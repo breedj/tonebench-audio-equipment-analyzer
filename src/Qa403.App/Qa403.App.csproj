@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Qa403.Device\Qa403.Device.csproj" />
+    <ProjectReference Include="..\Qa403.Dsp\Qa403.Dsp.csproj" />
+    <ProjectReference Include="..\Qa403.Data\Qa403.Data.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

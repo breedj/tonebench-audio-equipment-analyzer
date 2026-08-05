@@ -1,6 +1,7 @@
 using Qa403.App.Endpoints;
 using Qa403.App.Streaming;
 using Qa403.Device;
+using Qa403.Device.Simulation;
 
 namespace Qa403.App.Services;
 
@@ -28,11 +29,59 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     public bool Acquiring => _acquisitionTask is { IsCompleted: false };
 
+    /// <summary>
+    /// Whether the simulated DUT adds its own noise floor (the white floor plus the 1/f texture
+    /// layered on it), or <c>null</c> when the device isn't the simulator. Deliberately reached by
+    /// type test rather than through <see cref="IAnalyzerDevice"/>: real hardware has no such knob,
+    /// so putting it on the interface would be a lie. See <see cref="SimulatedSignalProfile"/>.
+    /// </summary>
+    public bool? SimulatedNoiseEnabled => (device as SimulatedDevice)?.SignalProfile.NoiseEnabled;
+
+    /// <summary>
+    /// Whether the simulated DUT adds mains hum (a 50 Hz fundamental plus two harmonics 6 dB apart),
+    /// or <c>null</c> when the device isn't the simulator. Independent of
+    /// <see cref="SimulatedNoiseEnabled"/> — hum is a deterministic tone stack, not part of the
+    /// noise path.
+    /// </summary>
+    public bool? SimulatedHumEnabled => (device as SimulatedDevice)?.SignalProfile.HumEnabled;
+
+    /// <summary>
+    /// Patches the simulated DUT's signal profile; <c>null</c> leaves a setting alone. Returns
+    /// false when the device isn't the simulator, so the caller can answer with a 400 rather than
+    /// silently accepting a setting that does nothing.
+    /// </summary>
+    public bool TrySetSimulatedProfile(bool? noiseEnabled, bool? humEnabled)
+    {
+        if (device is not SimulatedDevice simulated)
+            return false;
+
+        // Snapshot once: the property returns an immutable record, and re-reading it per field
+        // could mix two different profiles into the one being written back.
+        var profile = simulated.SignalProfile;
+        simulated.SignalProfile = profile with
+        {
+            NoiseEnabled = noiseEnabled ?? profile.NoiseEnabled,
+            HumEnabled = humEnabled ?? profile.HumEnabled,
+        };
+
+        return true;
+    }
+
     public async Task ConnectAsync(CancellationToken ct)
     {
         _info = await device.ConnectAsync(ct);
+
+        // Most sensitive input range (best resolution for a fresh measurement), and the *largest*
+        // output range — maximum generator headroom, so a default tone level can't sit above DAC
+        // full scale and arrive pre-clipped before the user has touched anything.
         _inputRangeDbv = Capabilities.InputRangesDbv[0];
-        _outputRangeDbv = Capabilities.OutputRangesDbv[0];
+        _outputRangeDbv = Capabilities.OutputRangesDbv[^1];
+
+        // Push both to the device rather than only caching them here. The device has its own field
+        // defaults, and leaving the two unsynced means status reports one full scale while the
+        // device actually clips at another — invisible until the ranges started doing something.
+        await device.SetInputRangeAsync(_inputRangeDbv, ct);
+        await device.SetOutputRangeAsync(_outputRangeDbv, ct);
         logger.LogInformation(
             "Connected to {Product} (serial {Serial}, fw {Firmware}, simulated={Simulated})",
             _info.ProductName, _info.SerialNumber, _info.FirmwareVersion, _info.IsSimulated);
@@ -44,17 +93,31 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         var right = ToResponse(_generatorConfig.Right);
 
         if (_info is not { } info)
-            return new DeviceStatusResponse(false, "", "", "", false, 0, 0, false, left, right);
+            return new DeviceStatusResponse(false, "", "", "", false, 0, 0, false, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
-            _inputRangeDbv, _outputRangeDbv, Acquiring, left, right);
+            _inputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled);
     }
 
     private static GeneratorChannelResponse ToResponse(ChannelGeneratorConfig config)
     {
         var tones = config.Tones.Select(t => new GeneratorToneResponse(t.FrequencyHz, t.AmplitudeDbv)).ToArray();
-        return new GeneratorChannelResponse(config.Enabled, tones);
+
+        // Fill unset per-kind blocks with the settings records' own defaults rather than sending
+        // null: the UI seeds every one of its parameter forms from this response, and a null block
+        // would leave whichever kind the user hasn't touched yet with no values to show.
+        var multitone = config.Multitone ?? new MultitoneSettings();
+        var noise = config.Noise ?? new WhiteNoiseSettings();
+        var chirp = config.Chirp ?? new EchoChirpSettings();
+
+        return new GeneratorChannelResponse(
+            config.Enabled,
+            tones,
+            config.Kind,
+            new MultitoneResponse(multitone.TonesPerOctave, multitone.TotalRmsDbv, multitone.RolloffDbPerOctave),
+            new WhiteNoiseResponse(noise.LevelDbv),
+            new EchoChirpResponse(chirp.AmplitudeDbv, chirp.StartFrequencyHz, chirp.EndFrequencyHz, chirp.Smoothing));
     }
 
     public async Task SetInputRangeAsync(double dbv, CancellationToken ct)

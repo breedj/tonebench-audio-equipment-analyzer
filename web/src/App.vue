@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { api, type GeneratorChannelRequest } from './api/client'
+import { api, type GeneratorChannelRequest, type SimulatedProfileRequest } from './api/client'
 import { useDevice } from './composables/useDevice'
 import { useSpectrumStream } from './composables/useSpectrumStream'
 import DeviceStatusBar from './components/DeviceStatusBar.vue'
@@ -39,6 +39,12 @@ function setOutputRange(dbv: number) {
   })
 }
 
+function setSimulatedProfile(patch: SimulatedProfileRequest) {
+  return withErrorReporting(async () => {
+    status.value = await api.setSimulatedProfile(patch)
+  })
+}
+
 function applyGenerator(left: GeneratorChannelRequest, right: GeneratorChannelRequest) {
   return withErrorReporting(async () => {
     status.value = await api.setGenerator({ left, right })
@@ -71,6 +77,7 @@ function reportError(message: string) {
       :error="error"
       @set-input-range="setInputRange"
       @set-output-range="setOutputRange"
+      @set-simulated-profile="setSimulatedProfile"
     />
 
     <main class="flex flex-1 flex-col gap-4 p-4">

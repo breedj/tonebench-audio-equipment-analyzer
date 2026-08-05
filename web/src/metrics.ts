@@ -81,6 +81,9 @@ export function noteName(freqHz: number): string {
   return `${name}${octave}${suffix}`
 }
 
+/** How many individual GenN tiles a channel shows before they're summarised into one. */
+const MAX_GENERATOR_TONE_TILES = 8
+
 /**
  * Full per-channel tile grid (Freq/Gain/THD/THD+N/N+D/N-D/SNR/Pk/RMS/Note/GenN), per the formula
  * table derived from the reference screenshot. `generatorTones` is that same channel's tones
@@ -137,13 +140,23 @@ export function channelTiles(meters: MetersFrame | null, generatorTones: Generat
     { label: 'RMS Pwr', value: formatWatts(powerWatts(rmsVrms, loadOhms), loadOhms) },
   ]
 
-  generatorTones.forEach((tone, i) => {
+  // Capped: a multitone stimulus reports its whole derived comb here (60 tones at the default
+  // 5 per octave), and one tile each would bury every other metric in the panel.
+  generatorTones.slice(0, MAX_GENERATOR_TONE_TILES).forEach((tone, i) => {
     const toneVrms = dbvToVrms(tone.ampDbv)
     tiles.push({
       label: `Gen${i + 1}`,
       value: `${(tone.freqHz / 1000).toFixed(4)} kHz\n${tone.ampDbv.toFixed(2)} dBV / ${formatVrms(toneVrms)}`,
     })
   })
+
+  if (generatorTones.length > MAX_GENERATOR_TONE_TILES) {
+    const last = generatorTones[generatorTones.length - 1]
+    tiles.push({
+      label: `Gen… (${generatorTones.length} tones)`,
+      value: `to ${(last.freqHz / 1000).toFixed(4)} kHz\n${last.ampDbv.toFixed(2)} dBV`,
+    })
+  }
 
   return tiles
 }

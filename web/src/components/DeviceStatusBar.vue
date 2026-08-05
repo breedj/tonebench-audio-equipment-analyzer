@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DeviceRanges, DeviceStatus } from '../api/client'
+import type { DeviceRanges, DeviceStatus, SimulatedProfileRequest } from '../api/client'
 
 defineProps<{
   status: DeviceStatus | null
@@ -10,6 +10,7 @@ defineProps<{
 const emit = defineEmits<{
   setInputRange: [dbv: number]
   setOutputRange: [dbv: number]
+  setSimulatedProfile: [patch: SimulatedProfileRequest]
 }>()
 
 function onInputRangeChange(e: Event) {
@@ -18,6 +19,14 @@ function onInputRangeChange(e: Event) {
 
 function onOutputRangeChange(e: Event) {
   emit('setOutputRange', Number((e.target as HTMLSelectElement).value))
+}
+
+function onSimulatedNoiseChange(e: Event) {
+  emit('setSimulatedProfile', { noiseEnabled: (e.target as HTMLInputElement).checked })
+}
+
+function onSimulatedHumChange(e: Event) {
+  emit('setSimulatedProfile', { humEnabled: (e.target as HTMLInputElement).checked })
 }
 </script>
 
@@ -36,6 +45,23 @@ function onOutputRangeChange(e: Event) {
       >
         Simulated
       </span>
+      <!-- Simulator-only: what the synthesized DUT adds on top of the generator's stimulus. -->
+      <template v-if="status?.isSimulated">
+        <label
+          class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
+          title="Simulated DUT noise floor (white + 1/f). Turn off for a clean spectrum."
+        >
+          <input type="checkbox" :checked="status.simulatedNoiseEnabled ?? false" @change="onSimulatedNoiseChange" />
+          Noise
+        </label>
+        <label
+          class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
+          title="Simulated mains hum: 50 Hz plus two harmonics, each 6 dB down."
+        >
+          <input type="checkbox" :checked="status.simulatedHumEnabled ?? false" @change="onSimulatedHumChange" />
+          Hum
+        </label>
+      </template>
       <span
         v-if="status?.acquiring"
         class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"

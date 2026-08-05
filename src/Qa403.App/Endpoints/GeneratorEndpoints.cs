@@ -9,21 +9,150 @@ public static class GeneratorEndpoints
     {
         app.MapPost("/api/generator", async (GeneratorRequest request, DeviceSessionService session, CancellationToken ct) =>
         {
-            var config = new GeneratorConfig(ToChannelConfig(request.Left), ToChannelConfig(request.Right));
-            await session.ConfigureGeneratorAsync(config, ct);
+            if (!TryMapChannel(request.Left, "Left", out var left, out var error)
+                || !TryMapChannel(request.Right, "Right", out var right, out error))
+            {
+                return Results.BadRequest(error);
+            }
+
+            await session.ConfigureGeneratorAsync(new GeneratorConfig(left, right), ct);
             return Results.Ok(session.GetStatus());
         });
     }
 
-    private static ChannelGeneratorConfig ToChannelConfig(GeneratorChannelRequest request)
+    /// <summary>
+    /// Maps one channel's request onto the domain config. Absent blocks fall back to the settings
+    /// records' own defaults, so a client only has to send the kind it actually selected. For
+    /// <see cref="GeneratorKind.Multitone"/> the comb is derived here rather than in the device, so
+    /// the device status reports the tones that are really playing.
+    /// </summary>
+    /// <remarks>Public so the mapping and its validation can be unit-tested without spinning up the host.</remarks>
+    public static bool TryMapChannel(
+        GeneratorChannelRequest request, string channelName, out ChannelGeneratorConfig config, out string error)
     {
-        var tones = request.Tones.Select(t => new GeneratorTone(t.FreqHz, t.AmpDbv)).ToArray();
-        return new ChannelGeneratorConfig(request.Enabled, tones);
+        config = ChannelGeneratorConfig.Off;
+
+        if (!EnumParsing.TryParse(request.Kind, GeneratorKind.Tones, out GeneratorKind kind, out error))
+        {
+            error = $"{channelName} channel: {error}";
+            return false;
+        }
+
+        var multitone = ToMultitone(request.Multitone);
+        var noise = ToNoise(request.Noise);
+        if (!TryToChirp(request.Chirp, out var chirp, out error))
+        {
+            error = $"{channelName} channel: {error}";
+            return false;
+        }
+
+        IReadOnlyList<GeneratorTone> tones = request.Tones is { } requested
+            ? requested.Select(t => new GeneratorTone(t.FreqHz, t.AmpDbv)).ToArray()
+            : [];
+
+        if (kind == GeneratorKind.Multitone)
+        {
+            try
+            {
+                tones = MultitoneGenerator.Build(multitone);
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                error = $"{channelName} channel: {ex.Message}";
+                return false;
+            }
+        }
+
+        config = new ChannelGeneratorConfig(request.Enabled, tones)
+        {
+            Kind = kind,
+            Multitone = multitone,
+            Noise = noise,
+            Chirp = chirp,
+        };
+
+        return true;
+    }
+
+    private static MultitoneSettings ToMultitone(MultitoneRequest? request)
+    {
+        var defaults = new MultitoneSettings();
+        if (request is null)
+            return defaults;
+
+        return defaults with
+        {
+            TonesPerOctave = request.TonesPerOctave ?? defaults.TonesPerOctave,
+            TotalRmsDbv = request.TotalRmsDbv ?? defaults.TotalRmsDbv,
+            RolloffDbPerOctave = request.RolloffDbPerOctave ?? defaults.RolloffDbPerOctave,
+        };
+    }
+
+    private static WhiteNoiseSettings ToNoise(WhiteNoiseRequest? request)
+    {
+        var defaults = new WhiteNoiseSettings();
+        return request is null ? defaults : defaults with { LevelDbv = request.LevelDbv ?? defaults.LevelDbv };
+    }
+
+    private static bool TryToChirp(EchoChirpRequest? request, out EchoChirpSettings settings, out string error)
+    {
+        var defaults = new EchoChirpSettings();
+        settings = defaults;
+        error = "";
+
+        if (request is null)
+            return true;
+
+        if (!EnumParsing.TryParse(request.Smoothing, defaults.Smoothing, out SmoothingOctaves smoothing, out error))
+            return false;
+
+        double startFreqHz = request.StartFreqHz ?? defaults.StartFrequencyHz;
+        double endFreqHz = request.EndFreqHz ?? defaults.EndFrequencyHz;
+
+        // An exponential sweep is only defined for 0 < f1 < f2 (its phase integral divides by
+        // ln(f2/f1)), so reject the degenerate cases here instead of letting the simulator go silent.
+        if (startFreqHz <= 0.0)
+        {
+            error = $"EchoChirp StartFreqHz must be greater than 0 (got {startFreqHz}).";
+            return false;
+        }
+
+        if (endFreqHz <= startFreqHz)
+        {
+            error = $"EchoChirp EndFreqHz must be greater than StartFreqHz (got {endFreqHz} <= {startFreqHz}).";
+            return false;
+        }
+
+        settings = defaults with
+        {
+            AmplitudeDbv = request.AmplitudeDbv ?? defaults.AmplitudeDbv,
+            StartFrequencyHz = startFreqHz,
+            EndFrequencyHz = endFreqHz,
+            Smoothing = smoothing,
+        };
+
+        return true;
     }
 }
 
 public sealed record GeneratorToneRequest(double FreqHz, double AmpDbv);
 
-public sealed record GeneratorChannelRequest(bool Enabled, IReadOnlyList<GeneratorToneRequest> Tones);
+public sealed record MultitoneRequest(int? TonesPerOctave, double? TotalRmsDbv, double? RolloffDbPerOctave);
+
+public sealed record WhiteNoiseRequest(double? LevelDbv);
+
+public sealed record EchoChirpRequest(double? AmplitudeDbv, double? StartFreqHz, double? EndFreqHz, string? Smoothing);
+
+/// <summary>
+/// One channel's generator request. <c>Kind</c> and the per-kind blocks are optional so the
+/// original body shape (<c>{ enabled, tones }</c>) still means a plain sine tone list.
+/// </summary>
+public sealed record GeneratorChannelRequest(
+    bool Enabled,
+    IReadOnlyList<GeneratorToneRequest>? Tones,
+    string? Kind = null,
+    MultitoneRequest? Multitone = null,
+    WhiteNoiseRequest? Noise = null,
+    EchoChirpRequest? Chirp = null);
 
 public sealed record GeneratorRequest(GeneratorChannelRequest Left, GeneratorChannelRequest Right);

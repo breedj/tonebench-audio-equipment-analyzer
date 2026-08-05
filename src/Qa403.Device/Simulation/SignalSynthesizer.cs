@@ -1,27 +1,59 @@
 namespace Qa403.Device.Simulation;
 
 /// <summary>
-/// Per-sample synthesis of a simulated DUT signal: coherent fundamental + harmonics (or a
-/// two-tone IMD pair), mains hum, white + 1/f noise. The deterministic part (tones, hum) is a
-/// pure function of elapsed time <c>t</c>, so it is exactly reproducible regardless of block
-/// boundaries or timer jitter — only the noise draw is stateful (RNG position, pink filter
-/// state), and that state lives here rather than in <see cref="SimulatedDevice"/> so a stream
-/// restart gets a fresh synthesizer and a fresh noise sequence.
+/// Per-sample synthesis of a simulated DUT signal: the channel's generator stimulus (tones,
+/// multitone comb, white noise or an exponential sweep) plus mains hum and white + 1/f noise.
+/// Every deterministic part (tones, chirp, hum) is a pure function of elapsed time <c>t</c>, so it
+/// is exactly reproducible regardless of block boundaries or timer jitter — only the noise draws
+/// are stateful (RNG position, pink filter state), and that state lives here rather than in
+/// <see cref="SimulatedDevice"/> so a stream restart gets a fresh synthesizer and a fresh noise
+/// sequence. Note that since <see cref="GeneratorKind.WhiteNoise"/> exists, that statefulness now
+/// reaches <see cref="ComputeChannelSample"/> too, not just the shared noise floor.
 /// </summary>
 internal sealed class SignalSynthesizer(Random random)
 {
     private const double HumHarmonicDecayDb = -6.0;
+
+    /// <summary>
+    /// How long one <see cref="GeneratorKind.EchoChirp"/> sweep takes before it restarts. A fixed
+    /// constant rather than a user parameter: the spec exposes no sweep length, and the real record
+    /// length is a property of the frequency-response measurement (still to come), not of the
+    /// stimulus. Wrapping on a constant period is also what keeps the chirp a pure function of t.
+    /// </summary>
+    private const double EchoChirpRepeatSeconds = 1.0;
+
+    /// <summary>Raised-cosine fade at each end of a sweep, so the wrap back to the start frequency isn't a step.</summary>
+    private const double EchoChirpFadeSeconds = 0.005;
+
     private double _pinkB0, _pinkB1, _pinkB2;
 
     /// <summary>
-    /// This channel's tone content: the configured generator tones for <paramref name="channelIndex"/>
-    /// (0 = left, 1 = right), or the legacy demo tone / intermodulation pair when that channel has
-    /// never been configured — see <see cref="SimulatedSignalProfile.GeneratorTonesLeft"/>.
+    /// This channel's generator content for <paramref name="channelIndex"/> (0 = left, 1 = right):
+    /// whichever <see cref="GeneratorKind"/> that channel has selected, or the legacy demo tone /
+    /// intermodulation pair when that channel has never been configured — see
+    /// <see cref="SimulatedSignalProfile.GeneratorLeft"/>.
     /// </summary>
     public double ComputeChannelSample(SimulatedSignalProfile profile, double t, int channelIndex)
     {
-        var channelTones = channelIndex == 0 ? profile.GeneratorTonesLeft : profile.GeneratorTonesRight;
-        return ComputeTones(profile, t, channelTones);
+        var channel = channelIndex == 0 ? profile.GeneratorLeft : profile.GeneratorRight;
+
+        // Never configured: the legacy demo-tone path, which is also the only path the profile's
+        // own IntermodulationMode override applies to (a DUT-simulation knob, not a stimulus kind).
+        if (channel is null)
+            return ComputeTones(profile, t, channelTones: null);
+
+        if (!channel.Enabled)
+            return 0.0;
+
+        return channel.Kind switch
+        {
+            GeneratorKind.Off => 0.0,
+            GeneratorKind.Tones => ComputeTones(profile, t, channel.Tones),
+            GeneratorKind.Multitone => ComputeMultitone(channel.Tones, t),
+            GeneratorKind.WhiteNoise => ComputeWhiteNoise(channel.Noise),
+            GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, t),
+            _ => 0.0,
+        };
     }
 
     /// <summary>
@@ -62,6 +94,21 @@ internal sealed class SignalSynthesizer(Random random)
         return Math.Sign(sample) * compressed;
     }
 
+    /// <summary>
+    /// Symmetric hard clip at ±<paramref name="clipPeakV"/>: what a DAC does when it runs out of
+    /// codes at 0 dBFS — the waveform is truncated flat, with no knee and no compression below the
+    /// limit. Deliberately not <see cref="SoftClip"/>: that knee models an analog input stage
+    /// easing into saturation, and reusing it here would understate the harmonics a converter
+    /// actually produces when it is driven past full scale.
+    /// </summary>
+    public static double HardClip(double sample, double clipPeakV)
+    {
+        if (clipPeakV <= 0.0)
+            return sample;
+
+        return Math.Clamp(sample, -clipPeakV, clipPeakV);
+    }
+
     public static double DbvToPeakV(double dbv) => Math.Sqrt(2.0) * Math.Pow(10.0, dbv / 20.0);
 
     private static double ComputeTones(SimulatedSignalProfile profile, double t, IReadOnlyList<GeneratorTone>? channelTones)
@@ -89,7 +136,7 @@ internal sealed class SignalSynthesizer(Random random)
         return sum;
     }
 
-    /// <summary>Each configured generator tone is treated as its own fundamental, with its own harmonic stack (see <see cref="SimulatedSignalProfile.GeneratorTones"/>).</summary>
+    /// <summary>Each configured generator tone is treated as its own fundamental, with its own harmonic stack (see <see cref="SimulatedSignalProfile.GeneratorLeft"/>).</summary>
     private static double ComputeGeneratorTones(SimulatedSignalProfile profile, IReadOnlyList<GeneratorTone> tones, double t)
     {
         double sum = 0.0;
@@ -112,6 +159,79 @@ internal sealed class SignalSynthesizer(Random random)
         }
 
         return sum;
+    }
+
+    /// <summary>
+    /// The multitone comb, summed as bare cosines. Deliberately skips the per-tone
+    /// <see cref="SimulatedSignalProfile.HarmonicDbc"/> stack that <see cref="ComputeGeneratorTones"/>
+    /// applies: the default comb is ~60 tones, and 60 x 8 harmonics per sample per channel at
+    /// 192 kS/s stereo is ~184 M cos() per second of audio, well past what the streaming loop can
+    /// afford (see CLAUDE.md "Performance constraints"). Fundamentals only is ~23 M/s. The soft
+    /// clipper in <see cref="SimulatedDevice"/> still supplies nonlinearity at high levels.
+    /// </summary>
+    private static double ComputeMultitone(IReadOnlyList<GeneratorTone> tones, double t)
+    {
+        double sum = 0.0;
+        for (int i = 0; i < tones.Count; i++)
+        {
+            var tone = tones[i];
+            sum += DbvToPeakV(tone.AmplitudeDbv) * Math.Cos(2.0 * Math.PI * tone.FrequencyHz * t);
+        }
+
+        return sum;
+    }
+
+    /// <summary>
+    /// Gaussian white noise at the configured broadband RMS. <c>LevelDbv</c> is a level referenced
+    /// to 1 Vrms, so sigma is the level itself — no peak conversion (unlike a tone's dBV) and no
+    /// sqrt(fs/2) density conversion (unlike <see cref="NextNoiseSample"/>, which is calibrated in
+    /// dBV/sqrt(Hz)). Drawn per channel, so left and right are independent, as two real generator
+    /// channels would be.
+    /// </summary>
+    private double ComputeWhiteNoise(WhiteNoiseSettings? settings)
+    {
+        if (settings is null)
+            return 0.0;
+
+        double sigma = Math.Pow(10.0, settings.LevelDbv / 20.0);
+        return sigma * NextGaussian();
+    }
+
+    /// <summary>
+    /// Exponential ("Farina") sine sweep from <c>StartFrequencyHz</c> to <c>EndFrequencyHz</c>,
+    /// restarting every <see cref="EchoChirpRepeatSeconds"/>. Instantaneous frequency is
+    /// <c>f(tau) = f1 (f2/f1)^(tau/T)</c>, so the phase integrates to
+    /// <c>2*pi*f1*T/k * (e^(k*tau/T) - 1)</c> with <c>k = ln(f2/f1)</c>. Uses sin (not cos) so the
+    /// sweep starts at zero crossing, and fades in/out so the wrap isn't a step.
+    /// </summary>
+    private static double ComputeEchoChirp(EchoChirpSettings? settings, double t)
+    {
+        if (settings is null)
+            return 0.0;
+
+        double startHz = settings.StartFrequencyHz;
+        double endHz = settings.EndFrequencyHz;
+        if (startHz <= 0.0 || endHz <= startHz)
+            return 0.0;
+
+        double tau = t % EchoChirpRepeatSeconds;
+        if (tau < 0.0)
+            tau += EchoChirpRepeatSeconds;
+
+        double k = Math.Log(endHz / startHz);
+        double phase = 2.0 * Math.PI * startHz * EchoChirpRepeatSeconds / k
+            * (Math.Exp(k * tau / EchoChirpRepeatSeconds) - 1.0);
+
+        return DbvToPeakV(settings.AmplitudeDbv) * Math.Sin(phase) * EchoChirpFade(tau);
+    }
+
+    private static double EchoChirpFade(double tau)
+    {
+        double fromEdge = Math.Min(tau, EchoChirpRepeatSeconds - tau);
+        if (fromEdge >= EchoChirpFadeSeconds)
+            return 1.0;
+
+        return 0.5 * (1.0 - Math.Cos(Math.PI * fromEdge / EchoChirpFadeSeconds));
     }
 
     private static double ComputeIntermodulation(SimulatedSignalProfile profile, double t)

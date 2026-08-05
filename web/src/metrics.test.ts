@@ -151,6 +151,19 @@ describe('channelTiles', () => {
     expect(tiles.find((t) => t.label === 'Gen1')?.value).toContain('1.0000 kHz')
     expect(tiles.find((t) => t.label === 'Gen2')?.value).toContain('5.0000 kHz')
   })
+
+  it('summarises a long tone list instead of one tile per tone', () => {
+    // A default multitone comb is 60 tones — the panel must stay readable.
+    const tones: GeneratorTone[] = Array.from({ length: 60 }, (_, i) => ({
+      freqHz: 5 * Math.pow(2, i / 5),
+      ampDbv: -67.78,
+    }))
+    const tiles = channelTiles(meters, tones, 8)
+
+    expect(tiles.filter((t) => /^Gen\d+$/.test(t.label))).toHaveLength(8)
+    expect(tiles.find((t) => t.label.startsWith('Gen…'))?.label).toBe('Gen… (60 tones)')
+    expect(tiles.find((t) => t.label.startsWith('Gen…'))?.value).toContain('17.8289 kHz')
+  })
 })
 
 describe('systemTiles', () => {

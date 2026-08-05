@@ -1,4 +1,5 @@
 using Qa403.App.Services;
+using Qa403.Device;
 
 namespace Qa403.App.Endpoints;
 
@@ -42,6 +43,17 @@ public static class DeviceEndpoints
                 return Results.BadRequest(ex.Message);
             }
         });
+
+        // Simulator-only: shapes the synthesized input signal, which real hardware cannot do.
+        // Exposed so the noise floor and hum can be taken out of the way while reading a spectrum.
+        // Patch-style — an omitted field leaves that setting alone.
+        group.MapPost("/sim-profile", (SimulatedProfileRequest request, DeviceSessionService session) =>
+        {
+            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled))
+                return Results.BadRequest("The connected device is not the simulator, so it has no signal-profile switches.");
+
+            return Results.Ok(session.GetStatus());
+        });
     }
 }
 
@@ -55,12 +67,34 @@ public sealed record DeviceStatusResponse(
     double OutputRangeDbv,
     bool Acquiring,
     GeneratorChannelResponse GeneratorLeft,
-    GeneratorChannelResponse GeneratorRight);
+    GeneratorChannelResponse GeneratorRight,
+    /// <summary>Simulated DUT noise floor on/off, or null when the device isn't the simulator — the UI hides the switch in that case.</summary>
+    bool? SimulatedNoiseEnabled,
+    /// <summary>Simulated DUT mains hum on/off, same null convention as <see cref="SimulatedNoiseEnabled"/>.</summary>
+    bool? SimulatedHumEnabled);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);
 
-public sealed record GeneratorChannelResponse(bool Enabled, IReadOnlyList<GeneratorToneResponse> Tones);
+/// <summary>
+/// One channel's generator state. Every per-kind block is always present (filled with the server's
+/// defaults when that kind has never been configured) so the UI can seed all of its forms from one
+/// status read. <c>Tones</c> is the effective tone list — for <c>Multitone</c> it holds the derived
+/// comb, not the user's parameters.
+/// </summary>
+public sealed record GeneratorChannelResponse(
+    bool Enabled,
+    IReadOnlyList<GeneratorToneResponse> Tones,
+    GeneratorKind Kind,
+    MultitoneResponse Multitone,
+    WhiteNoiseResponse Noise,
+    EchoChirpResponse Chirp);
+
+public sealed record MultitoneResponse(int TonesPerOctave, double TotalRmsDbv, double RolloffDbPerOctave);
+
+public sealed record WhiteNoiseResponse(double LevelDbv);
+
+public sealed record EchoChirpResponse(double AmplitudeDbv, double StartFreqHz, double EndFreqHz, SmoothingOctaves Smoothing);
 
 public sealed record DeviceRangesResponse(
     IReadOnlyList<double> SampleRatesHz,
@@ -71,3 +105,5 @@ public sealed record DeviceRangesResponse(
 public sealed record InputRangeRequest(double Dbv);
 
 public sealed record OutputRangeRequest(double Dbv);
+
+public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled);

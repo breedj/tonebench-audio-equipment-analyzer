@@ -15,12 +15,20 @@ public sealed class SimulatedDevice : IAnalyzerDevice
 {
     private readonly Random _random;
 
-    // GeneratorTonesLeft/Right = [] (not the type's own null-means-legacy-demo-tone default — see
-    // SimulatedSignalProfile.GeneratorTonesLeft) so this device's out-of-the-box state genuinely
+    // GeneratorLeft/Right = Off (not the type's own null-means-legacy-demo-tone default — see
+    // SimulatedSignalProfile.GeneratorLeft) so this device's out-of-the-box state genuinely
     // matches _generatorConfig's Off default below: no generator tone until ConfigureGeneratorAsync
     // says otherwise, same as the UI's "Generator enabled" checkbox starting unchecked.
-    private volatile SimulatedSignalProfile _profile = new() { GeneratorTonesLeft = [], GeneratorTonesRight = [] };
+    private volatile SimulatedSignalProfile _profile = new()
+    {
+        GeneratorLeft = ChannelGeneratorConfig.Off,
+        GeneratorRight = ChannelGeneratorConfig.Off,
+    };
 
+    // Written from whichever thread calls Set*RangeAsync, read by the streaming loop on another.
+    // C# forbids `volatile` on double, so these go through Volatile.Read/Write instead — without
+    // that, nothing stops the JIT from hoisting the read out of the per-block loop and a range
+    // change made during an acquisition would never take effect.
     private double _inputRangeDbv = 12.0;
     private double _outputRangeDbv = 8.0;
     private GeneratorConfig _generatorConfig = GeneratorConfig.Off;
@@ -52,14 +60,14 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     public Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {
         RequireSupportedRange(Capabilities.InputRangesDbv, dbv, nameof(dbv));
-        _inputRangeDbv = dbv;
+        Volatile.Write(ref _inputRangeDbv, dbv);
         return Task.CompletedTask;
     }
 
     public Task SetOutputRangeAsync(double dbv, CancellationToken ct)
     {
         RequireSupportedRange(Capabilities.OutputRangesDbv, dbv, nameof(dbv));
-        _outputRangeDbv = dbv;
+        Volatile.Write(ref _outputRangeDbv, dbv);
         return Task.CompletedTask;
     }
 
@@ -67,13 +75,13 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     {
         _generatorConfig = config ?? throw new ArgumentNullException(nameof(config));
 
-        // Enabled -> synthesize exactly the requested tones. Disabled -> an explicit empty list
-        // (silence at the generator's tones), not null (null means "never configured" and falls
-        // back to the fixed demo tone — see SimulatedSignalProfile.GeneratorTonesLeft).
+        // Store the per-channel config as-is: the synthesizer honours Enabled and Kind itself.
+        // Never null here — null means "never configured" and falls back to the fixed demo tone
+        // (see SimulatedSignalProfile.GeneratorLeft).
         _profile = _profile with
         {
-            GeneratorTonesLeft = config.Left.Enabled ? config.Left.Tones : [],
-            GeneratorTonesRight = config.Right.Enabled ? config.Right.Tones : [],
+            GeneratorLeft = config.Left,
+            GeneratorRight = config.Right,
         };
 
         return Task.CompletedTask;
@@ -107,7 +115,11 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                 yield break;
 
             var profile = _profile;
-            double clipPeakV = InputRangeToClipPeakV(_inputRangeDbv);
+
+            // Two independent clip points, one per end of the signal chain: the generator's own
+            // DAC full scale, and the analyzer's ADC full scale. See the per-sample loop below.
+            double outputClipPeakV = SignalSynthesizer.DbvToPeakV(Volatile.Read(ref _outputRangeDbv));
+            double inputClipPeakV = SignalSynthesizer.DbvToPeakV(Volatile.Read(ref _inputRangeDbv));
             int sampleCount = config.BlockFrameCount * config.ChannelCount;
             float[] buffer = ArrayPool<float>.Shared.Rent(sampleCount);
 
@@ -121,8 +133,16 @@ public sealed class SimulatedDevice : IAnalyzerDevice
 
                 for (int ch = 0; ch < config.ChannelCount; ch++)
                 {
-                    double sample = synthesizer.ComputeChannelSample(profile, t, ch) + sharedAdditive;
-                    sample = SignalSynthesizer.SoftClip(sample, clipPeakV);
+                    // Signal chain order matters: the generator's output is hard-clipped at the
+                    // DAC's full scale first (asking for a level above the selected output range
+                    // truncates the waveform, exactly as real hardware does), then the DUT's hum
+                    // and noise are added downstream of it, and only then does the whole thing meet
+                    // the ADC's soft input saturation. Hum/noise are not products of the DAC, so
+                    // they deliberately sit outside the output clip.
+                    double generated = SignalSynthesizer.HardClip(
+                        synthesizer.ComputeChannelSample(profile, t, ch), outputClipPeakV);
+
+                    double sample = SignalSynthesizer.SoftClip(generated + sharedAdditive, inputClipPeakV);
                     buffer[(frame * config.ChannelCount) + ch] = (float)sample;
                 }
             }
@@ -138,8 +158,6 @@ public sealed class SimulatedDevice : IAnalyzerDevice
         _stopRequested = true;
         return Task.CompletedTask;
     }
-
-    private static double InputRangeToClipPeakV(double inputRangeDbv) => SignalSynthesizer.DbvToPeakV(inputRangeDbv);
 
     private static void RequireSupportedRange(IReadOnlyList<double> supported, double value, string paramName)
     {

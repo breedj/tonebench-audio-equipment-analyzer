@@ -43,10 +43,10 @@ public static class AcquisitionEndpoints
             if (fftSize <= 0 || (fftSize & (fftSize - 1)) != 0)
                 return Results.BadRequest("FftSize must be a power of two.");
 
-            if (!TryParseEnum<WindowType>(request.Window, current.Window, out var window, out var windowError))
+            if (!EnumParsing.TryParse<WindowType>(request.Window, current.Window, out var window, out var windowError))
                 return Results.BadRequest(windowError);
 
-            if (!TryParseEnum<AveragingMode>(request.Averaging, current.Averaging, out var averaging, out var averagingError))
+            if (!EnumParsing.TryParse<AveragingMode>(request.Averaging, current.Averaging, out var averaging, out var averagingError))
                 return Results.BadRequest(averagingError);
 
             pipeline.Options = current with
@@ -65,23 +65,6 @@ public static class AcquisitionEndpoints
         });
 
         group.MapGet("/spectrum-config", (SpectrumPipeline pipeline) => Results.Ok(pipeline.Options));
-    }
-
-    private static bool TryParseEnum<TEnum>(string? raw, TEnum fallback, out TEnum value, out string error)
-        where TEnum : struct, Enum
-    {
-        error = "";
-        if (raw is null)
-        {
-            value = fallback;
-            return true;
-        }
-
-        if (Enum.TryParse(raw, ignoreCase: true, out value))
-            return true;
-
-        error = $"Unknown {typeof(TEnum).Name} '{raw}'. Valid values: {string.Join(", ", Enum.GetNames<TEnum>())}.";
-        return false;
     }
 }
 

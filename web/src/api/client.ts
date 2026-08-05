@@ -12,11 +12,58 @@ export interface DeviceStatus {
   acquiring: boolean
   generatorLeft: GeneratorChannelState
   generatorRight: GeneratorChannelState
+  /** Simulated DUT noise floor on/off; null when the device isn't the simulator. */
+  simulatedNoiseEnabled: boolean | null
+  /** Simulated DUT mains hum on/off; same null convention. */
+  simulatedHumEnabled: boolean | null
+}
+
+/** Patch for the simulated DUT's signal profile — omitted fields are left alone. */
+export interface SimulatedProfileRequest {
+  noiseEnabled?: boolean
+  humEnabled?: boolean
+}
+
+/** Mirrors Qa403.Device.GeneratorKind — exactly one stimulus is active per channel. */
+export type GeneratorKind = 'Off' | 'Tones' | 'Multitone' | 'WhiteNoise' | 'EchoChirp'
+
+/** Mirrors Qa403.Device.SmoothingOctaves. Stored and round-tripped only; the FR measurement that consumes it is a later phase. */
+export type SmoothingOctaves =
+  | 'None'
+  | 'OneOver96'
+  | 'OneOver48'
+  | 'OneOver24'
+  | 'OneOver12'
+  | 'OneOver6'
+  | 'OneOver3'
+
+export interface MultitoneSettings {
+  tonesPerOctave: number
+  /** Combined RMS of the comb, dBV — exact only at 0 dB/octave rolloff. */
+  totalRmsDbv: number
+  rolloffDbPerOctave: number
+}
+
+export interface WhiteNoiseSettings {
+  /** Broadband RMS, dBV. */
+  levelDbv: number
+}
+
+export interface EchoChirpSettings {
+  amplitudeDbv: number
+  startFreqHz: number
+  endFreqHz: number
+  smoothing: SmoothingOctaves
 }
 
 export interface GeneratorChannelState {
   enabled: boolean
+  /** The effective tone list — for kind 'Multitone' this is the derived comb, not the parameters. */
   tones: GeneratorTone[]
+  kind: GeneratorKind
+  multitone: MultitoneSettings
+  noise: WhiteNoiseSettings
+  chirp: EchoChirpSettings
 }
 
 export interface DeviceRanges {
@@ -31,9 +78,14 @@ export interface GeneratorTone {
   ampDbv: number
 }
 
+/** Only the block matching `kind` needs to be sent; the server fills the rest from its own defaults. */
 export interface GeneratorChannelRequest {
   enabled: boolean
   tones: GeneratorTone[]
+  kind?: GeneratorKind
+  multitone?: Partial<MultitoneSettings>
+  noise?: Partial<WhiteNoiseSettings>
+  chirp?: Partial<EchoChirpSettings>
 }
 
 export interface GeneratorRequest {
@@ -103,6 +155,9 @@ export const api = {
 
   setOutputRange: (dbv: number) =>
     request<DeviceStatus>('/device/output-range', { method: 'POST', body: JSON.stringify({ dbv }) }),
+
+  setSimulatedProfile: (patch: SimulatedProfileRequest) =>
+    request<DeviceStatus>('/device/sim-profile', { method: 'POST', body: JSON.stringify(patch) }),
 
   setGenerator: (config: GeneratorRequest) =>
     request<DeviceStatus>('/generator', { method: 'POST', body: JSON.stringify(config) }),

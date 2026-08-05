@@ -8,24 +8,27 @@ namespace Qa403.Device.Simulation;
 public sealed record SimulatedSignalProfile
 {
     /// <summary>
-    /// Tones from the last <see cref="IAnalyzerDevice.ConfigureGeneratorAsync"/> call for the left
-    /// channel: <c>null</c> means "never configured", which falls back to the fixed
+    /// The left channel's generator state from the last <see cref="IAnalyzerDevice.ConfigureGeneratorAsync"/>
+    /// call: <c>null</c> means "never configured", which falls back to the fixed
     /// <see cref="FundamentalFrequencyHz"/>/<see cref="FundamentalAmplitudeDbv"/> demo tone below
-    /// (so the simulator shows something before the UI's Generator panel is touched). An empty
-    /// (non-null) list means the generator was explicitly disabled — silence at the generator's
-    /// frequencies, same as real hardware. Each configured tone gets its own <see cref="HarmonicDbc"/>
-    /// stack, same as the legacy single-fundamental path, standing in for DUT nonlinearity acting
-    /// on that tone. See <see cref="GeneratorTonesRight"/> for the independent right-channel list.
+    /// (so the simulator shows something before the UI's Generator panel is touched). A non-null
+    /// config that is disabled, or whose <see cref="ChannelGeneratorConfig.Kind"/> is
+    /// <see cref="GeneratorKind.Off"/>, means silence at the generator — same as real hardware.
+    ///
+    /// For <see cref="GeneratorKind.Tones"/> each configured tone gets its own
+    /// <see cref="HarmonicDbc"/> stack, same as the legacy single-fundamental path, standing in for
+    /// DUT nonlinearity acting on that tone. The other kinds are synthesized without that stack —
+    /// see <see cref="SignalSynthesizer"/>. <see cref="GeneratorRight"/> is independent.
     /// </summary>
-    public IReadOnlyList<GeneratorTone>? GeneratorTonesLeft { get; init; }
+    public ChannelGeneratorConfig? GeneratorLeft { get; init; }
 
-    /// <summary>Right-channel counterpart to <see cref="GeneratorTonesLeft"/> — same conventions, independent tones.</summary>
-    public IReadOnlyList<GeneratorTone>? GeneratorTonesRight { get; init; }
+    /// <summary>Right-channel counterpart to <see cref="GeneratorLeft"/> — same conventions, independent state.</summary>
+    public ChannelGeneratorConfig? GeneratorRight { get; init; }
 
-    /// <summary>Fallback tone used only while <see cref="GeneratorTones"/> is <c>null</c> — see its doc.</summary>
+    /// <summary>Fallback tone used only while <see cref="GeneratorLeft"/>/<see cref="GeneratorRight"/> is <c>null</c> — see its doc.</summary>
     public double FundamentalFrequencyHz { get; init; } = 1000.0;
 
-    /// <summary>Fallback tone amplitude, dBV referenced to 1 Vrms — see <see cref="GeneratorTones"/>.</summary>
+    /// <summary>Fallback tone amplitude, dBV referenced to 1 Vrms — see <see cref="GeneratorLeft"/>.</summary>
     public double FundamentalAmplitudeDbv { get; init; } = 0.0;
 
     public bool HarmonicsEnabled { get; init; } = true;

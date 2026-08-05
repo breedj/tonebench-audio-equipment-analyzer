@@ -14,7 +14,13 @@ namespace Qa403.Device.Simulation;
 public sealed class SimulatedDevice : IAnalyzerDevice
 {
     private readonly Random _random;
-    private volatile SimulatedSignalProfile _profile = new();
+
+    // GeneratorTonesLeft/Right = [] (not the type's own null-means-legacy-demo-tone default — see
+    // SimulatedSignalProfile.GeneratorTonesLeft) so this device's out-of-the-box state genuinely
+    // matches _generatorConfig's Off default below: no generator tone until ConfigureGeneratorAsync
+    // says otherwise, same as the UI's "Generator enabled" checkbox starting unchecked.
+    private volatile SimulatedSignalProfile _profile = new() { GeneratorTonesLeft = [], GeneratorTonesRight = [] };
+
     private double _inputRangeDbv = 12.0;
     private double _outputRangeDbv = 8.0;
     private GeneratorConfig _generatorConfig = GeneratorConfig.Off;
@@ -60,6 +66,16 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     public Task ConfigureGeneratorAsync(GeneratorConfig config, CancellationToken ct)
     {
         _generatorConfig = config ?? throw new ArgumentNullException(nameof(config));
+
+        // Enabled -> synthesize exactly the requested tones. Disabled -> an explicit empty list
+        // (silence at the generator's tones), not null (null means "never configured" and falls
+        // back to the fixed demo tone — see SimulatedSignalProfile.GeneratorTonesLeft).
+        _profile = _profile with
+        {
+            GeneratorTonesLeft = config.Left.Enabled ? config.Left.Tones : [],
+            GeneratorTonesRight = config.Right.Enabled ? config.Right.Tones : [],
+        };
+
         return Task.CompletedTask;
     }
 
@@ -98,14 +114,17 @@ public sealed class SimulatedDevice : IAnalyzerDevice
             for (int frame = 0; frame < config.BlockFrameCount; frame++)
             {
                 double t = (frameIndex + frame) / config.SampleRateHz;
-                double sample = synthesizer.NextSample(profile, t, config.SampleRateHz);
-                sample = SignalSynthesizer.SoftClip(sample, clipPeakV);
 
-                float sampleF = (float)sample;
-                // The simulator models one input signal, duplicated across channels.
-                // Per-channel differentiation is not needed to develop the UI in Phase 3.
+                // Hum/noise are drawn once per frame and shared across channels (same as before);
+                // only the generator tones differ per channel (see ComputeChannelSample).
+                double sharedAdditive = synthesizer.ComputeSharedAdditive(profile, t, config.SampleRateHz);
+
                 for (int ch = 0; ch < config.ChannelCount; ch++)
-                    buffer[(frame * config.ChannelCount) + ch] = sampleF;
+                {
+                    double sample = synthesizer.ComputeChannelSample(profile, t, ch) + sharedAdditive;
+                    sample = SignalSynthesizer.SoftClip(sample, clipPeakV);
+                    buffer[(frame * config.ChannelCount) + ch] = (float)sample;
+                }
             }
 
             frameIndex += config.BlockFrameCount;

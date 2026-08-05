@@ -143,6 +143,170 @@ public class SimulatedDeviceTests
     }
 
     [Fact]
+    public async Task Device_StartsWithGeneratorOff_NoDefaultDemoTone()
+    {
+        // Regression: the device's out-of-the-box state must agree with GeneratorConfig.Off (and
+        // the UI's "Generator enabled" checkbox starting unchecked) — a hidden always-on demo tone
+        // here previously meant the checkbox and the actual signal disagreed until the user
+        // toggled it once. Deliberately does not touch SignalProfile/ConfigureGeneratorAsync.
+        var device = new SimulatedDevice(randomSeed: 1);
+        await device.ConnectAsync(CancellationToken.None);
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 1, BlockFrameCount: 4096);
+
+        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
+        {
+            using (block)
+            {
+                double sumSquares = 0.0;
+                foreach (var s in block.Samples)
+                    sumSquares += (double)s * s;
+                double rms = Math.Sqrt(sumSquares / block.SampleCount);
+
+                // A legacy always-on 1 kHz/0 dBV demo tone would read Vrms ~= 1.0. Hum (-90 dBV)
+                // and noise (-150 dBV/rtHz) alone land many orders of magnitude below that.
+                Assert.True(rms < 0.01, $"Expected near-silence with the generator off, got Vrms={rms}");
+            }
+
+            break;
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureGeneratorAsync_DrivesSynthesizedSignalToConfiguredTone()
+    {
+        var device = new SimulatedDevice();
+        await device.ConnectAsync(CancellationToken.None);
+        device.SignalProfile = new SimulatedSignalProfile
+        {
+            HarmonicsEnabled = false, HumEnabled = false, NoiseEnabled = false, PinkNoiseEnabled = false,
+        };
+
+        const double freqHz = 3000.0;
+        const double ampDbv = 0.0; // 0 dBV = 1 Vrms -> peak = sqrt(2)
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(true, [new GeneratorTone(freqHz, ampDbv)]), ChannelGeneratorConfig.Off), CancellationToken.None);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 1, BlockFrameCount: 64);
+        double peakV = Math.Sqrt(2.0);
+
+        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
+        {
+            using (block)
+            {
+                for (int i = 0; i < block.FrameCount; i++)
+                {
+                    double t = i / config.SampleRateHz;
+                    double expected = peakV * Math.Cos(2.0 * Math.PI * freqHz * t);
+                    Assert.Equal(expected, block.Samples[i], precision: 6);
+                }
+            }
+
+            break; // one block is enough to confirm the frequency took effect
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureGeneratorAsync_SumsMultipleTones()
+    {
+        var device = new SimulatedDevice();
+        await device.ConnectAsync(CancellationToken.None);
+        device.SignalProfile = new SimulatedSignalProfile
+        {
+            HarmonicsEnabled = false, HumEnabled = false, NoiseEnabled = false, PinkNoiseEnabled = false,
+        };
+
+        GeneratorTone[] tones = [new(1000.0, 0.0), new(5000.0, -6.0)];
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(true, tones), ChannelGeneratorConfig.Off), CancellationToken.None);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 1, BlockFrameCount: 64);
+
+        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
+        {
+            using (block)
+            {
+                for (int i = 0; i < block.FrameCount; i++)
+                {
+                    double t = i / config.SampleRateHz;
+                    double expected = Math.Sqrt(2.0) * Math.Cos(2.0 * Math.PI * 1000.0 * t)
+                        + (Math.Sqrt(2.0) * Math.Pow(10.0, -6.0 / 20.0) * Math.Cos(2.0 * Math.PI * 5000.0 * t));
+                    Assert.Equal(expected, block.Samples[i], precision: 6);
+                }
+            }
+
+            break;
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureGeneratorAsync_LeftAndRightRunIndependentTones()
+    {
+        // The split generator's whole point: each channel gets its own tone, not one signal
+        // duplicated across channels (see SimulatedDevice's per-frame loop in StreamAsync).
+        var device = new SimulatedDevice();
+        await device.ConnectAsync(CancellationToken.None);
+        device.SignalProfile = new SimulatedSignalProfile
+        {
+            HarmonicsEnabled = false, HumEnabled = false, NoiseEnabled = false, PinkNoiseEnabled = false,
+        };
+
+        const double leftFreqHz = 1000.0;
+        const double rightFreqHz = 3000.0;
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(
+                new ChannelGeneratorConfig(true, [new GeneratorTone(leftFreqHz, 0.0)]),
+                new ChannelGeneratorConfig(true, [new GeneratorTone(rightFreqHz, 0.0)])),
+            CancellationToken.None);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 2, BlockFrameCount: 64);
+        double peakV = Math.Sqrt(2.0);
+
+        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
+        {
+            using (block)
+            {
+                for (int frame = 0; frame < block.FrameCount; frame++)
+                {
+                    double t = frame / config.SampleRateHz;
+                    double expectedLeft = peakV * Math.Cos(2.0 * Math.PI * leftFreqHz * t);
+                    double expectedRight = peakV * Math.Cos(2.0 * Math.PI * rightFreqHz * t);
+                    Assert.Equal(expectedLeft, block.Samples[frame * 2], precision: 6);
+                    Assert.Equal(expectedRight, block.Samples[(frame * 2) + 1], precision: 6);
+                }
+            }
+
+            break;
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureGeneratorAsync_DisabledProducesSilenceAtGeneratorFrequencies()
+    {
+        var device = new SimulatedDevice();
+        await device.ConnectAsync(CancellationToken.None);
+        device.SignalProfile = new SimulatedSignalProfile
+        {
+            HarmonicsEnabled = false, HumEnabled = false, NoiseEnabled = false, PinkNoiseEnabled = false,
+        };
+
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(false, [new GeneratorTone(1000.0, 0.0)]), ChannelGeneratorConfig.Off), CancellationToken.None);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 1, BlockFrameCount: 64);
+
+        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
+        {
+            using (block)
+            {
+                foreach (var sample in block.Samples)
+                    Assert.Equal(0.0, sample, precision: 9);
+            }
+
+            break;
+        }
+    }
+
+    [Fact]
     public void PcmBlock_Dispose_ReturnsBufferAndThrowsOnUseAfterDispose()
     {
         var buffer = new float[16];

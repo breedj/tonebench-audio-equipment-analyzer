@@ -1,0 +1,173 @@
+import { describe, expect, it } from 'vitest'
+import {
+  absoluteLevelDbv,
+  channelTiles,
+  dbvToDbu,
+  dbvToVrms,
+  formatAveraging,
+  formatFftSize,
+  formatVrms,
+  formatWatts,
+  noteName,
+  powerWatts,
+  ratioPercentToDb,
+  systemTiles,
+  vrmsToDbv,
+} from './metrics'
+import type { MetersFrame } from './streaming/protocol'
+import type { GeneratorTone } from './api/client'
+
+// Golden values below are cross-checked against the reference QA40x screenshot's own numbers
+// (e.g. THD dB / THD+N dB / N-D dBr all reproduce independently from other tiles in that same
+// screenshot), not invented — see the plan's "Metric formulas" table.
+
+describe('dbvToVrms / vrmsToDbv', () => {
+  it('round-trip and match the 0 dBV = 1 Vrms convention', () => {
+    expect(dbvToVrms(0)).toBeCloseTo(1, 6)
+    expect(vrmsToDbv(1)).toBeCloseTo(0, 6)
+    expect(dbvToVrms(-17.6)).toBeCloseTo(0.1318, 3) // ~131.8 mVrms, matches the screenshot's RMS Volts
+    expect(vrmsToDbv(dbvToVrms(-42.7))).toBeCloseTo(-42.7, 6)
+  })
+})
+
+describe('dbvToDbu', () => {
+  it('adds the 0.775V-vs-1V reference offset (~2.218 dB)', () => {
+    // Screenshot: RMS dBV -17.60 -> RMS dBu -15.38.
+    expect(dbvToDbu(-17.6)).toBeCloseTo(-15.38, 1)
+  })
+})
+
+describe('ratioPercentToDb', () => {
+  it('matches the screenshot THD/THD+N dB conversions', () => {
+    expect(ratioPercentToDb(0.00861)).toBeCloseTo(-81.3, 1) // screenshot: THD dB -81.30
+    expect(ratioPercentToDb(0.0988)).toBeCloseTo(-60.1, 1) // screenshot: THD+N dB -60.10
+  })
+})
+
+describe('absoluteLevelDbv', () => {
+  it('recombines a dBc ratio with the fundamental into an absolute dBV level', () => {
+    // Screenshot: fundamental -17.60 dBV, THD dB -81.30 -> THD dBr -98.90.
+    expect(absoluteLevelDbv(-17.6, -81.3)).toBeCloseTo(-98.9, 1)
+    // fundamental -17.60 dBV, THD+N dB -60.10 -> THD+N dBr -77.70 (screenshot shows -77.71, 0.01 rounding).
+    expect(absoluteLevelDbv(-17.6, -60.1)).toBeCloseTo(-77.7, 1)
+  })
+})
+
+describe('powerWatts', () => {
+  it('reproduces the screenshot Pk/RMS power readings at 8Ω', () => {
+    // Screenshot: 131.7 mVrms @ 8Ω -> 2.16 mW.
+    expect(powerWatts(0.1317, 8)).toBeCloseTo(0.00217, 4)
+    // Screenshot: 131.8 mV @ 8Ω -> 2.17 mW.
+    expect(powerWatts(0.1318, 8)).toBeCloseTo(0.00217, 4)
+  })
+})
+
+describe('formatVrms / formatWatts', () => {
+  it('switches to milli-units below 1', () => {
+    expect(formatVrms(0.1317)).toBe('131.7 mVrms')
+    expect(formatVrms(1.5)).toBe('1.5000 Vrms')
+    expect(formatWatts(0.00217, 8)).toBe('2.17 mW (8Ω)')
+    expect(formatWatts(1.2, 8)).toBe('1.200 W (8Ω)')
+  })
+})
+
+describe('formatFftSize', () => {
+  it('formats binary-K sizes and passes through anything else', () => {
+    expect(formatFftSize(131072)).toBe('128k') // screenshot: Sys:FFT = 128k
+    expect(formatFftSize(65536)).toBe('64k')
+    expect(formatFftSize(4096)).toBe('4k')
+    expect(formatFftSize(1000)).toBe('1000')
+  })
+})
+
+describe('formatAveraging', () => {
+  it('describes Off/Linear/Exponential', () => {
+    expect(formatAveraging('Off', 8)).toBe('Off') // screenshot: Sys:Averages = Off
+    expect(formatAveraging('Linear', 8)).toBe('Linear x8')
+    expect(formatAveraging('Exponential', 16)).toBe('Exponential τ=16')
+  })
+})
+
+describe('noteName', () => {
+  it('identifies exact concert pitch with no deviation symbols', () => {
+    expect(noteName(440)).toBe('A4')
+  })
+
+  it('identifies a sharp note with deviation symbols, roughly matching the screenshot B5+++', () => {
+    // 1000.488 Hz is ~22 cents sharp of B5 (987.77 Hz) — same fundamental as the screenshot.
+    expect(noteName(1000.488)).toMatch(/^B5\+{1,3}$/)
+  })
+
+  it('returns an em dash for non-positive frequencies', () => {
+    expect(noteName(0)).toBe('—')
+    expect(noteName(-10)).toBe('—')
+  })
+})
+
+describe('channelTiles', () => {
+  const meters: MetersFrame = {
+    header: { msgType: 3, channel: 0, flags: 0, seq: 1, x0: 1000.488, dx: 1.46, nPoints: 0 },
+    fundamentalFreqHz: 1000.488,
+    binSizeHz: 1.46,
+    thdPercent: 0.00861,
+    thdNPercent: 0.0988,
+    snrDb: 60.7,
+    fundamentalDbv: -17.6,
+    noiseFloorDbv: -78.3, // fundamentalDbv - snrDb, as SpectrumPipeline already computes it
+    peakDbv: -17.61,
+    totalRmsDbv: -17.6,
+    harmonics: [],
+    otherPeaks: [],
+  }
+
+  it('returns an empty list when there is no data yet', () => {
+    expect(channelTiles(null, [], 8)).toEqual([])
+  })
+
+  it('derives N-D/SNR dBr directly from the already-sent noiseFloorDbv field', () => {
+    const tiles = channelTiles(meters, [], 8)
+    expect(tiles.find((t) => t.label === 'N-D dBr')?.value).toBe('-78.30 dBr')
+    expect(tiles.find((t) => t.label === 'SNR dBr')?.value).toBe('-78.30 dBr')
+  })
+
+  it('computes Gain dB against the channel\'s own first generator tone', () => {
+    const tones: GeneratorTone[] = [{ freqHz: 1000, ampDbv: -17.58 }]
+    const tiles = channelTiles(meters, tones, 8)
+    // -17.60 (measured) - (-17.58) (generator) = -0.02 dB, matching the screenshot's Gain dB.
+    expect(tiles.find((t) => t.label === 'Gain dB')?.value).toBe('-0.02 dB')
+  })
+
+  it('shows Gain dB as unavailable when the channel has no generator tone', () => {
+    const tiles = channelTiles(meters, [], 8)
+    expect(tiles.find((t) => t.label === 'Gain dB')?.value).toBe('—')
+  })
+
+  it('lists one GenN tile per configured tone for that channel', () => {
+    const tones: GeneratorTone[] = [
+      { freqHz: 1000, ampDbv: -6 },
+      { freqHz: 5000, ampDbv: -12 },
+    ]
+    const tiles = channelTiles(meters, tones, 8)
+    expect(tiles.find((t) => t.label === 'Gen1')?.value).toContain('1.0000 kHz')
+    expect(tiles.find((t) => t.label === 'Gen2')?.value).toContain('5.0000 kHz')
+  })
+})
+
+describe('systemTiles', () => {
+  it('formats the channel-independent Sys: tiles', () => {
+    const tiles = systemTiles({
+      fftSize: 131072,
+      window: 'Hann',
+      averaging: 'Off',
+      averageCount: 8,
+      inputRangeDbv: 42,
+      binSizeHz: 1.46,
+    })
+
+    expect(tiles.find((t) => t.label === 'Sys:FFT')?.value).toBe('128k')
+    expect(tiles.find((t) => t.label === 'Sys:Averages')?.value).toBe('Off')
+    expect(tiles.find((t) => t.label === 'Sys:Window')?.value).toBe('Hann')
+    expect(tiles.find((t) => t.label === 'Sys:FullScale')?.value).toBe('+42 dBV')
+    expect(tiles.find((t) => t.label === 'Sys:Resolution')?.value).toBe('1.46 Hz')
+  })
+})

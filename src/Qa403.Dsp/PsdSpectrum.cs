@@ -55,6 +55,14 @@ public readonly ref struct PsdSpectrum
         return new PsdSpectrum(destination, sampleRateHz, binSizeHz, sums);
     }
 
+    /// <summary>
+    /// Wraps an already-computed PSD — e.g. the output of averaging several <see cref="Compute"/>
+    /// results across ticks — without recomputing anything from a complex spectrum.
+    /// <paramref name="valuesV2PerHz"/> is used as-is, in V²/Hz.
+    /// </summary>
+    public static PsdSpectrum FromValues(ReadOnlySpan<double> valuesV2PerHz, double sampleRateHz, double binSizeHz, WindowSums sums) =>
+        new(valuesV2PerHz, sampleRateHz, binSizeHz, sums);
+
     public int BinOfFrequency(double frequencyHz) => (int)Math.Round(frequencyHz / BinSizeHz);
 
     /// <summary>Parseval: sqrt(Σ PSD·Δf) over every bin in the spectrum.</summary>

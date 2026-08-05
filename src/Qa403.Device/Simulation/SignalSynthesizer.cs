@@ -13,9 +13,26 @@ internal sealed class SignalSynthesizer(Random random)
     private const double HumHarmonicDecayDb = -6.0;
     private double _pinkB0, _pinkB1, _pinkB2;
 
-    public double NextSample(SimulatedSignalProfile profile, double t, double sampleRateHz)
+    /// <summary>
+    /// This channel's tone content: the configured generator tones for <paramref name="channelIndex"/>
+    /// (0 = left, 1 = right), or the legacy demo tone / intermodulation pair when that channel has
+    /// never been configured — see <see cref="SimulatedSignalProfile.GeneratorTonesLeft"/>.
+    /// </summary>
+    public double ComputeChannelSample(SimulatedSignalProfile profile, double t, int channelIndex)
     {
-        double sample = ComputeTones(profile, t) + ComputeHum(profile, t);
+        var channelTones = channelIndex == 0 ? profile.GeneratorTonesLeft : profile.GeneratorTonesRight;
+        return ComputeTones(profile, t, channelTones);
+    }
+
+    /// <summary>
+    /// Content shared identically across every channel: mains hum plus noise. Call once per
+    /// frame (not once per channel) so hum/noise stay correlated across channels exactly like
+    /// today's single-signal-duplicated-across-channels behaviour — only the generator tones
+    /// (<see cref="ComputeChannelSample"/>) are meant to diverge per channel.
+    /// </summary>
+    public double ComputeSharedAdditive(SimulatedSignalProfile profile, double t, double sampleRateHz)
+    {
+        double sample = ComputeHum(profile, t);
 
         if (profile.NoiseEnabled)
             sample += NextNoiseSample(profile, sampleRateHz);
@@ -47,10 +64,13 @@ internal sealed class SignalSynthesizer(Random random)
 
     public static double DbvToPeakV(double dbv) => Math.Sqrt(2.0) * Math.Pow(10.0, dbv / 20.0);
 
-    private static double ComputeTones(SimulatedSignalProfile profile, double t)
+    private static double ComputeTones(SimulatedSignalProfile profile, double t, IReadOnlyList<GeneratorTone>? channelTones)
     {
         if (profile.Intermodulation != IntermodulationMode.None)
             return ComputeIntermodulation(profile, t);
+
+        if (channelTones is { } generatorTones)
+            return ComputeGeneratorTones(profile, generatorTones, t);
 
         double fundamentalPeakV = DbvToPeakV(profile.FundamentalAmplitudeDbv);
         double sum = fundamentalPeakV * Math.Cos(2.0 * Math.PI * profile.FundamentalFrequencyHz * t);
@@ -63,6 +83,31 @@ internal sealed class SignalSynthesizer(Random random)
                 int order = i + 2;
                 double amplitudeV = fundamentalPeakV * Math.Pow(10.0, harmonicDbc[i] / 20.0);
                 sum += amplitudeV * Math.Cos(2.0 * Math.PI * profile.FundamentalFrequencyHz * order * t);
+            }
+        }
+
+        return sum;
+    }
+
+    /// <summary>Each configured generator tone is treated as its own fundamental, with its own harmonic stack (see <see cref="SimulatedSignalProfile.GeneratorTones"/>).</summary>
+    private static double ComputeGeneratorTones(SimulatedSignalProfile profile, IReadOnlyList<GeneratorTone> tones, double t)
+    {
+        double sum = 0.0;
+        var harmonicDbc = profile.HarmonicDbc;
+
+        foreach (var tone in tones)
+        {
+            double peakV = DbvToPeakV(tone.AmplitudeDbv);
+            sum += peakV * Math.Cos(2.0 * Math.PI * tone.FrequencyHz * t);
+
+            if (!profile.HarmonicsEnabled)
+                continue;
+
+            for (int i = 0; i < harmonicDbc.Count; i++)
+            {
+                int order = i + 2;
+                double amplitudeV = peakV * Math.Pow(10.0, harmonicDbc[i] / 20.0);
+                sum += amplitudeV * Math.Cos(2.0 * Math.PI * tone.FrequencyHz * order * t);
             }
         }
 

@@ -36,6 +36,31 @@ export type StreamChannel = (typeof StreamChannel)[keyof typeof StreamChannel]
 
 export const STREAM_FLAG_DECIMATED = 1 << 0
 export const STREAM_FLAG_LOG_SPACED = 1 << 1
+/**
+ * This frame covers only the zoom window this client asked for, at the full column budget — so it
+ * resolves detail the overview cannot. Its x0/dx are the window's edges, NOT the spectrum's, so
+ * never size an axis from a zoomed frame; only an un-flagged overview frame describes the full
+ * span. See StreamFlags.Zoomed server-side.
+ */
+export const STREAM_FLAG_ZOOMED = 1 << 2
+
+/** Client -> server control message kinds. Everything else is REST. */
+export const ClientControlType = {
+  SetViewport: 1,
+} as const
+
+/**
+ * Encodes a viewport update: `u8 type, f32 loFreqHz, f32 hiFreqHz`, little-endian. Pass a
+ * degenerate range (hi <= lo) to clear the zoom and go back to the shared overview frame.
+ */
+export function encodeSetViewport(loFreqHz: number, hiFreqHz: number): ArrayBuffer {
+  const buffer = new ArrayBuffer(9)
+  const view = new DataView(buffer)
+  view.setUint8(0, ClientControlType.SetViewport)
+  view.setFloat32(1, loFreqHz, true)
+  view.setFloat32(5, hiFreqHz, true)
+  return buffer
+}
 
 export interface StreamFrameHeader {
   msgType: StreamMsgType

@@ -36,6 +36,18 @@ public enum StreamFlags : ushort
     /// per-column step.
     /// </summary>
     LogSpaced = 1 << 1,
+
+    /// <summary>
+    /// This frame covers only the client's current zoom range, not the whole spectrum — the same
+    /// column budget spread over a narrower span, so zooming resolves detail the overview cannot.
+    /// Sent only to the client that asked for it (see <see cref="SpectrumBroadcastHub"/>), and only
+    /// once it is zoomed in far enough to be worth the extra encode.
+    ///
+    /// A client must NOT use x0/dx from a zoomed frame to size its axis — they are the zoom
+    /// window's edges, not the spectrum's. Only an un-flagged (overview) frame describes the full
+    /// span.
+    /// </summary>
+    Zoomed = 1 << 2,
 }
 
 /// <summary>
@@ -71,14 +83,16 @@ public static class StreamFrame
     /// </summary>
     public static byte[] EncodeSpectrum(
         StreamChannel channel, uint seq, float x0, float dx, ReadOnlySpan<float> columnFreqsHz, ReadOnlySpan<MinMax> columns,
-        StreamMsgType msgType = StreamMsgType.Spectrum, bool logSpaced = false)
+        StreamMsgType msgType = StreamMsgType.Spectrum, bool logSpaced = false, bool zoomed = false)
     {
         if (columnFreqsHz.Length != columns.Length)
             throw new ArgumentException("columnFreqsHz must be exactly columns.Length long.", nameof(columnFreqsHz));
 
         int nPoints = columns.Length;
         byte[] buffer = new byte[HeaderLength + (nPoints * 3 * sizeof(float))];
-        var flags = StreamFlags.Decimated | (logSpaced ? StreamFlags.LogSpaced : StreamFlags.None);
+        var flags = StreamFlags.Decimated
+            | (logSpaced ? StreamFlags.LogSpaced : StreamFlags.None)
+            | (zoomed ? StreamFlags.Zoomed : StreamFlags.None);
         WriteHeader(buffer, msgType, channel, flags, seq, x0, dx, (uint)nPoints);
 
         int offset = HeaderLength;

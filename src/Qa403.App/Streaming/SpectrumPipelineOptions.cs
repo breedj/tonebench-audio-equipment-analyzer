@@ -28,8 +28,36 @@ public sealed record SpectrumPipelineOptions
     /// </summary>
     public int TargetFrameRateHz { get; init; } = 20;
 
-    /// <summary>Harmonics reported per meters frame, order 1 (fundamental) through this order — 9 gives fundamental + H2..H9.</summary>
-    public int HarmonicCount { get; init; } = 9;
+    /// <summary>
+    /// Harmonics reported per meters frame, order 1 (fundamental) through this order — 12 gives
+    /// fundamental + H2..H12, matching QuantAsylum's own convention (their THD sums H2..H12; see
+    /// reference/previous version/QA40x_AUDIO_ANALYSER/frmThdFrequency.cs).
+    /// </summary>
+    public int HarmonicCount { get; init; } = 12;
+
+    /// <summary>
+    /// Lower edge of the measurement bandwidth for THD+N, SNR and the noise floor, in Hz.
+    ///
+    /// Not a display setting — this is what those figures are integrated over, and quoting any of
+    /// them without a bandwidth is meaningless. The default is the standard 20 Hz - 20 kHz audio
+    /// band. Critically it also keeps DC out: on a DC-coupled input a few mV of offset lives in
+    /// bin 0, and integrating it reported THD+N ~33 dB worse than reality.
+    /// </summary>
+    public double MeasurementLoFreqHz { get; init; } = 20.0;
+
+    /// <summary>
+    /// Upper edge of the measurement bandwidth for THD+N, SNR and the noise floor, in Hz. Clamped
+    /// to Nyquist. Also bounds which harmonics count toward THD, matching QuantAsylum's
+    /// <c>/ThdDb/{freq}/{stopHz}</c>.
+    /// </summary>
+    public double MeasurementHiFreqHz { get; init; } = 20000.0;
+
+    /// <summary>
+    /// Half-width, in octaves, of the notch taken out around the fundamental before integrating
+    /// THD+N/SNR — see <see cref="SpectrumMetrics.DefaultNotchOctaves"/>. 0.5 matches QuantAsylum's
+    /// PyQa40x. Lower it only if you need to resolve noise very close to the carrier.
+    /// </summary>
+    public double NotchOctaves { get; init; } = SpectrumMetrics.DefaultNotchOctaves;
 
     /// <summary>
     /// Lower bound, in Hz, for locating the fundamental by peak search. Excludes DC and mains

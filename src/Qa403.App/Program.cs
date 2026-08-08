@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Serialization;
@@ -7,14 +8,14 @@ using Qa403.App.Endpoints;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Device;
+using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
 using Serilog;
 
 var noBrowser = args.Contains("--no-browser");
 
-// Real hardware transport lands in phase 6; --simulate is wired now so that swap is a
-// one-line change to the branch below instead of a rewrite of this startup path.
-var simulate = !args.Contains("--no-simulate");
+// Default is real QA403 hardware; pass --simulate to fall back to the synthetic device.
+var simulate = args.Contains("--simulate");
 
 var logDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
 Log.Logger = new LoggerConfiguration()
@@ -35,11 +36,25 @@ try
     if (simulate)
         builder.Services.AddSingleton<IAnalyzerDevice, SimulatedDevice>();
     else
-        builder.Services.AddSingleton<IAnalyzerDevice, SimulatedDevice>(); // TODO(phase 6): swap for the real Qa40xUsbDevice
+        builder.Services.AddSingleton<IAnalyzerDevice, Qa40xUsbDevice>();
 
     // WindowType/AveragingMode read back as "Hann"/"Linear" etc, matching what /spectrum-config
     // already accepts on the way in — one representation, not int-in/string-out.
     builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+    // Down from the 30 s default, and sized to fit inside the ~5 s Windows allows a CTRL_CLOSE_EVENT
+    // handler before it terminates the process regardless — see RegisterConsoleCloseShutdown. The
+    // nesting is pump join 2 s < this 3 s < watchdog 3.5 s < console-close wait 4.5 s; raising any
+    // inner value past an outer one puts libusb_close back in the position of running with transfers
+    // still in flight.
+    //
+    // Note the stop order is the opposite of what it looks like: GenericWebHostService is registered
+    // during builder.Build(), *after* AddHostedService<DeviceLifecycleHostedService>() below, and
+    // hosted services stop in reverse registration order — so Kestrel stops first and the device
+    // teardown only begins once it has drained. /ws/stream therefore has to observe
+    // ApplicationStopping (see StreamingEndpoints) or an open browser tab spends this entire budget
+    // before the QA403 is touched.
+    builder.Host.ConfigureHostOptions(options => options.ShutdownTimeout = TimeSpan.FromSeconds(3));
 
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
@@ -67,7 +82,15 @@ try
     if (!noBrowser)
         LaunchBrowser(url);
 
+    var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+    var shutdownComplete = new ManualResetEventSlim(false);
+
+    StartShutdownWatchdog(lifetime);
+    using var consoleClose = RegisterConsoleCloseShutdown(lifetime, shutdownComplete);
+
     app.Run();
+    shutdownComplete.Set();
+    Log.Information("Host stopped cleanly; process exiting");
 }
 catch (Exception ex)
 {
@@ -76,6 +99,109 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+/// <summary>
+/// Runs a graceful shutdown when the console window's close button is used.
+///
+/// Without this, closing the window ran no shutdown at all — the log jumped straight from
+/// "Application started" to nothing, with no "Application is shutting down...", no
+/// <c>QA403 teardown:</c> lines, and no chance for the watchdog (armed on <c>ApplicationStopping</c>)
+/// to arm. Ctrl+C was always fine, which is what made this look like an intermittent USB bug rather
+/// than a missing signal handler.
+///
+/// The cause is a mapping gap. .NET's Windows <see cref="PosixSignalRegistration"/> installs a
+/// console control handler and maps CTRL_C_EVENT to <see cref="PosixSignal.SIGINT"/>,
+/// CTRL_BREAK_EVENT to <see cref="PosixSignal.SIGQUIT"/> and the window close button
+/// (CTRL_CLOSE_EVENT) to <see cref="PosixSignal.SIGHUP"/> — but the generic host's
+/// <c>ConsoleLifetime</c> only subscribes to SIGINT, SIGQUIT and SIGTERM. Nothing listens for
+/// SIGHUP, so the default action runs and Windows terminates the process outright.
+///
+/// Terminating mid-transfer is what left the QA403 unreachable: the pump still had bulk reads
+/// pending on EP2, and a process cannot finish dying while a thread sits in an uninterruptible
+/// kernel-mode USB I/O — which is exactly why the stuck process only disappeared when the cable was
+/// pulled, and why the device then needed a power cycle for any app to claim it.
+///
+/// <c>Cancel = true</c> suppresses that default termination. The handler must then *block*: returning
+/// from a CTRL_CLOSE_EVENT handler is what tells Windows to proceed with the kill. Windows allows
+/// roughly 5 s before it terminates regardless, so every timeout on this path is sized to fit inside
+/// it — pump join 2 s &lt; ShutdownTimeout 3 s &lt; watchdog 3.5 s &lt; this wait 4.5 s.
+static IDisposable? RegisterConsoleCloseShutdown(IHostApplicationLifetime lifetime, ManualResetEventSlim shutdownComplete)
+{
+    if (!OperatingSystem.IsWindows())
+        return null;
+
+    try
+    {
+        return PosixSignalRegistration.Create(PosixSignal.SIGHUP, context =>
+        {
+            context.Cancel = true;
+            Log.Information("Console window close requested — running graceful shutdown");
+
+            lifetime.StopApplication();
+
+            if (!shutdownComplete.Wait(TimeSpan.FromSeconds(4.5)))
+                Log.Error("Shutdown did not finish before the console-close deadline; Windows will terminate the process");
+        });
+    }
+    catch (PlatformNotSupportedException ex)
+    {
+        // Not fatal: Ctrl+C still shuts down cleanly, the window close button just goes back to
+        // being an ungraceful kill.
+        Log.Warning(ex, "Could not hook the console close button; closing the window will not shut down gracefully");
+        return null;
+    }
+}
+
+/// <summary>
+/// Guarantees the process actually dies once shutdown starts, even if teardown blocks.
+///
+/// This exists because a QA403 left claimed by a process that never exits is indistinguishable, from
+/// the outside, from a QA403 that needs a power cycle — and it is the far likelier of the two. The
+/// hazard is documented in <c>Qa40xUsbDevice.StreamAsync</c>: LibUsbDotNet's <c>Close()</c> signals
+/// its event thread to stop before closing the handle, and <c>libusb_close</c> then waits with no
+/// timeout for an acknowledgement from a thread that may already be gone. That wait is native and
+/// uninterruptible — no CancellationToken, no managed timeout, and no host ShutdownTimeout reaches
+/// it. Whether it happens depends on transfer timing, which is exactly why the symptom is
+/// intermittent ("most of the time"). The same applies to the GC.WaitForPendingFinalizers() in
+/// Qa40xTransport.Dispose.
+///
+/// Killing ourselves is safe here and strictly better than hanging: StreamingStop has already been
+/// written by this point (TransferPump's finally, and again in Qa40xUsbDevice.Dispose), so the device
+/// is quiesced, and Windows reclaims the USB handle on process death — which is the one thing a
+/// wedged process prevents. Serilog is flushed first so the diagnosis survives.
+///
+/// Deliberately Process.Kill and not Environment.Exit: Exit runs finalizers and ProcessExit handlers,
+/// which can block on the very native call being escaped from.
+static void StartShutdownWatchdog(IHostApplicationLifetime lifetime)
+{
+    // Above the host's own 3 s ShutdownTimeout so a clean shutdown always wins the race, and below
+    // the console-close handler's 4.5 s wait so the watchdog — which logs *why* — is what fires
+    // first when teardown blocks, rather than Windows silently terminating us.
+    var deadline = TimeSpan.FromSeconds(3.5);
+
+    lifetime.ApplicationStopping.Register(() =>
+    {
+        var watchdog = new Thread(() =>
+        {
+            Thread.Sleep(deadline);
+
+            Log.Error(
+                "Shutdown did not complete within {Seconds}s — forcing process exit. The last 'QA403 teardown:' line "
+                    + "above is the step that blocked. The device has already been sent StreamingStop; killing the "
+                    + "process is what releases the USB handle so the next connect can claim it.",
+                deadline.TotalSeconds);
+            Log.CloseAndFlush();
+
+            Process.GetCurrentProcess().Kill();
+        })
+        {
+            IsBackground = true,
+            Name = "QA403 shutdown watchdog",
+        };
+
+        watchdog.Start();
+    });
 }
 
 static int FindAvailablePort(int start, int end)

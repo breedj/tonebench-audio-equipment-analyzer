@@ -201,6 +201,15 @@ public class SpectrumPipelineTests
             Assert.InRange(meters.FundamentalFreqHz, (float)tone.FrequencyHz - 5f, (float)tone.FrequencyHz + 5f);
             Assert.InRange(meters.FundamentalDbv, -3.5f, -2.5f);
             Assert.NotEmpty(meters.Harmonics);
+
+            // The spectrum frame carries its own dBV values and used to be checked by nothing at
+            // all — which is how it shipped 3.01 dB high (10*log10 of peak-volts-squared, missing
+            // the /2 that makes it rms). Pin it to the same golden-test convention the meters frame
+            // above is pinned to: 1.0 V peak reads -3.01 dBV, on the chart as well as in the meters.
+            var columns = StreamFrame.DecodeSpectrumColumns(spectrumFrame);
+            var peakColumn = columns.MaxBy(c => c.Value.Max);
+            Assert.InRange(peakColumn.FreqHz, (float)tone.FrequencyHz - 20f, (float)tone.FrequencyHz + 20f);
+            Assert.InRange(peakColumn.Value.Max, -3.5, -2.5);
         }
         finally
         {

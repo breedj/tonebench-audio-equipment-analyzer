@@ -27,6 +27,14 @@ function start() {
   emit('start', form.sampleRateHz, props.ranges?.maxChannelCount ?? 2, form.blockFrameCount)
 }
 
+// Sample rate / block size are only meaningful once acquisition is actually running; before that
+// they're just staged for the next Start click. While acquiring, restarting is exactly what
+// DeviceSessionService.StartAcquisitionAsync now does in place when the config changed — the UI
+// never has to Stop first.
+function applyLive() {
+  if (props.status?.acquiring) start()
+}
+
 const processLeft = computed({
   get: () => config.value?.processLeft ?? true,
   set: (value: boolean) => apply({ processLeft: value }),
@@ -36,6 +44,11 @@ const processRight = computed({
   get: () => config.value?.processRight ?? true,
   set: (value: boolean) => apply({ processRight: value }),
 })
+
+// Exposed so App.vue can read the currently-selected (not-yet-started) sample rate/block size
+// when applying a generator change — the generator needs these to bring up a stream on its own
+// when no acquisition is running yet, and this form is the one place the user sets them.
+defineExpose({ form })
 </script>
 
 <template>
@@ -48,6 +61,7 @@ const processRight = computed({
         <select
           v-model.number="form.sampleRateHz"
           class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="applyLive"
         >
           <option v-for="fs in props.ranges?.sampleRatesHz" :key="fs" :value="fs">{{ fs }} Hz</option>
         </select>
@@ -72,6 +86,7 @@ const processRight = computed({
           min="1024"
           v-model.number="form.blockFrameCount"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="applyLive"
         />
       </label>
 

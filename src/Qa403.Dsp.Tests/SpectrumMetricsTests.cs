@@ -66,7 +66,7 @@ public class SpectrumMetricsTests
     {
         var harmonics = Analyze(WindowType.Hann, 1, out var psd, (1.0, FundamentalBin));
 
-        double thdN = SpectrumMetrics.ThdPlusN(psd, harmonics[0]);
+        double thdN = SpectrumMetrics.ThdPlusN(psd, harmonics[0], psd.FullBand);
 
         Assert.True(thdN < 1e-5, $"expected near-zero THD+N for a pure coherent tone, got {thdN}");
     }
@@ -92,8 +92,9 @@ public class SpectrumMetricsTests
         var harmonics = new Harmonic[1];
         HarmonicAnalyzer.Analyze(psd, FundamentalBin, 1, harmonics);
 
-        double thdN = SpectrumMetrics.ThdPlusN(psd, harmonics[0]);
-        double manualNoiseOnly = psd.IntegrateVrmsExcluding([new BinRange(FundamentalBin - 3, FundamentalBin + 3)]) / harmonics[0].AmplitudeVrms;
+        double thdN = SpectrumMetrics.ThdPlusN(psd, harmonics[0], psd.FullBand);
+        var notch = SpectrumMetrics.FundamentalNotch(psd, harmonics[0]);
+        double manualNoiseOnly = psd.IntegrateVrmsExcluding([notch], psd.FullBand) / harmonics[0].AmplitudeVrms;
 
         Assert.Equal(manualNoiseOnly, thdN, 9);
         Assert.True(thdN > 0.0);
@@ -104,8 +105,8 @@ public class SpectrumMetricsTests
     {
         var harmonics = Analyze(WindowType.Hann, 1, out var psd, (1.0, FundamentalBin));
 
-        double thdN = SpectrumMetrics.ThdPlusN(psd, harmonics[0]);
-        double sinad = SpectrumMetrics.Sinad(psd, harmonics[0]);
+        double thdN = SpectrumMetrics.ThdPlusN(psd, harmonics[0], psd.FullBand);
+        double sinad = SpectrumMetrics.Sinad(psd, harmonics[0], psd.FullBand);
 
         if (thdN > 0)
             Assert.Equal(1.0 / thdN, sinad, 3);
@@ -118,7 +119,7 @@ public class SpectrumMetricsTests
         // should stay high even though THD+N (which does not) would read poorly.
         var harmonics = Analyze(WindowType.Hann, 2, out var psd, (1.0, FundamentalBin), (0.5, FundamentalBin * 2));
 
-        double snr = SpectrumMetrics.Snr(psd, harmonics);
+        double snr = SpectrumMetrics.Snr(psd, harmonics, psd.FullBand);
 
         Assert.True(snr > 100, $"expected SNR to ignore the harmonic and stay high, got {snr}");
     }

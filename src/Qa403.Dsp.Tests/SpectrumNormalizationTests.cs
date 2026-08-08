@@ -91,7 +91,7 @@ public class SpectrumNormalizationTests
         var psd = PsdSpectrum.Compute(spectrum, SampleRateHz, w.Sums, destination);
 
         double full = psd.IntegrateVrms();
-        double excluded = psd.IntegrateVrmsExcluding([new BinRange(FundamentalBin, FundamentalBin)]);
+        double excluded = psd.IntegrateVrmsExcluding([new BinRange(FundamentalBin, FundamentalBin)], psd.FullBand);
 
         // Rectangular window puts 100% of a coherent tone's energy in exactly one bin, so
         // excluding it should leave (numerically) nothing.

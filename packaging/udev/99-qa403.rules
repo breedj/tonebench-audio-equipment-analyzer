@@ -1,0 +1,10 @@
+# QuantAsylum QA403 audio analyzer — USB access for non-root users on Linux.
+#
+# Install:
+#   sudo cp packaging/udev/99-qa403.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#   sudo usermod -aG plugdev $USER   # then log out/in (or reboot) for the group change to apply
+#
+# VID:PID 16c0:4e39 is the QA403 (docs/protocol.md §1, reference/qa40x-baremetal/QA40x_BareMetal/Form1.cs:43).
+SUBSYSTEM=="usb", ATTR{idVendor}=="16c0", ATTR{idProduct}=="4e39", MODE="0660", GROUP="plugdev"

@@ -16,6 +16,16 @@ export interface DeviceStatus {
   simulatedNoiseEnabled: boolean | null
   /** Simulated DUT mains hum on/off; same null convention. */
   simulatedHumEnabled: boolean | null
+  /** Input autoranging on/off; null when the device has no autoranging (the simulator). */
+  autoRangeEnabled: boolean | null
+  /** Whether generator tones are snapped to the nearest coherent FFT bin. generatorLeft/Right Tones are the snapped values. */
+  generatorSnapToBin: boolean
+  /**
+   * RX chunks dropped since connect because the consumer fell behind. Each one is a hole in the
+   * sample stream, so the FFT records around it are spliced — non-zero means noise-floor readings
+   * are suspect, not just that a display frame was skipped.
+   */
+  droppedRxChunks: number
 }
 
 /** Patch for the simulated DUT's signal profile — omitted fields are left alone. */
@@ -91,6 +101,19 @@ export interface GeneratorChannelRequest {
 export interface GeneratorRequest {
   left: GeneratorChannelRequest
   right: GeneratorChannelRequest
+  /**
+   * Hints the sample rate/channel/block-size to stream at if this call needs to bring up a
+   * generator-only stream (no acquisition running yet). Omit to leave the current stream state
+   * alone. See DeviceSessionService.ConfigureGeneratorAsync.
+   */
+  sampleRateHz?: number
+  channelCount?: number
+  blockFrameCount?: number
+  /**
+   * Snap every tone to the nearest coherent FFT bin before it reaches the DAC. Defaults to true
+   * server-side. Off-bin tones leak across neighbouring bins no matter which window is used.
+   */
+  snapToBin?: boolean
 }
 
 export interface AcquisitionStartRequest {
@@ -119,6 +142,13 @@ export interface SpectrumConfig {
   /** Whether the left/right channel is processed (FFT + meters) and broadcast at all — see AcquisitionPanel's L/R checkboxes. */
   processLeft: boolean
   processRight: boolean
+  /**
+   * Measurement bandwidth THD+N, SNR and the noise floor are integrated over. Not a display
+   * setting — those figures are meaningless without it, and it is what keeps a DC-coupled input's
+   * offset (bin 0) out of the noise sum. Defaults to the 20 Hz - 20 kHz audio band.
+   */
+  measurementLoFreqHz: number
+  measurementHiFreqHz: number
 }
 
 export interface SpectrumConfigRequest {
@@ -130,6 +160,8 @@ export interface SpectrumConfigRequest {
   otherPeaksCount?: number
   processLeft?: boolean
   processRight?: boolean
+  measurementLoFreqHz?: number
+  measurementHiFreqHz?: number
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -155,6 +187,9 @@ export const api = {
 
   setOutputRange: (dbv: number) =>
     request<DeviceStatus>('/device/output-range', { method: 'POST', body: JSON.stringify({ dbv }) }),
+
+  setAutoRange: (enabled: boolean) =>
+    request<DeviceStatus>('/device/auto-range', { method: 'POST', body: JSON.stringify({ enabled }) }),
 
   setSimulatedProfile: (patch: SimulatedProfileRequest) =>
     request<DeviceStatus>('/device/sim-profile', { method: 'POST', body: JSON.stringify(patch) }),

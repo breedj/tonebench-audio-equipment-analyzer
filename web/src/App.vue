@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { api, type GeneratorChannelRequest, type SimulatedProfileRequest } from './api/client'
 import { useDevice } from './composables/useDevice'
 import { useSpectrumStream } from './composables/useSpectrumStream'
@@ -13,7 +14,10 @@ import HarmonicsTable from './components/HarmonicsTable.vue'
 import OtherPeaksTable from './components/OtherPeaksTable.vue'
 
 const { status, ranges, error, refreshStatus } = useDevice()
-const { spectrum, meters } = useSpectrumStream()
+const { spectrum, meters, setViewport } = useSpectrumStream()
+
+const acquisitionPanel = ref<InstanceType<typeof AcquisitionPanel> | null>(null)
+const generatorPanel = ref<InstanceType<typeof GeneratorPanel> | null>(null)
 
 // Every handler below talks to the backend and must not fail silently — an uncaught rejection
 // from a template @click handler is swallowed by Vue (logged to console, nothing shown), which
@@ -33,9 +37,9 @@ function setInputRange(dbv: number) {
   })
 }
 
-function setOutputRange(dbv: number) {
+function setAutoRange(enabled: boolean) {
   return withErrorReporting(async () => {
-    status.value = await api.setOutputRange(dbv)
+    status.value = await api.setAutoRange(enabled)
   })
 }
 
@@ -45,15 +49,31 @@ function setSimulatedProfile(patch: SimulatedProfileRequest) {
   })
 }
 
-function applyGenerator(left: GeneratorChannelRequest, right: GeneratorChannelRequest) {
+function applyGenerator(left: GeneratorChannelRequest, right: GeneratorChannelRequest, snapToBin: boolean) {
   return withErrorReporting(async () => {
-    status.value = await api.setGenerator({ left, right })
+    // Sent as a hint the backend only uses if it needs to bring up a generator-only stream (no
+    // acquisition running yet) — see DeviceSessionService.ConfigureGeneratorAsync. Read straight off
+    // the Acquisition panel's current form so the generator plays at whatever sample rate/block size
+    // is selected there, even though the user hasn't pressed Start.
+    const form = acquisitionPanel.value?.form
+    status.value = await api.setGenerator({
+      left,
+      right,
+      sampleRateHz: form?.sampleRateHz,
+      channelCount: ranges.value?.maxChannelCount,
+      blockFrameCount: form?.blockFrameCount,
+      snapToBin,
+    })
   })
 }
 
 function startAcquisition(sampleRateHz: number, channelCount: number, blockFrameCount: number) {
   return withErrorReporting(async () => {
-    status.value = await api.startAcquisition({ sampleRateHz, channelCount, blockFrameCount })
+    const newStatus = await api.startAcquisition({ sampleRateHz, channelCount, blockFrameCount })
+    status.value = newStatus
+    // A sample-rate change re-snaps the generator server-side (see DeviceSessionService.StartAcquisitionAsync);
+    // newStatus already carries the new frequencies, this just pulls them into the form fields.
+    generatorPanel.value?.resyncTones(newStatus)
   })
 }
 
@@ -76,18 +96,18 @@ function reportError(message: string) {
       :ranges="ranges"
       :error="error"
       @set-input-range="setInputRange"
-      @set-output-range="setOutputRange"
+      @set-auto-range="setAutoRange"
       @set-simulated-profile="setSimulatedProfile"
     />
 
     <main class="flex flex-1 flex-col gap-4 p-4">
       <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <GeneratorPanel :status="status" @apply="applyGenerator" />
-        <AcquisitionPanel :status="status" :ranges="ranges" @start="startAcquisition" @stop="stopAcquisition" />
+        <GeneratorPanel ref="generatorPanel" :status="status" @apply="applyGenerator" />
+        <AcquisitionPanel ref="acquisitionPanel" :status="status" :ranges="ranges" @start="startAcquisition" @stop="stopAcquisition" />
         <SpectrumConfigPanel @error="reportError" />
       </div>
 
-      <SpectrumChart :spectrum="spectrum" :meters="meters" />
+      <SpectrumChart :spectrum="spectrum" :meters="meters" @viewport-change="setViewport" />
       <SystemMetricsPanel :status="status" :meters="meters[0] ?? meters[1] ?? null" />
 
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">

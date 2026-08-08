@@ -15,7 +15,16 @@ public static class GeneratorEndpoints
                 return Results.BadRequest(error);
             }
 
-            await session.ConfigureGeneratorAsync(new GeneratorConfig(left, right), ct);
+            // Only meaningful if this call needs to bring the underlying USB stream up on its own (no
+            // acquisition running yet) — see ConfigureGeneratorAsync's doc comment. The UI sends its
+            // current (possibly not-yet-started) Acquisition panel fields here so a generator-only
+            // stream runs at the sample rate the user actually selected.
+            AcquisitionConfig? streamConfigHint = request.SampleRateHz is { } sampleRateHz
+                ? new AcquisitionConfig(sampleRateHz, request.ChannelCount ?? 2, request.BlockFrameCount ?? 4096)
+                : null;
+
+            var config = new GeneratorConfig(left, right) { SnapToBin = request.SnapToBin ?? true };
+            await session.ConfigureGeneratorAsync(config, ct, streamConfigHint);
             return Results.Ok(session.GetStatus());
         });
     }
@@ -155,4 +164,14 @@ public sealed record GeneratorChannelRequest(
     WhiteNoiseRequest? Noise = null,
     EchoChirpRequest? Chirp = null);
 
-public sealed record GeneratorRequest(GeneratorChannelRequest Left, GeneratorChannelRequest Right);
+/// <summary>
+/// <c>SampleRateHz</c>/<c>ChannelCount</c>/<c>BlockFrameCount</c> are only a hint for starting a
+/// generator-only stream when no acquisition is running yet — see
+/// <see cref="DeviceSessionService.ConfigureGeneratorAsync"/>. Omit them to leave the current stream
+/// state (running or not) untouched.
+/// </summary>
+public sealed record GeneratorRequest(
+    GeneratorChannelRequest Left, GeneratorChannelRequest Right,
+    double? SampleRateHz = null, int? ChannelCount = null, int? BlockFrameCount = null,
+    /// <summary>Snap tone frequencies to the nearest coherent FFT bin. Defaults to on — see <see cref="GeneratorConfig.SnapToBin"/>.</summary>
+    bool? SnapToBin = null);

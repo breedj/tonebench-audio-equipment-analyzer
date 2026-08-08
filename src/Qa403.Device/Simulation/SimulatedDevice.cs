@@ -40,6 +40,9 @@ public sealed class SimulatedDevice : IAnalyzerDevice
 
     public DeviceCapabilities Capabilities => DeviceCapabilities.Qa403;
 
+    /// <summary>Never raised: the simulator has no physical device to lose.</summary>
+    public event EventHandler? DeviceLost { add { } remove { } }
+
     /// <summary>
     /// Shapes the simulated input signal. Not part of <see cref="IAnalyzerDevice"/> — real
     /// hardware has no equivalent knob. Reassigning it takes effect at the start of the next
@@ -56,6 +59,18 @@ public sealed class SimulatedDevice : IAnalyzerDevice
         _connected = true;
         return Task.FromResult(new DeviceInfo("QA403", "SIM-0001", "sim-1.0", IsSimulated: true));
     }
+
+    /// <inheritdoc />
+    public double InputRangeDbv => Volatile.Read(ref _inputRangeDbv);
+
+    /// <summary>The simulator generates blocks on demand rather than off a bounded USB queue, so it has nothing to drop.</summary>
+    public long DroppedRxChunks => 0;
+
+    /// <summary>
+    /// The simulator has no autoranging, so this stays false however it is set — the UI reads it to
+    /// decide whether to offer the auto/manual checkbox at all.
+    /// </summary>
+    public bool AutoRangeEnabled { get => false; set { } }
 
     public Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {

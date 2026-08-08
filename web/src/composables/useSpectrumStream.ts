@@ -3,6 +3,7 @@ import {
   decodeHeader,
   decodeMetersFrame,
   decodeSpectrumFrame,
+  encodeSetViewport,
   StreamMsgType,
   type MetersFrame,
   type SpectrumFrame,
@@ -24,6 +25,26 @@ export function useSpectrumStream() {
   let reconnectHandle: ReturnType<typeof setTimeout> | undefined
   let stopped = false
 
+  // Last zoom window reported to the server, kept so a reconnect can restore it — otherwise a
+  // dropped connection would silently demote a zoomed-in view back to the coarse overview.
+  let viewport: { loFreqHz: number; hiFreqHz: number } | null = null
+
+  function sendViewport() {
+    if (socket?.readyState !== WebSocket.OPEN) return
+    // A degenerate range is how the server is told "not zoomed, send me the overview".
+    socket.send(viewport ? encodeSetViewport(viewport.loFreqHz, viewport.hiFreqHz) : encodeSetViewport(0, 0))
+  }
+
+  /**
+   * Tells the server which frequency range this client is displaying, so it can spend its whole
+   * column budget on that range instead of the full spectrum. Pass null when zoomed all the way
+   * out. Cheap to call repeatedly — the server only acts on it past its own zoom threshold.
+   */
+  function setViewport(next: { loFreqHz: number; hiFreqHz: number } | null) {
+    viewport = next
+    sendViewport()
+  }
+
   function connect() {
     if (stopped) return
 
@@ -33,6 +54,7 @@ export function useSpectrumStream() {
 
     socket.onopen = () => {
       connected.value = true
+      if (viewport) sendViewport()
     }
 
     socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
@@ -63,5 +85,5 @@ export function useSpectrumStream() {
     socket?.close()
   })
 
-  return { spectrum, meters, connected }
+  return { spectrum, meters, connected, setViewport }
 }

@@ -19,6 +19,27 @@ internal sealed class SampleRingBuffer(int capacity)
     public bool IsFull => Interlocked.Read(ref _writeIndex) >= Capacity;
 
     /// <summary>
+    /// Discards everything buffered, so <see cref="IsFull"/> goes false until a whole new window
+    /// of samples has arrived.
+    ///
+    /// Called whenever the signal reaching this buffer changes discontinuously — acquisition
+    /// restart, a new sample rate, a generator or input-range change. Without it the next FFT
+    /// analyzes a record spliced from before and after the change, and a step part-way through a
+    /// record smears the tone's energy into a broad skirt either side of it: the spectrum shows a
+    /// noise floor tens of dB too high, decaying over exactly one buffer-fill as the stale samples
+    /// slide out. The fill time is Capacity/sampleRate — 0.68 s for a 128k FFT at 192 kHz, but
+    /// 21.8 s for a 1M FFT at 48 kHz.
+    /// </summary>
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            Array.Clear(_buffer);
+            Interlocked.Exchange(ref _writeIndex, 0);
+        }
+    }
+
+    /// <summary>
     /// Appends every <paramref name="channelIndex"/>-th sample (stride <paramref name="channelCount"/>)
     /// from an interleaved block — i.e. one channel's worth of samples out of a multi-channel
     /// <c>PcmBlock</c>.

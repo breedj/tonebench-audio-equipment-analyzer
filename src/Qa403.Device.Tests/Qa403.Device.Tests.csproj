@@ -23,4 +23,10 @@
     <ProjectReference Include="..\Qa403.Dsp\Qa403.Dsp.csproj" />
   </ItemGroup>
 
+  <!-- Needed for the [Trait("Category","Hardware")] tests, which talk to a real Qa40xUsbDevice.
+       See Qa403.App.csproj for why this is vendored here instead of coming from NuGet. -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <None Include="..\..\native\win-x64\libusb-1.0.dll" Link="libusb-1.0.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

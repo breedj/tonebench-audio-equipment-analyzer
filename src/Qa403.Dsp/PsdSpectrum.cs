@@ -65,6 +65,20 @@ public readonly ref struct PsdSpectrum
 
     public int BinOfFrequency(double frequencyHz) => (int)Math.Round(frequencyHz / BinSizeHz);
 
+    /// <summary>
+    /// The inclusive bin window covering [<paramref name="frequencyLoHz"/>, <paramref name="frequencyHiHz"/>],
+    /// clamped to the spectrum. Bin 0 (DC) is never included unless the caller explicitly asks for
+    /// 0 Hz: an analyzer's noise figures are defined over an audio band, and on a DC-coupled input
+    /// the offset sitting in bin 0 is orders of magnitude larger than the noise being measured.
+    /// </summary>
+    public BinRange BandOf(double frequencyLoHz, double frequencyHiHz) =>
+        new(
+            Math.Max(frequencyLoHz > 0.0 ? 1 : 0, BinOfFrequency(frequencyLoHz)),
+            Math.Min(ValuesV2PerHz.Length - 1, BinOfFrequency(frequencyHiHz)));
+
+    /// <summary>The whole spectrum including DC — only for callers that genuinely want everything.</summary>
+    public BinRange FullBand => new(0, ValuesV2PerHz.Length - 1);
+
     /// <summary>Parseval: sqrt(Σ PSD·Δf) over every bin in the spectrum.</summary>
     public double IntegrateVrms() => IntegrateVrms(0, ValuesV2PerHz.Length - 1);
 
@@ -86,13 +100,23 @@ public readonly ref struct PsdSpectrum
         IntegrateVrms(BinOfFrequency(frequencyLoHz), BinOfFrequency(frequencyHiHz));
 
     /// <summary>
-    /// sqrt(Σ PSD·Δf) over every bin NOT covered by <paramref name="excludedRanges"/> — the
-    /// "notch" used by THD+N (excludes the fundamental) and SNR (excludes fundamental + harmonics).
+    /// sqrt(Σ PSD·Δf) over every bin of <paramref name="band"/> NOT covered by
+    /// <paramref name="excludedRanges"/> — the "notch" used by THD+N (excludes the fundamental)
+    /// and SNR (excludes fundamental + harmonics).
+    ///
+    /// <paramref name="band"/> is the measurement bandwidth and is not optional by design. An
+    /// unbounded version of this integration silently summed bin 0, and a DC-coupled input's
+    /// few-mV offset then swamped the actual noise floor — on the bench that read THD+N ~33 dB
+    /// worse than it really was (a 4.6 mV offset alone gives THD+N = -46.8 dB against a 1 V
+    /// fundamental, versus -76.8 dB for the same trace with DC excluded).
     /// </summary>
-    public double IntegrateVrmsExcluding(ReadOnlySpan<BinRange> excludedRanges)
+    public double IntegrateVrmsExcluding(ReadOnlySpan<BinRange> excludedRanges, BinRange band)
     {
+        int lo = Math.Max(0, band.LoBinInclusive);
+        int hi = Math.Min(ValuesV2PerHz.Length - 1, band.HiBinInclusive);
+
         double power = 0.0;
-        for (int k = 0; k < ValuesV2PerHz.Length; k++)
+        for (int k = lo; k <= hi; k++)
         {
             bool excluded = false;
             for (int r = 0; r < excludedRanges.Length; r++)

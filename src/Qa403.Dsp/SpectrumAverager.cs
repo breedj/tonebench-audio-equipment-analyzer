@@ -18,6 +18,19 @@ public sealed class SpectrumAverager
     private int _historyNext;
 
     /// <summary>
+    /// Drops the accumulated average, so the next <see cref="Update"/> starts a fresh window.
+    /// Needed whenever the signal changes discontinuously (new sample rate, new stimulus): the
+    /// spectra averaged so far describe the old signal and would otherwise blend into the new one.
+    /// </summary>
+    public void Reset()
+    {
+        _ema = null;
+        _history = null;
+        _historyCount = 0;
+        _historyNext = 0;
+    }
+
+    /// <summary>
     /// Replaces <paramref name="current"/> in place with the running average of itself and
     /// previous calls. With <see cref="AveragingMode.Off"/> or <c>count &lt;= 1</c>,
     /// <paramref name="current"/> is left untouched and internal state is cleared (so switching

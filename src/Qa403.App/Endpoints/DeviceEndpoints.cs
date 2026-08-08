@@ -44,6 +44,15 @@ public static class DeviceEndpoints
             }
         });
 
+        group.MapPost("/auto-range", (AutoRangeRequest request, DeviceSessionService session) =>
+        {
+            if (session.AutoRangeEnabled is null)
+                return Results.BadRequest("The connected device has no input autoranging.");
+
+            session.SetAutoRangeEnabled(request.Enabled);
+            return Results.Ok(session.GetStatus());
+        });
+
         // Simulator-only: shapes the synthesized input signal, which real hardware cannot do.
         // Exposed so the noise floor and hum can be taken out of the way while reading a spectrum.
         // Patch-style — an omitted field leaves that setting alone.
@@ -71,7 +80,20 @@ public sealed record DeviceStatusResponse(
     /// <summary>Simulated DUT noise floor on/off, or null when the device isn't the simulator — the UI hides the switch in that case.</summary>
     bool? SimulatedNoiseEnabled,
     /// <summary>Simulated DUT mains hum on/off, same null convention as <see cref="SimulatedNoiseEnabled"/>.</summary>
-    bool? SimulatedHumEnabled);
+    bool? SimulatedHumEnabled,
+    /// <summary>
+    /// True once the transport has reported the physical device disconnected mid-session (see
+    /// <see cref="Qa403.Device.IAnalyzerDevice.DeviceLost"/>). Always false for the simulator.
+    /// Sticky for the life of the process — there is no reconnect flow yet, so this is a terminal
+    /// state the UI should surface plainly rather than something to poll past.
+    /// </summary>
+    bool DeviceLost,
+    /// <summary>Input autoranging on/off, or null when the device has no autoranging (the simulator) — the UI hides the checkbox in that case.</summary>
+    bool? AutoRangeEnabled,
+    /// <summary>Whether generator tones are snapped to the nearest coherent FFT bin. The Tones lists above are the snapped (effective) frequencies.</summary>
+    bool GeneratorSnapToBin,
+    /// <summary>RX chunks dropped since connect. Non-zero means FFT records contain splices and noise readings are suspect — see <see cref="Qa403.Device.IAnalyzerDevice.DroppedRxChunks"/>.</summary>
+    long DroppedRxChunks);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);
@@ -105,5 +127,7 @@ public sealed record DeviceRangesResponse(
 public sealed record InputRangeRequest(double Dbv);
 
 public sealed record OutputRangeRequest(double Dbv);
+
+public sealed record AutoRangeRequest(bool Enabled);
 
 public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled);

@@ -30,6 +30,8 @@ const form = reactive({
   averaging: 'Off' as AveragingMode,
   averageCount: 8,
   targetFrameRateHz: 20,
+  measurementLoFreqHz: 20,
+  measurementHiFreqHz: 20000,
 })
 
 function syncFormFromConfig() {
@@ -39,6 +41,8 @@ function syncFormFromConfig() {
   form.averaging = config.value.averaging
   form.averageCount = config.value.averageCount
   form.targetFrameRateHz = config.value.targetFrameRateHz
+  form.measurementLoFreqHz = config.value.measurementLoFreqHz
+  form.measurementHiFreqHz = config.value.measurementHiFreqHz
   loaded.value = true
 }
 
@@ -68,6 +72,7 @@ onMounted(load)
         <select
           v-model.number="form.fftSize"
           class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="apply"
         >
           <option v-for="n in FFT_SIZES" :key="n" :value="n">{{ n }}</option>
         </select>
@@ -78,6 +83,7 @@ onMounted(load)
         <select
           v-model="form.window"
           class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="apply"
         >
           <option v-for="w in WINDOWS" :key="w.value" :value="w.value">{{ w.label }}</option>
         </select>
@@ -88,6 +94,7 @@ onMounted(load)
         <select
           v-model="form.averaging"
           class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="apply"
         >
           <option v-for="m in AVERAGING_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
         </select>
@@ -100,6 +107,7 @@ onMounted(load)
           min="2"
           v-model.number="form.averageCount"
           class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="apply"
         />
       </label>
 
@@ -111,16 +119,38 @@ onMounted(load)
           max="60"
           v-model.number="form.targetFrameRateHz"
           class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="apply"
         />
       </label>
 
-      <button
-        type="button"
-        class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
-        @click="apply"
+      <!--
+        The band THD+N / SNR / noise floor are integrated over — a measurement setting, not a
+        display one. 20 Hz - 20 kHz is the standard audio band; widening it to Nyquist includes
+        ultrasonic noise and makes those figures read worse at higher sample rates.
+      -->
+      <label
+        class="flex flex-col gap-1"
+        title="Bandwidth THD+N, SNR and the noise floor are measured over. Also keeps DC out of the noise integration."
       >
-        Apply
-      </button>
+        Meas. band (Hz)
+        <span class="flex items-center gap-1">
+          <input
+            type="number"
+            min="0"
+            v-model.number="form.measurementLoFreqHz"
+            class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="apply"
+          />
+          <span class="text-neutral-400">–</span>
+          <input
+            type="number"
+            min="1"
+            v-model.number="form.measurementHiFreqHz"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="apply"
+          />
+        </span>
+      </label>
     </div>
     <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">Loading…</div>
   </section>

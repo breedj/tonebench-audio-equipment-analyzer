@@ -13,6 +13,8 @@ const props = defineProps<{
   channelStatus: GeneratorChannelState | undefined
 }>()
 
+const emit = defineEmits<{ change: [] }>()
+
 // 'Off' is deliberately not offered here — the Enabled checkbox is this channel's on/off control,
 // and a second way to say "silent" would just be two controls disagreeing.
 const KINDS: { value: GeneratorKind; label: string }[] = [
@@ -70,10 +72,24 @@ watch(
 
 function addTone() {
   tones.push({ freqHz: 1000, ampDbv: -6 })
+  emit('change')
 }
 
 function removeTone(index: number) {
   tones.splice(index, 1)
+  emit('change')
+}
+
+// Called by GeneratorPanel after a sample-rate change re-snaps tones to the new bin frequencies
+// server-side — pulls just the frequencies back in, since that's the only thing snapping touches.
+// Takes the status explicitly (not read off the `channelStatus` prop) because that prop lags a
+// render behind the response this is called with. Not routed through the mount-time watch below:
+// that one only ever runs once, on purpose, so it can't clobber an in-progress edit.
+function syncFromStatus(status: GeneratorChannelState) {
+  if (status.kind !== 'Tones') return
+  status.tones.forEach((t, i) => {
+    if (tones[i]) tones[i].freqHz = t.freqHz
+  })
 }
 
 function currentConfig(): GeneratorChannelRequest {
@@ -93,7 +109,7 @@ function currentConfig(): GeneratorChannelRequest {
   }
 }
 
-defineExpose({ currentConfig })
+defineExpose({ currentConfig, syncFromStatus })
 </script>
 
 <template>
@@ -101,7 +117,7 @@ defineExpose({ currentConfig })
     <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{{ label }}</h3>
 
     <label class="mb-3 flex items-center gap-2 text-sm">
-      <input type="checkbox" v-model="enabled" />
+      <input type="checkbox" v-model="enabled" @change="emit('change')" />
       Enabled
     </label>
 
@@ -110,6 +126,7 @@ defineExpose({ currentConfig })
       <select
         v-model="kind"
         class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="emit('change')"
       >
         <option v-for="k in KINDS" :key="k.value" :value="k.value">{{ k.label }}</option>
       </select>
@@ -123,6 +140,7 @@ defineExpose({ currentConfig })
             v-model.number="tone.freqHz"
             class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             placeholder="Freq (Hz)"
+            @change="emit('change')"
           />
           <span class="text-neutral-500">Hz @</span>
           <input
@@ -130,6 +148,7 @@ defineExpose({ currentConfig })
             v-model.number="tone.ampDbv"
             class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             placeholder="Amp (dBV)"
+            @change="emit('change')"
           />
           <span class="text-neutral-500">dBV</span>
           <button type="button" class="text-neutral-400 hover:text-red-500" @click="removeTone(i)">&times;</button>
@@ -153,6 +172,7 @@ defineExpose({ currentConfig })
           min="1"
           v-model.number="multitone.tonesPerOctave"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         />
       </label>
       <label class="flex flex-col gap-1">
@@ -161,6 +181,7 @@ defineExpose({ currentConfig })
           type="number"
           v-model.number="multitone.totalRmsDbv"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         />
       </label>
       <label class="flex flex-col gap-1">
@@ -169,6 +190,7 @@ defineExpose({ currentConfig })
           type="number"
           v-model.number="multitone.rolloffDbPerOctave"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         />
       </label>
       <p class="text-xs text-neutral-400 dark:text-neutral-600">Fixed 5 Hz – 20 kHz band.</p>
@@ -181,6 +203,7 @@ defineExpose({ currentConfig })
           type="number"
           v-model.number="noise.levelDbv"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         />
       </label>
     </div>
@@ -192,6 +215,7 @@ defineExpose({ currentConfig })
           type="number"
           v-model.number="chirp.amplitudeDbv"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         />
       </label>
       <label class="flex flex-col gap-1">
@@ -201,6 +225,7 @@ defineExpose({ currentConfig })
           min="1"
           v-model.number="chirp.startFreqHz"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         />
       </label>
       <label class="flex flex-col gap-1">
@@ -209,6 +234,7 @@ defineExpose({ currentConfig })
           type="number"
           v-model.number="chirp.endFreqHz"
           class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         />
       </label>
       <label class="flex flex-col gap-1">
@@ -216,6 +242,7 @@ defineExpose({ currentConfig })
         <select
           v-model="chirp.smoothing"
           class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="emit('change')"
         >
           <option v-for="s in SMOOTHING" :key="s.value" :value="s.value">{{ s.label }}</option>
         </select>

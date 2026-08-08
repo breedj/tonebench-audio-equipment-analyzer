@@ -114,5 +114,23 @@ public sealed record ChannelGeneratorConfig(bool Enabled, IReadOnlyList<Generato
 /// <summary>Generator (DAC output) configuration, independent per channel. Mirrors <c>POST /api/generator</c>.</summary>
 public sealed record GeneratorConfig(ChannelGeneratorConfig Left, ChannelGeneratorConfig Right)
 {
+    /// <summary>
+    /// Whether every tone frequency is snapped to the nearest coherent FFT bin
+    /// (<see cref="Qa403.Dsp.CoherentFrequency.Nearest"/>) before it reaches the DAC. On by default,
+    /// matching the QA403 software's own generator checkbox.
+    ///
+    /// A tone that does not land exactly on a bin leaks across its neighbours no matter which window
+    /// is used, and at 192 kHz with a 131072-point FFT a requested 1000 Hz sits 0.67 of a bin off —
+    /// close to the worst case. Snapping moves it to 1000.4883 Hz (bin 683, coprime to N), where the
+    /// transform is exact and everything but the fundamental's own three bins drops into the floor.
+    ///
+    /// Coherence is a property of the *analysis* length, so the snapped frequency depends on the
+    /// current FFT size and sample rate: the app re-snaps whenever either changes, and reports the
+    /// effective frequency back rather than the requested one. Applied by
+    /// <c>DeviceSessionService.ConfigureGeneratorAsync</c>, not here — this record has no idea what
+    /// the analyzer is set to.
+    /// </summary>
+    public bool SnapToBin { get; init; } = true;
+
     public static GeneratorConfig Off { get; } = new(ChannelGeneratorConfig.Off, ChannelGeneratorConfig.Off);
 }

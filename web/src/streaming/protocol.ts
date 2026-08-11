@@ -104,6 +104,26 @@ export function decodeSpectrumFrame(buffer: ArrayBuffer): SpectrumFrame {
   return { header, loFreqHz: header.x0, hiFreqHz: header.dx, columns }
 }
 
+export interface ScopeFrame {
+  header: StreamFrameHeader
+  /** Sample period (seconds) — the header's `dx` field for Scope frames; x0 is always 0, see decodeScopeFrame. */
+  samplePeriodS: number
+  /** Zero-copy view straight into the received ArrayBuffer: nPoints raw samples, in volts. */
+  samples: Float32Array
+}
+
+/**
+ * Decodes a scope (time-domain) frame: nPoints raw f32 samples in volts, one per point — unlike
+ * decodeSpectrumFrame's (freqHz,min,max) triples, a scope frame is never decimated. Each frame is
+ * a fresh, self-contained snapshot of the latest samples (x0 = 0), not something to accumulate
+ * across frames into a running timeline.
+ */
+export function decodeScopeFrame(buffer: ArrayBuffer): ScopeFrame {
+  const header = decodeHeader(buffer)
+  const samples = new Float32Array(buffer, HEADER_LENGTH, header.nPoints)
+  return { header, samplePeriodS: header.dx, samples }
+}
+
 export interface HarmonicMarker {
   freqHz: number
   dbc: number

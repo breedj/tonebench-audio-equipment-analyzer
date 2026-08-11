@@ -102,20 +102,24 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// under-range detection via <see cref="Qa40xAutoRanger"/>). Not part of <see cref="IAnalyzerDevice"/>
     /// — this is a hardware-only knob, same pattern as <c>SimulatedDevice.SignalProfile</c>.
     ///
-    /// **Defaults to <c>false</c>**, because the app's only range control is a manual selector and
-    /// nothing ever turned this off. With it on, an explicit <see cref="SetInputRangeAsync"/> was
-    /// silently undone within ~10 ms of the stream running: <see cref="Qa40xAutoRanger.Evaluate"/>
-    /// treats anything below <see cref="Qa40xAutoRanger.UnderRangeThresholdFraction"/> (-24 dBFS) as
+    /// Defaults to <c>true</c> — the app's Auto checkbox (moved to the Acquisition panel) reflects
+    /// this directly, and auto-ranging is the expected default for a fresh measurement.
+    ///
+    /// Historical note: this used to default to <c>false</c>, because back when the app had no real
+    /// Auto control, leaving it on meant an explicit <see cref="SetInputRangeAsync"/> got silently
+    /// undone within ~10 ms of the stream running: <see cref="Qa40xAutoRanger.Evaluate"/> treats
+    /// anything below <see cref="Qa40xAutoRanger.UnderRangeThresholdFraction"/> (-24 dBFS) as
     /// under-range, so any normal signal — or no signal at all — walked the range back down to the
     /// most sensitive setting one step per 3 chunks. Audible on real hardware as the 24 dB
-    /// attenuator relay clicking in on selection and straight back out, and it left the UI's Input
-    /// range dropdown reporting a range the hardware was not on (autorange steps update only this
-    /// class's <c>_inputRangeDbv</c>, never <c>DeviceSessionService</c>'s).
+    /// attenuator relay clicking in on selection and straight back out. That was a coordination bug
+    /// between this class's own <c>_inputRangeDbv</c> (which autorange steps) and
+    /// <c>DeviceSessionService</c>'s cached view of the range — if clicking or a stuck-looking range
+    /// selector reappears, check that those two are still staying in sync.
     ///
     /// Steps are plumbed back to <see cref="InputRangeDbv"/>, which the app's status endpoint reads,
     /// so the UI's range selector follows the hardware when this is on.
     /// </summary>
-    public bool AutoRangeEnabled { get; set; }
+    public bool AutoRangeEnabled { get; set; } = true;
 
     /// <inheritdoc />
     public double InputRangeDbv => Volatile.Read(ref _inputRangeDbv);

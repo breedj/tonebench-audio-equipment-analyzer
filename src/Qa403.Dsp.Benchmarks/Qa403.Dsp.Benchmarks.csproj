@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Qa403.Dsp\Qa403.Dsp.csproj" />
+    <ProjectReference Include="..\Qa403.Data\Qa403.Data.csproj" />
   </ItemGroup>
 
 </Project>

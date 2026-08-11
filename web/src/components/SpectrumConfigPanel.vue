@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
-import type { AveragingMode, WindowType } from '../api/client'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import type { AveragingMode, DeviceRanges, WindowType } from '../api/client'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import { useProjects } from '../composables/useProjects'
 
-const emit = defineEmits<{ error: [message: string] }>()
+const props = defineProps<{
+  ranges: DeviceRanges | null
+}>()
+
+const emit = defineEmits<{
+  error: [message: string]
+  /** Sample rate changed and something's live — App.vue restarts acquisition with it, same as any other live-apply edit. */
+  'sample-rate-change': []
+}>()
 
 const { config, error: configError, load, apply: applyConfig } = useSpectrumConfig()
+const { loadedParams, markDirty } = useProjects()
 
 const FFT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
 
@@ -29,9 +39,37 @@ const form = reactive({
   window: 'Hann' as WindowType,
   averaging: 'Off' as AveragingMode,
   averageCount: 8,
-  targetFrameRateHz: 20,
   measurementLoFreqHz: 20,
   measurementHiFreqHz: 20000,
+})
+
+// Sample rate — formerly Acquisition's own field — is staged from the measurement type's params
+// (loadedParams), not the server-side spectrum config those other fields above use; it only takes
+// effect on Run (or immediately, if something's already live — see onSampleRateChange).
+const sampleRateHz = ref(192000)
+watch(
+  loadedParams,
+  (params) => {
+    if (!params) return
+    sampleRateHz.value = params.sampleRateHz
+  },
+  { immediate: true },
+)
+
+function onSampleRateChange() {
+  markDirty()
+  emit('sample-rate-change')
+}
+
+// Which channel(s) get processed/displayed — moved here from Acquisition, which otherwise had
+// nothing left in it. Already server-persisted via useSpectrumConfig, same as FFT size/window/etc.
+const processLeft = computed({
+  get: () => config.value?.processLeft ?? true,
+  set: (value: boolean) => applyConfig({ processLeft: value }),
+})
+const processRight = computed({
+  get: () => config.value?.processRight ?? true,
+  set: (value: boolean) => applyConfig({ processRight: value }),
 })
 
 function syncFormFromConfig() {
@@ -40,7 +78,8 @@ function syncFormFromConfig() {
   form.window = config.value.window
   form.averaging = config.value.averaging
   form.averageCount = config.value.averageCount
-  form.targetFrameRateHz = config.value.targetFrameRateHz
+  // Frame rate is no longer user-editable — always 20, regardless of what a measurement's stored
+  // config says (see the removed "Frame rate (fps)" field below).
   form.measurementLoFreqHz = config.value.measurementLoFreqHz
   form.measurementHiFreqHz = config.value.measurementHiFreqHz
   loaded.value = true
@@ -59,14 +98,44 @@ async function apply() {
   }
 }
 
+/** The currently staged sample rate, for App.vue's Run handler and measurement-type save — see App.vue's buildStagedConfig. */
+function getSampleRateHz(): number {
+  return sampleRateHz.value
+}
+
 onMounted(load)
+
+defineExpose({ getSampleRateHz })
 </script>
 
 <template>
-  <section class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
-    <h2 class="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Spectrum</h2>
+  <section class="w-full rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+    <h2 class="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">FFT settings</h2>
 
     <div v-if="loaded" class="flex flex-wrap items-end gap-3 text-sm">
+      <label class="flex flex-col gap-1">
+        Sample rate
+        <select
+          v-model.number="sampleRateHz"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onSampleRateChange"
+        >
+          <option v-for="fs in props.ranges?.sampleRatesHz" :key="fs" :value="fs">{{ fs }} Hz</option>
+        </select>
+      </label>
+
+      <fieldset class="flex items-center gap-2" title="Which channel(s) to process and display, and which the Run button's generators can actually play — the ADC always samples both.">
+        <legend class="sr-only">Channels</legend>
+        <label class="flex items-center gap-1">
+          <input type="checkbox" v-model="processLeft" />
+          L
+        </label>
+        <label class="flex items-center gap-1">
+          <input type="checkbox" v-model="processRight" />
+          R
+        </label>
+      </fieldset>
+
       <label class="flex flex-col gap-1">
         FFT size
         <select
@@ -106,18 +175,6 @@ onMounted(load)
           type="number"
           min="2"
           v-model.number="form.averageCount"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="apply"
-        />
-      </label>
-
-      <label class="flex flex-col gap-1">
-        Frame rate (fps)
-        <input
-          type="number"
-          min="1"
-          max="60"
-          v-model.number="form.targetFrameRateHz"
           class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
           @change="apply"
         />

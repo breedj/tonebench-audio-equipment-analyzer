@@ -4,10 +4,16 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type MetersFrame, type SpectrumFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import { useChartDisplay } from '../composables/useChartDisplay'
+import { resample } from '../measurements/resample'
+import type { OverlayEntry } from '../composables/useMeasurements'
+import type { MeasurementChannel } from '../api/client'
 
 const props = defineProps<{
   spectrum: Record<number, SpectrumFrame>
   meters: Record<number, MetersFrame>
+  /** Stored measurements loaded onto the chart, in add order — see useMeasurements.ts. */
+  overlays: OverlayEntry[]
 }>()
 
 const emit = defineEmits<{
@@ -15,7 +21,7 @@ const emit = defineEmits<{
   viewportChange: [viewport: { loFreqHz: number; hiFreqHz: number } | null]
 }>()
 
-// Shared singleton (see useSpectrumConfig.ts) — reads whatever AcquisitionPanel's L/R checkboxes
+// Shared singleton (see useSpectrumConfig.ts) — reads whatever SpectrumConfigPanel's L/R checkboxes
 // last set, so a channel that's been turned off doesn't keep showing its last frame forever (the
 // spectrum stream only ever adds entries per channel, never removes a stale one).
 const { config: spectrumConfig } = useSpectrumConfig()
@@ -25,12 +31,51 @@ function channelEnabled(ch: number): boolean {
   return ch === 0 ? spectrumConfig.value.processLeft : spectrumConfig.value.processRight
 }
 
+// Client-side "show this trace" toggles for the two live channels, driven by the checkboxes in
+// the display-options column (a sibling in the layout, see ChartDisplayPanel.vue) — deliberately
+// not uPlot's built-in legend-click-to-hide. That used to toggle only uPlot's own series line,
+// leaving minMaxBandPlugin's band (a separate canvas draw, unaware of uPlot's per-series `show`
+// flag) painted on regardless. Routing both live-line and band visibility through these two refs
+// instead of two independently-toggleable mechanisms is what keeps them from drifting out of sync
+// again.
+const {
+  yTop,
+  yBottom,
+  xFrom,
+  xTo,
+  thickLines,
+  showDataPoints,
+  visibleL,
+  visibleR,
+  showMinMax,
+  autofitYTrigger,
+  autofitXTrigger,
+  resetYDefaults,
+  resetXDefaults,
+} = useChartDisplay()
+function channelVisible(ch: number): boolean {
+  return channelEnabled(ch) && (ch === 0 ? visibleL.value : visibleR.value)
+}
+
 const CHANNEL_LABELS = ['L', 'R']
 const CHANNEL_COLORS = ['#3b82f6', '#f97316']
 // Same hues at low alpha: the band is dense (one stroke per column) so it reads as a solid region
 // even this faint, and the max trace has to stay legible on top of it.
 const CHANNEL_BAND_COLORS = ['rgba(59, 130, 246, 0.35)', 'rgba(249, 115, 22, 0.35)']
-const CHART_HEIGHT = 360
+// L within an overlay dashes short, R dashes long-and-dotted — same color for both (the overlay's
+// own), so a stereo overlay reads as "one measurement, two channels" rather than two unrelated
+// traces that happen to share a hue.
+const OVERLAY_DASH: [number[], number[]] = [[4, 2], [1, 3]]
+const CHART_HEIGHT = 900
+// How far (in CSS pixels) the cursor readout searches for a local peak around the mouse — see
+// setCursor's remarks below.
+const PEAK_SNAP_RADIUS_PX = 15
+
+// Series layout: x, then L, R (always present, live), then two slots per overlay (its L and R
+// channel, in add order) — see buildOptions and every setData call below. The overlay portion's
+// *length* changes only when an overlay is added/removed (ensurePlot rebuilds for that, preserving
+// zoom explicitly — see ensurePlot), never on a streaming tick or a visibility toggle, which is
+// what keeps this from repeating the old channelCount-keyed rebuild-every-frame bug.
 
 // uPlot draws axis labels, ticks and grid onto a canvas, so Tailwind's `dark:` classes can't reach
 // them — left unset it falls back to its own near-black defaults, which are unreadable on the dark
@@ -71,7 +116,6 @@ let plot: uPlot | null = null
 let fullLoFreqHz = 10
 let fullHiFreqHz = -1
 let plotNyquistHz = -1
-let plotChannelCount = -1
 // Axis colours are baked into the options at construction, so a theme flip is one of the few
 // things that legitimately requires rebuilding the instance.
 let plotIsDark = darkQuery.matches
@@ -90,6 +134,7 @@ function minMaxBandPlugin(getSpectrum: () => Record<number, SpectrumFrame>): uPl
     hooks: {
       drawAxes: [
         (u) => {
+          if (!showMinMax.value) return
           const spectrum = getSpectrum()
           const ctx = u.ctx
           ctx.save()
@@ -101,7 +146,7 @@ function minMaxBandPlugin(getSpectrum: () => Record<number, SpectrumFrame>): uPl
           ctx.clip()
 
           for (let ch = 0; ch < CHANNEL_COLORS.length; ch++) {
-            if (!channelEnabled(ch)) continue
+            if (!channelVisible(ch)) continue
             const frame = spectrum[ch]
             if (!frame) continue
 
@@ -206,7 +251,31 @@ function harmonicMarkersPlugin(): uPlot.Plugin {
             cursorReadout.value = null
             return
           }
-          cursorReadout.value = { freqHz: xs[idx] as number, dbv: ys[idx] as number }
+
+          // Snaps to the local peak (max) within a small pixel radius of the cursor, rather than
+          // literally whatever column uPlot's own nearest-x lookup landed on. Reading a
+          // harmonic's or the fundamental's true level off the chart would otherwise need
+          // pixel-perfect mouse placement on that exact column — easy to miss by a column or two,
+          // especially at higher frequencies where many raw bins collapse into one narrow
+          // on-screen column. The search radius itself bounds how far this can jump, so it never
+          // latches onto some distant, unrelated peak.
+          let bestIdx = idx
+          let bestY = ys[idx] as number
+          const cursorPx = u.cursor.left
+          if (cursorPx != null && cursorPx >= 0) {
+            for (let i = 0; i < xs.length; i++) {
+              const x = xs[i]
+              const y = ys[i]
+              if (x == null || y == null) continue
+              if (Math.abs(u.valToPos(x, 'x', false) - cursorPx) > PEAK_SNAP_RADIUS_PX) continue
+              if (y > bestY) {
+                bestY = y
+                bestIdx = i
+              }
+            }
+          }
+
+          cursorReadout.value = { freqHz: xs[bestIdx] as number, dbv: bestY }
         },
       ],
     },
@@ -224,11 +293,22 @@ function formatDbTick(v: number | null): string | null {
   return v == null ? null : `${v}`
 }
 
-function buildOptions(width: number, nyquistHz: number, channelCount: number): uPlot.Options {
+function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]): uPlot.Options {
   const theme = currentTheme()
-  const series: uPlot.Series[] = [{}]
-  for (let ch = 0; ch < channelCount; ch++)
-    series.push({ label: CHANNEL_LABELS[ch], stroke: CHANNEL_COLORS[ch], width: 1.5, points: { show: false } })
+  const liveWidth = thickLines.value ? 3 : 1.5
+  const overlayWidth = thickLines.value ? 2.5 : 1.25
+  const points = { show: showDataPoints.value }
+  const series: uPlot.Series[] = [
+    {},
+    { label: CHANNEL_LABELS[0], stroke: CHANNEL_COLORS[0], width: liveWidth, points },
+    { label: CHANNEL_LABELS[1], stroke: CHANNEL_COLORS[1], width: liveWidth, points },
+  ]
+  for (const overlay of overlays) {
+    series.push(
+      { label: `${overlay.detail.name} L`, stroke: overlay.color, width: overlayWidth, dash: OVERLAY_DASH[0], points },
+      { label: `${overlay.detail.name} R`, stroke: overlay.color, width: overlayWidth, dash: OVERLAY_DASH[1], points },
+    )
+  }
 
   return {
     width,
@@ -256,7 +336,9 @@ function buildOptions(width: number, nyquistHz: number, channelCount: number): u
       // range() and got the full range back, silently overriding every zoom the instant it was
       // set — the same bug as before, just moved one level down.
       x: { time: false, distr: 3, log: 10, auto: false, range: (_u, dataMin, dataMax) => [dataMin ?? 10, dataMax ?? nyquistHz] },
-      y: { range: [-180, 20] },
+      // Initial range only — the dBV range fields in the display-options column (ChartDisplayPanel)
+      // adjust it live afterward via the watcher below, without rebuilding the plot.
+      y: { range: [yBottom.value, yTop.value] },
     },
     axes: [
       {
@@ -276,7 +358,12 @@ function buildOptions(width: number, nyquistHz: number, channelCount: number): u
     ],
     series,
     cursor: { points: { show: false } },
-    legend: { show: true },
+    // uPlot's built-in legend doubles as a click-to-hide-series control — that's what caused a
+    // channel's band to keep drawing after its line was hidden (the band plugin didn't know about
+    // uPlot's internal per-series `show`). Visibility is now this component's own checkboxes
+    // (live L/R) and the overlay list (each stored trace), both driving null-fill instead of
+    // uPlot's `show`, so there's exactly one place that decides what's visible.
+    legend: { show: false },
     plugins: [minMaxBandPlugin(() => props.spectrum), harmonicMarkersPlugin()],
   }
 }
@@ -300,19 +387,55 @@ function maxTrace(columns: Float32Array, nPoints: number): Float64Array {
   return out
 }
 
-// Deliberately not keyed on the frame's point count: nothing in buildOptions depends on it, and
-// including it meant a zoom window with fewer bins than columns tore the plot down and rebuilt it
-// — losing the very zoom that produced the frame. setData handles a changing length by itself.
-function ensurePlot(nyquistHz: number, channelCount: number) {
+// Deliberately not keyed on the frame's point count or on channelCount: nothing in buildOptions
+// depends on either, and including the point count meant a zoom window with fewer bins than
+// columns tore the plot down and rebuilt it — losing the very zoom that produced the frame.
+// setData handles a changing length by itself.
+//
+// The overlay list *does* rebuild the plot (its series count is baked into buildOptions, unlike
+// L/R which are always present) — but that only happens on an explicit add/remove, not per
+// streaming tick or visibility toggle, so it's rare enough that the rebuild cost doesn't matter.
+// What does matter is not silently discarding the user's zoom every time they add one more
+// overlay to compare — the min/max is saved before destroy and reapplied after, same idea as
+// resetZoom below just round-tripped through a rebuild instead of a click.
+let plotOverlaySignature = ''
+function overlaySignature(overlays: OverlayEntry[]): string {
+  return overlays.map((o) => o.id).join(',')
+}
+// Set by ensurePlot when a rebuild needs to reapply the zoom the user had before it; consumed by
+// update() right after its own setData() call. It can't be applied inside ensurePlot itself: uPlot
+// defers a setScale() call's effect (confirmed live — reading u.scales.x right after setScale still
+// showed the pre-call value), so calling it before update()'s subsequent setData() just gets that
+// deferred change clobbered by setData()'s own scale reapplication, which runs synchronously.
+let pendingZoomRestore: { min: number; max: number } | null = null
+// Thick-lines/show-data-points are baked into each series at construction (uPlot has no live
+// setter for stroke width or point visibility), so — like the overlay signature above — a change
+// has to go through the same destroy/recreate ensurePlot already does for those, not a setData.
+let plotStyleKey = ''
+function styleKey(): string {
+  return `${thickLines.value}|${showDataPoints.value}`
+}
+
+function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   const el = containerRef.value
   if (!el) return
 
-  if (plot && plotNyquistHz === nyquistHz && plotChannelCount === channelCount && plotIsDark === darkQuery.matches)
+  const signature = overlaySignature(overlays)
+  const style = styleKey()
+  if (plot && plotNyquistHz === nyquistHz && plotIsDark === darkQuery.matches && plotOverlaySignature === signature && plotStyleKey === style)
     return
 
+  const savedScale = plot ? { min: plot.scales.x.min, max: plot.scales.x.max } : null
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
-  plot = new uPlot(buildOptions(width, nyquistHz, channelCount), [[], ...Array(channelCount).fill([])], el)
+  // Same AlignedData-typing wrinkle as setData below: a literal tuple like `[[], [], []]` gets
+  // contextually typed against uPlot's tuple type, but a dynamically-sized array built via
+  // Array.from can't be, since its length (and therefore its tuple shape) isn't known until
+  // runtime. The runtime shape is fine — every slot is a plain empty array — only the static type
+  // needs the assertion.
+  const dataSlots = 3 + overlays.length * 2
+  const emptyData = Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData
+  plot = new uPlot(buildOptions(width, nyquistHz, overlays), emptyData, el)
 
   // uPlot's own double-click handler calls autoScaleX(), which fits the axis to the *data* extent.
   // While a zoomed frame is on screen that extent is the zoom window, so its reset would be a
@@ -320,9 +443,12 @@ function ensurePlot(nyquistHz: number, channelCount: number) {
   // restores the real full span.
   plot.over.addEventListener('dblclick', resetZoom)
 
+  pendingZoomRestore = savedScale && savedScale.min != null && savedScale.max != null ? { min: savedScale.min, max: savedScale.max } : null
+
   plotNyquistHz = nyquistHz
-  plotChannelCount = channelCount
   plotIsDark = darkQuery.matches
+  plotOverlaySignature = signature
+  plotStyleKey = style
 }
 
 function resetZoom() {
@@ -330,67 +456,189 @@ function resetZoom() {
     plot.setScale('x', { min: fullLoFreqHz, max: fullHiFreqHz })
 }
 
+function nullFill(n: number): (number | null)[] {
+  return new Array<number | null>(n).fill(null)
+}
+
+/** An overlay's stored channel by index (0=L, 1=R) — absent when that channel wasn't captured (e.g. a single-channel result). */
+function channelByIndex(detail: OverlayEntry['detail'], ch: number): MeasurementChannel | undefined {
+  return detail.channelsData.find((c) => c.channel === ch)
+}
+
+/** A stored channel's own frequency axis, for use as the active x grid when nothing is streaming. */
+function channelFreqs(channel: MeasurementChannel): Float64Array {
+  return Float64Array.from(channel.columns, (c) => c.freqHz)
+}
+
+/**
+ * A stored channel as a resample()-ready trace. maxDbv only, matching what the live series plots
+ * (the max, not the full min/max band — minMaxBandPlugin stays live-only, see its own remarks;
+ * a band per stored trace would make a four-trace comparison unreadable).
+ */
+function toTrace(channel: MeasurementChannel) {
+  return { freqHz: channel.columns.map((c) => c.freqHz), value: channel.columns.map((c) => c.maxDbv) }
+}
+
+/**
+ * Highest/lowest dBV across whatever is actually plotted right now — visible live channels plus
+ * visible overlays — for the dBV range "Autofit" button. Reads straight from the same sources
+ * update() draws from, not from uPlot's own data (which nulls out hidden series rather than
+ * omitting them, and would need unpacking back out of the flat setData arrays).
+ */
+function computeYExtent(): { min: number; max: number } | null {
+  let min = Infinity
+  let max = -Infinity
+
+  function consider(v: number) {
+    if (!Number.isFinite(v)) return
+    if (v > max) max = v
+    if (v < min) min = v
+  }
+
+  for (let ch = 0; ch < 2; ch++) {
+    if (!channelVisible(ch)) continue
+    const frame = props.spectrum[ch]
+    if (!frame) continue
+    const { columns, header } = frame
+    for (let i = 0; i < header.nPoints; i++) consider(columns[i * 3 + 2])
+  }
+
+  for (const overlay of props.overlays) {
+    if (!overlay.visible) continue
+    for (const ch of [0, 1]) {
+      const channel = channelByIndex(overlay.detail, ch)
+      if (!channel) continue
+      for (const c of channel.columns) consider(c.maxDbv)
+    }
+  }
+
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
+}
+
+/** The Frequency range "Autofit" target's upper edge — a fixed step above the current sample
+ * rate's Nyquist frequency, not a true data-driven autofit (unlike the dBV range button): 48 kHz
+ * -> 25 kHz, 96 kHz -> 50 kHz, 192 kHz -> 100 kHz, and reasonable buckets for anything else. */
+function autofitFreqToFor(sampleRateHz: number): number {
+  if (sampleRateHz <= 48000) return 25000
+  if (sampleRateHz <= 96000) return 50000
+  return 100000
+}
+
+watch(autofitYTrigger, () => {
+  const extent = computeYExtent()
+  if (extent) {
+    // +10/-10 headroom, then rounded out to the nearest multiple of 10 (up for Top, down for
+    // Bottom) so the range lines up with the Top/Bottom fields' own step-10 spinners.
+    yTop.value = Math.ceil((extent.max + 10) / 10) * 10
+    yBottom.value = Math.floor((extent.min - 10) / 10) * 10
+  } else {
+    resetYDefaults()
+  }
+})
+
+watch(autofitXTrigger, () => {
+  if (fullHiFreqHz > 0) {
+    xFrom.value = 10
+    xTo.value = autofitFreqToFor(fullHiFreqHz * 2)
+  } else {
+    resetXDefaults()
+  }
+})
+
 function update() {
   const ch0 = props.spectrum[0]
-  if (!ch0) return
+  const ch1 = props.spectrum[1]
+  const firstOverlay = props.overlays[0]?.detail
+  const firstOverlayChannel = firstOverlay && (channelByIndex(firstOverlay, 0) ?? channelByIndex(firstOverlay, 1))
+
+  // Nothing to draw. Also guards a stale fullHiFreqHz from a previous call (live data that has
+  // since disappeared, with no overlay loaded either) from reaching the xs computation below with
+  // neither a live frame nor an overlay to build it from.
+  if (!ch0 && !firstOverlayChannel) return
 
   // Only an overview frame describes the whole spectrum; a zoomed one describes the zoom window.
   // The axis must always be built from the former, or zooming would redefine "fully zoomed out".
-  if ((ch0.header.flags & STREAM_FLAG_ZOOMED) === 0) {
+  // With no live data at all (viewing loaded overlays before ever streaming), fall back to the
+  // first overlay — recomputed every call, so switching overlays re-fits it.
+  if (ch0 && (ch0.header.flags & STREAM_FLAG_ZOOMED) === 0) {
     fullLoFreqHz = ch0.loFreqHz
     fullHiFreqHz = ch0.hiFreqHz
+  } else if (!ch0 && firstOverlayChannel && firstOverlayChannel.columns.length > 0) {
+    fullLoFreqHz = firstOverlayChannel.columns[0].freqHz
+    fullHiFreqHz = firstOverlayChannel.columns[firstOverlayChannel.columns.length - 1].freqHz
   }
   if (fullHiFreqHz <= 0) return
 
-  // Only build series for channels actually streaming and currently enabled — an idle or disabled
-  // channel 1 must not show up as a phantom "R" legend entry (idle: single-channel acquisition;
-  // disabled: the R checkbox turned off, but the stream record for it never gets cleared — see
-  // useSpectrumStream.ts).
-  //
-  // This count must depend only on whether R exists at all, never on anything that varies frame to
-  // frame: it is an ensurePlot key, so changing it tears the plot down and rebuilds it — which
-  // resets the x scale and throws away the user's zoom.
-  const ch1 = props.spectrum[1]
-  const channelCount = ch1 !== undefined && channelEnabled(1) ? 2 : 1
-  const nPoints = ch0.header.nPoints
-  ensurePlot(fullHiFreqHz, channelCount)
+  // The active x grid: live L's columns when streaming, otherwise the first overlay's — everything
+  // else gets resampled onto this, since uPlot draws one x array per plot. See measurements/resample.ts.
+  const xs = ch0 ? freqTrace(ch0.columns, ch0.header.nPoints) : channelFreqs(firstOverlayChannel!)
+  const nPoints = xs.length
+
+  ensurePlot(fullHiFreqHz, props.overlays)
   if (!plot) return
 
-  const xs = freqTrace(ch0.columns, nPoints)
-  const left = maxTrace(ch0.columns, nPoints)
+  // Only real data for channels actually streaming, enabled, and toggled visible — an idle,
+  // disabled, or hidden channel must not show up as a phantom trace (idle: single-channel
+  // acquisition; disabled: the Acquisition panel's L/R checkbox turned off, but the stream record
+  // for it never gets cleared — see useSpectrumStream.ts; hidden: this component's own L/R
+  // checkboxes, see channelVisible). Everything else fills with null rather than being omitted:
+  // the series themselves are always present (see buildOptions), only their data varies per tick.
+  const left = ch0 && channelVisible(0) ? maxTrace(ch0.columns, ch0.header.nPoints) : nullFill(nPoints)
 
-  // Passed to setData as literals rather than being accumulated in a local array: uPlot's
-  // AlignedData permits a TypedArray x with y-series that are TypedArray *or* (number|null)[],
-  // but only through its tuple form. Annotating an intermediate array collapses that to a plain
-  // union-element array, which matches neither branch — and `vue-tsc -b` (what `npm run build`
-  // runs) rejects it even though a bare `vue-tsc --noEmit` lets it through.
+  // R can only be drawn when it was decimated over the same span as whatever xs came from (the
+  // one frame after a zoom where L has already switched and R has not, is the case this guards).
+  const rComparable =
+    ch0 && ch1 && channelVisible(1) && ch1.header.nPoints === ch0.header.nPoints &&
+    (ch1.header.flags & STREAM_FLAG_ZOOMED) === (ch0.header.flags & STREAM_FLAG_ZOOMED)
+  const right = rComparable ? maxTrace(ch1!.columns, ch1!.header.nPoints) : nullFill(nPoints)
+
+  // Passed to setData as a literal rather than being accumulated in a pre-typed local array:
+  // uPlot's AlignedData permits a TypedArray x with y-series that are TypedArray *or*
+  // (number|null)[], but only through its tuple form. Annotating an intermediate array collapses
+  // that to a plain union-element array, which matches neither branch — and `vue-tsc -b` (what
+  // `npm run build` runs) rejects it even though a bare `vue-tsc --noEmit` lets it through.
   //
   // The 1-arg setData is also deliberate: passing resetScales=false looks like the way to stop
   // zoom-reset (see the x scale's `auto:false` above for the actual fix), but in this uPlot build
   // setData()'s commit() — the call that actually repaints the canvas — only runs inside the same
   // `if (_resetScales !== false)` branch as the scale reset. Passing false skips both: the chart
   // would freeze on frame one and never draw again.
-  if (channelCount === 1) {
-    plot.setData([xs, left])
-    return
+  const overlayData = props.overlays.flatMap((overlay) => {
+    const chL = channelByIndex(overlay.detail, 0)
+    const chR = channelByIndex(overlay.detail, 1)
+    return [
+      overlay.visible && chL ? resample(toTrace(chL), xs) : nullFill(nPoints),
+      overlay.visible && chR ? resample(toTrace(chR), xs) : nullFill(nPoints),
+    ]
+  })
+  plot.setData([xs, left, right, ...overlayData])
+
+  // See ensurePlot's pendingZoomRestore comment — must run after setData, not before.
+  if (pendingZoomRestore) {
+    plot.setScale('x', pendingZoomRestore)
+    pendingZoomRestore = null
   }
-
-  // Both series share data[0] (L's frequencies), so R can only be drawn when it was decimated over
-  // the same span. For the one frame after a zoom where L has already switched and R has not,
-  // blank R for that frame rather than plotting it at the wrong x positions — and, unlike dropping
-  // the series, without disturbing the plot (which would reset the zoom).
-  const comparable =
-    ch1!.header.nPoints === nPoints &&
-    (ch1!.header.flags & STREAM_FLAG_ZOOMED) === (ch0.header.flags & STREAM_FLAG_ZOOMED)
-
-  plot.setData([
-    xs,
-    left,
-    comparable ? maxTrace(ch1!.columns, ch1!.header.nPoints) : new Array<number | null>(nPoints).fill(null),
-  ])
 }
 
 watch(() => props.spectrum, update)
+watch(() => props.overlays, update, { deep: true })
+watch(visibleL, update)
+watch(visibleR, update)
+watch(showMinMax, update)
+watch(thickLines, update)
+watch(showDataPoints, update)
+
+// dBV range: a live setScale, not a rebuild — uPlot has no per-call range override, but the scale
+// itself can be nudged directly and takes effect on the next paint.
+watch([yTop, yBottom], ([top, bottom]) => {
+  plot?.setScale('y', { min: bottom, max: top })
+})
+
+// Frequency range: same idea, driven by the From/To dropdowns in ChartDisplayPanel rather than a
+// mouse drag on the chart.
+watch([xFrom, xTo], ([from, to]) => {
+  plot?.setScale('x', { min: from, max: to })
+})
 
 function handleResize() {
   if (plot && containerRef.value)
@@ -403,11 +651,10 @@ function handleResize() {
 function handleThemeChange() {
   if (!plot) return
   const nyquistHz = plotNyquistHz
-  const channelCount = plotChannelCount
   plot.destroy()
   plot = null
   plotNyquistHz = -1
-  ensurePlot(nyquistHz, channelCount)
+  ensurePlot(nyquistHz, props.overlays)
   update()
 }
 
@@ -433,23 +680,9 @@ onBeforeUnmount(() => {
       </span>
       <span v-else-if="!spectrum[0]">Waiting for data…</span>
     </div>
+    <!-- L/R/min-max/thick-lines/show-points/dBV-range/frequency-range controls now live in
+         ChartDisplayPanel.vue, a sibling column next to the chart — see App.vue — all reading and
+         writing the same useChartDisplay() state this component reacts to. -->
     <div ref="containerRef" class="w-full"></div>
   </section>
 </template>
-
-<!--
-  Deliberately not `scoped`: the legend is markup uPlot creates itself, outside this component's
-  template, so a scoped rule's data attribute never lands on it. The axes are canvas-drawn and
-  handled in THEME above — this covers only the DOM parts uPlot.min.css colours near-black.
--->
-<style>
-.u-legend {
-  color: #525252;
-}
-
-@media (prefers-color-scheme: dark) {
-  .u-legend {
-    color: #a3a3a3;
-  }
-}
-</style>

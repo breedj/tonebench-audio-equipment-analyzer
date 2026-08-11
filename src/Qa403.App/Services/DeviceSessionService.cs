@@ -60,6 +60,19 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     public bool Acquiring => _isAcquiring;
 
+    /// <summary>Null until <see cref="ConnectAsync"/> completes.</summary>
+    public DeviceInfo? Info => _info;
+
+    public double InputRangeDbv => device.InputRangeDbv;
+
+    public double OutputRangeDbv => _outputRangeDbv;
+
+    /// <summary>The effective (already bin-snapped, if snapping is on) generator config — what the device is actually playing.</summary>
+    public GeneratorConfig EffectiveGeneratorConfig => _generatorConfig;
+
+    /// <summary>The acquisition config currently driving the device stream, or null when nothing has started one.</summary>
+    public AcquisitionConfig? StreamConfig => _streamConfig;
+
     /// <summary>
     /// Whether the simulated DUT adds its own noise floor (the white floor plus the 1/f texture
     /// layered on it), or <c>null</c> when the device isn't the simulator. Deliberately reached by
@@ -149,7 +162,8 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         logger.LogWarning("Device reported itself lost (disconnected).");
     }
 
-    private static GeneratorChannelResponse ToResponse(ChannelGeneratorConfig config)
+    /// <summary>Also used by <see cref="MeasurementSaveService.ApplyAsync"/> to describe a measurement type's stored generator config in the same wire shape as live device status.</summary>
+    internal static GeneratorChannelResponse ToResponse(ChannelGeneratorConfig config)
     {
         var tones = config.Tones.Select(t => new GeneratorToneResponse(t.FrequencyHz, t.AmplitudeDbv)).ToArray();
 

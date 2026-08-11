@@ -1,25 +1,14 @@
 <script setup lang="ts">
-import type { DeviceRanges, DeviceStatus, SimulatedProfileRequest } from '../api/client'
+import type { DeviceStatus, SimulatedProfileRequest } from '../api/client'
 
 defineProps<{
   status: DeviceStatus | null
-  ranges: DeviceRanges | null
   error: string | null
 }>()
 
 const emit = defineEmits<{
-  setInputRange: [dbv: number]
-  setAutoRange: [enabled: boolean]
   setSimulatedProfile: [patch: SimulatedProfileRequest]
 }>()
-
-function onAutoRangeChange(e: Event) {
-  emit('setAutoRange', (e.target as HTMLInputElement).checked)
-}
-
-function onInputRangeChange(e: Event) {
-  emit('setInputRange', Number((e.target as HTMLSelectElement).value))
-}
 
 function onSimulatedNoiseChange(e: Event) {
   emit('setSimulatedProfile', { noiseEnabled: (e.target as HTMLInputElement).checked })
@@ -31,8 +20,8 @@ function onSimulatedHumChange(e: Event) {
 </script>
 
 <template>
-  <header
-    class="flex flex-wrap items-center gap-4 border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900"
+  <footer
+    class="flex flex-wrap items-center gap-4 border-t border-neutral-200 bg-white px-4 py-2 text-xs dark:border-neutral-800 dark:bg-neutral-900"
   >
     <div class="flex items-center gap-2">
       <span class="h-2.5 w-2.5 rounded-full" :class="status?.connected ? 'bg-emerald-500' : 'bg-neutral-400'" />
@@ -48,14 +37,14 @@ function onSimulatedHumChange(e: Event) {
       <!-- Simulator-only: what the synthesized DUT adds on top of the generator's stimulus. -->
       <template v-if="status?.isSimulated">
         <label
-          class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
+          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="Simulated DUT noise floor (white + 1/f). Turn off for a clean spectrum."
         >
           <input type="checkbox" :checked="status.simulatedNoiseEnabled ?? false" @change="onSimulatedNoiseChange" />
           Noise
         </label>
         <label
-          class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
+          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="Simulated mains hum: 50 Hz plus two harmonics, each 6 dB down."
         >
           <input type="checkbox" :checked="status.simulatedHumEnabled ?? false" @change="onSimulatedHumChange" />
@@ -70,7 +59,7 @@ function onSimulatedHumChange(e: Event) {
       </span>
     </div>
 
-    <div v-if="status?.connected" class="flex items-center gap-3 text-sm text-neutral-500 dark:text-neutral-400">
+    <div v-if="status?.connected" class="flex items-center gap-3 text-neutral-500 dark:text-neutral-400">
       <span>S/N {{ status.serialNumber }}</span>
       <span>FW {{ status.firmwareVersion }}</span>
       <!--
@@ -87,32 +76,22 @@ function onSimulatedHumChange(e: Event) {
       </span>
     </div>
 
-    <div class="ml-auto flex items-center gap-4 text-sm">
-      <label class="flex items-center gap-2">
-        Input range
-        <select
-          class="rounded border border-neutral-300 bg-white px-2 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
-          :value="status?.inputRangeDbv"
-          :disabled="status?.autoRangeEnabled === true"
-          @change="onInputRangeChange"
-        >
-          <option v-for="dbv in ranges?.inputRangesDbv" :key="dbv" :value="dbv">{{ dbv }} dBV</option>
-        </select>
-      </label>
+    <div class="ml-auto flex items-center gap-4">
       <!--
-        Hidden for the simulator, which has no autoranging (autoRangeEnabled is null there). While
-        auto is on the selector above is read-only and follows the hardware: the device steps the
-        range on its own, so letting it look editable is what made it report a range the QA403 was
-        not actually using.
+        Read-only: auto-ranging is always on (see AcquisitionPanel's former Auto checkbox, now
+        removed) — either the device's own hardware ranger or, where that's not available (the
+        simulator), App.vue's live peak-level monitor (see determineAttenuation in attenuation.ts).
+        Either way this is never something to pick by hand anymore, only to watch.
       -->
-      <label
-        v-if="status?.autoRangeEnabled !== null && status?.autoRangeEnabled !== undefined"
-        class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-        title="Let the device pick the input range. Off means the selection to the left stays put."
+      <span
+        class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"
+        title="Automatically kept matched to the input signal — by the device's own auto-ranging where available, otherwise by continuously monitoring the peak level."
       >
-        <input type="checkbox" :checked="status.autoRangeEnabled" @change="onAutoRangeChange" />
-        Auto
-      </label>
+        Input range
+        <span class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
+          {{ status?.inputRangeDbv ?? '--' }} dBV
+        </span>
+      </span>
       <!--
         Read-only: the output range is derived from the generator's own amplitude
         (OutputRangeSelector), the way QuantAsylum's software does it, because it is an analog
@@ -124,12 +103,12 @@ function onSimulatedHumChange(e: Event) {
         title="Selected automatically from the generator amplitude — the lowest range with enough headroom, for the lowest DAC noise."
       >
         Output range
-        <span class="rounded border border-neutral-200 px-2 py-1 font-mono dark:border-neutral-800">
+        <span class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
           {{ status?.outputRangeDbv ?? '--' }} dBV
         </span>
       </span>
     </div>
 
-    <p v-if="error" class="w-full text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-  </header>
+    <p v-if="error" class="w-full text-red-600 dark:text-red-400">{{ error }}</p>
+  </footer>
 </template>

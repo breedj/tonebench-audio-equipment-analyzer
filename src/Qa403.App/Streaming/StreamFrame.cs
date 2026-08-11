@@ -62,14 +62,16 @@ public enum StreamFlags : ushort
 /// 8       f32       x0          first freq (Hz)/time (s), or (decimated) the span's low edge freq (Hz)
 /// 12      f32       dx          bin width (Hz)/sample period (s), or (decimated) the span's high edge freq (Hz)
 /// 16      u32       nPoints
-/// 20      f32[]     payload     if decimated: nPoints*(freqHz,min,max) triples — see EncodeSpectrum
+/// 20      f32[]     payload     if decimated: nPoints*(freqHz,min,max) triples — see EncodeSpectrum;
+///                                otherwise (scope): nPoints raw samples — see EncodeScope
 /// </code>
 ///
 /// All fields little-endian. Each decimated column carries its own frequency rather than relying
 /// on the client to reconstruct one from x0/dx/nPoints: see <see cref="StreamFlags.LogSpaced"/>
 /// for why a formula-based reconstruction is unsafe. <see cref="StreamMsgType.Meters"/> repurposes
 /// the header the same way (x0 = fundamental frequency in Hz, dx unused/0) but its payload is not
-/// a min/max series — see <see cref="EncodeMeters"/> for that layout.
+/// a min/max series — see <see cref="EncodeMeters"/> for that layout. <see cref="StreamMsgType.Scope"/>
+/// is never decimated: x0 = 0, dx = sample period (s), payload is nPoints raw f32 volts.
 /// </summary>
 public static class StreamFrame
 {
@@ -167,6 +169,30 @@ public static class StreamFrame
         return buffer;
     }
 
+    /// <summary>
+    /// Encodes a scope (time-domain) frame: header + nPoints raw f32 samples in volts, one per
+    /// point. Not decimated — <see cref="StreamFlags.Decimated"/> stays unset, so unlike
+    /// <see cref="EncodeSpectrum"/> the payload is a flat sample array, not (freq,min,max) triples.
+    /// x0 is always 0: each frame is a fresh, self-contained snapshot of the latest samples (like a
+    /// real scope's single-shot capture), not a continuous timeline a client accumulates across
+    /// frames. dx is the sample period (s) = 1/sampleRateHz.
+    /// </summary>
+    public static byte[] EncodeScope(StreamChannel channel, uint seq, float dx, ReadOnlySpan<float> samples)
+    {
+        int nPoints = samples.Length;
+        byte[] buffer = new byte[HeaderLength + (nPoints * sizeof(float))];
+        WriteHeader(buffer, StreamMsgType.Scope, channel, StreamFlags.None, seq, 0f, dx, (uint)nPoints);
+
+        int offset = HeaderLength;
+        for (int i = 0; i < nPoints; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), samples[i]);
+            offset += 4;
+        }
+
+        return buffer;
+    }
+
     private static void WriteHeader(
         Span<byte> buffer, StreamMsgType msgType, StreamChannel channel, StreamFlags flags, uint seq, float x0, float dx, uint nPoints)
     {
@@ -210,6 +236,24 @@ public static class StreamFrame
             double max = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 8, 4));
             result[i] = new SpectrumColumn(freqHz, new MinMax(min, max));
             offset += 12;
+        }
+
+        return result;
+    }
+
+    /// <summary>Decodes a scope frame's raw f32 sample payload. <paramref name="frame"/> must be a <see cref="StreamMsgType.Scope"/> frame.</summary>
+    public static float[] DecodeScopeSamples(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.Scope)
+            throw new ArgumentException("Frame is not a scope frame.", nameof(frame));
+
+        var result = new float[header.NPoints];
+        int offset = HeaderLength;
+        for (int i = 0; i < header.NPoints; i++)
+        {
+            result[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4));
+            offset += 4;
         }
 
         return result;

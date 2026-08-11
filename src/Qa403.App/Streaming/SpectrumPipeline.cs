@@ -31,6 +31,15 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     private readonly SpectrumAverager[] _psdAveragers = [new(), new()];
     private readonly object _ringBufferLock = new();
 
+    // Retained across StopAsync (so a stopped acquisition can still be saved) and cleared only by
+    // Flush() (so restarting acquisition drops the stale trace). Holds ampPower -- peak-volts
+    // squared, the same pre-dBV quantity ProcessChannel already computes -- rather than the
+    // converted dBV trace: a Math.Log10 pass over every bin only needs to happen when someone
+    // actually calls LatestSnapshots() (a user-initiated save), not on every one of this tick's
+    // ~20/sec iterations regardless of whether a save ever happens. See LatestSnapshots.
+    private readonly RetainedSpectrum[] _retained = [new(), new()];
+    private readonly object _retainedLock = new();
+
     private SampleRingBuffer?[] _ringBuffers = new SampleRingBuffer?[MaxChannels];
     private int _ringBufferFftSize;
     private double _sampleRateHz;
@@ -88,6 +97,49 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             ringBuffers[ch]?.Reset();
             _ampAveragers[ch].Reset();
             _psdAveragers[ch].Reset();
+        }
+
+        lock (_retainedLock)
+        {
+            for (int ch = 0; ch < MaxChannels; ch++)
+                _retained[ch] = new RetainedSpectrum();
+        }
+    }
+
+    /// <summary>
+    /// The last full-resolution spectrum retained per channel, for a "save current capture"
+    /// action -- deliberately unrelated to the ~1600-column decimated display frames this
+    /// pipeline broadcasts. Empty before the first tick or right after <see cref="Flush"/>; a
+    /// channel with <see cref="SpectrumPipelineOptions.ProcessLeft"/>/<c>ProcessRight</c> off is
+    /// simply absent, same as it is from the live broadcast.
+    ///
+    /// Deliberately not called on every tick's hot path: it converts the retained peak-volts^2
+    /// trace to dBV here, on the caller's thread, rather than in <see cref="ProcessChannel"/> --
+    /// see <see cref="_retained"/>.
+    /// </summary>
+    public SpectrumSnapshot[] LatestSnapshots()
+    {
+        lock (_retainedLock)
+        {
+            List<SpectrumSnapshot>? result = null;
+
+            for (int ch = 0; ch < MaxChannels; ch++)
+            {
+                var retained = _retained[ch];
+                if (retained.AmpPower is null || retained.Meters is null)
+                    continue;
+
+                var dbv = new double[retained.AmpPower.Length];
+                for (int i = 0; i < dbv.Length; i++)
+                    dbv[i] = 10.0 * Math.Log10(Math.Max(retained.AmpPower[i] / 2.0, double.Epsilon));
+
+                (result ??= []).Add(new SpectrumSnapshot(
+                    ch == 0 ? StreamChannel.Left : StreamChannel.Right, retained.Seq, retained.CapturedUtc,
+                    retained.SampleRateHz, retained.BinSizeHz, retained.FftSize,
+                    retained.Window, retained.Sums, dbv, retained.Meters));
+            }
+
+            return result?.ToArray() ?? [];
         }
     }
 
@@ -240,9 +292,14 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             var channel = channelIndex == 0 ? StreamChannel.Left : StreamChannel.Right;
 
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
+            var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options);
+
+            UpdateRetainedSnapshot(channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, seq);
 
             BroadcastSpectrumFrame(channel, seq, ampPower, binSizeHz, options);
-            BroadcastMetersFrame(channel, seq, psd, peakDbv, totalRmsDbv, options);
+            if (meters is not null)
+                BroadcastMetersFrame(channel, seq, meters);
+            BroadcastScopeFrame(channel, seq, timeBuf.AsSpan(0, n), _sampleRateHz);
         }
         finally
         {
@@ -423,13 +480,19 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         return (peakDbv, totalRmsDbv);
     }
 
-    private void BroadcastMetersFrame(
-        StreamChannel channel, uint seq, PsdSpectrum psd, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options)
+    /// <summary>
+    /// Everything the meters panel shows, computed once per channel per tick and shared by both
+    /// the live broadcast (<see cref="BroadcastMetersFrame"/>) and <see cref="LatestSnapshots"/> --
+    /// so a saved measurement's metrics are exactly what was on screen, never re-derived
+    /// separately. Returns <see langword="null"/> when no fundamental (and so no harmonics) could
+    /// be found, matching the old inline logic's "nothing to broadcast this tick" behaviour.
+    /// </summary>
+    private static SpectrumMeters? ComputeMeters(PsdSpectrum psd, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options)
     {
         int minSearchBin = Math.Max(1, (int)Math.Round(options.FundamentalMinSearchHz / psd.BinSizeHz));
         int fundamentalBin = FindGlobalPeakBin(psd.ValuesV2PerHz, minSearchBin);
         if (fundamentalBin <= 0)
-            return;
+            return null;
 
         // The measurement bandwidth for every noise-integrated figure below, and the upper bound
         // on which harmonics count toward THD. See SpectrumPipelineOptions.MeasurementLoFreqHz —
@@ -438,13 +501,13 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         var band = psd.BandOf(options.MeasurementLoFreqHz, options.MeasurementHiFreqHz);
 
         int harmonicCount = Math.Max(1, options.HarmonicCount);
-        Span<Harmonic> harmonics = harmonicCount <= 32 ? stackalloc Harmonic[harmonicCount] : new Harmonic[harmonicCount];
+        var harmonicsBuf = new Harmonic[harmonicCount];
         int written = HarmonicAnalyzer.Analyze(
-            psd, fundamentalBin, harmonicCount, harmonics, maxBinInclusive: band.HiBinInclusive);
+            psd, fundamentalBin, harmonicCount, harmonicsBuf, maxBinInclusive: band.HiBinInclusive);
         if (written == 0)
-            return;
+            return null;
 
-        harmonics = harmonics[..written];
+        var harmonics = written == harmonicsBuf.Length ? harmonicsBuf : harmonicsBuf[..written];
         var fundamental = harmonics[0];
 
         float fundamentalFreqHz = (float)(fundamentalBin * psd.BinSizeHz);
@@ -456,11 +519,90 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
         var otherPeaks = FindOtherPeaks(psd, harmonics, fundamentalDbv, options);
 
+        return new SpectrumMeters(
+            fundamentalFreqHz, (float)psd.BinSizeHz, thdPercent, thdNPercent, snrDb,
+            fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks);
+    }
+
+    /// <summary>
+    /// How many of the most recent time-domain samples the oscilloscope view gets per tick,
+    /// independent of FFT size — a 1,048,576-point FFT's whole window would be both far more data
+    /// than a chart can usefully show and a multi-second-long "instant" that isn't a waveform
+    /// snapshot anymore. Fixed rather than a fraction of FftSize so the on-screen time span only
+    /// depends on sample rate (e.g. ~43 ms at 48 kHz, ~11 ms at 192 kHz), not on unrelated
+    /// spectrum-analysis settings.
+    /// </summary>
+    private const int ScopeSampleCount = 2048;
+
+    /// <summary>
+    /// Broadcasts the tail of this tick's already-captured time-domain window as a scope frame —
+    /// reuses <paramref name="timeDomainSamples"/> (the same raw, unwindowed snapshot
+    /// <see cref="ComputeTimeDomainLevels"/> reads) rather than touching the ring buffer again, so
+    /// this costs one more encode+broadcast per tick, not another snapshot.
+    /// </summary>
+    private void BroadcastScopeFrame(StreamChannel channel, uint seq, ReadOnlySpan<double> timeDomainSamples, double sampleRateHz)
+    {
+        int count = Math.Min(ScopeSampleCount, timeDomainSamples.Length);
+        var tail = timeDomainSamples[^count..];
+
+        float[] samples = ArrayPool<float>.Shared.Rent(count);
+        try
+        {
+            for (int i = 0; i < count; i++)
+                samples[i] = (float)tail[i];
+
+            byte[] frame = StreamFrame.EncodeScope(channel, seq, (float)(1.0 / sampleRateHz), samples.AsSpan(0, count));
+            hub.Broadcast(frame);
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(samples);
+        }
+    }
+
+    private void BroadcastMetersFrame(StreamChannel channel, uint seq, SpectrumMeters meters)
+    {
         byte[] frame = StreamFrame.EncodeMeters(
-            channel, seq, fundamentalFreqHz, (float)psd.BinSizeHz,
-            thdPercent, thdNPercent, snrDb, fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv,
-            harmonics, otherPeaks);
+            channel, seq, meters.FundamentalFreqHz, meters.BinSizeHz,
+            meters.ThdPercent, meters.ThdNPercent, meters.SnrDb, meters.FundamentalDbv, meters.NoiseFloorDbv,
+            meters.PeakDbv, meters.TotalRmsDbv, meters.Harmonics, meters.OtherPeaks);
         hub.Broadcast(frame);
+    }
+
+    private void UpdateRetainedSnapshot(
+        int channelIndex, ReadOnlySpan<double> ampPower, double binSizeHz, int fftSize,
+        WindowType windowType, WindowSums sums, SpectrumMeters? meters, uint seq)
+    {
+        lock (_retainedLock)
+        {
+            var retained = _retained[channelIndex];
+            if (retained.AmpPower is null || retained.AmpPower.Length != ampPower.Length)
+                retained.AmpPower = new double[ampPower.Length];
+
+            ampPower.CopyTo(retained.AmpPower);
+            retained.CapturedUtc = DateTimeOffset.UtcNow;
+            retained.SampleRateHz = _sampleRateHz;
+            retained.BinSizeHz = binSizeHz;
+            retained.FftSize = fftSize;
+            retained.Window = windowType;
+            retained.Sums = sums;
+            retained.Meters = meters;
+            retained.Seq = seq;
+        }
+    }
+
+    /// <summary>Mutable per-channel retention slot backing <see cref="_retained"/> -- see its own remarks.</summary>
+    private sealed class RetainedSpectrum
+    {
+        public double[]? AmpPower;
+        public DateTimeOffset CapturedUtc;
+        public double SampleRateHz;
+        public double BinSizeHz;
+        public int FftSize;
+        public WindowType Window;
+        public WindowSums Sums;
+        public SpectrumMeters? Meters;
+        public uint Seq;
     }
 
     /// <summary>

@@ -2,10 +2,12 @@ import { onUnmounted, ref, shallowRef } from 'vue'
 import {
   decodeHeader,
   decodeMetersFrame,
+  decodeScopeFrame,
   decodeSpectrumFrame,
   encodeSetViewport,
   StreamMsgType,
   type MetersFrame,
+  type ScopeFrame,
   type SpectrumFrame,
 } from '../streaming/protocol'
 
@@ -19,6 +21,7 @@ const RECONNECT_DELAY_MS = 1000
 export function useSpectrumStream() {
   const spectrum = shallowRef<Record<number, SpectrumFrame>>({})
   const meters = shallowRef<Record<number, MetersFrame>>({})
+  const scope = shallowRef<Record<number, ScopeFrame>>({})
   const connected = ref(false)
 
   let socket: WebSocket | null = null
@@ -65,6 +68,9 @@ export function useSpectrumStream() {
       } else if (header.msgType === StreamMsgType.Meters) {
         const frame = decodeMetersFrame(event.data)
         meters.value = { ...meters.value, [header.channel]: frame }
+      } else if (header.msgType === StreamMsgType.Scope) {
+        const frame = decodeScopeFrame(event.data)
+        scope.value = { ...scope.value, [header.channel]: frame }
       }
     }
 
@@ -85,5 +91,5 @@ export function useSpectrumStream() {
     socket?.close()
   })
 
-  return { spectrum, meters, connected, setViewport }
+  return { spectrum, meters, scope, connected, setViewport }
 }

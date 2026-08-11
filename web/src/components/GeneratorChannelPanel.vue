@@ -9,19 +9,31 @@ import type {
 } from '../api/client'
 
 const props = defineProps<{
-  label: string
-  channelStatus: GeneratorChannelState | undefined
+  /**
+   * Set whenever a measurement is (re)selected — see GeneratorPanel.vue. Loads this stimulus's
+   * kind/tones/etc into the form. Not "live device status": the whole point of the Run/Stop model
+   * is that selecting a measurement stages its generator config without playing it, so this always
+   * comes from the measurement type's stored parameters, never from a status poll (which would show
+   * whatever's *actually* configured, i.e. usually silence).
+   */
+  loadState: GeneratorChannelState | null | undefined
 }>()
 
+// Bubbled up to GeneratorPanel, then App.vue — pushes the edit live if a generator is already
+// playing, otherwise a no-op (the value's already staged here regardless). See
+// App.vue's applyGeneratorLive.
 const emit = defineEmits<{ change: [] }>()
 
-// 'Off' is deliberately not offered here — the Enabled checkbox is this channel's on/off control,
-// and a second way to say "silent" would just be two controls disagreeing.
+// 'Off' is deliberately not offered here — GeneratorPanel's own L/R "Enabled" checkboxes are the
+// on/off control, and a second way to say "silent" would just be two controls disagreeing.
+//
+// 'EchoChirp' is deliberately left out of this list — not deleted, just hidden from this picker.
+// The kind, its form below, and the underlying request/state types all still exist; it's slated
+// for a different UI elsewhere later.
 const KINDS: { value: GeneratorKind; label: string }[] = [
   { value: 'Tones', label: 'Sine tones' },
   { value: 'Multitone', label: 'Multitone' },
   { value: 'WhiteNoise', label: 'White noise' },
-  { value: 'EchoChirp', label: 'Frequency response (EchoChirp)' },
 ]
 
 const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
@@ -34,13 +46,16 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
   { value: 'OneOver3', label: '1/3' },
 ]
 
-const enabled = ref(false)
 const kind = ref<GeneratorKind>('Tones')
 
 // One state object per kind, all kept alive at once, so switching the dropdown back and forth
 // never discards what the user typed into the other forms. currentConfig() sends only the
 // selected kind's block.
 const tones = reactive<GeneratorTone[]>([{ freqHz: 1000, ampDbv: -6 }])
+// What the device is actually playing per tone, in parallel with `tones` — kept separate so
+// syncFromStatus (below) can report the real, possibly-snapped bin frequency without overwriting
+// what the user typed. Index-aligned with `tones`; null until Run confirms an actual frequency.
+const actualFreqHz = reactive<(number | null)[]>([null])
 const multitone = reactive({ tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 })
 const noise = reactive({ levelDbv: -20 })
 const chirp = reactive({
@@ -50,50 +65,51 @@ const chirp = reactive({
   smoothing: 'None' as SmoothingOctaves,
 })
 
-// Sync once from the backend's actual per-channel generator state on first load, so this
-// checkbox can never start disagreeing with what's actually playing. Not a continuous sync —
-// after this, the form is the user's to edit until Apply, so a periodic status poll can't
-// clobber an in-progress edit. Mirrors the pre-split GeneratorPanel's own sync logic.
+// Stages this form from a measurement type's stored config — see `loadState` above. Also clears
+// actualFreqHz: a freshly-loaded measurement hasn't been Run yet, so there's no real bin frequency
+// to show until it has.
 watch(
-  () => props.channelStatus,
-  (status) => {
-    if (!status) return
-    enabled.value = status.enabled
+  () => props.loadState,
+  (state) => {
+    if (!state) return
     // 'Off' is the never-configured state and has no dropdown entry — leave the default selected.
-    if (status.kind !== 'Off') kind.value = status.kind
-    if (status.tones.length > 0 && status.kind === 'Tones')
-      tones.splice(0, tones.length, ...status.tones.map((t) => ({ ...t })))
-    Object.assign(multitone, status.multitone)
-    Object.assign(noise, status.noise)
-    Object.assign(chirp, status.chirp)
+    if (state.kind !== 'Off') kind.value = state.kind
+    if (state.tones.length > 0 && state.kind === 'Tones')
+      tones.splice(0, tones.length, ...state.tones.map((t) => ({ ...t })))
+    actualFreqHz.fill(null, 0, actualFreqHz.length)
+    Object.assign(multitone, state.multitone)
+    Object.assign(noise, state.noise)
+    Object.assign(chirp, state.chirp)
   },
-  { once: true },
+  { immediate: true },
 )
 
 function addTone() {
   tones.push({ freqHz: 1000, ampDbv: -6 })
+  actualFreqHz.push(null)
   emit('change')
 }
 
 function removeTone(index: number) {
   tones.splice(index, 1)
+  actualFreqHz.splice(index, 1)
   emit('change')
 }
 
-// Called by GeneratorPanel after a sample-rate change re-snaps tones to the new bin frequencies
-// server-side — pulls just the frequencies back in, since that's the only thing snapping touches.
-// Takes the status explicitly (not read off the `channelStatus` prop) because that prop lags a
-// render behind the response this is called with. Not routed through the mount-time watch below:
-// that one only ever runs once, on purpose, so it can't clobber an in-progress edit.
+// Called by GeneratorPanel after Run (or a sample-rate change while running) re-snaps tones to the
+// new bin frequencies server-side. Updates `actualFreqHz` only — not `tones[i].freqHz` — so the
+// textbox keeps showing what was typed (e.g. 1000) while the label beneath it reports what's
+// really playing (e.g. 999.76, the nearest coherent bin).
 function syncFromStatus(status: GeneratorChannelState) {
   if (status.kind !== 'Tones') return
   status.tones.forEach((t, i) => {
-    if (tones[i]) tones[i].freqHz = t.freqHz
+    if (i < actualFreqHz.length) actualFreqHz[i] = t.freqHz
   })
 }
 
-function currentConfig(): GeneratorChannelRequest {
-  const base = { enabled: enabled.value, kind: kind.value, tones: [] as GeneratorTone[] }
+/** The stimulus config shared by both channels — GeneratorPanel adds each channel's own `enabled` on top. */
+function currentConfig(): Omit<GeneratorChannelRequest, 'enabled'> {
+  const base = { kind: kind.value, tones: [] as GeneratorTone[] }
 
   switch (kind.value) {
     case 'Tones':
@@ -114,13 +130,6 @@ defineExpose({ currentConfig, syncFromStatus })
 
 <template>
   <div>
-    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{{ label }}</h3>
-
-    <label class="mb-3 flex items-center gap-2 text-sm">
-      <input type="checkbox" v-model="enabled" @change="emit('change')" />
-      Enabled
-    </label>
-
     <label class="mb-3 flex flex-col gap-1 text-sm">
       Stimulus
       <select
@@ -134,24 +143,33 @@ defineExpose({ currentConfig, syncFromStatus })
 
     <div v-if="kind === 'Tones'">
       <div class="space-y-2">
-        <div v-for="(tone, i) in tones" :key="i" class="flex items-center gap-2 text-sm">
-          <input
-            type="number"
-            v-model.number="tone.freqHz"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            placeholder="Freq (Hz)"
-            @change="emit('change')"
-          />
-          <span class="text-neutral-500">Hz @</span>
+        <div v-for="(tone, i) in tones" :key="i" class="flex items-start gap-2 text-sm">
+          <div class="flex flex-col gap-0.5">
+            <input
+              type="number"
+              v-model.number="tone.freqHz"
+              class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              placeholder="Freq (Hz)"
+              @change="emit('change')"
+            />
+            <span v-if="actualFreqHz[i] != null" class="text-xs text-neutral-400 dark:text-neutral-600">
+              → {{ actualFreqHz[i]!.toFixed(2) }} Hz
+            </span>
+          </div>
+          <span class="pt-1.5 text-neutral-500">Hz @</span>
           <input
             type="number"
             v-model.number="tone.ampDbv"
-            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="w-16 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             placeholder="Amp (dBV)"
             @change="emit('change')"
           />
-          <span class="text-neutral-500">dBV</span>
-          <button type="button" class="text-neutral-400 hover:text-red-500" @click="removeTone(i)">&times;</button>
+          <span class="pt-1.5 text-neutral-500">dBV</span>
+          <button type="button" class="pt-1.5 text-neutral-400 hover:text-red-500" title="Remove tone" @click="removeTone(i)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z" />
+            </svg>
+          </button>
         </div>
       </div>
 

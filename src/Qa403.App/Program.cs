@@ -7,6 +7,7 @@ using Microsoft.Extensions.FileProviders;
 using Qa403.App.Endpoints;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
+using Qa403.Data;
 using Qa403.Device;
 using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
@@ -61,7 +62,29 @@ try
     builder.Services.AddSingleton<DeviceSessionService>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
 
+    // First use of configuration binding in this app: appsettings.json's "Database:Path" key
+    // overrides the LocalApplicationData default — see Qa403DatabaseOptions.Default's remarks on
+    // why measurement history lives there rather than next to the binary.
+    var databasePath = builder.Configuration["Database:Path"];
+    var databaseOptions = string.IsNullOrWhiteSpace(databasePath)
+        ? Qa403DatabaseOptions.Default
+        : new Qa403DatabaseOptions { Path = databasePath };
+    builder.Services.AddSingleton(databaseOptions);
+    builder.Services.AddSingleton<SqliteConnectionFactory>();
+    builder.Services.AddSingleton<ProjectRepository>();
+    builder.Services.AddSingleton<MeasurementRepository>();
+    builder.Services.AddSingleton<MeasurementSaveService>();
+
     var app = builder.Build();
+
+    // Runs once at startup, before the host serves any request — see MigrationRunner's own
+    // remarks on why it's idempotent and why the .sql files are embedded rather than loose.
+    {
+        using var scope = app.Services.CreateScope();
+        var connectionFactory = scope.ServiceProvider.GetRequiredService<SqliteConnectionFactory>();
+        await using var migrationConnection = await connectionFactory.OpenAsync(CancellationToken.None);
+        await new MigrationRunner().RunAsync(migrationConnection, CancellationToken.None);
+    }
 
     app.UseWebSockets();
 
@@ -73,6 +96,8 @@ try
     app.MapGeneratorEndpoints();
     app.MapAcquisitionEndpoints();
     app.MapStreamingEndpoints();
+    app.MapProjectsEndpoints();
+    app.MapMeasurementsEndpoints();
 
     app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = wwwroot });
 

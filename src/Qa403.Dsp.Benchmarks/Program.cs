@@ -8,4 +8,6 @@ var config = ManualConfig.CreateMinimumViable()
         .WithWarmupCount(2)
         .WithIterationCount(5));
 
-BenchmarkRunner.Run<FftBackendBenchmarks>(config);
+// Two benchmark classes now live in this project (FftBackendBenchmarks, SpectrumBlobBenchmarks).
+// BenchmarkSwitcher picks one via `--filter *ClassName*`; with no args it prompts interactively.
+BenchmarkSwitcher.FromAssembly(typeof(FftBackendBenchmarks).Assembly).Run(args, config);

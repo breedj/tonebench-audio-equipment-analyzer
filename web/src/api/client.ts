@@ -139,7 +139,7 @@ export interface SpectrumConfig {
   harmonicCount: number
   fundamentalMinSearchHz: number
   otherPeaksCount: number
-  /** Whether the left/right channel is processed (FFT + meters) and broadcast at all — see AcquisitionPanel's L/R checkboxes. */
+  /** Whether the left/right channel is processed (FFT + meters) and broadcast at all — see SpectrumConfigPanel's L/R checkboxes. */
   processLeft: boolean
   processRight: boolean
   /**
@@ -164,6 +164,142 @@ export interface SpectrumConfigRequest {
   measurementHiFreqHz?: number
 }
 
+// Projects / measurement-types / measurements — mirrors Qa403.App/Endpoints/ProjectsEndpoints.cs
+// and MeasurementsEndpoints.cs. A project holds several configured measurement-types (only
+// 'FFTSpectrum' exists today); saving a measurement snapshots the type's parameters as-run.
+
+export interface Project {
+  id: number
+  name: string
+  notes: string | null
+  createdUtc: string
+}
+
+export interface SaveProjectRequest {
+  name: string
+  notes?: string | null
+}
+
+export interface MeasurementType {
+  id: number
+  projectId: number
+  kind: string
+  name: string
+  notes: string | null
+  /** The configured parameters (FFT size, window, band, generator, ...), JSON-encoded. Re-appliable via api.applyMeasurementType. */
+  paramsJson: string
+  createdUtc: string
+}
+
+/** What a measurement type's stored generator/acquisition config actually is — same shape as DeviceStatus's generatorLeft/Right, so the UI's existing form-sync logic works from either source. */
+export interface MeasurementTypeAppliedResponse {
+  generatorLeft: GeneratorChannelState
+  generatorRight: GeneratorChannelState
+  snapToBin: boolean
+  sampleRateHz: number
+  channelCount: number
+  blockFrameCount: number
+  inputRangeDbv: number
+  outputRangeDbv: number
+  autoRangeEnabled: boolean | null
+}
+
+/**
+ * The Acquisition/Generator panels' current staged (possibly not-yet-applied-to-the-device)
+ * values — sent along with a save so params_json reflects what's on screen rather than whatever
+ * the device last actually ran. Mirrors ProjectsEndpoints.cs's StagedMeasurementConfig.
+ */
+export interface StagedMeasurementConfig {
+  sampleRateHz: number
+  channelCount: number
+  inputRangeDbv: number
+  autoRangeEnabled: boolean | null
+  generatorLeft: GeneratorChannelRequest
+  generatorRight: GeneratorChannelRequest
+  snapToBin?: boolean
+}
+
+export interface SaveMeasurementTypeRequest {
+  kind: string
+  name: string
+  notes?: string | null
+  paramsJson?: string | null
+  staged?: StagedMeasurementConfig | null
+}
+
+export interface ChannelHeadline {
+  thdPercent: number
+  thdNPercent: number
+  snrDb: number
+}
+
+export interface MeasurementSummary {
+  resultId: number
+  projectName: string
+  measurementTypeName: string
+  name: string
+  notes: string | null
+  timestampUtc: string
+  sampleRateHz: number
+  fftSize: number
+  channels: number
+  /** Keyed by channel index as a string ("0"/"1") — System.Text.Json's default int-key dictionary shape. */
+  channelHeadlines: Record<string, ChannelHeadline>
+}
+
+export interface MeasurementListResponse {
+  items: MeasurementSummary[]
+}
+
+export interface MeasurementFilter {
+  projectId?: number
+  typeId?: number
+  /** ISO-8601 UTC, e.g. new Date().toISOString(). */
+  from?: string
+  to?: string
+  skip?: number
+  take?: number
+}
+
+/** One decimated display column of a stored trace — same (freqHz, min, max) shape as the live chart's columns, just JSON instead of the binary wire format. */
+export interface MeasurementColumn {
+  freqHz: number
+  minDbv: number
+  maxDbv: number
+}
+
+export interface MeasurementChannel {
+  channel: number
+  columns: MeasurementColumn[]
+  /** Metric name -> value, e.g. "thd_percent", "snr_db", "h2_hz", "h2_dbc". */
+  metrics: Record<string, number>
+}
+
+export interface MeasurementDetail {
+  resultId: number
+  measurementTypeId: number
+  projectName: string
+  measurementTypeName: string
+  name: string
+  notes: string | null
+  timestampUtc: string
+  /** The parameters this specific result actually ran with — independent of the type's current (possibly since-edited) params. */
+  paramsJson: string
+  sampleRateHz: number
+  fftSize: number
+  channels: number
+  inRangeDbv: number | null
+  outRangeDbv: number | null
+  genJson: string | null
+  channelsData: MeasurementChannel[]
+}
+
+export interface SaveMeasurementRequest {
+  measurementTypeId: number
+  name: string
+  notes?: string | null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -175,7 +311,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${init?.method ?? 'GET'} /api${path} failed: ${response.status} ${body}`)
   }
 
-  return response.json() as Promise<T>
+  // Every endpoint until now always returned a full JSON body. The project/measurement CRUD
+  // endpoints introduced 204 No Content (delete) and empty 200 (update) responses, so `.json()`
+  // unconditionally would throw "Unexpected end of JSON input" on those — read as text first and
+  // only parse when there's something to parse.
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+function toQuery(params: Record<string, string | number | undefined>): string {
+  const entries = Object.entries(params).filter((entry): entry is [string, string | number] => entry[1] !== undefined)
+  if (entries.length === 0) return ''
+  return '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
 }
 
 export const api = {
@@ -206,4 +353,46 @@ export const api = {
 
   setSpectrumConfig: (config: SpectrumConfigRequest) =>
     request<SpectrumConfig>('/acquisition/spectrum-config', { method: 'POST', body: JSON.stringify(config) }),
+
+  listProjects: () => request<Project[]>('/projects'),
+
+  createProject: (req: SaveProjectRequest) => request<{ id: number }>('/projects', { method: 'POST', body: JSON.stringify(req) }),
+
+  updateProject: (id: number, req: SaveProjectRequest) =>
+    request<void>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
+
+  deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+
+  listMeasurementTypes: (projectId: number) => request<MeasurementType[]>(`/projects/${projectId}/measurement-types`),
+
+  createMeasurementType: (projectId: number, req: SaveMeasurementTypeRequest) =>
+    request<{ id: number }>(`/projects/${projectId}/measurement-types`, { method: 'POST', body: JSON.stringify(req) }),
+
+  updateMeasurementType: (id: number, req: SaveMeasurementTypeRequest) =>
+    request<void>(`/measurement-types/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
+
+  deleteMeasurementType: (id: number) => request<void>(`/measurement-types/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Pushes this type's stored spectrum/range parameters into the live app (silent, safe at select
+   * time) and returns its generator/acquisition settings for the UI to stage into its forms —
+   * loading a measurement never starts it playing; see App.vue's Run button for that.
+   */
+  applyMeasurementType: (id: number) => request<MeasurementTypeAppliedResponse>(`/measurement-types/${id}/apply`, { method: 'POST' }),
+
+  /** Saves the currently retained (stopped) spectrum snapshot — 409 while acquiring, or when nothing has been captured. */
+  saveMeasurement: (req: SaveMeasurementRequest) =>
+    request<MeasurementDetail>('/measurements', { method: 'POST', body: JSON.stringify(req) }),
+
+  listMeasurements: (filter: MeasurementFilter = {}) =>
+    request<MeasurementListResponse>(
+      `/measurements${toQuery({ projectId: filter.projectId, typeId: filter.typeId, from: filter.from, to: filter.to, skip: filter.skip, take: filter.take })}`,
+    ),
+
+  getMeasurement: (id: number) => request<MeasurementDetail>(`/measurements/${id}`),
+
+  deleteMeasurement: (id: number) => request<void>(`/measurements/${id}`, { method: 'DELETE' }),
+
+  /** Not fetched through `request` — a plain download link the caller renders as an `<a href=... download>`. */
+  measurementCsvExportUrl: (id: number) => `/api/measurements/${id}/export.csv`,
 }

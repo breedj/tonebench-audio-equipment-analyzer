@@ -107,10 +107,10 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     ///
     /// Historical note: this used to default to <c>false</c>, because back when the app had no real
     /// Auto control, leaving it on meant an explicit <see cref="SetInputRangeAsync"/> got silently
-    /// undone within ~10 ms of the stream running: <see cref="Qa40xAutoRanger.Evaluate"/> treats
-    /// anything below <see cref="Qa40xAutoRanger.UnderRangeThresholdFraction"/> (-24 dBFS) as
-    /// under-range, so any normal signal — or no signal at all — walked the range back down to the
-    /// most sensitive setting one step per 3 chunks. Audible on real hardware as the 24 dB
+    /// undone within ~10 ms of the stream running: <see cref="Qa40xAutoRanger.Evaluate"/> treats a
+    /// peak more than <see cref="Qa40xAutoRanger.HeadroomDb"/> dB below the next lower range's full
+    /// scale as under-range, so any normal signal — or no signal at all — walked the range back down
+    /// to the most sensitive setting one step per 3 chunks. Audible on real hardware as the 24 dB
     /// attenuator relay clicking in on selection and straight back out. That was a coordination bug
     /// between this class's own <c>_inputRangeDbv</c> (which autorange steps) and
     /// <c>DeviceSessionService</c>'s cached view of the range — if clicking or a stuck-looking range
@@ -806,7 +806,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// </summary>
         private void StepRangeIfNeeded(byte[] buffer, int transferLength, double currentRangeDbv)
         {
-            var decision = autoRanger.Evaluate(currentRangeDbv, ScanPeakAbsRaw(buffer, transferLength));
+            var decision = autoRanger.Evaluate(currentRangeDbv, ScanPeakDbv(buffer, transferLength, currentRangeDbv));
             if (decision == RangeStepDecision.Hold)
                 return;
 
@@ -821,20 +821,38 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 decision, nextRangeDbv, _pendingSettleFrames);
         }
 
-        /// <summary>Largest absolute raw ADC sample in the chunk — a plain int scan, cheap enough to keep on the pump thread (autoranging needs it before the chunk is handed off).</summary>
-        private static int ScanPeakAbsRaw(byte[] buffer, int transferLength)
+        /// <summary>
+        /// Largest calibrated peak level in the chunk (either channel), in dBV — converted through
+        /// the same peak-to-RMS-equivalent step <c>SpectrumPipeline.ComputeTimeDomainLevels</c> uses
+        /// for its "Pk dBV" meter (<c>peakVrms = peakVpk / sqrt(2)</c>), not a bare peak-volts log.
+        /// <see cref="Qa40xAutoRanger.HeadroomDb"/> (ported from the previous app's
+        /// <c>QaLibrary.DetermineAttenuation</c> / <c>attenuation.ts</c>) was calibrated against that
+        /// same RMS-equivalent "Pk dBV" reading, not a true-peak one — a true-peak dBV would read
+        /// 20*log10(sqrt(2)) ≈ 3.01 dB hotter than the level the rest of the app (and a signal
+        /// generator's own dBV setpoint) reports for the same sine, which would eat into the
+        /// documented -5 dBV headroom margin. Cheap enough to keep on the pump thread, since
+        /// autoranging needs it before the chunk is handed off.
+        /// </summary>
+        private double ScanPeakDbv(byte[] buffer, int transferLength, double currentRangeDbv)
         {
-            long peak = 0;
+            long peakRaw0 = 0, peakRaw1 = 0;
             int frameCount = transferLength / BytesPerFrame;
             for (int frame = 0; frame < frameCount; frame++)
             {
                 int byteOffset = frame * BytesPerFrame;
                 int slot0Raw = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(byteOffset));
                 int slot1Raw = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(byteOffset + 4));
-                peak = Math.Max(peak, Math.Max(Math.Abs((long)slot0Raw), Math.Abs((long)slot1Raw)));
+                peakRaw0 = Math.Max(peakRaw0, Math.Abs((long)slot0Raw));
+                peakRaw1 = Math.Max(peakRaw1, Math.Abs((long)slot1Raw));
             }
 
-            return (int)Math.Min(peak, int.MaxValue);
+            double volts0 = calibration.RawToVolts((int)Math.Min(peakRaw0, int.MaxValue), currentRangeDbv, 0);
+            double volts1 = calibration.RawToVolts((int)Math.Min(peakRaw1, int.MaxValue), currentRangeDbv, 1);
+            double peakVrms = Math.Max(volts0, volts1) / Math.Sqrt(2.0);
+
+            // Silence has no dBV; -Infinity compares fine against Evaluate's finite thresholds and
+            // reads as unambiguously under range, which is what true silence is.
+            return peakVrms > 0 ? 20.0 * Math.Log10(peakVrms) : double.NegativeInfinity;
         }
 
         private void Prime()

@@ -8,22 +8,23 @@ public class Qa40xAutoRangerTests
     private static readonly double[] InputRangesDbv = [0, 6, 12, 18, 24, 30, 36, 42];
 
     [Fact]
-    public void Evaluate_ClippingSample_StepsUpOneRange()
+    public void Evaluate_PeakAboveHeadroom_StepsUpOneRange()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
 
-        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakAbsRawSample: int.MaxValue);
+        // Range 12's headroom boundary is 12 - 5 = 7 dBV; 8 dBV is just over it.
+        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 8.0);
 
         Assert.Equal(RangeStepDecision.StepUp, decision);
         Assert.Equal(18.0, ranger.NextRangeDbv(12.0, decision));
     }
 
     [Fact]
-    public void Evaluate_ClippingAtTopRange_Holds()
+    public void Evaluate_PeakAboveHeadroomAtTopRange_Holds()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
 
-        var decision = ranger.Evaluate(currentRangeDbv: 42.0, peakAbsRawSample: int.MaxValue);
+        var decision = ranger.Evaluate(currentRangeDbv: 42.0, peakDbv: 100.0);
 
         Assert.Equal(RangeStepDecision.Hold, decision);
         Assert.Equal(42.0, ranger.NextRangeDbv(42.0, decision));
@@ -33,11 +34,12 @@ public class Qa40xAutoRangerTests
     public void Evaluate_UnderRange_RequiresConsecutiveBlocksBeforeSteppingDown()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
-        int lowPeak = (int)(int.MaxValue * 0.01); // well under the 6% threshold
+        // Next range down is 6, whose headroom boundary is 6 - 5 = 1 dBV; well under that.
+        const double lowPeakDbv = -10.0;
 
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeak));
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeak));
-        var third = ranger.Evaluate(12.0, lowPeak);
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
+        var third = ranger.Evaluate(12.0, lowPeakDbv);
 
         Assert.Equal(RangeStepDecision.StepDown, third);
         Assert.Equal(6.0, ranger.NextRangeDbv(12.0, third));
@@ -47,50 +49,50 @@ public class Qa40xAutoRangerTests
     public void Evaluate_UnderRangeAtBottomRange_NeverSteps()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
-        int lowPeak = (int)(int.MaxValue * 0.01);
+        const double lowPeakDbv = -40.0;
 
         for (int i = 0; i < 5; i++)
-            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(0.0, lowPeak));
+            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(0.0, lowPeakDbv));
     }
 
     [Fact]
     public void Evaluate_ANormalLevelBlockResetsUnderRangeHysteresis()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
-        int lowPeak = (int)(int.MaxValue * 0.01);
-        int midPeak = (int)(int.MaxValue * 0.5);
+        const double lowPeakDbv = -10.0;
+        const double midPeakDbv = 4.0; // Between the 1 dBV step-down and 7 dBV step-up boundaries.
 
-        ranger.Evaluate(12.0, lowPeak);
-        ranger.Evaluate(12.0, lowPeak);
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeak)); // resets the counter
+        ranger.Evaluate(12.0, lowPeakDbv);
+        ranger.Evaluate(12.0, lowPeakDbv);
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeakDbv)); // resets the counter
 
         // Two more low blocks after the reset is only the 2nd consecutive, not yet the 3rd.
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeak));
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeak));
-        Assert.Equal(RangeStepDecision.StepDown, ranger.Evaluate(12.0, lowPeak));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
+        Assert.Equal(RangeStepDecision.StepDown, ranger.Evaluate(12.0, lowPeakDbv));
     }
 
     [Fact]
     public void Reset_ClearsUnderRangeHysteresis()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
-        int lowPeak = (int)(int.MaxValue * 0.01);
+        const double lowPeakDbv = -10.0;
 
-        ranger.Evaluate(12.0, lowPeak);
-        ranger.Evaluate(12.0, lowPeak);
+        ranger.Evaluate(12.0, lowPeakDbv);
+        ranger.Evaluate(12.0, lowPeakDbv);
         ranger.Reset();
 
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeak));
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeak));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
     }
 
     [Fact]
     public void Evaluate_MidRangeSample_Holds()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
-        int midPeak = (int)(int.MaxValue * 0.5);
+        const double midPeakDbv = 4.0;
 
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeak));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeakDbv));
     }
 
     [Fact]

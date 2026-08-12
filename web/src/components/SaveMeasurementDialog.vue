@@ -7,44 +7,36 @@ import { useMeasurements } from '../composables/useMeasurements'
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 
-const { projects, types, loadTypes, currentProjectId, currentTypeId } = useProjects()
+// Always saves into whichever project/measurement is currently open in the sidebar — this dialog
+// only opens from the "Save measurement result" button, which itself only shows once a type is
+// selected (see App.vue), so currentTypeId is never null here. Same currentType/currentProject
+// lookup App.vue itself does — useProjects doesn't keep a derived "current" object of its own.
+const { projects, types, currentTypeId } = useProjects()
 const { save, error } = useMeasurements()
 
+const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
+const currentProject = computed(() => projects.value.find((p) => p.id === currentType.value?.projectId) ?? null)
+
 const form = reactive({
-  projectId: null as number | null,
-  measurementTypeId: null as number | null,
   name: '',
   notes: '',
 })
 
-const canSave = computed(() => form.measurementTypeId !== null && form.name.trim().length > 0)
+const canSave = computed(() => currentType.value !== null && form.name.trim().length > 0)
 
 watch(
   () => props.open,
   (open) => {
     if (!open) return
-    // Reset per open, not per mount — the dialog is a template singleton in App.vue. Defaults to
-    // whatever the sidebar currently has open, since that's almost always what "Save" means here.
+    // Reset per open, not per mount — the dialog is a template singleton in App.vue.
     form.name = ''
     form.notes = ''
-    form.projectId = currentProjectId.value ?? projects.value[0]?.id ?? null
   },
-)
-
-watch(
-  () => form.projectId,
-  async (projectId) => {
-    form.measurementTypeId = null
-    if (projectId === null) return
-    await loadTypes(projectId)
-    if (projectId === currentProjectId.value && currentTypeId.value !== null) form.measurementTypeId = currentTypeId.value
-  },
-  { immediate: true },
 )
 
 async function onSave() {
-  if (!canSave.value || form.measurementTypeId === null) return
-  await save({ measurementTypeId: form.measurementTypeId, name: form.name.trim(), notes: form.notes.trim() || null })
+  if (!canSave.value || currentType.value === null) return
+  await save({ measurementTypeId: currentType.value.id, name: form.name.trim(), notes: form.notes.trim() || null })
   emit('saved')
   emit('close')
 }
@@ -53,28 +45,9 @@ async function onSave() {
 <template>
   <Modal :open="props.open" title="Save measurement" @close="emit('close')">
     <div class="flex flex-col gap-3 text-sm">
-      <label class="flex flex-col gap-1">
-        Project
-        <select
-          v-model.number="form.projectId"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-        </select>
-      </label>
-
-      <label class="flex flex-col gap-1">
-        Measurement type
-        <select
-          v-model.number="form.measurementTypeId"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option v-for="t in types" :key="t.id" :value="t.id">{{ t.name }}</option>
-        </select>
-        <span v-if="form.projectId !== null && types.length === 0" class="text-xs text-neutral-400 dark:text-neutral-600">
-          This project has no measurement types yet — add one in the Projects panel first.
-        </span>
-      </label>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400">
+        Saving into <span class="font-medium text-neutral-700 dark:text-neutral-300">{{ currentProject?.name }} / {{ currentType?.name }}</span>
+      </p>
 
       <label class="flex flex-col gap-1">
         Name

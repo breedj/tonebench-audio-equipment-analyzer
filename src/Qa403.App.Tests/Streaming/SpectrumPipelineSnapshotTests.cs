@@ -125,12 +125,14 @@ public class SpectrumPipelineSnapshotTests
             Assert.Equal(header.Seq, snapshot.Seq);
 
             var decoded = meters.Value;
-            Assert.Equal(decoded.FundamentalFreqHz, snapshot.Meters.FundamentalFreqHz);
-            Assert.Equal(decoded.ThdPercent, snapshot.Meters.ThdPercent);
-            Assert.Equal(decoded.ThdNPercent, snapshot.Meters.ThdNPercent);
-            Assert.Equal(decoded.SnrDb, snapshot.Meters.SnrDb);
-            Assert.Equal(decoded.FundamentalDbv, snapshot.Meters.FundamentalDbv);
-            Assert.Equal(decoded.Harmonics.Length, snapshot.Meters.Harmonics.Length);
+            Assert.NotNull(snapshot.Meters);
+            var snapshotMeters = snapshot.Meters;
+            Assert.Equal(decoded.FundamentalFreqHz, snapshotMeters.FundamentalFreqHz);
+            Assert.Equal(decoded.ThdPercent, snapshotMeters.ThdPercent);
+            Assert.Equal(decoded.ThdNPercent, snapshotMeters.ThdNPercent);
+            Assert.Equal(decoded.SnrDb, snapshotMeters.SnrDb);
+            Assert.Equal(decoded.FundamentalDbv, snapshotMeters.FundamentalDbv);
+            Assert.Equal(decoded.Harmonics.Length, snapshotMeters.Harmonics.Length);
         }
         finally
         {

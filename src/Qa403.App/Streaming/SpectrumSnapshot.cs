@@ -24,7 +24,10 @@ public sealed record SpectrumMeters(
 /// <summary>
 /// One channel's full-resolution spectrum as last displayed, for a "save current capture"
 /// action. <see cref="Dbv"/> is dBV (20*log10(Vrms)) per bin -- the amplitude-domain trace, full
-/// resolution (not the ~1600-column decimated display frame).
+/// resolution (not the ~1600-column decimated display frame). <see cref="Meters"/> is null when
+/// the tick that produced this trace found no fundamental in the measurement band (e.g. the
+/// loudest content in the whole spectrum sits above <c>MeasurementHiFreqHz</c>) -- the trace is
+/// still perfectly saveable, it just has no derived THD/SNR/harmonics to go with it.
 /// </summary>
 public sealed record SpectrumSnapshot(
     StreamChannel Channel,
@@ -36,4 +39,4 @@ public sealed record SpectrumSnapshot(
     WindowType Window,
     WindowSums Sums,
     double[] Dbv,
-    SpectrumMeters Meters);
+    SpectrumMeters? Meters);

@@ -113,6 +113,11 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     /// channel with <see cref="SpectrumPipelineOptions.ProcessLeft"/>/<c>ProcessRight</c> off is
     /// simply absent, same as it is from the live broadcast.
     ///
+    /// Gated only on the trace itself (<c>AmpPower</c>), not on <c>Meters</c> -- a tick that found
+    /// no fundamental in band still produced a perfectly good spectrum (see
+    /// <see cref="SpectrumSnapshot.Meters"/>), and requiring Meters here used to make "Save" fail
+    /// with "No spectrum has been captured yet." even while a trace was clearly on screen.
+    ///
     /// Deliberately not called on every tick's hot path: it converts the retained peak-volts^2
     /// trace to dBV here, on the caller's thread, rather than in <see cref="ProcessChannel"/> --
     /// see <see cref="_retained"/>.
@@ -126,7 +131,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             for (int ch = 0; ch < MaxChannels; ch++)
             {
                 var retained = _retained[ch];
-                if (retained.AmpPower is null || retained.Meters is null)
+                if (retained.AmpPower is null)
                     continue;
 
                 var dbv = new double[retained.AmpPower.Length];

@@ -10,6 +10,41 @@ export interface MetricTile {
   value: string
 }
 
+/**
+ * The fixed, user-selectable subset of channelTiles()'s labels, in the same order — everything
+ * except the dynamic GenN/Gen… tiles (their count depends on how many generator tones are active,
+ * so they're not something a fixed checklist can offer). Used to back MetricPickerDialog.vue and
+ * to filter MetricsPanel.vue's display down to what's selected — see useMetricSelection.ts.
+ */
+export const AVAILABLE_METRIC_LABELS = [
+  'Freq Hz',
+  'Note',
+  'Gain dB',
+  'THD %',
+  'THD dB',
+  'THD dBr',
+  'THD dBV',
+  'THD+N %',
+  'THD+N dB',
+  'THD+N dBr',
+  'THD+N dBV',
+  'N+D dBr',
+  'N+D dBV',
+  'N-D dBr',
+  'N-D dBV',
+  'SNR dB',
+  'SNR dBr',
+  'Pk dBr',
+  'Pk dBV',
+  'Pk Vrms',
+  'Pk Pwr',
+  'RMS dBr',
+  'RMS dBV',
+  'RMS dBu',
+  'RMS Volts',
+  'RMS Pwr',
+] as const
+
 export function dbvToVrms(dbv: number): number {
   return Math.pow(10, dbv / 20)
 }

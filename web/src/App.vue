@@ -6,6 +6,7 @@ import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements } from './composables/useMeasurements'
 import { useProjects } from './composables/useProjects'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
+import { useMetricSelection } from './composables/useMetricSelection'
 import { determineAttenuation, nearestInputRange } from './attenuation'
 import { stopRun } from './deviceControl'
 import DeviceStatusBar from './components/DeviceStatusBar.vue'
@@ -25,16 +26,19 @@ import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
 import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
+import MetricPickerDialog from './components/MetricPickerDialog.vue'
 
 const { status, ranges, error, refreshStatus } = useDevice()
 const { spectrum, meters, scope, setViewport } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig } = useSpectrumConfig()
+const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
 const {
   projects,
   types,
   currentProjectId,
   currentTypeId,
+  loadedParams,
   dirtyTypeIds,
   markDirty,
   saveMeasurementType,
@@ -42,6 +46,10 @@ const {
   saveProject,
   saveProjectAs,
 } = useProjects()
+
+// Syncs the metrics-picker selection whenever a measurement type is (re)loaded — see
+// useMetricSelection.ts's applyLoaded for the null-means-default handling.
+watch(loadedParams, (params) => applyLoadedMetrics(params?.selectedMetrics), { immediate: true })
 
 interface RunConfig {
   sampleRateHz: number
@@ -53,6 +61,7 @@ const spectrumConfigPanel = ref<InstanceType<typeof SpectrumConfigPanel> | null>
 const saveDialogOpen = ref(false)
 const saveTypeAsOpen = ref(false)
 const saveProjectAsOpen = ref(false)
+const metricPickerOpen = ref(false)
 // Placeholder for the real "Projects" dialog — for now the button just expands the existing
 // project list/create/delete panel in place, until that gets its own proper dialog.
 const projectPanelOpen = ref(false)
@@ -244,6 +253,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     generatorLeft: generator.left,
     generatorRight: generator.right,
     snapToBin: generator.snapToBin,
+    selectedMetrics: selectedMetrics.value,
   }
 }
 
@@ -414,6 +424,31 @@ function confirmSaveProjectAs(name: string) {
             </div>
 
             <div class="min-w-0 flex-1">
+              <div class="mb-3 flex flex-wrap items-start gap-3">
+                <div class="flex flex-1 flex-wrap gap-3">
+                  <MetricsPanel
+                    v-if="spectrumConfig?.processLeft ?? true"
+                    channel-label="L"
+                    :meters="meters[0] ?? null"
+                    :generator-tones="status?.generatorLeft.tones ?? []"
+                  />
+                  <MetricsPanel
+                    v-if="spectrumConfig?.processRight ?? true"
+                    channel-label="R"
+                    :meters="meters[1] ?? null"
+                    :generator-tones="status?.generatorRight.tones ?? []"
+                  />
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                  title="Choose which metrics appear above the graph."
+                  @click="metricPickerOpen = true"
+                >
+                  + Metrics
+                </button>
+              </div>
+
               <SpectrumChart
                 :spectrum="spectrum"
                 :meters="meters"
@@ -435,12 +470,10 @@ function confirmSaveProjectAs(name: string) {
 
           <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <div class="flex flex-col gap-4">
-              <MetricsPanel channel-label="L" :meters="meters[0] ?? null" :generator-tones="status?.generatorLeft.tones ?? []" />
               <HarmonicsTable :meters="meters" :channel="0" channel-label="L" />
               <OtherPeaksTable :meters="meters" :channel="0" channel-label="L" />
             </div>
             <div class="flex flex-col gap-4">
-              <MetricsPanel channel-label="R" :meters="meters[1] ?? null" :generator-tones="status?.generatorRight.tones ?? []" />
               <HarmonicsTable :meters="meters" :channel="1" channel-label="R" />
               <OtherPeaksTable :meters="meters" :channel="1" channel-label="R" />
             </div>
@@ -476,5 +509,6 @@ function confirmSaveProjectAs(name: string) {
       @close="saveProjectAsOpen = false"
       @confirm="confirmSaveProjectAs"
     />
+    <MetricPickerDialog :open="metricPickerOpen" @close="metricPickerOpen = false" />
   </div>
 </template>

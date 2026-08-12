@@ -202,6 +202,8 @@ export interface MeasurementTypeAppliedResponse {
   inputRangeDbv: number
   outputRangeDbv: number
   autoRangeEnabled: boolean | null
+  /** This type's stored metric-picker selection — null for a type saved before the feature existed, or never customized. See useMetricSelection.ts. */
+  selectedMetrics?: string[] | null
 }
 
 /**
@@ -217,6 +219,8 @@ export interface StagedMeasurementConfig {
   generatorLeft: GeneratorChannelRequest
   generatorRight: GeneratorChannelRequest
   snapToBin?: boolean
+  /** The metrics-picker's current selection, staged the same way as any other on-screen setting. */
+  selectedMetrics?: string[] | null
 }
 
 export interface SaveMeasurementTypeRequest {

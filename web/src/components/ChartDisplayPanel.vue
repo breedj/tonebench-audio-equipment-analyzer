@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useChartDisplay } from '../composables/useChartDisplay'
+import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 
 const {
   yTop,
@@ -15,6 +16,16 @@ const {
   requestAutofitY,
   requestAutofitX,
 } = useChartDisplay()
+
+// FFT settings' L/R checkboxes (SpectrumConfigPanel.vue) are the source of truth for whether a
+// channel is processed at all — a channel turned off there has no data to show, so its own
+// show/hide checkbox here is forced off and locked rather than left toggleable.
+const { config: spectrumConfig } = useSpectrumConfig()
+const processLeft = computed(() => spectrumConfig.value?.processLeft ?? true)
+const processRight = computed(() => spectrumConfig.value?.processRight ?? true)
+
+watch(processLeft, (enabled) => { if (!enabled) visibleL.value = false }, { immediate: true })
+watch(processRight, (enabled) => { if (!enabled) visibleR.value = false }, { immediate: true })
 
 const FREQ_FROM_PRESETS = [5, 10, 20, 50, 100, 200, 500]
 const FREQ_TO_PRESETS = [1000, 2000, 5000, 10000, 20000, 100000]
@@ -106,12 +117,12 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
     </section>
 
     <section class="flex flex-col gap-1.5 text-sm">
-      <label class="flex items-center gap-1.5">
-        <input v-model="visibleL" type="checkbox" />
+      <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processLeft }">
+        <input v-model="visibleL" type="checkbox" :disabled="!processLeft" />
         Left channel
       </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="visibleR" type="checkbox" />
+      <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processRight }">
+        <input v-model="visibleR" type="checkbox" :disabled="!processRight" />
         Right channel
       </label>
       <label class="flex items-center gap-1.5">

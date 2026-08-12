@@ -142,7 +142,8 @@ public sealed record SaveMeasurementTypeRequest(string Kind, string Name, string
 /// </summary>
 public sealed record StagedMeasurementConfig(
     double SampleRateHz, int ChannelCount, double InputRangeDbv, bool? AutoRangeEnabled,
-    GeneratorChannelRequest GeneratorLeft, GeneratorChannelRequest GeneratorRight, bool? SnapToBin);
+    GeneratorChannelRequest GeneratorLeft, GeneratorChannelRequest GeneratorRight, bool? SnapToBin,
+    IReadOnlyList<string>? SelectedMetrics = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, DateTimeOffset CreatedUtc);
@@ -161,4 +162,5 @@ public sealed record MeasurementTypeAppliedResponse(
     int BlockFrameCount,
     double InputRangeDbv,
     double OutputRangeDbv,
-    bool? AutoRangeEnabled);
+    bool? AutoRangeEnabled,
+    IReadOnlyList<string>? SelectedMetrics);

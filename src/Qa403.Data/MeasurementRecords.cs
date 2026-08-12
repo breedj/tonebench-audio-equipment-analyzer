@@ -28,7 +28,12 @@ public sealed record FftSpectrumParameters(
     double InputRangeDbv,
     double OutputRangeDbv,
     bool? AutoRangeEnabled,
-    GeneratorConfig Generator);
+    GeneratorConfig Generator,
+    // The metrics-picker's selection at save time -- purely a UI display preference, never fed into
+    // spectrumPipeline.Options. Optional with a default so rows saved before this field existed
+    // still deserialize (every other property here is required); null means "use the THD %/Pk dBV
+    // default" -- see useMetricSelection.ts.
+    IReadOnlyList<string>? SelectedMetrics = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm

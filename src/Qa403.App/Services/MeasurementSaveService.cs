@@ -52,8 +52,13 @@ public sealed class MeasurementSaveService(
         var metrics = new List<MeasurementMetric>();
         foreach (var snapshot in snapshots)
         {
+            // No fundamental found in band for this channel this tick — its spectrum is still
+            // saved above (via `spectra`), just with no derived metric rows to go with it. See
+            // SpectrumSnapshot.Meters.
+            if (snapshot.Meters is not { } m)
+                continue;
+
             int channel = ChannelIndex(snapshot.Channel);
-            var m = snapshot.Meters;
 
             metrics.Add(new MeasurementMetric(channel, "thd_percent", m.ThdPercent, "%"));
             metrics.Add(new MeasurementMetric(channel, "thd_n_percent", m.ThdNPercent, "%"));
@@ -125,7 +130,8 @@ public sealed class MeasurementSaveService(
             parameters.BlockFrameCount,
             parameters.InputRangeDbv,
             parameters.OutputRangeDbv,
-            parameters.AutoRangeEnabled);
+            parameters.AutoRangeEnabled,
+            parameters.SelectedMetrics);
     }
 
     /// <summary>
@@ -163,7 +169,7 @@ public sealed class MeasurementSaveService(
             sampleRateHz, channelCount,
             streamConfig?.BlockFrameCount ?? DeviceSessionService.MinBlockFrameCount,
             inputRangeDbv, session.OutputRangeDbv, autoRangeEnabled,
-            generator);
+            generator, staged?.SelectedMetrics);
     }
 
     public string BuildCurrentParametersJson(StagedMeasurementConfig? staged = null) =>

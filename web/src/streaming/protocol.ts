@@ -146,6 +146,8 @@ export interface MetersFrame {
   harmonics: HarmonicMarker[]
   /** Strongest-first non-harmonic peaks (mains hum, IMD/mixing products, other spurs) — see PeakFinder.cs. */
   otherPeaks: HarmonicMarker[]
+  /** How many spectra have contributed so far, capped at the configured target count; 0 when averaging is off. See SpectrumAverager.Count. */
+  averagesTaken: number
 }
 
 /**
@@ -158,7 +160,8 @@ export interface MetersFrame {
  * 20 f32  peakDbv
  * 24 f32  totalRmsDbv
  * 28 u32  otherPeakCount
- * 32 (f32 freqHz, f32 dbc) * nPoints          — one entry per harmonic, order 1..N in order.
+ * 32 u32  averagesTaken
+ * 36 (f32 freqHz, f32 dbc) * nPoints          — one entry per harmonic, order 1..N in order.
  * .. (f32 freqHz, f32 dbc) * otherPeakCount   — non-harmonic peaks, strongest first.
  */
 export function decodeMetersFrame(buffer: ArrayBuffer): MetersFrame {
@@ -181,6 +184,8 @@ export function decodeMetersFrame(buffer: ArrayBuffer): MetersFrame {
   const totalRmsDbv = view.getFloat32(offset, true)
   offset += 4
   const otherPeakCount = view.getUint32(offset, true)
+  offset += 4
+  const averagesTaken = view.getUint32(offset, true)
   offset += 4
 
   const harmonics: HarmonicMarker[] = new Array(header.nPoints)
@@ -214,5 +219,6 @@ export function decodeMetersFrame(buffer: ArrayBuffer): MetersFrame {
     totalRmsDbv,
     harmonics,
     otherPeaks,
+    averagesTaken,
   }
 }

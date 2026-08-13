@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+/* Dark mode is driven by a `.dark` class on <html> (see useAppTheme.ts) instead of Tailwind's
+   default `prefers-color-scheme` media query, so a manual Light/Dark choice in the Configuration
+   dialog can override the OS setting; Auto mode just mirrors the OS onto the class itself. */
+@custom-variant dark (&:where(.dark, .dark *));

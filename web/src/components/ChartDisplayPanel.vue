@@ -13,8 +13,10 @@ const {
   visibleL,
   visibleR,
   showMinMax,
+  showPeakHold,
   requestAutofitY,
   requestAutofitX,
+  requestResetPeakHold,
 } = useChartDisplay()
 
 // FFT settings' L/R checkboxes (SpectrumConfigPanel.vue) are the source of truth for whether a
@@ -129,6 +131,19 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
         <input v-model="showMinMax" type="checkbox" />
         Min/max
       </label>
+      <label class="flex items-center gap-1.5">
+        <input v-model="showPeakHold" type="checkbox" />
+        Peak-hold
+      </label>
+      <button
+        v-if="showPeakHold"
+        type="button"
+        class="w-full rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        title="Clears the peak-hold trace and starts capturing fresh maximums."
+        @click="requestResetPeakHold"
+      >
+        Reset peak-hold
+      </button>
     </section>
   </div>
 </template>

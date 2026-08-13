@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, useTemplateRef, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import type { DeviceStatus, GeneratorChannelRequest } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useLoadOhms } from '../composables/useLoadOhms'
+import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import GeneratorChannelPanel from './GeneratorChannelPanel.vue'
 
 // Shared with both channels' Metrics panels — one amplifier load, edited here instead of twice.
@@ -23,13 +24,28 @@ const channelPanel = useTemplateRef<InstanceType<typeof GeneratorChannelPanel>>(
 const leftEnabled = ref(false)
 const rightEnabled = ref(false)
 const snapToBin = ref(true)
+const { kind: stimulusKind } = useGeneratorStimulus()
+
+// Snapping only ever rewrites a channel's `tones` list (see DeviceSessionService.SnapTones) — a
+// silent no-op for Multitone/WhiteNoise, which have none. Disabled rather than just documented so
+// it can't look like it's doing something for those kinds.
+const canSnapToBin = computed(() => stimulusKind.value === 'Tones')
+// Switching to Tones re-enables it by default (the common case wants it on); switching away
+// disables it, same as before.
+watch(stimulusKind, (kind) => {
+  snapToBin.value = kind === 'Tones'
+})
+
 watch(
   loadedParams,
   (params) => {
     if (!params) return
     leftEnabled.value = params.generatorLeft.enabled
     rightEnabled.value = params.generatorRight.enabled
-    snapToBin.value = params.snapToBin
+    // Clamped against the loaded kind directly, rather than against stimulusKind (synced from the
+    // child a tick later) — a measurement saved before this gate existed could have snapToBin true
+    // alongside a Multitone/WhiteNoise kind, and this must not resurrect it as checked.
+    snapToBin.value = params.snapToBin && params.generatorLeft.kind === 'Tones'
   },
   { immediate: true },
 )
@@ -86,7 +102,11 @@ defineExpose({ buildRequest, resyncTones })
       Ω
     </label>
 
-    <GeneratorChannelPanel ref="channelPanel" :load-state="loadedParams?.generatorLeft" @change="emit('change')" />
+    <GeneratorChannelPanel
+      ref="channelPanel"
+      :load-state="loadedParams?.generatorLeft"
+      @change="emit('change')"
+    />
 
     <div class="mt-4 flex items-center gap-4">
       <!--
@@ -98,9 +118,12 @@ defineExpose({ buildRequest, resyncTones })
       -->
       <label
         class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
-        title="Snap tone frequencies to the nearest coherent FFT bin, so a tone lands on exactly one bin with no leakage."
+        :class="{ 'opacity-40': !canSnapToBin }"
+        :title="canSnapToBin
+          ? 'Snap tone frequencies to the nearest coherent FFT bin, so a tone lands on exactly one bin with no leakage.'
+          : 'Only applies to sine tones — Multitone and White noise have no single frequency to snap.'"
       >
-        <input v-model="snapToBin" type="checkbox" @change="emit('change')" />
+        <input v-model="snapToBin" type="checkbox" :disabled="!canSnapToBin" @change="emit('change')" />
         Snap to bin
       </label>
     </div>

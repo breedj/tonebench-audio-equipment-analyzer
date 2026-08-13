@@ -8,6 +8,8 @@ import {
   formatFftSize,
   formatVrms,
   formatWatts,
+  generatorTile,
+  multitoneToneCount,
   noteName,
   powerWatts,
   ratioPercentToDb,
@@ -15,7 +17,7 @@ import {
   vrmsToDbv,
 } from './metrics'
 import type { MetersFrame } from './streaming/protocol'
-import type { GeneratorTone } from './api/client'
+import type { GeneratorTone, MultitoneSettings, WhiteNoiseSettings } from './api/client'
 
 // Golden values below are cross-checked against the reference QA40x screenshot's own numbers
 // (e.g. THD dB / THD+N dB / N-D dBr all reproduce independently from other tiles in that same
@@ -86,6 +88,13 @@ describe('formatAveraging', () => {
     expect(formatAveraging('Linear', 8)).toBe('Linear x8')
     expect(formatAveraging('Exponential', 16)).toBe('Exponential τ=16')
   })
+
+  it('appends a taken/target progress count, capped at the target, when taken is given', () => {
+    expect(formatAveraging('Linear', 8, 3)).toBe('Linear x8 (3/8)')
+    expect(formatAveraging('Linear', 8, 8)).toBe('Linear x8 (8/8)')
+    expect(formatAveraging('Linear', 8, 20)).toBe('Linear x8 (8/8)') // capped, never over target
+    expect(formatAveraging('Off', 8, 0)).toBe('Off') // Off ignores taken entirely
+  })
 })
 
 describe('noteName', () => {
@@ -118,6 +127,7 @@ describe('channelTiles', () => {
     totalRmsDbv: -17.6,
     harmonics: [],
     otherPeaks: [],
+    averagesTaken: 0,
   }
 
   it('returns an empty list when there is no data yet', () => {
@@ -142,27 +152,52 @@ describe('channelTiles', () => {
     expect(tiles.find((t) => t.label === 'Gain dB')?.value).toBe('—')
   })
 
-  it('lists one GenN tile per configured tone for that channel', () => {
+  it('no longer carries a per-tone GenN tile — see generatorTile() below', () => {
+    const tones: GeneratorTone[] = [{ freqHz: 1000, ampDbv: -6 }]
+    const tiles = channelTiles(meters, tones, 8)
+    expect(tiles.some((t) => /^Gen/.test(t.label))).toBe(false)
+  })
+})
+
+describe('multitoneToneCount', () => {
+  it('matches MultitoneGenerator.Build\'s f_i = 5 * 2^(i/n) walk over the fixed 5 Hz-20 kHz band', () => {
+    // Default tonesPerOctave (5) comb — the "9 Gen metrics (...Gen (60 tones))" bug report's own number.
+    expect(multitoneToneCount(5)).toBe(60)
+    expect(multitoneToneCount(1)).toBe(12)
+  })
+})
+
+describe('generatorTile', () => {
+  const multitone: MultitoneSettings = { tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 }
+  const noise: WhiteNoiseSettings = { levelDbv: -20 }
+
+  it('lists every staged Sine tone in one tile, not one tile each', () => {
     const tones: GeneratorTone[] = [
       { freqHz: 1000, ampDbv: -6 },
       { freqHz: 5000, ampDbv: -12 },
     ]
-    const tiles = channelTiles(meters, tones, 8)
-    expect(tiles.find((t) => t.label === 'Gen1')?.value).toContain('1.0000 kHz')
-    expect(tiles.find((t) => t.label === 'Gen2')?.value).toContain('5.0000 kHz')
+    const tile = generatorTile('Tones', tones, multitone, noise)
+    expect(tile?.label).toBe('Gen')
+    expect(tile?.value).toBe('1000.000 Hz, -6.00 dBV\n5000.000 Hz, -12.00 dBV')
   })
 
-  it('summarises a long tone list instead of one tile per tone', () => {
-    // A default multitone comb is 60 tones — the panel must stay readable.
-    const tones: GeneratorTone[] = Array.from({ length: 60 }, (_, i) => ({
-      freqHz: 5 * Math.pow(2, i / 5),
-      ampDbv: -67.78,
-    }))
-    const tiles = channelTiles(meters, tones, 8)
+  it('returns null for Sine with no tones staged yet', () => {
+    expect(generatorTile('Tones', [], multitone, noise)).toBeNull()
+  })
 
-    expect(tiles.filter((t) => /^Gen\d+$/.test(t.label))).toHaveLength(8)
-    expect(tiles.find((t) => t.label.startsWith('Gen…'))?.label).toBe('Gen… (60 tones)')
-    expect(tiles.find((t) => t.label.startsWith('Gen…'))?.value).toContain('17.8289 kHz')
+  it('summarises Multitone as a tone count over its fixed band', () => {
+    const tile = generatorTile('Multitone', [], multitone, noise)
+    expect(tile).toEqual({ label: 'Gen', value: '(60 tones), 5 Hz - 20 kHz' })
+  })
+
+  it('summarises White noise as its configured level', () => {
+    const tile = generatorTile('WhiteNoise', [], multitone, noise)
+    expect(tile).toEqual({ label: 'Gen', value: 'White noise, -20.00 dBV' })
+  })
+
+  it('returns null for kinds with no summary (Off/EchoChirp)', () => {
+    expect(generatorTile('Off', [], multitone, noise)).toBeNull()
+    expect(generatorTile('EchoChirp', [], multitone, noise)).toBeNull()
   })
 })
 
@@ -173,12 +208,12 @@ describe('systemTiles', () => {
       window: 'Hann',
       averaging: 'Off',
       averageCount: 8,
+      averagesTaken: undefined,
       inputRangeDbv: 42,
       binSizeHz: 1.46,
     })
 
     expect(tiles.find((t) => t.label === 'Sys:FFT')?.value).toBe('128k')
-    expect(tiles.find((t) => t.label === 'Sys:Averages')?.value).toBe('Off')
     expect(tiles.find((t) => t.label === 'Sys:Window')?.value).toBe('Hann')
     expect(tiles.find((t) => t.label === 'Sys:FullScale')?.value).toBe('+42 dBV')
     expect(tiles.find((t) => t.label === 'Sys:Resolution')?.value).toBe('1.46 Hz')

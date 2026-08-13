@@ -15,6 +15,11 @@ const showDataPoints = ref(false)
 const visibleL = ref(true)
 const visibleR = ref(true)
 const showMinMax = ref(true)
+const showPeakHold = ref(false)
+
+// SpectrumChart.vue owns the actual per-bin peak data (module-level there, same reasoning as
+// autofit below); this is just the button's "clear it" signal.
+const resetPeakHoldTrigger = ref(0)
 
 // "Autofit" needs the currently-plotted data (highest/lowest dBV point, current sample rate) to
 // compute a real answer — data this composable doesn't have. The buttons just bump these counters;
@@ -42,6 +47,10 @@ export function useChartDisplay() {
     autofitXTrigger.value++
   }
 
+  function requestResetPeakHold() {
+    resetPeakHoldTrigger.value++
+  }
+
   return {
     yTop,
     yBottom,
@@ -52,10 +61,13 @@ export function useChartDisplay() {
     visibleL,
     visibleR,
     showMinMax,
+    showPeakHold,
+    resetPeakHoldTrigger,
     autofitYTrigger,
     autofitXTrigger,
     requestAutofitY,
     requestAutofitX,
+    requestResetPeakHold,
     resetYDefaults,
     resetXDefaults,
   }

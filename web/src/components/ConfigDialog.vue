@@ -1,0 +1,94 @@
+<script setup lang="ts">
+import { reactive, watch } from 'vue'
+import Modal from './Modal.vue'
+import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
+import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+
+const props = defineProps<{ open: boolean }>()
+const emit = defineEmits<{ close: [] }>()
+
+const { themeMode } = useAppTheme()
+const { config, apply: applyConfig } = useSpectrumConfig()
+
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: 'Auto', label: 'Auto' },
+  { value: 'Light', label: 'Light' },
+  { value: 'Dark', label: 'Dark' },
+]
+
+// The band THD+N / SNR / noise floor are integrated over — global (applies to whatever is
+// currently running, independent of which measurement type is selected), not part of any
+// measurement type's saved params. Staged locally like SpectrumConfigPanel's own form, applied on
+// change straight through the same live useSpectrumConfig() config this used to live next to.
+const bandwidth = reactive({ loFreqHz: 20, hiFreqHz: 20000 })
+
+watch(
+  config,
+  (c) => {
+    if (!c) return
+    bandwidth.loFreqHz = c.measurementLoFreqHz
+    bandwidth.hiFreqHz = c.measurementHiFreqHz
+  },
+  { immediate: true },
+)
+
+async function applyBandwidth() {
+  await applyConfig({ measurementLoFreqHz: bandwidth.loFreqHz, measurementHiFreqHz: bandwidth.hiFreqHz })
+}
+</script>
+
+<template>
+  <Modal :open="props.open" title="Configuration" @close="emit('close')">
+    <div class="flex flex-col gap-5 text-sm">
+      <section>
+        <h3 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">Display</h3>
+        <label class="flex flex-col gap-1">
+          Style
+          <select
+            v-model="themeMode"
+            class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          >
+            <option v-for="o in THEME_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+        </label>
+      </section>
+
+      <section>
+        <h3 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">Measurement</h3>
+        <label
+          class="flex flex-col gap-1"
+          title="Bandwidth THD+N, SNR and the noise floor are measured over. Also keeps DC out of the noise integration. Applies globally, regardless of which measurement is selected."
+        >
+          Metrics bandwidth (Hz)
+          <span class="flex items-center gap-1">
+            <input
+              type="number"
+              min="0"
+              v-model.number="bandwidth.loFreqHz"
+              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              @change="applyBandwidth"
+            />
+            <span class="text-neutral-400">–</span>
+            <input
+              type="number"
+              min="1"
+              v-model.number="bandwidth.hiFreqHz"
+              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              @change="applyBandwidth"
+            />
+          </span>
+        </label>
+      </section>
+
+      <div class="flex justify-end border-t border-neutral-200 pt-3 dark:border-neutral-800">
+        <button
+          type="button"
+          class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+          @click="emit('close')"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </Modal>
+</template>

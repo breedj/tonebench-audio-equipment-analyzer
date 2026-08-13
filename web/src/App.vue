@@ -7,7 +7,9 @@ import { useMeasurements } from './composables/useMeasurements'
 import { useProjects } from './composables/useProjects'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
+import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
 import { determineAttenuation, nearestInputRange } from './attenuation'
+import { formatAveraging } from './metrics'
 import { stopRun } from './deviceControl'
 import DeviceStatusBar from './components/DeviceStatusBar.vue'
 import MeasurementSidebar from './components/MeasurementSidebar.vue'
@@ -18,6 +20,7 @@ import SpectrumChart from './components/SpectrumChart.vue'
 import OscilloscopeChart from './components/OscilloscopeChart.vue'
 import SystemMetricsPanel from './components/SystemMetricsPanel.vue'
 import MetricsPanel from './components/MetricsPanel.vue'
+import GeneratorMetricsPanel from './components/GeneratorMetricsPanel.vue'
 import HarmonicsTable from './components/HarmonicsTable.vue'
 import OtherPeaksTable from './components/OtherPeaksTable.vue'
 import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
@@ -27,12 +30,30 @@ import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
 import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
+import ConfigDialog from './components/ConfigDialog.vue'
 
 const { status, ranges, error, refreshStatus } = useDevice()
 const { spectrum, meters, scope, setViewport } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
+// Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
+// fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
+// loudest) and White noise has no discrete tone at all, so both would label meaningless content.
+const { kind: stimulusKind } = useGeneratorStimulus()
+const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
+
+// Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the +Metrics button
+// and the chart — same formatAveraging formula, just relocated. Either channel's averagesTaken is
+// fine (both average together, see SystemMetricsPanel's own meters prop).
+const averagesLabel = computed(() => {
+  if (!spectrumConfig.value) return ''
+  return formatAveraging(
+    spectrumConfig.value.averaging,
+    spectrumConfig.value.averageCount,
+    (meters.value[0] ?? meters.value[1])?.averagesTaken,
+  )
+})
 const {
   projects,
   types,
@@ -62,6 +83,7 @@ const saveDialogOpen = ref(false)
 const saveTypeAsOpen = ref(false)
 const saveProjectAsOpen = ref(false)
 const metricPickerOpen = ref(false)
+const configDialogOpen = ref(false)
 // Placeholder for the real "Projects" dialog — for now the button just expands the existing
 // project list/create/delete panel in place, until that gets its own proper dialog.
 const projectPanelOpen = ref(false)
@@ -321,12 +343,12 @@ function confirmSaveProjectAs(name: string) {
         Save project as…
       </button>
       <span class="flex-1"></span>
-      <!-- Not wired up yet — app-wide configuration doesn't exist as a concept in this app yet. -->
       <button
         type="button"
-        class="text-neutral-400 dark:text-neutral-600"
+        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
         aria-label="Configuration"
-        title="Configuration (coming soon)"
+        title="Configuration"
+        @click="configDialogOpen = true"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
@@ -426,6 +448,7 @@ function confirmSaveProjectAs(name: string) {
             <div class="min-w-0 flex-1">
               <div class="mb-3 flex flex-wrap items-start gap-3">
                 <div class="flex flex-1 flex-wrap gap-3">
+                  <GeneratorMetricsPanel />
                   <MetricsPanel
                     v-if="spectrumConfig?.processLeft ?? true"
                     channel-label="L"
@@ -449,6 +472,10 @@ function confirmSaveProjectAs(name: string) {
                 </button>
               </div>
 
+              <div v-if="averagesLabel" class="mb-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                Averages: {{ averagesLabel }}
+              </div>
+
               <SpectrumChart
                 :spectrum="spectrum"
                 :meters="meters"
@@ -468,7 +495,9 @@ function confirmSaveProjectAs(name: string) {
           <OverlayList />
           <SystemMetricsPanel :status="status" :meters="meters[0] ?? meters[1] ?? null" />
 
-          <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <!-- Harmonics/other-peaks only mean something relative to a single fundamental tone —
+               Multitone's comb and White noise have none (see showFundamentalMarkers above). -->
+          <div v-if="showFundamentalMarkers" class="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <div class="flex flex-col gap-4">
               <HarmonicsTable :meters="meters" :channel="0" channel-label="L" />
               <OtherPeaksTable :meters="meters" :channel="0" channel-label="L" />
@@ -510,5 +539,6 @@ function confirmSaveProjectAs(name: string) {
       @confirm="confirmSaveProjectAs"
     />
     <MetricPickerDialog :open="metricPickerOpen" @close="metricPickerOpen = false" />
+    <ConfigDialog :open="configDialogOpen" @close="configDialogOpen = false" />
   </div>
 </template>

@@ -1,8 +1,9 @@
 import { ref } from 'vue'
 import { useProjects } from './useProjects'
+import { GEN_METRIC_LABEL } from '../metrics'
 
 /** What a brand-new measurement type (or one saved before this feature existed) shows. */
-export const DEFAULT_SELECTED_METRICS = ['THD %', 'Pk dBV']
+export const DEFAULT_SELECTED_METRICS = [GEN_METRIC_LABEL, 'THD %', 'Pk dBV']
 
 // Module-level singleton, same pattern as useChartDisplay.ts / useSpectrumConfig.ts — MetricsPanel
 // (both channel instances), MetricPickerDialog and App.vue's save/load flow all need to see the

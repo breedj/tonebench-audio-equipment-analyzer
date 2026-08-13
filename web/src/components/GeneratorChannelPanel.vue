@@ -1,12 +1,7 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
-import type {
-  GeneratorChannelRequest,
-  GeneratorChannelState,
-  GeneratorKind,
-  GeneratorTone,
-  SmoothingOctaves,
-} from '../api/client'
+import { reactive, watch } from 'vue'
+import type { GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, SmoothingOctaves } from '../api/client'
+import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 
 const props = defineProps<{
   /**
@@ -46,24 +41,17 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
   { value: 'OneOver3', label: '1/3' },
 ]
 
-const kind = ref<GeneratorKind>('Tones')
+// Shared with GeneratorPanel (which gates its "Snap to bin" checkbox on the current kind — snapping
+// only ever touches a channel's `tones` list server-side, see DeviceSessionService.SnapTones, so
+// it's a silent no-op for Multitone/WhiteNoise) and with GeneratorMetricsPanel.vue, which needs this
+// staged config reactively even after Stop silences DeviceStatus.generatorLeft/Right — see
+// useGeneratorStimulus.ts.
+const { kind, tones, multitone, noise, chirp } = useGeneratorStimulus()
 
-// One state object per kind, all kept alive at once, so switching the dropdown back and forth
-// never discards what the user typed into the other forms. currentConfig() sends only the
-// selected kind's block.
-const tones = reactive<GeneratorTone[]>([{ freqHz: 1000, ampDbv: -6 }])
 // What the device is actually playing per tone, in parallel with `tones` — kept separate so
 // syncFromStatus (below) can report the real, possibly-snapped bin frequency without overwriting
 // what the user typed. Index-aligned with `tones`; null until Run confirms an actual frequency.
 const actualFreqHz = reactive<(number | null)[]>([null])
-const multitone = reactive({ tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 })
-const noise = reactive({ levelDbv: -20 })
-const chirp = reactive({
-  amplitudeDbv: -20,
-  startFreqHz: 20,
-  endFreqHz: 20000,
-  smoothing: 'None' as SmoothingOctaves,
-})
 
 // Stages this form from a measurement type's stored config — see `loadState` above. Also clears
 // actualFreqHz: a freshly-loaded measurement hasn't been Run yet, so there's no real bin frequency

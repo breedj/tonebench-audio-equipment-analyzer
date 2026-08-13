@@ -3,7 +3,7 @@
 // just call these and render the result.
 
 import type { MetersFrame } from './streaming/protocol'
-import type { AveragingMode, GeneratorTone } from './api/client'
+import type { AveragingMode, GeneratorKind, GeneratorTone, MultitoneSettings, WhiteNoiseSettings } from './api/client'
 
 export interface MetricTile {
   label: string
@@ -11,10 +11,18 @@ export interface MetricTile {
 }
 
 /**
- * The fixed, user-selectable subset of channelTiles()'s labels, in the same order — everything
- * except the dynamic GenN/Gen… tiles (their count depends on how many generator tones are active,
- * so they're not something a fixed checklist can offer). Used to back MetricPickerDialog.vue and
- * to filter MetricsPanel.vue's display down to what's selected — see useMetricSelection.ts.
+ * The label backing the single, channel-independent generator summary tile (see generatorTile()
+ * below and GeneratorMetricsPanel.vue) — both channels play the same stimulus, so unlike every
+ * other entry here this isn't a per-channel L:/R: tile. Selected/removed through the same
+ * useMetricSelection.ts list as AVAILABLE_METRIC_LABELS (MetricPickerDialog.vue offers it
+ * alongside them), just rendered by a different component.
+ */
+export const GEN_METRIC_LABEL = 'Gen'
+
+/**
+ * The fixed, user-selectable subset of channelTiles()'s labels, in the same order. Used to back
+ * MetricPickerDialog.vue and to filter MetricsPanel.vue's display down to what's selected — see
+ * useMetricSelection.ts.
  */
 export const AVAILABLE_METRIC_LABELS = [
   'Freq Hz',
@@ -87,9 +95,16 @@ export function formatFftSize(n: number): string {
   return n >= 1024 && n % 1024 === 0 ? `${n / 1024}k` : `${n}`
 }
 
-export function formatAveraging(mode: AveragingMode, count: number): string {
+/**
+ * `taken` is how many spectra have contributed so far (see MetersFrame.averagesTaken) — counts up
+ * to `count` as averaging fills its window, then holds there. Omitted (not just 0) whenever no
+ * meters frame has arrived yet, so a fresh/idle panel reads "Linear x8" rather than a premature
+ * "Linear x8 (0/8)".
+ */
+export function formatAveraging(mode: AveragingMode, count: number, taken?: number): string {
   if (mode === 'Off') return 'Off'
-  return mode === 'Linear' ? `Linear x${count}` : `Exponential τ=${count}`
+  const progress = taken === undefined ? '' : ` (${Math.min(taken, count)}/${count})`
+  return (mode === 'Linear' ? `Linear x${count}` : `Exponential τ=${count}`) + progress
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -116,13 +131,12 @@ export function noteName(freqHz: number): string {
   return `${name}${octave}${suffix}`
 }
 
-/** How many individual GenN tiles a channel shows before they're summarised into one. */
-const MAX_GENERATOR_TONE_TILES = 8
-
 /**
- * Full per-channel tile grid (Freq/Gain/THD/THD+N/N+D/N-D/SNR/Pk/RMS/Note/GenN), per the formula
- * table derived from the reference screenshot. `generatorTones` is that same channel's tones
- * (the generator is per-channel — see GeneratorPanel.vue) — Gain and GenN both key off it.
+ * Full per-channel tile grid (Freq/Gain/THD/THD+N/N+D/N-D/SNR/Pk/RMS/Note), per the formula table
+ * derived from the reference screenshot. `generatorTones` is the shared stimulus's *actual*
+ * (possibly bin-snapped) tones as last reported by DeviceStatus — used only for the Gain
+ * calculation here; the generator summary shown to the user is a single tile independent of
+ * channel, see generatorTile() below.
  */
 export function channelTiles(meters: MetersFrame | null, generatorTones: GeneratorTone[], loadOhms: number): MetricTile[] {
   if (!meters) return []
@@ -175,25 +189,54 @@ export function channelTiles(meters: MetersFrame | null, generatorTones: Generat
     { label: 'RMS Pwr', value: formatWatts(powerWatts(rmsVrms, loadOhms), loadOhms) },
   ]
 
-  // Capped: a multitone stimulus reports its whole derived comb here (60 tones at the default
-  // 5 per octave), and one tile each would bury every other metric in the panel.
-  generatorTones.slice(0, MAX_GENERATOR_TONE_TILES).forEach((tone, i) => {
-    const toneVrms = dbvToVrms(tone.ampDbv)
-    tiles.push({
-      label: `Gen${i + 1}`,
-      value: `${(tone.freqHz / 1000).toFixed(4)} kHz\n${tone.ampDbv.toFixed(2)} dBV / ${formatVrms(toneVrms)}`,
-    })
-  })
-
-  if (generatorTones.length > MAX_GENERATOR_TONE_TILES) {
-    const last = generatorTones[generatorTones.length - 1]
-    tiles.push({
-      label: `Gen… (${generatorTones.length} tones)`,
-      value: `to ${(last.freqHz / 1000).toFixed(4)} kHz\n${last.ampDbv.toFixed(2)} dBV`,
-    })
-  }
-
   return tiles
+}
+
+// Multitone's comb is log-spaced over a fixed band the generator form doesn't expose as separate
+// controls (see GeneratorChannelPanel.vue's "Fixed 5 Hz – 20 kHz band" note) — mirrored here from
+// MultitoneGenerator.cs's own constants so the tile can be computed from the staged form alone,
+// without waiting for DeviceStatus to report the server-derived comb (which goes silent on Stop —
+// see useGeneratorStimulus.ts).
+const MULTITONE_BAND_START_HZ = 5
+const MULTITONE_BAND_END_HZ = 20_000
+
+/** Tone count for a given tones-per-octave, matching MultitoneGenerator.Build's f_i = 5 * 2^(i/n) walk. */
+export function multitoneToneCount(tonesPerOctave: number): number {
+  if (!(tonesPerOctave >= 1)) return 0
+  return Math.floor(tonesPerOctave * Math.log2(MULTITONE_BAND_END_HZ / MULTITONE_BAND_START_HZ)) + 1
+}
+
+/**
+ * The single, channel-independent "Gen" summary tile (see GEN_METRIC_LABEL) — one tile
+ * regardless of stimulus kind, computed from the staged generator form (useGeneratorStimulus.ts)
+ * rather than from live tones, so it keeps showing the configured stimulus after Stop instead of
+ * disappearing along with DeviceStatus's silenced generator state. Null for kinds with nothing
+ * useful to summarise (no tones staged yet, or a kind with no UI of its own).
+ */
+export function generatorTile(
+  kind: GeneratorKind,
+  tones: GeneratorTone[],
+  multitone: MultitoneSettings,
+  noise: WhiteNoiseSettings,
+): MetricTile | null {
+  switch (kind) {
+    case 'Tones': {
+      if (tones.length === 0) return null
+      const value = tones.map((t) => `${t.freqHz.toFixed(3)} Hz, ${t.ampDbv.toFixed(2)} dBV`).join('\n')
+      return { label: GEN_METRIC_LABEL, value }
+    }
+    case 'Multitone': {
+      const count = multitoneToneCount(multitone.tonesPerOctave)
+      return {
+        label: GEN_METRIC_LABEL,
+        value: `(${count} tones), ${MULTITONE_BAND_START_HZ} Hz - ${MULTITONE_BAND_END_HZ / 1000} kHz`,
+      }
+    }
+    case 'WhiteNoise':
+      return { label: GEN_METRIC_LABEL, value: `White noise, ${noise.levelDbv.toFixed(2)} dBV` }
+    default:
+      return null
+  }
 }
 
 export interface SystemTilesInput {
@@ -201,15 +244,20 @@ export interface SystemTilesInput {
   window: string
   averaging: AveragingMode
   averageCount: number
+  /** How many spectra have contributed to the current average so far — see MetersFrame.averagesTaken. */
+  averagesTaken: number | undefined
   inputRangeDbv: number | undefined
   binSizeHz: number | undefined
 }
 
-/** Channel-independent Sys:* tiles, rendered once (see SystemMetricsPanel.vue). */
+/**
+ * Channel-independent Sys:* tiles, rendered once (see SystemMetricsPanel.vue). Averages moved out
+ * of this grid into its own readout above the chart (see App.vue) — formatAveraging is what that
+ * reads directly, not a Sys:* tile here anymore.
+ */
 export function systemTiles(input: SystemTilesInput): MetricTile[] {
   return [
     { label: 'Sys:FFT', value: formatFftSize(input.fftSize) },
-    { label: 'Sys:Averages', value: formatAveraging(input.averaging, input.averageCount) },
     { label: 'Sys:Window', value: input.window },
     {
       label: 'Sys:FullScale',

@@ -5,6 +5,8 @@ import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type MetersFrame, type SpectrumFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useChartDisplay } from '../composables/useChartDisplay'
+import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useAppTheme } from '../composables/useAppTheme'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import type { MeasurementChannel } from '../api/client'
@@ -48,6 +50,8 @@ const {
   visibleL,
   visibleR,
   showMinMax,
+  showPeakHold,
+  resetPeakHoldTrigger,
   autofitYTrigger,
   autofitXTrigger,
   resetYDefaults,
@@ -56,6 +60,11 @@ const {
 function channelVisible(ch: number): boolean {
   return channelEnabled(ch) && (ch === 0 ? visibleL.value : visibleR.value)
 }
+
+// Fundamental/harmonic markers only mean something relative to a single fundamental tone —
+// Multitone's comb and White noise have none, so the peak-bin search behind ch0.harmonics would
+// just label whichever tone (or noise bin) happens to read loudest that tick.
+const { kind: stimulusKind } = useGeneratorStimulus()
 
 const CHANNEL_LABELS = ['L', 'R']
 const CHANNEL_COLORS = ['#3b82f6', '#f97316']
@@ -66,13 +75,21 @@ const CHANNEL_BAND_COLORS = ['rgba(59, 130, 246, 0.35)', 'rgba(249, 115, 22, 0.3
 // own), so a stereo overlay reads as "one measurement, two channels" rather than two unrelated
 // traces that happen to share a hue.
 const OVERLAY_DASH: [number[], number[]] = [[4, 2], [1, 3]]
-const CHART_HEIGHT = 900
+const CHART_HEIGHT = 720
+// Peak-hold: running per-bin maximum, keyed by that bin's column frequency (as broadcast — stable
+// across ticks for a given FFT size/zoom window, since the server's log-decimation always picks
+// the same center bin for the same range/budget). Cleared only by the Reset button (see
+// resetPeakHoldTrigger) — switching FFT size etc. just leaves old keys unused rather than an
+// explicit clear, since the new frequency grid won't match them anyway.
+const peakHoldMaps: [Map<number, number>, Map<number, number>] = [new Map(), new Map()]
 // How far (in CSS pixels) the cursor readout searches for a local peak around the mouse — see
 // setCursor's remarks below.
 const PEAK_SNAP_RADIUS_PX = 15
 
-// Series layout: x, then L, R (always present, live), then two slots per overlay (its L and R
-// channel, in add order) — see buildOptions and every setData call below. The overlay portion's
+// Series layout: x, then L, R, L peak, R peak (always present, live — the peak pair just fills
+// null when Peak-hold is off, same convention as an idle/hidden L or R), then two slots per
+// overlay (its L and R channel, in add order) — see buildOptions and every setData call below.
+// The overlay portion's
 // *length* changes only when an overlay is added/removed (ensurePlot rebuilds for that, preserving
 // zoom explicitly — see ensurePlot), never on a streaming tick or a visibility toggle, which is
 // what keeps this from repeating the old channelCount-keyed rebuild-every-frame bug.
@@ -96,11 +113,11 @@ const THEME = {
   },
 } as const
 
-// Tailwind v4 defaults to the `prefers-color-scheme` media query (this app sets no darkMode
-// override and has no theme toggle), so the OS preference is the single source of truth.
-const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
+// Canvas colours can't follow Tailwind's `dark:` classes (see THEME's own remarks above), so this
+// reads the same Auto/Light/Dark state as everything else — see useAppTheme.ts.
+const { isDark } = useAppTheme()
 function currentTheme() {
-  return darkQuery.matches ? THEME.dark : THEME.light
+  return isDark.value ? THEME.dark : THEME.light
 }
 
 const containerRef = ref<HTMLDivElement>()
@@ -118,7 +135,7 @@ let fullHiFreqHz = -1
 let plotNyquistHz = -1
 // Axis colours are baked into the options at construction, so a theme flip is one of the few
 // things that legitimately requires rebuilding the instance.
-let plotIsDark = darkQuery.matches
+let plotIsDark = isDark.value
 
 // The server sends min *and* max per decimated column; plotting only the max threw away half of
 // what decimation deliberately preserved, and made our noise floor read as a thin line ~6 dB above
@@ -211,6 +228,7 @@ function harmonicMarkersPlugin(): uPlot.Plugin {
     hooks: {
       draw: [
         (u) => {
+          if (stimulusKind.value !== 'Tones') return
           const ch0 = props.meters[0]
           if (!ch0 || ch0.harmonics.length === 0) return
 
@@ -302,6 +320,8 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
     {},
     { label: CHANNEL_LABELS[0], stroke: CHANNEL_COLORS[0], width: liveWidth, points },
     { label: CHANNEL_LABELS[1], stroke: CHANNEL_COLORS[1], width: liveWidth, points },
+    { label: `${CHANNEL_LABELS[0]} peak`, stroke: CHANNEL_COLORS[0], width: 1, dash: [2, 2], points: { show: false } },
+    { label: `${CHANNEL_LABELS[1]} peak`, stroke: CHANNEL_COLORS[1], width: 1, dash: [2, 2], points: { show: false } },
   ]
   for (const overlay of overlays) {
     series.push(
@@ -387,6 +407,32 @@ function maxTrace(columns: Float32Array, nPoints: number): Float64Array {
   return out
 }
 
+/** Folds this tick's column maxima into the running per-bin peak-hold map — see peakHoldMaps. */
+function updatePeakHold(map: Map<number, number>, frame: SpectrumFrame): void {
+  const { columns, header } = frame
+  for (let i = 0; i < header.nPoints; i++) {
+    const freqHz = columns[i * 3]
+    const maxDb = columns[i * 3 + 2]
+    const prev = map.get(freqHz)
+    if (prev === undefined || maxDb > prev) map.set(freqHz, maxDb)
+  }
+}
+
+/**
+ * The peak-hold map resampled onto the active x grid — a plain lookup, not resample()'s
+ * interpolation, since a bin the map hasn't seen yet (a fresh key from a just-changed zoom/FFT
+ * size) has no peak to interpolate from; it just stays null until this tick's updatePeakHold has
+ * a chance to populate it.
+ */
+function peakTrace(map: Map<number, number>, xs: Float64Array | number[]): (number | null)[] {
+  const out = new Array<number | null>(xs.length)
+  for (let i = 0; i < xs.length; i++) {
+    const v = map.get(xs[i])
+    out[i] = v === undefined ? null : v
+  }
+  return out
+}
+
 // Deliberately not keyed on the frame's point count or on channelCount: nothing in buildOptions
 // depends on either, and including the point count meant a zoom window with fewer bins than
 // columns tore the plot down and rebuilt it — losing the very zoom that produced the frame.
@@ -422,7 +468,7 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
 
   const signature = overlaySignature(overlays)
   const style = styleKey()
-  if (plot && plotNyquistHz === nyquistHz && plotIsDark === darkQuery.matches && plotOverlaySignature === signature && plotStyleKey === style)
+  if (plot && plotNyquistHz === nyquistHz && plotIsDark === isDark.value && plotOverlaySignature === signature && plotStyleKey === style)
     return
 
   const savedScale = plot ? { min: plot.scales.x.min, max: plot.scales.x.max } : null
@@ -433,7 +479,7 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   // Array.from can't be, since its length (and therefore its tuple shape) isn't known until
   // runtime. The runtime shape is fine — every slot is a plain empty array — only the static type
   // needs the assertion.
-  const dataSlots = 3 + overlays.length * 2
+  const dataSlots = 5 + overlays.length * 2
   const emptyData = Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData
   plot = new uPlot(buildOptions(width, nyquistHz, overlays), emptyData, el)
 
@@ -446,7 +492,7 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   pendingZoomRestore = savedScale && savedScale.min != null && savedScale.max != null ? { min: savedScale.min, max: savedScale.max } : null
 
   plotNyquistHz = nyquistHz
-  plotIsDark = darkQuery.matches
+  plotIsDark = isDark.value
   plotOverlaySignature = signature
   plotStyleKey = style
 }
@@ -592,6 +638,17 @@ function update() {
     (ch1.header.flags & STREAM_FLAG_ZOOMED) === (ch0.header.flags & STREAM_FLAG_ZOOMED)
   const right = rComparable ? maxTrace(ch1!.columns, ch1!.header.nPoints) : nullFill(nPoints)
 
+  // Peak-hold: fold this tick's columns into the running maps (only while enabled — leaving it off
+  // is how a user keeps yesterday's peak run from bleeding into today's), then read the maps back
+  // out onto the same x grid as everything else. Gated the same way as left/right above (visible,
+  // channel present) so a hidden or idle channel's peak trace disappears along with its live one.
+  if (showPeakHold.value) {
+    if (ch0 && channelVisible(0)) updatePeakHold(peakHoldMaps[0], ch0)
+    if (rComparable) updatePeakHold(peakHoldMaps[1], ch1!)
+  }
+  const leftPeak = showPeakHold.value && ch0 && channelVisible(0) ? peakTrace(peakHoldMaps[0], xs) : nullFill(nPoints)
+  const rightPeak = showPeakHold.value && rComparable ? peakTrace(peakHoldMaps[1], xs) : nullFill(nPoints)
+
   // Passed to setData as a literal rather than being accumulated in a pre-typed local array:
   // uPlot's AlignedData permits a TypedArray x with y-series that are TypedArray *or*
   // (number|null)[], but only through its tuple form. Annotating an intermediate array collapses
@@ -611,7 +668,7 @@ function update() {
       overlay.visible && chR ? resample(toTrace(chR), xs) : nullFill(nPoints),
     ]
   })
-  plot.setData([xs, left, right, ...overlayData])
+  plot.setData([xs, left, right, leftPeak, rightPeak, ...overlayData])
 
   // See ensurePlot's pendingZoomRestore comment — must run after setData, not before.
   if (pendingZoomRestore) {
@@ -625,8 +682,15 @@ watch(() => props.overlays, update, { deep: true })
 watch(visibleL, update)
 watch(visibleR, update)
 watch(showMinMax, update)
+watch(showPeakHold, update)
 watch(thickLines, update)
 watch(showDataPoints, update)
+
+watch(resetPeakHoldTrigger, () => {
+  peakHoldMaps[0].clear()
+  peakHoldMaps[1].clear()
+  update()
+})
 
 // dBV range: a live setScale, not a rebuild — uPlot has no per-call range override, but the scale
 // itself can be nudged directly and takes effect on the next paint.
@@ -645,9 +709,9 @@ function handleResize() {
     plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
 }
 
-// Rebuilds with the new palette on an OS light/dark switch. Rebuilding is only acceptable because
-// this fires on a theme change, not per frame — ensurePlot's identity check keeps every other path
-// on setData().
+// Rebuilds with the new palette on a Light/Dark/Auto change (OS or the Configuration dialog).
+// Rebuilding is only acceptable because this fires on a theme change, not per frame —
+// ensurePlot's identity check keeps every other path on setData().
 function handleThemeChange() {
   if (!plot) return
   const nyquistHz = plotNyquistHz
@@ -657,14 +721,13 @@ function handleThemeChange() {
   ensurePlot(nyquistHz, props.overlays)
   update()
 }
+watch(isDark, handleThemeChange)
 
 onMounted(() => {
   window.addEventListener('resize', handleResize)
-  darkQuery.addEventListener('change', handleThemeChange)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  darkQuery.removeEventListener('change', handleThemeChange)
   clearTimeout(viewportTimer)
   plot?.destroy()
   plot = null

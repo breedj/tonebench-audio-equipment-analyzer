@@ -39,8 +39,6 @@ const form = reactive({
   window: 'Hann' as WindowType,
   averaging: 'Off' as AveragingMode,
   averageCount: 8,
-  measurementLoFreqHz: 20,
-  measurementHiFreqHz: 20000,
 })
 
 // Sample rate — formerly Acquisition's own field — is staged from the measurement type's params
@@ -80,8 +78,6 @@ function syncFormFromConfig() {
   form.averageCount = config.value.averageCount
   // Frame rate is no longer user-editable — always 20, regardless of what a measurement's stored
   // config says (see the removed "Frame rate (fps)" field below).
-  form.measurementLoFreqHz = config.value.measurementLoFreqHz
-  form.measurementHiFreqHz = config.value.measurementHiFreqHz
   loaded.value = true
 }
 
@@ -178,35 +174,6 @@ defineExpose({ getSampleRateHz })
           class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
           @change="apply"
         />
-      </label>
-
-      <!--
-        The band THD+N / SNR / noise floor are integrated over — a measurement setting, not a
-        display one. 20 Hz - 20 kHz is the standard audio band; widening it to Nyquist includes
-        ultrasonic noise and makes those figures read worse at higher sample rates.
-      -->
-      <label
-        class="flex flex-col gap-1"
-        title="Bandwidth THD+N, SNR and the noise floor are measured over. Also keeps DC out of the noise integration."
-      >
-        Meas. band (Hz)
-        <span class="flex items-center gap-1">
-          <input
-            type="number"
-            min="0"
-            v-model.number="form.measurementLoFreqHz"
-            class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="apply"
-          />
-          <span class="text-neutral-400">–</span>
-          <input
-            type="number"
-            min="1"
-            v-model.number="form.measurementHiFreqHz"
-            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="apply"
-          />
-        </span>
       </label>
     </div>
     <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">Loading…</div>

@@ -20,6 +20,7 @@ const tiles = computed(() =>
         window: config.value.window,
         averaging: config.value.averaging,
         averageCount: config.value.averageCount,
+        averagesTaken: props.meters?.averagesTaken,
         inputRangeDbv: props.status?.inputRangeDbv,
         binSizeHz: props.meters?.binSizeHz,
       })

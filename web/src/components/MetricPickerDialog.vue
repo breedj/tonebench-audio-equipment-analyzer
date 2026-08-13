@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import Modal from './Modal.vue'
-import { AVAILABLE_METRIC_LABELS } from '../metrics'
+import { AVAILABLE_METRIC_LABELS, GEN_METRIC_LABEL } from '../metrics'
 import { useMetricSelection } from '../composables/useMetricSelection'
+
+// Gen first, separated from the per-channel catalogue below — it's the one entry here that isn't
+// an L:/R: tile (see GEN_METRIC_LABEL), but it's staged/persisted through the same selection list.
+const PICKER_LABELS = [GEN_METRIC_LABEL, ...AVAILABLE_METRIC_LABELS]
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -28,7 +32,7 @@ function toggle(label: string, checked: boolean) {
 }
 
 function onApply() {
-  setSelectedMetrics(AVAILABLE_METRIC_LABELS.filter((label) => staged.has(label)))
+  setSelectedMetrics(PICKER_LABELS.filter((label) => staged.has(label)))
   emit('close')
 }
 </script>
@@ -37,7 +41,7 @@ function onApply() {
   <Modal :open="props.open" title="Add or remove metrics" @close="emit('close')">
     <div class="flex flex-col gap-3 text-sm">
       <div class="grid max-h-80 grid-cols-2 gap-x-4 gap-y-1.5 overflow-y-auto sm:grid-cols-3">
-        <label v-for="label in AVAILABLE_METRIC_LABELS" :key="label" class="flex items-center gap-1.5">
+        <label v-for="label in PICKER_LABELS" :key="label" class="flex items-center gap-1.5">
           <input
             type="checkbox"
             class="h-4 w-4 rounded border-neutral-400 dark:border-neutral-600"

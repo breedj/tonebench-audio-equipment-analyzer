@@ -24,12 +24,20 @@ const form = reactive({
 
 const canSave = computed(() => currentType.value !== null && form.name.trim().length > 0)
 
+/** Local-time "yyyy-MM-dd HH:mm" — the default Name, so a save someone doesn't bother renaming
+ * still sorts and reads sensibly in the history list rather than showing up blank. */
+function timestampName(): string {
+  const d = new Date()
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 watch(
   () => props.open,
   (open) => {
     if (!open) return
     // Reset per open, not per mount — the dialog is a template singleton in App.vue.
-    form.name = ''
+    form.name = timestampName()
     form.notes = ''
   },
 )

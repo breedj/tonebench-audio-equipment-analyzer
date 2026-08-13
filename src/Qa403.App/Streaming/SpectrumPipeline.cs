@@ -296,8 +296,12 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             uint seq = Interlocked.Increment(ref _seq);
             var channel = channelIndex == 0 ? StreamChannel.Left : StreamChannel.Right;
 
+            // Either averager reports the same count (both Updated together, just above, with the
+            // same mode/count) — _psdAveragers is the arbitrary pick.
+            int averagesTaken = _psdAveragers[channelIndex].Count;
+
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
-            var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options);
+            var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options, averagesTaken);
 
             UpdateRetainedSnapshot(channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, seq);
 
@@ -492,7 +496,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     /// separately. Returns <see langword="null"/> when no fundamental (and so no harmonics) could
     /// be found, matching the old inline logic's "nothing to broadcast this tick" behaviour.
     /// </summary>
-    private static SpectrumMeters? ComputeMeters(PsdSpectrum psd, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options)
+    private static SpectrumMeters? ComputeMeters(PsdSpectrum psd, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options, int averagesTaken)
     {
         int minSearchBin = Math.Max(1, (int)Math.Round(options.FundamentalMinSearchHz / psd.BinSizeHz));
         int fundamentalBin = FindGlobalPeakBin(psd.ValuesV2PerHz, minSearchBin);
@@ -526,7 +530,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
         return new SpectrumMeters(
             fundamentalFreqHz, (float)psd.BinSizeHz, thdPercent, thdNPercent, snrDb,
-            fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks);
+            fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks, averagesTaken);
     }
 
     /// <summary>
@@ -570,7 +574,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         byte[] frame = StreamFrame.EncodeMeters(
             channel, seq, meters.FundamentalFreqHz, meters.BinSizeHz,
             meters.ThdPercent, meters.ThdNPercent, meters.SnrDb, meters.FundamentalDbv, meters.NoiseFloorDbv,
-            meters.PeakDbv, meters.TotalRmsDbv, meters.Harmonics, meters.OtherPeaks);
+            meters.PeakDbv, meters.TotalRmsDbv, meters.Harmonics, meters.OtherPeaks, (uint)meters.AveragesTaken);
         hub.Broadcast(frame);
     }
 

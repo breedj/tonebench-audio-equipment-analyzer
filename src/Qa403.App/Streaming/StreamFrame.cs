@@ -120,21 +120,23 @@ public static class StreamFrame
     /// 40  f32  peakDbv          -- true instantaneous time-domain peak, RMS-equivalent (peakVpk/sqrt2), dBV
     /// 44  f32  totalRmsDbv      -- true broadband time-domain RMS (not just the fundamental bin), dBV
     /// 48  u32  otherPeakCount
-    /// 52  (f32 freqHz, f32 dbc) * nPoints           -- one entry per Harmonic, order 1..N in order
+    /// 52  u32  averagesTaken    -- how many spectra have contributed so far, capped at the configured target; 0 if averaging is off
+    /// 56  (f32 freqHz, f32 dbc) * nPoints           -- one entry per Harmonic, order 1..N in order
     /// ..  (f32 freqHz, f32 dbc) * otherPeakCount    -- non-harmonic peaks (hum, IMD, spurs), strongest first
     /// </code>
     /// x0 = fundamental frequency (Hz), dx = FFT bin size (Hz), nPoints = harmonic count.
     /// <paramref name="otherPeaks"/> is whatever <c>PeakFinder.FindPeaks</c> found outside the
     /// fundamental/harmonics — dbc is relative to the fundamental, same convention as harmonics,
-    /// for a fair side-by-side comparison.
+    /// for a fair side-by-side comparison. <paramref name="averagesTaken"/> defaults to 0 so
+    /// existing positional call sites (e.g. StreamFrameTests) keep compiling unchanged.
     /// </summary>
     public static byte[] EncodeMeters(
         StreamChannel channel, uint seq, float fundamentalFreqHz, float binSizeHz,
         float thdPercent, float thdNPercent, float snrDb, float fundamentalDbv, float noiseFloorDbv,
         float peakDbv, float totalRmsDbv,
-        ReadOnlySpan<Harmonic> harmonics, ReadOnlySpan<(float FreqHz, float Dbc)> otherPeaks)
+        ReadOnlySpan<Harmonic> harmonics, ReadOnlySpan<(float FreqHz, float Dbc)> otherPeaks, uint averagesTaken = 0)
     {
-        const int scalarsAndCountLength = (7 * sizeof(float)) + sizeof(uint);
+        const int scalarsAndCountLength = (7 * sizeof(float)) + (2 * sizeof(uint));
         int nPoints = harmonics.Length;
         int otherPeakCount = otherPeaks.Length;
         byte[] buffer = new byte[HeaderLength + scalarsAndCountLength + ((nPoints + otherPeakCount) * 2 * sizeof(float))];
@@ -149,6 +151,7 @@ public static class StreamFrame
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), peakDbv); offset += 4;
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), totalRmsDbv); offset += 4;
         BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)otherPeakCount); offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), averagesTaken); offset += 4;
 
         foreach (var h in harmonics)
         {
@@ -274,6 +277,7 @@ public static class StreamFrame
         float peakDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
         float totalRmsDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
         uint otherPeakCount = BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+        uint averagesTaken = BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
 
         var harmonics = new (float FreqHz, float Dbc)[header.NPoints];
         for (int i = 0; i < header.NPoints; i++)
@@ -293,7 +297,7 @@ public static class StreamFrame
 
         return new DecodedMeters(
             header.X0, header.Dx, thdPercent, thdNPercent, snrDb, fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv,
-            harmonics, otherPeaks);
+            harmonics, otherPeaks, averagesTaken);
     }
 }
 
@@ -305,4 +309,4 @@ public readonly record struct SpectrumColumn(float FreqHz, MinMax Value);
 public readonly record struct DecodedMeters(
     float FundamentalFreqHz, float BinSizeHz, float ThdPercent, float ThdNPercent, float SnrDb, float FundamentalDbv,
     float NoiseFloorDbv, float PeakDbv, float TotalRmsDbv,
-    (float FreqHz, float Dbc)[] Harmonics, (float FreqHz, float Dbc)[] OtherPeaks);
+    (float FreqHz, float Dbc)[] Harmonics, (float FreqHz, float Dbc)[] OtherPeaks, uint AveragesTaken);

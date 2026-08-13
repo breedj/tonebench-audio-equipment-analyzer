@@ -71,6 +71,55 @@ public class SpectrumAveragerTests
     }
 
     [Fact]
+    public void Count_climbs_to_the_target_count_and_holds_there()
+    {
+        var averager = new SpectrumAverager();
+        Assert.Equal(0, averager.Count);
+
+        for (int tick = 1; tick <= 4; tick++)
+        {
+            averager.Update([1.0], AveragingMode.Linear, count: 4);
+            Assert.Equal(tick, averager.Count);
+        }
+
+        // Window is full — further ticks keep averaging but the counter holds at the target.
+        averager.Update([1.0], AveragingMode.Linear, count: 4);
+        Assert.Equal(4, averager.Count);
+    }
+
+    [Fact]
+    public void Count_climbs_the_same_way_for_Exponential_since_it_has_no_natural_done_state()
+    {
+        var averager = new SpectrumAverager();
+
+        for (int tick = 1; tick <= 9; tick++)
+            averager.Update([1.0], AveragingMode.Exponential, count: 9);
+
+        Assert.Equal(9, averager.Count);
+
+        averager.Update([1.0], AveragingMode.Exponential, count: 9);
+        Assert.Equal(9, averager.Count); // holds, doesn't keep climbing past the target
+    }
+
+    [Fact]
+    public void Count_resets_to_zero_on_Off_and_on_Reset()
+    {
+        var averager = new SpectrumAverager();
+        averager.Update([1.0], AveragingMode.Linear, count: 4);
+        averager.Update([1.0], AveragingMode.Linear, count: 4);
+        Assert.Equal(2, averager.Count);
+
+        averager.Update([1.0], AveragingMode.Off, count: 4);
+        Assert.Equal(0, averager.Count);
+
+        averager.Update([1.0], AveragingMode.Linear, count: 4);
+        Assert.Equal(1, averager.Count);
+
+        averager.Reset();
+        Assert.Equal(0, averager.Count);
+    }
+
+    [Fact]
     public void FromValues_round_trips_through_PsdSpectrum_integration()
     {
         double[] values = [0.0, 1.0, 1.0, 1.0, 0.0]; // 5 bins, N/2+1 form for an 8-point transform

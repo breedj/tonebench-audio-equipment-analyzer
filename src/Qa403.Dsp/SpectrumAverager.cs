@@ -18,6 +18,16 @@ public sealed class SpectrumAverager
     private int _historyNext;
 
     /// <summary>
+    /// How many spectra have contributed to the current average, capped at the configured target
+    /// count — 0 right after <see cref="Reset"/>, climbing by one per <see cref="Update"/> call
+    /// until it reaches <c>count</c> and holds there. Exponential mode has no true "done" state
+    /// (it's an unbounded running EMA), so this counts ticks the same way Linear does: it reaches
+    /// and holds at the target count once the EMA has had that many samples to settle, which is
+    /// what a user watching "how many averages so far" actually wants to see for either mode.
+    /// </summary>
+    public int Count { get; private set; }
+
+    /// <summary>
     /// Drops the accumulated average, so the next <see cref="Update"/> starts a fresh window.
     /// Needed whenever the signal changes discontinuously (new sample rate, new stimulus): the
     /// spectra averaged so far describe the old signal and would otherwise blend into the new one.
@@ -28,6 +38,7 @@ public sealed class SpectrumAverager
         _history = null;
         _historyCount = 0;
         _historyNext = 0;
+        Count = 0;
     }
 
     /// <summary>
@@ -42,8 +53,11 @@ public sealed class SpectrumAverager
         {
             _ema = null;
             _history = null;
+            Count = 0;
             return;
         }
+
+        Count = Math.Min(Count + 1, count);
 
         if (mode == AveragingMode.Exponential)
         {

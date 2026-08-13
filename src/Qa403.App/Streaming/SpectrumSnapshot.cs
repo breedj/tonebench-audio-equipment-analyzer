@@ -19,7 +19,13 @@ public sealed record SpectrumMeters(
     float PeakDbv,
     float TotalRmsDbv,
     Harmonic[] Harmonics,
-    (float FreqHz, float Dbc)[] OtherPeaks);
+    (float FreqHz, float Dbc)[] OtherPeaks,
+    /// <summary>
+    /// How many spectra have contributed to this tick's (possibly averaged) trace so far, capped
+    /// at the configured target — see <see cref="Qa403.Dsp.SpectrumAverager.Count"/>. 0 when
+    /// averaging is off.
+    /// </summary>
+    int AveragesTaken);
 
 /// <summary>
 /// One channel's full-resolution spectrum as last displayed, for a "save current capture"

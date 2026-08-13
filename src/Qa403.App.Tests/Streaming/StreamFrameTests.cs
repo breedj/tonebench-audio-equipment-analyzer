@@ -116,6 +116,21 @@ public class StreamFrameTests
         Assert.Equal(-60f, meters.Harmonics[2].Dbc);
 
         Assert.Empty(meters.OtherPeaks);
+        Assert.Equal(0u, meters.AveragesTaken); // default param — existing call sites keep compiling unchanged
+    }
+
+    [Fact]
+    public void Meters_frame_round_trips_averages_taken()
+    {
+        Harmonic[] harmonics = [new Harmonic(Order: 1, Bin: 1000, AmplitudeVrms: 1.0, AmplitudeDbv: 0.0, Dbc: 0.0)];
+
+        byte[] frame = StreamFrame.EncodeMeters(
+            StreamChannel.Left, seq: 1, fundamentalFreqHz: 1000f, binSizeHz: 1f,
+            thdPercent: 0f, thdNPercent: 0f, snrDb: 0f, fundamentalDbv: 0f, noiseFloorDbv: 0f,
+            peakDbv: 0f, totalRmsDbv: 0f, harmonics, otherPeaks: [], averagesTaken: 5);
+
+        var meters = StreamFrame.DecodeMeters(frame);
+        Assert.Equal(5u, meters.AveragesTaken);
     }
 
     [Fact]

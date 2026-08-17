@@ -38,6 +38,14 @@ public interface IAnalyzerDevice
     bool AutoRangeEnabled { get; set; }
 
     /// <summary>
+    /// How long, in milliseconds, a peak must stay continuously under-range before autoranging
+    /// steps to a more sensitive range. Settable while connected; ignored (but harmlessly stored)
+    /// on devices with no autoranging of their own, e.g. the simulator. See
+    /// <see cref="Hardware.Qa40xAutoRanger.StepDownDelayMs"/> for why this is time-based.
+    /// </summary>
+    double AutoRangeStepDownDelayMs { get; set; }
+
+    /// <summary>
     /// RX chunks discarded since connect because the consumer could not keep up, cumulative across
     /// streams. Not a cosmetic statistic: a dropped chunk is a hole in the sample stream, so the next
     /// FFT record is spliced — which smears tones into skirts and lifts the broadband noise floor.

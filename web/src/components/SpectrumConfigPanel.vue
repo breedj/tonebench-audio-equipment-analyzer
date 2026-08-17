@@ -66,7 +66,7 @@ const processLeft = computed({
   set: (value: boolean) => applyConfig({ processLeft: value }),
 })
 const processRight = computed({
-  get: () => config.value?.processRight ?? true,
+  get: () => config.value?.processRight ?? false,
   set: (value: boolean) => applyConfig({ processRight: value }),
 })
 
@@ -108,18 +108,7 @@ defineExpose({ getSampleRateHz })
   <section class="w-full rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
     <h2 class="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">FFT settings</h2>
 
-    <div v-if="loaded" class="flex flex-wrap items-end gap-3 text-sm">
-      <label class="flex flex-col gap-1">
-        Sample rate
-        <select
-          v-model.number="sampleRateHz"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="onSampleRateChange"
-        >
-          <option v-for="fs in props.ranges?.sampleRatesHz" :key="fs" :value="fs">{{ fs }} Hz</option>
-        </select>
-      </label>
-
+    <div v-if="loaded" class="flex flex-col gap-3 text-sm">
       <fieldset class="flex items-center gap-2" title="Which channel(s) to process and display, and which the Run button's generators can actually play — the ADC always samples both.">
         <legend class="sr-only">Channels</legend>
         <label class="flex items-center gap-1">
@@ -132,49 +121,62 @@ defineExpose({ getSampleRateHz })
         </label>
       </fieldset>
 
-      <label class="flex flex-col gap-1">
-        FFT size
-        <select
-          v-model.number="form.fftSize"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="apply"
-        >
-          <option v-for="n in FFT_SIZES" :key="n" :value="n">{{ n }}</option>
-        </select>
-      </label>
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="flex flex-col gap-1">
+          Sample rate
+          <select
+            v-model.number="sampleRateHz"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="onSampleRateChange"
+          >
+            <option v-for="fs in props.ranges?.sampleRatesHz" :key="fs" :value="fs">{{ fs }} Hz</option>
+          </select>
+        </label>
 
-      <label class="flex flex-col gap-1">
-        Window
-        <select
-          v-model="form.window"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="apply"
-        >
-          <option v-for="w in WINDOWS" :key="w.value" :value="w.value">{{ w.label }}</option>
-        </select>
-      </label>
+        <label class="flex flex-col gap-1">
+          FFT size
+          <select
+            v-model.number="form.fftSize"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="apply"
+          >
+            <option v-for="n in FFT_SIZES" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </label>
 
-      <label class="flex flex-col gap-1">
-        Averaging
-        <select
-          v-model="form.averaging"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="apply"
-        >
-          <option v-for="m in AVERAGING_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
-        </select>
-      </label>
+        <label class="flex flex-col gap-1">
+          Window
+          <select
+            v-model="form.window"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="apply"
+          >
+            <option v-for="w in WINDOWS" :key="w.value" :value="w.value">{{ w.label }}</option>
+          </select>
+        </label>
 
-      <label v-if="form.averaging !== 'Off'" class="flex flex-col gap-1">
-        {{ form.averaging === 'Linear' ? 'Spectra averaged' : 'Time constant' }}
-        <input
-          type="number"
-          min="2"
-          v-model.number="form.averageCount"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="apply"
-        />
-      </label>
+        <label class="flex flex-col gap-1">
+          Averaging
+          <select
+            v-model="form.averaging"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="apply"
+          >
+            <option v-for="m in AVERAGING_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+          </select>
+        </label>
+
+        <label v-if="form.averaging !== 'Off'" class="flex flex-col gap-1">
+          {{ form.averaging === 'Linear' ? 'Spectra averaged' : 'Time constant' }}
+          <input
+            type="number"
+            min="2"
+            v-model.number="form.averageCount"
+            class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="apply"
+          />
+        </label>
+      </div>
     </div>
     <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">Loading…</div>
   </section>

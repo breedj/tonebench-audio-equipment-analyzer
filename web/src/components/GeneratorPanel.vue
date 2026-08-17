@@ -21,7 +21,7 @@ const channelPanel = useTemplateRef<InstanceType<typeof GeneratorChannelPanel>>(
 // Left and right play the same stimulus — only whether each channel is on is separate. Staged
 // from whichever measurement is currently selected, same as the shared stimulus form below;
 // nothing here reaches the device until Run.
-const leftEnabled = ref(false)
+const leftEnabled = ref(true)
 const rightEnabled = ref(false)
 const snapToBin = ref(true)
 const { kind: stimulusKind } = useGeneratorStimulus()

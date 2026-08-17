@@ -110,7 +110,8 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// undone within ~10 ms of the stream running: <see cref="Qa40xAutoRanger.Evaluate"/> treats a
     /// peak more than <see cref="Qa40xAutoRanger.HeadroomDb"/> dB below the next lower range's full
     /// scale as under-range, so any normal signal — or no signal at all — walked the range back down
-    /// to the most sensitive setting one step per 3 chunks. Audible on real hardware as the 24 dB
+    /// to the most sensitive setting one step per <see cref="Qa40xAutoRanger.StepDownDelayMs"/>.
+    /// Audible on real hardware as the 24 dB
     /// attenuator relay clicking in on selection and straight back out. That was a coordination bug
     /// between this class's own <c>_inputRangeDbv</c> (which autorange steps) and
     /// <c>DeviceSessionService</c>'s cached view of the range — if clicking or a stuck-looking range
@@ -120,6 +121,27 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// so the UI's range selector follows the hardware when this is on.
     /// </summary>
     public bool AutoRangeEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Backing value for <see cref="AutoRangeStepDownDelayMs"/> before <see cref="_autoRanger"/>
+    /// exists (i.e. before <see cref="ConnectAsync"/>), and the value <see cref="ConnectAsync"/>
+    /// seeds a freshly created ranger with. Once connected, <see cref="_autoRanger"/>'s own property
+    /// is the live source of truth — this field is kept in sync by the setter below purely so a
+    /// caller reading it back before connecting sees what it just set.
+    /// </summary>
+    private double _autoRangeStepDownDelayMs = Qa40xAutoRanger.DefaultStepDownDelayMs;
+
+    /// <inheritdoc />
+    public double AutoRangeStepDownDelayMs
+    {
+        get => _autoRanger?.StepDownDelayMs ?? _autoRangeStepDownDelayMs;
+        set
+        {
+            _autoRangeStepDownDelayMs = value;
+            if (_autoRanger is not null)
+                _autoRanger.StepDownDelayMs = value;
+        }
+    }
 
     /// <inheritdoc />
     public double InputRangeDbv => Volatile.Read(ref _inputRangeDbv);
@@ -178,7 +200,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
             _transport = transport;
             _calibration = calibration;
-            _autoRanger = new Qa40xAutoRanger(Capabilities.InputRangesDbv);
+            _autoRanger = new Qa40xAutoRanger(Capabilities.InputRangesDbv) { StepDownDelayMs = _autoRangeStepDownDelayMs };
             _connected = true;
 
             var info = new DeviceInfo("QA403", serialRaw.ToString(), firmwareRaw.ToString(), IsSimulated: false);
@@ -533,6 +555,9 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         private readonly int _queueDepth = QueueDepthFor(sampleRateHz);
         private readonly Qa40xGeneratorWaveform _waveform = new(new Random());
 
+        /// <summary>Wall-clock duration of one <see cref="TransferChunkFrames"/> chunk at this stream's sample rate — what <see cref="StepRangeIfNeeded"/> feeds <see cref="Qa40xAutoRanger.Evaluate"/> as its under-range hysteresis tick.</summary>
+        private readonly double _blockDurationMs = TransferChunkFrames * 1000.0 / sampleRateHz;
+
         /// <summary>
         /// Mutable box for the dropped-chunk count. The itemDropped callback below has to increment
         /// something, and a field initializer may not touch <c>this</c> — so the counter is a local
@@ -806,7 +831,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// </summary>
         private void StepRangeIfNeeded(byte[] buffer, int transferLength, double currentRangeDbv)
         {
-            var decision = autoRanger.Evaluate(currentRangeDbv, ScanPeakDbv(buffer, transferLength, currentRangeDbv));
+            var decision = autoRanger.Evaluate(currentRangeDbv, ScanPeakDbv(buffer, transferLength, currentRangeDbv), _blockDurationMs);
             if (decision == RangeStepDecision.Hold)
                 return;
 

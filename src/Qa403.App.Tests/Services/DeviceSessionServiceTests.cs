@@ -338,6 +338,8 @@ public class DeviceSessionServiceTests
 
         public bool AutoRangeEnabled { get; set; }
 
+        public double AutoRangeStepDownDelayMs { get; set; }
+
         public Task SetInputRangeAsync(double dbv, CancellationToken ct)
         {
             InputRangeDbv = dbv;
@@ -389,6 +391,8 @@ public class DeviceSessionServiceTests
         public long DroppedRxChunks => 0;
 
         public bool AutoRangeEnabled { get; set; }
+
+        public double AutoRangeStepDownDelayMs { get; set; }
 
         public Task SetInputRangeAsync(double dbv, CancellationToken ct)
         {

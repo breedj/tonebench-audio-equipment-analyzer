@@ -148,7 +148,7 @@ public sealed class MeasurementSaveService(
         var options = spectrumPipeline.Options;
         var streamConfig = session.StreamConfig;
 
-        double sampleRateHz = staged?.SampleRateHz ?? streamConfig?.SampleRateHz ?? 48000.0;
+        double sampleRateHz = staged?.SampleRateHz ?? streamConfig?.SampleRateHz ?? 192000.0;
         int channelCount = staged?.ChannelCount ?? streamConfig?.ChannelCount ?? 2;
         double inputRangeDbv = staged?.InputRangeDbv ?? session.InputRangeDbv;
         bool? autoRangeEnabled = staged is not null ? staged.AutoRangeEnabled : session.AutoRangeEnabled;
@@ -174,6 +174,28 @@ public sealed class MeasurementSaveService(
 
     public string BuildCurrentParametersJson(StagedMeasurementConfig? staged = null) =>
         JsonSerializer.Serialize(BuildParameters(staged), SerializerOptions);
+
+    /// <summary>
+    /// Same as <see cref="BuildCurrentParametersJson"/> with no staged config, except when the live
+    /// generator is fully silent it defaults the left channel on instead of cloning that silence —
+    /// so a brand-new measurement type has something to Run rather than two disabled channels.
+    /// "Fully silent" is the common case here: stopRun() disables both channels on every project/
+    /// type switch (see deviceControl.ts), so by the time "+ New measurement" is pressed the live
+    /// generator is silent regardless of what any previous type actually had configured.
+    ///
+    /// Deliberately not folded into <see cref="BuildParameters"/> itself: that method also backs the
+    /// update-type endpoint's own blank-params fallback, which a bulk project save relies on to
+    /// clone each dirty-but-not-currently-open type's live state verbatim (see
+    /// ProjectsEndpoints.cs's PUT handler and useProjects.saveProject) — defaulting the channel on
+    /// there would silently rewrite those types' saved generator config.
+    /// </summary>
+    public string BuildDefaultParametersJsonForNewType()
+    {
+        var parameters = BuildParameters();
+        if (!parameters.Generator.Left.Enabled && !parameters.Generator.Right.Enabled)
+            parameters = parameters with { Generator = parameters.Generator with { Left = parameters.Generator.Left with { Enabled = true } } };
+        return JsonSerializer.Serialize(parameters, SerializerOptions);
+    }
 
     private static int ChannelIndex(StreamChannel channel) => channel == StreamChannel.Left ? 0 : 1;
 }

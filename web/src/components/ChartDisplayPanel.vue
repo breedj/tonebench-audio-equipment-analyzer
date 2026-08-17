@@ -21,13 +21,13 @@ const {
 
 // FFT settings' L/R checkboxes (SpectrumConfigPanel.vue) are the source of truth for whether a
 // channel is processed at all — a channel turned off there has no data to show, so its own
-// show/hide checkbox here is forced off and locked rather than left toggleable.
+// show/hide checkbox here is forced to match and locked rather than left toggleable.
 const { config: spectrumConfig } = useSpectrumConfig()
 const processLeft = computed(() => spectrumConfig.value?.processLeft ?? true)
-const processRight = computed(() => spectrumConfig.value?.processRight ?? true)
+const processRight = computed(() => spectrumConfig.value?.processRight ?? false)
 
-watch(processLeft, (enabled) => { if (!enabled) visibleL.value = false }, { immediate: true })
-watch(processRight, (enabled) => { if (!enabled) visibleR.value = false }, { immediate: true })
+watch(processLeft, (enabled) => { visibleL.value = enabled }, { immediate: true })
+watch(processRight, (enabled) => { visibleR.value = enabled }, { immediate: true })
 
 const FREQ_FROM_PRESETS = [5, 10, 20, 50, 100, 200, 500]
 const FREQ_TO_PRESETS = [1000, 2000, 5000, 10000, 20000, 100000]

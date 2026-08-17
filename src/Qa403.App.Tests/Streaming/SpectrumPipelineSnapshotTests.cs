@@ -173,7 +173,9 @@ public class SpectrumPipelineSnapshotTests
         hub = new SpectrumBroadcastHub();
         var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
         {
-            Options = new SpectrumPipelineOptions { FftSize = fftSize, TargetFrameRateHz = 40, DisplayColumns = 200 },
+            // ProcessRight explicit here (its class default is now off) so these tests still cover
+            // both channels regardless of the UI's left-only-by-default preference.
+            Options = new SpectrumPipelineOptions { FftSize = fftSize, TargetFrameRateHz = 40, DisplayColumns = 200, ProcessRight = true },
         };
         pipeline.Start(sampleRateHz, channelCount);
 

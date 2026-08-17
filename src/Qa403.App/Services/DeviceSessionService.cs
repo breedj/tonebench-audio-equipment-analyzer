@@ -141,12 +141,12 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         if (_info is not { } info)
             return new DeviceStatusResponse(
                 false, "", "", "", false, 0, 0, false, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
-                _deviceLost, AutoRangeEnabled, _generatorConfig.SnapToBin, device.DroppedRxChunks);
+                _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
             device.InputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
-            _deviceLost, AutoRangeEnabled, _generatorConfig.SnapToBin, device.DroppedRxChunks);
+            _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks);
     }
 
     /// <summary>
@@ -191,6 +191,15 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     public bool? AutoRangeEnabled => device is SimulatedDevice ? null : device.AutoRangeEnabled;
 
     public void SetAutoRangeEnabled(bool enabled) => device.AutoRangeEnabled = enabled;
+
+    /// <summary>
+    /// How long a peak must stay under-range before hardware autoranging steps to a more sensitive
+    /// range, in milliseconds. Null with the same convention as <see cref="AutoRangeEnabled"/> — the
+    /// simulator has no hardware ranger to configure.
+    /// </summary>
+    public double? AutoRangeStepDownDelayMs => device is SimulatedDevice ? null : device.AutoRangeStepDownDelayMs;
+
+    public void SetAutoRangeStepDownDelayMs(double delayMs) => device.AutoRangeStepDownDelayMs = delayMs;
 
     public async Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {

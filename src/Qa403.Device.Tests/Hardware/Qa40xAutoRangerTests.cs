@@ -7,13 +7,18 @@ public class Qa40xAutoRangerTests
 {
     private static readonly double[] InputRangesDbv = [0, 6, 12, 18, 24, 30, 36, 42];
 
+    // Chosen so 3 blocks (1200 ms) crosses the default 1000 ms StepDownDelayMs on the 3rd call,
+    // matching the old 3-consecutive-block hysteresis this replaced — keeps the tests below reading
+    // the same way while actually exercising the new elapsed-time accumulation.
+    private const double BlockDurationMs = 400.0;
+
     [Fact]
     public void Evaluate_PeakAboveHeadroom_StepsUpOneRange()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
 
         // Range 12's headroom boundary is 12 - 5 = 7 dBV; 8 dBV is just over it.
-        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 8.0);
+        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 8.0, BlockDurationMs);
 
         Assert.Equal(RangeStepDecision.StepUp, decision);
         Assert.Equal(18.0, ranger.NextRangeDbv(12.0, decision));
@@ -24,22 +29,22 @@ public class Qa40xAutoRangerTests
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
 
-        var decision = ranger.Evaluate(currentRangeDbv: 42.0, peakDbv: 100.0);
+        var decision = ranger.Evaluate(currentRangeDbv: 42.0, peakDbv: 100.0, BlockDurationMs);
 
         Assert.Equal(RangeStepDecision.Hold, decision);
         Assert.Equal(42.0, ranger.NextRangeDbv(42.0, decision));
     }
 
     [Fact]
-    public void Evaluate_UnderRange_RequiresConsecutiveBlocksBeforeSteppingDown()
+    public void Evaluate_UnderRange_RequiresStepDownDelayBeforeSteppingDown()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
         // Next range down is 6, whose headroom boundary is 6 - 5 = 1 dBV; well under that.
         const double lowPeakDbv = -10.0;
 
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
-        var third = ranger.Evaluate(12.0, lowPeakDbv);
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 400 ms
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 800 ms
+        var third = ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs); // 1200 ms >= 1000 ms default
 
         Assert.Equal(RangeStepDecision.StepDown, third);
         Assert.Equal(6.0, ranger.NextRangeDbv(12.0, third));
@@ -52,7 +57,7 @@ public class Qa40xAutoRangerTests
         const double lowPeakDbv = -40.0;
 
         for (int i = 0; i < 5; i++)
-            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(0.0, lowPeakDbv));
+            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(0.0, lowPeakDbv, BlockDurationMs));
     }
 
     [Fact]
@@ -62,14 +67,14 @@ public class Qa40xAutoRangerTests
         const double lowPeakDbv = -10.0;
         const double midPeakDbv = 4.0; // Between the 1 dBV step-down and 7 dBV step-up boundaries.
 
-        ranger.Evaluate(12.0, lowPeakDbv);
-        ranger.Evaluate(12.0, lowPeakDbv);
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeakDbv)); // resets the counter
+        ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs); // 400 ms
+        ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs); // 800 ms
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeakDbv, BlockDurationMs)); // resets the timer
 
-        // Two more low blocks after the reset is only the 2nd consecutive, not yet the 3rd.
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
-        Assert.Equal(RangeStepDecision.StepDown, ranger.Evaluate(12.0, lowPeakDbv));
+        // Two more low blocks after the reset is only 800 ms elapsed, not yet the 1000 ms delay.
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 400 ms
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 800 ms
+        Assert.Equal(RangeStepDecision.StepDown, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 1200 ms
     }
 
     [Fact]
@@ -78,12 +83,12 @@ public class Qa40xAutoRangerTests
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
         const double lowPeakDbv = -10.0;
 
-        ranger.Evaluate(12.0, lowPeakDbv);
-        ranger.Evaluate(12.0, lowPeakDbv);
+        ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs);
+        ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs);
         ranger.Reset();
 
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs));
     }
 
     [Fact]
@@ -92,7 +97,40 @@ public class Qa40xAutoRangerTests
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
         const double midPeakDbv = 4.0;
 
-        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeakDbv));
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, midPeakDbv, BlockDurationMs));
+    }
+
+    [Fact]
+    public void StepDownDelayMs_DefaultsTo1000Ms()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv);
+
+        Assert.Equal(1000.0, ranger.StepDownDelayMs);
+        Assert.Equal(1000.0, Qa40xAutoRanger.DefaultStepDownDelayMs);
+    }
+
+    [Fact]
+    public void Evaluate_UnderRange_AccumulatesWallClockTimeRegardlessOfBlockCadence()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv) { StepDownDelayMs = 100.0 };
+        const double lowPeakDbv = -10.0;
+
+        // Many short blocks (e.g. a high sample rate's small chunk duration) still only step down
+        // once their summed wall-clock time crosses StepDownDelayMs, not after a fixed block count.
+        for (int i = 0; i < 9; i++)
+            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, blockDurationMs: 10.0));
+
+        Assert.Equal(RangeStepDecision.StepDown, ranger.Evaluate(12.0, lowPeakDbv, blockDurationMs: 10.0));
+    }
+
+    [Fact]
+    public void Evaluate_UnderRange_OneLongBlockCanCrossTheDelayImmediately()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv) { StepDownDelayMs = 100.0 };
+
+        var decision = ranger.Evaluate(12.0, peakDbv: -10.0, blockDurationMs: 150.0);
+
+        Assert.Equal(RangeStepDecision.StepDown, decision);
     }
 
     [Fact]

@@ -53,6 +53,15 @@ public static class DeviceEndpoints
             return Results.Ok(session.GetStatus());
         });
 
+        group.MapPost("/auto-range-step-down-delay", (AutoRangeStepDownDelayRequest request, DeviceSessionService session) =>
+        {
+            if (session.AutoRangeStepDownDelayMs is null)
+                return Results.BadRequest("The connected device has no input autoranging.");
+
+            session.SetAutoRangeStepDownDelayMs(request.DelayMs);
+            return Results.Ok(session.GetStatus());
+        });
+
         // Simulator-only: shapes the synthesized input signal, which real hardware cannot do.
         // Exposed so the noise floor and hum can be taken out of the way while reading a spectrum.
         // Patch-style — an omitted field leaves that setting alone.
@@ -90,6 +99,12 @@ public sealed record DeviceStatusResponse(
     bool DeviceLost,
     /// <summary>Input autoranging on/off, or null when the device has no autoranging (the simulator) — the UI hides the checkbox in that case.</summary>
     bool? AutoRangeEnabled,
+    /// <summary>
+    /// How long, in milliseconds, a peak must stay under-range before hardware autoranging steps to
+    /// a more sensitive range. Same null-means-no-autoranging convention as
+    /// <see cref="AutoRangeEnabled"/>.
+    /// </summary>
+    double? AutoRangeStepDownDelayMs,
     /// <summary>Whether generator tones are snapped to the nearest coherent FFT bin. The Tones lists above are the snapped (effective) frequencies.</summary>
     bool GeneratorSnapToBin,
     /// <summary>RX chunks dropped since connect. Non-zero means FFT records contain splices and noise readings are suspect — see <see cref="Qa403.Device.IAnalyzerDevice.DroppedRxChunks"/>.</summary>
@@ -129,5 +144,7 @@ public sealed record InputRangeRequest(double Dbv);
 public sealed record OutputRangeRequest(double Dbv);
 
 public sealed record AutoRangeRequest(bool Enabled);
+
+public sealed record AutoRangeStepDownDelayRequest(double DelayMs);
 
 public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled);

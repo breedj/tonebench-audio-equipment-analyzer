@@ -18,6 +18,11 @@ export interface DeviceStatus {
   simulatedHumEnabled: boolean | null
   /** Input autoranging on/off; null when the device has no autoranging (the simulator). */
   autoRangeEnabled: boolean | null
+  /**
+   * How long, in ms, a peak must stay under-range before autoranging steps to a more sensitive
+   * range. Same null-means-no-autoranging convention as autoRangeEnabled.
+   */
+  autoRangeStepDownDelayMs: number | null
   /** Whether generator tones are snapped to the nearest coherent FFT bin. generatorLeft/Right Tones are the snapped values. */
   generatorSnapToBin: boolean
   /**
@@ -341,6 +346,9 @@ export const api = {
 
   setAutoRange: (enabled: boolean) =>
     request<DeviceStatus>('/device/auto-range', { method: 'POST', body: JSON.stringify({ enabled }) }),
+
+  setAutoRangeStepDownDelay: (delayMs: number) =>
+    request<DeviceStatus>('/device/auto-range-step-down-delay', { method: 'POST', body: JSON.stringify({ delayMs }) }),
 
   setSimulatedProfile: (patch: SimulatedProfileRequest) =>
     request<DeviceStatus>('/device/sim-profile', { method: 'POST', body: JSON.stringify(patch) }),

@@ -67,7 +67,7 @@ public static class ProjectsEndpoints
             try
             {
                 string paramsJson = string.IsNullOrWhiteSpace(request.ParamsJson)
-                    ? saveService.BuildCurrentParametersJson(request.Staged)
+                    ? (request.Staged is null ? saveService.BuildDefaultParametersJsonForNewType() : saveService.BuildCurrentParametersJson(request.Staged))
                     : request.ParamsJson;
                 long typeId = await repo.CreateTypeAsync(id, request.Kind, request.Name, request.Notes, paramsJson, ct);
                 return Results.Ok(new IdResponse(typeId));

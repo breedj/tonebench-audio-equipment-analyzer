@@ -80,5 +80,8 @@ public sealed record SpectrumPipelineOptions
     /// </summary>
     public bool ProcessLeft { get; init; } = true;
 
-    public bool ProcessRight { get; init; } = true;
+    // Only the left channel is on out of the box — matching the generator's own left-only default
+    // (see MeasurementSaveService.BuildParameters) so a fresh measurement has one clean channel to
+    // look at rather than an unused right channel cluttering the chart.
+    public bool ProcessRight { get; init; } = false;
 }

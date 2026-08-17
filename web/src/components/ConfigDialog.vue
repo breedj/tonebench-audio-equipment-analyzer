@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import Modal from './Modal.vue'
+import { api } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
+import { useDevice } from '../composables/useDevice'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 
 const props = defineProps<{ open: boolean }>()
@@ -9,6 +11,24 @@ const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
 const { config, apply: applyConfig } = useSpectrumConfig()
+const { status: deviceStatus } = useDevice()
+
+// Staged locally like the bandwidth field below, applied on change. Only meaningful on a device
+// with a hardware ranger (autoRangeStepDownDelayMs is null on the simulator, which has its own
+// client-side ranger in App.vue instead) — the field is hidden in that case.
+const autoRangeStepDownDelayMs = reactive({ value: 1000 })
+
+watch(
+  deviceStatus,
+  (s) => {
+    if (s?.autoRangeStepDownDelayMs != null) autoRangeStepDownDelayMs.value = s.autoRangeStepDownDelayMs
+  },
+  { immediate: true },
+)
+
+async function applyAutoRangeStepDownDelay() {
+  deviceStatus.value = await api.setAutoRangeStepDownDelay(autoRangeStepDownDelayMs.value)
+}
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'Auto', label: 'Auto' },
@@ -77,6 +97,24 @@ async function applyBandwidth() {
               @change="applyBandwidth"
             />
           </span>
+        </label>
+      </section>
+
+      <section v-if="deviceStatus?.autoRangeStepDownDelayMs != null">
+        <h3 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">Auto-ranging</h3>
+        <label
+          class="flex flex-col gap-1"
+          title="How long a peak must stay under-range before the input range steps down to a more sensitive setting. Higher values ride out amplitude-modulated signals (e.g. two close tones beating) without chasing every dip; lower values react faster to a genuinely quieter signal."
+        >
+          Step-down delay (ms)
+          <input
+            type="number"
+            min="0"
+            step="100"
+            v-model.number="autoRangeStepDownDelayMs.value"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="applyAutoRangeStepDownDelay"
+          />
         </label>
       </section>
 

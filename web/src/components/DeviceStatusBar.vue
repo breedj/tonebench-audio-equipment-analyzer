@@ -87,9 +87,9 @@ function onSimulatedHumChange(e: Event) {
         class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"
         title="Automatically kept matched to the input signal — by the device's own auto-ranging where available, otherwise by continuously monitoring the peak level."
       >
-        Input range
+        Attenuation
         <span class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
-          {{ status?.inputRangeDbv ?? '--' }} dBV
+          {{ status?.inputRangeDbv ?? '--' }} dB
         </span>
       </span>
       <!--

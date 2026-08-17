@@ -213,7 +213,9 @@ function onSampleRateChange() {
 // Requires the same determined target 3 frames running before acting — this is a coarse (6 dB step)
 // decision already, but a peak sitting right on a step boundary could still ping-pong frame to
 // frame; on real hardware every step is an audible relay click, so this is not just "avoid churn."
-// Same 3-frame threshold Qa40xAutoRanger.cs uses for its own under-range hysteresis.
+// Qa40xAutoRanger.cs uses an analogous under-range hysteresis for the real hardware ranger, but
+// time-based (StepDownDelayMs, configurable in the Configuration dialog) rather than frame-count
+// based — this frame count and that delay are not the same figure and don't need to match.
 const RANGE_STABILITY_FRAMES = 3
 let pendingRangeTarget: number | null = null
 let pendingRangeCount = 0

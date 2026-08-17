@@ -41,8 +41,27 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     /// </summary>
     public const double HeadroomDb = 5.0;
 
-    /// <summary>Consecutive under-range blocks required before stepping down — hysteresis so one quiet block doesn't trigger a step (tuning constant, not a protocol fact). Same 3-block figure <c>App.vue</c>'s <c>RANGE_STABILITY_FRAMES</c> mirrors for the simulator.</summary>
-    public const int UnderRangeConsecutiveBlocksRequired = 3;
+    /// <summary>
+    /// Default for <see cref="StepDownDelayMs"/> — how long a peak must stay under-range before
+    /// stepping down, in milliseconds.
+    /// </summary>
+    public const double DefaultStepDownDelayMs = 1000.0;
+
+    /// <summary>
+    /// How long, in milliseconds, a peak must stay continuously under-range before
+    /// <see cref="Evaluate"/> steps down — hysteresis so a brief dip doesn't trigger a step.
+    /// Settable live (e.g. from a configuration dialog); a change takes effect on the next call to
+    /// <see cref="Evaluate"/>.
+    ///
+    /// Time-based rather than a fixed block count: a fixed count of consecutive under-range blocks
+    /// (this used to require 3) covers wildly different amounts of real time depending on sample
+    /// rate and block size, and is too short to ride out an amplitude-modulated multitone signal —
+    /// e.g. two tones close in frequency beat at their difference frequency, so <c>ScanPeakDbv</c>'s
+    /// per-block peak rises and falls at that beat rate and can dip under the step-down threshold
+    /// for several consecutive blocks purely from the beat, not from the signal actually having
+    /// gotten quieter. A wall-clock delay filters that out regardless of block cadence.
+    /// </summary>
+    public double StepDownDelayMs { get; set; } = DefaultStepDownDelayMs;
 
     /// <summary>
     /// TODO: no relay settling time is documented anywhere in docs/protocol.md for register 5 —
@@ -53,7 +72,7 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     /// </summary>
     public const int SettleTimeMsTodoPlaceholder = 50;
 
-    private int _consecutiveUnderRangeBlocks;
+    private double _underRangeElapsedMs;
 
     /// <summary>
     /// Decides what the input range should do next, given the current range and this block's
@@ -63,30 +82,33 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     /// would read ~3 dB hotter and eat into <see cref="HeadroomDb"/>. Compared against each
     /// candidate range's own nominal full scale (its entry in <see cref="inputRangesDbv"/>) rather
     /// than a fixed raw-code fraction, so the same headroom margin applies at every range.
+    /// <paramref name="blockDurationMs"/> is how much wall-clock time this block represents — the
+    /// caller's chunk duration at its sample rate — accumulated against <see cref="StepDownDelayMs"/>
+    /// for the under-range hysteresis; it plays no part in the immediate step-up path.
     /// </summary>
-    public RangeStepDecision Evaluate(double currentRangeDbv, double peakDbv)
+    public RangeStepDecision Evaluate(double currentRangeDbv, double peakDbv, double blockDurationMs)
     {
         int currentIndex = IndexOf(currentRangeDbv);
 
         if (peakDbv > currentRangeDbv - HeadroomDb)
         {
-            _consecutiveUnderRangeBlocks = 0;
+            _underRangeElapsedMs = 0;
             return currentIndex < inputRangesDbv.Count - 1 ? RangeStepDecision.StepUp : RangeStepDecision.Hold;
         }
 
         if (currentIndex > 0 && peakDbv <= inputRangesDbv[currentIndex - 1] - HeadroomDb)
         {
-            _consecutiveUnderRangeBlocks++;
-            if (_consecutiveUnderRangeBlocks >= UnderRangeConsecutiveBlocksRequired)
+            _underRangeElapsedMs += blockDurationMs;
+            if (_underRangeElapsedMs >= StepDownDelayMs)
             {
-                _consecutiveUnderRangeBlocks = 0;
+                _underRangeElapsedMs = 0;
                 return RangeStepDecision.StepDown;
             }
 
             return RangeStepDecision.Hold;
         }
 
-        _consecutiveUnderRangeBlocks = 0;
+        _underRangeElapsedMs = 0;
         return RangeStepDecision.Hold;
     }
 
@@ -108,8 +130,8 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     public static int SettleFrameCount(double sampleRateHz) =>
         (int)Math.Ceiling(SettleTimeMsTodoPlaceholder / 1000.0 * sampleRateHz);
 
-    /// <summary>Clears the under-range hysteresis counter — call after any explicit (non-autorange) range change.</summary>
-    public void Reset() => _consecutiveUnderRangeBlocks = 0;
+    /// <summary>Clears the under-range hysteresis timer — call after any explicit (non-autorange) range change.</summary>
+    public void Reset() => _underRangeElapsedMs = 0;
 
     private int IndexOf(double rangeDbv)
     {

@@ -72,6 +72,13 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     /// </summary>
     public bool AutoRangeEnabled { get => false; set { } }
 
+    /// <summary>
+    /// The simulator has no autoranging of its own (see <see cref="AutoRangeEnabled"/>), so this
+    /// value is never read — stored rather than ignored purely so a caller reading it straight back
+    /// after setting it doesn't see a surprising discard.
+    /// </summary>
+    public double AutoRangeStepDownDelayMs { get; set; } = Hardware.Qa40xAutoRanger.DefaultStepDownDelayMs;
+
     public Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {
         RequireSupportedRange(Capabilities.InputRangesDbv, dbv, nameof(dbv));

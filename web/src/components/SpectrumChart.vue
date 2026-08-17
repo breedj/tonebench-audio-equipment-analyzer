@@ -68,6 +68,9 @@ const { kind: stimulusKind } = useGeneratorStimulus()
 
 const CHANNEL_LABELS = ['L', 'R']
 const CHANNEL_COLORS = ['#3b82f6', '#f97316']
+// Deliberately not a shade of either channel color — peak-hold needs to read as its own thing at a
+// glance, not a dimmer echo of whichever channel it belongs to.
+const PEAK_HOLD_COLOR = '#eab308'
 // Same hues at low alpha: the band is dense (one stroke per column) so it reads as a solid region
 // even this faint, and the max trace has to stay legible on top of it.
 const CHANNEL_BAND_COLORS = ['rgba(59, 130, 246, 0.35)', 'rgba(249, 115, 22, 0.35)']
@@ -320,8 +323,8 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
     {},
     { label: CHANNEL_LABELS[0], stroke: CHANNEL_COLORS[0], width: liveWidth, points },
     { label: CHANNEL_LABELS[1], stroke: CHANNEL_COLORS[1], width: liveWidth, points },
-    { label: `${CHANNEL_LABELS[0]} peak`, stroke: CHANNEL_COLORS[0], width: 1, dash: [2, 2], points: { show: false } },
-    { label: `${CHANNEL_LABELS[1]} peak`, stroke: CHANNEL_COLORS[1], width: 1, dash: [2, 2], points: { show: false } },
+    { label: `${CHANNEL_LABELS[0]} peak`, stroke: PEAK_HOLD_COLOR, width: 1, dash: [2, 2], points: { show: false } },
+    { label: `${CHANNEL_LABELS[1]} peak`, stroke: PEAK_HOLD_COLOR, width: 1, dash: [2, 2], points: { show: false } },
   ]
   for (const overlay of overlays) {
     series.push(

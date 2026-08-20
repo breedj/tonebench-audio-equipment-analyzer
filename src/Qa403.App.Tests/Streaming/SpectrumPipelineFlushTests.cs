@@ -134,4 +134,49 @@ public class SpectrumPipelineFlushTests
 
         await pipeline.StopAsync();
     }
+
+    /// <summary>
+    /// Emptying the buffers is only half of what a stimulus flush has to do. On real hardware the
+    /// change has not reached the DAC when the call returns — a QA403 has one TX queue (~65 ms:
+    /// 3200 frames at 48 kHz, 12416 at 192 kHz) of pre-change audio still committed — so the samples
+    /// arriving immediately after the flush are the *old* stimulus, and they refill the window with
+    /// exactly the step the flush existed to keep out. Measured in loopback on a 1 kHz tone moved
+    /// -18 -> -17 dBV with no range change anywhere: the first record after a bare flush read
+    /// +16 to +41 dB of broadband floor (and up to +81 dB of skirt around the tone) depending on FFT
+    /// size, versus +0.3 dB or better once the in-flight frames were discarded too.
+    ///
+    /// Asserted structurally rather than spectrally: a discard of N frames must delay the first
+    /// frame by N samples, so a window's worth of post-flush samples is *not* enough on its own.
+    /// </summary>
+    [Fact]
+    public async Task Flush_WithDiscardFrames_AlsoDropsTheAudioStillInFlightWhenItWasCalled()
+    {
+        const int discardFrames = FftSize / 4;
+
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = NewPipeline(hub);
+        var (_, reader) = hub.Subscribe();
+        long phase = 0;
+
+        pipeline.Start(SampleRateHz, channelCount: 1);
+        EnqueueTone(pipeline, FftSize, amplitudeV: 1.0, ref phase);
+        Assert.True(await SawMetersWithinAsync(reader, TimeSpan.FromSeconds(5)));
+
+        pipeline.Flush(discardFrames);
+        DrainPending(reader);
+
+        // A full window — but the first discardFrames of it are the stale ones, so the window is
+        // still short and nothing may be broadcast yet. Without the discard this alone would frame.
+        EnqueueTone(pipeline, FftSize, amplitudeV: 0.1, ref phase);
+        Assert.False(
+            await SawMetersWithinAsync(reader, TimeSpan.FromMilliseconds(400)),
+            "the discarded frames must not count toward the new window");
+
+        EnqueueTone(pipeline, discardFrames, amplitudeV: 0.1, ref phase);
+        Assert.True(
+            await SawMetersWithinAsync(reader, TimeSpan.FromSeconds(5)),
+            "once a whole window of post-discard samples has arrived, frames resume");
+
+        await pipeline.StopAsync();
+    }
 }

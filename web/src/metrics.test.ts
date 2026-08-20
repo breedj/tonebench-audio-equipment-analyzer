@@ -128,6 +128,7 @@ describe('channelTiles', () => {
     harmonics: [],
     otherPeaks: [],
     averagesTaken: 0,
+    held: false,
   }
 
   it('returns an empty list when there is no data yet', () => {

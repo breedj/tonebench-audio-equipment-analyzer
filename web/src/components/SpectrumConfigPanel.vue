@@ -37,7 +37,7 @@ const loaded = ref(false)
 const form = reactive({
   fftSize: 65536,
   window: 'Hann' as WindowType,
-  averaging: 'Off' as AveragingMode,
+  averaging: 'Linear' as AveragingMode,
   averageCount: 8,
 })
 
@@ -113,11 +113,11 @@ defineExpose({ getSampleRateHz })
         <legend class="sr-only">Channels</legend>
         <label class="flex items-center gap-1">
           <input type="checkbox" v-model="processLeft" />
-          L
+          Left
         </label>
         <label class="flex items-center gap-1">
           <input type="checkbox" v-model="processRight" />
-          R
+          Right
         </label>
       </fieldset>
 

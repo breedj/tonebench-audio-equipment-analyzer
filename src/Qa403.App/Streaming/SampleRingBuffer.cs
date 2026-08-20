@@ -12,6 +12,7 @@ internal sealed class SampleRingBuffer(int capacity)
     private readonly double[] _buffer = new double[capacity];
     private readonly object _lock = new();
     private long _writeIndex;
+    private int _discardRemaining;
 
     public int Capacity { get; } = capacity;
 
@@ -29,13 +30,35 @@ internal sealed class SampleRingBuffer(int capacity)
     /// noise floor tens of dB too high, decaying over exactly one buffer-fill as the stale samples
     /// slide out. The fill time is Capacity/sampleRate — 0.68 s for a 128k FFT at 192 kHz, but
     /// 21.8 s for a 1M FFT at 48 kHz.
+    ///
+    /// <para><paramref name="discardSamples"/> is what makes this actually work on real hardware.
+    /// Emptying the buffer is only half the job: the change has not reached the wire yet when the
+    /// caller returns, so the samples arriving immediately afterwards still carry the *old* stimulus
+    /// and refill this buffer with exactly the discontinuity the reset was meant to exclude. Pass
+    /// <see cref="Qa403.Device.IAnalyzerDevice.StimulusLatencyFrames"/> so those are dropped too.
+    /// Measured on a QA403, 1 kHz at -18 -> -17 dBV with no range change of any kind, first record
+    /// after the reset versus steady state:</para>
+    /// <code>
+    ///   FFT      reset only     reset + discard
+    ///   4096     +16.4 dB           +0.3 dB
+    ///   16384    +25.4 dB           -0.1 dB
+    ///   32768    +41.3 dB           +0.1 dB
+    ///   65536     +1.9 dB           +0.0 dB
+    /// </code>
+    /// <para>A 1 dB step is enough to do that because the damage scales with where the step lands
+    /// under the window, not with its size. It is also why the artifact never appears if acquisition
+    /// is stopped, the generator changed, and acquisition restarted: by then the stale audio is long
+    /// gone and the buffer fills entirely from post-change samples.</para>
     /// </summary>
-    public void Reset()
+    public void Reset(int discardSamples = 0)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(discardSamples);
+
         lock (_lock)
         {
             Array.Clear(_buffer);
             Interlocked.Exchange(ref _writeIndex, 0);
+            _discardRemaining = discardSamples;
         }
     }
 
@@ -51,6 +74,14 @@ internal sealed class SampleRingBuffer(int capacity)
             int cap = _buffer.Length;
             for (int i = channelIndex; i < interleaved.Length; i += channelCount)
             {
+                // Still draining the stimulus latency booked by Reset — these samples predate the
+                // change that caused it, so they must not land here at all.
+                if (_discardRemaining > 0)
+                {
+                    _discardRemaining--;
+                    continue;
+                }
+
                 _buffer[_writeIndex % cap] = interleaved[i];
                 _writeIndex++;
             }

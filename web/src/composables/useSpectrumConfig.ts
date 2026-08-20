@@ -44,8 +44,19 @@ export function useSpectrumConfig() {
     }
   }
 
+  /** Arms/re-arms a singleShot capture — see api.armSpectrumCapture. Does not change config values. */
+  async function arm() {
+    try {
+      config.value = await api.armSpectrumCapture()
+      error.value = null
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   if (config.value === null)
     load()
 
-  return { config, error, load, apply }
+  return { config, error, load, apply, arm }
 }

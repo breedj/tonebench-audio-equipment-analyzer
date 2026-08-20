@@ -145,6 +145,86 @@ public class SpectrumPipelineTests
     }
 
     [Fact]
+    public async Task SingleShot_HoldsAfterReachingAverageCount()
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        await device.ConnectAsync(CancellationToken.None);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 0.0)]), ChannelGeneratorConfig.Off), CancellationToken.None);
+
+        const int averageCount = 3;
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
+        {
+            Options = new SpectrumPipelineOptions
+            {
+                FftSize = 4096, TargetFrameRateHz = 40, DisplayColumns = 200,
+                Averaging = AveragingMode.Linear, AverageCount = averageCount, SingleShot = true,
+            },
+        };
+
+        var (_, reader) = hub.Subscribe();
+        pipeline.Start(sampleRateHz: 48000, channelCount: 1);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48000, ChannelCount: 1, BlockFrameCount: 4096);
+        using var streamCts = new CancellationTokenSource();
+        var drainTask = Task.Run(async () =>
+        {
+            await foreach (var block in device.StreamAsync(config, streamCts.Token).WithCancellation(streamCts.Token))
+                pipeline.Enqueue(block);
+        });
+
+        try
+        {
+            // The averages-taken count must climb 1, 2, ... up to (and never past) averageCount,
+            // and only the meters frame that reaches averageCount carries Held — a client (e.g. the
+            // "Single" button's auto-stop) must be able to tell "done" apart from "still climbing".
+            int lastAveragesTaken = 0;
+            uint lastSeq = 0;
+            using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (lastAveragesTaken < averageCount)
+            {
+                byte[] frame = await reader.ReadAsync(readCts.Token);
+                var header = StreamFrame.DecodeHeader(frame);
+                lastSeq = header.Seq;
+                if (header.MsgType != StreamMsgType.Meters)
+                    continue;
+
+                var meters = StreamFrame.DecodeMeters(frame);
+                Assert.InRange((int)meters.AveragesTaken, lastAveragesTaken + 1, averageCount);
+                lastAveragesTaken = (int)meters.AveragesTaken;
+
+                bool expectHeld = lastAveragesTaken == averageCount;
+                Assert.Equal(expectHeld, header.Flags.HasFlag(StreamFlags.Held));
+            }
+
+            // Held: every frame seen after this point must belong to the tick that just completed
+            // (same seq) — a genuinely new tick's spectrum/meters/scope frame would carry a higher
+            // seq, and none should arrive even though samples keep streaming in.
+            using var holdCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+            try
+            {
+                while (true)
+                {
+                    byte[] frame = await reader.ReadAsync(holdCts.Token);
+                    Assert.Equal(lastSeq, StreamFrame.DecodeHeader(frame).Seq);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected: the hold window elapsed with nothing but same-tick leftovers, if any.
+            }
+        }
+        finally
+        {
+            streamCts.Cancel();
+            try { await drainTask; } catch (OperationCanceledException) { }
+            await device.StopAsync();
+            await pipeline.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Pipeline_broadcasts_spectrum_and_meters_frames_for_a_known_tone()
     {
         const double sampleRateHz = 48000;

@@ -8,6 +8,7 @@ import { useProjects } from './composables/useProjects'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
+import { useCaptureDelay } from './composables/useCaptureDelay'
 import { determineAttenuation, nearestInputRange } from './attenuation'
 import { formatAveraging } from './metrics'
 import { stopRun } from './deviceControl'
@@ -42,6 +43,7 @@ const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection(
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
 const { kind: stimulusKind } = useGeneratorStimulus()
 const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
+const { captureDelayMs } = useCaptureDelay()
 
 // Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the +Metrics button
 // and the chart — same formatAveraging formula, just relocated. Either channel's averagesTaken is
@@ -126,6 +128,13 @@ function runMeasurement(runConfig: RunConfig) {
   return withErrorReporting(async () => {
     const { sampleRateHz, channelCount } = runConfig
 
+    // Drop whatever the previous run last displayed, most importantly any `held` flag from an
+    // earlier Single capture — otherwise the auto-stop watcher below could see stale held=true
+    // meters left over from before this run even produces its first fresh frame.
+    meters.value = {}
+    spectrum.value = {}
+    scope.value = {}
+
     // Gated on the *device* actually having auto-ranging (status.autoRangeEnabled null means it
     // doesn't — the simulator, currently) rather than unconditionally requesting it: the server
     // 400s a device with no such capability, same reasoning as the live monitor's own
@@ -145,6 +154,11 @@ function runMeasurement(runConfig: RunConfig) {
         snapToBin: generator.snapToBin,
       })
       generatorPanel.value?.resyncTones(status.value)
+
+      // Lets the generator settle (through external gear, DUT, etc.) before capture starts — see
+      // ConfigDialog's "Capture delay" field. Only meaningful once the generator's actually been
+      // enabled above, not on every Run (e.g. a generator-less measurement).
+      if (captureDelayMs.value > 0) await new Promise((resolve) => setTimeout(resolve, captureDelayMs.value))
     }
 
     const newStatus = await api.startAcquisition({ sampleRateHz, channelCount })
@@ -174,6 +188,42 @@ function stopMeasurement() {
     await refreshStatus()
   })
 }
+
+// The Single button: same as Run, except it arms SpectrumPipelineOptions.SingleShot right after
+// starting, so the capture settles to the configured average count and holds instead of
+// free-running — the autoStopOnceHeld watcher below then stops it automatically, same as pressing
+// Stop, once every processed channel's meters frame comes back flagged Held. Not a saved config
+// value (see useSpectrumConfig().arm) — just another way to capture data, alongside Run/Stop.
+const { arm: armSingleShotCapture } = useSpectrumConfig()
+function singleShotCapture() {
+  return withErrorReporting(async () => {
+    await runFromCurrentSettings()
+    if (status.value?.acquiring)
+      await armSingleShotCapture()
+  })
+}
+
+// Companion to singleShotCapture: stops automatically once every enabled/processed channel's
+// meters frame comes back Held, so a Single capture is a genuinely one-shot action — no separate
+// "now click Stop" step. held is only ever true while SpectrumPipelineOptions.SingleShot is on
+// (armed by singleShotCapture above, cleared by every plain Run), so this never fires during an
+// ordinary continuous run.
+let autoStopping = false
+watch(meters, (m) => {
+  if (!status.value?.acquiring || autoStopping) return
+
+  const config = spectrumConfig.value
+  if (!config || (!config.processLeft && !config.processRight)) return
+
+  const leftDone = !config.processLeft || m[0]?.held === true
+  const rightDone = !config.processRight || m[1]?.held === true
+  if (!leftDone || !rightDone) return
+
+  autoStopping = true
+  stopMeasurement().finally(() => {
+    autoStopping = false
+  })
+})
 
 // Generator field edits (frequency, level, kind, enabled, snap-to-bin — see GeneratorPanel's
 // `change` emit) only need to reach the device at all if something's already live: pushing while
@@ -422,6 +472,19 @@ function confirmSaveProjectAs(name: string) {
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
                   RUN
+                </button>
+                <button
+                  type="button"
+                  class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-base font-bold tracking-wide text-white transition disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0"
+                  :class="status?.acquiring
+                    ? 'bg-blue-800'
+                    : 'bg-blue-600 hover:bg-blue-500 ring-2 ring-blue-400 ring-offset-2 dark:ring-offset-neutral-950'"
+                  :disabled="status?.acquiring"
+                  title="Same as Run, but captures one settled spectrum (the configured average count, or one FFT if averaging is off) and stops automatically — no need to press Stop."
+                  @click="singleShotCapture"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="9" /></svg>
+                  SINGLE
                 </button>
                 <button
                   type="button"

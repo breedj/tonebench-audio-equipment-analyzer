@@ -210,6 +210,110 @@ public class Qa40xUsbDeviceHardwareTests
         }
     }
 
+    /// <summary>
+    /// Regression guard for the output-range scaling lag. Register 6 is an analog attenuator, so the
+    /// range <c>BuildTxChunk</c> divides by has to flip at the same instant the register does. It used
+    /// to be written by <see cref="Qa40xUsbDevice.SetOutputRangeAsync"/> only *after* the pump had
+    /// programmed the register, and the <c>Prime()</c> inside <c>QuiesceAndWriteRegister</c> refills the
+    /// entire TX queue immediately — so one queue depth of audio (64 ms at 48 kHz) went out scaled for
+    /// the old range through the new attenuator, i.e. wrong by the whole range step. Measured in
+    /// loopback before the fix: a -30 dBV tone came back at -0.14 dBV across a -12 -> 18 dBV change and
+    /// at -39.6 dBV across 18 -> 8. That burst is a broadband smear in any FFT record it lands in
+    /// (which is how it was noticed — "the noise floor jumps when I change the generator amplitude",
+    /// amplitude being what picks the output range via <c>OutputRangeSelector</c>), and on a widening
+    /// step it is a real 10-30 dB overshoot into whatever the generator is driving.
+    ///
+    /// Deliberately measured in short windows rather than as one average: a 30 dB burst lasting 64 ms
+    /// out of a 1 s capture barely moves a full-capture RMS, which is exactly why this went unnoticed.
+    /// </summary>
+    [Theory]
+    [InlineData(18.0, -12.0)]  // narrowing, 30 dB step
+    [InlineData(-12.0, 18.0)]  // widening, 30 dB step — the overshoot case
+    [InlineData(18.0, 8.0)]    // narrowing, one range step
+    public async Task OutputRangeChange_DoesNotEmitABurstAtTheWrongLevel(double fromRangeDbv, double toRangeDbv)
+    {
+        const double sampleRateHz = 48_000.0;
+        const double toneFreqHz = 1000.0;
+        const double toneDbv = -30.0;
+
+        // 256 frames = 5.33 ms, several cycles of the tone: short enough to resolve a 64 ms burst,
+        // long enough that its RMS is a stable level rather than a phase-dependent sample.
+        const int windowFrames = 256;
+
+        // Generous next to the 10-30 dB error this catches; covers the analog settling of the
+        // attenuator itself and the ~0.15 dB window-vs-tone ripple.
+        const double toleranceDb = 3.0;
+
+        using var device = new Qa40xUsbDevice(NullLogger<Qa40xUsbDevice>.Instance);
+        await device.ConnectAsync(CancellationToken.None);
+        device.AutoRangeEnabled = false;
+
+        // Input range 12 dBV (full scale +3 dBV rms) can show the tone 30 dB above its settled level
+        // without clipping — otherwise the widening case's overshoot would be hidden by the ADC.
+        await device.SetInputRangeAsync(12.0, CancellationToken.None);
+        await device.SetOutputRangeAsync(fromRangeDbv, CancellationToken.None);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(
+                new ChannelGeneratorConfig(true, [new GeneratorTone(toneFreqHz, toneDbv)]),
+                ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+
+        var config = new AcquisitionConfig(sampleRateHz, ChannelCount: 2, BlockFrameCount: 4096);
+        var levelsAfterChange = new List<double>();
+        double sumSquares = 0.0;
+        int windowFill = 0;
+        long framesSeen = 0;
+        bool changeRequested = false;
+        bool changeApplied = false;
+
+        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
+        {
+            using (block)
+            {
+                var samples = block.Samples;
+                for (int i = 0; i + 1 < samples.Length; i += 2)
+                {
+                    sumSquares += (double)samples[i] * samples[i];
+                    framesSeen++;
+
+                    if (++windowFill < windowFrames)
+                        continue;
+
+                    double dbv = 20.0 * Math.Log10(Math.Max(Math.Sqrt(sumSquares / windowFrames), double.Epsilon));
+                    sumSquares = 0.0;
+                    windowFill = 0;
+
+                    if (changeApplied)
+                        levelsAfterChange.Add(dbv);
+                }
+            }
+
+            // Half a second of settling, then the change; then keep capturing for ~0.4 s, comfortably
+            // longer than the 64 ms of TX the pump keeps in flight at this sample rate.
+            if (!changeRequested && framesSeen > sampleRateHz / 2)
+            {
+                changeRequested = true;
+                await device.SetOutputRangeAsync(toRangeDbv, CancellationToken.None);
+                changeApplied = true;
+            }
+
+            if (changeApplied && levelsAfterChange.Count >= (int)(0.4 * sampleRateHz / windowFrames))
+                break;
+        }
+
+        await device.StopAsync();
+
+        Assert.NotEmpty(levelsAfterChange);
+
+        double worst = levelsAfterChange.MaxBy(dbv => Math.Abs(dbv - toneDbv));
+        Assert.True(
+            Math.Abs(worst - toneDbv) < toleranceDb,
+            $"Output range {fromRangeDbv} -> {toRangeDbv} dBV: the generator was commanded {toneDbv} dBV "
+                + $"throughout, but a {windowFrames}-frame window right after the change measured {worst:F2} dBV "
+                + $"({worst - toneDbv:+0.00;-0.00} dB). TX chunks are being scaled for a range the attenuator "
+                + "is no longer on.");
+    }
+
     [Fact]
     public async Task SustainedCapture_60SecondsAt192kHz_HasNoDroppedSequenceNumbers()
     {

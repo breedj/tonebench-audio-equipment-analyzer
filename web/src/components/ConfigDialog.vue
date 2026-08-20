@@ -3,6 +3,7 @@ import { reactive, watch } from 'vue'
 import Modal from './Modal.vue'
 import { api } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
+import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDevice } from '../composables/useDevice'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 
@@ -10,6 +11,7 @@ const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
+const { captureDelayMs } = useCaptureDelay()
 const { config, apply: applyConfig } = useSpectrumConfig()
 const { status: deviceStatus } = useDevice()
 
@@ -58,7 +60,7 @@ async function applyBandwidth() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Configuration" @close="emit('close')">
+  <Modal :open="props.open" title="Configuration" :close-on-backdrop="false" @close="emit('close')">
     <div class="flex flex-col gap-5 text-sm">
       <section>
         <h3 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">Display</h3>
@@ -70,6 +72,23 @@ async function applyBandwidth() {
           >
             <option v-for="o in THEME_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
+        </label>
+      </section>
+
+      <section>
+        <h3 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">Acquisition</h3>
+        <label
+          class="flex flex-col gap-1"
+          title="How long to wait, after Run or Single enables the generator, before capture actually starts. Lets the generator/output settle (e.g. through external gear) before the FFT starts averaging."
+        >
+          Capture delay (ms)
+          <input
+            type="number"
+            min="0"
+            step="10"
+            v-model.number="captureDelayMs"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          />
         </label>
       </section>
 

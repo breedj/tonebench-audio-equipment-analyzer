@@ -53,6 +53,22 @@ public interface IAnalyzerDevice
     /// </summary>
     long DroppedRxChunks { get; }
 
+    /// <summary>
+    /// Frames of audio that are already committed to the hardware when a stimulus change
+    /// (<see cref="ConfigureGeneratorAsync"/>, <see cref="SetInputRangeAsync"/>,
+    /// <see cref="SetOutputRangeAsync"/>) returns, and which therefore still carry the *old*
+    /// stimulus when they arrive on <see cref="StreamAsync"/>.
+    ///
+    /// <para>Anything that empties a buffer in response to such a change has to discard this many
+    /// frames as well, or it re-fills with pre-change audio and the discontinuity ends up inside the
+    /// very record the flush existed to protect. Measured on a QA403 at 48/96/192 kHz: 3200/6272/12416
+    /// frames, i.e. the DAC's committed-but-unplayed TX queue and nothing else (~65 ms at every rate,
+    /// by design — see <c>Qa40xUsbDevice.TargetInFlightSeconds</c>).</para>
+    ///
+    /// <para>Zero for the simulator, whose generator changes take effect on the next block.</para>
+    /// </summary>
+    int StimulusLatencyFrames(double sampleRateHz);
+
     /// <summary><paramref name="dbv"/> must be one of <see cref="DeviceCapabilities.InputRangesDbv"/>.</summary>
     Task SetInputRangeAsync(double dbv, CancellationToken ct);
 

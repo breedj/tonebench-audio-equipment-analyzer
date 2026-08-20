@@ -48,6 +48,15 @@ public enum StreamFlags : ushort
     /// span.
     /// </summary>
     Zoomed = 1 << 2,
+
+    /// <summary>
+    /// Meters-frame-only: this channel's <see cref="Qa403.App.Streaming.SpectrumPipelineOptions.SingleShot"/>
+    /// capture just completed on this tick, and the pipeline has stopped broadcasting further
+    /// frames for it (see <see cref="Qa403.App.Streaming.SpectrumPipeline"/>'s single-shot hold). A
+    /// client waiting on a single shot should treat this as "capture complete" — no more frames for
+    /// this channel are coming until the next arm.
+    /// </summary>
+    Held = 1 << 3,
 }
 
 /// <summary>
@@ -129,18 +138,20 @@ public static class StreamFrame
     /// fundamental/harmonics — dbc is relative to the fundamental, same convention as harmonics,
     /// for a fair side-by-side comparison. <paramref name="averagesTaken"/> defaults to 0 so
     /// existing positional call sites (e.g. StreamFrameTests) keep compiling unchanged.
+    /// <paramref name="held"/> sets <see cref="StreamFlags.Held"/> — see its remarks.
     /// </summary>
     public static byte[] EncodeMeters(
         StreamChannel channel, uint seq, float fundamentalFreqHz, float binSizeHz,
         float thdPercent, float thdNPercent, float snrDb, float fundamentalDbv, float noiseFloorDbv,
         float peakDbv, float totalRmsDbv,
-        ReadOnlySpan<Harmonic> harmonics, ReadOnlySpan<(float FreqHz, float Dbc)> otherPeaks, uint averagesTaken = 0)
+        ReadOnlySpan<Harmonic> harmonics, ReadOnlySpan<(float FreqHz, float Dbc)> otherPeaks, uint averagesTaken = 0,
+        bool held = false)
     {
         const int scalarsAndCountLength = (7 * sizeof(float)) + (2 * sizeof(uint));
         int nPoints = harmonics.Length;
         int otherPeakCount = otherPeaks.Length;
         byte[] buffer = new byte[HeaderLength + scalarsAndCountLength + ((nPoints + otherPeakCount) * 2 * sizeof(float))];
-        WriteHeader(buffer, StreamMsgType.Meters, channel, StreamFlags.None, seq, fundamentalFreqHz, binSizeHz, (uint)nPoints);
+        WriteHeader(buffer, StreamMsgType.Meters, channel, held ? StreamFlags.Held : StreamFlags.None, seq, fundamentalFreqHz, binSizeHz, (uint)nPoints);
 
         int offset = HeaderLength;
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), thdPercent); offset += 4;

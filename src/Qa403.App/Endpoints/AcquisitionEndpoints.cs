@@ -11,10 +11,14 @@ public static class AcquisitionEndpoints
     {
         var group = app.MapGroup("/api/acquisition");
 
-        group.MapPost("/start", async (AcquisitionStartRequest request, DeviceSessionService session, CancellationToken ct) =>
+        group.MapPost("/start", async (AcquisitionStartRequest request, DeviceSessionService session, SpectrumPipeline pipeline, CancellationToken ct) =>
         {
             try
             {
+                // Run always free-runs continuously, even if a previous Single press left the
+                // pipeline holding — SingleShot is a one-off capture mode, not a sticky setting.
+                pipeline.Options = pipeline.Options with { SingleShot = false };
+
                 var config = new AcquisitionConfig(request.SampleRateHz, request.ChannelCount, request.BlockFrameCount ?? 4096);
                 await session.StartAcquisitionAsync(config, ct);
                 return Results.Ok(session.GetStatus());
@@ -78,6 +82,20 @@ public static class AcquisitionEndpoints
         });
 
         group.MapGet("/spectrum-config", (SpectrumPipeline pipeline) => Results.Ok(pipeline.Options));
+
+        // Backs the "Single" button (see App.vue, between Run and Stop): turns on
+        // SpectrumPipelineOptions.SingleShot and arms a fresh capture, so the next AverageCount
+        // ticks build a clean average and then hold — no more frames for that channel until the
+        // next Run or Single. Not part of SpectrumConfigRequest/spectrum-config on purpose: this is
+        // a one-off action like Run/Stop, never a saved measurement setting. Run always resets
+        // SingleShot back to false (see "/start" above) so a plain continuous run is never left
+        // holding from a previous Single press.
+        group.MapPost("/spectrum-capture", (SpectrumPipeline pipeline) =>
+        {
+            pipeline.Options = pipeline.Options with { SingleShot = true };
+            pipeline.Flush();
+            return Results.Ok(pipeline.Options);
+        });
     }
 }
 

@@ -19,6 +19,23 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     private readonly object _streamLock = new();
 
+    /// <summary>
+    /// Serializes every device-session-mutating operation (generator, input/output range,
+    /// start/stop acquisition) against every other one. Without this, two concurrent requests
+    /// could interleave: one enqueues a register write onto the currently active USB transfer
+    /// pump (e.g. <see cref="SetOutputRangeAsync"/>'s pump-queued write) while another tears that
+    /// same pump down (<see cref="StopStreamIfRunningAsync"/>), cancelling the pump's own token
+    /// out from under the still-pending write — observed as <c>TaskCanceledException</c> out of
+    /// <c>Qa40xTransport.WriteRegisterAsync</c> every time a Single capture auto-stops (the
+    /// client's Stop call disables the generator right after stopping acquisition, and that
+    /// disable's own output-range write must never race a concurrent teardown of the same pump).
+    /// Each public entry point below acquires this once and delegates to a private "Core"
+    /// implementation; internal cross-calls (e.g. <see cref="StartAcquisitionAsync"/> stopping a
+    /// previous run) call the Core methods directly rather than re-entering the lock, since
+    /// <see cref="SemaphoreSlim"/> is not reentrant.
+    /// </summary>
+    private readonly SemaphoreSlim _sessionLock = new(1, 1);
+
     private DeviceInfo? _info;
     private double _inputRangeDbv;
     private double _outputRangeDbv;
@@ -203,6 +220,19 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     public async Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await SetInputRangeCoreAsync(dbv, ct);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    private async Task SetInputRangeCoreAsync(double dbv, CancellationToken ct)
+    {
         await device.SetInputRangeAsync(dbv, ct);
         _inputRangeDbv = dbv;
 
@@ -210,16 +240,38 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         // change in ConfigureGeneratorAsync. (Autoranging steps the range inside the device without
         // telling us, so those transients can't be flushed this way.)
         if (_isAcquiring)
-            spectrumPipeline.Flush();
+            spectrumPipeline.Flush(StimulusLatencyFrames);
     }
+
+    /// <summary>
+    /// Frames of pre-change audio still in flight when a stimulus change returns — what every
+    /// stimulus-driven <see cref="SpectrumPipeline.Flush"/> has to discard on top of emptying the
+    /// buffers. Falls back to the last known sample rate when no stream is running, which only
+    /// matters for a flush that is about to be followed by a restart anyway.
+    /// </summary>
+    private int StimulusLatencyFrames =>
+        device.StimulusLatencyFrames(_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
 
     /// <summary>
     /// Re-applies the last generator request. Needed after an FFT-size or sample-rate change, because
     /// which frequency is coherent depends on both — without this, snapping silently goes stale and
     /// the tone drifts back off-bin the moment the analyzer is reconfigured.
     /// </summary>
-    public Task ReapplyGeneratorAsync(CancellationToken ct) =>
-        ConfigureGeneratorAsync(_requestedGeneratorConfig, ct);
+    public async Task ReapplyGeneratorAsync(CancellationToken ct)
+    {
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await ReapplyGeneratorCoreAsync(ct);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    private Task ReapplyGeneratorCoreAsync(CancellationToken ct) =>
+        ConfigureGeneratorCoreAsync(_requestedGeneratorConfig, ct);
 
     /// <summary>
     /// Rewrites every tone frequency to the nearest coherent bin for the current FFT size and sample
@@ -253,6 +305,19 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     public async Task SetOutputRangeAsync(double dbv, CancellationToken ct)
     {
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await SetOutputRangeCoreAsync(dbv, ct);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    private async Task SetOutputRangeCoreAsync(double dbv, CancellationToken ct)
+    {
         await device.SetOutputRangeAsync(dbv, ct);
         _outputRangeDbv = dbv;
     }
@@ -268,6 +333,19 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// </summary>
     public async Task ConfigureGeneratorAsync(GeneratorConfig config, CancellationToken ct, AcquisitionConfig? streamConfigHint = null)
     {
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await ConfigureGeneratorCoreAsync(config, ct, streamConfigHint);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    private async Task ConfigureGeneratorCoreAsync(GeneratorConfig config, CancellationToken ct, AcquisitionConfig? streamConfigHint = null)
+    {
         _lastSampleRateHz = streamConfigHint?.SampleRateHz ?? _streamConfig?.SampleRateHz ?? _lastSampleRateHz;
         _requestedGeneratorConfig = config;
 
@@ -282,20 +360,22 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         bool widening = nextOutputRangeDbv > _outputRangeDbv;
 
         if (widening && nextOutputRangeDbv != _outputRangeDbv)
-            await SetOutputRangeAsync(nextOutputRangeDbv, ct);
+            await SetOutputRangeCoreAsync(nextOutputRangeDbv, ct);
 
         await device.ConfigureGeneratorAsync(config, ct);
         _generatorConfig = config;
 
         if (!widening && nextOutputRangeDbv != _outputRangeDbv)
-            await SetOutputRangeAsync(nextOutputRangeDbv, ct);
+            await SetOutputRangeCoreAsync(nextOutputRangeDbv, ct);
 
         if (_isAcquiring)
         {
             // Every sample already buffered predates this stimulus, so an FFT record spanning the
             // change would show the step as a broad skirt around the tone rather than the real
-            // noise floor. See SpectrumPipeline.Flush.
-            spectrumPipeline.Flush();
+            // noise floor. And so does everything still queued for the DAC at this instant, which is
+            // why this passes the stimulus latency rather than flushing bare. See
+            // SpectrumPipeline.Flush.
+            spectrumPipeline.Flush(StimulusLatencyFrames);
             return;
         }
 
@@ -321,12 +401,25 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
                     + "near-tight spin at the simulated sample rate and can starve the app under load.");
         }
 
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await StartAcquisitionCoreAsync(config, ct);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    private async Task StartAcquisitionCoreAsync(AcquisitionConfig config, CancellationToken ct)
+    {
         // A config change (sample rate, channel count, block size) while already acquiring restarts
         // the stream in place rather than making the caller Stop then Start — the UI applies these
         // changes live, with no explicit stop/restart step of its own.
         double previousSampleRateHz = _streamConfig?.SampleRateHz ?? _lastSampleRateHz;
         if (_isAcquiring)
-            await StopAcquisitionAsync();
+            await StopAcquisitionCoreAsync();
 
         // Reuses an already-running generator-only stream if its config matches, otherwise restarts it
         // at this config — either way, by the time this returns the stream is up before spectrumPipeline
@@ -338,7 +431,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         // Which frequency is coherent depends on the sample rate, so a rate change has to re-snap the
         // generator or its tones silently drift off-bin at the new rate.
         if (config.SampleRateHz != previousSampleRateHz)
-            await ReapplyGeneratorAsync(ct);
+            await ReapplyGeneratorCoreAsync(ct);
     }
 
     /// <summary>Starts (or restarts, if already running at a different config) the underlying device stream.</summary>
@@ -419,6 +512,19 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     }
 
     public async Task StopAcquisitionAsync()
+    {
+        await _sessionLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await StopAcquisitionCoreAsync();
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    private async Task StopAcquisitionCoreAsync()
     {
         if (!_isAcquiring)
             return;

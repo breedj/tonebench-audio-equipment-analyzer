@@ -67,6 +67,14 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     public long DroppedRxChunks => 0;
 
     /// <summary>
+    /// Zero: each block is synthesized from the generator config as it is handed out, so a change is
+    /// audible in the very next block and nothing is ever committed ahead. This is precisely why the
+    /// post-change skirt that real hardware shows cannot be reproduced against the simulator — see
+    /// <see cref="IAnalyzerDevice.StimulusLatencyFrames"/>.
+    /// </summary>
+    public int StimulusLatencyFrames(double sampleRateHz) => 0;
+
+    /// <summary>
     /// The simulator has no autoranging, so this stays false however it is set — the UI reads it to
     /// decide whether to offer the auto/manual checkbox at all.
     /// </summary>

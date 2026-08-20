@@ -43,6 +43,13 @@ export const STREAM_FLAG_LOG_SPACED = 1 << 1
  * span. See StreamFlags.Zoomed server-side.
  */
 export const STREAM_FLAG_ZOOMED = 1 << 2
+/**
+ * Meters-frame-only: this channel's single-shot capture (see the "Single" button and
+ * Qa403.App.Streaming.SpectrumPipelineOptions.SingleShot) just completed on this tick, and the
+ * pipeline has stopped sending further frames for it until the next Run or Single. This is the
+ * signal a client waiting on a single shot polls for — see decodeMetersFrame's `held`.
+ */
+export const STREAM_FLAG_HELD = 1 << 3
 
 /** Client -> server control message kinds. Everything else is REST. */
 export const ClientControlType = {
@@ -148,6 +155,8 @@ export interface MetersFrame {
   otherPeaks: HarmonicMarker[]
   /** How many spectra have contributed so far, capped at the configured target count; 0 when averaging is off. See SpectrumAverager.Count. */
   averagesTaken: number
+  /** True once this channel's single-shot capture has completed — see STREAM_FLAG_HELD. */
+  held: boolean
 }
 
 /**
@@ -220,5 +229,6 @@ export function decodeMetersFrame(buffer: ArrayBuffer): MetersFrame {
     harmonics,
     otherPeaks,
     averagesTaken,
+    held: (header.flags & STREAM_FLAG_HELD) !== 0,
   }
 }

@@ -153,6 +153,24 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     internal static int QueueDepthFor(double sampleRateHz) => Math.Clamp(
         (int)Math.Ceiling(TargetInFlightSeconds * sampleRateHz / TransferChunkFrames), MinQueueDepth, MaxQueueDepth);
 
+    /// <summary>
+    /// One extra chunk on top of the TX queue, covering the device's own output FIFO and the analog
+    /// path — neither of which this app can observe, and both of which sit after the last transfer
+    /// this side has handed over. A tuning constant, not a protocol fact.
+    ///
+    /// Sized against the measurement rather than guessed at: the observed latency ran 128-256 frames
+    /// past <see cref="QueueDepthFor"/> × <see cref="TransferChunkFrames"/> at 48, 96 and 192 kHz, and
+    /// that excess was itself the 128-frame resolution of the detector. One chunk is comfortably over
+    /// it at every rate. Over-discarding is close to free (it delays the first post-change spectrum by
+    /// ~10 ms, against a buffer refill measured in hundreds of ms) whereas under-discarding puts the
+    /// discontinuity straight back into the first record.
+    /// </summary>
+    private const int StimulusLatencySlackFrames = TransferChunkFrames;
+
+    /// <inheritdoc />
+    public int StimulusLatencyFrames(double sampleRateHz) =>
+        (QueueDepthFor(sampleRateHz) * TransferChunkFrames) + StimulusLatencySlackFrames;
+
     public async Task<DeviceInfo> ConnectAsync(CancellationToken ct)
     {
         var transport = new Qa40xTransport
@@ -255,7 +273,21 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         _autoRanger?.Reset();
     }
 
-    /// <summary>Same EP1-while-EP2-is-busy hazard as <see cref="SetInputRangeAsync"/> — routed through the pump for the same reason.</summary>
+    /// <summary>
+    /// Same EP1-while-EP2-is-busy hazard as <see cref="SetInputRangeAsync"/> — routed through the pump
+    /// for the same reason, and for the second reason too: the range that scales a TX chunk has to flip
+    /// at exactly the same instant the attenuator does.
+    ///
+    /// <para>The field written below is a bookkeeping mirror (it seeds the *next* pump), not what
+    /// <c>TransferPump.BuildTxChunk</c> scales by. It used to be both, and because it was only written
+    /// after the pump had already programmed register 6, the <c>Prime()</c> that immediately follows the
+    /// register write filled a whole queue's worth of TX chunks with the *old* range's scaling while the
+    /// analog attenuator was already on the new one. Measured in loopback at 48 kHz: a -30 dBV tone came
+    /// out at -0.1 dBV for ~30 ms across a -12 -> 18 dBV change (30 dB too loud, i.e. the whole range
+    /// step) and at -39.5 dBV across an 18 -> 8 dBV one. A burst like that inside an FFT record is a
+    /// broadband smear — it reads as the noise floor jumping — and on a widening step it is a real 10-30 dB
+    /// overshoot into whatever the generator is driving.</para>
+    /// </summary>
     public async Task SetOutputRangeAsync(double dbv, CancellationToken ct)
     {
         RequireSupportedRange(Capabilities.OutputRangesDbv, dbv, nameof(dbv));
@@ -312,7 +344,10 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
         var pump = new TransferPump(
             transport, calibration, autoRanger, logger,
-            () => _generatorConfig, () => Volatile.Read(ref _outputRangeDbv),
+            // The generator config is a Func (it changes with no register write, so the pump has no
+            // point at which to latch it), but the output range is passed by value: from here on the
+            // pump owns it, and flips it at the instant it programs register 6 — see SetOutputRangeAsync.
+            () => _generatorConfig, Volatile.Read(ref _outputRangeDbv),
             // A Func, not the captured bool: the auto/manual checkbox has to take effect on a
             // running stream, not only on the next one.
             Volatile.Read(ref _inputRangeDbv), () => AutoRangeEnabled, config.SampleRateHz, () => _stopRequested,
@@ -546,7 +581,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// </summary>
     private sealed class TransferPump(
         Qa40xTransport transport, Qa40xCalibration calibration, Qa40xAutoRanger autoRanger,
-        ILogger logger, Func<GeneratorConfig> getGeneratorConfig, Func<double> getOutputRangeDbv,
+        ILogger logger, Func<GeneratorConfig> getGeneratorConfig, double initialOutputRangeDbv,
         double initialInputRangeDbv, Func<bool> isAutoRangeEnabled, double sampleRateHz, Func<bool> isStopRequested,
         Action<double> onInputRangeStepped)
     {
@@ -604,6 +639,14 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         private long _frameIndex;
         private double _inputRangeDbv = initialInputRangeDbv;
 
+        /// <summary>
+        /// The range <see cref="BuildTxChunk"/> scales by, and the authoritative copy while this pump
+        /// runs. Only ever written from <see cref="QuiesceAndWriteRegister"/>'s
+        /// <c>applyBeforePrime</c> hook, i.e. after register 6 has been programmed and before the TX
+        /// queue is refilled, so no chunk is ever built for a range the attenuator is not already on.
+        /// </summary>
+        private double _outputRangeDbv = initialOutputRangeDbv;
+
         /// <summary>Settle window owed to the consumer, attached to the next chunk emitted after a range step.</summary>
         private int _pendingSettleFrames;
 
@@ -614,7 +657,14 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// </summary>
         private readonly ConcurrentQueue<PendingRegisterWrite> _pendingRegisterWrites = new();
 
-        private sealed record PendingRegisterWrite(byte Register, uint Value, double? InputRangeDbv, TaskCompletionSource Completion);
+        /// <summary>
+        /// One queued register write. <see cref="InputRangeDbv"/>/<see cref="OutputRangeDbv"/> are the
+        /// value this write puts into effect, for whichever of the two ranges it programs — applied by
+        /// the pump at the write itself, never by the caller, so the range the pump *calibrates and
+        /// scales with* can never disagree with the range the hardware is on.
+        /// </summary>
+        private sealed record PendingRegisterWrite(
+            byte Register, uint Value, double? InputRangeDbv, double? OutputRangeDbv, TaskCompletionSource Completion);
 
         public ChannelReader<RxChunk> Reader => _rx.Channel.Reader;
 
@@ -623,16 +673,20 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
         /// <summary>Queues an input-range change and completes when the pump thread has actually programmed it.</summary>
         public Task RequestInputRangeAsync(double dbv, CancellationToken ct) =>
-            EnqueueRegisterWriteAsync(Qa40xRegisters.InputRange, Qa40xRegisters.InputRangeDbvToRegister(dbv), dbv, ct);
+            EnqueueRegisterWriteAsync(
+                Qa40xRegisters.InputRange, Qa40xRegisters.InputRangeDbvToRegister(dbv), dbv, null, ct);
 
         /// <summary>Queues an output-range change and completes when the pump thread has actually programmed it.</summary>
         public Task RequestOutputRangeAsync(double dbv, CancellationToken ct) =>
-            EnqueueRegisterWriteAsync(Qa40xRegisters.OutputRange, Qa40xRegisters.OutputRangeDbvToRegister(dbv), null, ct);
+            EnqueueRegisterWriteAsync(
+                Qa40xRegisters.OutputRange, Qa40xRegisters.OutputRangeDbvToRegister(dbv), null, dbv, ct);
 
-        private Task EnqueueRegisterWriteAsync(byte register, uint value, double? inputRangeDbv, CancellationToken ct)
+        private Task EnqueueRegisterWriteAsync(
+            byte register, uint value, double? inputRangeDbv, double? outputRangeDbv, CancellationToken ct)
         {
             var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingRegisterWrites.Enqueue(new PendingRegisterWrite(register, value, inputRangeDbv, completion));
+            _pendingRegisterWrites.Enqueue(
+                new PendingRegisterWrite(register, value, inputRangeDbv, outputRangeDbv, completion));
             return completion.Task.WaitAsync(ct);
         }
 
@@ -647,13 +701,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             {
                 try
                 {
-                    QuiesceAndWriteRegister(pending.Register, pending.Value);
-                    if (pending.InputRangeDbv is { } dbv)
-                    {
-                        Volatile.Write(ref _inputRangeDbv, dbv);
-                        onInputRangeStepped(dbv);
-                    }
-
+                    QuiesceAndWriteRegister(pending.Register, pending.Value, () => ApplyRange(pending));
                     pending.Completion.TrySetResult();
                 }
                 catch (Exception ex)
@@ -664,17 +712,38 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             }
         }
 
+        /// <summary>Puts a queued write's range into effect on this pump. Runs between the register write and <see cref="Prime"/> — see <paramref name="pending"/>'s type.</summary>
+        private void ApplyRange(PendingRegisterWrite pending)
+        {
+            if (pending.InputRangeDbv is { } inputDbv)
+            {
+                Volatile.Write(ref _inputRangeDbv, inputDbv);
+                onInputRangeStepped(inputDbv);
+            }
+
+            if (pending.OutputRangeDbv is { } outputDbv)
+                Volatile.Write(ref _outputRangeDbv, outputDbv);
+        }
+
         /// <summary>
         /// Stops EP2, writes one register, restarts EP2, and books the settle window. The device's
         /// USB stack does not tolerate a register write on EP1 with bulk transfers in flight on EP2
         /// (observed as a native transfer that never completes and a device that needs power-cycling),
         /// so this sequence — not a bare write — is the only way a register may be touched mid-stream.
         /// Shared by autoranging and by externally requested writes.
+        ///
+        /// <para><paramref name="applyBeforePrime"/> runs in the one window where the hardware is on the
+        /// new range but no TX chunk has been built for it yet. Anything that must change *with* the
+        /// register goes here rather than after this method returns: <see cref="Prime"/> immediately
+        /// refills the whole TX queue, and <see cref="BuildTxChunk"/> scales those chunks by
+        /// <see cref="_outputRangeDbv"/>, so updating that afterwards puts a queue's worth of audio out
+        /// at the wrong level — see <see cref="SetOutputRangeAsync"/> for what that measured.</para>
         /// </summary>
-        private void QuiesceAndWriteRegister(byte register, uint value)
+        private void QuiesceAndWriteRegister(byte register, uint value, Action? applyBeforePrime = null)
         {
             Drain();
             transport.WriteRegisterAsync(register, value, _ct).GetAwaiter().GetResult();
+            applyBeforePrime?.Invoke();
             Prime();
             _pendingSettleFrames = Qa40xAutoRanger.SettleFrameCount(sampleRateHz);
         }
@@ -792,9 +861,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                     try
                     {
                         transport.WriteRegisterAsync(pending.Register, pending.Value, CancellationToken.None).GetAwaiter().GetResult();
-                        if (pending.InputRangeDbv is { } dbv)
-                            onInputRangeStepped(dbv);
-
+                        ApplyRange(pending);
                         pending.Completion.TrySetResult();
                     }
                     catch (Exception ex)
@@ -837,10 +904,14 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
             double nextRangeDbv = autoRanger.NextRangeDbv(currentRangeDbv, decision);
 
-            QuiesceAndWriteRegister(Qa40xRegisters.InputRange, Qa40xRegisters.InputRangeDbvToRegister(nextRangeDbv));
+            QuiesceAndWriteRegister(
+                Qa40xRegisters.InputRange, Qa40xRegisters.InputRangeDbvToRegister(nextRangeDbv),
+                () =>
+                {
+                    Volatile.Write(ref _inputRangeDbv, nextRangeDbv);
+                    onInputRangeStepped(nextRangeDbv);
+                });
 
-            Volatile.Write(ref _inputRangeDbv, nextRangeDbv);
-            onInputRangeStepped(nextRangeDbv);
             logger.LogDebug(
                 "Input range {Decision} to {RangeDbv} dBV, discarding {Frames} settle frames",
                 decision, nextRangeDbv, _pendingSettleFrames);
@@ -933,7 +1004,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         private void BuildTxChunk(long startFrameIndex, byte[] chunk)
         {
             var generatorConfig = getGeneratorConfig();
-            double outputRangeDbv = getOutputRangeDbv();
+            double outputRangeDbv = Volatile.Read(ref _outputRangeDbv);
             var waveform = _waveform;
 
             for (int frame = 0; frame < TransferChunkFrames; frame++)

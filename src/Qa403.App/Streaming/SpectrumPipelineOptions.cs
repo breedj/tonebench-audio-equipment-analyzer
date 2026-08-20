@@ -10,10 +10,26 @@ public sealed record SpectrumPipelineOptions
 
     public WindowType Window { get; init; } = WindowType.Hann;
 
-    public AveragingMode Averaging { get; init; } = AveragingMode.Off;
+    public AveragingMode Averaging { get; init; } = AveragingMode.Linear;
 
     /// <summary>Spectra averaged together (linear) or the effective time constant (exponential, alpha = 2/(count+1)). Ignored when <see cref="Averaging"/> is <see cref="AveragingMode.Off"/>.</summary>
     public int AverageCount { get; init; } = 8;
+
+    /// <summary>
+    /// When true, each channel stops updating once it reaches <see cref="AverageCount"/> averages
+    /// (or, with <see cref="Averaging"/> set to <see cref="AveragingMode.Off"/>, after its first
+    /// captured spectrum) — the pipeline holds that final frame instead of continuing to reprocess
+    /// new samples, and flags the completing meters frame with <see cref="StreamFlags.Held"/>.
+    /// Mirrors a bench analyzer's "Single" sweep button: start, capture settles, then stops on its
+    /// own instead of free-running.
+    ///
+    /// Not a persisted UI setting — it is turned on only by the "Single" action (POST
+    /// /api/acquisition/spectrum-capture, which also calls <see cref="SpectrumPipeline.Flush"/> to
+    /// arm a fresh capture) and turned back off by the next plain Run (POST
+    /// /api/acquisition/start), so a normal continuous run is never left holding from a previous
+    /// Single press. Off by default (continuous/free-run).
+    /// </summary>
+    public bool SingleShot { get; init; } = false;
 
     /// <summary>Decimated columns sent per frame, log-spaced across [<see cref="DisplayLoFreqHz"/>, Nyquist].</summary>
     public int DisplayColumns { get; init; } = 1600;

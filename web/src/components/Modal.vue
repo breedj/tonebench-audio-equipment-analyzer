@@ -5,7 +5,9 @@ import { ref, watch } from 'vue'
 // since showModal() already gives Escape-to-close, a backdrop, and focus containment for free in
 // every evergreen browser.
 
-const props = defineProps<{ open: boolean; title: string }>()
+const props = withDefaults(defineProps<{ open: boolean; title: string; closeOnBackdrop?: boolean }>(), {
+  closeOnBackdrop: true,
+})
 const emit = defineEmits<{ close: [] }>()
 
 const dialogRef = ref<HTMLDialogElement | null>(null)
@@ -32,7 +34,7 @@ function onCancel(e: Event) {
 function onBackdropClick(e: MouseEvent) {
   // A click that lands on the <dialog> element itself (not a descendant) is the backdrop —
   // <dialog>'s own box fills the viewport when open, so only clicks outside the visible card hit it directly.
-  if (e.target === dialogRef.value) emit('close')
+  if (props.closeOnBackdrop && e.target === dialogRef.value) emit('close')
 }
 </script>
 

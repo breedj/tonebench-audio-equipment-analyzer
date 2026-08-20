@@ -329,6 +329,8 @@ public class DeviceSessionServiceTests
 
         public bool StopRequested { get; private set; }
 
+        public int StimulusLatencyFrames(double sampleRateHz) => 0;
+
         public Task<DeviceInfo> ConnectAsync(CancellationToken ct) =>
             Task.FromResult(new DeviceInfo("QA403", "HW-0001", "1.0", IsSimulated: false));
 
@@ -382,6 +384,9 @@ public class DeviceSessionServiceTests
         public event EventHandler? DeviceLost { add { } remove { } }
 
         public DeviceCapabilities Capabilities => DeviceCapabilities.Qa403;
+
+        /// <summary>Non-zero, like real hardware — this stub stands in for a device that commits audio to the DAC ahead of time.</summary>
+        public int StimulusLatencyFrames(double sampleRateHz) => 3584;
 
         public Task<DeviceInfo> ConnectAsync(CancellationToken ct) =>
             Task.FromResult(new DeviceInfo("QA403", "HW-0001", "1.0", IsSimulated: false));

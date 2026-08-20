@@ -366,6 +366,9 @@ export const api = {
   setSpectrumConfig: (config: SpectrumConfigRequest) =>
     request<SpectrumConfig>('/acquisition/spectrum-config', { method: 'POST', body: JSON.stringify(config) }),
 
+  /** Backs the "Single" button: turns on SpectrumPipelineOptions.SingleShot and arms a fresh capture — see the server endpoint's remarks. Not a saved config value; call startAcquisition (Run) to go back to free-running. */
+  armSpectrumCapture: () => request<SpectrumConfig>('/acquisition/spectrum-capture', { method: 'POST' }),
+
   listProjects: () => request<Project[]>('/projects'),
 
   createProject: (req: SaveProjectRequest) => request<{ id: number }>('/projects', { method: 'POST', body: JSON.stringify(req) }),

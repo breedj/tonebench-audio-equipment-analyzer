@@ -40,6 +40,12 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     private readonly RetainedSpectrum[] _retained = [new(), new()];
     private readonly object _retainedLock = new();
 
+    // Set once a channel's SpectrumPipelineOptions.SingleShot capture completes; ProcessTick then
+    // skips that channel entirely, which is what "holds" the last broadcast frame on screen. Only
+    // Flush() clears it, so toggling SingleShot off and back on without a Flush would otherwise
+    // resume immediately held from a previous capture rather than starting a fresh window.
+    private readonly bool[] _singleShotHeld = new bool[MaxChannels];
+
     private SampleRingBuffer?[] _ringBuffers = new SampleRingBuffer?[MaxChannels];
     private int _ringBufferFftSize;
     private double _sampleRateHz;
@@ -81,22 +87,33 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
     /// <summary>
     /// Drops every buffered sample and all averaging state, so the next broadcast frame is built
-    /// only from samples captured after this call.
+    /// only from samples captured after the change that prompted this call actually reached the wire.
     ///
     /// Call this whenever the signal being analyzed changes discontinuously: a new sample rate, a
     /// generator change, an input-range change. An FFT record that straddles such a change carries
     /// a step, and a step smears the tone across a broad skirt — the "noise floor jumps up and then
     /// settles" artifact, which lasts exactly one buffer-fill. Flushing trades that for a brief
     /// pause in updates (the UI keeps showing the last good frame) while a clean record fills.
+    ///
+    /// <para><paramref name="discardFrames"/> must be
+    /// <see cref="Qa403.Device.IAnalyzerDevice.StimulusLatencyFrames"/> for any caller flushing
+    /// because of a stimulus change, and 0 only when nothing changed on the wire (an acquisition
+    /// restart, where there is no stale audio to outrun). Passing 0 for a stimulus change is the
+    /// bug this parameter exists for: the flush lands before the change does, so the buffer refills
+    /// with pre-change audio and the step ends up inside the first record anyway — measured at up to
+    /// +41 dB of broadband floor on a 1 dB amplitude change. Worse, the contaminated record then
+    /// becomes average #1, so with 8 averages it stays on screen for eight frames rather than one.
+    /// See <see cref="SampleRingBuffer.Reset"/> for the measurements.</para>
     /// </summary>
-    public void Flush()
+    public void Flush(int discardFrames = 0)
     {
         var ringBuffers = _ringBuffers;
         for (int ch = 0; ch < MaxChannels; ch++)
         {
-            ringBuffers[ch]?.Reset();
+            ringBuffers[ch]?.Reset(discardFrames);
             _ampAveragers[ch].Reset();
             _psdAveragers[ch].Reset();
+            _singleShotHeld[ch] = false;
         }
 
         lock (_retainedLock)
@@ -250,6 +267,9 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             if (!enabled)
                 continue;
 
+            if (options.SingleShot && _singleShotHeld[ch])
+                continue;
+
             var rb = ringBuffers[ch];
             if (rb is null || rb.Capacity != options.FftSize || !rb.IsFull)
                 continue;
@@ -300,6 +320,12 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             // same mode/count) — _psdAveragers is the arbitrary pick.
             int averagesTaken = _psdAveragers[channelIndex].Count;
 
+            // Off has no "reached count" signal of its own (SpectrumAverager.Count stays 0 when
+            // averaging is off), so a single shot without averaging just holds after this one tick.
+            bool singleShotComplete = options.SingleShot && (options.Averaging == AveragingMode.Off || averagesTaken >= options.AverageCount);
+            if (singleShotComplete)
+                _singleShotHeld[channelIndex] = true;
+
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
             var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options, averagesTaken);
 
@@ -307,7 +333,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
             BroadcastSpectrumFrame(channel, seq, ampPower, binSizeHz, options);
             if (meters is not null)
-                BroadcastMetersFrame(channel, seq, meters);
+                BroadcastMetersFrame(channel, seq, meters, singleShotComplete);
             BroadcastScopeFrame(channel, seq, timeBuf.AsSpan(0, n), _sampleRateHz);
         }
         finally
@@ -569,12 +595,12 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         }
     }
 
-    private void BroadcastMetersFrame(StreamChannel channel, uint seq, SpectrumMeters meters)
+    private void BroadcastMetersFrame(StreamChannel channel, uint seq, SpectrumMeters meters, bool held)
     {
         byte[] frame = StreamFrame.EncodeMeters(
             channel, seq, meters.FundamentalFreqHz, meters.BinSizeHz,
             meters.ThdPercent, meters.ThdNPercent, meters.SnrDb, meters.FundamentalDbv, meters.NoiseFloorDbv,
-            meters.PeakDbv, meters.TotalRmsDbv, meters.Harmonics, meters.OtherPeaks, (uint)meters.AveragesTaken);
+            meters.PeakDbv, meters.TotalRmsDbv, meters.Harmonics, meters.OtherPeaks, (uint)meters.AveragesTaken, held);
         hub.Broadcast(frame);
     }
 

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
-import { api } from '../api/client'
+import { reactive, ref, watch } from 'vue'
+import { api, type MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
+import EditMeasurementDialog from './EditMeasurementDialog.vue'
 
 const emit = defineEmits<{ error: [message: string] }>()
 
@@ -10,6 +11,14 @@ const { currentTypeId } = useProjects()
 const { items, filter, error, load, remove } = useMeasurements()
 
 const form = reactive({ fromDate: '', toDate: '' })
+
+const editDialogOpen = ref(false)
+const editingItem = ref<MeasurementSummary | null>(null)
+
+function onEdit(item: MeasurementSummary) {
+  editingItem.value = item
+  editDialogOpen.value = true
+}
 
 function applyFilter() {
   filter.value = {
@@ -26,9 +35,10 @@ function applyFilter() {
 // standalone project/type picker of its own.
 watch(currentTypeId, applyFilter, { immediate: true })
 
-async function onDelete(id: number) {
+async function onDelete(item: MeasurementSummary) {
+  if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return
   try {
-    await remove(id)
+    await remove(item.resultId)
   } catch (e) {
     emit('error', (e as Error).message)
   }
@@ -85,15 +95,28 @@ async function onDelete(id: number) {
             </span>
           </td>
           <td class="py-1 text-right">
-            <div class="flex justify-end gap-2 text-xs whitespace-nowrap">
+            <div class="flex justify-end gap-1.5 text-xs whitespace-nowrap">
+              <button
+                type="button"
+                class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                @click="onEdit(item)"
+              >
+                Edit
+              </button>
               <a
                 :href="api.measurementCsvExportUrl(item.resultId)"
                 download
-                class="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+                class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
               >
                 CSV
               </a>
-              <button type="button" class="text-neutral-400 hover:text-red-600" @click="onDelete(item.resultId)">delete</button>
+              <button
+                type="button"
+                class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-red-800 dark:hover:bg-red-950 dark:hover:text-red-400"
+                @click="onDelete(item)"
+              >
+                Delete
+              </button>
             </div>
           </td>
         </tr>
@@ -102,5 +125,7 @@ async function onDelete(id: number) {
         </tr>
       </tbody>
     </table>
+
+    <EditMeasurementDialog :open="editDialogOpen" :item="editingItem" @close="editDialogOpen = false" />
   </section>
 </template>

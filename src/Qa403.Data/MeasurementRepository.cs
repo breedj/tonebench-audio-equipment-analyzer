@@ -262,6 +262,15 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             NormFromText(row.Norm), dbv);
     }
 
+    public async Task<bool> UpdateResultAsync(long resultId, string name, string? notes, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        int affected = await connection.ExecuteAsync(
+            "UPDATE measurement_result SET name = @name, notes = @notes WHERE id = @resultId;",
+            new { resultId, name, notes });
+        return affected > 0;
+    }
+
     /// <summary>Deletes the result's captures (and their spectra/metrics) then the result itself.</summary>
     public async Task<bool> DeleteResultAsync(long resultId, CancellationToken ct)
     {

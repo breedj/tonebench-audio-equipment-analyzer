@@ -1,5 +1,12 @@
 import { ref } from 'vue'
-import { api, type MeasurementDetail, type MeasurementFilter, type MeasurementSummary, type SaveMeasurementRequest } from '../api/client'
+import {
+  api,
+  type MeasurementDetail,
+  type MeasurementFilter,
+  type MeasurementSummary,
+  type SaveMeasurementRequest,
+  type UpdateMeasurementRequest,
+} from '../api/client'
 
 // A distinct hue per overlay, cycling once more than 8 are on screen at once — unlikely, and a
 // repeat is harmless since the list rows still disambiguate by name.
@@ -55,6 +62,17 @@ export function useMeasurements() {
     }
   }
 
+  async function update(id: number, req: UpdateMeasurementRequest) {
+    try {
+      await api.updateMeasurement(id, req)
+      await load()
+      error.value = null
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   async function remove(id: number) {
     try {
       await api.deleteMeasurement(id)
@@ -98,5 +116,5 @@ export function useMeasurements() {
 
   if (items.value.length === 0) load()
 
-  return { items, filter, overlays, error, load, save, remove, addOverlay, removeOverlay, setOverlayVisible }
+  return { items, filter, overlays, error, load, save, update, remove, addOverlay, removeOverlay, setOverlayVisible }
 }

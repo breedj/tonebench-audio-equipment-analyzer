@@ -7,6 +7,7 @@ import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useChartDisplay } from '../composables/useChartDisplay'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useAppTheme } from '../composables/useAppTheme'
+import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import type { MeasurementChannel } from '../api/client'
@@ -51,6 +52,7 @@ const {
   visibleR,
   showMinMax,
   showPeakHold,
+  activeXRange,
   resetPeakHoldTrigger,
   autofitYTrigger,
   autofitXTrigger,
@@ -207,7 +209,15 @@ let lastReportedHi = Number.NaN
 function reportViewport(u: uPlot) {
   const min = u.scales.x.min
   const max = u.scales.x.max
-  if (min == null || max == null || fullHiFreqHz <= 0) return
+  if (min == null || max == null) return
+
+  // Published before (and independently of) the server-facing viewport below: the waterfall
+  // stacked underneath has to track *every* x change, zoomed or not and debounced or not, or its
+  // columns stop lining up with the spectrum's for 150 ms after each one. See useChartDisplay.ts.
+  if (activeXRange.value?.min !== min || activeXRange.value?.max !== max)
+    activeXRange.value = { min, max }
+
+  if (fullHiFreqHz <= 0) return
 
   // Treat "essentially the whole span" as not zoomed, so nudging the edges doesn't leave the
   // server encoding a private frame that buys nothing.
@@ -303,13 +313,6 @@ function harmonicMarkersPlugin(): uPlot.Plugin {
   }
 }
 
-// uPlot ticks/labels a log axis at more split positions than it wants text on — positions with
-// no label come through as `null` and must stay `null` (not get stringified into the text "null").
-function formatFreqTick(v: number | null): string | null {
-  if (v == null) return null
-  return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `${v}`
-}
-
 function formatDbTick(v: number | null): string | null {
   return v == null ? null : `${v}`
 }
@@ -365,8 +368,10 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
     },
     axes: [
       {
-        space: 60,
-        values: (_u, vals) => vals.map(formatFreqTick),
+        // Ticks and labels come from freqAxis.ts, shared with the waterfall stacked underneath so
+        // the two axes agree column for column — see the reasoning there for why uPlot's own
+        // log-axis ticking isn't usable once you zoom in.
+        ...freqAxis(),
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },

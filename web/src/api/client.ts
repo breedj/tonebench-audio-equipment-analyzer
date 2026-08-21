@@ -209,6 +209,8 @@ export interface MeasurementTypeAppliedResponse {
   autoRangeEnabled: boolean | null
   /** This type's stored metric-picker selection — null for a type saved before the feature existed, or never customized. See useMetricSelection.ts. */
   selectedMetrics?: string[] | null
+  /** This type's stored oscilloscope period count — null for a type saved before that feature existed. See useScopeDisplay.ts. */
+  scopePeriods?: number | null
 }
 
 /**
@@ -226,6 +228,8 @@ export interface StagedMeasurementConfig {
   snapToBin?: boolean
   /** The metrics-picker's current selection, staged the same way as any other on-screen setting. */
   selectedMetrics?: string[] | null
+  /** The oscilloscope chart's period count, staged the same way as any other on-screen setting. */
+  scopePeriods?: number | null
 }
 
 export interface SaveMeasurementTypeRequest {
@@ -305,6 +309,11 @@ export interface MeasurementDetail {
 
 export interface SaveMeasurementRequest {
   measurementTypeId: number
+  name: string
+  notes?: string | null
+}
+
+export interface UpdateMeasurementRequest {
   name: string
   notes?: string | null
 }
@@ -405,6 +414,9 @@ export const api = {
     ),
 
   getMeasurement: (id: number) => request<MeasurementDetail>(`/measurements/${id}`),
+
+  updateMeasurement: (id: number, req: UpdateMeasurementRequest) =>
+    request<void>(`/measurements/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
 
   deleteMeasurement: (id: number) => request<void>(`/measurements/${id}`, { method: 'DELETE' }),
 

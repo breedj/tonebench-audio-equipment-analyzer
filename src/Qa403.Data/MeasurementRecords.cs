@@ -33,7 +33,13 @@ public sealed record FftSpectrumParameters(
     // spectrumPipeline.Options. Optional with a default so rows saved before this field existed
     // still deserialize (every other property here is required); null means "use the THD %/Pk dBV
     // default" -- see useMetricSelection.ts.
-    IReadOnlyList<string>? SelectedMetrics = null);
+    IReadOnlyList<string>? SelectedMetrics = null,
+    // How many whole periods of the fundamental the oscilloscope chart shows per frame -- like
+    // SelectedMetrics above, purely a UI display preference that never reaches the pipeline (the
+    // server always sends the same 2048-sample scope frame; the client just draws a slice of it).
+    // Optional with a default so rows saved before this field existed still deserialize; null means
+    // "use the 4-period default" -- see useScopeDisplay.ts.
+    int? ScopePeriods = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm

@@ -41,6 +41,12 @@ public static class MeasurementsEndpoints
             return response is null ? Results.NotFound() : Results.Ok(response);
         });
 
+        group.MapPut("/{id:long}", async (long id, UpdateMeasurementRequest request, MeasurementRepository repo, CancellationToken ct) =>
+        {
+            bool updated = await repo.UpdateResultAsync(id, request.Name, request.Notes, ct);
+            return updated ? Results.Ok() : Results.NotFound();
+        });
+
         group.MapDelete("/{id:long}", async (long id, MeasurementRepository repo, CancellationToken ct) =>
         {
             bool deleted = await repo.DeleteResultAsync(id, ct);
@@ -136,6 +142,8 @@ public static class MeasurementsEndpoints
 }
 
 public sealed record SaveMeasurementRequest(long MeasurementTypeId, string Name, string? Notes);
+
+public sealed record UpdateMeasurementRequest(string Name, string? Notes);
 
 public sealed record MeasurementListResponse(MeasurementSummaryResponse[] Items);
 

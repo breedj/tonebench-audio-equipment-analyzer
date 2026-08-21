@@ -131,7 +131,8 @@ public sealed class MeasurementSaveService(
             parameters.InputRangeDbv,
             parameters.OutputRangeDbv,
             parameters.AutoRangeEnabled,
-            parameters.SelectedMetrics);
+            parameters.SelectedMetrics,
+            parameters.ScopePeriods);
     }
 
     /// <summary>
@@ -169,7 +170,7 @@ public sealed class MeasurementSaveService(
             sampleRateHz, channelCount,
             streamConfig?.BlockFrameCount ?? DeviceSessionService.MinBlockFrameCount,
             inputRangeDbv, session.OutputRangeDbv, autoRangeEnabled,
-            generator, staged?.SelectedMetrics);
+            generator, staged?.SelectedMetrics, staged?.ScopePeriods);
     }
 
     public string BuildCurrentParametersJson(StagedMeasurementConfig? staged = null) =>

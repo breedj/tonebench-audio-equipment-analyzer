@@ -7,6 +7,7 @@ import { useMeasurements } from './composables/useMeasurements'
 import { useProjects } from './composables/useProjects'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
+import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
 import { useCaptureDelay } from './composables/useCaptureDelay'
 import { determineAttenuation, nearestInputRange } from './attenuation'
@@ -18,6 +19,7 @@ import ProjectPanel from './components/ProjectPanel.vue'
 import GeneratorPanel from './components/GeneratorPanel.vue'
 import SpectrumConfigPanel from './components/SpectrumConfigPanel.vue'
 import SpectrumChart from './components/SpectrumChart.vue'
+import WaterfallChart from './components/WaterfallChart.vue'
 import OscilloscopeChart from './components/OscilloscopeChart.vue'
 import SystemMetricsPanel from './components/SystemMetricsPanel.vue'
 import MetricsPanel from './components/MetricsPanel.vue'
@@ -38,6 +40,7 @@ const { spectrum, meters, scope, setViewport } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
+const { scopePeriods, applyLoaded: applyLoadedScopePeriods } = useScopeDisplay()
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
 // fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
@@ -70,9 +73,18 @@ const {
   saveProjectAs,
 } = useProjects()
 
-// Syncs the metrics-picker selection whenever a measurement type is (re)loaded — see
-// useMetricSelection.ts's applyLoaded for the null-means-default handling.
-watch(loadedParams, (params) => applyLoadedMetrics(params?.selectedMetrics), { immediate: true })
+// Syncs the display-only settings — the metrics-picker selection and the oscilloscope's period
+// count — whenever a measurement type is (re)loaded. Neither reaches the device or the pipeline,
+// so unlike the generator/acquisition fields they apply straight away rather than waiting for Run.
+// See each composable's applyLoaded for the null-means-default handling.
+watch(
+  loadedParams,
+  (params) => {
+    applyLoadedMetrics(params?.selectedMetrics)
+    applyLoadedScopePeriods(params?.scopePeriods)
+  },
+  { immediate: true },
+)
 
 interface RunConfig {
   sampleRateHz: number
@@ -328,6 +340,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     generatorRight: generator.right,
     snapToBin: generator.snapToBin,
     selectedMetrics: selectedMetrics.value,
+    scopePeriods: scopePeriods.value,
   }
 }
 
@@ -547,7 +560,8 @@ function confirmSaveProjectAs(name: string) {
                 :overlays="overlays"
                 @viewport-change="setViewport"
               />
-              <OscilloscopeChart :scope="scope" :status="status" />
+              <WaterfallChart class="mt-3" :spectrum="spectrum" />
+              <OscilloscopeChart class="mt-3" :scope="scope" :status="status" />
             </div>
 
             <ChartDisplayPanel>

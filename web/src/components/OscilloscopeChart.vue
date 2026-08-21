@@ -5,6 +5,7 @@ import 'uplot/dist/uPlot.min.css'
 import type { DeviceStatus } from '../api/client'
 import type { ScopeFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import { MAX_SCOPE_PERIODS, useScopeDisplay } from '../composables/useScopeDisplay'
 
 const props = defineProps<{
   scope: Record<number, ScopeFrame>
@@ -33,6 +34,10 @@ function currentTheme() {
 }
 
 const containerRef = ref<HTMLDivElement>()
+// How many whole periods the last draw actually managed — findTriggerWindow steps the request
+// down when the 2048-sample frame can't hold it, and silently showing 2 when the field says 20
+// reads as the field being broken. Null while untriggered (no tone to count periods of).
+const shownPeriods = ref<number | null>(null)
 let plot: uPlot | null = null
 let plotIsDark = darkQuery.matches
 
@@ -97,8 +102,57 @@ function generatorFreqHz(status: DeviceStatus | null): number | null {
   return gen.tones[0].freqHz > 0 ? gen.tones[0].freqHz : null
 }
 
-/** Most periods to show at once — see findTriggerWindow's fallback ladder below. */
-const MAX_TRIGGER_PERIODS = 4
+// How many whole periods the Periods field asks for — see findTriggerWindow's fallback ladder
+// below for what happens when the 2048-sample frame can't hold that many. Saved with the
+// measurement type (see useScopeDisplay.ts).
+const { scopePeriods, setScopePeriods } = useScopeDisplay()
+
+/**
+ * The field's own text, mirrored on every keystroke — deliberately *not* `:value="scopePeriods"`.
+ * Vue re-patches an input's `value` prop on every re-render even when the bound value hasn't
+ * changed (`patchProps` special-cases `value` so the DOM can never drift from the binding), and
+ * this component re-renders on every scope frame, because the `scope` prop object is replaced
+ * ~20 times a second while acquisition runs. Binding the *committed* number therefore stamped the
+ * old value back into the field between keystrokes, so a typed edit was usually gone before Enter
+ * or a blur could commit it — the field looked like it ignored what you typed. Mirroring the text
+ * means each of those re-patches writes back exactly what is already there, which
+ * `patchDOMProp`'s own `el.value !== newValue` check then skips.
+ */
+const periodsField = ref(String(scopePeriods.value))
+watch(scopePeriods, (periods) => {
+  periodsField.value = String(periods)
+})
+
+/**
+ * Applies as you type, rather than only when the field is committed. `change` alone was not enough:
+ * it fires on blur, and on Enter only in browsers that choose to raise it for a number input — so
+ * a typed edit could sit there looking accepted while the chart kept drawing the previous count,
+ * which reads as the field having been ignored.
+ *
+ * Debounced, so typing "12" doesn't briefly draw 1 period on the way through, and gated to in-range
+ * integers so a half-typed or out-of-range entry is left alone under the cursor and waits for
+ * onPeriodsChange to clamp it.
+ */
+const LIVE_COMMIT_DELAY_MS = 250
+let liveCommitTimer: ReturnType<typeof setTimeout> | undefined
+
+function onPeriodsInput(event: Event) {
+  periodsField.value = (event.target as HTMLInputElement).value
+  clearTimeout(liveCommitTimer)
+
+  const typed = Number(periodsField.value)
+  if (!Number.isInteger(typed) || typed < 1 || typed > MAX_SCOPE_PERIODS) return
+  liveCommitTimer = setTimeout(() => setScopePeriods(typed), LIVE_COMMIT_DELAY_MS)
+}
+
+// Commit on change (blur/Enter/spinner), then re-read what was accepted: setScopePeriods clamps to
+// 1..MAX_SCOPE_PERIODS, and a clamped-away edit (typing 999) leaves scopePeriods unchanged, so the
+// watcher above wouldn't fire and the field would keep showing the rejected number.
+function onPeriodsChange() {
+  clearTimeout(liveCommitTimer)
+  setScopePeriods(Number(periodsField.value))
+  periodsField.value = String(scopePeriods.value)
+}
 
 /**
  * Finds a steady trigger window: the first rising (negative-to-positive) zero-crossing, then as
@@ -107,29 +161,52 @@ const MAX_TRIGGER_PERIODS = 4
  * signal looks like it's crawling sideways; starting every frame at the same phase is what makes
  * it look like a real scope.
  *
- * Prefers MAX_TRIGGER_PERIODS whole periods, stepping down to 3, 2, then 1 if the buffer (2048
- * samples minus however much the crossing search itself consumed) doesn't hold that many —
- * cutting a period off mid-cycle would show a real discontinuity at the trace's own edge, so
- * showing fewer *whole* periods reads better than a partial one. Below one whole period there's
- * nothing left to step down to, so it just shows whatever remains.
+ * Prefers `desiredPeriods` whole periods (the Periods field), stepping down one at a time to 1 if
+ * the 2048-sample frame can't hold that many — cutting a period off mid-cycle would show a real
+ * discontinuity at the trace's own edge, so showing fewer *whole* periods reads better than a
+ * partial one. Below one whole period there's nothing left to step down to, so it just shows
+ * whatever remains. This is why the field is a request rather than a guarantee: 20 periods of
+ * 1 kHz needs 3840 samples at 192 kHz and the frame only ever carries 2048.
  */
-function findTriggerWindow(samples: Float32Array, frequencyHz: number, samplePeriodS: number): { startStep: number; count: number } {
+function findTriggerWindow(
+  samples: Float32Array,
+  frequencyHz: number,
+  samplePeriodS: number,
+  desiredPeriods: number,
+): { startStep: number; count: number; periods: number } {
+  const periodSamples = 1 / frequencyHz / samplePeriodS
+
+  // The crossing search is bounded to a single period. One period is all a *periodic* signal can
+  // need, but the captured waveform is the tone plus everything else: on a tone riding a large
+  // low-frequency component the sum simply doesn't go negative for a while, and an unbounded search
+  // ran 800+ samples — four periods — into a 2048-sample frame before it found a crossing. That
+  // eats the very buffer the window is then measured against, which is what made the trace's length
+  // (and with it the time axis) change on every frame. Failing to find a crossing inside one period
+  // means there is no clean one to find, and starting at the raw beginning is no worse.
+  const searchLimit = Math.min(samples.length, Math.ceil(periodSamples) + 1)
   let startStep = 0
-  for (let i = 1; i < samples.length; i++) {
+  for (let i = 1; i < searchLimit; i++) {
     if (samples[i - 1] < 0 && samples[i] >= 0) {
       startStep = i
       break
     }
   }
 
+  // Budgeted against that worst case rather than against this frame's actual `startStep`: the
+  // crossing lands somewhere different every frame, so a ladder that stepped down on the real
+  // offset chose a different period count from one frame to the next whenever the request sat near
+  // the buffer's capacity — the "showing N" readout flickered along with the trace. Budgeting the
+  // capped worst case makes the choice depend only on the request, the tone and the sample rate.
+  const budget = samples.length - Math.ceil(periodSamples)
+
+  let periods = desiredPeriods
+  while (periods > 1 && periodSamples * periods > budget) periods--
+
+  // `available` can only exceed `budget` now that the search is bounded, so this clamp is a
+  // backstop (a sub-one-period buffer, say) rather than something the steady state relies on.
   const available = samples.length - startStep
-  const periodSamples = 1 / frequencyHz / samplePeriodS
-
-  let periods = MAX_TRIGGER_PERIODS
-  while (periods > 1 && periodSamples * periods > available) periods--
-
   const count = Math.max(1, Math.min(Math.round(periodSamples * periods), available))
-  return { startStep, count }
+  return { startStep, count, periods }
 }
 
 /** Reads `count` samples starting at `start`; null past this particular channel's own array bounds (see update()'s remarks on mismatched lengths). */
@@ -160,9 +237,14 @@ function update() {
   let startStep = 0
   let count = (ch0 ?? ch1!).samples.length
   if (freqHz && triggerSource) {
-    const window = findTriggerWindow(triggerSource.samples, freqHz, triggerSource.samplePeriodS)
+    const window = findTriggerWindow(triggerSource.samples, freqHz, triggerSource.samplePeriodS, scopePeriods.value)
     startStep = window.startStep
     count = window.count
+    shownPeriods.value = window.periods
+  } else {
+    // Untriggered (no known tone frequency): the whole buffer is drawn, so the Periods field has
+    // nothing to act on and its readout says so rather than claiming a count it didn't honour.
+    shownPeriods.value = null
   }
 
   // Both channels' frames arrive independently, so their sample counts can momentarily differ —
@@ -180,6 +262,9 @@ function update() {
 }
 
 watch(() => props.scope, update)
+// A Periods change has to redraw off the *last* frame rather than waiting for the next one —
+// otherwise the field looks dead while acquisition is stopped.
+watch(scopePeriods, update)
 
 function handleResize() {
   if (plot && containerRef.value)
@@ -199,6 +284,7 @@ onMounted(() => {
   darkQuery.addEventListener('change', handleThemeChange)
 })
 onBeforeUnmount(() => {
+  clearTimeout(liveCommitTimer)
   window.removeEventListener('resize', handleResize)
   darkQuery.removeEventListener('change', handleThemeChange)
   plot?.destroy()
@@ -208,8 +294,25 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span>Oscilloscope</span>
+      <label class="flex items-center gap-1.5" title="How many whole periods of the generator tone to show. Stepped down automatically when the captured frame is too short to hold that many.">
+        Periods
+        <input
+          :value="periodsField"
+          type="number"
+          min="1"
+          :max="MAX_SCOPE_PERIODS"
+          step="1"
+          class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+          @input="onPeriodsInput"
+          @change="onPeriodsChange"
+        />
+      </label>
+      <span v-if="shownPeriods !== null && shownPeriods !== scopePeriods" class="text-amber-600 dark:text-amber-500">
+        showing {{ shownPeriods }} — the captured frame is too short for {{ scopePeriods }}
+      </span>
+      <span class="flex-1"></span>
       <span v-if="!scope[0] && !scope[1]">Waiting for data…</span>
     </div>
     <div ref="containerRef" class="w-full"></div>

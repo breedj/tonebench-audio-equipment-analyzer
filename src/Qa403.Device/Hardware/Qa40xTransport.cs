@@ -12,11 +12,20 @@ namespace Qa403.Device.Hardware;
 /// unplug). Caught inside <see cref="Qa40xUsbDevice"/> and translated into
 /// <see cref="IAnalyzerDevice.DeviceLost"/> plus a clean end of the stream — never allowed to
 /// propagate out of <see cref="IAnalyzerDevice.StreamAsync"/>.
+///
+/// Public because it also escapes the *non*-streaming paths (a register write from
+/// <c>SetOutputRangeAsync</c>, the liveness ping), where there is no stream to end cleanly and the
+/// app has to turn it into a "device was unplugged" answer rather than a 500.
 /// </summary>
-internal sealed class Qa40xDeviceLostException(string message) : Exception(message);
+public sealed class Qa40xDeviceLostException(string message) : Exception(message);
 
-/// <summary>Thrown by <see cref="Qa40xTransport.Open"/> when no QA403 is found.</summary>
-internal sealed class Qa40xDeviceNotFoundException(string message) : Exception(message);
+/// <summary>
+/// Thrown by <see cref="Qa40xTransport.Open"/> when no QA403 is found. Public, unlike its two
+/// siblings here, because "nothing plugged in" is an ordinary state the app has to handle rather
+/// than a transport-internal failure: <c>DeviceLifecycleHostedService</c> catches this one to keep
+/// startup going, and logs it without a stack trace since there is nothing to diagnose.
+/// </summary>
+public sealed class Qa40xDeviceNotFoundException(string message) : Exception(message);
 
 /// <summary>
 /// Thrown by <see cref="Qa40xTransport.Open"/> when a QA403 is present but its interface cannot be
@@ -131,7 +140,8 @@ internal sealed class Qa40xTransport : IDisposable
         await _registerLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var (error, _) = await writer.WriteAsync(frame, 0, frame.Length, RegisterTimeoutMs).ConfigureAwait(false);
+            var (error, _) = await TransferAsync(
+                () => writer.WriteAsync(frame, 0, frame.Length, RegisterTimeoutMs), "register write").ConfigureAwait(false);
             ThrowIfDeviceLost(error, "register write");
         }
         finally
@@ -154,10 +164,12 @@ internal sealed class Qa40xTransport : IDisposable
         await _registerLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var (writeError, _) = await writer.WriteAsync(frame, 0, frame.Length, RegisterTimeoutMs).ConfigureAwait(false);
+            var (writeError, _) = await TransferAsync(
+                () => writer.WriteAsync(frame, 0, frame.Length, RegisterTimeoutMs), "register read (write phase)").ConfigureAwait(false);
             ThrowIfDeviceLost(writeError, "register read (write phase)");
 
-            var (readError, readLength) = await reader.ReadAsync(readBuffer, 0, readBuffer.Length, RegisterTimeoutMs).ConfigureAwait(false);
+            var (readError, readLength) = await TransferAsync(
+                () => reader.ReadAsync(readBuffer, 0, readBuffer.Length, RegisterTimeoutMs), "register read (read phase)").ConfigureAwait(false);
             ThrowIfDeviceLost(readError, "register read (read phase)");
             if (readLength == 0)
                 throw new InvalidOperationException($"Register {reg} read returned no data.");
@@ -180,7 +192,8 @@ internal sealed class Qa40xTransport : IDisposable
     public async Task<int> WriteDataAsync(byte[] buffer, int length, CancellationToken ct)
     {
         var writer = _dataWriter ?? throw new InvalidOperationException("Transport not open.");
-        var (error, transferLength) = await writer.WriteAsync(buffer, 0, length, DataTimeoutMs).ConfigureAwait(false);
+        var (error, transferLength) = await TransferAsync(
+            () => writer.WriteAsync(buffer, 0, length, DataTimeoutMs), "data write").ConfigureAwait(false);
         ThrowIfDeviceLost(error, "data write");
         return transferLength;
     }
@@ -193,7 +206,8 @@ internal sealed class Qa40xTransport : IDisposable
     public async Task<int> ReadDataAsync(byte[] buffer, int count, CancellationToken ct)
     {
         var reader = _dataReader ?? throw new InvalidOperationException("Transport not open.");
-        var (error, transferLength) = await reader.ReadAsync(buffer, 0, count, DataTimeoutMs).ConfigureAwait(false);
+        var (error, transferLength) = await TransferAsync(
+            () => reader.ReadAsync(buffer, 0, count, DataTimeoutMs), "data read").ConfigureAwait(false);
         ThrowIfDeviceLost(error, "data read");
         return transferLength;
     }
@@ -218,7 +232,8 @@ internal sealed class Qa40xTransport : IDisposable
 
             // Short timeout on purpose: on an idle device every one of these costs the full wait, so
             // the drain must not use the 1000 ms DataTimeoutMs the streaming path needs.
-            var (error, length) = await reader.ReadAsync(scratch, 0, scratch.Length, 50).ConfigureAwait(false);
+            var (error, length) = await TransferAsync(
+                () => reader.ReadAsync(scratch, 0, scratch.Length, 50), "data-endpoint drain").ConfigureAwait(false);
             if (error is Error.NoDevice)
                 throw new Qa40xDeviceLostException("QA403 data-endpoint drain failed with NoDevice — device appears disconnected.");
             if (length <= 0)
@@ -228,6 +243,37 @@ internal sealed class Qa40xTransport : IDisposable
         }
 
         return total;
+    }
+
+    /// <summary>
+    /// Runs one LibUsbDotNet transfer, normalising the *second* way it reports a vanished device.
+    ///
+    /// Every transfer here has two failure channels, and only one of them was being watched.
+    /// <c>WriteAsync</c>/<c>ReadAsync</c> hand back an <see cref="Error"/> for a transfer that
+    /// completed unsuccessfully — that is what <see cref="ThrowIfDeviceLost"/> covers — but when the
+    /// submit itself fails, <c>AsyncTransfer.TransferAsync</c> calls <c>ErrorExtensions.ThrowOnError</c>
+    /// and a <see cref="UsbException"/> comes out instead. Unplugging a connected QA403 and then
+    /// writing a register takes exactly that path: <c>UsbException: Input/Output Error</c> escaped the
+    /// transport untranslated, so <see cref="Qa40xUsbDevice"/> never saw a device-lost signal, never
+    /// raised <see cref="IAnalyzerDevice.DeviceLost"/>, and the app answered the user's Run press with
+    /// a 500 and a stack trace.
+    /// </summary>
+    private static async Task<(Error Error, int Length)> TransferAsync(
+        Func<Task<(Error, int)>> transfer, string phase)
+    {
+        try
+        {
+            var (error, length) = await transfer().ConfigureAwait(false);
+            return (error, length);
+        }
+        catch (UsbException ex) when (ex.ErrorCode is Error.NoDevice or Error.Io or Error.Pipe or Error.NotFound)
+        {
+            // Same three codes as ThrowIfDeviceLost, plus NotFound: a handle whose device has been
+            // removed. Anything else (Timeout, Busy, Overflow...) is a transfer problem on a device
+            // that is still there, and must keep its own exception rather than being reported as an
+            // unplug.
+            throw new Qa40xDeviceLostException($"QA403 {phase} failed with {ex.ErrorCode} — device appears disconnected.");
+        }
     }
 
     /// <summary><see cref="Error.NoDevice"/> is documented by LibUsbDotNet itself as "it may have been disconnected" — the one unambiguous disconnect signal. Io/Pipe are also treated as disconnect since a freshly-unplugged bulk endpoint on Windows/Linux commonly surfaces as one of those instead of NoDevice.</summary>

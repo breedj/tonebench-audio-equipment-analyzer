@@ -84,6 +84,9 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     private volatile bool _stopRequested;
     private bool _connected;
 
+    /// <summary>0/1 latch so <see cref="DeviceLost"/> is raised once per connection, however many operations trip over the same unplug. Reset by <see cref="ConnectAsync"/>.</summary>
+    private int _deviceLostRaised;
+
     /// <summary>
     /// The pump for the currently-running stream, or null when nothing is streaming. Every register
     /// write has to go through it while it is non-null — see <see cref="SetInputRangeAsync"/>.
@@ -221,6 +224,14 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             _autoRanger = new Qa40xAutoRanger(Capabilities.InputRangesDbv) { StepDownDelayMs = _autoRangeStepDownDelayMs };
             _connected = true;
 
+            // This instance is reusable across an unplug/replug: HandleDeviceLost releases the dead
+            // handle rather than leaving it claimed, so a later connect opens a fresh transport into
+            // the same object. Both latches belong to the *previous* connection and have to clear
+            // with it, or the reconnected device would never report a second loss and would stream
+            // straight into a stale stop request.
+            _deviceLostRaised = 0;
+            _stopRequested = false;
+
             var info = new DeviceInfo("QA403", serialRaw.ToString(), firmwareRaw.ToString(), IsSimulated: false);
             logger.LogInformation(
                 "Connected to QA403 (serial {Serial}, fw {Firmware})", info.SerialNumber, info.FirmwareVersion);
@@ -268,7 +279,16 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             return;
         }
 
-        await transport.WriteRegisterAsync(Qa40xRegisters.InputRange, Qa40xRegisters.InputRangeDbvToRegister(dbv), ct).ConfigureAwait(false);
+        try
+        {
+            await transport.WriteRegisterAsync(Qa40xRegisters.InputRange, Qa40xRegisters.InputRangeDbvToRegister(dbv), ct).ConfigureAwait(false);
+        }
+        catch (Qa40xDeviceLostException)
+        {
+            HandleDeviceLost("input range write");
+            throw;
+        }
+
         Volatile.Write(ref _inputRangeDbv, dbv);
         _autoRanger?.Reset();
     }
@@ -300,7 +320,16 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             return;
         }
 
-        await transport.WriteRegisterAsync(Qa40xRegisters.OutputRange, Qa40xRegisters.OutputRangeDbvToRegister(dbv), ct).ConfigureAwait(false);
+        try
+        {
+            await transport.WriteRegisterAsync(Qa40xRegisters.OutputRange, Qa40xRegisters.OutputRangeDbvToRegister(dbv), ct).ConfigureAwait(false);
+        }
+        catch (Qa40xDeviceLostException)
+        {
+            HandleDeviceLost("output range write");
+            throw;
+        }
+
         Volatile.Write(ref _outputRangeDbv, dbv);
     }
 
@@ -472,12 +501,116 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                     dropped, dropped * TransferChunkFrames);
             }
 
+            // _activePump was cleared above and the pump has joined, so this releases the handle here
+            // rather than leaving it claimed by a device that is no longer on the bus.
             if (deviceLost)
+                HandleDeviceLost("mid-stream");
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A register read (firmware version — read-only, so it changes nothing) is the cheapest honest
+    /// answer to "is it still there?": it is the same EP1 exchange every other control operation
+    /// uses, so it fails exactly when they would.
+    ///
+    /// <para>Skipped entirely while a stream is running, and not because it would be wasteful: a
+    /// register exchange on EP1 with EP2 transfers in flight is the documented way to wedge this
+    /// device's USB stack. The running pump is the better detector there anyway — it reads EP2
+    /// continuously and reports a loss through <see cref="DeviceLost"/> within one transfer.</para>
+    ///
+    /// <para>Only a device-lost failure answers false. A timeout or a short read is a hiccup on a
+    /// device that is still present, and reporting those as a disconnect would tear down a working
+    /// session over one slow exchange.</para>
+    /// </remarks>
+    public async Task<bool> PingAsync(CancellationToken ct)
+    {
+        if (!_connected)
+            return false;
+
+        if (_activePump is not null)
+            return true;
+
+        var transport = _transport;
+        if (transport is null)
+            return false;
+
+        try
+        {
+            await transport.ReadRegisterAsync(Qa40xRegisters.FirmwareVersion, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Qa40xDeviceLostException)
+        {
+            HandleDeviceLost("liveness ping");
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "QA403 liveness ping failed without a disconnect signal — treating the device as still present");
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The single reaction to "this device is gone", from wherever it was noticed: a register write,
+    /// the liveness ping, or the transfer pump.
+    ///
+    /// Releasing the handle is the point of it. A removed device leaves a claimed interface behind,
+    /// and holding that means the replugged QA403 cannot be opened by this process (or any other)
+    /// without a restart — the same "needs a power cycle" symptom a wedged process produces. With the
+    /// transport disposed and the fields cleared, <see cref="ConnectAsync"/> works again as-is.
+    ///
+    /// <para>Ordering matters when a stream is running: the pump owns every in-flight EP2 transfer,
+    /// and disposing the transport under it puts <c>libusb_close</c> in exactly the position
+    /// <see cref="StreamAsync"/>'s remarks warn about. So a loss noticed while the pump is live only
+    /// asks it to stop; the stream's own finally joins it and calls back in here, by which point
+    /// <see cref="_activePump"/> is null and the release is safe.</para>
+    /// </summary>
+    private void HandleDeviceLost(string context)
+    {
+        _connected = false;
+
+        if (_activePump is not null)
+        {
+            _stopRequested = true;
+            RaiseDeviceLostOnce(context);
+            return;
+        }
+
+        var transport = _transport;
+        _transport = null;
+        _calibration = null;
+        _autoRanger = null;
+
+        if (transport is not null)
+        {
+            try
             {
-                logger.LogWarning("QA403 disconnected mid-stream");
-                DeviceLost?.Invoke(this, EventArgs.Empty);
+                transport.Dispose();
+            }
+            catch (Exception ex)
+            {
+                // Nothing left to salvage: the device is gone either way, and the next connect opens
+                // a new transport regardless of how this one ended.
+                logger.LogWarning(ex, "QA403 transport dispose failed after disconnect");
             }
         }
+
+        RaiseDeviceLostOnce(context);
+    }
+
+    private void RaiseDeviceLostOnce(string context)
+    {
+        if (Interlocked.Exchange(ref _deviceLostRaised, 1) == 1)
+            return;
+
+        logger.LogWarning("QA403 disconnected ({Context}) — handle released; reconnect the device and press Connect", context);
+        DeviceLost?.Invoke(this, EventArgs.Empty);
     }
 
     public Task StopAsync()

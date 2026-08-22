@@ -4,10 +4,13 @@ import type { DeviceStatus, SimulatedProfileRequest } from '../api/client'
 defineProps<{
   status: DeviceStatus | null
   error: string | null
+  /** True while a connect attempt is in flight — the emit is fire-and-forget, so the button can't tell on its own. */
+  connecting: boolean
 }>()
 
 const emit = defineEmits<{
   setSimulatedProfile: [patch: SimulatedProfileRequest]
+  connect: []
 }>()
 
 function onSimulatedNoiseChange(e: Event) {
@@ -27,6 +30,14 @@ function onSimulatedHumChange(e: Event) {
       <span class="h-2.5 w-2.5 rounded-full" :class="status?.connected ? 'bg-emerald-500' : 'bg-neutral-400'" />
       <span class="font-semibold text-neutral-900 dark:text-neutral-100">
         {{ status?.connected ? status.productName : 'Disconnected' }}
+      </span>
+      <!-- Says which kind of disconnected this is: never attached, or unplugged while we were using it. -->
+      <span
+        v-if="status && !status.connected && status.deviceLost"
+        class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+        title="The QA403 stopped responding — it was unplugged or powered off. Plug it back in and press Connect."
+      >
+        Device removed
       </span>
       <span
         v-if="status?.isSimulated"
@@ -51,6 +62,22 @@ function onSimulatedHumChange(e: Event) {
           Hum
         </label>
       </template>
+      <!--
+        The app starts whether or not a QA403 is attached (a missing one used to abort startup
+        outright), so "Disconnected" is a normal state to arrive in rather than a failure. Covers the
+        mid-session unplug too: the server releases the dead handle and reports connected=false, so
+        the same button brings the device back once it is plugged in again.
+      -->
+      <button
+        v-if="status && !status.connected"
+        type="button"
+        class="rounded border border-neutral-300 px-2 py-0.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        :disabled="connecting"
+        title="Look for a QA403 on USB and connect to it."
+        @click="emit('connect')"
+      >
+        {{ connecting ? 'Connecting…' : 'Connect' }}
+      </button>
       <span
         v-if="status?.acquiring"
         class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"

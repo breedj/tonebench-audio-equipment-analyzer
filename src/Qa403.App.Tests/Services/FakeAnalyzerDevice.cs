@@ -1,0 +1,87 @@
+using Qa403.Device;
+using Qa403.Device.Hardware;
+using Qa403.Device.Simulation;
+
+namespace Qa403.App.Tests.Services;
+
+/// <summary>
+/// A <see cref="SimulatedDevice"/> wrapper that can also be absent or unplugged — the two states the
+/// simulator has no way to be, and the two the app now has to survive. Real hardware signals both
+/// through exceptions from deep inside LibUsbDotNet, so what matters here is only the shape the app
+/// sees: a failing <see cref="ConnectAsync"/>, and a <see cref="Qa40xDeviceLostException"/> preceded
+/// by <see cref="DeviceLost"/> — the order <see cref="Qa40xUsbDevice"/> itself uses, since it raises
+/// the event on its way out of the failing operation.
+/// </summary>
+internal class FakeAnalyzerDevice : IAnalyzerDevice
+{
+    private readonly SimulatedDevice _inner = new();
+    private EventHandler? _deviceLost;
+
+    /// <summary>Thrown by the next <see cref="ConnectAsync"/> when set; null lets it succeed.</summary>
+    public Exception? ConnectFailure { get; set; }
+
+    public int ConnectAttempts { get; private set; }
+
+    public int DeviceLostSubscribers { get; private set; }
+
+    /// <summary>Set to simulate the cable being pulled: every device operation then fails as lost, and the ping answers false.</summary>
+    public bool Unplugged { get; set; }
+
+    public event EventHandler? DeviceLost
+    {
+        add { _deviceLost += value; DeviceLostSubscribers++; }
+        remove { _deviceLost -= value; DeviceLostSubscribers--; }
+    }
+
+    public Task<DeviceInfo> ConnectAsync(CancellationToken ct)
+    {
+        ConnectAttempts++;
+        if (ConnectFailure is { } failure)
+            return Task.FromException<DeviceInfo>(failure);
+
+        Unplugged = false;
+        return _inner.ConnectAsync(ct);
+    }
+
+    public virtual Task<bool> PingAsync(CancellationToken ct)
+    {
+        if (!Unplugged)
+            return _inner.PingAsync(ct);
+
+        RaiseDeviceLost();
+        return Task.FromResult(false);
+    }
+
+    public Task SetInputRangeAsync(double dbv, CancellationToken ct) =>
+        Unplugged ? FailAsLost("input range write") : _inner.SetInputRangeAsync(dbv, ct);
+
+    public Task SetOutputRangeAsync(double dbv, CancellationToken ct) =>
+        Unplugged ? FailAsLost("output range write") : _inner.SetOutputRangeAsync(dbv, ct);
+
+    public Task ConfigureGeneratorAsync(GeneratorConfig config, CancellationToken ct) =>
+        Unplugged ? FailAsLost("generator config") : _inner.ConfigureGeneratorAsync(config, ct);
+
+    public DeviceCapabilities Capabilities => _inner.Capabilities;
+
+    public double InputRangeDbv => _inner.InputRangeDbv;
+
+    public bool AutoRangeEnabled { get => _inner.AutoRangeEnabled; set => _inner.AutoRangeEnabled = value; }
+
+    public double AutoRangeStepDownDelayMs { get => _inner.AutoRangeStepDownDelayMs; set => _inner.AutoRangeStepDownDelayMs = value; }
+
+    public long DroppedRxChunks => _inner.DroppedRxChunks;
+
+    public int StimulusLatencyFrames(double sampleRateHz) => _inner.StimulusLatencyFrames(sampleRateHz);
+
+    public IAsyncEnumerable<PcmBlock> StreamAsync(AcquisitionConfig config, CancellationToken ct) => _inner.StreamAsync(config, ct);
+
+    public Task StopAsync() => _inner.StopAsync();
+
+    private Task FailAsLost(string phase)
+    {
+        RaiseDeviceLost();
+        return Task.FromException(new Qa40xDeviceLostException($"QA403 {phase} failed with Io — device appears disconnected."));
+    }
+
+    private void RaiseDeviceLost() => _deviceLost?.Invoke(this, EventArgs.Empty);
+}

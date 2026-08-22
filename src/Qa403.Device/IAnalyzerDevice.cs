@@ -10,6 +10,19 @@ public interface IAnalyzerDevice
 {
     Task<DeviceInfo> ConnectAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Whether the device is still reachable, checked cheaply enough to run on a UI status poll.
+    /// Returns false once it is gone, having raised <see cref="DeviceLost"/> and released whatever
+    /// the dead handle still held.
+    ///
+    /// <para>Exists because nothing else notices an unplug while the app is idle: every other
+    /// operation is user-driven, so without a ping the status bar kept claiming "connected" until
+    /// something was pressed, and then failed from deep inside a register write. Implementations
+    /// that are already watching the device continuously (a running stream) should answer true
+    /// without adding traffic of their own.</para>
+    /// </summary>
+    Task<bool> PingAsync(CancellationToken ct);
+
     /// <summary>Sample rates and gain ranges the device supports. Valid only after <see cref="ConnectAsync"/> has completed.</summary>
     DeviceCapabilities Capabilities { get; }
 

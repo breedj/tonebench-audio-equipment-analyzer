@@ -26,6 +26,12 @@ export interface DeviceStatus {
   /** Whether generator tones are snapped to the nearest coherent FFT bin. generatorLeft/Right Tones are the snapped values. */
   generatorSnapToBin: boolean
   /**
+   * True once a device the app *was* connected to went away — an unplugged cable, mid-session.
+   * Comes with connected=false: the server releases the dead handle, so this is the reason for the
+   * disconnect rather than a state of its own, and Connect brings the device back once it returns.
+   */
+  deviceLost: boolean
+  /**
    * RX chunks dropped since connect because the consumer fell behind. Each one is a hole in the
    * sample stream, so the FFT records around it are spliced — non-zero means noise-floor readings
    * are suspect, not just that a display frame was skipped.
@@ -345,6 +351,14 @@ function toQuery(params: Record<string, string | number | undefined>): string {
 
 export const api = {
   getDevice: () => request<DeviceStatus>('/device'),
+
+  /**
+   * Connects a QA403 that wasn't attached when the app started. The app comes up device-less
+   * rather than failing to start, so this is the only way back to a connected session short of a
+   * restart. Rejects with the server's message (503) when there's still nothing to connect to.
+   */
+  connectDevice: () => request<DeviceStatus>('/device/connect', { method: 'POST' }),
+
   getDeviceRanges: () => request<DeviceRanges>('/device/ranges'),
 
   setInputRange: (dbv: number) =>

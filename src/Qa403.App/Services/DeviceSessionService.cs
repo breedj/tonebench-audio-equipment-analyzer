@@ -1,6 +1,7 @@
 using Qa403.App.Endpoints;
 using Qa403.App.Streaming;
 using Qa403.Device;
+using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
 using Qa403.Dsp;
 
@@ -73,9 +74,33 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     private volatile bool _isAcquiring;
     private volatile bool _deviceLost;
 
+    /// <summary>Whether <see cref="OnDeviceLost"/> is already subscribed — see <see cref="ConnectAsync"/>, which may run more than once.</summary>
+    private bool _deviceLostHooked;
+
+    /// <summary>
+    /// Bumped by every successful <see cref="ConnectAsync"/>. <see cref="OnDeviceLost"/> hands its
+    /// generation to the background teardown, which then does nothing if the user has already
+    /// reconnected in the meantime — otherwise a teardown scheduled microseconds before a Connect
+    /// could stop the *new* session's pipeline.
+    /// </summary>
+    private int _connectionGeneration;
+
+    /// <summary>
+    /// <see cref="Environment.TickCount64"/> of the last liveness ping, or -1 for "never". Throttles
+    /// <see cref="GetStatusAsync"/>: several browser tabs polling at 2 s each must not turn into
+    /// several register exchanges per second on the wire.
+    /// </summary>
+    private long _lastPingTicks = -1;
+
+    /// <summary>Floor on the gap between liveness pings, just under the UI's own 2 s status poll so a single poller still gets one per poll.</summary>
+    private const int LivenessPingIntervalMs = 1500;
+
     public DeviceCapabilities Capabilities => device.Capabilities;
 
     public bool Acquiring => _isAcquiring;
+
+    /// <summary>Whether a device has been brought up. False from startup until <see cref="ConnectAsync"/> first succeeds — the app runs fine with no QA403 attached.</summary>
+    public bool Connected => _info is not null;
 
     /// <summary>Null until <see cref="ConnectAsync"/> completes.</summary>
     public DeviceInfo? Info => _info;
@@ -128,27 +153,144 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         return true;
     }
 
+    /// <summary>
+    /// Brings the device up, throwing whatever <see cref="IAnalyzerDevice.ConnectAsync"/> throws
+    /// when there is nothing to connect to.
+    ///
+    /// Called once at startup by <see cref="DeviceLifecycleHostedService"/> and again, on demand,
+    /// by <c>POST /api/device/connect</c>: a QA403 that isn't plugged in yet must not stop the app
+    /// from starting (it used to take host startup down with it, so <c>run.bat</c> with no device
+    /// attached died on a stack trace), so this has to be retryable rather than one-shot.
+    ///
+    /// Retrying after a failure is safe: <see cref="Hardware.Qa40xUsbDevice.ConnectAsync"/> assigns
+    /// none of its own state and disposes the transport it opened unless every step succeeded.
+    /// Retrying after *success* is a no-op — opening a second transport over a live one would claim
+    /// the interface twice.
+    /// </summary>
     public async Task ConnectAsync(CancellationToken ct)
     {
-        device.DeviceLost += OnDeviceLost;
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_info is not null)
+                return;
 
-        _info = await device.ConnectAsync(ct);
+            // Once per process, not once per attempt: every failed attempt would otherwise leave
+            // another subscription behind, and a later disconnect would then log once per attempt.
+            if (!_deviceLostHooked)
+            {
+                device.DeviceLost += OnDeviceLost;
+                _deviceLostHooked = true;
+            }
 
-        // Most sensitive input range (best resolution for a fresh measurement), and the *largest*
-        // output range — maximum generator headroom, so a default tone level can't sit above DAC
-        // full scale and arrive pre-clipped before the user has touched anything.
-        _inputRangeDbv = Capabilities.InputRangesDbv[0];
-        _outputRangeDbv = Capabilities.OutputRangesDbv[^1];
+            _info = await device.ConnectAsync(ct);
 
-        // Push both to the device rather than only caching them here. The device has its own field
-        // defaults, and leaving the two unsynced means status reports one full scale while the
-        // device actually clips at another — invisible until the ranges started doing something.
-        await device.SetInputRangeAsync(_inputRangeDbv, ct);
-        await device.SetOutputRangeAsync(_outputRangeDbv, ct);
-        logger.LogInformation(
-            "Connected to {Product} (serial {Serial}, fw {Firmware}, simulated={Simulated})",
-            _info.ProductName, _info.SerialNumber, _info.FirmwareVersion, _info.IsSimulated);
+            // Most sensitive input range (best resolution for a fresh measurement), and the *largest*
+            // output range — maximum generator headroom, so a default tone level can't sit above DAC
+            // full scale and arrive pre-clipped before the user has touched anything.
+            _inputRangeDbv = Capabilities.InputRangesDbv[0];
+            _outputRangeDbv = Capabilities.OutputRangesDbv[^1];
+
+            // Push both to the device rather than only caching them here. The device has its own field
+            // defaults, and leaving the two unsynced means status reports one full scale while the
+            // device actually clips at another — invisible until the ranges started doing something.
+            await device.SetInputRangeAsync(_inputRangeDbv, ct);
+            await device.SetOutputRangeAsync(_outputRangeDbv, ct);
+
+            // A fresh handle: whatever was lost before belonged to the previous connection.
+            _deviceLost = false;
+            _connectionGeneration++;
+            logger.LogInformation(
+                "Connected to {Product} (serial {Serial}, fw {Firmware}, simulated={Simulated})",
+                _info.ProductName, _info.SerialNumber, _info.FirmwareVersion, _info.IsSimulated);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
     }
+
+    /// <summary>
+    /// Guards every operation that has to reach the hardware. The app runs perfectly well with no
+    /// device — the UI, the measurement database and every stored result are all still usable — so
+    /// "not connected" is an ordinary state a request can arrive in, not an impossible one. Without
+    /// this the failure surfaced from three levels down: <c>Qa40xUsbDevice</c>'s own "Device is not
+    /// connected" on a register write (a 500 and a dev exception page), or worse, silently — a
+    /// <c>POST /acquisition/start</c> answering 200 with <c>acquiring: false</c> while the stream
+    /// task faulted on a background thread, which reads to the user as a Run button that does
+    /// nothing. <see cref="InvalidOperationException"/> because that is what the endpoints already
+    /// map to 409 with the message shown in the status bar.
+    /// </summary>
+    private void EnsureConnected()
+    {
+        if (_info is null)
+            throw new InvalidOperationException("No device connected. Attach the QA403 and press Connect in the status bar.");
+    }
+
+    /// <summary>
+    /// Turns "the device vanished while we were talking to it" into the same
+    /// <see cref="InvalidOperationException"/> the endpoints already answer with 409. Without it the
+    /// unplug surfaced as a raw <c>UsbException: Input/Output Error</c> out of a register write — a
+    /// 500 and a stack trace for something the user did on purpose. <see cref="OnDeviceLost"/> has
+    /// already run by this point (the device raises it before the exception propagates), so the
+    /// session is disconnected and the message is the actionable half.
+    /// </summary>
+    private static InvalidOperationException DeviceLostError(Qa40xDeviceLostException inner) =>
+        new("The QA403 was disconnected. Plug it back in and press Connect in the status bar.", inner);
+
+    /// <summary>
+    /// Status, preceded by a throttled liveness check — what <c>GET /api/device</c> serves.
+    ///
+    /// An unplug is only self-announcing while a stream is running (the transfer pump notices within
+    /// one transfer). Idle, nothing touches USB at all, so the status bar went on reporting a
+    /// connected QA403 that had been unplugged minutes earlier, and the discovery came instead as a
+    /// failed register write behind the user's next click. Since the UI already polls this endpoint
+    /// every 2 s, the check rides along with it rather than adding a background timer.
+    /// </summary>
+    public async Task<DeviceStatusResponse> GetStatusAsync(CancellationToken ct)
+    {
+        await CheckDeviceAliveAsync(ct).ConfigureAwait(false);
+        return GetStatus();
+    }
+
+    private async Task CheckDeviceAliveAsync(CancellationToken ct)
+    {
+        if (_info is null || StreamRunning)
+            return;
+
+        long now = Environment.TickCount64;
+        if (_lastPingTicks >= 0 && now - _lastPingTicks < LivenessPingIntervalMs)
+            return;
+
+        // Zero-timeout: if any other operation holds the session it is already talking to the device,
+        // which answers the same question better than a ping would. Never block a status poll on it.
+        if (!await _sessionLock.WaitAsync(0, ct).ConfigureAwait(false))
+            return;
+
+        try
+        {
+            // Re-checked under the lock: both could have changed while waiting for it.
+            if (_info is null || StreamRunning)
+                return;
+
+            _lastPingTicks = Environment.TickCount64;
+
+            // The return value needs no handling: a false answer means the device already raised
+            // DeviceLost, and OnDeviceLost has cleared _info by the time this returns — so the
+            // GetStatus() that follows reports the disconnect on this very poll.
+            await device.PingAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogDebug(ex, "Liveness ping threw; leaving the session connected");
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    private bool StreamRunning => _streamTask is { IsCompleted: false };
 
     public DeviceStatusResponse GetStatus()
     {
@@ -167,16 +309,58 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     }
 
     /// <summary>
-    /// Runs on whichever thread <see cref="IAnalyzerDevice.StreamAsync"/>'s enumerator was being
-    /// pumped from when the transport detected the disconnect. Only flips a flag the polled
-    /// <c>GET /api/device</c> status already surfaces (<see cref="DeviceStatusResponse.DeviceLost"/>)
-    /// — no acquisition-stopping here, since <see cref="IAnalyzerDevice.StreamAsync"/> itself
-    /// already ends its enumeration cleanly before raising this event.
+    /// Runs on whichever thread noticed the disconnect — the stream's pump thread, or the request
+    /// thread behind a liveness ping or a register write.
+    ///
+    /// The two flags are set inline so the very status response being built around this reports the
+    /// disconnect. Clearing <see cref="_info"/> (rather than only setting
+    /// <see cref="DeviceStatusResponse.DeviceLost"/>, which is all this used to do) is what makes the
+    /// session honest about it: status flips to disconnected, every device operation is refused with
+    /// a message instead of failing inside a register write, and Connect can bring the replugged
+    /// device back — <see cref="Hardware.Qa40xUsbDevice"/> releases the dead handle on its way
+    /// through here, so there is nothing left claiming the interface.
+    ///
+    /// Everything that has to *await* is deferred to <see cref="TearDownAfterLossAsync"/>: this can be
+    /// called from inside the stream task's own finally, where awaiting that task would deadlock.
     /// </summary>
     private void OnDeviceLost(object? sender, EventArgs e)
     {
         _deviceLost = true;
-        logger.LogWarning("Device reported itself lost (disconnected).");
+        _info = null;
+        logger.LogWarning("QA403 disconnected — session marked device-less; press Connect once it is plugged back in");
+
+        int generation = _connectionGeneration;
+        _ = Task.Run(() => TearDownAfterLossAsync(generation));
+    }
+
+    /// <summary>
+    /// Releases what the lost device left running: the spectrum worker (started by
+    /// <see cref="StartAcquisitionCoreAsync"/> and otherwise leaked, since a second
+    /// <see cref="SpectrumPipeline.Start"/> overwrites its task without cancelling it) and the stream
+    /// bookkeeping. The stream task itself needs no cancelling — it ended when the device did — but
+    /// its fields have to be cleared or the next run would reuse a completed one.
+    /// </summary>
+    private async Task TearDownAfterLossAsync(int generation)
+    {
+        await _sessionLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            // Reconnected while this was queued: that session owns the pipeline now, leave it alone.
+            if (generation != _connectionGeneration)
+                return;
+
+            _isAcquiring = false;
+            await spectrumPipeline.StopAsync().ConfigureAwait(false);
+            await StopStreamIfRunningAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Teardown after a device disconnect did not complete cleanly");
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
     }
 
     /// <summary>Also used by <see cref="MeasurementSaveService.ApplyAsync"/> to describe a measurement type's stored generator config in the same wire shape as live device status.</summary>
@@ -225,6 +409,10 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         {
             await SetInputRangeCoreAsync(dbv, ct);
         }
+        catch (Qa40xDeviceLostException ex)
+        {
+            throw DeviceLostError(ex);
+        }
         finally
         {
             _sessionLock.Release();
@@ -233,6 +421,8 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     private async Task SetInputRangeCoreAsync(double dbv, CancellationToken ct)
     {
+        EnsureConnected();
+
         await device.SetInputRangeAsync(dbv, ct);
         _inputRangeDbv = dbv;
 
@@ -263,6 +453,10 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         try
         {
             await ReapplyGeneratorCoreAsync(ct);
+        }
+        catch (Qa40xDeviceLostException ex)
+        {
+            throw DeviceLostError(ex);
         }
         finally
         {
@@ -310,6 +504,10 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         {
             await SetOutputRangeCoreAsync(dbv, ct);
         }
+        catch (Qa40xDeviceLostException ex)
+        {
+            throw DeviceLostError(ex);
+        }
         finally
         {
             _sessionLock.Release();
@@ -318,6 +516,8 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     private async Task SetOutputRangeCoreAsync(double dbv, CancellationToken ct)
     {
+        EnsureConnected();
+
         await device.SetOutputRangeAsync(dbv, ct);
         _outputRangeDbv = dbv;
     }
@@ -338,6 +538,10 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         {
             await ConfigureGeneratorCoreAsync(config, ct, streamConfigHint);
         }
+        catch (Qa40xDeviceLostException ex)
+        {
+            throw DeviceLostError(ex);
+        }
         finally
         {
             _sessionLock.Release();
@@ -350,6 +554,19 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         _requestedGeneratorConfig = config;
 
         config = SnapTones(config);
+
+        // Silencing a generator there is no device to silence is a success, not a 409: deviceControl's
+        // stopRun (Stop, and every measurement switch) disables both channels unconditionally, and
+        // with no device attached that has nothing to do. Asking for *output* without one is the
+        // error case, and only that one is worth telling the user about.
+        if (_info is null)
+        {
+            if (config.Left.Enabled || config.Right.Enabled)
+                EnsureConnected();
+
+            _generatorConfig = config;
+            return;
+        }
 
         // The output range is derived from what the generator is about to play, never chosen by the
         // user — see OutputRangeSelector. Ordering matters: program a *larger* range before the new
@@ -406,6 +623,10 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         {
             await StartAcquisitionCoreAsync(config, ct);
         }
+        catch (Qa40xDeviceLostException ex)
+        {
+            throw DeviceLostError(ex);
+        }
         finally
         {
             _sessionLock.Release();
@@ -414,6 +635,8 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     private async Task StartAcquisitionCoreAsync(AcquisitionConfig config, CancellationToken ct)
     {
+        EnsureConnected();
+
         // A config change (sample rate, channel count, block size) while already acquiring restarts
         // the stream in place rather than making the caller Stop then Start — the UI applies these
         // changes live, with no explicit stop/restart step of its own.

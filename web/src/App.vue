@@ -127,6 +127,22 @@ function setSimulatedProfile(patch: SimulatedProfileRequest) {
   })
 }
 
+// The status bar's Connect button: the app starts with no device rather than refusing to start, so
+// this is how a QA403 plugged in afterwards gets picked up. Failure is just an error line in the
+// status bar — nothing else about the session changes, and pressing it again is safe.
+const connecting = ref(false)
+
+function connectDevice() {
+  return withErrorReporting(async () => {
+    connecting.value = true
+    try {
+      status.value = await api.connectDevice()
+    } finally {
+      connecting.value = false
+    }
+  })
+}
+
 // The Run button's whole job: push everything staged in the FFT settings and Generator panels'
 // forms — auto-ranging, generator config, then start acquisition — in one explicit action.
 // Nothing in either panel touches the device on its own before this: on real hardware, setting
@@ -599,7 +615,9 @@ function confirmSaveProjectAs(name: string) {
     <DeviceStatusBar
       :status="status"
       :error="error"
+      :connecting="connecting"
       @set-simulated-profile="setSimulatedProfile"
+      @connect="connectDevice"
     />
 
     <SaveMeasurementDialog :open="saveDialogOpen" @close="saveDialogOpen = false" />

@@ -334,6 +334,8 @@ public class DeviceSessionServiceTests
         public Task<DeviceInfo> ConnectAsync(CancellationToken ct) =>
             Task.FromResult(new DeviceInfo("QA403", "HW-0001", "1.0", IsSimulated: false));
 
+        public Task<bool> PingAsync(CancellationToken ct) => Task.FromResult(true);
+
         public double InputRangeDbv { get; private set; }
 
         public long DroppedRxChunks => 0;
@@ -390,6 +392,8 @@ public class DeviceSessionServiceTests
 
         public Task<DeviceInfo> ConnectAsync(CancellationToken ct) =>
             Task.FromResult(new DeviceInfo("QA403", "HW-0001", "1.0", IsSimulated: false));
+
+        public Task<bool> PingAsync(CancellationToken ct) => Task.FromResult(true);
 
         public double InputRangeDbv { get; private set; }
 

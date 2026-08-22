@@ -24,7 +24,18 @@ public static class GeneratorEndpoints
                 : null;
 
             var config = new GeneratorConfig(left, right) { SnapToBin = request.SnapToBin ?? true };
-            await session.ConfigureGeneratorAsync(config, ct, streamConfigHint);
+            try
+            {
+                await session.ConfigureGeneratorAsync(config, ct, streamConfigHint);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Asking for output with no device attached — the app starts without one, so this is
+                // a state the UI can reach. 409 with the message, same as /acquisition/start, rather
+                // than a 500 from a register write three levels down.
+                return Results.Conflict(ex.Message);
+            }
+
             return Results.Ok(session.GetStatus());
         });
     }

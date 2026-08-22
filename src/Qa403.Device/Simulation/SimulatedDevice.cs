@@ -60,6 +60,9 @@ public sealed class SimulatedDevice : IAnalyzerDevice
         return Task.FromResult(new DeviceInfo("QA403", "SIM-0001", "sim-1.0", IsSimulated: true));
     }
 
+    /// <summary>There is no cable to pull: the simulator is reachable for exactly as long as it has been connected.</summary>
+    public Task<bool> PingAsync(CancellationToken ct) => Task.FromResult(_connected);
+
     /// <inheritdoc />
     public double InputRangeDbv => Volatile.Read(ref _inputRangeDbv);
 

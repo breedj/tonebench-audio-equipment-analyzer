@@ -9,7 +9,28 @@ public static class DeviceEndpoints
     {
         var group = app.MapGroup("/api/device");
 
-        group.MapGet("", (DeviceSessionService session) => Results.Ok(session.GetStatus()));
+        // Async because this poll is also the app's disconnect detector while nothing is streaming
+        // — see DeviceSessionService.GetStatusAsync.
+        group.MapGet("", async (DeviceSessionService session, CancellationToken ct) =>
+            Results.Ok(await session.GetStatusAsync(ct)));
+
+        // Retry hook for a device that wasn't attached when the app started — a missing QA403 no
+        // longer aborts startup (see DeviceLifecycleHostedService), so this is how the session gets
+        // one afterwards. Idempotent: connecting an already-connected session just returns status.
+        // 503 rather than 500 on failure because "no device found" is a transient condition the user
+        // fixes by plugging one in, and the message is what the status bar shows them.
+        group.MapPost("/connect", async (DeviceSessionService session, CancellationToken ct) =>
+        {
+            try
+            {
+                await session.ConnectAsync(ct);
+                return Results.Ok(session.GetStatus());
+            }
+            catch (Exception ex)
+            {
+                return Results.Text(ex.Message, "text/plain", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        });
 
         group.MapGet("/ranges", (DeviceSessionService session) =>
         {
@@ -25,6 +46,10 @@ public static class DeviceEndpoints
                 await session.SetInputRangeAsync(request.Dbv, ct);
                 return Results.Ok(session.GetStatus());
             }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
             catch (ArgumentOutOfRangeException ex)
             {
                 return Results.BadRequest(ex.Message);
@@ -37,6 +62,10 @@ public static class DeviceEndpoints
             {
                 await session.SetOutputRangeAsync(request.Dbv, ct);
                 return Results.Ok(session.GetStatus());
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
             }
             catch (ArgumentOutOfRangeException ex)
             {
@@ -93,8 +122,9 @@ public sealed record DeviceStatusResponse(
     /// <summary>
     /// True once the transport has reported the physical device disconnected mid-session (see
     /// <see cref="Qa403.Device.IAnalyzerDevice.DeviceLost"/>). Always false for the simulator.
-    /// Sticky for the life of the process — there is no reconnect flow yet, so this is a terminal
-    /// state the UI should surface plainly rather than something to poll past.
+    /// Sticky for the life of the process — <c>POST /api/device/connect</c> brings up a session that
+    /// never had a device, not one whose transport died under it, so this stays a terminal state the
+    /// UI should surface plainly rather than something to poll past.
     /// </summary>
     bool DeviceLost,
     /// <summary>Input autoranging on/off, or null when the device has no autoranging (the simulator) — the UI hides the checkbox in that case.</summary>

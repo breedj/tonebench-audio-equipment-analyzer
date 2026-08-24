@@ -96,6 +96,16 @@ public static class AcquisitionEndpoints
             pipeline.Flush();
             return Results.Ok(pipeline.Options);
         });
+
+        // Backs the "Clear" button next to Save measurement result: discards the retained (stopped)
+        // spectrum so the chart goes back to "Waiting for data..." and Save measurement result has
+        // nothing stale left to save. Meaningful only while stopped -- the client disables the
+        // button while acquiring, same as Save measurement result itself.
+        group.MapPost("/clear", (SpectrumPipeline pipeline) =>
+        {
+            pipeline.Flush();
+            return Results.Ok();
+        });
     }
 }
 

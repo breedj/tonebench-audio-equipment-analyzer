@@ -46,6 +46,12 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     // resume immediately held from a previous capture rather than starting a fresh window.
     private readonly bool[] _singleShotHeld = new bool[MaxChannels];
 
+    /// <summary>
+    /// Bumped by every <see cref="Flush"/>. A tick reads it before it starts and again before it
+    /// commits anything, and throws its work away if the two differ — see <see cref="ProcessChannel"/>.
+    /// </summary>
+    private long _flushGeneration;
+
     private SampleRingBuffer?[] _ringBuffers = new SampleRingBuffer?[MaxChannels];
     private int _ringBufferFftSize;
     private double _sampleRateHz;
@@ -107,19 +113,63 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     /// </summary>
     public void Flush(int discardFrames = 0)
     {
+        // Before anything else, so a tick already running is guaranteed to see the new value by the
+        // time it reaches its commit check.
+        Interlocked.Increment(ref _flushGeneration);
+
         var ringBuffers = _ringBuffers;
         for (int ch = 0; ch < MaxChannels; ch++)
         {
             ringBuffers[ch]?.Reset(discardFrames);
             _ampAveragers[ch].Reset();
             _psdAveragers[ch].Reset();
-            _singleShotHeld[ch] = false;
+            Volatile.Write(ref _singleShotHeld[ch], false);
         }
 
         lock (_retainedLock)
         {
             for (int ch = 0; ch < MaxChannels; ch++)
                 _retained[ch] = new RetainedSpectrum();
+        }
+    }
+
+    /// <summary>
+    /// True once every channel this pipeline is processing has finished its
+    /// <see cref="SpectrumPipelineOptions.SingleShot"/> capture and held — the server-side
+    /// equivalent of a client watching for <see cref="StreamFlags.Held"/> on the meters frame.
+    ///
+    /// This is what <c>ThdSweepRunner</c> awaits between sweep points: it needs "the averages for
+    /// this frequency are complete" without being a WebSocket client of its own. Always false while
+    /// <c>SingleShot</c> is off (a free-running pipeline never completes), and cleared by
+    /// <see cref="Flush"/> — so the arming sequence is "set SingleShot, then Flush", and this stays
+    /// false until the capture that flush armed is done.
+    ///
+    /// A channel that is not processed cannot hold and is skipped, matching
+    /// <see cref="ProcessTick"/>; if neither channel is processed there is nothing to wait for and
+    /// this is false rather than vacuously true, so a misconfigured sweep times out loudly instead
+    /// of silently recording empty points.
+    /// </summary>
+    public bool SingleShotComplete
+    {
+        get
+        {
+            var options = _options;
+            if (!options.SingleShot)
+                return false;
+
+            bool any = false;
+            for (int ch = 0; ch < _channelCount; ch++)
+            {
+                bool enabled = ch == 0 ? options.ProcessLeft : options.ProcessRight;
+                if (!enabled)
+                    continue;
+
+                any = true;
+                if (!Volatile.Read(ref _singleShotHeld[ch]))
+                    return false;
+            }
+
+            return any;
         }
     }
 
@@ -158,7 +208,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
                 (result ??= []).Add(new SpectrumSnapshot(
                     ch == 0 ? StreamChannel.Left : StreamChannel.Right, retained.Seq, retained.CapturedUtc,
                     retained.SampleRateHz, retained.BinSizeHz, retained.FftSize,
-                    retained.Window, retained.Sums, dbv, retained.Meters));
+                    retained.Window, retained.Sums, dbv, retained.Meters, retained.PreviewFft, retained.PreviewScope));
             }
 
             return result?.ToArray() ?? [];
@@ -267,7 +317,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             if (!enabled)
                 continue;
 
-            if (options.SingleShot && _singleShotHeld[ch])
+            if (options.SingleShot && Volatile.Read(ref _singleShotHeld[ch]))
                 continue;
 
             var rb = ringBuffers[ch];
@@ -280,6 +330,11 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
     private void ProcessChannel(int channelIndex, SampleRingBuffer rb, SpectrumPipelineOptions options)
     {
+        // The generation this record belongs to. Everything below describes the signal as it was
+        // when this line ran; if a Flush lands while the FFT is in flight, that description is of
+        // the *old* stimulus and must not be committed. See the check before the commit below.
+        long generation = Interlocked.Read(ref _flushGeneration);
+
         int n = options.FftSize;
         int specLen = (n / 2) + 1;
 
@@ -323,13 +378,43 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             // Off has no "reached count" signal of its own (SpectrumAverager.Count stays 0 when
             // averaging is off), so a single shot without averaging just holds after this one tick.
             bool singleShotComplete = options.SingleShot && (options.Averaging == AveragingMode.Off || averagesTaken >= options.AverageCount);
-            if (singleShotComplete)
-                _singleShotHeld[channelIndex] = true;
+
+            // A Flush while this tick was running means the samples it just analyzed predate a
+            // stimulus change (a new generator frequency, a new range, a restart). Committing them
+            // would re-arm `held` and overwrite the retained snapshot with pre-change audio — which
+            // is exactly what made a THD-vs-frequency sweep report its first point's spectrum at
+            // every subsequent frequency, and made the flush's own in-flight-discard pointless.
+            // Drop the record instead; the next tick reads a window that is entirely post-change.
+            //
+            // Ahead of the `held` write below, not after it: a discarded record must leave no trace
+            // at all, and holding the channel on one would stop the pipeline from ever producing the
+            // fresh record that replaces it.
+            if (Interlocked.Read(ref _flushGeneration) != generation)
+                return;
 
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
             var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options, averagesTaken);
 
-            UpdateRetainedSnapshot(channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, seq);
+            // Only computed for a sweep (see SpectrumPipelineOptions.CapturePreview) -- the ~2400x
+            // more expensive full-resolution retained trace already exists for the live view, and a
+            // second decimation of it on every one of ~20 ticks/sec would be pure waste there.
+            SweepPreviewSeries? previewFft = null;
+            SweepPreviewSeries? previewScope = null;
+            if (options.CapturePreview)
+            {
+                previewFft = BuildFftPreview(ampPower, binSizeHz, options.DisplayLoFreqHz);
+                previewScope = BuildScopePreview(timeBuf.AsSpan(0, n), _sampleRateHz, meters?.FundamentalFreqHz);
+            }
+
+            UpdateRetainedSnapshot(channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, seq, previewFft, previewScope);
+
+            // Only now, once the trace this signal refers to is actually retained. `held` is the
+            // "your capture is ready" flag SingleShotComplete exposes, and ThdSweepRunner reads
+            // LatestSnapshots() the moment it sees it — setting it before UpdateRetainedSnapshot
+            // left a window where the capture was complete but the snapshot was still empty (or
+            // still the previous point's), which showed up as a sweep point silently going missing.
+            if (singleShotComplete)
+                Volatile.Write(ref _singleShotHeld[channelIndex], true);
 
             BroadcastSpectrumFrame(channel, seq, ampPower, binSizeHz, options);
             if (meters is not null)
@@ -535,10 +620,16 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         // of THD+N/SNR.
         var band = psd.BandOf(options.MeasurementLoFreqHz, options.MeasurementHiFreqHz);
 
+        // Harmonics may be counted past the measurement band -- see
+        // SpectrumPipelineOptions.HarmonicMaxFreqHz. Everything else below stays on `band`.
+        int harmonicMaxBin = options.HarmonicMaxFreqHz is { } harmonicMaxHz
+            ? Math.Min(psd.ValuesV2PerHz.Length - 1, psd.BinOfFrequency(harmonicMaxHz))
+            : band.HiBinInclusive;
+
         int harmonicCount = Math.Max(1, options.HarmonicCount);
         var harmonicsBuf = new Harmonic[harmonicCount];
         int written = HarmonicAnalyzer.Analyze(
-            psd, fundamentalBin, harmonicCount, harmonicsBuf, maxBinInclusive: band.HiBinInclusive);
+            psd, fundamentalBin, harmonicCount, harmonicsBuf, maxBinInclusive: harmonicMaxBin);
         if (written == 0)
             return null;
 
@@ -606,7 +697,8 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
     private void UpdateRetainedSnapshot(
         int channelIndex, ReadOnlySpan<double> ampPower, double binSizeHz, int fftSize,
-        WindowType windowType, WindowSums sums, SpectrumMeters? meters, uint seq)
+        WindowType windowType, WindowSums sums, SpectrumMeters? meters, uint seq,
+        SweepPreviewSeries? previewFft, SweepPreviewSeries? previewScope)
     {
         lock (_retainedLock)
         {
@@ -623,7 +715,137 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             retained.Sums = sums;
             retained.Meters = meters;
             retained.Seq = seq;
+            retained.PreviewFft = previewFft;
+            retained.PreviewScope = previewScope;
         }
+    }
+
+    /// <summary>
+    /// At most this many (x, min, max) columns in a decimated sweep-point preview — small enough
+    /// that a whole stereo sweep's worth of previews is negligible next to the full-resolution
+    /// spectra a saved FFT result stores, generous enough that a waveform or a spectrum's harmonic
+    /// structure still reads clearly on a small chart.
+    /// </summary>
+    public const int PreviewMaxColumns = 200;
+
+    /// <summary>
+    /// Decimates the current tick's (already-averaged) power spectrum into a small FFT preview,
+    /// the same log-spaced min/max convention <see cref="BuildSpectrumFrame"/> uses for the live
+    /// chart, just capped at far fewer columns. <paramref name="ampPower"/> is peak-volts squared,
+    /// same as everywhere else in this class -- converted to dBV only for the handful of columns
+    /// actually kept, not the full spectrum.
+    /// </summary>
+    private static SweepPreviewSeries BuildFftPreview(ReadOnlySpan<double> ampPower, double binSizeHz, double displayLoFreqHz)
+    {
+        int specLen = ampPower.Length;
+        int loBin = Math.Clamp((int)Math.Round(displayLoFreqHz / binSizeHz), 1, specLen - 2);
+        int hiBin = specLen - 1;
+        int columnCount = Math.Clamp(hiBin - loBin + 1, 1, PreviewMaxColumns);
+
+        var columns = new MinMax[columnCount];
+        var centerBins = new double[columnCount];
+        SpectrumDecimator.DecimateLogWithCenters(ampPower[..(hiBin + 1)], columns, centerBins, loBin);
+
+        var freqHz = new float[columnCount];
+        var dbvMin = new float[columnCount];
+        var dbvMax = new float[columnCount];
+        for (int i = 0; i < columnCount; i++)
+        {
+            freqHz[i] = (float)(centerBins[i] * binSizeHz);
+            dbvMin[i] = (float)(10.0 * Math.Log10(Math.Max(columns[i].Min / 2.0, double.Epsilon)));
+            dbvMax[i] = (float)(10.0 * Math.Log10(Math.Max(columns[i].Max / 2.0, double.Epsilon)));
+        }
+
+        return new SweepPreviewSeries(freqHz, dbvMin, dbvMax);
+    }
+
+    /// <summary>
+    /// Decimates a window of this tick's raw (unwindowed) time-domain samples into a small
+    /// oscilloscope preview, spanning <see cref="ScopeDisplayWindow.SecondsFor"/> of the located
+    /// fundamental so a high-frequency sweep point isn't drawn as a barely-visible sliver. Falls
+    /// back to the same span the live oscilloscope's own frame covers
+    /// (<see cref="ScopeSampleCount"/>) when no fundamental was found -- the noise-floor pass has no
+    /// tone to size a period-based window around.
+    ///
+    /// The window starts at the first rising zero-crossing rather than at a fixed tail offset --
+    /// the same trigger search <c>OscilloscopeChart.vue</c>'s <c>findTriggerWindow</c> does for the
+    /// live FFT screen's oscilloscope, ported here because this preview is decimated server-side
+    /// (min/max, ≤ <see cref="PreviewMaxColumns"/> points): the raw per-sample resolution a crossing
+    /// search needs does not survive that decimation, so unlike the live view this has to trigger
+    /// before it shrinks the data, not after. Each channel triggers off its own crossing rather than
+    /// sharing one the way the live view's two channels do (see that component's remarks on why it
+    /// picks one trigger source for both) -- SpectrumPipeline processes channels independently and
+    /// has no per-tick view of the other one's samples to share a trigger point with, and for a
+    /// diagnostic preview (not a phase measurement) each trace reading as a clean waveform matters
+    /// more than the two staying phase-locked to each other.
+    ///
+    /// Values are decimated linearly (not log, unlike the FFT preview): a waveform's x-axis is
+    /// time, which has no meaningful log spacing.
+    /// </summary>
+    private SweepPreviewSeries BuildScopePreview(ReadOnlySpan<double> timeDomainSamples, double sampleRateHz, float? fundamentalFreqHz)
+    {
+        int n = timeDomainSamples.Length;
+        double displaySeconds = fundamentalFreqHz is { } f && f > 0.0
+            ? ScopeDisplayWindow.SecondsFor(f)
+            : ScopeSampleCount / sampleRateHz;
+
+        int sampleCount = Math.Clamp((int)Math.Round(displaySeconds * sampleRateHz), 1, n);
+        ReadOnlySpan<double> window;
+
+        if (fundamentalFreqHz is { } freqHz && freqHz > 0.0)
+        {
+            // Widened by one period so a crossing found near the end of the search buffer still
+            // leaves room for the full display window after it -- matching a display window
+            // narrower than what was searched (see findTriggerWindow's own "available" clamp) is
+            // the exception, not the rule.
+            double periodSamples = sampleRateHz / freqHz;
+            int searchBufferCount = Math.Clamp(sampleCount + (int)Math.Ceiling(periodSamples), 1, n);
+            var searchBuffer = timeDomainSamples[^searchBufferCount..];
+
+            // Bounded to one period, same as the live view: a periodic signal cannot need more than
+            // that to find its own rising edge, and an unbounded search risks eating the very buffer
+            // the window is measured against on a tone riding a large low-frequency component.
+            int searchLimit = Math.Min(searchBuffer.Length, (int)Math.Ceiling(periodSamples) + 1);
+            int crossingIndex = 0;
+            for (int i = 1; i < searchLimit; i++)
+            {
+                if (searchBuffer[i - 1] < 0.0 && searchBuffer[i] >= 0.0)
+                {
+                    crossingIndex = i;
+                    break;
+                }
+            }
+
+            // No crossing found means there is no clean one to find (the live view's own fallback);
+            // starting at the raw beginning of the search buffer is no worse.
+            int available = searchBuffer.Length - crossingIndex;
+            window = searchBuffer.Slice(crossingIndex, Math.Min(sampleCount, available));
+        }
+        else
+        {
+            window = timeDomainSamples[^sampleCount..];
+        }
+
+        int columnCount = Math.Clamp(window.Length, 1, PreviewMaxColumns);
+        var columns = new MinMax[columnCount];
+        SpectrumDecimator.DecimateLinear(window, columns);
+
+        // The decimator's own column boundaries are evenly spaced up to integer rounding, so a
+        // column's center time is recovered from its index rather than threaded out of Decimate as
+        // a second array (as DecimateLogWithCenters does for the log case, where the boundaries are
+        // NOT evenly spaced and reconstructing them would be wrong) -- see that method's remarks.
+        double actualSeconds = window.Length / sampleRateHz;
+        var timeS = new float[columnCount];
+        var vMin = new float[columnCount];
+        var vMax = new float[columnCount];
+        for (int i = 0; i < columnCount; i++)
+        {
+            timeS[i] = (float)((i + 0.5) / columnCount * actualSeconds);
+            vMin[i] = (float)columns[i].Min;
+            vMax[i] = (float)columns[i].Max;
+        }
+
+        return new SweepPreviewSeries(timeS, vMin, vMax);
     }
 
     /// <summary>Mutable per-channel retention slot backing <see cref="_retained"/> -- see its own remarks.</summary>
@@ -638,6 +860,8 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         public WindowSums Sums;
         public SpectrumMeters? Meters;
         public uint Seq;
+        public SweepPreviewSeries? PreviewFft;
+        public SweepPreviewSeries? PreviewScope;
     }
 
     /// <summary>

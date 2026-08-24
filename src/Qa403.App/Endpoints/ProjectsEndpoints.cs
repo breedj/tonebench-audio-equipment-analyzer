@@ -66,9 +66,8 @@ public static class ProjectsEndpoints
         {
             try
             {
-                string paramsJson = string.IsNullOrWhiteSpace(request.ParamsJson)
-                    ? (request.Staged is null ? saveService.BuildDefaultParametersJsonForNewType() : saveService.BuildCurrentParametersJson(request.Staged))
-                    : request.ParamsJson;
+                string paramsJson = saveService.ResolveTypeParamsJson(
+                    request.ParamsJson, request.Kind, existingParamsJson: null, request.Staged);
                 long typeId = await repo.CreateTypeAsync(id, request.Kind, request.Name, request.Notes, paramsJson, ct);
                 return Results.Ok(new IdResponse(typeId));
             }
@@ -87,9 +86,18 @@ public static class ProjectsEndpoints
         typeGroup.MapPut("/{id:long}", async (
             long id, SaveMeasurementTypeRequest request, ProjectRepository repo, MeasurementSaveService saveService, CancellationToken ct) =>
         {
-            string paramsJson = string.IsNullOrWhiteSpace(request.ParamsJson)
-                ? saveService.BuildCurrentParametersJson(request.Staged)
-                : request.ParamsJson;
+            // Read first, so an omitted ParamsJson on a sweep type can fall back to what it already
+            // has rather than to a live-state snapshot that would describe a different measurement
+            // entirely — see MeasurementSaveService.ResolveTypeParamsJson. The sweep screen always
+            // sends its own params (App.vue's buildTypeParamsJson); the fallback is the path a bulk
+            // project save takes for a dirty sweep type that isn't the open one.
+            var existing = await repo.GetTypeAsync(id, ct);
+            if (existing is null)
+                return Results.NotFound();
+
+            string paramsJson = saveService.ResolveTypeParamsJson(
+                request.ParamsJson, existing.Kind, existing.ParamsJson, request.Staged);
+
             bool updated = await repo.UpdateTypeAsync(id, request.Name, request.Notes, paramsJson, ct);
             return updated ? Results.Ok() : Results.NotFound();
         });

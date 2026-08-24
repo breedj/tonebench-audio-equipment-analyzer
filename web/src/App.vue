@@ -34,6 +34,14 @@ import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
+import UpdateBanner from './components/UpdateBanner.vue'
+import SweepConfigPanel from './components/SweepConfigPanel.vue'
+import SweepDisplayPanel from './components/SweepDisplayPanel.vue'
+import ThdSweepChart from './components/ThdSweepChart.vue'
+import SweepFftPreviewChart from './components/SweepFftPreviewChart.vue'
+import SweepScopePreviewChart from './components/SweepScopePreviewChart.vue'
+import { useSweep } from './composables/useSweep'
+import { nearestSweepPoint } from './sweep/points'
 
 const { status, ranges, error, refreshStatus } = useDevice()
 const { spectrum, meters, scope, setViewport } = useSpectrumStream()
@@ -47,6 +55,7 @@ const { scopePeriods, applyLoaded: applyLoadedScopePeriods } = useScopeDisplay()
 const { kind: stimulusKind } = useGeneratorStimulus()
 const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
 const { captureDelayMs } = useCaptureDelay()
+
 
 // Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the +Metrics button
 // and the chart — same formatAveraging formula, just relocated. Either channel's averagesTaken is
@@ -104,6 +113,105 @@ const projectPanelOpen = ref(false)
 
 const currentProject = computed(() => projects.value.find((p) => p.id === currentProjectId.value) ?? null)
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
+// ---------------------------------------------------------------------------
+// THD vs frequency
+// ---------------------------------------------------------------------------
+const {
+  running: sweepRunning,
+  progressLabel: sweepProgressLabel,
+  generatorAmpDbv: sweepGeneratorAmpDbv,
+  error: sweepError,
+  points: sweepPoints,
+  start: startSweep,
+  cancel: cancelSweepRun,
+  refresh: refreshSweep,
+} = useSweep()
+
+// Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
+// which was fine while FFTSpectrum was the only kind.
+const isSweepKind = computed(() => currentType.value?.kind === 'ThdVsFrequency')
+
+// The small FFT/oscilloscope preview charts below the sweep rail: while a sweep is running they
+// track the point each channel just measured (points arrive frequency-sorted and a sweep always
+// steps upward, so the last one on a channel is the most recent); once it's done they follow
+// ThdSweepChart's cursor instead, falling back to each channel's own last point until something
+// is hovered. Both channels are computed independently and always passed to both charts — a
+// channel with no points (never part of this sweep, i.e. disabled in the generator) resolves to
+// null and the charts simply draw nothing for it, rather than this deciding up front which one
+// channel to show.
+const hoveredSweepFreqHz = ref<number | null>(null)
+function onSweepCursorFreq(freqHz: number | null) {
+  hoveredSweepFreqHz.value = freqHz
+}
+
+function selectedSweepPointFor(channel: number) {
+  const onChannel = sweepPoints.value.filter((p) => p.channel === channel)
+  if (onChannel.length === 0) return null
+
+  if (sweepRunning.value) return onChannel[onChannel.length - 1]
+
+  const targetFreqHz = hoveredSweepFreqHz.value ?? onChannel[onChannel.length - 1].freqHz
+  return nearestSweepPoint(sweepPoints.value, channel, targetFreqHz)
+}
+
+const sweepSelectedLeft = computed(() => selectedSweepPointFor(0))
+const sweepSelectedRight = computed(() => selectedSweepPointFor(1))
+
+// Chart display preferences. Purely local view state — deliberately not part of the measurement
+// type's saved parameters yet, same as the FFT view's own display toggles started out.
+const sweepUnit = ref<'percent' | 'db'>('percent')
+const sweepShowNoiseFloor = ref(false)
+
+// Per-trace visibility. THD/D2..D5/D6+ on by default, matching the previous app's Graph data box;
+// Magnitude only appears on the dB axis and starts off.
+const sweepShowMagnitude = ref(false)
+const sweepShowThd = ref(true)
+const sweepShowD2 = ref(true)
+const sweepShowD3 = ref(true)
+const sweepShowD4 = ref(true)
+const sweepShowD5 = ref(true)
+const sweepShowD6Plus = ref(true)
+const sweepShowLeft = ref(true)
+const sweepShowRight = ref(false)
+const sweepThickLines = ref(true)
+const sweepShowDataPoints = ref(false)
+
+// Axis bounds, in percent for y and Hz for x. 10% down to 0.00001% covers everything from a
+// clipping tube stage to the analyzer's own residual without touching the dropdowns.
+const sweepYMaxPercent = ref(10)
+const sweepYMinPercent = ref(0.00001)
+const sweepXFromHz = ref(10)
+const sweepXToHz = ref(20000)
+
+// The dB axis keeps its own bounds rather than reusing the percent ones: it has to reach above
+// 0 dB for the Magnitude trace, and no percentage expresses that.
+const sweepYTopDb = ref(20)
+const sweepYBottomDb = ref(-160)
+
+// Drives RUN SWEEP, which lives above the rail while the form it validates stays in the panel.
+const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
+
+function runSweep(request: import('./api/client').ThdSweepStartRequest) {
+  // Mirror the channel selection onto the chart so a stereo sweep actually draws both traces.
+  sweepShowLeft.value = request.processLeft
+  sweepShowRight.value = request.processRight
+  return withErrorReporting(async () => {
+    await startSweep(request)
+  })
+}
+
+function cancelSweep() {
+  return withErrorReporting(async () => {
+    await cancelSweepRun()
+  })
+}
+
+// A sweep runs server-side, so a reload (or opening a second tab) mid-sweep has to re-attach
+// rather than start from an empty chart.
+watch(isSweepKind, (isSweep) => {
+  if (isSweep) void refreshSweep().catch(() => undefined)
+})
+
 const isCurrentTypeDirty = computed(() => currentTypeId.value !== null && dirtyTypeIds.value.has(currentTypeId.value))
 const hasAnyDirtyInProject = computed(() =>
   types.value.some((t) => t.projectId === currentProjectId.value && dirtyTypeIds.value.has(t.id)),
@@ -210,8 +318,13 @@ function runFromCurrentSettings() {
 // The Stop button's counterpart — same "stop everything" used automatically when switching
 // measurements (see useProjects.ts's selectType), just with a snappy refresh here since this one
 // has a button sitting right there waiting on it, unlike the switch-measurement case.
+// Whether the Single button armed the capture this screen is now waiting on — see the
+// autoStopOnceHeld watcher below for why merely seeing `held` is not enough.
+const singleShotArmed = ref(false)
+
 function stopMeasurement() {
   return withErrorReporting(async () => {
+    singleShotArmed.value = false
     await stopRun()
     await refreshStatus()
   })
@@ -226,19 +339,28 @@ const { arm: armSingleShotCapture } = useSpectrumConfig()
 function singleShotCapture() {
   return withErrorReporting(async () => {
     await runFromCurrentSettings()
-    if (status.value?.acquiring)
+    if (status.value?.acquiring) {
+      singleShotArmed.value = true
       await armSingleShotCapture()
+    }
   })
 }
 
 // Companion to singleShotCapture: stops automatically once every enabled/processed channel's
 // meters frame comes back Held, so a Single capture is a genuinely one-shot action — no separate
-// "now click Stop" step. held is only ever true while SpectrumPipelineOptions.SingleShot is on
-// (armed by singleShotCapture above, cleared by every plain Run), so this never fires during an
-// ordinary continuous run.
+// "now click Stop" step.
+//
+// Gated on this screen having armed the capture itself, NOT merely on `held` arriving. A Held
+// meters frame only means "some single-shot capture completed", and the THD-vs-frequency sweep
+// turns SpectrumPipelineOptions.SingleShot on for every one of its points — so without this flag
+// the FFT screen stopped the *sweep's* acquisition the moment its first point completed. Everything
+// after that ran with acquisition stopped: ConfigureGeneratorAsync no longer flushed (it only does
+// so while acquiring), the pipeline stayed held, and every remaining point reported the first
+// point's spectrum. Only reproducible with a browser tab open, which is why the API-level tests
+// never saw it.
 let autoStopping = false
 watch(meters, (m) => {
-  if (!status.value?.acquiring || autoStopping) return
+  if (!singleShotArmed.value || !status.value?.acquiring || autoStopping) return
 
   const config = spectrumConfig.value
   if (!config || (!config.processLeft && !config.processRight)) return
@@ -248,6 +370,7 @@ watch(meters, (m) => {
   if (!leftDone || !rightDone) return
 
   autoStopping = true
+  singleShotArmed.value = false
   stopMeasurement().finally(() => {
     autoStopping = false
   })
@@ -337,6 +460,20 @@ function openSaveDialog() {
   saveDialogOpen.value = true
 }
 
+// The Clear button next to Save measurement result: discards the retained (stopped) spectrum both
+// server-side (so Save has nothing stale left to save) and here in the client's own display state,
+// same reset runMeasurement does before a fresh Run — so the chart goes straight back to "Waiting
+// for data…" instead of waiting for a frame that isn't coming until Run/Single is pressed again.
+// Does not touch anything already saved to History.
+function clearMeasurement() {
+  return withErrorReporting(async () => {
+    await api.clearSpectrum()
+    meters.value = {}
+    spectrum.value = {}
+    scope.value = {}
+  })
+}
+
 // The FFT settings/Generator panels' current on-screen values, whether or not they've ever reached
 // the device — same values runMeasurement uses to gather what Run would send, just packaged for a
 // measurement-type save (params_json) instead of pushed live. Undefined when nothing's loaded yet,
@@ -360,17 +497,27 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
   }
 }
 
+/**
+ * A sweep type's settings are the sweep panel's own form — the server cannot snapshot them the way
+ * it snapshots the live pipeline for an FFT type, because nothing about a configured sweep is live
+ * device state. So the sweep screen sends its params_json explicitly; every other kind keeps
+ * omitting it and lets the server build one. See ProjectsEndpoints' PUT handler.
+ */
+function buildTypeParamsJson(): string | undefined {
+  return isSweepKind.value ? sweepConfigPanel.value?.buildParamsJson() : undefined
+}
+
 function saveCurrentType() {
   return withErrorReporting(async () => {
     if (currentTypeId.value === null) return
-    await saveMeasurementType(currentTypeId.value, buildStagedConfig())
+    await saveMeasurementType(currentTypeId.value, buildStagedConfig(), buildTypeParamsJson())
   })
 }
 
 function confirmSaveTypeAs(name: string) {
   return withErrorReporting(async () => {
     if (currentTypeId.value === null) return
-    await saveMeasurementTypeAs(currentTypeId.value, name, buildStagedConfig())
+    await saveMeasurementTypeAs(currentTypeId.value, name, buildStagedConfig(), buildTypeParamsJson())
     saveTypeAsOpen.value = false
   })
 }
@@ -378,7 +525,7 @@ function confirmSaveTypeAs(name: string) {
 function saveCurrentProject() {
   return withErrorReporting(async () => {
     if (currentProjectId.value === null) return
-    await saveProject(currentProjectId.value, buildStagedConfig())
+    await saveProject(currentProjectId.value, buildStagedConfig(), buildTypeParamsJson())
   })
 }
 
@@ -392,6 +539,7 @@ function confirmSaveProjectAs(name: string) {
 
 <template>
   <div class="flex h-screen flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+    <UpdateBanner />
     <header class="flex items-center gap-3 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
       <span class="text-sm font-semibold">QA403 audio analyzer</span>
       <button
@@ -474,6 +622,7 @@ function confirmSaveProjectAs(name: string) {
               Save as…
             </button>
             <button
+              v-if="!isSweepKind"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -482,10 +631,136 @@ function confirmSaveProjectAs(name: string) {
             >
               Save measurement result
             </button>
+            <button
+              v-if="!isSweepKind"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="status?.acquiring"
+              title="Clears the currently displayed spectrum, oscilloscope trace and meters — stop acquisition first. Does not delete anything saved to History."
+              @click="clearMeasurement"
+            >
+              Clear
+            </button>
+            <button
+              v-else
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="sweepRunning || sweepPoints.length === 0"
+              title="Saves the sweep on screen as a new measurement result — one stored point per frequency. A cancelled sweep can be saved too."
+              @click="openSaveDialog"
+            >
+              Save sweep result
+            </button>
           </div>
+
+          <!-- THD vs frequency screen: sweep settings rail on the left, the result chart in the
+               center, display options on the right. RUN SWEEP sits at the top of the rail, in the
+               same slot and the same shape as the FFT screen's RUN, so the button that starts a
+               measurement is in one place whichever screen you are on. It drives SweepConfigPanel
+               through its exposed run(), which keeps the form and its validation in the panel. -->
+          <template v-if="isSweepKind">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+                <div class="flex gap-3">
+                  <button
+                    v-if="!sweepRunning"
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    :disabled="!!sweepConfigPanel?.invalid"
+                    :title="sweepConfigPanel?.invalid ?? 'Steps the generator across the configured frequency range and records the harmonics at each point.'"
+                    @click="sweepConfigPanel?.run()"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    RUN SWEEP
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="flex flex-1 animate-pulse items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-red-400 ring-offset-2 transition hover:bg-red-500 dark:ring-offset-neutral-950"
+                    title="Stops the sweep and silences the generator. The points already measured are kept."
+                    @click="cancelSweep"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
+                    CANCEL
+                  </button>
+                </div>
+
+                <SweepConfigPanel ref="sweepConfigPanel" :running="sweepRunning" @run="runSweep" />
+
+                <!-- Each channel's point currently measuring (while running) or nearest the chart
+                     cursor (once done) — see selectedSweepPointFor. -->
+                <SweepFftPreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
+                <SweepScopePreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
+              </div>
+
+              <div class="flex min-w-0 flex-1 flex-col gap-3">
+                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  <span>{{ sweepProgressLabel || 'Idle' }}</span>
+                  <span v-if="sweepGeneratorAmpDbv">· gen {{ sweepGeneratorAmpDbv.toFixed(2) }} dBV</span>
+                  <span v-if="sweepPoints.length">· {{ sweepPoints.length }} readings</span>
+                </div>
+                <p v-if="sweepError" class="text-xs text-red-600 dark:text-red-400">{{ sweepError }}</p>
+
+                <ThdSweepChart
+                  :unit="sweepUnit"
+                  :show-noise-floor="sweepShowNoiseFloor"
+                  :show-magnitude="sweepShowMagnitude"
+                  :show-thd="sweepShowThd"
+                  :show-d2="sweepShowD2"
+                  :show-d3="sweepShowD3"
+                  :show-d4="sweepShowD4"
+                  :show-d5="sweepShowD5"
+                  :show-d6-plus="sweepShowD6Plus"
+                  :show-left="sweepShowLeft"
+                  :show-right="sweepShowRight"
+                  :thick-lines="sweepThickLines"
+                  :show-data-points="sweepShowDataPoints"
+                  :y-max-percent="sweepYMaxPercent"
+                  :y-min-percent="sweepYMinPercent"
+                  :y-top-db="sweepYTopDb"
+                  :y-bottom-db="sweepYBottomDb"
+                  :x-from-hz="sweepXFromHz"
+                  :x-to-hz="sweepXToHz"
+                  :overlays="overlays"
+                  :selected-left="sweepSelectedLeft"
+                  :selected-right="sweepSelectedRight"
+                  @cursor-freq="onSweepCursorFreq"
+                />
+              </div>
+
+              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+                <!-- Same checklist the FFT screen puts next to its chart: tick a saved result to
+                     draw it alongside the live sweep. -->
+                <MeasurementChecklist @error="reportError" />
+
+                <SweepDisplayPanel
+                  v-model:unit="sweepUnit"
+                  v-model:show-noise-floor="sweepShowNoiseFloor"
+                  v-model:show-magnitude="sweepShowMagnitude"
+                  v-model:show-thd="sweepShowThd"
+                  v-model:show-d2="sweepShowD2"
+                  v-model:show-d3="sweepShowD3"
+                  v-model:show-d4="sweepShowD4"
+                  v-model:show-d5="sweepShowD5"
+                  v-model:show-d6-plus="sweepShowD6Plus"
+                  v-model:show-left="sweepShowLeft"
+                  v-model:show-right="sweepShowRight"
+                  v-model:thick-lines="sweepThickLines"
+                  v-model:show-data-points="sweepShowDataPoints"
+                  v-model:y-max-percent="sweepYMaxPercent"
+                  v-model:y-min-percent="sweepYMinPercent"
+                  v-model:y-top-db="sweepYTopDb"
+                  v-model:y-bottom-db="sweepYBottomDb"
+                  v-model:x-from-hz="sweepXFromHz"
+                  v-model:x-to-hz="sweepXToHz"
+                />
+              </div>
+            </div>
+          </template>
 
           <!-- FFT Spectrum screen, matching the wireframe: settings rail on the left, chart in the
                center, display options + history checklist on the right. -->
+          <template v-else>
           <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
             <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
               <div class="flex gap-3">
@@ -602,6 +877,7 @@ function confirmSaveProjectAs(name: string) {
               <OtherPeaksTable :meters="meters" :channel="1" channel-label="R" />
             </div>
           </div>
+          </template>
 
           <MeasurementHistoryPanel @error="reportError" />
         </template>

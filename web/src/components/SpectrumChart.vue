@@ -76,9 +76,10 @@ const PEAK_HOLD_COLOR = '#eab308'
 // Same hues at low alpha: the band is dense (one stroke per column) so it reads as a solid region
 // even this faint, and the max trace has to stay legible on top of it.
 const CHANNEL_BAND_COLORS = ['rgba(59, 130, 246, 0.35)', 'rgba(249, 115, 22, 0.35)']
-// L within an overlay dashes short, R dashes long-and-dotted — same color for both (the overlay's
-// own), so a stereo overlay reads as "one measurement, two channels" rather than two unrelated
-// traces that happen to share a hue.
+// L within an overlay dashes short, R dashes long-and-dotted — colored as a tint of the matching
+// live channel (see OverlayEntry.colorL/colorR in useMeasurements.ts) rather than one shared hue,
+// so a stereo overlay reads as "an earlier L and an earlier R" instead of two unrelated traces that
+// happen to share a color.
 const OVERLAY_DASH: [number[], number[]] = [[4, 2], [1, 3]]
 const CHART_HEIGHT = 720
 // Peak-hold: running per-bin maximum, keyed by that bin's column frequency (as broadcast — stable
@@ -331,8 +332,8 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
   ]
   for (const overlay of overlays) {
     series.push(
-      { label: `${overlay.detail.name} L`, stroke: overlay.color, width: overlayWidth, dash: OVERLAY_DASH[0], points },
-      { label: `${overlay.detail.name} R`, stroke: overlay.color, width: overlayWidth, dash: OVERLAY_DASH[1], points },
+      { label: `${overlay.detail.name} L`, stroke: overlay.colorL, width: overlayWidth, dash: OVERLAY_DASH[0], points },
+      { label: `${overlay.detail.name} R`, stroke: overlay.colorR, width: overlayWidth, dash: OVERLAY_DASH[1], points },
     )
   }
 
@@ -605,10 +606,17 @@ function update() {
   const firstOverlay = props.overlays[0]?.detail
   const firstOverlayChannel = firstOverlay && (channelByIndex(firstOverlay, 0) ?? channelByIndex(firstOverlay, 1))
 
-  // Nothing to draw. Also guards a stale fullHiFreqHz from a previous call (live data that has
-  // since disappeared, with no overlay loaded either) from reaching the xs computation below with
-  // neither a live frame nor an overlay to build it from.
-  if (!ch0 && !firstOverlayChannel) return
+  // Nothing to draw — no live frame and no overlay to fall back to (the Clear button, or before
+  // the very first frame ever arrives). Destroying rather than merely returning matters here: a
+  // bare return leaves whatever the last setData() call painted sitting on the canvas, so the
+  // chart would keep showing a stale trace under the "Waiting for data…" label in the header. This
+  // also clears the stale fullHiFreqHz that return would otherwise leave behind.
+  if (!ch0 && !firstOverlayChannel) {
+    plot?.destroy()
+    plot = null
+    fullHiFreqHz = -1
+    return
+  }
 
   // Only an overview frame describes the whole spectrum; a zoomed one describes the zoom window.
   // The axis must always be built from the former, or zooming would redefine "fully zoomed out".

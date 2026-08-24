@@ -29,8 +29,10 @@ public class MeasurementSaveServiceTests
             await using (var connection = await factory.OpenAsync(CancellationToken.None))
                 await new MigrationRunner().RunAsync(connection, CancellationToken.None);
 
+            var sweepRunner = new ThdSweepRunner(
+                session, pipeline, new SpectrumBroadcastHub(), NullLogger<ThdSweepRunner>.Instance);
             var saveService = new MeasurementSaveService(
-                session, pipeline, new ProjectRepository(factory), new MeasurementRepository(factory),
+                session, pipeline, sweepRunner, new ProjectRepository(factory), new MeasurementRepository(factory),
                 Options.Create(new JsonOptions()));
 
             // The service must reject the save before ever touching the repository -- an

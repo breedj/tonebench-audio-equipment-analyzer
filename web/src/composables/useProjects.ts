@@ -207,11 +207,11 @@ export function useProjects() {
    * they were. Omitting paramsJson from the request is what tells the server to snapshot the live
    * state; see ProjectsEndpoints.cs's PUT handler.
    */
-  async function saveMeasurementType(id: number, staged?: StagedMeasurementConfig) {
+  async function saveMeasurementType(id: number, staged?: StagedMeasurementConfig, paramsJson?: string) {
     const type = types.value.find((t) => t.id === id)
     if (!type) throw new Error(`Measurement type ${id} not found.`)
     try {
-      await api.updateMeasurementType(id, { kind: type.kind, name: type.name, notes: type.notes, staged })
+      await api.updateMeasurementType(id, { kind: type.kind, name: type.name, notes: type.notes, staged, paramsJson })
       await loadTypes(type.projectId)
       markClean(id)
       error.value = null
@@ -227,11 +227,18 @@ export function useProjects() {
    * end up living only on the new copy. Omitting paramsJson on create (like saveMeasurementType)
    * is what seeds the new type from the live state rather than an empty default.
    */
-  async function saveMeasurementTypeAs(id: number, newName: string, staged?: StagedMeasurementConfig): Promise<number> {
+  async function saveMeasurementTypeAs(
+    id: number,
+    newName: string,
+    staged?: StagedMeasurementConfig,
+    paramsJson?: string,
+  ): Promise<number> {
     const type = types.value.find((t) => t.id === id)
     if (!type) throw new Error(`Measurement type ${id} not found.`)
     try {
-      const { id: newId } = await api.createMeasurementType(type.projectId, { kind: type.kind, name: newName, notes: type.notes, staged })
+      const { id: newId } = await api.createMeasurementType(type.projectId, {
+        kind: type.kind, name: newName, notes: type.notes, staged, paramsJson,
+      })
       loadedParams.value = await applyMeasurementType(id)
       markClean(id)
       await loadTypes(type.projectId)
@@ -246,11 +253,16 @@ export function useProjects() {
   /**
    * Saves every dirty measurement type in the given project at once — see saveMeasurementType.
    * `staged` (the live Acquisition/Generator form state) only applies to whichever of those is the
-   * currently-open type, since that's the only one it could possibly describe.
+   * currently-open type, since that's the only one it could possibly describe. `paramsJson` is the
+   * same story for a sweep type — SweepConfigPanel is only mounted for the open one, so any other
+   * dirty sweep type falls through to the server's "keep what's stored" path.
    */
-  async function saveProject(projectId: number, staged?: StagedMeasurementConfig) {
+  async function saveProject(projectId: number, staged?: StagedMeasurementConfig, paramsJson?: string) {
     const dirty = types.value.filter((t) => t.projectId === projectId && dirtyTypeIds.value.has(t.id))
-    for (const t of dirty) await saveMeasurementType(t.id, t.id === currentTypeId.value ? staged : undefined)
+    for (const t of dirty) {
+      const isOpen = t.id === currentTypeId.value
+      await saveMeasurementType(t.id, isOpen ? staged : undefined, isOpen ? paramsJson : undefined)
+    }
   }
 
   /**

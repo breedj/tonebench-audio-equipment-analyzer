@@ -60,7 +60,7 @@ public class MigrationRunnerTests
             await new MigrationRunner().RunAsync(connection, CancellationToken.None);
 
             long count = await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_version;");
-            Assert.Equal(3L, count);
+            Assert.Equal(4L, count);
         }
         finally
         {
@@ -85,7 +85,8 @@ public class MigrationRunnerTests
                 rows.Add((reader.GetInt64(0), reader.GetString(1)));
 
             Assert.Equal(
-                [(1L, "001_initial.sql"), (2L, "002_channels_and_indexes.sql"), (3L, "003_project_model.sql")],
+                [(1L, "001_initial.sql"), (2L, "002_channels_and_indexes.sql"), (3L, "003_project_model.sql"),
+                 (4L, "004_capture_preview.sql")],
                 rows);
         }
         finally

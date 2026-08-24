@@ -2,9 +2,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.Sockets;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.FileProviders;
 using Qa403.App.Endpoints;
+using Qa403.App.Json;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Data;
@@ -40,8 +40,12 @@ try
         builder.Services.AddSingleton<IAnalyzerDevice, Qa40xUsbDevice>();
 
     // WindowType/AveragingMode read back as "Hann"/"Linear" etc, matching what /spectrum-config
-    // already accepts on the way in — one representation, not int-in/string-out.
-    builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+    // already accepts on the way in — one representation, not int-in/string-out. Enum-as-string
+    // now comes from AppJsonContext's UseStringEnumConverter rather than a runtime
+    // JsonStringEnumConverter, which needs reflection per enum type — see AppJsonContext's remarks
+    // on why a trimmed publish has no reflection-based JSON fallback to fall back on.
+    builder.Services.ConfigureHttpJsonOptions(options =>
+        options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonContext.Default));
 
     // Down from the 30 s default, and sized to fit inside the ~5 s Windows allows a CTRL_CLOSE_EVENT
     // handler before it terminates the process regardless — see RegisterConsoleCloseShutdown. The
@@ -60,7 +64,19 @@ try
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<DeviceSessionService>();
+    builder.Services.AddSingleton<ThdSweepRunner>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
+
+    // Update-check (docs/qa403-app-stack-spec.md §8): a short timeout and silent-on-failure
+    // UpdateCheckService are what keep an offline bench machine from ever seeing an error over
+    // this — see its own remarks.
+    builder.Services.AddHttpClient("GitHubReleases", client =>
+    {
+        client.BaseAddress = new Uri("https://api.github.com/");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("qa403-audio-analyzer");
+        client.Timeout = TimeSpan.FromSeconds(5);
+    });
+    builder.Services.AddSingleton<UpdateCheckService>();
 
     // First use of configuration binding in this app: appsettings.json's "Database:Path" key
     // overrides the LocalApplicationData default — see Qa403DatabaseOptions.Default's remarks on
@@ -95,9 +111,11 @@ try
     app.MapDeviceEndpoints();
     app.MapGeneratorEndpoints();
     app.MapAcquisitionEndpoints();
+    app.MapSweepEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapMeasurementsEndpoints();
+    app.MapUpdateCheckEndpoints();
 
     app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = wwwroot });
 

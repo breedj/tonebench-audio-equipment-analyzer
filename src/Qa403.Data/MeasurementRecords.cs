@@ -41,6 +41,92 @@ public sealed record FftSpectrumParameters(
     // "use the 4-period default" -- see useScopeDisplay.ts.
     int? ScopePeriods = null);
 
+/// <summary>
+/// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
+/// the 'ThdVsFrequency' measurement kind -- the sweep's own settings, deliberately a separate
+/// record from <see cref="FftSpectrumParameters"/> rather than more optional properties on it: a
+/// sweep has no single generator config, no averaging mode the user picks, and no display
+/// bandwidth, and half of FftSpectrumParameters would have to be nullable to pretend otherwise.
+/// <see cref="MeasurementTypeRow.Kind"/> selects which one <c>params_json</c> holds.
+/// </summary>
+public sealed record ThdVsFrequencyParameters(
+    double StartFreqHz,
+    double EndFreqHz,
+    int StepsPerOctave,
+    string LevelMode,
+    double LevelValue,
+    string LevelUnit,
+    double LoadOhms,
+    bool ProcessLeft,
+    bool ProcessRight,
+    int FftSize,
+    WindowType Window,
+    int AverageCount,
+    double SampleRateHz,
+    bool MeasureNoiseFloor,
+    /// <summary>The generator amplitude the run actually used -- solved by probing for the output-referred modes, so it is only known after the fact.</summary>
+    double GeneratorAmpDbv = 0.0);
+
+/// <summary>
+/// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a
+/// <c>capture_preview</c> row. Capped at a couple hundred points; see that table's migration for
+/// why this isn't the same quantized encoding <see cref="StoredSpectrumInput"/> uses.
+/// </summary>
+public sealed record CapturePreviewInput(int Channel, string Kind, float[] X, float[] Min, float[] Max);
+
+/// <summary>The <c>capture_preview.kind</c> values -- mirrors Qa403.App.Streaming.SpectrumSnapshot's PreviewFft/PreviewScope.</summary>
+public static class CapturePreviewKind
+{
+    public const string Fft = "fft";
+    public const string Scope = "scope";
+}
+
+/// <summary>
+/// One sweep point as a <c>capture</c> row: its own frequency, its <c>seq_index</c> position in
+/// the sweep, the per-channel metrics measured there, and (when the sweep captured them) each
+/// channel's small preview traces. No full-resolution spectrum -- see <see cref="SweepSaveRequest"/>.
+/// </summary>
+public sealed record SweepCaptureInput(
+    int SeqIndex, double FreqHz, IReadOnlyList<MeasurementMetric> Metrics,
+    IReadOnlyList<CapturePreviewInput>? Previews = null);
+
+/// <summary>
+/// One saved sweep: a <c>measurement_result</c> row plus N <c>capture</c> rows, one per frequency,
+/// ordered by <c>seq_index</c> -- exactly the shape migration 003 kept <c>seq_index</c> for.
+///
+/// Metrics only, no <c>spectrum</c> rows. A 31-point stereo sweep at a 64k FFT would be ~60 MB of
+/// traces for a chart that only ever plots eight scalars per point, and the sweep's whole value is
+/// the scalars. A "store spectra too" option would hang off here.
+/// </summary>
+public sealed record SweepSaveRequest(
+    long MeasurementTypeId,
+    string Name,
+    string? Notes,
+    string ParamsJson,
+    string? DeviceName,
+    string? Serial,
+    string? FwVer,
+    bool IsSimulated,
+    double SampleRateHz,
+    int FftSize,
+    int Channels,
+    double? InRangeDbv,
+    double? OutRangeDbv,
+    IReadOnlyList<SweepCaptureInput> Captures);
+
+/// <summary>One channel's decimated trace read back out of a saved sweep point. See <see cref="CapturePreviewInput"/>.</summary>
+public sealed record StoredPreviewSeries(float[] X, float[] Min, float[] Max);
+
+/// <summary>
+/// One point read back out of a saved sweep: its frequency, its metrics, and its preview traces
+/// (present only for a sweep that captured them -- every sweep does, in practice), all keyed by
+/// channel.
+/// </summary>
+public sealed record StoredSweepPoint(
+    int SeqIndex, double FreqHz,
+    IReadOnlyDictionary<int, IReadOnlyDictionary<string, double>> MetricsByChannel,
+    IReadOnlyDictionary<int, IReadOnlyDictionary<string, StoredPreviewSeries>>? PreviewsByChannel = null);
+
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm
 {
@@ -124,6 +210,9 @@ public sealed record MeasurementDetail(
     long MeasurementTypeId,
     string ProjectName,
     string MeasurementTypeName,
+    /// <summary>The owning <c>measurement_type.kind</c> -- 'FFTSpectrum' | 'ThdVsFrequency'. Tells a
+    /// consumer whether this result has spectra to read at all, or N metric-only sweep captures.</summary>
+    string Kind,
     string Name,
     string? Notes,
     DateTimeOffset TimestampUtc,

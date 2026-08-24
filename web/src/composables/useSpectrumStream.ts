@@ -4,12 +4,15 @@ import {
   decodeMetersFrame,
   decodeScopeFrame,
   decodeSpectrumFrame,
+  decodeSweepPointFrame,
+  decodeSweepProgressFrame,
   encodeSetViewport,
   StreamMsgType,
   type MetersFrame,
   type ScopeFrame,
   type SpectrumFrame,
 } from '../streaming/protocol'
+import { useSweep } from './useSweep'
 
 const RECONNECT_DELAY_MS = 1000
 
@@ -23,6 +26,7 @@ export function useSpectrumStream() {
   const meters = shallowRef<Record<number, MetersFrame>>({})
   const scope = shallowRef<Record<number, ScopeFrame>>({})
   const connected = ref(false)
+  const sweep = useSweep()
 
   let socket: WebSocket | null = null
   let reconnectHandle: ReturnType<typeof setTimeout> | undefined
@@ -71,6 +75,13 @@ export function useSpectrumStream() {
       } else if (header.msgType === StreamMsgType.Scope) {
         const frame = decodeScopeFrame(event.data)
         scope.value = { ...scope.value, [header.channel]: frame }
+      } else if (header.msgType === StreamMsgType.SweepPoint) {
+        // Sweep frames go straight into useSweep's singleton store rather than being returned
+        // from here: a sweep is one server-side run shared by every component looking at it, not
+        // per-subscriber display state like the three refs above.
+        sweep.ingestPoint(decodeSweepPointFrame(event.data))
+      } else if (header.msgType === StreamMsgType.SweepProgress) {
+        sweep.ingestProgress(decodeSweepProgressFrame(event.data))
       }
     }
 

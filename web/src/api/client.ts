@@ -299,6 +299,8 @@ export interface MeasurementDetail {
   measurementTypeId: number
   projectName: string
   measurementTypeName: string
+  /** The owning type's kind. A 'ThdVsFrequency' result has an empty `channelsData` — its data comes from api.getStoredSweep instead. */
+  kind: string
   name: string
   notes: string | null
   timestampUtc: string
@@ -324,6 +326,14 @@ export interface UpdateMeasurementRequest {
   notes?: string | null
 }
 
+/** Mirrors Qa403.App.Services.UpdateCheckResult. latestVersion/latestUrl are null when the check failed or found nothing newer. */
+export interface UpdateStatus {
+  currentVersion: string
+  latestVersion: string | null
+  latestUrl: string | null
+  updateAvailable: boolean
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -347,6 +357,114 @@ function toQuery(params: Record<string, string | number | undefined>): string {
   const entries = Object.entries(params).filter((entry): entry is [string, string | number] => entry[1] !== undefined)
   if (entries.length === 0) return ''
   return '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
+}
+
+// ---------------------------------------------------------------------------
+// THD vs frequency sweep
+// ---------------------------------------------------------------------------
+
+/** Mirrors Qa403.App.Services.ThdSweepLevelMode. */
+export type SweepLevelMode = 'GeneratorVoltage' | 'OutputVoltage' | 'OutputPower'
+
+/** Mirrors Qa403.App.Services.ThdSweepLevelUnit. 'Watt' is only valid with the OutputPower mode. */
+export type SweepLevelUnit = 'Dbv' | 'Volt' | 'MilliVolt' | 'Watt'
+
+/** Mirrors Qa403.App.Services.ThdSweepPhase. */
+export type SweepPhaseName =
+  | 'Idle'
+  | 'DeterminingLevel'
+  | 'NoiseFloor'
+  | 'Sweeping'
+  | 'Finished'
+  | 'Cancelled'
+  | 'Failed'
+
+export interface ThdSweepStartRequest {
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  loadOhms: number
+  processLeft: boolean
+  processRight: boolean
+  fftSize: number
+  window: WindowType
+  averageCount: number
+  sampleRateHz: number
+  measureNoiseFloor: boolean
+}
+
+/**
+ * Mirrors Qa403.Data.ThdVsFrequencyParameters — what a ThdVsFrequency measurement type stores in
+ * `params_json`, and what a saved sweep result records as its as-run settings. Identical to
+ * ThdSweepStartRequest plus `generatorAmpDbv`, but deliberately its own type: the request is what
+ * the client asks for, this is what was configured or actually run.
+ */
+export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
+  /** The generator amplitude a run actually used — probed for the output-referred level modes, so only known after the fact. 0 on a configured type that has not been run. */
+  generatorAmpDbv: number
+}
+
+export interface ThdSweepStarted {
+  pointCount: number
+  /** The coherent frequencies the sweep will actually step through, ascending. */
+  frequenciesHz: number[]
+}
+
+/** One decimated (x, min, max) trace — mirrors the streaming protocol's SweepPreviewSeries and Qa403.Data.StoredPreviewSeries. */
+export interface SweepPreviewSeries {
+  /** Frequency (Hz) for an FFT preview, elapsed time (s) for a scope preview. */
+  x: number[]
+  min: number[]
+  max: number[]
+}
+
+export interface ThdSweepPoint {
+  freqHz: number
+  /** 0 = left, 1 = right. */
+  channel: number
+  fundamentalDbv: number
+  gainDb: number
+  powerWatt: number
+  thdPercent: number
+  thdNPercent: number
+  snrDb: number
+  /** D2..D5 as a % of the fundamental, index 0 = 2nd harmonic. */
+  harmonicPercent: number[]
+  d6PlusPercent: number
+  noisePercent: number
+  /** A small decimated spectrum captured alongside this point, in dBV. Null if the pipeline wasn't asked to capture one. */
+  previewFft: SweepPreviewSeries | null
+  /** A small decimated oscilloscope trace, in volts. Null if not captured. */
+  previewScope: SweepPreviewSeries | null
+}
+
+export interface StoredSweepPoint {
+  seqIndex: number
+  freqHz: number
+  /** Metric name -> value, keyed by channel index (0 = left, 1 = right). Names match the FFT save's convention. */
+  metricsByChannel: Record<number, Record<string, number>>
+  /** kind ('fft' | 'scope') -> preview, keyed by channel index. Absent for a sweep saved without previews. */
+  previewsByChannel: Record<number, Record<string, SweepPreviewSeries>> | null
+}
+
+export interface StoredSweepResponse {
+  points: StoredSweepPoint[]
+}
+
+export interface ThdSweepStatus {
+  running: boolean
+  phase: SweepPhaseName
+  index: number
+  total: number
+  currentFreqHz: number
+  /** The generator amplitude actually used — solved by probing for the output-referred modes. */
+  generatorAmpDbv: number
+  error: string | null
+  /** Every point measured so far. Present on a finished, cancelled or still-running sweep alike. */
+  points: ThdSweepPoint[]
 }
 
 export const api = {
@@ -392,6 +510,9 @@ export const api = {
   /** Backs the "Single" button: turns on SpectrumPipelineOptions.SingleShot and arms a fresh capture — see the server endpoint's remarks. Not a saved config value; call startAcquisition (Run) to go back to free-running. */
   armSpectrumCapture: () => request<SpectrumConfig>('/acquisition/spectrum-capture', { method: 'POST' }),
 
+  /** Backs the "Clear" button: discards the retained (stopped) spectrum server-side, so Save measurement result has nothing stale left to save. */
+  clearSpectrum: () => request<void>('/acquisition/clear', { method: 'POST' }),
+
   listProjects: () => request<Project[]>('/projects'),
 
   createProject: (req: SaveProjectRequest) => request<{ id: number }>('/projects', { method: 'POST', body: JSON.stringify(req) }),
@@ -436,4 +557,20 @@ export const api = {
 
   /** Not fetched through `request` — a plain download link the caller renders as an `<a href=... download>`. */
   measurementCsvExportUrl: (id: number) => `/api/measurements/${id}/export.csv`,
+
+  startThdSweep: (req: ThdSweepStartRequest) =>
+    request<ThdSweepStarted>('/sweep/thd-vs-frequency/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelSweep: () => request<ThdSweepStatus>('/sweep/cancel', { method: 'POST' }),
+
+  // Carries the accumulated points, not just a counter — this is how a browser that reloaded
+  // mid-sweep redraws everything measured so far instead of waiting for the next point.
+  getSweepStatus: () => request<ThdSweepStatus>('/sweep/status'),
+
+  saveSweep: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/sweep/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  getStoredSweep: (measurementId: number) => request<StoredSweepResponse>(`/measurements/${measurementId}/sweep-points`),
+
+  getUpdateStatus: () => request<UpdateStatus>('/update-check'),
 }

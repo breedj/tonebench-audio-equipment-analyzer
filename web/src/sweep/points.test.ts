@@ -1,0 +1,155 @@
+import { describe, expect, it } from 'vitest'
+import {
+  estimateDurationSeconds,
+  estimatePointCount,
+  formatDuration,
+  logPerOctave,
+  mergePreviewSeries,
+  nearestSweepPoint,
+  percentToDb,
+} from './points'
+
+describe('logPerOctave', () => {
+  it('returns stepsPerOctave*octaves + 1 points across a whole number of octaves', () => {
+    // 20 -> 80 Hz is exactly 2 octaves, so 5 steps/octave gives 10 steps and 11 endpoints.
+    const values = logPerOctave(20, 80, 5)
+    expect(values).toHaveLength(11)
+    expect(values[0]).toBeCloseTo(20, 9)
+    expect(values[values.length - 1]).toBeCloseTo(80, 9)
+  })
+
+  it('is ascending with a constant ratio between neighbours', () => {
+    const values = logPerOctave(20, 20000, 6)
+    const firstRatio = values[1] / values[0]
+    for (let i = 2; i < values.length - 1; i++) {
+      expect(values[i] / values[i - 1]).toBeCloseTo(firstRatio, 9)
+    }
+  })
+
+  it('still returns several points for a span narrower than one octave', () => {
+    const values = logPerOctave(1000, 1200, 5)
+    expect(values.length).toBeGreaterThanOrEqual(3)
+    expect(values[values.length - 1]).toBeCloseTo(1200, 9)
+  })
+
+  it('returns nothing for a degenerate range', () => {
+    expect(logPerOctave(0, 1000, 5)).toEqual([])
+    expect(logPerOctave(1000, 100, 5)).toEqual([])
+    expect(logPerOctave(20, 20000, 0)).toEqual([])
+  })
+})
+
+describe('estimatePointCount', () => {
+  it('drops points above 98% of Nyquist', () => {
+    // At 48 kHz the ceiling is 23.52 kHz, so a sweep asked to run to 40 kHz is truncated.
+    const truncated = estimatePointCount(1000, 40000, 3, 48000)
+    const whole = logPerOctave(1000, 40000, 3).length
+    expect(truncated).toBeLessThan(whole)
+  })
+
+  it('keeps every point of an audio-band sweep at 192 kHz', () => {
+    expect(estimatePointCount(20, 20000, 3, 192000)).toBe(logPerOctave(20, 20000, 3).length)
+  })
+})
+
+describe('estimateDurationSeconds', () => {
+  it('scales with the point count', () => {
+    const one = estimateDurationSeconds(1, 65536, 48000, 4)
+    const ten = estimateDurationSeconds(10, 65536, 48000, 4)
+    expect(ten).toBeCloseTo(one * 10, 9)
+  })
+
+  it('is zero for a sweep with no points', () => {
+    expect(estimateDurationSeconds(0, 65536, 48000, 4)).toBe(0)
+  })
+})
+
+describe('formatDuration', () => {
+  it('formats seconds, whole minutes and mixed', () => {
+    expect(formatDuration(45)).toBe('45 s')
+    expect(formatDuration(120)).toBe('2 m')
+    expect(formatDuration(150)).toBe('2 m 30 s')
+    expect(formatDuration(0)).toBe('—')
+  })
+})
+
+describe('percentToDb', () => {
+  it('maps 100% to 0 dB and 1% to -40 dB', () => {
+    expect(percentToDb(100)).toBeCloseTo(0, 9)
+    expect(percentToDb(1)).toBeCloseTo(-40, 9)
+    expect(percentToDb(0.1)).toBeCloseTo(-60, 9)
+  })
+
+  it('stays finite at zero rather than returning -Infinity', () => {
+    expect(Number.isFinite(percentToDb(0))).toBe(true)
+  })
+})
+
+describe('nearestSweepPoint', () => {
+  const points = [
+    { channel: 0, freqHz: 100 },
+    { channel: 0, freqHz: 1000 },
+    { channel: 0, freqHz: 10000 },
+    { channel: 1, freqHz: 500 },
+  ]
+
+  it('finds the closest point by frequency on the requested channel', () => {
+    expect(nearestSweepPoint(points, 0, 1200)?.freqHz).toBe(1000)
+    expect(nearestSweepPoint(points, 0, 50)?.freqHz).toBe(100)
+    expect(nearestSweepPoint(points, 0, 50000)?.freqHz).toBe(10000)
+  })
+
+  it('only considers the requested channel, even when another channel is closer', () => {
+    // 500 Hz is exactly channel 1's point, but only channel 0 was asked for.
+    expect(nearestSweepPoint(points, 0, 500)?.freqHz).toBe(100)
+  })
+
+  it('returns null for a channel with no points at all', () => {
+    expect(nearestSweepPoint(points, 1, 1000)?.freqHz).toBe(500)
+    expect(nearestSweepPoint([], 0, 1000)).toBeNull()
+  })
+})
+
+describe('mergePreviewSeries', () => {
+  it('reads both channels straight through when their x grids are identical', () => {
+    // The common FFT-preview case: both channels decimated with the same bin count/DisplayLoFreqHz.
+    const left = { x: [100, 200, 300], min: [-90, -80, -70], max: [-85, -75, -65] }
+    const right = { x: [100, 200, 300], min: [-91, -81, -71], max: [-86, -76, -66] }
+
+    const merged = mergePreviewSeries(left, right)
+
+    expect(merged.x).toEqual([100, 200, 300])
+    expect(merged.leftMin).toEqual([-90, -80, -70])
+    expect(merged.rightMax).toEqual([-86, -76, -66])
+  })
+
+  it('unions mismatched x grids and snaps each channel to its own nearest point', () => {
+    // The scope-preview case: each channel triggers off its own zero crossing, so the two windows
+    // can differ in both length and alignment. Every union x still gets a value from each channel
+    // that has any data at all -- "nearest" never comes up empty, unlike a channel that's absent
+    // entirely (see the null test below).
+    const left = { x: [0, 0.001], min: [-1, -0.5], max: [1, 0.5] }
+    const right = { x: [0.0005, 0.0015], min: [-2, -1], max: [2, 1] }
+
+    const merged = mergePreviewSeries(left, right)
+
+    expect(merged.x).toEqual([0, 0.0005, 0.001, 0.0015])
+    // On an exact tie (0.0005 is equidistant from both of left's points), the earlier index wins.
+    expect(merged.leftMax).toEqual([1, 1, 0.5, 0.5])
+    expect(merged.rightMax).toEqual([2, 2, 2, 1])
+  })
+
+  it('reads an absent channel back as null at every x, not zero', () => {
+    const left = { x: [100, 200], min: [-90, -80], max: [-85, -75] }
+
+    const merged = mergePreviewSeries(left, null)
+
+    expect(merged.x).toEqual([100, 200])
+    expect(merged.rightMin).toEqual([null, null])
+    expect(merged.rightMax).toEqual([null, null])
+  })
+
+  it('returns an empty series when neither channel has data', () => {
+    expect(mergePreviewSeries(null, null)).toEqual({ x: [], leftMin: [], leftMax: [], rightMin: [], rightMax: [] })
+  })
+})

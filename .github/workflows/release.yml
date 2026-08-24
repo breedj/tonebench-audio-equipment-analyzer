@@ -1,0 +1,164 @@
+name: Build, test, and release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  NODE_VERSION: "22"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      # Only Qa403.Device.Tests/Hardware/Qa40xUsbDeviceHardwareTests.cs carries this trait — every
+      # other test in the solution runs here, matching CLAUDE.md's documented pre-commit command.
+      - run: dotnet test Qa403.sln --filter "Category!=Hardware" --configuration Release
+        working-directory: code
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            archive: zip
+          - rid: linux-x64
+            os: ubuntu-latest
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build frontend
+        working-directory: code/web
+        run: |
+          npm ci
+          npm run build
+
+      # Release tags (vX.Y.Z) set the published assembly version to match the tag exactly, so the
+      # update-check feature compares like against like. Non-tag builds keep Directory.Build.props'
+      # dev default.
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish
+        working-directory: code
+        shell: bash
+        run: |
+          VERSION_ARG=""
+          if [[ -n "${{ steps.version.outputs.version }}" ]]; then
+            VERSION_ARG="-p:Version=${{ steps.version.outputs.version }}"
+          fi
+          dotnet publish src/Qa403.App/Qa403.App.csproj -c Release -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true -p:PublishTrimmed=true -p:TrimMode=partial \
+            -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true \
+            -p:InvariantGlobalization=true \
+            $VERSION_ARG \
+            -o publish/${{ matrix.rid }}
+
+      # Verifies the trimmed self-contained binary actually runs, not just that it built — trimming
+      # is the likeliest way to silently break Dapper's reflection-based mapping (see
+      # Qa403.App.csproj's TrimmerRootAssembly note).
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        working-directory: code/publish/${{ matrix.rid }}
+        run: |
+          chmod +x Qa403.App
+          ./Qa403.App --simulate --no-browser &
+          PID=$!
+          for i in $(seq 1 20); do
+            if curl -fs http://127.0.0.1:8399/api/update-check >/dev/null 2>&1; then
+              echo "App responded, smoke test passed."
+              kill $PID
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App did not respond within 20s" >&2
+          kill $PID || true
+          exit 1
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        working-directory: code/publish/${{ matrix.rid }}
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath .\Qa403.App.exe -ArgumentList "--simulate --no-browser" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:8399/api/update-check -TimeoutSec 2 | Out-Null
+              $ok = $true
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) {
+            Write-Error "App did not respond within 20s"
+            exit 1
+          }
+          Write-Host "App responded, smoke test passed."
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        working-directory: code/publish/${{ matrix.rid }}
+        shell: pwsh
+        run: Compress-Archive -Path * -DestinationPath ../../qa403-audio-analyzer-${{ matrix.rid }}.zip
+
+      # tar.gz rather than zip on Linux to preserve the executable bit on Qa403.App.
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        working-directory: code/publish/${{ matrix.rid }}
+        run: tar -czf ../../qa403-audio-analyzer-${{ matrix.rid }}.tar.gz .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qa403-audio-analyzer-${{ matrix.rid }}
+          path: code/qa403-audio-analyzer-${{ matrix.rid }}.${{ matrix.archive }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            artifacts/qa403-audio-analyzer-win-x64/*.zip \
+            artifacts/qa403-audio-analyzer-linux-x64/*.tar.gz \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

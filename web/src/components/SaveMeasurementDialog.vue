@@ -12,7 +12,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 // selected (see App.vue), so currentTypeId is never null here. Same currentType/currentProject
 // lookup App.vue itself does — useProjects doesn't keep a derived "current" object of its own.
 const { projects, types, currentTypeId } = useProjects()
-const { save, error } = useMeasurements()
+const { save, saveSweep, error } = useMeasurements()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 const currentProject = computed(() => projects.value.find((p) => p.id === currentType.value?.projectId) ?? null)
@@ -44,7 +44,12 @@ watch(
 
 async function onSave() {
   if (!canSave.value || currentType.value === null) return
-  await save({ measurementTypeId: currentType.value.id, name: form.name.trim(), notes: form.notes.trim() || null })
+  const req = { measurementTypeId: currentType.value.id, name: form.name.trim(), notes: form.notes.trim() || null }
+  // Which endpoint depends on the kind: a sweep's result is N captures built from the runner's
+  // points, an FFT's is the pipeline's single retained spectrum. Same dialog either way — the
+  // name/notes it collects are all the difference the user cares about.
+  if (currentType.value.kind === 'ThdVsFrequency') await saveSweep(req)
+  else await save(req)
   emit('saved')
   emit('close')
 }

@@ -25,6 +25,10 @@ export const StreamMsgType = {
   Spectrum: 1,
   Scope: 2,
   Meters: 3,
+  /** One finished THD-vs-frequency sweep point — see decodeSweepPointFrame. */
+  SweepPoint: 4,
+  /** Where a running sweep is; carries no per-channel data — see decodeSweepProgressFrame. */
+  SweepProgress: 5,
 } as const
 export type StreamMsgType = (typeof StreamMsgType)[keyof typeof StreamMsgType]
 
@@ -230,5 +234,158 @@ export function decodeMetersFrame(buffer: ArrayBuffer): MetersFrame {
     otherPeaks,
     averagesTaken,
     held: (header.flags & STREAM_FLAG_HELD) !== 0,
+  }
+}
+
+/**
+ * Mirrors Qa403.App.Services.ThdSweepPhase. Ordinals, because the phase rides in the sweep
+ * progress frame's `seq` field — it is an enumeration, not a set of independent flag bits.
+ */
+export const SweepPhase = {
+  Idle: 0,
+  DeterminingLevel: 1,
+  NoiseFloor: 2,
+  Sweeping: 3,
+  Finished: 4,
+  Cancelled: 5,
+  Failed: 6,
+} as const
+export type SweepPhase = (typeof SweepPhase)[keyof typeof SweepPhase]
+
+/** One decimated (x, min, max) trace — a sweep point's FFT or oscilloscope preview. See SweepPreviewSeries server-side. */
+export interface SweepPreviewSeries {
+  /** Frequency (Hz) for an FFT preview, elapsed time (s) for a scope preview. */
+  x: number[]
+  min: number[]
+  max: number[]
+}
+
+export interface SweepPointFrame {
+  header: StreamFrameHeader
+  freqHz: number
+  channel: StreamChannel
+  /** Index of this point within the sweep — the header's `seq`. Both channels of one frequency share it. */
+  pointIndex: number
+  thdPercent: number
+  thdNPercent: number
+  snrDb: number
+  fundamentalDbv: number
+  /** fundamentalDbv minus the generator amplitude actually used. */
+  gainDb: number
+  /** V1^2 / load; 0 when no load was given. */
+  powerWatt: number
+  /** 6th harmonic and above, power-summed into one bucket. */
+  d6PlusPercent: number
+  /** Generator-off residual as a % of this point's fundamental; 0 when the noise pass was skipped. */
+  noisePercent: number
+  /** D2..D5 as a % of the fundamental, index 0 = 2nd harmonic. May be short near Nyquist. */
+  harmonicPercent: number[]
+  /** A small decimated spectrum around this point's fundamental, in dBV. Null if the pipeline wasn't asked to capture one. */
+  previewFft: SweepPreviewSeries | null
+  /** A small decimated oscilloscope trace, in volts, spanning ScopeDisplayWindow.SecondsFor(fundamentalFreqHz). Null if not captured. */
+  previewScope: SweepPreviewSeries | null
+}
+
+/**
+ * Sweep point payload (offsets relative to the 20-byte header):
+ * 0  f32  thdPercent
+ * 4  f32  thdNPercent
+ * 8  f32  snrDb
+ * 12 f32  fundamentalDbv
+ * 16 f32  gainDb
+ * 20 f32  powerWatt
+ * 24 f32  d6PlusPercent
+ * 28 f32  noisePercent
+ * 32 u32  harmonicCount
+ * 36 f32 * harmonicCount   — D2..D5 as a % of the fundamental
+ * ..  u32  fftPreviewCount
+ * ..  (f32 x, f32 min, f32 max) * fftPreviewCount
+ * ..  u32  scopePreviewCount
+ * ..  (f32 x, f32 min, f32 max) * scopePreviewCount
+ *
+ * x0 = the point's frequency (Hz), dx = 0, nPoints = harmonicCount, seq = the point's index. A
+ * preview count of 0 decodes to `null`, not an empty array — see EncodeSweepPoint server-side.
+ */
+export function decodeSweepPointFrame(buffer: ArrayBuffer): SweepPointFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  let offset = HEADER_LENGTH
+
+  const readF32 = () => {
+    const v = view.getFloat32(offset, true)
+    offset += 4
+    return v
+  }
+
+  const thdPercent = readF32()
+  const thdNPercent = readF32()
+  const snrDb = readF32()
+  const fundamentalDbv = readF32()
+  const gainDb = readF32()
+  const powerWatt = readF32()
+  const d6PlusPercent = readF32()
+  const noisePercent = readF32()
+  const harmonicCount = view.getUint32(offset, true)
+  offset += 4
+
+  const harmonicPercent: number[] = new Array(harmonicCount)
+  for (let i = 0; i < harmonicCount; i++) harmonicPercent[i] = readF32()
+
+  const readPreview = (): SweepPreviewSeries | null => {
+    const count = view.getUint32(offset, true)
+    offset += 4
+    if (count === 0) return null
+
+    const x: number[] = new Array(count)
+    const min: number[] = new Array(count)
+    const max: number[] = new Array(count)
+    for (let i = 0; i < count; i++) {
+      x[i] = readF32()
+      min[i] = readF32()
+      max[i] = readF32()
+    }
+    return { x, min, max }
+  }
+
+  const previewFft = readPreview()
+  const previewScope = readPreview()
+
+  return {
+    header,
+    freqHz: header.x0,
+    channel: header.channel,
+    pointIndex: header.seq,
+    thdPercent,
+    thdNPercent,
+    snrDb,
+    fundamentalDbv,
+    gainDb,
+    powerWatt,
+    d6PlusPercent,
+    noisePercent,
+    harmonicPercent,
+    previewFft,
+    previewScope,
+  }
+}
+
+export interface SweepProgressFrame {
+  header: StreamFrameHeader
+  index: number
+  total: number
+  /** The frequency currently being measured; 0 when the sweep is not on a point. */
+  currentFreqHz: number
+  phase: SweepPhase
+}
+
+/** Decodes a sweep progress frame. No payload: index = nPoints, total = dx, phase = seq. */
+export function decodeSweepProgressFrame(buffer: ArrayBuffer): SweepProgressFrame {
+  const header = decodeHeader(buffer)
+  return {
+    header,
+    index: header.nPoints,
+    total: Math.round(header.dx),
+    currentFreqHz: header.x0,
+    phase: header.seq as SweepPhase,
   }
 }

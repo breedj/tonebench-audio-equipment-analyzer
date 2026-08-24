@@ -125,6 +125,76 @@ public class SpectrumMetricsTests
     }
 
     [Fact]
+    public void PartialThd_FromOrderTwo_EqualsThd()
+    {
+        var harmonics = Analyze(
+            WindowType.Hann, 6, out _,
+            (1.0, FundamentalBin), (0.01, FundamentalBin * 2), (0.005, FundamentalBin * 3), (0.002, FundamentalBin * 6));
+
+        Assert.Equal(SpectrumMetrics.Thd(harmonics), SpectrumMetrics.PartialThd(harmonics, 2), 12);
+    }
+
+    [Fact]
+    public void PartialThd_FromOrderSix_ExcludesTheLowerHarmonics()
+    {
+        // Only H2 (1%) and H6 (0.2%) carry energy, so the D6+ bucket must see 0.2% and not the H2.
+        var harmonics = Analyze(
+            WindowType.Hann, 6, out _,
+            (1.0, FundamentalBin), (0.01, FundamentalBin * 2), (0.002, FundamentalBin * 6));
+
+        double d6Plus = SpectrumMetrics.PartialThd(harmonics, 6);
+
+        Assert.Equal(0.002, d6Plus, 4);
+    }
+
+    [Fact]
+    public void PartialThd_LowerAndUpperBuckets_PowerSumBackToThd()
+    {
+        // The property that makes a D2..D5 + D6+ chart honest: the buckets add in power, so no
+        // distortion energy is shown twice and none goes missing.
+        var harmonics = Analyze(
+            WindowType.Hann, 8, out _,
+            (1.0, FundamentalBin), (0.01, FundamentalBin * 2), (0.004, FundamentalBin * 4),
+            (0.002, FundamentalBin * 6), (0.001, FundamentalBin * 8));
+
+        double thd = SpectrumMetrics.Thd(harmonics);
+        double lower = LowerBucket(harmonics);
+        double upper = SpectrumMetrics.PartialThd(harmonics, 6);
+
+        Assert.Equal(thd * thd, (lower * lower) + (upper * upper), 12);
+
+        static double LowerBucket(ReadOnlySpan<Harmonic> harmonics)
+        {
+            double all = SpectrumMetrics.PartialThd(harmonics, 2);
+            double sixPlus = SpectrumMetrics.PartialThd(harmonics, 6);
+            return Math.Sqrt((all * all) - (sixPlus * sixPlus));
+        }
+    }
+
+    [Fact]
+    public void PartialThd_FromOrderAboveEveryHarmonicPresent_IsZero()
+    {
+        var harmonics = Analyze(WindowType.Hann, 3, out _, (1.0, FundamentalBin), (0.01, FundamentalBin * 2));
+
+        Assert.Equal(0.0, SpectrumMetrics.PartialThd(harmonics, 12), 12);
+    }
+
+    [Fact]
+    public void PartialThd_FromOrderBelowTwo_Throws()
+    {
+        var harmonics = Analyze(WindowType.Hann, 2, out _, (1.0, FundamentalBin), (0.01, FundamentalBin * 2));
+
+        // The span cannot be captured by a lambda, so re-analyze inside the assertion.
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            var local = new[] { new Harmonic(1, FundamentalBin, 1.0, 0.0, 0.0) };
+            SpectrumMetrics.PartialThd(local, 1);
+        });
+
+        Assert.NotEmpty(harmonics);
+    }
+
+    [Fact]
     public void BandNoiseFloorVrms_IntegratesOnlyRequestedBand()
     {
         var w = Window.Get(WindowType.Rectangular, FftSize);

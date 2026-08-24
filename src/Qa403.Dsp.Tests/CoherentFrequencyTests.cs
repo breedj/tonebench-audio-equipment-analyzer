@@ -48,6 +48,24 @@ public class CoherentFrequencyTests
         Assert.Equal(result.Bin * fs / n, result.FrequencyHz, 9);
     }
 
+    [Theory]
+    // 192 kHz / 32768 = 5.859 Hz bins. 10 Hz is bin 1.71, rounds to 2, and 2 is not coprime to a
+    // power of two -- so the answer is bin 1 (5.86 Hz, 4.1 Hz away), not bin 3 (17.58 Hz, 7.6 Hz
+    // away). Searching up-then-down returned bin 3 and started a 10 Hz THD sweep at 17.6 Hz.
+    [InlineData(10.0, 192000.0, 32768, 1)]
+    // Same request at the resolution the sweep actually uses now: bin 7, 10.25 Hz.
+    [InlineData(10.0, 192000.0, 131072, 7)]
+    // 20 Hz is bin 13.65 -> rounds to 14 (even); 13 is 0.65 away, 15 is 1.35 away.
+    [InlineData(20.0, 192000.0, 131072, 13)]
+    public void Nearest_EvenRoundedBin_TakesTheCoprimeNeighbourClosestInFrequency(
+        double desiredHz, double sampleRateHz, int n, int expectedBin)
+    {
+        var result = CoherentFrequency.Nearest(desiredHz, sampleRateHz, n);
+
+        Assert.Equal(expectedBin, result.Bin);
+        Assert.Equal(1, Gcd(result.Bin, n));
+    }
+
     [Fact]
     public void Nearest_NonPowerOfTwoN_StillFindsCoprimeBin()
     {

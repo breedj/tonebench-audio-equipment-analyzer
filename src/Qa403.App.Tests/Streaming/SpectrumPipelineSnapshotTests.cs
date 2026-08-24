@@ -167,15 +167,129 @@ public class SpectrumPipelineSnapshotTests
         }
     }
 
+    [Fact]
+    public async Task LatestSnapshots_WithCapturePreviewOff_HasNoPreviewSeries()
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        await device.ConnectAsync(CancellationToken.None);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 0.0)]), ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+
+        var (pipeline, streamCts, drainTask) = StartPipeline(device, channelCount: 1, out _);
+
+        try
+        {
+            await WaitForSnapshotsAsync(pipeline, channelCount: 1);
+            var snapshot = pipeline.LatestSnapshots().Single();
+
+            Assert.Null(snapshot.PreviewFft);
+            Assert.Null(snapshot.PreviewScope);
+        }
+        finally
+        {
+            await StopAsync(device, pipeline, streamCts, drainTask);
+        }
+    }
+
+    /// <summary>
+    /// What ThdSweepRunner turns on via SpectrumPipelineOptions.CapturePreview — a decimated FFT and
+    /// oscilloscope trace alongside the metrics, capped at PreviewMaxColumns and long enough to
+    /// actually resolve the 1 kHz tone's shape (not just a couple of points).
+    /// </summary>
+    [Fact]
+    public async Task LatestSnapshots_WithCapturePreviewOn_CarriesBoundedPreviewSeries()
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        await device.ConnectAsync(CancellationToken.None);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 0.0)]), ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+
+        var (pipeline, streamCts, drainTask) = StartPipeline(device, channelCount: 1, out _, capturePreview: true);
+
+        try
+        {
+            await WaitForSnapshotsAsync(pipeline, channelCount: 1);
+            var snapshot = pipeline.LatestSnapshots().Single();
+
+            Assert.NotNull(snapshot.PreviewFft);
+            var fft = snapshot.PreviewFft!;
+            Assert.InRange(fft.X.Length, 2, SpectrumPipeline.PreviewMaxColumns);
+            Assert.Equal(fft.X.Length, fft.Min.Length);
+            Assert.Equal(fft.X.Length, fft.Max.Length);
+            // Ascending frequency, log-spaced like the live spectrum chart.
+            for (int i = 1; i < fft.X.Length; i++)
+                Assert.True(fft.X[i] > fft.X[i - 1], $"fft.X[{i}]={fft.X[i]} <= fft.X[{i - 1}]={fft.X[i - 1]}");
+
+            Assert.NotNull(snapshot.PreviewScope);
+            var scope = snapshot.PreviewScope!;
+            Assert.InRange(scope.X.Length, 2, SpectrumPipeline.PreviewMaxColumns);
+            Assert.Equal(scope.X.Length, scope.Min.Length);
+            Assert.Equal(scope.X.Length, scope.Max.Length);
+            for (int i = 1; i < scope.X.Length; i++)
+                Assert.True(scope.X[i] > scope.X[i - 1], $"scope.X[{i}]={scope.X[i]} <= scope.X[{i - 1}]={scope.X[i - 1]}");
+
+            // ScopeDisplayWindow.SecondsFor(1000 Hz) is exactly one period (1 ms) -- the preview's
+            // own span should land close to that, not the pipeline's full multi-thousand-sample window.
+            double spanS = scope.X[^1] - scope.X[0];
+            Assert.InRange(spanS, 0.0005, 0.0015);
+        }
+        finally
+        {
+            await StopAsync(device, pipeline, streamCts, drainTask);
+        }
+    }
+
+    /// <summary>
+    /// The scope preview's window starts at a rising zero-crossing (BuildScopePreview), the same
+    /// trigger search the live FFT screen's oscilloscope does client-side -- ported server-side
+    /// because this data is already decimated by the time it would reach a client. A window that
+    /// started at an arbitrary tail offset would put the first bucket anywhere in the cycle; a
+    /// triggered one puts it right at (or just after) zero, rising.
+    /// </summary>
+    [Fact]
+    public async Task LatestSnapshots_ScopePreview_StartsNearARisingZeroCrossing()
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        await device.ConnectAsync(CancellationToken.None);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 0.0)]), ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+
+        var (pipeline, streamCts, drainTask) = StartPipeline(device, channelCount: 1, out _, capturePreview: true);
+
+        try
+        {
+            await WaitForSnapshotsAsync(pipeline, channelCount: 1);
+            var scope = pipeline.LatestSnapshots().Single().PreviewScope!;
+
+            // The first decimated column covers only the first few samples after the crossing, so
+            // its min/max should sit close to zero and trend positive -- not somewhere mid-swing,
+            // which is what an untriggered tail-anchored window would produce most of the time.
+            Assert.True(scope.Max[0] >= -0.05, $"scope.Max[0]={scope.Max[0]} -- expected close to zero, rising");
+            Assert.True(scope.Min[0] < scope.Max[1], "expected the trace to keep rising into the second column");
+        }
+        finally
+        {
+            await StopAsync(device, pipeline, streamCts, drainTask);
+        }
+    }
+
     private static (SpectrumPipeline Pipeline, CancellationTokenSource StreamCts, Task DrainTask) StartPipeline(
-        SimulatedDevice device, int channelCount, out SpectrumBroadcastHub hub, double sampleRateHz = 48000, int fftSize = 4096)
+        SimulatedDevice device, int channelCount, out SpectrumBroadcastHub hub, double sampleRateHz = 48000, int fftSize = 4096,
+        bool capturePreview = false)
     {
         hub = new SpectrumBroadcastHub();
         var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
         {
             // ProcessRight explicit here (its class default is now off) so these tests still cover
             // both channels regardless of the UI's left-only-by-default preference.
-            Options = new SpectrumPipelineOptions { FftSize = fftSize, TargetFrameRateHz = 40, DisplayColumns = 200, ProcessRight = true },
+            Options = new SpectrumPipelineOptions
+            {
+                FftSize = fftSize, TargetFrameRateHz = 40, DisplayColumns = 200, ProcessRight = true,
+                CapturePreview = capturePreview,
+            },
         };
         pipeline.Start(sampleRateHz, channelCount);
 

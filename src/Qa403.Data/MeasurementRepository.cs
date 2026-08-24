@@ -74,6 +74,176 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         return resultId;
     }
 
+    /// <summary>
+    /// Saves one sweep: a result row plus one <c>capture</c> row per frequency, at ascending
+    /// <c>seq_index</c>, each carrying that point's per-channel metrics. One transaction, per the
+    /// stack spec's "wrap sweep writes in a single transaction" note -- 31 points x 2 channels x 10
+    /// metrics is ~600 inserts, and outside a transaction SQLite would fsync on every one.
+    ///
+    /// A capture's <c>n</c> column holds the FFT size and <c>fs</c> the sample rate, same as a
+    /// spectrum capture; the point's own frequency lives in a <c>fundamental_hz</c> metric rather
+    /// than a new column, so the existing metric reader and CSV exporter need no special case.
+    ///
+    /// Deliberately a separate method from <see cref="SaveResultAsync"/> rather than a
+    /// generalisation of it: that path is the working FFT save, and widening it to a list of
+    /// captures would put every existing measurement through new code for no gain.
+    /// </summary>
+    public async Task<long> SaveSweepResultAsync(SweepSaveRequest request, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        await using var transaction = connection.BeginTransaction();
+
+        long resultId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO measurement_result
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated);
+            SELECT last_insert_rowid();
+            """,
+            new
+            {
+                request.MeasurementTypeId,
+                request.Name,
+                request.Notes,
+                Ts = Qa403Timestamp.Now(),
+                request.ParamsJson,
+                request.DeviceName,
+                request.Serial,
+                request.FwVer,
+                request.IsSimulated,
+            },
+            transaction);
+
+        string capturedAt = Qa403Timestamp.Now();
+
+        foreach (var capture in request.Captures)
+        {
+            long captureId = await connection.ExecuteScalarAsync<long>(
+                """
+                INSERT INTO capture
+                    (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels)
+                VALUES (@ResultId, @SeqIndex, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, NULL, @Channels);
+                SELECT last_insert_rowid();
+                """,
+                new
+                {
+                    ResultId = resultId,
+                    capture.SeqIndex,
+                    Ts = capturedAt,
+                    Fs = request.SampleRateHz,
+                    N = request.FftSize,
+                    request.InRangeDbv,
+                    request.OutRangeDbv,
+                    request.Channels,
+                },
+                transaction);
+
+            foreach (var metric in capture.Metrics)
+            {
+                await connection.ExecuteAsync(
+                    "INSERT INTO metric (capture_id, channel, name, value, unit) VALUES (@CaptureId, @Channel, @Name, @Value, @Unit);",
+                    new { CaptureId = captureId, metric.Channel, metric.Name, metric.Value, metric.Unit },
+                    transaction);
+            }
+
+            if (capture.Previews is not null)
+            {
+                foreach (var preview in capture.Previews)
+                {
+                    await connection.ExecuteAsync(
+                        """
+                        INSERT INTO capture_preview (capture_id, channel, kind, x, min, max)
+                        VALUES (@CaptureId, @Channel, @Kind, @X, @Min, @Max);
+                        """,
+                        new
+                        {
+                            CaptureId = captureId,
+                            preview.Channel,
+                            preview.Kind,
+                            X = PreviewCodec.Encode(preview.X),
+                            Min = PreviewCodec.Encode(preview.Min),
+                            Max = PreviewCodec.Encode(preview.Max),
+                        },
+                        transaction);
+                }
+            }
+        }
+
+        await transaction.CommitAsync(ct);
+        return resultId;
+    }
+
+    /// <summary>
+    /// Every point of a saved sweep, ascending by <c>seq_index</c>. Reads all the metrics in one
+    /// query joined through <c>capture</c> rather than one query per point -- a 50-point stereo
+    /// sweep is 50 round trips otherwise.
+    /// </summary>
+    public async Task<IReadOnlyList<StoredSweepPoint>> GetSweepPointsAsync(long resultId, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        var rows = await connection.QueryAsync<SweepMetricRowRaw>(
+            """
+            SELECT c.seq_index AS SeqIndex, m.channel AS Channel, m.name AS Name, m.value AS Value
+            FROM capture c
+            JOIN metric m ON m.capture_id = c.id
+            WHERE c.measurement_result_id = @resultId
+            ORDER BY c.seq_index;
+            """,
+            new { resultId });
+
+        // A second query rather than folding into the one above: previews are one row per
+        // (capture, channel, kind) with three BLOB columns each, and joining that against the
+        // metric rows would multiply every metric row by up to two preview rows for nothing --
+        // the two are stitched back together by seq_index/channel below instead.
+        var previewRows = await connection.QueryAsync<SweepPreviewRowRaw>(
+            """
+            SELECT c.seq_index AS SeqIndex, cp.channel AS Channel, cp.kind AS Kind, cp.x AS X, cp.min AS Min, cp.max AS Max
+            FROM capture c
+            JOIN capture_preview cp ON cp.capture_id = c.id
+            WHERE c.measurement_result_id = @resultId
+            ORDER BY c.seq_index;
+            """,
+            new { resultId });
+
+        var previewsBySeq = previewRows
+            .GroupBy(r => (int)r.SeqIndex)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyDictionary<int, IReadOnlyDictionary<string, StoredPreviewSeries>>)g
+                    .GroupBy(r => (int)r.Channel)
+                    .ToDictionary(
+                        c => c.Key,
+                        c => (IReadOnlyDictionary<string, StoredPreviewSeries>)c.ToDictionary(
+                            r => r.Kind,
+                            r => new StoredPreviewSeries(PreviewCodec.Decode(r.X), PreviewCodec.Decode(r.Min), PreviewCodec.Decode(r.Max)))));
+
+        return rows
+            .GroupBy(r => (int)r.SeqIndex)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var byChannel = g
+                    .GroupBy(r => (int)r.Channel)
+                    .ToDictionary(
+                        c => c.Key,
+                        c => (IReadOnlyDictionary<string, double>)c.ToDictionary(r => r.Name, r => r.Value));
+
+                // The point's frequency is stored as a metric (see SaveSweepResultAsync); take it
+                // from whichever channel is present, since both record the same value.
+                double freqHz = byChannel.Values
+                    .Select(m => m.TryGetValue("fundamental_hz", out double hz) ? hz : 0.0)
+                    .FirstOrDefault(hz => hz > 0.0);
+
+                return new StoredSweepPoint(g.Key, freqHz, byChannel, previewsBySeq.GetValueOrDefault(g.Key));
+            })
+            .ToList();
+    }
+
+    private sealed record SweepMetricRowRaw(long SeqIndex, long Channel, string Name, double Value);
+
+    private sealed record SweepPreviewRowRaw(long SeqIndex, long Channel, string Kind, byte[] X, byte[] Min, byte[] Max);
+
     private static async Task InsertSpectrumAsync(
         SqliteConnection connection, SqliteTransaction transaction, long captureId, StoredSpectrumInput spectrum, CancellationToken ct)
     {
@@ -191,7 +361,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         var row = await connection.QuerySingleOrDefaultAsync<ResultDetailRowRaw>(
             """
             SELECT mr.id AS ResultId, mr.measurement_type_id AS MeasurementTypeId,
-                   p.name AS ProjectName, mt.name AS MeasurementTypeName,
+                   p.name AS ProjectName, mt.name AS MeasurementTypeName, mt.kind AS Kind,
                    mr.name AS Name, mr.notes AS Notes, mr.ts AS TimestampUtc, mr.params_json AS ParamsJson,
                    c.id AS CaptureId, c.fs AS SampleRateHz, c.n AS FftSize, c.channels AS Channels,
                    c.in_range_dbv AS InRangeDbv, c.out_range_dbv AS OutRangeDbv, c.gen_json AS GenJson
@@ -219,7 +389,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             .ToDictionary(g => g.Key, g => (IReadOnlyDictionary<string, double>)g.ToDictionary(m => m.Name, m => m.Value));
 
         return new MeasurementDetail(
-            row.ResultId, row.MeasurementTypeId, row.ProjectName, row.MeasurementTypeName,
+            row.ResultId, row.MeasurementTypeId, row.ProjectName, row.MeasurementTypeName, row.Kind,
             row.Name, row.Notes, Qa403Timestamp.Parse(row.TimestampUtc), row.ParamsJson,
             row.CaptureId, row.SampleRateHz, (int)row.FftSize, (int)row.Channels,
             row.InRangeDbv, row.OutRangeDbv, row.GenJson,
@@ -284,6 +454,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         {
             await connection.ExecuteAsync("DELETE FROM metric WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM spectrum WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
+            await connection.ExecuteAsync("DELETE FROM capture_preview WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM capture WHERE id IN @captureIds;", new { captureIds }, transaction);
         }
 
@@ -317,7 +488,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         string TimestampUtc, long CaptureId, long SampleRateHz, long FftSize, long Channels);
 
     private sealed record ResultDetailRowRaw(
-        long ResultId, long MeasurementTypeId, string ProjectName, string MeasurementTypeName,
+        long ResultId, long MeasurementTypeId, string ProjectName, string MeasurementTypeName, string Kind,
         string Name, string? Notes, string TimestampUtc, string ParamsJson,
         long CaptureId, long SampleRateHz, long FftSize, long Channels,
         double? InRangeDbv, double? OutRangeDbv, string? GenJson);

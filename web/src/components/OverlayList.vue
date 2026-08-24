@@ -17,10 +17,10 @@ function hasChannel(o: (typeof overlays.value)[number], ch: number): boolean {
       class="flex items-center gap-2 text-sm"
       :class="{ 'opacity-40': !overlay.visible }"
     >
-      <!-- Dashed-L / dotted-R swatch, matching how the chart actually draws this overlay's two channels. -->
+      <!-- Dashed-L / dotted-R swatch, matching how the chart actually draws this overlay's two channels (a tint of the live L/R colors — see colorL/colorR). -->
       <svg width="28" height="14" viewBox="0 0 28 14" class="shrink-0">
-        <line x1="1" y1="5" x2="27" y2="5" :stroke="overlay.color" stroke-width="1.5" stroke-dasharray="4,2" />
-        <line x1="1" y1="10" x2="27" y2="10" :stroke="overlay.color" stroke-width="1.5" stroke-dasharray="1,3" />
+        <line x1="1" y1="5" x2="27" y2="5" :stroke="overlay.colorL" stroke-width="1.5" stroke-dasharray="4,2" />
+        <line x1="1" y1="10" x2="27" y2="10" :stroke="overlay.colorR" stroke-width="1.5" stroke-dasharray="1,3" />
       </svg>
 
       <span class="min-w-0 flex-1 truncate">

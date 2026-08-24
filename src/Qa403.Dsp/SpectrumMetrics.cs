@@ -48,14 +48,36 @@ public static class SpectrumMetrics
     }
 
     /// <summary>THD = sqrt(Σ V_h² for h=2..H) / V1. <paramref name="harmonics"/> must start with order 1 (the fundamental).</summary>
-    public static double Thd(ReadOnlySpan<Harmonic> harmonics)
+    public static double Thd(ReadOnlySpan<Harmonic> harmonics) => PartialThd(harmonics, fromOrder: 2);
+
+    /// <summary>
+    /// sqrt(Σ V_h² for h &gt;= <paramref name="fromOrder"/>) / V1 — <see cref="Thd"/> restricted to
+    /// the harmonics at or above one order. <c>PartialThd(h, 2)</c> is THD itself.
+    ///
+    /// Exists for the "D6+" roll-up a THD-vs-frequency sweep plots: the individual 2nd..5th
+    /// harmonics get their own traces, and everything from the 6th up is power-summed into one, so
+    /// a chart doesn't carry eleven near-identical lines down in the grass. Power-summed rather
+    /// than "the largest of them" because that is what makes the buckets add back up to THD:
+    /// Thd² == PartialThd(2..5)² + PartialThd(6..)².
+    ///
+    /// Orders are read off <see cref="Harmonic.Order"/>, not from the span's indices, so a caller
+    /// that trimmed the list still gets the right bucket.
+    /// </summary>
+    public static double PartialThd(ReadOnlySpan<Harmonic> harmonics, int fromOrder)
     {
         RequireFundamentalFirst(harmonics);
+        if (fromOrder < 2)
+            throw new ArgumentOutOfRangeException(nameof(fromOrder), fromOrder, "The fundamental is the reference, so a partial THD starts at order 2 or above.");
 
         double v1 = harmonics[0].AmplitudeVrms;
         double sumSquares = 0.0;
         for (int i = 1; i < harmonics.Length; i++)
+        {
+            if (harmonics[i].Order < fromOrder)
+                continue;
+
             sumSquares += harmonics[i].AmplitudeVrms * harmonics[i].AmplitudeVrms;
+        }
 
         return Math.Sqrt(sumSquares) / v1;
     }

@@ -4,7 +4,7 @@ import { ref } from 'vue'
 // itself and the display-options column (a separate sibling in the layout, not nested inside the
 // chart's own card) both need to see the same state.
 const DEFAULT_Y_TOP = 20
-const DEFAULT_Y_BOTTOM = -180
+const DEFAULT_Y_BOTTOM = -150
 
 const yTop = ref(DEFAULT_Y_TOP)
 const yBottom = ref(DEFAULT_Y_BOTTOM)

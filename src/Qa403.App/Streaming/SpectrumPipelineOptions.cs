@@ -69,6 +69,21 @@ public sealed record SpectrumPipelineOptions
     public double MeasurementHiFreqHz { get; init; } = 20000.0;
 
     /// <summary>
+    /// Upper bound, in Hz, on which harmonics count toward THD — overriding
+    /// <see cref="MeasurementHiFreqHz"/> for that one purpose. Null (the default) means "use
+    /// MeasurementHiFreqHz", which is QuantAsylum's own <c>/ThdDb/{freq}/{stopHz}</c> convention
+    /// and what the live FFT view wants.
+    ///
+    /// The THD-vs-frequency sweep sets this to Nyquist instead. Bounded at the 20 kHz measurement
+    /// band, every harmonic of a sweep point above ~7 kHz is out of band, so <c>Analyze</c> writes
+    /// the fundamental and nothing else and THD reads exactly 0 — the top third of the sweep would
+    /// plot as a cliff into the floor rather than a measurement. Noise, THD+N and SNR deliberately
+    /// keep using <see cref="MeasurementLoFreqHz"/>/<see cref="MeasurementHiFreqHz"/>: those are
+    /// integrated figures and quoting one without a stated bandwidth is meaningless.
+    /// </summary>
+    public double? HarmonicMaxFreqHz { get; init; }
+
+    /// <summary>
     /// Half-width, in octaves, of the notch taken out around the fundamental before integrating
     /// THD+N/SNR — see <see cref="SpectrumMetrics.DefaultNotchOctaves"/>. 0.5 matches QuantAsylum's
     /// PyQa40x. Lower it only if you need to resolve noise very close to the carrier.
@@ -100,4 +115,19 @@ public sealed record SpectrumPipelineOptions
     // (see MeasurementSaveService.BuildParameters) so a fresh measurement has one clean channel to
     // look at rather than an unused right channel cluttering the chart.
     public bool ProcessRight { get; init; } = false;
+
+    /// <summary>
+    /// When true, every tick also decimates a small FFT and oscilloscope preview (at most
+    /// <see cref="SpectrumPipeline.PreviewMaxColumns"/> points each) into the retained snapshot —
+    /// see <see cref="SpectrumSnapshot.PreviewFft"/>/<see cref="SpectrumSnapshot.PreviewScope"/>.
+    ///
+    /// Off by default: the live FFT/scope charts already stream their own full-rate frames over the
+    /// WebSocket, so computing a second, smaller decimation of the same tick for them would be pure
+    /// waste. <see cref="ThdSweepRunner"/> turns this on because a sweep point's capture is
+    /// discarded (the ring buffer moves on to the next frequency) the instant
+    /// <see cref="SpectrumPipeline.LatestSnapshots"/> is read -- unlike the live view, there is no
+    /// second chance to ask the device what a given frequency's waveform looked like, so the sweep
+    /// preview has to be taken at the only moment the samples exist.
+    /// </summary>
+    public bool CapturePreview { get; init; } = false;
 }

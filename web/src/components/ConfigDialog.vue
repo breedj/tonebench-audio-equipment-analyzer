@@ -6,6 +6,7 @@ import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDevice } from '../composables/useDevice'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import { useUpdateCheck } from '../composables/useUpdateCheck'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -14,6 +15,7 @@ const { themeMode } = useAppTheme()
 const { captureDelayMs } = useCaptureDelay()
 const { config, apply: applyConfig } = useSpectrumConfig()
 const { status: deviceStatus } = useDevice()
+const { updateCheckEnabled } = useUpdateCheck()
 
 // Staged locally like the bandwidth field below, applied on change. Only meaningful on a device
 // with a hardware ranger (autoRangeStepDownDelayMs is null on the simulator, which has its own
@@ -134,6 +136,17 @@ async function applyBandwidth() {
             class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             @change="applyAutoRangeStepDownDelay"
           />
+        </label>
+      </section>
+
+      <section>
+        <h3 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">Updates</h3>
+        <label
+          class="flex items-center gap-2"
+          title="Periodically checks GitHub for a newer release and shows a dismissible banner. Never installs anything automatically; fails silently if this machine has no internet access."
+        >
+          <input type="checkbox" v-model="updateCheckEnabled" />
+          Check for updates
         </label>
       </section>
 

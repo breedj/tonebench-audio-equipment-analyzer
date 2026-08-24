@@ -5,6 +5,7 @@ using Qa403.App.Endpoints;
 using Qa403.App.Streaming;
 using Qa403.Data;
 using Qa403.Device;
+using Qa403.Dsp;
 
 namespace Qa403.App.Services;
 
@@ -16,6 +17,7 @@ namespace Qa403.App.Services;
 public sealed class MeasurementSaveService(
     DeviceSessionService session,
     SpectrumPipeline spectrumPipeline,
+    ThdSweepRunner sweepRunner,
     ProjectRepository projectRepository,
     MeasurementRepository measurementRepository,
     IOptions<JsonOptions> jsonOptions)
@@ -24,6 +26,67 @@ public sealed class MeasurementSaveService(
     // Program.cs) rather than a second, independently-drifting JsonSerializerOptions instance —
     // params_json round-trips WindowType/AveragingMode/GeneratorKind the same way the REST API does.
     private JsonSerializerOptions SerializerOptions => jsonOptions.Value.SerializerOptions;
+
+    /// <summary>The <c>measurement_type.kind</c> value for a THD-vs-frequency sweep. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string ThdVsFrequencyKind = "ThdVsFrequency";
+
+    /// <summary>
+    /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
+    /// snapshot — a configured sweep exists only as SweepConfigPanel's form — so a new one starts
+    /// from that panel's own defaults, kept in step with it. The fixed analysis settings
+    /// (192 kHz / 131072 / Hann) are not offered as choices in either place; see the panel's
+    /// remarks on why.
+    ///
+    /// Serialized through <see cref="SerializerOptions"/> like every other params_json, not with a
+    /// bare <c>JsonSerializer.Serialize</c>: the default options write PascalCase keys and a
+    /// numeric <c>Window</c>, which the browser reads as an object with none of the fields it wants
+    /// and a window it cannot name — a new sweep type silently came up with the panel's hard-coded
+    /// defaults instead of its own stored ones.
+    /// </summary>
+    public string DefaultSweepParametersJson() =>
+        JsonSerializer.Serialize(new ThdVsFrequencyParameters(
+            StartFreqHz: 20.0,
+            EndFreqHz: 20000.0,
+            StepsPerOctave: 5,
+            LevelMode: nameof(ThdSweepLevelMode.GeneratorVoltage),
+            LevelValue: -20.0,
+            LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
+            LoadOhms: 8.0,
+            ProcessLeft: true,
+            ProcessRight: false,
+            FftSize: 131072,
+            Window: WindowType.Hann,
+            AverageCount: 4,
+            SampleRateHz: 192000.0,
+            MeasureNoiseFloor: true), SerializerOptions);
+
+    /// <summary>
+    /// What a create-or-update of a measurement type should write to <c>params_json</c>.
+    ///
+    /// The interesting case is an omitted <paramref name="requestedJson"/>, which means "snapshot
+    /// whatever is configured right now". For an FFT type that is the live pipeline/device state,
+    /// which the host can build on its own. For a sweep it is not: a configured sweep exists only
+    /// as SweepConfigPanel's form, and <see cref="BuildCurrentParametersJson"/> would hand back an
+    /// <see cref="FftSpectrumParameters"/> — replacing the type's sweep settings with something
+    /// <see cref="ApplyAsync"/> cannot read back. So a sweep keeps <paramref name="existingParamsJson"/>
+    /// instead, or starts from the panel's defaults when there is none.
+    /// </summary>
+    /// <param name="existingParamsJson">The type's current stored params, or null when creating one.</param>
+    public string ResolveTypeParamsJson(string? requestedJson, string kind, string? existingParamsJson, StagedMeasurementConfig? staged)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedJson))
+            return requestedJson;
+
+        if (kind == ThdVsFrequencyKind)
+            return existingParamsJson ?? DefaultSweepParametersJson();
+
+        // Creating (no stored params yet) with nothing staged: seed from the live state, but with a
+        // generator channel switched on so the new type has something to Run.
+        if (existingParamsJson is null && staged is null)
+            return BuildDefaultParametersJsonForNewType();
+
+        return BuildCurrentParametersJson(staged);
+    }
 
     /// <summary>
     /// Saves the pipeline's currently retained snapshot(s) as one measurement result. Throws
@@ -88,6 +151,101 @@ public sealed class MeasurementSaveService(
     }
 
     /// <summary>
+    /// Saves the last completed sweep as one measurement result with one capture per frequency.
+    ///
+    /// Reads <see cref="ThdSweepRunner.Status"/> rather than taking the points as an argument, for
+    /// the same reason <see cref="SaveAsync"/> reads the pipeline's retained snapshot: what gets
+    /// saved must be exactly what is on screen, not a separately-supplied copy that could differ.
+    /// A cancelled sweep is saveable -- a partial sweep still measured the part it covered.
+    /// </summary>
+    public async Task<long> SaveSweepAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = sweepRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the sweep to finish (or cancel it) before saving.");
+        if (status.Points.Count == 0)
+            throw new InvalidOperationException("No sweep has been run yet.");
+
+        var request = sweepRunner.LastRequest
+            ?? throw new InvalidOperationException("No sweep has been run yet.");
+
+        var parameters = new ThdVsFrequencyParameters(
+            request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave,
+            request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
+            request.LoadOhms, request.ProcessLeft, request.ProcessRight,
+            request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
+            request.MeasureNoiseFloor, status.GeneratorAmpDbv);
+
+        // One capture per frequency, in sweep order. Points arrive per channel, so group them back
+        // together first -- both channels of one frequency share a capture row.
+        var captures = status.Points
+            .GroupBy(p => p.FreqHz)
+            .OrderBy(g => g.Key)
+            .Select((group, index) => new SweepCaptureInput(index, group.Key, BuildSweepMetrics(group), BuildSweepPreviews(group)))
+            .ToList();
+
+        var info = session.Info;
+        var saveRequest = new SweepSaveRequest(
+            measurementTypeId, name, notes,
+            JsonSerializer.Serialize(parameters, SerializerOptions),
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            request.SampleRateHz, request.FftSize,
+            (request.ProcessLeft ? 1 : 0) + (request.ProcessRight ? 1 : 0),
+            session.InputRangeDbv, session.OutputRangeDbv,
+            captures);
+
+        return await measurementRepository.SaveSweepResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
+    /// One frequency's preview traces, per channel and kind (FFT/scope) -- absent entirely for a
+    /// point whose channel never captured one (the sweep runner always turns capture on, so in
+    /// practice this only happens for a sweep saved before this feature existed... except there is
+    /// no such sweep, since it isn't re-run from old state; kept defensive rather than assumed).
+    /// </summary>
+    private static List<CapturePreviewInput> BuildSweepPreviews(IEnumerable<ThdSweepPoint> pointsAtOneFrequency)
+    {
+        var previews = new List<CapturePreviewInput>();
+        foreach (var point in pointsAtOneFrequency)
+        {
+            if (point.PreviewFft is { } fft)
+                previews.Add(new CapturePreviewInput(point.Channel, CapturePreviewKind.Fft, fft.X, fft.Min, fft.Max));
+            if (point.PreviewScope is { } scope)
+                previews.Add(new CapturePreviewInput(point.Channel, CapturePreviewKind.Scope, scope.X, scope.Min, scope.Max));
+        }
+
+        return previews;
+    }
+
+    /// <summary>
+    /// One frequency's metrics, per channel. Names follow the same convention
+    /// <see cref="SaveAsync"/> uses (<c>thd_percent</c>, <c>h{n}_dbc</c>, ...) so the metric index
+    /// and the CSV exporter treat a sweep point exactly like a spectrum capture.
+    /// </summary>
+    private static List<MeasurementMetric> BuildSweepMetrics(IEnumerable<ThdSweepPoint> pointsAtOneFrequency)
+    {
+        var metrics = new List<MeasurementMetric>();
+        foreach (var point in pointsAtOneFrequency)
+        {
+            int ch = point.Channel;
+            metrics.Add(new MeasurementMetric(ch, "fundamental_hz", point.FreqHz, "Hz"));
+            metrics.Add(new MeasurementMetric(ch, "fundamental_dbv", point.FundamentalDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(ch, "gain_db", point.GainDb, "dB"));
+            metrics.Add(new MeasurementMetric(ch, "power_watt", point.PowerWatt, "W"));
+            metrics.Add(new MeasurementMetric(ch, "thd_percent", point.ThdPercent, "%"));
+            metrics.Add(new MeasurementMetric(ch, "thd_n_percent", point.ThdNPercent, "%"));
+            metrics.Add(new MeasurementMetric(ch, "snr_db", point.SnrDb, "dB"));
+            metrics.Add(new MeasurementMetric(ch, "d6plus_percent", point.D6PlusPercent, "%"));
+            metrics.Add(new MeasurementMetric(ch, "noise_percent", point.NoisePercent, "%"));
+
+            for (int i = 0; i < point.HarmonicPercent.Count; i++)
+                metrics.Add(new MeasurementMetric(ch, $"h{i + 2}_percent", point.HarmonicPercent[i], "%"));
+        }
+
+        return metrics;
+    }
+
+    /// <summary>
     /// Loads a measurement-type's configured parameters for the UI to stage — touches nothing on
     /// the device. Not even <see cref="DeviceSessionService.SetInputRangeAsync"/>: on real hardware
     /// that steps the attenuator relay, which is audible the instant a measurement is selected, not
@@ -101,6 +259,14 @@ public sealed class MeasurementSaveService(
     {
         var type = await projectRepository.GetTypeAsync(measurementTypeId, ct)
             ?? throw new KeyNotFoundException($"Measurement type {measurementTypeId} not found.");
+
+        // A sweep type's params_json is a ThdVsFrequencyParameters, which would not deserialize as
+        // an FftSpectrumParameters at all (every property there is required), so selecting one used
+        // to be an exception rather than a screen. None of it belongs on the spectrum pipeline
+        // either -- the runner applies its own analysis settings when it starts, and SweepConfigPanel
+        // owns the rest -- so this hands back the live device state and touches nothing.
+        if (type.Kind == ThdVsFrequencyKind)
+            return ToAppliedResponse(BuildParameters());
 
         var parameters = JsonSerializer.Deserialize<FftSpectrumParameters>(type.ParamsJson, SerializerOptions)
             ?? throw new InvalidOperationException($"Measurement type {measurementTypeId} has no usable parameters.");
@@ -121,7 +287,11 @@ public sealed class MeasurementSaveService(
             ProcessRight = parameters.ProcessRight,
         };
 
-        return new MeasurementTypeAppliedResponse(
+        return ToAppliedResponse(parameters);
+    }
+
+    private static MeasurementTypeAppliedResponse ToAppliedResponse(FftSpectrumParameters parameters) =>
+        new(
             DeviceSessionService.ToResponse(parameters.Generator.Left),
             DeviceSessionService.ToResponse(parameters.Generator.Right),
             parameters.Generator.SnapToBin,
@@ -133,7 +303,6 @@ public sealed class MeasurementSaveService(
             parameters.AutoRangeEnabled,
             parameters.SelectedMetrics,
             parameters.ScopePeriods);
-    }
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally

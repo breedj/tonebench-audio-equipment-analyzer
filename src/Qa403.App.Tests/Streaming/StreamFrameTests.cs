@@ -1,3 +1,4 @@
+using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Dsp;
 
@@ -163,5 +164,56 @@ public class StreamFrameTests
     public void Decode_throws_on_frame_shorter_than_header()
     {
         Assert.Throws<ArgumentException>(() => StreamFrame.DecodeHeader(new byte[10]));
+    }
+
+    [Fact]
+    public void SweepPoint_frame_round_trips_previews()
+    {
+        var previewFft = new SweepPreviewSeries([100f, 200f, 300f], [-90f, -80f, -70f], [-85f, -75f, -65f]);
+        var previewScope = new SweepPreviewSeries([0f, 0.0005f, 0.001f], [-1.0f, -0.9f, -1.0f], [1.0f, 0.9f, 1.0f]);
+        var point = new ThdSweepPoint(
+            FreqHz: 1000.0, Channel: 1, MeasuredFreqHz: 999.8, FundamentalDbv: -20.0, GainDb: -0.1,
+            PowerWatt: 0.00125, ThdPercent: 0.05, ThdNPercent: 0.06, SnrDb: 90.0,
+            HarmonicPercent: [0.03, 0.01], D6PlusPercent: 0.002, NoisePercent: 0.001,
+            PreviewFft: previewFft, PreviewScope: previewScope);
+
+        byte[] frame = StreamFrame.EncodeSweepPoint(point, pointIndex: 7);
+        var decoded = StreamFrame.DecodeSweepPoint(frame);
+
+        Assert.Equal(1000.0f, decoded.FreqHz, precision: 3);
+        Assert.Equal(StreamChannel.Right, decoded.Channel);
+        Assert.Equal(7u, decoded.PointIndex);
+        Assert.Equal(2, decoded.HarmonicPercent.Length);
+
+        Assert.NotNull(decoded.PreviewFft);
+        Assert.Equal(previewFft.X, decoded.PreviewFft!.X);
+        Assert.Equal(previewFft.Min, decoded.PreviewFft.Min);
+        Assert.Equal(previewFft.Max, decoded.PreviewFft.Max);
+
+        Assert.NotNull(decoded.PreviewScope);
+        Assert.Equal(previewScope.X, decoded.PreviewScope!.X);
+        Assert.Equal(previewScope.Min, decoded.PreviewScope.Min);
+        Assert.Equal(previewScope.Max, decoded.PreviewScope.Max);
+    }
+
+    /// <summary>
+    /// A missing preview (pipeline not asked to capture one) has to decode as null, not as a
+    /// zero-length-but-present series — the client tells "no preview for this point" apart from
+    /// "an empty one" the same way.
+    /// </summary>
+    [Fact]
+    public void SweepPoint_frame_withNoPreviews_decodesAsNull()
+    {
+        var point = new ThdSweepPoint(
+            FreqHz: 1000.0, Channel: 0, MeasuredFreqHz: 1000.0, FundamentalDbv: -20.0, GainDb: 0.0,
+            PowerWatt: 0.0, ThdPercent: 0.0, ThdNPercent: 0.0, SnrDb: 0.0,
+            HarmonicPercent: [], D6PlusPercent: 0.0, NoisePercent: 0.0,
+            PreviewFft: null, PreviewScope: null);
+
+        byte[] frame = StreamFrame.EncodeSweepPoint(point, pointIndex: 0);
+        var decoded = StreamFrame.DecodeSweepPoint(frame);
+
+        Assert.Null(decoded.PreviewFft);
+        Assert.Null(decoded.PreviewScope);
     }
 }

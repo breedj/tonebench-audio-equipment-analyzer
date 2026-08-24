@@ -59,18 +59,34 @@ public static class MeasurementsEndpoints
             if (detail is null)
                 return Results.NotFound();
 
-            var spectra = new List<StoredSpectrum>();
-            foreach (int channel in detail.AvailableChannels)
+            // A sweep result stores metrics only, no spectrum rows, so it exports through its own
+            // renderer -- one row per frequency. Branching on the stored kind rather than on
+            // "found no spectra" keeps a genuinely empty FFT result a 404 instead of a 0-row CSV.
+            string csv;
+            if (detail.Kind == MeasurementSaveService.ThdVsFrequencyKind)
             {
-                var spectrum = await repo.GetSpectrumAsync(detail.CaptureId, channel, ct);
-                if (spectrum is not null)
-                    spectra.Add(spectrum);
+                var points = await repo.GetSweepPointsAsync(detail.ResultId, ct);
+                if (points.Count == 0)
+                    return Results.NotFound();
+
+                csv = CsvExporter.ExportSweep(detail, points);
+            }
+            else
+            {
+                var spectra = new List<StoredSpectrum>();
+                foreach (int channel in detail.AvailableChannels)
+                {
+                    var spectrum = await repo.GetSpectrumAsync(detail.CaptureId, channel, ct);
+                    if (spectrum is not null)
+                        spectra.Add(spectrum);
+                }
+
+                if (spectra.Count == 0)
+                    return Results.NotFound();
+
+                csv = CsvExporter.Export(detail, spectra);
             }
 
-            if (spectra.Count == 0)
-                return Results.NotFound();
-
-            string csv = CsvExporter.Export(detail, spectra);
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(csv);
             return Results.File(bytes, "text/csv", $"{SanitizeFileName(detail.Name)}.csv");
         });
@@ -104,6 +120,7 @@ public static class MeasurementsEndpoints
 
         return new MeasurementDetailResponse(
             detail.ResultId, detail.MeasurementTypeId, detail.ProjectName, detail.MeasurementTypeName,
+            detail.Kind,
             detail.Name, detail.Notes, detail.TimestampUtc, detail.ParamsJson,
             detail.SampleRateHz, detail.FftSize, detail.Channels,
             detail.InRangeDbv, detail.OutRangeDbv, detail.GenJson, channels.ToArray());
@@ -154,6 +171,8 @@ public sealed record MeasurementSummaryResponse(
 
 public sealed record MeasurementDetailResponse(
     long ResultId, long MeasurementTypeId, string ProjectName, string MeasurementTypeName,
+    /// <summary>The owning type's kind. A 'ThdVsFrequency' result has no ChannelsData -- its points come from /sweep-points instead.</summary>
+    string Kind,
     string Name, string? Notes, DateTimeOffset TimestampUtc, string ParamsJson,
     double SampleRateHz, int FftSize, int Channels,
     double? InRangeDbv, double? OutRangeDbv, string? GenJson,

@@ -222,7 +222,14 @@ function sliceSamples(samples: Float32Array, start: number, count: number): (num
 function update() {
   const ch0 = props.scope[0]
   const ch1 = props.scope[1]
-  if (!ch0 && !ch1) return
+  // Destroying rather than merely returning matters here: a bare return leaves whatever the last
+  // setData() call painted sitting on the canvas, so the chart would keep showing a stale waveform
+  // under the "Waiting for data…" label in the header (see the Clear button in App.vue).
+  if (!ch0 && !ch1) {
+    plot?.destroy()
+    plot = null
+    return
+  }
 
   ensurePlot()
   if (!plot) return

@@ -1,0 +1,11 @@
+<Project>
+
+  <!-- Single source of truth for the app's version. The release workflow overrides this with
+       -p:Version=<tag-without-v> at publish time so a tagged release's assembly version always
+       matches its git tag exactly — see UpdateCheckService, which compares this against GitHub's
+       latest release tag. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+</Project>

@@ -108,4 +108,58 @@ public class SweepPointsTests
 
         return a;
     }
+
+    [Fact]
+    public void SnapAndDedupeAdaptive_EveryToneIsCoherentForItsOwnFftSize()
+    {
+        // The property that makes per-point sizing safe at all. A coherent bin is only coherent for
+        // one N, so a tone snapped against the wrong size leaks straight into the harmonic bins the
+        // sweep is measuring — which would read as distortion that is not there.
+        var desired = SweepPoints.LogPerOctave(20.0, 20000.0, 5);
+        var steps = SweepPoints.SnapAndDedupeAdaptive(
+            desired, 192000.0, hz => SweepResolution.FftSizeFor(hz, 192000.0), 0.98 * 96000.0);
+
+        Assert.NotEmpty(steps);
+        foreach (var step in steps)
+        {
+            var expected = CoherentFrequency.Nearest(step.FrequencyHz, 192000.0, step.FftSize);
+            Assert.Equal(expected.FrequencyHz, step.FrequencyHz, 9);
+        }
+    }
+
+    [Fact]
+    public void SnapAndDedupeAdaptive_ReturnsAscendingDistinctFrequencies()
+    {
+        // De-duplication keys on frequency here rather than bin index, because a bin index means
+        // nothing across different FFT sizes.
+        var desired = SweepPoints.LogPerOctave(20.0, 2000.0, 12);
+        var steps = SweepPoints.SnapAndDedupeAdaptive(
+            desired, 96000.0, hz => SweepResolution.FftSizeFor(hz, 96000.0), 0.98 * 48000.0);
+
+        for (int i = 1; i < steps.Length; i++)
+            Assert.True(steps[i].FrequencyHz > steps[i - 1].FrequencyHz, $"step {i} is not above its predecessor");
+    }
+
+    [Fact]
+    public void SnapAndDedupeAdaptive_DropsEverythingAboveTheCeiling()
+    {
+        var desired = SweepPoints.LogPerOctave(1000.0, 40000.0, 3);
+        const double maxHz = 20000.0;
+        var steps = SweepPoints.SnapAndDedupeAdaptive(
+            desired, 192000.0, hz => SweepResolution.FftSizeFor(hz, 192000.0), maxHz);
+
+        Assert.NotEmpty(steps);
+        Assert.All(steps, step => Assert.True(step.FrequencyHz <= maxHz));
+    }
+
+    [Fact]
+    public void SnapAndDedupeAdaptive_UsesSmallerRecordsAsFrequencyRises()
+    {
+        var desired = SweepPoints.LogPerOctave(50.0, 10000.0, 4);
+        var steps = SweepPoints.SnapAndDedupeAdaptive(
+            desired, 192000.0, hz => SweepResolution.FftSizeFor(hz, 192000.0), 0.98 * 96000.0);
+
+        Assert.True(steps[0].FftSize > steps[^1].FftSize,
+            $"the bottom of the sweep ({steps[0].FftSize}) should use a longer record than the top ({steps[^1].FftSize})");
+    }
 }

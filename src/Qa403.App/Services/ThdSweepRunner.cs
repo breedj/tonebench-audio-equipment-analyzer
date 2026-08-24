@@ -47,6 +47,15 @@ public sealed class ThdSweepRunner(
 
     private const double ProbeFrequencyHz = 1000.0;
 
+    /// <summary>
+    /// Fresh signal between two averages, as a fraction of one record — see
+    /// <see cref="SpectrumPipelineOptions.AverageHopFraction"/>. Welch's 50 %: eight averages cost
+    /// 4.5 records rather than 8, and keep about 90 % of the variance reduction of fully
+    /// independent ones. The sweep sets this and the live view does not, because here an average
+    /// that adds nothing is time added to every single point.
+    /// </summary>
+    private const double AverageHopFraction = 0.5;
+
     /// <summary>Headroom left above the expected level when picking an input range, in dB. From the previous app's <c>DetermineAttenuation</c>.</summary>
     private const double InputRangeHeadroomDb = 5.0;
 
@@ -115,9 +124,16 @@ public sealed class ThdSweepRunner(
             if (Running)
                 throw new InvalidOperationException("A sweep is already running.");
 
-            double maxHz = MaxFrequencyNyquistFraction * request.SampleRateHz / 2.0;
+            double sampleRateHz = request.EffectiveSampleRateHz;
+            double maxHz = MaxFrequencyNyquistFraction * sampleRateHz / 2.0;
             var desired = SweepPoints.LogPerOctave(request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave);
-            var steps = SweepPoints.SnapAndDedupe(desired, request.SampleRateHz, request.FftSize, maxHz);
+
+            // Both paths produce the same shape; the fixed one just reports one size for every
+            // point, so the runner below never has to branch on the mode again.
+            var steps = request.AdaptiveResolution
+                ? SweepPoints.SnapAndDedupeAdaptive(desired, sampleRateHz, request.FftSizeAt, maxHz)
+                : [.. SweepPoints.SnapAndDedupe(desired, sampleRateHz, request.FftSize, maxHz)
+                    .Select(t => new SweepStep(t.FrequencyHz, request.FftSize))];
 
             if (steps.Length == 0)
                 throw new ArgumentOutOfRangeException(nameof(request), $"No sweep frequency falls below {maxHz:0} Hz at this sample rate.");
@@ -173,7 +189,7 @@ public sealed class ThdSweepRunner(
         }
     }
 
-    private async Task RunAsync(ThdSweepRequest request, CoherentTone[] steps, CancellationToken ct)
+    private async Task RunAsync(ThdSweepRequest request, SweepStep[] steps, CancellationToken ct)
     {
         var savedOptions = pipeline.Options;
         bool startedAcquisition = false;
@@ -188,14 +204,17 @@ public sealed class ThdSweepRunner(
 
             if (!session.Acquiring)
             {
-                await session.StartAcquisitionAsync(new AcquisitionConfig(request.SampleRateHz, 2), ct);
+                await session.StartAcquisitionAsync(new AcquisitionConfig(request.EffectiveSampleRateHz, 2), ct);
                 startedAcquisition = true;
             }
 
             double generatorAmpDbv = await ResolveGeneratorAmplitudeAsync(request, ct);
             SetGeneratorAmpDbv(generatorAmpDbv);
 
-            var noiseVrms = await MeasureNoiseFloorAsync(request, ct);
+            // Distinct sizes only -- fixed mode has one, adaptive has one per size band the grid
+            // actually reaches, which is at most a handful.
+            var fftSizes = steps.Select(s => s.FftSize).Distinct().OrderBy(n => n).ToArray();
+            var noiseByFftSize = await MeasureNoiseFloorAsync(request, fftSizes, ct);
 
             SetPhase(ThdSweepPhase.Sweeping);
 
@@ -208,8 +227,9 @@ public sealed class ThdSweepRunner(
                 BroadcastProgress(i, steps.Length, step.FrequencyHz, ThdSweepPhase.Sweeping);
 
                 var snapshots = await CaptureWithStimulusAsync(
-                    ToneConfig(step.FrequencyHz, generatorAmpDbv, request), request, ct);
+                    ToneConfig(step.FrequencyHz, generatorAmpDbv, request), request, step.FftSize, ct);
 
+                var noiseVrms = noiseByFftSize.TryGetValue(step.FftSize, out var forSize) ? forSize : new double[2];
                 foreach (var point in BuildPoints(step.FrequencyHz, generatorAmpDbv, request, snapshots, noiseVrms))
                 {
                     AddPoint(point);
@@ -302,7 +322,14 @@ public sealed class ThdSweepRunner(
             ProcessRight = request.ProcessRight,
             SingleShot = true,
             CapturePreview = true,
-            HarmonicMaxFreqHz = request.SampleRateHz / 2.0,
+            HarmonicMaxFreqHz = request.EffectiveSampleRateHz / 2.0,
+
+            // Averaging paced by fresh signal rather than by the display tick. Without this the
+            // sweep paid AverageCount/TargetFrameRateHz per point for averages that overlapped by
+            // ~93 % at a large FFT size -- see SpectrumPipelineOptions.AverageHopFraction. Welch's
+            // 50 % is the standard trade: eight averages cost 4.5 records instead of 8 and keep
+            // about 90 % of the variance reduction of fully independent ones.
+            AverageHopFraction = AverageHopFraction,
             FundamentalMinSearchHz = Math.Min(current.FundamentalMinSearchHz, request.StartFreqHz / 2.0),
         };
 
@@ -333,7 +360,11 @@ public sealed class ThdSweepRunner(
         // device's autoranging) stands.
         await SetInputRangeForAsync(wantedOutDbv, ct);
 
-        var probeTone = CoherentFrequency.Nearest(ProbeFrequencyHz, request.SampleRateHz, request.FftSize);
+        // The probe is its own capture at its own frequency, so under adaptive resolution it gets
+        // the size 1 kHz would be swept at -- and must be snapped against that same size, or the
+        // probe tone leaks and the level it solves for is read off a smeared fundamental.
+        int probeFftSize = request.FftSizeAt(ProbeFrequencyHz);
+        var probeTone = CoherentFrequency.Nearest(ProbeFrequencyHz, request.EffectiveSampleRateHz, probeFftSize);
         double genDbv = ProbeStartDbv;
 
         for (int i = 0; i < MaxProbeIterations; i++)
@@ -341,7 +372,7 @@ public sealed class ThdSweepRunner(
             ct.ThrowIfCancellationRequested();
 
             var snapshots = await CaptureWithStimulusAsync(
-                ToneConfig(probeTone.FrequencyHz, genDbv, request), request, ct);
+                ToneConfig(probeTone.FrequencyHz, genDbv, request), request, probeFftSize, ct);
 
             double measuredDbv = MeasuredFundamentalDbv(snapshots);
             if (double.IsNegativeInfinity(measuredDbv))
@@ -421,16 +452,37 @@ public sealed class ThdSweepRunner(
     /// size; and it is not the noise term in THD+N, which does integrate the band. If you want
     /// "how many volts of noise are there", read THD+N, not this.
     /// </summary>
-    private async Task<double[]> MeasureNoiseFloorAsync(ThdSweepRequest request, CancellationToken ct)
+    private async Task<Dictionary<int, double[]>> MeasureNoiseFloorAsync(
+        ThdSweepRequest request, IReadOnlyList<int> fftSizes, CancellationToken ct)
     {
-        var noiseVrms = new double[2];
+        var byFftSize = new Dictionary<int, double[]>();
         if (!request.MeasureNoiseFloor)
-            return noiseVrms;
+        {
+            foreach (int fftSize in fftSizes)
+                byFftSize[fftSize] = new double[2];
+            return byFftSize;
+        }
 
         SetPhase(ThdSweepPhase.NoiseFloor);
         BroadcastProgress(0, 0, 0.0, ThdSweepPhase.NoiseFloor);
 
-        var snapshots = await CaptureWithStimulusAsync(GeneratorConfig.Off, request, ct);
+        // One capture per distinct FFT size the sweep will use, not one for the whole sweep. The
+        // figure is a *per-bin* level (see this method's own remarks) and therefore scales with bin
+        // width -- about 3 dB per doubling -- so under adaptive resolution a single measurement
+        // would be wrong by that much for every point analyzed at a different size, and the noise
+        // trace would step at each size boundary. Fixed mode has exactly one size, so this collapses
+        // back to the single capture it always did.
+        foreach (int fftSize in fftSizes)
+            byFftSize[fftSize] = await MeasureNoiseFloorAtAsync(request, fftSize, ct);
+
+        return byFftSize;
+    }
+
+    private async Task<double[]> MeasureNoiseFloorAtAsync(ThdSweepRequest request, int fftSize, CancellationToken ct)
+    {
+        var noiseVrms = new double[2];
+
+        var snapshots = await CaptureWithStimulusAsync(GeneratorConfig.Off, request, fftSize, ct);
         foreach (var snapshot in snapshots)
         {
             int ch = snapshot.Channel == StreamChannel.Left ? 0 : 1;
@@ -454,16 +506,24 @@ public sealed class ThdSweepRunner(
     /// land back inside the very record the flush existed to protect.
     /// </summary>
     private async Task<SpectrumSnapshot[]> CaptureWithStimulusAsync(
-        GeneratorConfig generator, ThdSweepRequest request, CancellationToken ct)
+        GeneratorConfig generator, ThdSweepRequest request, int fftSize, CancellationToken ct)
     {
+        // Strictly before ConfigureGeneratorAsync, which is what flushes. Changing FftSize makes the
+        // acquisition thread allocate replacement ring buffers, and doing that *after* the flush
+        // would discard the flush's own state -- the buffers it emptied are not the buffers the next
+        // record fills. (The stimulus-latency discard survives either order now, because
+        // EnsureRingBuffers carries it across, but the emptying itself still has to come last.)
+        if (pipeline.Options.FftSize != fftSize)
+            pipeline.Options = pipeline.Options with { FftSize = fftSize };
+
         await session.ConfigureGeneratorAsync(generator, ct);
-        await WaitForCaptureAsync(request, ct);
+        await WaitForCaptureAsync(request, fftSize, ct);
         return pipeline.LatestSnapshots();
     }
 
-    private async Task WaitForCaptureAsync(ThdSweepRequest request, CancellationToken ct)
+    private async Task WaitForCaptureAsync(ThdSweepRequest request, int fftSize, CancellationToken ct)
     {
-        var timeout = CaptureTimeout(request);
+        var timeout = CaptureTimeout(request, fftSize);
         long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
 
         while (!pipeline.SingleShotComplete)
@@ -485,15 +545,21 @@ public sealed class ThdSweepRunner(
     /// the discarded in-flight audio), plus one pipeline tick per average, times three for slack.
     /// Generous on purpose — this exists to notice a wedged device, not to police timing.
     /// </summary>
-    private TimeSpan CaptureTimeout(ThdSweepRequest request)
+    private TimeSpan CaptureTimeout(ThdSweepRequest request, int fftSize)
     {
         // The stimulus latency the flush discards is ~65 ms at every sample rate (see
         // Qa40xUsbDevice.StimulusLatencyFrames); 100 ms is a deliberately loose stand-in rather than
         // widening DeviceSessionService's surface for a timeout estimate.
         const double StimulusLatencySeconds = 0.1;
 
-        double fillSeconds = (request.FftSize / request.SampleRateHz) + StimulusLatencySeconds;
-        double averageSeconds = request.AverageCount / (double)Math.Max(1, pipeline.Options.TargetFrameRateHz);
+        double recordSeconds = fftSize / request.EffectiveSampleRateHz;
+        double fillSeconds = recordSeconds + StimulusLatencySeconds;
+
+        // Averages are now paced by fresh signal, not by the display tick, so the budget has to be
+        // too: AverageCount averages at AverageHopFraction cost (1 + (n-1)*hop) records. Timing this
+        // against the old tick-rate figure would abort a large-FFT point long before it could
+        // legitimately finish.
+        double averageSeconds = (1.0 + ((Math.Max(1, request.AverageCount) - 1) * AverageHopFraction)) * recordSeconds;
         return TimeSpan.FromSeconds(((fillSeconds + averageSeconds) * 3.0) + 2.0);
     }
 

@@ -20,6 +20,39 @@ internal sealed class SampleRingBuffer(int capacity)
     public bool IsFull => Interlocked.Read(ref _writeIndex) >= Capacity;
 
     /// <summary>
+    /// Samples appended since the last <see cref="Reset"/>, counting only those that actually
+    /// landed (the ones dropped to drain the stimulus latency do not advance this).
+    ///
+    /// <para>Monotonic within a reset epoch, which is what makes it usable as the clock for
+    /// overlap-controlled averaging: two analyses whose <c>SamplesWritten</c> differ by at least
+    /// <see cref="Capacity"/> share no samples at all, and by <c>Capacity/2</c> share exactly half.
+    /// See <c>SpectrumPipelineOptions.AverageHopFraction</c> — without a counter like this the
+    /// pipeline can only average on its display tick, whose relationship to the record length is
+    /// accidental.</para>
+    /// </summary>
+    public long SamplesWritten => Interlocked.Read(ref _writeIndex);
+
+    /// <summary>
+    /// Stimulus-latency samples still to be dropped before anything lands in the buffer — see
+    /// <see cref="Reset"/>'s <c>discardSamples</c>.
+    ///
+    /// <para>Exposed so a ring-buffer <i>resize</i> can carry the pending discard onto the
+    /// replacement buffer. An FFT-size change allocates fresh buffers on the acquisition thread
+    /// (<c>SpectrumPipeline.EnsureRingBuffers</c>), and a fresh buffer's discard counter is zero —
+    /// so a sweep that changes FFT size and stimulus together would otherwise lose the discard
+    /// booked by the flush and refill its first record with pre-change audio, which is the exact
+    /// failure the discard exists to prevent.</para>
+    /// </summary>
+    public int DiscardRemaining
+    {
+        get
+        {
+            lock (_lock)
+                return _discardRemaining;
+        }
+    }
+
+    /// <summary>
     /// Discards everything buffered, so <see cref="IsFull"/> goes false until a whole new window
     /// of samples has arrived.
     ///

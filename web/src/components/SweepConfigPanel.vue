@@ -9,7 +9,15 @@ import type {
 } from '../api/client'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
-import { estimateDurationSeconds, estimatePointCount, formatDuration } from '../sweep/points'
+import {
+  adaptiveFftBounds,
+  adaptiveFftSize,
+  adaptiveSampleRateHz,
+  estimateAdaptiveDurationSeconds,
+  estimateDurationSeconds,
+  formatDuration,
+  logPerOctave,
+} from '../sweep/points'
 
 /**
  * Everything a THD-vs-frequency sweep needs, staged locally and only sent on Run — the same
@@ -78,6 +86,13 @@ const form = reactive({
   processRight: false,
   averageCount: 4,
   measureNoiseFloor: true,
+  /**
+   * Size the FFT per point and pick the sample rate from the sweep range, rather than holding the
+   * fixed preset below across every point — see SweepResolution server-side. On by default: a fixed
+   * size is chosen for the bottom of the sweep and then paid at every point above it, which is most
+   * of them.
+   */
+  adaptiveResolution: true,
 })
 
 /**
@@ -117,6 +132,9 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.processLeft === 'boolean') form.processLeft = stored.processLeft
   if (typeof stored.processRight === 'boolean') form.processRight = stored.processRight
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
+  // Absent in sweeps saved before adaptive resolution existed; those ran fixed, so that is what
+  // they must reload as rather than silently changing resolution on reopen.
+  form.adaptiveResolution = stored.adaptiveResolution === true
   if (typeof stored.measureNoiseFloor === 'boolean') form.measureNoiseFloor = stored.measureNoiseFloor
 
   // The form writes land in this tick; the watcher runs on the next one, so the flag has to
@@ -146,21 +164,66 @@ watch(
 
 const isPowerMode = computed(() => form.levelMode === 'OutputPower')
 
-const pointCount = computed(() =>
-  estimatePointCount(form.startFreqHz, form.endFreqHz, form.stepsPerOctave, SWEEP_SAMPLE_RATE_HZ),
+/**
+ * Turning adaptive resolution off means asking for the fixed reference sweep, and 8 averages is
+ * part of that preset — at the fixed 131072 points they are what buys back the dynamic range the
+ * adaptive mode gets from sizing each record to its own tone. Only forced on the transition, so the
+ * count stays freely editable afterwards in either mode.
+ */
+watch(
+  () => form.adaptiveResolution,
+  (adaptive, wasAdaptive) => {
+    if (wasAdaptive && !adaptive) form.averageCount = 8
+  },
 )
+
+/**
+ * What the sweep will actually analyze at. Under adaptive resolution the sample rate falls out of
+ * the sweep's top end (enough Nyquist for D2..D5) and the FFT size varies per point; the fixed
+ * preset is the reference both fall back to. Mirrors ThdSweepRequest.EffectiveSampleRateHz.
+ */
+const effectiveSampleRateHz = computed(() =>
+  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz) : SWEEP_SAMPLE_RATE_HZ,
+)
+
+/** The pre-snap log grid, shared by the point count and the adaptive duration estimate. */
+const gridHz = computed(() =>
+  logPerOctave(form.startFreqHz, form.endFreqHz, form.stepsPerOctave).filter(
+    (hz) => hz > 0 && hz <= 0.98 * (effectiveSampleRateHz.value / 2),
+  ),
+)
+
+const pointCount = computed(() => gridHz.value.length)
+
+/** FFT size at the two ends of the sweep — the range the readout quotes for adaptive mode. */
+const adaptiveFftRange = computed(() => {
+  if (gridHz.value.length === 0) return null
+  const sizes = gridHz.value.map((hz) => adaptiveFftSize(hz, effectiveSampleRateHz.value))
+  return { max: Math.max(...sizes), min: Math.min(...sizes) }
+})
 
 const durationLabel = computed(() =>
   formatDuration(
-    estimateDurationSeconds(pointCount.value, SWEEP_FFT_SIZE, SWEEP_SAMPLE_RATE_HZ, form.averageCount),
+    form.adaptiveResolution
+      ? estimateAdaptiveDurationSeconds(gridHz.value, effectiveSampleRateHz.value, form.averageCount)
+      : estimateDurationSeconds(pointCount.value, SWEEP_FFT_SIZE, SWEEP_SAMPLE_RATE_HZ, form.averageCount),
   ),
 )
 
 /** The highest frequency the sweep can actually reach — points above it are dropped server-side. */
-const maxFreqHz = computed(() => Math.round(0.98 * (SWEEP_SAMPLE_RATE_HZ / 2)))
+const maxFreqHz = computed(() => Math.round(0.98 * (effectiveSampleRateHz.value / 2)))
 
-/** The lowest frequency this resolution can carry a harmonic analysis at — matches the server's rejection. */
-const minFreqHz = computed(() => MIN_FUNDAMENTAL_BINS * SWEEP_BIN_SIZE_HZ)
+/**
+ * The lowest frequency this resolution can carry a harmonic analysis at — matches the server's
+ * rejection. Adaptive mode reaches for the largest permitted FFT at the bottom of a sweep, so the
+ * floor is that size's bin width rather than the fixed preset's.
+ */
+const minFreqHz = computed(() => {
+  const binSizeHz = form.adaptiveResolution
+    ? effectiveSampleRateHz.value / adaptiveFftBounds(effectiveSampleRateHz.value).ceiling
+    : SWEEP_BIN_SIZE_HZ
+  return MIN_FUNDAMENTAL_BINS * binSizeHz
+})
 
 const truncated = computed(() => form.endFreqHz > maxFreqHz.value)
 
@@ -200,6 +263,7 @@ function buildParamsJson(): string {
     averageCount: form.averageCount,
     sampleRateHz: SWEEP_SAMPLE_RATE_HZ,
     measureNoiseFloor: form.measureNoiseFloor,
+    adaptiveResolution: form.adaptiveResolution,
     generatorAmpDbv: 0,
   }
   return JSON.stringify(parameters)
@@ -222,8 +286,11 @@ function run() {
     fftSize: SWEEP_FFT_SIZE,
     window: SWEEP_WINDOW,
     averageCount: form.averageCount,
+    // Sent as the fixed preset regardless; the server ignores both under adaptiveResolution and
+    // derives them per point instead (ThdSweepRequest.EffectiveSampleRateHz / FftSizeAt).
     sampleRateHz: SWEEP_SAMPLE_RATE_HZ,
     measureNoiseFloor: form.measureNoiseFloor,
+    adaptiveResolution: form.adaptiveResolution,
   })
 }
 </script>
@@ -350,7 +417,28 @@ function run() {
       </label>
     </div>
 
+    <label
+      class="flex items-center gap-1.5 text-xs"
+      title="Sizes the FFT per point instead of holding one size across the whole sweep, and picks the sample rate from the top of the frequency range. A fixed size is chosen for the lowest point and then paid at every point above it, where the record is far longer than the measurement needs — so this mostly speeds up the top of a sweep. Turn it off for a fixed 192 kHz / 131072-point reference: slower, but the same resolution and noise floor at every frequency."
+    >
+      <input v-model="form.adaptiveResolution" type="checkbox" :disabled="running" />
+      Adaptive resolution
+    </label>
+
     <p
+      v-if="form.adaptiveResolution && adaptiveFftRange"
+      class="text-xs text-neutral-500 dark:text-neutral-400"
+      title="The FFT size varies per point so each record holds a similar number of cycles of the tone. The largest size is used at the bottom of the sweep, the smallest at the top."
+    >
+      Analysis: {{ effectiveSampleRateHz / 1000 }} kHz ·
+      {{ adaptiveFftRange.max }}–{{ adaptiveFftRange.min }} points ·
+      {{ (effectiveSampleRateHz / adaptiveFftRange.max).toFixed(3) }}–{{
+        (effectiveSampleRateHz / adaptiveFftRange.min).toFixed(2)
+      }}
+      Hz per bin
+    </p>
+    <p
+      v-else
       class="text-xs text-neutral-500 dark:text-neutral-400"
       title="Fixed for a sweep: the bottom of the frequency range needs this resolution for the harmonic analysis to separate a harmonic from its own fundamental."
     >

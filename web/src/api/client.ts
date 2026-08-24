@@ -394,6 +394,12 @@ export interface ThdSweepStartRequest {
   averageCount: number
   sampleRateHz: number
   measureNoiseFloor: boolean
+  /**
+   * Size the FFT per point and pick the sample rate from the sweep's own range, instead of holding
+   * both fixed across every point — see ThdSweepRequest.AdaptiveResolution server-side. When on,
+   * `fftSize` and `sampleRateHz` above are ignored.
+   */
+  adaptiveResolution: boolean
 }
 
 /**

@@ -26,7 +26,7 @@ public static class SweepEndpoints
                 levelMode, request.LevelValue, levelUnit, request.LoadOhms,
                 request.ProcessLeft, request.ProcessRight,
                 request.FftSize, window, request.AverageCount,
-                request.SampleRateHz, request.MeasureNoiseFloor);
+                request.SampleRateHz, request.MeasureNoiseFloor, request.AdaptiveResolution);
 
             try
             {
@@ -98,7 +98,9 @@ public sealed record ThdSweepStartRequest(
     string? Window,
     int AverageCount,
     double SampleRateHz,
-    bool MeasureNoiseFloor);
+    bool MeasureNoiseFloor,
+    /// <summary>Size the FFT per point and pick the sample rate from the sweep range — see <see cref="ThdSweepRequest.AdaptiveResolution"/>. Defaults off so an older client keeps the fixed behaviour.</summary>
+    bool AdaptiveResolution = false);
 
 public sealed record SaveSweepRequest(long MeasurementTypeId, string Name, string? Notes);
 

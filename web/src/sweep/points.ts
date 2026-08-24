@@ -47,21 +47,120 @@ export function estimatePointCount(
 }
 
 /**
- * Roughly how long a sweep will take, in seconds. Per point: refill the FFT window after the flush,
- * then one pipeline tick per average. Deliberately an estimate for a "this will take about N
- * minutes" hint — it does not model USB latency or the level-probe pass.
+ * Mirrors Qa403.Dsp.SweepResolution — see there for why bin index and cycle count are the same
+ * number, and why that means one constant sizes the FFT. Duplicated for the same reason the
+ * frequency grid is: the panel has to answer "how long will this take?" while the user is still
+ * typing, before anything has reached the server.
+ */
+export const ADAPTIVE_TARGET_BINS = 64
+export const ADAPTIVE_MAX_FFT_SIZE = 131072
+const ADAPTIVE_MIN_FFT_SIZE = 1024
+const ADAPTIVE_MAX_BIN_WIDTH_HZ = 46.875
+const ADAPTIVE_MAX_RECORD_SECONDS = 131072 / 192000
+const ADAPTIVE_HARMONIC_ORDER = 5
+const SUPPORTED_SAMPLE_RATES_HZ = [48000, 96000, 192000]
+
+function powerOfTwoAtLeast(value: number): number {
+  let n = 1
+  while (n < value && n < ADAPTIVE_MAX_FFT_SIZE) n *= 2
+  return n
+}
+
+function powerOfTwoAtMost(value: number): number {
+  let n = 1
+  while (n * 2 <= value && n < ADAPTIVE_MAX_FFT_SIZE) n *= 2
+  return n
+}
+
+/**
+ * The FFT sizes available at a given sample rate — a bin-width floor and a record-length ceiling,
+ * both of which mean the same thing at every rate. See SweepResolution.BoundsFor.
+ */
+export function adaptiveFftBounds(sampleRateHz: number): { floor: number; ceiling: number } {
+  const ceiling = Math.min(
+    Math.max(powerOfTwoAtMost(ADAPTIVE_MAX_RECORD_SECONDS * sampleRateHz), ADAPTIVE_MIN_FFT_SIZE),
+    ADAPTIVE_MAX_FFT_SIZE,
+  )
+  const rawFloor = Math.min(
+    Math.max(powerOfTwoAtLeast(sampleRateHz / ADAPTIVE_MAX_BIN_WIDTH_HZ), ADAPTIVE_MIN_FFT_SIZE),
+    ADAPTIVE_MAX_FFT_SIZE,
+  )
+  return { floor: Math.min(rawFloor, ceiling), ceiling }
+}
+
+/** The FFT size a point at `freqHz` is analyzed at under adaptive resolution. */
+export function adaptiveFftSize(freqHz: number, sampleRateHz: number): number {
+  const { floor, ceiling } = adaptiveFftBounds(sampleRateHz)
+  if (!(freqHz > 0)) return ceiling
+  const n = powerOfTwoAtLeast((ADAPTIVE_TARGET_BINS * sampleRateHz) / freqHz)
+  return Math.min(Math.max(n, floor), ceiling)
+}
+
+/** The sample rate an adaptive sweep ending at `endFreqHz` will run at. */
+export function adaptiveSampleRateHz(endFreqHz: number): number {
+  const highest = SUPPORTED_SAMPLE_RATES_HZ[SUPPORTED_SAMPLE_RATES_HZ.length - 1]
+  if (!(endFreqHz > 0)) return highest
+  const needed = ADAPTIVE_HARMONIC_ORDER * endFreqHz
+  const usable = SUPPORTED_SAMPLE_RATES_HZ.filter((rate) => 0.98 * (rate / 2) >= needed)
+  return usable.length > 0 ? Math.min(...usable) : highest
+}
+
+/**
+ * Roughly how long a sweep will take, in seconds.
+ *
+ * Per point: refill the FFT window after the flush (one whole record), then the averages. Averages
+ * are paced by fresh signal rather than by the display tick — see
+ * SpectrumPipelineOptions.AverageHopFraction — so N of them cost `1 + (N-1)*hop` records rather
+ * than N/frameRate seconds. That is the term the old estimate got wrong in both directions: it
+ * under-counted a large FFT (whose averages overlapped almost completely and bought nothing) and
+ * over-counted a small one.
+ *
+ * Deliberately still an estimate for a "this will take about N minutes" hint — it does not model
+ * the level-probe pass or the per-size noise-floor captures.
  */
 export function estimateDurationSeconds(
   pointCount: number,
   fftSize: number,
   sampleRateHz: number,
   averageCount: number,
-  frameRateHz = 20,
+  hopFraction = 0.5,
+  stimulusLatencySeconds = 0.065,
 ): number {
   if (!(pointCount > 0) || !(sampleRateHz > 0)) return 0
-  const fillSeconds = fftSize / sampleRateHz
-  const averageSeconds = Math.max(1, averageCount) / frameRateHz
-  return pointCount * (fillSeconds + averageSeconds)
+  const recordSeconds = fftSize / sampleRateHz
+  return pointCount * perPointSeconds(recordSeconds, averageCount, hopFraction, stimulusLatencySeconds)
+}
+
+/**
+ * The adaptive counterpart: every point carries its own record length, so the total is a sum over
+ * the grid rather than one per-point figure times a count. The frequencies are the pre-snap log
+ * grid, which is close enough — snapping moves a point by at most half a bin.
+ */
+export function estimateAdaptiveDurationSeconds(
+  frequenciesHz: number[],
+  sampleRateHz: number,
+  averageCount: number,
+  hopFraction = 0.5,
+  stimulusLatencySeconds = 0.065,
+): number {
+  if (!(sampleRateHz > 0)) return 0
+  let total = 0
+  for (const freqHz of frequenciesHz) {
+    const recordSeconds = adaptiveFftSize(freqHz, sampleRateHz) / sampleRateHz
+    total += perPointSeconds(recordSeconds, averageCount, hopFraction, stimulusLatencySeconds)
+  }
+  return total
+}
+
+function perPointSeconds(
+  recordSeconds: number,
+  averageCount: number,
+  hopFraction: number,
+  stimulusLatencySeconds: number,
+): number {
+  const averages = Math.max(1, averageCount)
+  const averageSeconds = (1 + (averages - 1) * hopFraction) * recordSeconds
+  return recordSeconds + averageSeconds + stimulusLatencySeconds
 }
 
 /** "2 m 30 s" / "45 s" — for the config panel's duration hint. */

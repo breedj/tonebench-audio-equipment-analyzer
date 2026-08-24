@@ -66,7 +66,19 @@ public sealed record ThdSweepRequest(
     WindowType Window,
     int AverageCount,
     double SampleRateHz,
-    bool MeasureNoiseFloor)
+    bool MeasureNoiseFloor,
+    /// <summary>
+    /// Size the FFT per point and pick the sample rate from the sweep's own range, instead of
+    /// holding <see cref="FftSize"/> and <see cref="SampleRateHz"/> fixed across every point.
+    ///
+    /// <para>A fixed size is chosen for the bottom of the sweep and then paid at every point above
+    /// it, where the record is orders of magnitude longer than the measurement needs — see
+    /// <see cref="SweepResolution"/>. When this is on, <see cref="FftSize"/> and
+    /// <see cref="SampleRateHz"/> are ignored in favour of
+    /// <see cref="EffectiveSampleRateHz"/>/<see cref="FftSizeAt"/>; when it is off both are used
+    /// exactly as given, which is what makes the fixed mode a reproducible reference.</para>
+    /// </summary>
+    bool AdaptiveResolution = false)
 {
     /// <summary>The level expressed in dBV. Watts are converted through the load: V = sqrt(P·R).</summary>
     public double LevelDbv => LevelUnit switch
@@ -94,8 +106,26 @@ public sealed record ThdSweepRequest(
     /// </summary>
     public const int MinFundamentalBins = 5;
 
-    /// <summary>Analysis resolution, Hz per bin.</summary>
+    /// <summary>Analysis resolution at the fixed <see cref="FftSize"/>, Hz per bin. See <see cref="BinSizeHzAt"/> for the adaptive-aware value.</summary>
     public double BinSizeHz => SampleRateHz / FftSize;
+
+    /// <summary>
+    /// The sample rate this sweep will actually run at: the requested one, or — under
+    /// <see cref="AdaptiveResolution"/> — the lowest supported rate that still keeps
+    /// <see cref="SweepResolution.HarmonicHeadroomOrder"/> harmonics of <see cref="EndFreqHz"/> in
+    /// band. Note this does not change how long the sweep takes (see
+    /// <see cref="SweepResolution.SampleRateFor"/>); it changes how many harmonics are measurable
+    /// at the top of it, and how much USB and FFT load the sweep costs.
+    /// </summary>
+    public double EffectiveSampleRateHz =>
+        AdaptiveResolution ? SweepResolution.SampleRateFor(EndFreqHz) : SampleRateHz;
+
+    /// <summary>The FFT size a given sweep point is analyzed at — constant unless <see cref="AdaptiveResolution"/> is on.</summary>
+    public int FftSizeAt(double freqHz) =>
+        AdaptiveResolution ? SweepResolution.FftSizeFor(freqHz, EffectiveSampleRateHz) : FftSize;
+
+    /// <summary>Analysis resolution at a given sweep point, Hz per bin.</summary>
+    public double BinSizeHzAt(double freqHz) => EffectiveSampleRateHz / FftSizeAt(freqHz);
 
     /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> for anything the runner cannot act on.</summary>
     public void Validate()
@@ -116,18 +146,30 @@ public sealed record ThdSweepRequest(
             throw new ArgumentOutOfRangeException(nameof(ProcessLeft), "At least one channel must be measured.");
         if (LevelMode != ThdSweepLevelMode.GeneratorVoltage && LoadOhms <= 0.0)
             throw new ArgumentOutOfRangeException(nameof(LoadOhms), LoadOhms, "An output-referred level needs a load above 0 Ω.");
-        if (StartFreqHz < MinFundamentalBins * BinSizeHz)
+        // Judged against the size and rate the sweep will actually use at its lowest point, which
+        // under AdaptiveResolution is neither of the requested ones. The adaptive sizer already
+        // reaches for the largest permitted FFT down there, so this can still fail -- it just means
+        // the start frequency is genuinely too low to analyze at any size the sweep will use.
+        double effectiveSampleRateHz = EffectiveSampleRateHz;
+        int effectiveFftSize = FftSizeAt(StartFreqHz);
+        double effectiveBinSizeHz = effectiveSampleRateHz / effectiveFftSize;
+
+        if (StartFreqHz < MinFundamentalBins * effectiveBinSizeHz)
         {
             int neededFftSize = 1;
-            while (neededFftSize < FftSize || StartFreqHz < MinFundamentalBins * (SampleRateHz / neededFftSize))
+            while (neededFftSize < effectiveFftSize || StartFreqHz < MinFundamentalBins * (effectiveSampleRateHz / neededFftSize))
                 neededFftSize *= 2;
+
+            string sizeAdvice = AdaptiveResolution
+                ? $"Start the sweep above {MinFundamentalBins * effectiveBinSizeHz:0.#} Hz, or turn off adaptive resolution and pick an FFT size of {neededFftSize} or more."
+                : $"Use an FFT size of {neededFftSize} or more, or start the sweep above {MinFundamentalBins * effectiveBinSizeHz:0.#} Hz.";
 
             throw new ArgumentOutOfRangeException(
                 nameof(StartFreqHz),
                 StartFreqHz,
-                $"{StartFreqHz:0.##} Hz is only {StartFreqHz / BinSizeHz:0.#} bins up at {SampleRateHz / 1000:0.##} kHz / {FftSize} " +
-                $"({BinSizeHz:0.###} Hz per bin); the harmonic analysis needs at least {MinFundamentalBins}. " +
-                $"Use an FFT size of {neededFftSize} or more, or start the sweep above {MinFundamentalBins * BinSizeHz:0.#} Hz.");
+                $"{StartFreqHz:0.##} Hz is only {StartFreqHz / effectiveBinSizeHz:0.#} bins up at {effectiveSampleRateHz / 1000:0.##} kHz / {effectiveFftSize} " +
+                $"({effectiveBinSizeHz:0.###} Hz per bin); the harmonic analysis needs at least {MinFundamentalBins}. " +
+                sizeAdvice);
         }
 
         if (LevelUnit == ThdSweepLevelUnit.Watt && LevelMode != ThdSweepLevelMode.OutputPower)

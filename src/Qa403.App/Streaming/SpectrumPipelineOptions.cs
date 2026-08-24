@@ -16,6 +16,28 @@ public sealed record SpectrumPipelineOptions
     public int AverageCount { get; init; } = 8;
 
     /// <summary>
+    /// Fresh signal, as a fraction of one FFT record, that must arrive between two accepted
+    /// averages. 0 keeps the historical behaviour (average on every display tick); 0.5 is textbook
+    /// Welch 50 % overlap; 1.0 makes consecutive averages share no samples at all.
+    ///
+    /// <para><b>Why this exists.</b> Averaging was paced by <see cref="TargetFrameRateHz"/>, which
+    /// has no relationship to the record length, so how much an "average" actually added was an
+    /// accident of the FFT size. At 131072 points and 192 kHz the record is 683 ms while ticks come
+    /// every 50 ms, so eight consecutive averages shared ~93 % of their samples and spanned about
+    /// 1.5 records of independent signal — roughly a sqrt(1.5) noise improvement for eight averages'
+    /// worth of waiting. Below about 9600 points the opposite happened: the record was shorter than
+    /// the tick, so samples between records were never analyzed at all.</para>
+    ///
+    /// <para>Left at 0 by default so the live spectrum view keeps updating at the display rate,
+    /// where responsiveness matters more than the statistics of the average. The sweep runner sets
+    /// it, because there an average that adds nothing is time added to every point.</para>
+    ///
+    /// <para>Cost scales the way you would expect: N averages at hop h take
+    /// <c>(1 + (N-1)·h)</c> record lengths. Eight averages are 4.5 records at 0.5, and 8 at 1.0.</para>
+    /// </summary>
+    public double AverageHopFraction { get; init; } = 0.0;
+
+    /// <summary>
     /// When true, each channel stops updating once it reaches <see cref="AverageCount"/> averages
     /// (or, with <see cref="Averaging"/> set to <see cref="AveragingMode.Off"/>, after its first
     /// captured spectrum) — the pipeline holds that final frame instead of continuing to reprocess

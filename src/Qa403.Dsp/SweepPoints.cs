@@ -86,4 +86,53 @@ public static class SweepPoints
         tones.Sort(static (a, b) => a.Bin.CompareTo(b.Bin));
         return [.. tones];
     }
+
+    /// <summary>
+    /// The adaptive-resolution counterpart of <see cref="SnapAndDedupe"/>: every point is snapped
+    /// against <i>its own</i> FFT size, chosen by <paramref name="fftSizeFor"/>, and carries that
+    /// size along for the runner to program before it plays the tone.
+    ///
+    /// <para>Two things differ from the fixed-size version, both forced by the per-point size.
+    /// Snapping has to happen against the size that point will actually be analyzed at, because a
+    /// coherent bin is only coherent for one N — a frequency snapped for 131072 points generally is
+    /// not coherent at 16384 and would leak straight into the harmonic bins the sweep is measuring.
+    /// And de-duplication can no longer key on the bin index, which means nothing across different
+    /// N (bin 40 is 58.6 Hz at 131072 and 469 Hz at 16384); it keys on the snapped frequency
+    /// instead, which is the thing that was actually being de-duplicated all along.</para>
+    /// </summary>
+    /// <param name="fftSizeFor">
+    /// The FFT size to analyze a given desired frequency at. Called with the pre-snap frequency:
+    /// snapping moves a tone by at most half a bin, far too little to change which size band it
+    /// falls in, and this way the size is settled before the snap that depends on it.
+    /// </param>
+    public static SweepStep[] SnapAndDedupeAdaptive(
+        ReadOnlySpan<double> desiredHz, double sampleRateHz, Func<double, int> fftSizeFor, double maxHz)
+    {
+        ArgumentNullException.ThrowIfNull(fftSizeFor);
+
+        var seenHz = new HashSet<double>();
+        var steps = new List<SweepStep>(desiredHz.Length);
+
+        foreach (double hz in desiredHz)
+        {
+            if (hz <= 0.0 || hz > maxHz)
+                continue;
+
+            int fftSize = fftSizeFor(hz);
+            var tone = CoherentFrequency.Nearest(hz, sampleRateHz, fftSize);
+
+            // Nearest() can round *up* past maxHz — re-check after snapping, same as SnapAndDedupe.
+            if (tone.FrequencyHz > maxHz)
+                continue;
+
+            if (seenHz.Add(tone.FrequencyHz))
+                steps.Add(new SweepStep(tone.FrequencyHz, fftSize));
+        }
+
+        steps.Sort(static (a, b) => a.FrequencyHz.CompareTo(b.FrequencyHz));
+        return [.. steps];
+    }
 }
+
+/// <summary>One sweep point: the coherent frequency to play, and the FFT size it is coherent for.</summary>
+public readonly record struct SweepStep(double FrequencyHz, int FftSize);

@@ -46,6 +46,12 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     // resume immediately held from a previous capture rather than starting a fresh window.
     private readonly bool[] _singleShotHeld = new bool[MaxChannels];
 
+    // SampleRingBuffer.SamplesWritten as it stood when each channel last committed an average, or 0
+    // for "no average yet in this epoch". Drives SpectrumPipelineOptions.AverageHopFraction; see
+    // HasFreshSignalForAverage. Reset by Flush and by a ring-buffer resize, both of which restart
+    // the counter it is compared against.
+    private readonly long[] _lastAverageWritten = new long[MaxChannels];
+
     /// <summary>
     /// Bumped by every <see cref="Flush"/>. A tick reads it before it starts and again before it
     /// commits anything, and throws its work away if the two differ — see <see cref="ProcessChannel"/>.
@@ -124,6 +130,9 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             _ampAveragers[ch].Reset();
             _psdAveragers[ch].Reset();
             Volatile.Write(ref _singleShotHeld[ch], false);
+            // Reset() restarts SamplesWritten at 0, so a value carried over from the previous epoch
+            // would sit above it and stall the hop gate permanently.
+            Volatile.Write(ref _lastAverageWritten[ch], 0);
         }
 
         lock (_retainedLock)
@@ -268,9 +277,25 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             if (_ringBufferFftSize == fftSize)
                 return;
 
+            var previous = _ringBuffers;
             var next = new SampleRingBuffer?[MaxChannels];
             for (int ch = 0; ch < MaxChannels; ch++)
+            {
                 next[ch] = new SampleRingBuffer(fftSize);
+
+                // A fresh buffer starts with no discard booked, so a caller that changed FFT size
+                // and stimulus together would lose the stimulus-latency discard the flush had just
+                // set and refill this buffer with pre-change audio -- the very step the discard
+                // exists to keep out of the first record. Carrying it across makes the resize safe
+                // whichever order the two land in, which matters because the resize happens here on
+                // the acquisition thread while the flush happens on the caller's.
+                int pendingDiscard = previous[ch]?.DiscardRemaining ?? 0;
+                if (pendingDiscard > 0)
+                    next[ch]!.Reset(pendingDiscard);
+
+                // SamplesWritten restarts at 0 on the replacement buffer -- see Flush.
+                Volatile.Write(ref _lastAverageWritten[ch], 0);
+            }
 
             _ringBuffers = next;
             _ringBufferFftSize = fftSize;
@@ -324,8 +349,35 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             if (rb is null || rb.Capacity != options.FftSize || !rb.IsFull)
                 continue;
 
+            // Checked here rather than inside ProcessChannel so a tick that has nothing new to add
+            // skips the FFT entirely instead of computing one and throwing it away.
+            if (!HasFreshSignalForAverage(ch, rb, options))
+                continue;
+
             ProcessChannel(ch, rb, options);
         }
+    }
+
+    /// <summary>
+    /// Whether enough new signal has arrived since this channel's last committed average to justify
+    /// another one, per <see cref="SpectrumPipelineOptions.AverageHopFraction"/>.
+    ///
+    /// <para>Always true at the historical default of 0, and always true for the first analysis of
+    /// an epoch — <c>IsFull</c> has already established that a complete, post-flush record exists,
+    /// and there is no previous average for it to overlap with.</para>
+    /// </summary>
+    private bool HasFreshSignalForAverage(int channelIndex, SampleRingBuffer rb, SpectrumPipelineOptions options)
+    {
+        double hop = options.AverageHopFraction;
+        if (hop <= 0.0)
+            return true;
+
+        long last = Volatile.Read(ref _lastAverageWritten[channelIndex]);
+        if (last <= 0)
+            return true;
+
+        long needed = (long)Math.Ceiling(options.FftSize * Math.Min(hop, 1.0));
+        return rb.SamplesWritten - last >= needed;
     }
 
     private void ProcessChannel(int channelIndex, SampleRingBuffer rb, SpectrumPipelineOptions options)
@@ -345,6 +397,10 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         double[] psdBuf = ArrayPool<double>.Shared.Rent(specLen);
         try
         {
+            // Read alongside the samples it describes, not after the FFT: more samples land while
+            // this tick runs, and crediting the average with those would let the next one through
+            // early by however long the FFT took.
+            long writtenAtSnapshot = rb.SamplesWritten;
             rb.SnapshotLatest(timeBuf.AsSpan(0, n));
 
             var window = Window.Get(options.Window, n);
@@ -391,6 +447,11 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             // fresh record that replaces it.
             if (Interlocked.Read(ref _flushGeneration) != generation)
                 return;
+
+            // Past the discard check, so this record is genuinely part of the average -- advance the
+            // hop clock only now, or a dropped record would push the next accepted one a full hop
+            // further out for no reason.
+            Volatile.Write(ref _lastAverageWritten[channelIndex], writtenAtSnapshot);
 
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
             var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options, averagesTaken);

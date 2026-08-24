@@ -211,10 +211,7 @@ public sealed class ThdSweepRunner(
             double generatorAmpDbv = await ResolveGeneratorAmplitudeAsync(request, ct);
             SetGeneratorAmpDbv(generatorAmpDbv);
 
-            // Distinct sizes only -- fixed mode has one, adaptive has one per size band the grid
-            // actually reaches, which is at most a handful.
-            var fftSizes = steps.Select(s => s.FftSize).Distinct().OrderBy(n => n).ToArray();
-            var noiseByFftSize = await MeasureNoiseFloorAsync(request, fftSizes, ct);
+            var noiseVrms = await MeasureNoiseFloorAsync(request, ct);
 
             SetPhase(ThdSweepPhase.Sweeping);
 
@@ -229,7 +226,6 @@ public sealed class ThdSweepRunner(
                 var snapshots = await CaptureWithStimulusAsync(
                     ToneConfig(step.FrequencyHz, generatorAmpDbv, request), request, step.FftSize, ct);
 
-                var noiseVrms = noiseByFftSize.TryGetValue(step.FftSize, out var forSize) ? forSize : new double[2];
                 foreach (var point in BuildPoints(step.FrequencyHz, generatorAmpDbv, request, snapshots, noiseVrms))
                 {
                     AddPoint(point);
@@ -451,38 +447,29 @@ public sealed class ThdSweepRunner(
     /// it scales with bin width, so the same hardware reads ~3 dB lower at each doubling of FFT
     /// size; and it is not the noise term in THD+N, which does integrate the band. If you want
     /// "how many volts of noise are there", read THD+N, not this.
+    ///
+    /// <para><b>Always captured at <see cref="SweepResolution.BoundsFor"/>'s ceiling, never at the
+    /// size a given point is swept at.</b> That bin-width dependence above is why. Under adaptive
+    /// resolution the FFT shrinks as frequency rises, so measuring this per point makes every point
+    /// internally consistent and the *trace* meaningless: measured on the simulator, the noise floor
+    /// climbed 16.8 dB from 20 Hz to 20 kHz in 3.4 dB steps, one at each FFT-size halving, purely
+    /// from the resolution change and with the real noise constant. On a DUT whose THD sits near the
+    /// residual that crosses the noise trace above the distortion traces part-way up the sweep.
+    /// Since the generator is off, the size is free to choose, and pinning it to the ceiling costs
+    /// nothing: the ceiling is a record-*time* bound, so it yields the same 1.465 Hz bin at every
+    /// supported sample rate, which makes an adaptive sweep's noise trace identical to a fixed one's
+    /// with no scaling factor and no white-noise assumption.</para>
     /// </summary>
-    private async Task<Dictionary<int, double[]>> MeasureNoiseFloorAsync(
-        ThdSweepRequest request, IReadOnlyList<int> fftSizes, CancellationToken ct)
+    private async Task<double[]> MeasureNoiseFloorAsync(ThdSweepRequest request, CancellationToken ct)
     {
-        var byFftSize = new Dictionary<int, double[]>();
+        var noiseVrms = new double[2];
         if (!request.MeasureNoiseFloor)
-        {
-            foreach (int fftSize in fftSizes)
-                byFftSize[fftSize] = new double[2];
-            return byFftSize;
-        }
+            return noiseVrms;
 
         SetPhase(ThdSweepPhase.NoiseFloor);
         BroadcastProgress(0, 0, 0.0, ThdSweepPhase.NoiseFloor);
 
-        // One capture per distinct FFT size the sweep will use, not one for the whole sweep. The
-        // figure is a *per-bin* level (see this method's own remarks) and therefore scales with bin
-        // width -- about 3 dB per doubling -- so under adaptive resolution a single measurement
-        // would be wrong by that much for every point analyzed at a different size, and the noise
-        // trace would step at each size boundary. Fixed mode has exactly one size, so this collapses
-        // back to the single capture it always did.
-        foreach (int fftSize in fftSizes)
-            byFftSize[fftSize] = await MeasureNoiseFloorAtAsync(request, fftSize, ct);
-
-        return byFftSize;
-    }
-
-    private async Task<double[]> MeasureNoiseFloorAtAsync(ThdSweepRequest request, int fftSize, CancellationToken ct)
-    {
-        var noiseVrms = new double[2];
-
-        var snapshots = await CaptureWithStimulusAsync(GeneratorConfig.Off, request, fftSize, ct);
+        var snapshots = await CaptureWithStimulusAsync(GeneratorConfig.Off, request, NoiseFloorFftSize(request), ct);
         foreach (var snapshot in snapshots)
         {
             int ch = snapshot.Channel == StreamChannel.Left ? 0 : 1;
@@ -562,6 +549,16 @@ public sealed class ThdSweepRunner(
         double averageSeconds = (1.0 + ((Math.Max(1, request.AverageCount) - 1) * AverageHopFraction)) * recordSeconds;
         return TimeSpan.FromSeconds(((fillSeconds + averageSeconds) * 3.0) + 2.0);
     }
+
+    /// <summary>
+    /// The FFT size the noise floor is captured at — the largest the sweep's sample rate allows, in
+    /// both modes. See <see cref="MeasureNoiseFloorAsync"/> for why it is deliberately not the size
+    /// any particular point is swept at.
+    /// </summary>
+    private static int NoiseFloorFftSize(ThdSweepRequest request) =>
+        request.AdaptiveResolution
+            ? SweepResolution.BoundsFor(request.EffectiveSampleRateHz).Ceiling
+            : request.FftSize;
 
     private static GeneratorConfig ToneConfig(double freqHz, double ampDbv, ThdSweepRequest request)
     {

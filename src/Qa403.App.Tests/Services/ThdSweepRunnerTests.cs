@@ -338,4 +338,58 @@ public class ThdSweepRunnerTests
 
         Assert.Equal(9.031, request.LevelDbv, 3);
     }
+
+    /// <summary>
+    /// The noise floor must not depend on the FFT size a point happens to be swept at.
+    ///
+    /// It is a per-bin figure, so it scales with bin width — about 3 dB per doubling. Capturing it
+    /// at each point's own size (which the adaptive mode's first version did) therefore made the
+    /// trace climb with frequency purely because the resolution coarsened: measured on the simulator
+    /// it rose 16.8 dB from 20 Hz to 20 kHz in 3.4 dB steps, one per size halving, while the real
+    /// noise never moved. On a DUT whose distortion sits near the residual, that crossed the noise
+    /// trace above the THD traces part-way up the sweep. Pinning the capture to the ceiling size
+    /// makes an adaptive sweep's noise trace flat and identical to a fixed sweep's.
+    /// </summary>
+    [Fact]
+    public async Task Sweep_WithAdaptiveResolution_ReportsAFlatNoiseFloorAcrossEveryFftSize()
+    {
+        var harness = await CreateAsync();
+
+        // Wide enough that the adaptive sizer walks down several FFT sizes — the size boundaries are
+        // where the old behaviour stepped.
+        var request = Request(startHz: 100.0, endHz: 12000.0, stepsPerOctave: 2, measureNoiseFloor: true)
+            with { AdaptiveResolution = true, SampleRateHz = 192_000.0 };
+
+        await harness.Runner.StartAsync(request, CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+
+        // Reconstructed back to an absolute level. NoisePercent is referenced to each point's own
+        // fundamental, and a fundamental that reads low inflates it by the same dB -- a real but
+        // separate intermittent defect, and one this test must not be sensitive to, since what is
+        // under test is whether the noise term itself moves with bin width.
+        var noiseVrms = harness.Runner.Status.Points
+            .Where(p => p.Channel == 0 && p.NoisePercent > 0.0)
+            .Select(p => p.NoisePercent / 100.0 * Math.Pow(10.0, p.FundamentalDbv / 20.0))
+            .ToArray();
+
+        Assert.True(noiseVrms.Length >= 4, $"expected several points with a noise reading, got {noiseVrms.Length}");
+
+        // Captured once, so every point carries the identical figure; the tolerance is only against
+        // the round trip through a percentage.
+        double spreadDb = 20.0 * Math.Log10(noiseVrms.Max() / noiseVrms.Min());
+        Assert.True(spreadDb < 0.1, $"noise floor varied by {spreadDb:0.00} dB across the sweep's FFT sizes");
+    }
+
+    [Fact]
+    public void NoiseFloorReferenceBinWidth_IsTheSameAtEverySupportedSampleRate()
+    {
+        // Why no scaling factor is needed: the ceiling is a record-*time* bound, so the bin width it
+        // yields is 1/MaxRecordSeconds regardless of rate. An adaptive sweep that drops to 48 kHz
+        // still reports its noise floor against the same bin width a 192 kHz one does.
+        foreach (double sampleRateHz in SweepResolution.SupportedSampleRatesHz)
+        {
+            var (_, ceiling) = SweepResolution.BoundsFor(sampleRateHz);
+            Assert.Equal(1.0 / SweepResolution.MaxRecordSeconds, sampleRateHz / ceiling, 3);
+        }
+    }
 }

@@ -71,7 +71,23 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     public SpectrumPipelineOptions Options
     {
         get => _options;
-        set => _options = value ?? throw new ArgumentNullException(nameof(value));
+        set
+        {
+            _options = value ?? throw new ArgumentNullException(nameof(value));
+
+            // Resize now, on the caller's thread, rather than leaving it to the next Enqueue on the
+            // acquisition thread. A caller that changes FftSize and then flushes -- the sweep does
+            // exactly that, per point -- otherwise races the two: Flush captures _ringBuffers and
+            // books the stimulus-latency discard on it while EnsureRingBuffers concurrently swaps in
+            // replacements that read DiscardRemaining before the discard was set. The discard is
+            // then lost and the first record after the change refills with pre-change audio, which
+            // reads as a fundamental several dB low on the first point at each new FFT size.
+            //
+            // Guarded on the pipeline having started: before Start() there are no buffers to keep in
+            // step, and Start() does its own EnsureRingBuffers.
+            if (_ringBufferFftSize != 0)
+                EnsureRingBuffers(_options.FftSize);
+        }
     }
 
     public void Start(double sampleRateHz, int channelCount)

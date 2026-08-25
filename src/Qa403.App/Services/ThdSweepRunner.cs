@@ -189,6 +189,41 @@ public sealed class ThdSweepRunner(
         }
     }
 
+    /// <summary>
+    /// Discards the sweep on screen and returns the emptied status.
+    /// </summary>
+    /// <remarks>
+    /// Server-side, because the runner is the source of truth and the browser is a mirror: a
+    /// client-only clear comes straight back on the next <c>GET /api/sweep/status</c>, which is
+    /// what a reload, a second tab, and every switch back to the sweep screen all perform.
+    /// <para>
+    /// The whole progress block is reset with the points, not just the list — leaving
+    /// <c>Finished · 50 points</c> next to an empty chart states something that is no longer true.
+    /// <see cref="LastRequest"/> deliberately survives: it is the as-run configuration of a sweep
+    /// that is gone, and <see cref="MeasurementSaveService.SaveSweepAsync"/> is already gated on
+    /// the points being non-empty, so it can never be saved against.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">A sweep is running — clearing would race the writer still appending to the list.</exception>
+    public ThdSweepStatus Clear()
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                throw new InvalidOperationException("Wait for the sweep to finish (or cancel it) before clearing.");
+
+            _points = [];
+            _phase = ThdSweepPhase.Idle;
+            _index = 0;
+            _total = 0;
+            _currentFreqHz = 0;
+            _generatorAmpDbv = 0;
+            _error = null;
+
+            return Status;
+        }
+    }
+
     private async Task RunAsync(ThdSweepRequest request, SweepStep[] steps, CancellationToken ct)
     {
         var savedOptions = pipeline.Options;

@@ -569,6 +569,9 @@ export const api = {
 
   cancelSweep: () => request<ThdSweepStatus>('/sweep/cancel', { method: 'POST' }),
 
+  /** Backs the sweep screen's "Clear": discards the points server-side, where they live — clearing them only in the browser would undo itself on the next getSweepStatus. */
+  clearSweep: () => request<ThdSweepStatus>('/sweep/clear', { method: 'POST' }),
+
   // Carries the accumulated points, not just a counter — this is how a browser that reloaded
   // mid-sweep redraws everything measured so far instead of waiting for the next point.
   getSweepStatus: () => request<ThdSweepStatus>('/sweep/status'),

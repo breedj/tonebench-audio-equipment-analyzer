@@ -198,6 +198,52 @@ public class ThdSweepRunnerTests
     }
 
     [Fact]
+    public async Task Clear_AfterAFinishedSweep_EmptiesThePointsAndTheProgressWithThem()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        Assert.NotEmpty(harness.Runner.Status.Points);
+
+        var cleared = harness.Runner.Clear();
+
+        // The returned status and the runner's own must agree — the browser applies the response
+        // directly rather than polling again, so a stale return value would leave the UI redrawing
+        // the sweep it just cleared.
+        foreach (var status in new[] { cleared, harness.Runner.Status })
+        {
+            Assert.Empty(status.Points);
+            Assert.Equal(ThdSweepPhase.Idle, status.Phase);
+            Assert.False(status.Running);
+            Assert.Equal(0, status.Index);
+            Assert.Equal(0, status.Total);
+            Assert.Null(status.Error);
+        }
+    }
+
+    [Fact]
+    public async Task Clear_WhileASweepIsRunning_IsRefusedRatherThanRacingTheWriter()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(startHz: 200.0, endHz: 12000.0, stepsPerOctave: 6), CancellationToken.None);
+
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => harness.Runner.Clear());
+            Assert.True(harness.Runner.Running);
+        }
+        finally
+        {
+            await harness.Runner.CancelAsync();
+        }
+
+        // Cancelled is not running, so the same call now goes through.
+        Assert.Empty(harness.Runner.Clear().Points);
+    }
+
+    [Fact]
     public async Task Sweep_StartingBelowTheDefaultFundamentalSearchFloor_StillLocatesItsOwnTone()
     {
         // FundamentalMinSearchHz defaults to 200 Hz so mains hum is never mistaken for the

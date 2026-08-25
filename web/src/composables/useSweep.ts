@@ -121,6 +121,17 @@ async function cancel() {
   applyStatus(await api.cancelSweep())
 }
 
+/**
+ * Throws away the sweep on screen. Goes through the server rather than just emptying `points`
+ * here: the runner owns them (that is what `refresh()` reads back), so a local clear would return
+ * on the next status poll — a reload, a second tab, or simply leaving the sweep screen and coming
+ * back. The response is the emptied status, so the progress line resets with the chart instead of
+ * still reading "Finished · 50 points" over nothing.
+ */
+async function clear() {
+  applyStatus(await api.clearSweep())
+}
+
 export function useSweep() {
   return {
     running,
@@ -146,6 +157,7 @@ export function useSweep() {
 
     start,
     cancel,
+    clear,
     refresh,
     ingestPoint,
     ingestProgress,

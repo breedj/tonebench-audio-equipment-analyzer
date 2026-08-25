@@ -54,6 +54,22 @@ public static class SweepEndpoints
         // mid-sweep can redraw everything measured so far instead of waiting for the next one.
         group.MapGet("/status", (ThdSweepRunner runner) => Results.Ok(runner.Status));
 
+        // The sweep counterpart of /api/acquisition/clear, and server-side for the same reason the
+        // status endpoint exists at all: the runner holds the points, so a browser-only clear would
+        // be undone by the next status poll. Conflict rather than BadRequest while a sweep runs,
+        // matching /save's own "finish or cancel first".
+        group.MapPost("/clear", (ThdSweepRunner runner) =>
+        {
+            try
+            {
+                return Results.Ok(runner.Clear());
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         // Its own endpoint rather than POST /api/measurements, which saves the spectrum pipeline's
         // retained snapshot — a different source and a different row shape (N captures, not one).
         group.MapPost("/save", async (SaveSweepRequest request, MeasurementSaveService saveService, CancellationToken ct) =>

@@ -7,6 +7,7 @@ import { useLoadOhms } from '../composables/useLoadOhms'
 import { formatHz, useSweep } from '../composables/useSweep'
 import { freqAxis } from '../freqAxis'
 import { percentToDb } from '../sweep/points'
+import { interpolateOnGrid } from '../sweep/align'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import type { ThdSweepPoint } from '../api/client'
 
@@ -74,7 +75,9 @@ const props = defineProps<{
  * The frequency under the pointer, or null once it leaves the plot area — App.vue uses this to
  * drive the small FFT/scope preview charts once a sweep is done ("nearest point to the cursor").
  * uPlot's own cursor.idx is an index into the shared x (frequency) array built in update(), so it
- * names an actual measured/plotted frequency, not an interpolated pixel position.
+ * names a frequency something on the chart was measured at, not an interpolated pixel position —
+ * though with overlays on that grid it may be one only an *overlay* measured, which is why the
+ * consumer (App.vue's selectedSweepPointFor) resolves it through nearestSweepPoint.
  */
 const emit = defineEmits<{ cursorFreq: [freqHz: number | null] }>()
 
@@ -161,8 +164,13 @@ const activeOverlays = computed(() => props.overlays.filter((o) => o.visible && 
  *
  * The union of the live sweep's grid and every visible overlay's, not just the live one: a stored
  * sweep run at different start/end/steps lands on different frequencies, and uPlot aligns all
- * series to one x array, so anything missing from it simply would not be drawn. Frequencies the
- * live sweep has no point at read back as gaps, which is what they are.
+ * series to one x array, so anything missing from it simply would not be drawn.
+ *
+ * A trace does *not* read back as a gap at the frequencies it has no point at — see
+ * sweep/align.ts. Two grids that interleave rather than coincide (adaptive vs fixed, 4 vs 5 points
+ * per decade) would otherwise leave every series as value/null/value/null, which uPlot draws as
+ * disconnected stubs. Each trace is interpolated along its own measured points instead, within its
+ * own frequency range only.
  */
 const frequencies = computed(() => {
   const all = new Set(points.value.map((p) => p.freqHz))
@@ -172,6 +180,24 @@ const frequencies = computed(() => {
 })
 
 const hasData = computed(() => frequencies.value.length > 0)
+
+/** Frequency -> its slot in the shared x array. The grid is built from these very numbers, so this is exact. */
+const gridIndexByFreq = computed(() => {
+  const index = new Map<number, number>()
+  frequencies.value.forEach((hz, i) => index.set(hz, i))
+  return index
+})
+
+/**
+ * Which x slots each series was actually *measured* at, by series index — what the data-point
+ * markers are drawn at. Rebuilt by update() alongside the data itself.
+ *
+ * Without this, turning "show data points" on would put a marker on every interpolated slot too,
+ * so a 4-points-per-decade sweep would appear to have as many points as whatever else is on the
+ * chart. The interpolated line is a drawing convenience; the markers are the measurement, and they
+ * have to stay honest about where it happened.
+ */
+let measuredIdxBySeries: (number[] | null)[] = []
 
 function valueOf(point: ThdSweepPoint, key: TraceKey): number {
   switch (key) {
@@ -214,10 +240,52 @@ function yRange(): [number, number] {
   return props.unit === 'db' ? [props.yBottomDb, props.yTopDb] : [props.yMinPercent, props.yMaxPercent]
 }
 
+/**
+ * True while either axis shows something other than the window the display panel's dropdowns ask
+ * for — i.e. the user has dragged a zoom. Drives the Reset zoom button, which is the only visible
+ * cue that the axes are no longer the ones the dropdowns name.
+ */
+const zoomed = ref(false)
+
+/** Tolerant equality: a zoom is compared against bounds that came from the same numbers, but they have been through a log/linear round trip. */
+function sameBound(a: number | null | undefined, b: number): boolean {
+  return a != null && Math.abs(a - b) <= 1e-9 + Math.abs(b) * 1e-6
+}
+
+function isZoomedNow(u: uPlot): boolean {
+  const [bottom, top] = yRange()
+  return !(
+    sameBound(u.scales.x.min, props.xFromHz) &&
+    sameBound(u.scales.x.max, props.xToHz) &&
+    sameBound(u.scales.y?.min, bottom) &&
+    sameBound(u.scales.y?.max, top)
+  )
+}
+
+/**
+ * Back to the window the dropdowns name — not to the data extent, which is what uPlot's own
+ * double-click handler (autoScaleX) does. While a zoom is on screen there is no difference between
+ * the two for it to reset *to* on a chart whose scales are auto:false, so ours is bound on top of
+ * uPlot's (added later on the same element, so it runs after) and puts both axes back explicitly.
+ */
+function resetZoom() {
+  if (!plot) return
+  const [bottom, top] = yRange()
+  plot.setScale('x', { min: props.xFromHz, max: props.xToHz })
+  plot.setScale('y', { min: bottom, max: top })
+}
+
 function buildOptions(width: number): uPlot.Options {
   const theme = currentTheme()
   const lineWidth = props.thickLines ? 2 : 1
-  const points = { show: props.showDataPoints, size: props.thickLines ? 7 : 5 }
+  // filter names the indices to mark; uPlot draws points when `show || idxs` is truthy, so it must
+  // return null (not []) when markers are off, or the "off" state would draw them again via idxs.
+  const points = {
+    show: props.showDataPoints,
+    size: props.thickLines ? 7 : 5,
+    filter: (_u: uPlot, seriesIdx: number) =>
+      props.showDataPoints ? (measuredIdxBySeries[seriesIdx] ?? null) : null,
+  }
 
   const series: uPlot.Series[] = [{}]
   // uPlot's legend swatch is a CSS border and legend.markers.dash defaults to the literal string
@@ -264,23 +332,38 @@ function buildOptions(width: number): uPlot.Options {
     width,
     height: CHART_HEIGHT,
     scales: {
-      // Both axes are pinned to the dropdowns rather than fitted to the data. auto:false plus a
-      // range() that ignores dataMin/dataMax is what makes that stick — otherwise every setData()
-      // re-fits, and a sweep calls setData once per point, so the axes would crawl as it ran.
+      // Both axes *start* pinned to the dropdowns rather than fitted to the data. auto:false is
+      // what makes that stick -- otherwise every setData() re-fits, and a sweep calls setData once
+      // per point, so the axes would crawl as it ran.
+      //
+      // The range callbacks pass their arguments through rather than always handing back the
+      // dropdown bounds, and that is what lets a drag-zoom survive. uPlot re-derives the x scale
+      // through this very callback on every setScale -- including the exact window a drag just
+      // requested -- so the original version, which ignored the arguments, fed the zoom request
+      // back in and got the full span out again, undoing every zoom the instant it was made. The
+      // arguments are null only when nothing is pending (notably on the empty construction data),
+      // which is where the dropdown bounds seed the axis. y in practice never sees a non-null pair
+      // -- uPlot assigns a pending y window directly and skips the callback -- but it is written
+      // the same way so neither axis depends on which branch uPlot takes.
       x: {
         time: false,
         distr: 3,
         log: 10,
         auto: false,
-        range: () => [props.xFromHz, props.xToHz],
+        range: (_u, min, max) => [min ?? props.xFromHz, max ?? props.xToHz],
       },
       // Percent is log (distr 3) across up to seven decades; dB is the same numbers on a linear
       // axis, so the bounds go through percentToDb and swap ends -- a smaller percentage is a more
       // negative dB, but it is still the bottom of the window.
       y:
         props.unit === 'db'
-          ? { auto: false, range: () => yRange() }
-          : { distr: 3, log: 10, auto: false, range: () => yRange() },
+          ? { auto: false, range: (_u, min, max) => [min ?? yRange()[0], max ?? yRange()[1]] }
+          : {
+              distr: 3,
+              log: 10,
+              auto: false,
+              range: (_u, min, max) => [min ?? yRange()[0], max ?? yRange()[1]],
+            },
     },
     axes: [
       {
@@ -299,7 +382,16 @@ function buildOptions(width: number): uPlot.Options {
       },
     ],
     series,
-    cursor: { points: { show: false } },
+    cursor: {
+      points: { show: false },
+      // Both axes draggable, with `uni` making a drag unidirectional unless it is a real box: a
+      // drag that stays under 12 px in one direction zooms the other axis only, across the full
+      // span of this one. Frequency-only is the common case on a sweep (narrowing to an octave
+      // around a rise in THD), but a distortion window matters just as much when four harmonic
+      // traces sit within a few dB of each other, and demanding a pixel-accurate horizontal drag
+      // to get one without the other would make both awkward.
+      drag: { x: true, y: true, uni: 12 },
+    },
     // Display only. uPlot's legend rows toggle their series on click, and now that the display
     // panel owns visibility that click would silently desync the two -- a trace off in the chart
     // with its checkbox still ticked, and nothing to un-stick it but another click on the legend.
@@ -312,6 +404,16 @@ function buildOptions(width: number): uPlot.Options {
       markers: { dash: (_u: uPlot, i: number) => markerDash[i] ?? 'solid' },
     },
     hooks: {
+      // Drives the Reset zoom button. Fires on setData too (the x scale is auto:false, so setData
+      // re-applies the same min/max every point of a running sweep), hence the change-gate inside
+      // isZoomedNow's caller -- writing an unchanged `false` 50 times per sweep would be harmless
+      // but pointless.
+      setScale: [
+        (u: uPlot) => {
+          const next = isZoomedNow(u)
+          if (next !== zoomed.value) zoomed.value = next
+        },
+      ],
       // u.cursor.idx indexes the shared x (frequency) array from update() -- not a pixel-derived
       // value, so it always names a frequency something was actually plotted at. null once the
       // pointer leaves the plot area (uPlot clears idx on mouseleave), which is the "nothing
@@ -411,6 +513,38 @@ function signature(): string {
   ].join('|')
 }
 
+/**
+ * The two halves of signature() that describe the *axis windows* specifically. A rebuild triggered
+ * by anything else — a theme flip, a trace or overlay checkbox, thick lines — has to give the user
+ * back the zoom they were looking at, exactly as SpectrumChart does across an overlay change. A
+ * rebuild triggered by one of these must not: the dropdown is the user saying which window they
+ * want, and reapplying the old zoom over it would make the dropdown look broken.
+ *
+ * The unit belongs to the y key rather than the x one: percent and dB are not two views of one
+ * window (see the yMaxPercent/yTopDb prop docs), so a zoom made on one axis means nothing on the
+ * other — but the frequency window is the same either way and is worth keeping across the toggle.
+ */
+function xWindowKey(): string {
+  return `${props.xFromHz}|${props.xToHz}`
+}
+function yWindowKey(): string {
+  return `${props.unit}|${props.yMinPercent}|${props.yMaxPercent}|${props.yBottomDb}|${props.yTopDb}`
+}
+let plotXWindowKey = ''
+let plotYWindowKey = ''
+
+// Set by ensurePlot when a rebuild should restore the zoom that was on screen before it, consumed
+// by update() right after its own setData(). It cannot be applied inside ensurePlot: uPlot defers a
+// setScale, so a call made before update()'s setData just gets clobbered by the scale reapplication
+// setData does synchronously — the same ordering SpectrumChart's own zoom restore needs.
+type ScaleWindow = { min: number; max: number }
+let pendingScaleRestore: { x: ScaleWindow | null; y: ScaleWindow | null } | null = null
+
+/** A live scale's window, or null while it is still unset (empty construction data). */
+function windowOf(scale: uPlot.Scale | undefined): ScaleWindow | null {
+  return scale?.min != null && scale.max != null ? { min: scale.min, max: scale.max } : null
+}
+
 function ensurePlot() {
   const el = containerRef.value
   if (!el) return
@@ -418,8 +552,19 @@ function ensurePlot() {
   const next = signature()
   if (plot && plotSignature === next) return
 
+  const nextX = xWindowKey()
+  const nextY = yWindowKey()
+  pendingScaleRestore = plot
+    ? {
+        x: plotXWindowKey === nextX ? windowOf(plot.scales.x) : null,
+        y: plotYWindowKey === nextY ? windowOf(plot.scales.y) : null,
+      }
+    : null
+
   plot?.destroy()
   plotSignature = next
+  plotXWindowKey = nextX
+  plotYWindowKey = nextY
 
   const width = el.getBoundingClientRect().width || 800
   const blocks = 1 + activeOverlays.value.length // the live sweep, plus one block per overlay
@@ -428,6 +573,20 @@ function ensurePlot() {
   // typed against uPlot's tuple type. The runtime shape is correct; only the static type needs it.
   const empty = Array.from({ length: slots }, () => [] as number[]) as unknown as uPlot.AlignedData
   plot = new uPlot(buildOptions(width), empty, el)
+
+  // uPlot's own double-click resets the x axis to the *data* extent, which on an auto:false chart
+  // is whatever the zoom already shows — a no-op, and no way back out. Ours runs after it.
+  plot.over.addEventListener('dblclick', resetZoom)
+}
+
+/** Reapplies a zoom carried across a plot rebuild. Called after setData, never before — see pendingScaleRestore. */
+function applyPendingScaleRestore() {
+  const pending = pendingScaleRestore
+  pendingScaleRestore = null
+  if (!plot || !pending) return
+
+  if (pending.x) plot.setScale('x', pending.x)
+  if (pending.y) plot.setScale('y', pending.y)
 }
 
 function update() {
@@ -436,10 +595,16 @@ function update() {
 
   const freqs = frequencies.value
   if (freqs.length === 0) {
+    measuredIdxBySeries = []
     plot.setData([[]] as unknown as uPlot.AlignedData)
+    // Nothing plotted, so nothing to hold a zoom against — drop it rather than reapply it to an
+    // empty chart, where the next real data would arrive already zoomed into a window chosen for
+    // a sweep that is gone.
+    pendingScaleRestore = null
     return
   }
 
+  measuredIdxBySeries = [null] // slot 0 is the x series
   const data: (number | null)[][] = [freqs]
   pushSeriesData(data, freqs, points.value)
   // Order has to match buildOptions' series order exactly — live block first, then one block per
@@ -447,46 +612,55 @@ function update() {
   for (const overlay of activeOverlays.value) pushSeriesData(data, freqs, overlay.sweepPoints ?? [])
 
   plot.setData(data as unknown as uPlot.AlignedData)
+  applyPendingScaleRestore()
 }
 
 /**
  * Appends one channel x trace block of y arrays for a set of sweep points, aligned to `freqs`.
  * Shared by the live sweep and every overlay so a stored sweep goes through the same valueOf/toY
  * conversion the running one does.
+ *
+ * Each series is expressed on the shared grid by interpolating between this block's own measured
+ * frequencies (sweep/align.ts) rather than by an exact per-frequency lookup — a block measured on
+ * a different grid than the one on screen would otherwise be all gaps except where the two grids
+ * happen to collide.
  */
 function pushSeriesData(data: (number | null)[][], freqs: number[], sweepPoints: ThdSweepPoint[]) {
   // Index the points once per block rather than searching per series per frequency: a stereo
   // sweep with nine traces would otherwise be O(traces x freqs x points).
-  const byChannel = new Map<number, Map<number, ThdSweepPoint>>()
+  const byChannel = new Map<number, ThdSweepPoint[]>()
   for (const point of sweepPoints) {
-    let map = byChannel.get(point.channel)
-    if (!map) byChannel.set(point.channel, (map = new Map()))
-    map.set(point.freqHz, point)
+    const list = byChannel.get(point.channel)
+    if (list) list.push(point)
+    else byChannel.set(point.channel, [point])
   }
+
+  // The percent axis is logarithmic and the dB axis is linear, so a straight on-screen segment is
+  // a log interpolation in the first case and a linear one in the second. Magnitude is dB-only, so
+  // one flag per update covers every trace.
+  const logY = props.unit === 'percent'
+  const index = gridIndexByFreq.value
 
   for (const ch of activeChannels.value) {
-    const map = byChannel.get(ch)
+    // Ascending grid slots this channel has a measurement at. Sorted explicitly: a running sweep
+    // appends points as they are measured, and the union grid may reorder them anyway.
+    const channelPoints = (byChannel.get(ch) ?? []).slice().sort((a, b) => a.freqHz - b.freqHz)
+    const anchorIdx: number[] = []
+    const anchorPoints: ThdSweepPoint[] = []
+    for (const point of channelPoints) {
+      const idx = index.get(point.freqHz)
+      if (idx === undefined) continue
+      anchorIdx.push(idx)
+      anchorPoints.push(point)
+    }
+
     for (const trace of activeTraces.value) {
-      data.push(freqs.map((hz) => (map ? toY(valueOf(map.get(hz) ?? emptyPoint, trace.key), trace.key) : null)))
+      const anchorValues = anchorPoints.map((p) => toY(valueOf(p, trace.key), trace.key))
+      data.push(interpolateOnGrid(freqs, anchorIdx, anchorValues, logY))
+      // Markers belong at the measured frequencies only, and only where there is a value to mark.
+      measuredIdxBySeries.push(anchorIdx.filter((_, k) => anchorValues[k] != null))
     }
   }
-}
-
-/** Stand-in for a frequency a channel has no point at yet — every field reads as "no value". */
-const emptyPoint: ThdSweepPoint = {
-  freqHz: 0,
-  channel: 0,
-  fundamentalDbv: Number.NaN,
-  gainDb: Number.NaN,
-  powerWatt: Number.NaN,
-  thdPercent: Number.NaN,
-  thdNPercent: Number.NaN,
-  snrDb: Number.NaN,
-  harmonicPercent: [],
-  d6PlusPercent: Number.NaN,
-  noisePercent: Number.NaN,
-  previewFft: null,
-  previewScope: null,
 }
 
 watch(points, update)
@@ -517,6 +691,20 @@ onBeforeUnmount(() => {
     <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Distortion vs frequency</span>
       <span v-if="!hasData">No sweep data yet — press Run sweep.</span>
+      <!-- The only visible sign that the axes are no longer the window the display panel's
+           dropdowns name — double-clicking the plot does the same thing, but nothing on screen
+           would say so. The hint takes its place while unzoomed rather than sitting alongside it,
+           so the header never carries two competing messages about the same gesture. -->
+      <button
+        v-else-if="zoomed"
+        type="button"
+        class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        title="Back to the From/To and distortion-range window set in the display panel."
+        @click="resetZoom"
+      >
+        Reset zoom
+      </button>
+      <span v-else>Drag to zoom · double-click to reset</span>
     </div>
     <div ref="containerRef" class="sweep-chart w-full"></div>
 

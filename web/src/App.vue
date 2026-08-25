@@ -124,6 +124,7 @@ const {
   points: sweepPoints,
   start: startSweep,
   cancel: cancelSweepRun,
+  clear: clearSweepRun,
   refresh: refreshSweep,
 } = useSweep()
 
@@ -203,6 +204,16 @@ function runSweep(request: import('./api/client').ThdSweepStartRequest) {
 function cancelSweep() {
   return withErrorReporting(async () => {
     await cancelSweepRun()
+  })
+}
+
+// The sweep screen's counterpart of clearMeasurement. The hovered frequency has to go with the
+// points: it is a frequency from a sweep that no longer exists, and leaving it set would keep the
+// FFT/scope preview charts pointing at the last thing hovered on the chart that was just emptied.
+function clearSweep() {
+  return withErrorReporting(async () => {
+    await clearSweepRun()
+    hoveredSweepFreqHz.value = null
   })
 }
 
@@ -650,6 +661,20 @@ function confirmSaveProjectAs(name: string) {
               @click="openSaveDialog"
             >
               Save sweep result
+            </button>
+            <!-- The sweep screen's Clear, in the same slot and the same shape as the FFT screen's
+                 above. Disabled while a sweep runs for the same reason CANCEL exists separately:
+                 stopping a sweep and discarding its points are different intentions, and a sweep
+                 that took two minutes should not be thrown away by one stray click. -->
+            <button
+              v-if="isSweepKind"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="sweepRunning || sweepPoints.length === 0"
+              title="Clears the sweep on screen and its preview traces — cancel a running sweep first. Does not delete anything saved to History, and leaves the sweep settings alone."
+              @click="clearSweep"
+            >
+              Clear
             </button>
           </div>
 

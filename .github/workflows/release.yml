@@ -21,7 +21,6 @@ jobs:
       # Only Qa403.Device.Tests/Hardware/Qa40xUsbDeviceHardwareTests.cs carries this trait — every
       # other test in the solution runs here, matching CLAUDE.md's documented pre-commit command.
       - run: dotnet test Qa403.sln --filter "Category!=Hardware" --configuration Release
-        working-directory: code
 
   build:
     needs: test
@@ -46,7 +45,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Build frontend
-        working-directory: code/web
+        working-directory: web
         run: |
           npm ci
           npm run build
@@ -65,7 +64,6 @@ jobs:
           fi
 
       - name: Publish
-        working-directory: code
         shell: bash
         run: |
           VERSION_ARG=""
@@ -85,7 +83,7 @@ jobs:
       # Qa403.App.csproj's TrimmerRootAssembly note).
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
-        working-directory: code/publish/${{ matrix.rid }}
+        working-directory: publish/${{ matrix.rid }}
         run: |
           chmod +x Qa403.App
           ./Qa403.App --simulate --no-browser &
@@ -104,7 +102,7 @@ jobs:
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
-        working-directory: code/publish/${{ matrix.rid }}
+        working-directory: publish/${{ matrix.rid }}
         shell: pwsh
         run: |
           $proc = Start-Process -FilePath .\Qa403.App.exe -ArgumentList "--simulate --no-browser" -PassThru
@@ -127,20 +125,20 @@ jobs:
 
       - name: Package (zip)
         if: matrix.archive == 'zip'
-        working-directory: code/publish/${{ matrix.rid }}
+        working-directory: publish/${{ matrix.rid }}
         shell: pwsh
         run: Compress-Archive -Path * -DestinationPath ../../qa403-audio-analyzer-${{ matrix.rid }}.zip
 
       # tar.gz rather than zip on Linux to preserve the executable bit on Qa403.App.
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
-        working-directory: code/publish/${{ matrix.rid }}
+        working-directory: publish/${{ matrix.rid }}
         run: tar -czf ../../qa403-audio-analyzer-${{ matrix.rid }}.tar.gz .
 
       - uses: actions/upload-artifact@v4
         with:
           name: qa403-audio-analyzer-${{ matrix.rid }}
-          path: code/qa403-audio-analyzer-${{ matrix.rid }}.${{ matrix.archive }}
+          path: qa403-audio-analyzer-${{ matrix.rid }}.${{ matrix.archive }}
 
   release:
     needs: build

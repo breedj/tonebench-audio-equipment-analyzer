@@ -107,6 +107,14 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     public double InputRangeDbv => device.InputRangeDbv;
 
+    /// <summary>
+    /// RX chunks the device has dropped since connect. Exposed so a caller that owns a measurement
+    /// window can bracket it — <see cref="ThdSweepRunner"/> reads this either side of every point, so
+    /// a hole in the sample stream can be attributed to the frequency it actually contaminated
+    /// instead of to the run as a whole.
+    /// </summary>
+    public long DroppedRxChunks => device.DroppedRxChunks;
+
     public double OutputRangeDbv => _outputRangeDbv;
 
     /// <summary>The effective (already bin-snapped, if snapping is on) generator config — what the device is actually playing.</summary>

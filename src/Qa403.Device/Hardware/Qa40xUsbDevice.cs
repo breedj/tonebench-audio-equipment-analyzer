@@ -384,10 +384,13 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             // programmed, so a later SetInputRangeAsync/status read isn't working from a stale value.
             stepped => Volatile.Write(ref _inputRangeDbv, stepped));
 
-        float[]? blockBuffer = null;
-        int framesInBlock = 0;
-        long sequenceNumber = 0;
-        int settleFramesRemaining = 0;
+        // Calibration and block assembly run on their own thread, not on thread-pool continuations —
+        // see BlockAssembler. Measured on real hardware before this existed: a 100 s sweep dropped 75
+        // RX chunks, i.e. the reader of the pump's 683 ms channel went unscheduled for longer than
+        // that, repeatedly, while the FFT worker had the pool.
+        var assembler = new BlockAssembler(pump.Reader, calibration, config, logger);
+        long reportedChunkDrops = 0;
+        long reportedBlockDrops = 0;
 
         // Everything from pump start to pump join must sit inside this try/finally. A consumer that
         // leaves the `await foreach` early — `break`, an exception, or just not enumerating to the
@@ -408,97 +411,82 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         {
             _activePump = pump;
             pump.Start(ct);
+            assembler.Start();
 
             // Deliberately *not* passing ct here. Cancellation is observed by the pump thread, which
-            // then stops and completes the channel — so this loop ends by running out of chunks, the
-            // same clean end-of-enumeration the pre-channel version had. Passing ct would instead make
-            // ReadAllAsync throw OperationCanceledException out of StreamAsync, turning what every
-            // caller treats as a normal stop into an exception, and would abandon chunks already
-            // captured rather than flushing them.
-            await foreach (var chunk in pump.Reader.ReadAllAsync().ConfigureAwait(false))
+            // stops and completes its channel; the assembler follows and completes this one — so this
+            // loop ends by running out of blocks, the same clean end-of-enumeration the pre-channel
+            // version had. Passing ct would instead make ReadAllAsync throw OperationCanceledException
+            // out of StreamAsync, turning what every caller treats as a normal stop into an exception,
+            // and would abandon blocks already captured rather than flushing them.
+            await foreach (var block in assembler.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                // A range step reports its settle window on the first chunk captured *after* the
-                // register write, so this chunk's own samples are still valid at its stated range.
-                if (chunk.SettleFrames > 0)
-                    settleFramesRemaining = chunk.SettleFrames;
+                // Logged here rather than where any of it is measured: this loop is off both the pump
+                // thread and the assembler thread, so the file/console I/O behind an ILogger call
+                // cannot land between one transfer completing and the next being submitted.
+                LogPumpStalls(pump.Diagnostics);
 
-                int chunkFrameCount = chunk.Length / BytesPerFrame;
-                for (int i = 0; i < chunkFrameCount; i++)
+                // Reported as it happens, not just as a total at stream end. A drop total printed once
+                // the run is over says a measurement was invalid but not *which* part of it — and the
+                // whole question a sweep raises is whether the holes clustered on one point or were
+                // spread across all of them.
+                long chunkDrops = pump.DroppedChunks;
+                long blockDrops = assembler.DroppedBlocks;
+                if (chunkDrops != reportedChunkDrops || blockDrops != reportedBlockDrops)
                 {
-                    if (settleFramesRemaining > 0)
-                    {
-                        settleFramesRemaining--;
-                        continue;
-                    }
-
-                    blockBuffer ??= ArrayPool<float>.Shared.Rent(config.BlockFrameCount * config.ChannelCount);
-
-                    // Deinterleaved and calibrated straight into the outgoing block — no intermediate
-                    // per-chunk float arrays. There is deliberately **no channel swap here**. The
-                    // QA403's swap is on the DAC only — PyQa40x states it as "On QA402 and QA403,
-                    // *outputs* need to be swapped" (analyzer.py:113) and correspondingly reads its ADC
-                    // data straight through, left = interleaved[0::2] / right = interleaved[1::2]
-                    // (analyzer.py:174-175), applying its channel-0 ("left") calibration record to wire
-                    // slot 0. TransferPump.BuildTxChunk already applies the swap on the way out, so
-                    // applying it again here would swap twice and cross the channels: a tone generated
-                    // on logical left would come back on logical right.
-                    //
-                    // This was measured on real hardware rather than inferred. Driving a raw sine on
-                    // wire slot 1 alone put it at -6.00 dBFS on RX slot 0 with RX slot 1 at -94 dBFS,
-                    // and driving slot 0 alone mirrored it exactly — TX slot N returns on RX slot 1-N.
-                    // qa40x-baremetal does swap on receive (Acquisition.cs:193,
-                    // FromByteStream(rxData, out r.Right, out r.Left)) and an earlier version of this
-                    // code followed it, which is what crossed the channels; that reference sends 1 kHz
-                    // left / 2 kHz right but only ever prints per-channel *peaks*, never which
-                    // frequency arrived where, so a crossed pair is invisible to it.
-                    int byteOffset = i * BytesPerFrame;
-                    int slot0Raw = BinaryPrimitives.ReadInt32LittleEndian(chunk.Buffer.AsSpan(byteOffset));
-                    int slot1Raw = BinaryPrimitives.ReadInt32LittleEndian(chunk.Buffer.AsSpan(byteOffset + 4));
-
-                    int baseIndex = framesInBlock * config.ChannelCount;
-                    blockBuffer[baseIndex] = (float)calibration.RawToVolts(slot0Raw, chunk.InputRangeDbv, 0);
-                    if (config.ChannelCount > 1)
-                        blockBuffer[baseIndex + 1] = (float)calibration.RawToVolts(slot1Raw, chunk.InputRangeDbv, 1);
-                    framesInBlock++;
-
-                    if (framesInBlock == config.BlockFrameCount)
-                    {
-                        yield return new PcmBlock(
-                            blockBuffer, config.BlockFrameCount * config.ChannelCount, config.SampleRateHz,
-                            config.ChannelCount, sequenceNumber++, Stopwatch.GetTimestamp());
-                        blockBuffer = null;
-                        framesInBlock = 0;
-                    }
+                    LogDropBurst(
+                        chunkDrops - reportedChunkDrops, blockDrops - reportedBlockDrops,
+                        chunkDrops, blockDrops, config);
+                    reportedChunkDrops = chunkDrops;
+                    reportedBlockDrops = blockDrops;
                 }
 
-                ArrayPool<byte>.Shared.Return(chunk.Buffer);
+                yield return block;
             }
         }
         finally
         {
-            if (blockBuffer is not null)
-                ArrayPool<float>.Shared.Return(blockBuffer);
-
             // Cleared before the join, not after: once teardown has begun the pump can no longer
             // service queued register writes from its loop, so a concurrent SetInputRangeAsync must
             // fall through to writing directly rather than queueing onto a pump that is going away.
             _activePump = null;
+
+            // Strictly before the pump's join, and that order is load-bearing: StopAndJoinAsync ends
+            // by draining whatever RxChunks are still sitting in the channel and returning their
+            // buffers to the pool. An assembler still reading that same channel would be returning
+            // the same buffers concurrently, and a double return to ArrayPool hands one array to two
+            // owners. Stopping the assembler first makes the pump the sole owner of that channel.
+            assembler.StopAndJoin();
 
             // Stops the pump thread and waits for it. The pump owns every EP2 transfer and the
             // StreamingStop write, and does both in its own finally — so by the time this returns the
             // data plane is quiet and the device has been told to stop.
             bool deviceLost = await pump.StopAndJoinAsync().ConfigureAwait(false);
 
+            // After the join, so nothing is still being recorded: whatever the loop noticed on its
+            // last iterations gets logged rather than dropped, and the summary is final.
+            LogPumpStalls(pump.Diagnostics);
+            LogPumpSummary(pump.Diagnostics, config.SampleRateHz);
+
             // Folded in only after the join, when the pump can no longer drop anything — reading it
             // while still running would double-count against the live term in DroppedRxChunks.
             long dropped = pump.DroppedChunks;
-            if (dropped > 0)
+            long droppedBlocks = assembler.DroppedBlocks;
+            if (dropped > 0 || droppedBlocks > 0)
             {
                 Interlocked.Add(ref _droppedRxChunks, dropped);
+
+                // The two counters answer different questions, which is the entire reason they are
+                // separate. RX chunks drop when the *assembler* could not keep up with the pump;
+                // blocks drop when whoever consumes this stream could not keep up with the assembler.
+                // A single combined number would have said "something fell behind" and left the next
+                // person to guess which half — exactly the guess this split exists to remove.
                 logger.LogWarning(
-                    "QA403 stream dropped {Dropped} RX chunks ({Frames} frames) — the consumer fell behind, so FFT records "
-                        + "over this run contain splices and any noise-floor reading from them is suspect",
-                    dropped, dropped * TransferChunkFrames);
+                    "QA403 stream lost data: {Chunks} RX chunks ({ChunkFrames} frames) dropped before calibration, "
+                        + "{Blocks} assembled blocks ({BlockFrames} frames) dropped after it — FFT records over this run "
+                        + "contain splices and any noise-floor reading from them is suspect",
+                    dropped, dropped * TransferChunkFrames,
+                    droppedBlocks, droppedBlocks * config.BlockFrameCount);
             }
 
             // _activePump was cleared above and the pump has joined, so this releases the handle here
@@ -571,6 +559,79 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// asks it to stop; the stream's own finally joins it and calls back in here, by which point
     /// <see cref="_activePump"/> is null and the release is safe.</para>
     /// </summary>
+    /// <summary>
+    /// Logs whatever the pump has recorded since the last call. Warning level on purpose: the app
+    /// ships at Information, and a DAC gap that only shows up under Debug is a DAC gap nobody sees.
+    /// </summary>
+    private void LogPumpStalls(TransferPumpDiagnostics diagnostics)
+    {
+        if (!diagnostics.TryDrain(out var stalls))
+            return;
+
+        foreach (var stall in stalls)
+        {
+            logger.LogWarning(
+                "QA403 DAC starvation [{Cause}] iter {Iteration}: iteration {IterationMs:0.0} ms "
+                    + "(read wait {ReadWaitMs:0.0}, write wait {WriteWaitMs:0.0}, submit {SubmitMs:0.0}, "
+                    + "register+prime {RegisterMs:0.0}), TX slack now {SlackMs:0.0} ms of {PrimedMs:0.0}; "
+                    + "GC pause {GcPauseMs:0.0} ms total (gen0 {Gen0}/gen1 {Gen1}/gen2 {Gen2}), "
+                    + "pool {ThreadPoolThreads} threads / {ThreadPoolPending} queued"
+                    + "{ShortWriteNote}",
+                stall.Cause, stall.Iteration, stall.IterationMs,
+                stall.ReadWaitMs, stall.WriteWaitMs, stall.SubmitMs, stall.RegisterMs,
+                stall.SlackMs, diagnostics.PrimedSlackMs,
+                stall.GcPauseMs, stall.Gen0, stall.Gen1, stall.Gen2,
+                stall.ThreadPoolThreads, stall.ThreadPoolPending,
+                stall.ShortWriteBytes > 0 ? $"; {stall.ShortWriteBytes} TX bytes never sent" : string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// One burst of lost data, logged the moment the consumer notices the counters moved rather than
+    /// as a total once the run is over. A sweep point spans a known wall-clock window, so a timestamped
+    /// burst is what makes "this point's THD is contaminated" answerable instead of "some point's was".
+    /// </summary>
+    private void LogDropBurst(long chunkDelta, long blockDelta, long chunkTotal, long blockTotal, AcquisitionConfig config)
+    {
+        logger.LogWarning(
+            "QA403 lost data now: +{ChunkDelta} RX chunks ({ChunkFrames} frames, before calibration), "
+                + "+{BlockDelta} blocks ({BlockFrames} frames, after it); run totals {ChunkTotal}/{BlockTotal}. "
+                + "Any FFT record spanning this instant is spliced",
+            chunkDelta, chunkDelta * TransferChunkFrames,
+            blockDelta, blockDelta * config.BlockFrameCount,
+            chunkTotal, blockTotal);
+    }
+
+    /// <summary>
+    /// End-of-stream verdict. <c>PrimedSlackMs - MinSlackMs</c> is the total DAC time the host failed
+    /// to cover over the whole run — the sum of every flat span a scope would have shown — so a clean
+    /// run reports a number near zero and a run with gaps reports their total directly.
+    /// </summary>
+    private void LogPumpSummary(TransferPumpDiagnostics diagnostics, double sampleRateHz)
+    {
+        double lostMs = diagnostics.PrimedSlackMs - diagnostics.MinSlackMs;
+
+        // A few ms is host-vs-device clock drift over a long run, not starvation — see the slack
+        // metric's remarks. Report at Warning only once it is past anything drift can explain.
+        var level = lostMs > 2.0 || diagnostics.ShortWrites > 0
+            ? Microsoft.Extensions.Logging.LogLevel.Warning
+            : Microsoft.Extensions.Logging.LogLevel.Information;
+
+        logger.Log(
+            level,
+            "QA403 TX summary at {SampleRateHz:0} Hz: {Iterations} iterations, worst {WorstMs:0.0} ms, "
+                + "TX slack floor {MinSlackMs:0.0} ms of {PrimedMs:0.0} (≈{LostMs:0.0} ms of DAC time lost), "
+                + "{ShortWrites} short writes ({ShortWriteBytes} bytes), "
+                + "{GcPauseMs:0.0} ms GC pause over gen0 {Gen0}/gen1 {Gen1}/gen2 {Gen2}"
+                + "{Suppressed}",
+            sampleRateHz, diagnostics.Iterations, diagnostics.WorstIterationMs,
+            diagnostics.MinSlackMs, diagnostics.PrimedSlackMs, lostMs,
+            diagnostics.ShortWrites, diagnostics.ShortWriteBytes,
+            diagnostics.GcPauseDuringStream.TotalMilliseconds,
+            diagnostics.Gen0Collections, diagnostics.Gen1Collections, diagnostics.Gen2Collections,
+            diagnostics.SuppressedStalls > 0 ? $", {diagnostics.SuppressedStalls} further events not logged" : string.Empty);
+    }
+
     private void HandleDeviceLost(string context)
     {
         _connected = false;
@@ -687,6 +748,200 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     private readonly record struct RxChunk(byte[] Buffer, int Length, double InputRangeDbv, int SettleFrames);
 
     /// <summary>
+    /// Turns raw <see cref="RxChunk"/>s into calibrated <see cref="PcmBlock"/>s, on its own thread.
+    ///
+    /// <para><b>Why a thread, and not an <c>await foreach</c>.</b> This work used to live directly in
+    /// <see cref="StreamAsync"/>'s iterator, which meant it ran as thread-pool continuations: one per
+    /// chunk, competing with the FFT worker in <c>SpectrumPipeline</c> for the same pool. That is the
+    /// same starvation the pump was given a dedicated thread to escape, and it was still costing real
+    /// samples — measured on a QA403 over a 100 s sweep at 192 kHz, 75 RX chunks dropped, i.e. the
+    /// reader of the pump's 683 ms channel went unscheduled for longer than 683 ms, repeatedly. Per
+    /// <c>SampleRingBuffer</c>'s contract those holes are not skipped display frames: the stream is
+    /// concatenated, so each one splices an FFT record, smears the tone into a skirt and lifts the
+    /// broadband floor — a spurious THD reading, which is exactly the symptom that was reported.</para>
+    ///
+    /// <para>The pool round-trip does not disappear, it moves: this thread hands finished blocks to a
+    /// second channel and <see cref="StreamAsync"/> yields from that. So a consumer that cannot keep
+    /// up now backs up <em>behind</em> calibration instead of in front of it, and
+    /// <see cref="DroppedBlocks"/> counts that case separately from the pump's own drops. The two
+    /// numbers name which half fell behind, which one combined number never could.</para>
+    /// </summary>
+    private sealed class BlockAssembler
+    {
+        private readonly ChannelReader<RxChunk> _source;
+        private readonly Qa40xCalibration _calibration;
+        private readonly AcquisitionConfig _config;
+        private readonly ILogger _logger;
+        private readonly Channel<PcmBlock> _output;
+        private readonly CancellationTokenSource _stop = new();
+        private long _droppedBlocks;
+        private Thread? _thread;
+
+        public BlockAssembler(
+            ChannelReader<RxChunk> source, Qa40xCalibration calibration, AcquisitionConfig config, ILogger logger)
+        {
+            _source = source;
+            _calibration = calibration;
+            _config = config;
+            _logger = logger;
+
+            // Roughly a second of assembled audio. Drop-oldest for the same reason the RX channel uses
+            // it — blocking here would push back onto this thread, which would stop draining the RX
+            // channel, which is the drop this class exists to prevent. Losing the oldest block is the
+            // lesser of the two, and it is counted rather than silent.
+            int capacity = Math.Max(8, (int)Math.Ceiling(config.SampleRateHz / config.BlockFrameCount));
+            _output = Channel.CreateBounded<PcmBlock>(
+                new BoundedChannelOptions(capacity)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                    SingleWriter = true,
+                },
+                itemDropped: dropped =>
+                {
+                    dropped.Dispose();
+                    Interlocked.Increment(ref _droppedBlocks);
+                });
+        }
+
+        public ChannelReader<PcmBlock> Reader => _output.Reader;
+
+        /// <summary>Blocks discarded because whoever consumes this stream fell behind calibration — see the type remarks.</summary>
+        public long DroppedBlocks => Interlocked.Read(ref _droppedBlocks);
+
+        public void Start()
+        {
+            _thread = new Thread(Run)
+            {
+                IsBackground = true,
+                Name = "QA403 block assembler",
+
+                // Above the pool's normal priority, below the pump's: this must not be preempted by
+                // the DSP work it exists to be independent of, and must not preempt transfer refill.
+                Priority = ThreadPriority.AboveNormal,
+            };
+            _thread.Start();
+        }
+
+        /// <summary>
+        /// Stops the thread and waits for it. Must complete before the pump drains its channel — see
+        /// the call site: both would otherwise be returning the same rented buffers.
+        /// </summary>
+        public void StopAndJoin()
+        {
+            _stop.Cancel();
+
+            if (_thread is { } thread && !thread.Join(TimeSpan.FromSeconds(2)))
+                _logger.LogWarning("QA403 block assembler did not exit within 2 s");
+
+            _stop.Dispose();
+
+            while (_output.Reader.TryRead(out var leftover))
+                leftover.Dispose();
+        }
+
+        private void Run()
+        {
+            float[]? blockBuffer = null;
+            int framesInBlock = 0;
+            long sequenceNumber = 0;
+            int settleFramesRemaining = 0;
+
+            try
+            {
+                // Blocking waits, on a dedicated thread, for the same reason TransferPump blocks on
+                // its transfers: it is not a pool thread, so parking it costs nothing that matters.
+                while (_source.WaitToReadAsync(_stop.Token).AsTask().GetAwaiter().GetResult())
+                {
+                    while (_source.TryRead(out var chunk))
+                    {
+                        // A range step reports its settle window on the first chunk captured *after*
+                        // the register write, so this chunk's own samples are still valid at its
+                        // stated range.
+                        if (chunk.SettleFrames > 0)
+                            settleFramesRemaining = chunk.SettleFrames;
+
+                        int chunkFrameCount = chunk.Length / BytesPerFrame;
+                        for (int i = 0; i < chunkFrameCount; i++)
+                        {
+                            if (settleFramesRemaining > 0)
+                            {
+                                settleFramesRemaining--;
+                                continue;
+                            }
+
+                            blockBuffer ??= ArrayPool<float>.Shared.Rent(_config.BlockFrameCount * _config.ChannelCount);
+
+                            // Deinterleaved and calibrated straight into the outgoing block — no
+                            // intermediate per-chunk float arrays. There is deliberately **no channel
+                            // swap here**. The QA403's swap is on the DAC only — PyQa40x states it as
+                            // "On QA402 and QA403, *outputs* need to be swapped" (analyzer.py:113) and
+                            // correspondingly reads its ADC data straight through, left =
+                            // interleaved[0::2] / right = interleaved[1::2] (analyzer.py:174-175),
+                            // applying its channel-0 ("left") calibration record to wire slot 0.
+                            // TransferPump.BuildTxChunk already applies the swap on the way out, so
+                            // applying it again here would swap twice and cross the channels: a tone
+                            // generated on logical left would come back on logical right.
+                            //
+                            // This was measured on real hardware rather than inferred. Driving a raw
+                            // sine on wire slot 1 alone put it at -6.00 dBFS on RX slot 0 with RX slot
+                            // 1 at -94 dBFS, and driving slot 0 alone mirrored it exactly — TX slot N
+                            // returns on RX slot 1-N. qa40x-baremetal does swap on receive
+                            // (Acquisition.cs:193, FromByteStream(rxData, out r.Right, out r.Left)) and
+                            // an earlier version of this code followed it, which is what crossed the
+                            // channels; that reference sends 1 kHz left / 2 kHz right but only ever
+                            // prints per-channel *peaks*, never which frequency arrived where, so a
+                            // crossed pair is invisible to it.
+                            int byteOffset = i * BytesPerFrame;
+                            int slot0Raw = BinaryPrimitives.ReadInt32LittleEndian(chunk.Buffer.AsSpan(byteOffset));
+                            int slot1Raw = BinaryPrimitives.ReadInt32LittleEndian(chunk.Buffer.AsSpan(byteOffset + 4));
+
+                            int baseIndex = framesInBlock * _config.ChannelCount;
+                            blockBuffer[baseIndex] = (float)_calibration.RawToVolts(slot0Raw, chunk.InputRangeDbv, 0);
+                            if (_config.ChannelCount > 1)
+                                blockBuffer[baseIndex + 1] = (float)_calibration.RawToVolts(slot1Raw, chunk.InputRangeDbv, 1);
+                            framesInBlock++;
+
+                            if (framesInBlock == _config.BlockFrameCount)
+                            {
+                                var block = new PcmBlock(
+                                    blockBuffer, _config.BlockFrameCount * _config.ChannelCount, _config.SampleRateHz,
+                                    _config.ChannelCount, sequenceNumber++, Stopwatch.GetTimestamp());
+
+                                // DropOldest never blocks, so a stalled consumer can never stall this
+                                // thread and therefore can never stall the RX drain. TryWrite reports
+                                // false only on a completed channel, where nothing will read this.
+                                if (!_output.Writer.TryWrite(block))
+                                    block.Dispose();
+
+                                blockBuffer = null;
+                                framesInBlock = 0;
+                            }
+                        }
+
+                        ArrayPool<byte>.Shared.Return(chunk.Buffer);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected on stop.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "QA403 block assembler faulted");
+            }
+            finally
+            {
+                if (blockBuffer is not null)
+                    ArrayPool<float>.Shared.Return(blockBuffer);
+
+                _output.Writer.TryComplete();
+            }
+        }
+    }
+
+    /// <summary>
     /// Owns the queued bulk TX/RX pipeline for one <see cref="StreamAsync"/> run, on a dedicated
     /// thread, and hands completed RX buffers to the consumer over a <see cref="Channel"/>.
     ///
@@ -773,6 +1028,20 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         private double _inputRangeDbv = initialInputRangeDbv;
 
         /// <summary>
+        /// DAC-starvation detector. Pump-thread-only writes, drained and logged by the consumer —
+        /// see <see cref="TransferPumpDiagnostics"/> for the slack metric it is built around.
+        /// </summary>
+        private readonly TransferPumpDiagnostics _diagnostics =
+            new(sampleRateHz, QueueDepthFor(sampleRateHz), TransferChunkFrames);
+
+        /// <summary>Running total of milliseconds spent inside <see cref="QuiesceAndWriteRegister"/>, so the loop can tell a deliberate drain from a stall it did not ask for.</summary>
+        private double _quiesceMs;
+
+        /// <summary>Milliseconds between two <see cref="Stopwatch.GetTimestamp"/> readings.</summary>
+        private static double Elapsed(long from, long to) =>
+            (to - from) * 1000.0 / Stopwatch.Frequency;
+
+        /// <summary>
         /// The range <see cref="BuildTxChunk"/> scales by, and the authoritative copy while this pump
         /// runs. Only ever written from <see cref="QuiesceAndWriteRegister"/>'s
         /// <c>applyBeforePrime</c> hook, i.e. after register 6 has been programmed and before the TX
@@ -800,6 +1069,9 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             byte Register, uint Value, double? InputRangeDbv, double? OutputRangeDbv, TaskCompletionSource Completion);
 
         public ChannelReader<RxChunk> Reader => _rx.Channel.Reader;
+
+        /// <summary>DAC-starvation measurements for this stream. Drained and logged by the consumer, never by the pump.</summary>
+        public TransferPumpDiagnostics Diagnostics => _diagnostics;
 
         /// <summary>RX chunks discarded because the consumer fell behind — see the itemDropped callback.</summary>
         public long DroppedChunks => Interlocked.Read(ref _rx.Drops.Count);
@@ -874,10 +1146,20 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// </summary>
         private void QuiesceAndWriteRegister(byte register, uint value, Action? applyBeforePrime = null)
         {
+            // Timed because this is a *known* DAC gap, not a suspected one: Drain() waits for every
+            // outstanding TX transfer to complete, which is precisely the device having consumed all
+            // the audio the host had queued. From that moment until Prime() has rebuilt the queue the
+            // DAC has nothing to play and emits silence. Only the register write and the rebuild are
+            // charged here — the drain itself is covered by audio that is still playing — so this
+            // number is the width of the flat span a scope sees on the generator output.
             Drain();
+
+            long tRegisterStart = Stopwatch.GetTimestamp();
             transport.WriteRegisterAsync(register, value, _ct).GetAwaiter().GetResult();
             applyBeforePrime?.Invoke();
             Prime();
+            _quiesceMs += Elapsed(tRegisterStart, Stopwatch.GetTimestamp());
+
             _pendingSettleFrames = Qa40xAutoRanger.SettleFrameCount(sampleRateHz);
         }
 
@@ -931,22 +1213,39 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             try
             {
                 Prime();
+                _diagnostics.Start();
 
                 while (!_stop && !_ct.IsCancellationRequested && !isStopRequested())
                 {
+                    // Timestamps only — see TransferPumpDiagnostics on why measuring here is safe and
+                    // logging here would not be. The four spans below are the whole iteration, split
+                    // so a stall can be blamed on the thing that actually took the time.
+                    long tIterationStart = Stopwatch.GetTimestamp();
+
                     // Complete the oldest read, then immediately put a read and a write back on the
                     // wire. Nothing between those two points may do meaningful work — that latency is
                     // the DAC's underrun margin.
                     var (readTask, readBuffer) = _pendingReads.Dequeue();
                     int transferLength = readTask.GetAwaiter().GetResult();
+                    long tAfterRead = Stopwatch.GetTimestamp();
 
                     byte[] nextReadBuffer = ArrayPool<byte>.Shared.Rent(ChunkByteSize);
                     _pendingReads.Enqueue((transport.ReadDataAsync(nextReadBuffer, ChunkByteSize, _ct), nextReadBuffer));
 
                     var (writeTask, writeBuffer) = _pendingWrites.Dequeue();
-                    writeTask.GetAwaiter().GetResult();
+                    int writtenBytes = writeTask.GetAwaiter().GetResult();
+                    long tAfterWrite = Stopwatch.GetTimestamp();
+
+                    // Checked, not discarded. A partial bulk write is reported as a length rather
+                    // than an error (Qa40xTransport.WriteDataAsync says so explicitly, and a timeout
+                    // is deliberately not fatal), so the frames it failed to move are simply absent
+                    // from the DAC's stream — a gap on a scope, and nothing at all in a log.
+                    if (writtenBytes != ChunkByteSize)
+                        _diagnostics.RecordShortWrite(_frameIndex, ChunkByteSize, writtenBytes);
+
                     ArrayPool<byte>.Shared.Return(writeBuffer);
                     SubmitWrite();
+                    long tAfterSubmit = Stopwatch.GetTimestamp();
 
                     double rangeForThisChunk = Volatile.Read(ref _inputRangeDbv);
                     int settleFrames = _pendingSettleFrames;
@@ -955,10 +1254,21 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                     // Externally requested register writes first, then autorange — both quiesce EP2,
                     // and both must land after rangeForThisChunk is latched above so this chunk keeps
                     // the range its samples were captured at.
+                    double quiesceMsBefore = _quiesceMs;
                     ApplyPendingRegisterWrites();
 
                     if (isAutoRangeEnabled())
                         StepRangeIfNeeded(readBuffer, transferLength, rangeForThisChunk);
+
+                    long tIterationEnd = Stopwatch.GetTimestamp();
+                    _diagnostics.EndIteration(
+                        _frameIndex,
+                        Elapsed(tIterationStart, tIterationEnd),
+                        Elapsed(tIterationStart, tAfterRead),
+                        Elapsed(tAfterRead, tAfterWrite),
+                        Elapsed(tAfterWrite, tAfterSubmit),
+                        _quiesceMs - quiesceMsBefore,
+                        quiesced: _quiesceMs != quiesceMsBefore);
 
                     // DropOldest never blocks, so a stalled consumer can never stall the DAC. TryWrite
                     // only reports false on a completed channel, in which case nothing will read this.

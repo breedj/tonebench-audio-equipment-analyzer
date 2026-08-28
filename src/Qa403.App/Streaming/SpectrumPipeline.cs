@@ -84,6 +84,7 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         get => _options;
         set
         {
+            var previous = _options;
             _options = value ?? throw new ArgumentNullException(nameof(value));
 
             // Resize now, on the caller's thread, rather than leaving it to the next Enqueue on the
@@ -98,6 +99,19 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             // step, and Start() does its own EnsureRingBuffers.
             if (_ringBufferFftSize != 0)
                 EnsureRingBuffers(_options.FftSize);
+
+            // The FFT size sets both the per-tick CPU cost and the record length, so it is the first
+            // thing anyone reading a log wants to know when attributing a dropped chunk or a
+            // contaminated point — and nothing was recording it. Only on an actual change: the sweep
+            // reassigns Options per point, and most of those reassignments change nothing.
+            if (previous.FftSize != _options.FftSize || previous.AverageCount != _options.AverageCount)
+            {
+                logger.LogInformation(
+                    "Spectrum analysis now {FftSize} points, {Window} window, {Averaging} x{AverageCount} at hop {Hop:0.##} "
+                        + "(was {PreviousFftSize} points x{PreviousAverageCount})",
+                    _options.FftSize, _options.Window, _options.Averaging, _options.AverageCount,
+                    _options.AverageHopFraction, previous.FftSize, previous.AverageCount);
+            }
         }
     }
 
@@ -107,6 +121,15 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         _channelCount = Math.Clamp(channelCount, 1, MaxChannels);
         _seq = 0;
         EnsureRingBuffers(_options.FftSize);
+
+        logger.LogInformation(
+            "Spectrum pipeline starting at {SampleRateHz:0} Hz, {ChannelCount} ch, {FftSize} points "
+                + "({BinHz:0.###} Hz/bin, {RecordMs:0.#} ms record), {Window} window, {Averaging} x{AverageCount} "
+                + "at hop {Hop:0.##}, single-shot {SingleShot}, {FrameRateHz} Hz display",
+            sampleRateHz, _channelCount, _options.FftSize,
+            sampleRateHz / _options.FftSize, _options.FftSize * 1000.0 / sampleRateHz,
+            _options.Window, _options.Averaging, _options.AverageCount, _options.AverageHopFraction,
+            _options.SingleShot, _options.TargetFrameRateHz);
 
         // Unconditionally, because EnsureRingBuffers only allocates fresh buffers when the FFT size
         // changed. Restarting at a new sample rate keeps the same size, so without this the first

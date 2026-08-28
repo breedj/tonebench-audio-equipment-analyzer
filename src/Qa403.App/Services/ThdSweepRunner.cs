@@ -235,6 +235,21 @@ public sealed class ThdSweepRunner(
 
         try
         {
+            // The as-run configuration, once, before anything else. Nothing recorded it before, so a
+            // log showing dropped chunks during a sweep could not answer the first question anyone
+            // asks of it — which resolution mode and FFT size were actually in play.
+            logger.LogInformation(
+                "THD sweep starting: {StartHz:0.##}-{EndHz:0.##} Hz, {StepsPerOctave}/octave, {Points} points, "
+                    + "{SampleRateHz:0} Hz, adaptive {Adaptive} ({FftDescription}), {Averages} averages, "
+                    + "level {LevelValue:0.##} {LevelUnit} ({LevelMode}), noise floor first: {NoiseFloor}",
+                request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave, steps.Length,
+                request.EffectiveSampleRateHz, request.AdaptiveResolution,
+                request.AdaptiveResolution
+                    ? $"{steps.Max(s => s.FftSize)}-{steps.Min(s => s.FftSize)} points"
+                    : $"fixed {request.FftSize} points",
+                request.AverageCount, request.LevelValue, request.LevelUnit, request.LevelMode,
+                request.MeasureNoiseFloor);
+
             pipeline.Options = BuildSweepOptions(savedOptions, request);
 
             if (!session.Acquiring)
@@ -258,8 +273,22 @@ public sealed class ThdSweepRunner(
                 SetProgress(i, step.FrequencyHz);
                 BroadcastProgress(i, steps.Length, step.FrequencyHz, ThdSweepPhase.Sweeping);
 
+                // Bracketed around the capture, not sampled after the run. A hole in the sample stream
+                // splices whatever FFT record spans it, so the question that matters is which point's
+                // record it landed in — and a total read at the end cannot say.
+                long dropsBefore = session.DroppedRxChunks;
+
                 var snapshots = await CaptureWithStimulusAsync(
                     ToneConfig(step.FrequencyHz, generatorAmpDbv, request), request, step.FftSize, ct);
+
+                long dropsDuring = session.DroppedRxChunks - dropsBefore;
+                if (dropsDuring > 0)
+                {
+                    logger.LogWarning(
+                        "Sweep point {Index}/{Total} at {FreqHz:0.##} Hz ({FftSize} points) captured across "
+                            + "{Drops} dropped RX chunks — its record is spliced and its THD is not trustworthy",
+                        i + 1, steps.Length, step.FrequencyHz, step.FftSize, dropsDuring);
+                }
 
                 foreach (var point in BuildPoints(step.FrequencyHz, generatorAmpDbv, request, snapshots, noiseVrms))
                 {

@@ -9,6 +9,7 @@ import type {
 } from '../api/client'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
+import CollapsibleSection from './CollapsibleSection.vue'
 import {
   adaptiveFftBounds,
   adaptiveFftSize,
@@ -296,9 +297,7 @@ function run() {
 </script>
 
 <template>
-  <section class="flex flex-col gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Sweep</h2>
-
+  <CollapsibleSection title="Sweep">
     <div class="grid grid-cols-2 gap-2 text-xs">
       <label class="flex flex-col gap-1" title="Lowest frequency measured. The sweep steps upward from here.">
         Start (Hz)
@@ -462,6 +461,5 @@ function run() {
     </p>
 
     <p v-if="invalid" class="text-xs text-red-600 dark:text-red-400">{{ invalid }}</p>
-
-  </section>
+  </CollapsibleSection>
 </template>

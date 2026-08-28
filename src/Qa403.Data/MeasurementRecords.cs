@@ -39,7 +39,21 @@ public sealed record FftSpectrumParameters(
     // server always sends the same 2048-sample scope frame; the client just draws a slice of it).
     // Optional with a default so rows saved before this field existed still deserialize; null means
     // "use the 4-period default" -- see useScopeDisplay.ts.
-    int? ScopePeriods = null);
+    int? ScopePeriods = null,
+    // The spectrum chart's own axis bounds and line-style toggles -- same rationale as
+    // SelectedMetrics/ScopePeriods above: purely a UI display preference, never fed into
+    // spectrumPipeline.Options. Null means "use useChartDisplay.ts's own defaults" -- covers rows
+    // saved before this field existed. ChannelVisibility (L/R) is deliberately not here: it always
+    // mirrors ProcessLeft/ProcessRight (see ChartDisplayPanel.vue), so persisting it separately
+    // could only ever disagree with those.
+    double? ChartYTopDbv = null,
+    double? ChartYBottomDbv = null,
+    double? ChartXFromHz = null,
+    double? ChartXToHz = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    bool? ChartShowMinMax = null,
+    bool? ChartShowPeakHold = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
@@ -65,7 +79,30 @@ public sealed record ThdVsFrequencyParameters(
     double SampleRateHz,
     bool MeasureNoiseFloor,
     /// <summary>The generator amplitude the run actually used -- solved by probing for the output-referred modes, so it is only known after the fact.</summary>
-    double GeneratorAmpDbv = 0.0);
+    double GeneratorAmpDbv = 0.0,
+    // The sweep chart's own axis bounds, per-trace visibility and line-style toggles -- purely a UI
+    // display preference, never fed into the sweep runner. Optional with defaults so rows saved
+    // before this field existed still deserialize; null means "use App.vue's own sweep* ref
+    // defaults" -- see SweepDisplayPanel.vue.
+    string? ChartUnit = null,
+    bool? ChartShowNoiseFloor = null,
+    bool? ChartShowMagnitude = null,
+    bool? ChartShowThd = null,
+    bool? ChartShowD2 = null,
+    bool? ChartShowD3 = null,
+    bool? ChartShowD4 = null,
+    bool? ChartShowD5 = null,
+    bool? ChartShowD6Plus = null,
+    bool? ChartShowLeft = null,
+    bool? ChartShowRight = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    double? ChartYMaxPercent = null,
+    double? ChartYMinPercent = null,
+    double? ChartXFromHz = null,
+    double? ChartXToHz = null,
+    double? ChartYTopDb = null,
+    double? ChartYBottomDb = null);
 
 /// <summary>
 /// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a

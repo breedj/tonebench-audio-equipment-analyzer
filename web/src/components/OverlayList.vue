@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { useMeasurements } from '../composables/useMeasurements'
+import { computed } from 'vue'
+import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
+import { FFT_SPECTRUM_KIND } from '../measurements/kinds'
+import { fftOverlayColor, fftOverlays } from '../measurements/spectrumOverlayColors'
 
-const { overlays, removeOverlay, setOverlayVisible } = useMeasurements()
+const { overlays, removeOverlay, setOverlayVisible, canShowMoreOverlays } = useMeasurements()
+
+// This list only ever renders on the FFT Spectrum screen (App.vue), but `overlays` is the one
+// singleton shared with the THD-vs-frequency screen's own checklist — filter to this chart's own
+// kind so a stray sweep result loaded elsewhere doesn't show up as a blank, colorless row here.
+const fftOnlyOverlays = computed(() => fftOverlays(overlays.value))
 
 function hasChannel(o: (typeof overlays.value)[number], ch: number): boolean {
   return o.detail.channelsData.some((c) => c.channel === ch)
@@ -9,18 +17,19 @@ function hasChannel(o: (typeof overlays.value)[number], ch: number): boolean {
 </script>
 
 <template>
-  <section v-if="overlays.length > 0" class="flex flex-col gap-1.5 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section v-if="fftOnlyOverlays.length > 0" class="flex flex-col gap-1.5 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Overlays</h2>
     <div
-      v-for="overlay in overlays"
+      v-for="overlay in fftOnlyOverlays"
       :key="overlay.id"
       class="flex items-center gap-2 text-sm"
       :class="{ 'opacity-40': !overlay.visible }"
     >
-      <!-- Dashed-L / dotted-R swatch, matching how the chart actually draws this overlay's two channels (a tint of the live L/R colors — see colorL/colorR). -->
+      <!-- Solid-L / dashed-R swatch, matching how SpectrumChart draws this overlay's two channels
+           (CHANNEL_DASH there) — color identifies the run (fftOverlayColor), not the channel. -->
       <svg width="28" height="14" viewBox="0 0 28 14" class="shrink-0">
-        <line x1="1" y1="5" x2="27" y2="5" :stroke="overlay.colorL" stroke-width="1.5" stroke-dasharray="4,2" />
-        <line x1="1" y1="10" x2="27" y2="10" :stroke="overlay.colorR" stroke-width="1.5" stroke-dasharray="1,3" />
+        <line x1="1" y1="5" x2="27" y2="5" :stroke="fftOverlayColor(overlays, overlay.id)" stroke-width="1.5" />
+        <line x1="1" y1="10" x2="27" y2="10" :stroke="fftOverlayColor(overlays, overlay.id)" stroke-width="1.5" stroke-dasharray="6,3" />
       </svg>
 
       <span class="min-w-0 flex-1 truncate">
@@ -33,8 +42,9 @@ function hasChannel(o: (typeof overlays.value)[number], ch: number): boolean {
 
       <button
         type="button"
-        class="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
-        :title="overlay.visible ? 'Hide' : 'Show'"
+        class="text-neutral-500 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-neutral-500 dark:hover:text-neutral-100"
+        :title="overlay.visible ? 'Hide' : !canShowMoreOverlays(FFT_SPECTRUM_KIND) ? `At most ${MAX_VISIBLE_OVERLAYS} overlays can be shown at once — hide one first.` : 'Show'"
+        :disabled="!overlay.visible && !canShowMoreOverlays(FFT_SPECTRUM_KIND)"
         @click="setOverlayVisible(overlay.id, !overlay.visible)"
       >
         <svg v-if="overlay.visible" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

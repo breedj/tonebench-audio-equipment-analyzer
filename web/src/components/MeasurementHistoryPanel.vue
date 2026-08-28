@@ -4,6 +4,7 @@ import { api, type MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
 import EditMeasurementDialog from './EditMeasurementDialog.vue'
+import CollapsibleSection from './CollapsibleSection.vue'
 
 const emit = defineEmits<{ error: [message: string] }>()
 
@@ -49,10 +50,8 @@ async function onDelete(item: MeasurementSummary) {
   <!-- The checkbox list from the design lives in MeasurementChecklist.vue, next to the chart. This
        is the rest of what History used to show (timestamps, THD headline, CSV export, delete, date
        filter) — not part of the new design, kept here for now until it's repositioned. -->
-  <section class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
-    <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
-      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">History details</h2>
-
+  <CollapsibleSection title="History details" padding="p-4">
+    <template #header-right>
       <div class="flex items-end gap-3 text-sm">
         <label class="flex flex-col gap-1">
           From
@@ -74,58 +73,60 @@ async function onDelete(item: MeasurementSummary) {
           />
         </label>
       </div>
-    </div>
+    </template>
 
-    <p v-if="error" class="mb-2 text-xs text-red-600 dark:text-red-400">{{ error }}</p>
+    <p v-if="error" class="text-xs text-red-600 dark:text-red-400">{{ error }}</p>
 
     <p v-if="currentTypeId === null" class="text-xs text-neutral-400 dark:text-neutral-600">
       Select a measurement to see its saved results.
     </p>
-    <table v-else class="w-full text-sm">
-      <tbody>
-        <tr v-for="item in items" :key="item.resultId" class="border-t border-neutral-100 dark:border-neutral-800">
-          <td class="py-1 pr-2">
-            {{ item.name }}
-            <span v-if="item.notes" class="text-neutral-400"> — {{ item.notes }}</span>
-          </td>
-          <td class="py-1 pr-2 whitespace-nowrap text-neutral-400">{{ new Date(item.timestampUtc).toLocaleString() }}</td>
-          <td class="py-1 pr-2 whitespace-nowrap text-neutral-400">
-            <span v-for="(headline, channel) in item.channelHeadlines" :key="channel" class="mr-2">
-              ch{{ channel }}: THD {{ headline.thdPercent.toFixed(3) }}%
-            </span>
-          </td>
-          <td class="py-1 text-right">
-            <div class="flex justify-end gap-1.5 text-xs whitespace-nowrap">
-              <button
-                type="button"
-                class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                @click="onEdit(item)"
-              >
-                Edit
-              </button>
-              <a
-                :href="api.measurementCsvExportUrl(item.resultId)"
-                download
-                class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-              >
-                CSV
-              </a>
-              <button
-                type="button"
-                class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-red-800 dark:hover:bg-red-950 dark:hover:text-red-400"
-                @click="onDelete(item)"
-              >
-                Delete
-              </button>
-            </div>
-          </td>
-        </tr>
-        <tr v-if="items.length === 0">
-          <td colspan="4" class="py-1 text-xs text-neutral-400 dark:text-neutral-600">No measurements saved yet.</td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <tbody>
+          <tr v-for="item in items" :key="item.resultId" class="border-t border-neutral-100 dark:border-neutral-800">
+            <td class="py-1 pr-2">
+              {{ item.name }}
+              <span v-if="item.notes" class="text-neutral-400"> — {{ item.notes }}</span>
+            </td>
+            <td class="py-1 pr-2 whitespace-nowrap text-neutral-400">{{ new Date(item.timestampUtc).toLocaleString() }}</td>
+            <td class="py-1 pr-2 whitespace-nowrap text-neutral-400">
+              <span v-for="(headline, channel) in item.channelHeadlines" :key="channel" class="mr-2">
+                ch{{ channel }}: THD {{ headline.thdPercent.toFixed(3) }}%
+              </span>
+            </td>
+            <td class="py-1 text-right">
+              <div class="flex justify-end gap-1.5 text-xs whitespace-nowrap">
+                <button
+                  type="button"
+                  class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                  @click="onEdit(item)"
+                >
+                  Edit
+                </button>
+                <a
+                  :href="api.measurementCsvExportUrl(item.resultId)"
+                  download
+                  class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                >
+                  CSV
+                </a>
+                <button
+                  type="button"
+                  class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-red-800 dark:hover:bg-red-950 dark:hover:text-red-400"
+                  @click="onDelete(item)"
+                >
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
+          <tr v-if="items.length === 0">
+            <td colspan="4" class="py-1 text-xs text-neutral-400 dark:text-neutral-600">No measurements saved yet.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <EditMeasurementDialog :open="editDialogOpen" :item="editingItem" @close="editDialogOpen = false" />
-  </section>
+  </CollapsibleSection>
 </template>

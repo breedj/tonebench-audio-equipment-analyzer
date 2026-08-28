@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { api, type SimulatedProfileRequest, type StagedMeasurementConfig } from './api/client'
 import { useDevice } from './composables/useDevice'
 import { useSpectrumStream } from './composables/useSpectrumStream'
-import { useMeasurements } from './composables/useMeasurements'
+import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
 import { useProjects } from './composables/useProjects'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
 import { useScopeDisplay } from './composables/useScopeDisplay'
+import { useChartDisplay } from './composables/useChartDisplay'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
 import { useCaptureDelay } from './composables/useCaptureDelay'
 import { determineAttenuation, nearestInputRange } from './attenuation'
@@ -44,11 +45,22 @@ import { useSweep } from './composables/useSweep'
 import { nearestSweepPoint } from './sweep/points'
 
 const { status, ranges, error, refreshStatus } = useDevice()
-const { spectrum, meters, scope, setViewport } = useSpectrumStream()
+const { spectrum, meters, scope, setViewport, clearScope } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
 const { scopePeriods, applyLoaded: applyLoadedScopePeriods } = useScopeDisplay()
+const {
+  yTop: chartYTop,
+  yBottom: chartYBottom,
+  xFrom: chartXFrom,
+  xTo: chartXTo,
+  thickLines: chartThickLines,
+  showDataPoints: chartShowDataPoints,
+  showMinMax: chartShowMinMax,
+  showPeakHold: chartShowPeakHold,
+  applyLoaded: applyLoadedChartDisplay,
+} = useChartDisplay()
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
 // fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
@@ -82,15 +94,17 @@ const {
   saveProjectAs,
 } = useProjects()
 
-// Syncs the display-only settings — the metrics-picker selection and the oscilloscope's period
-// count — whenever a measurement type is (re)loaded. Neither reaches the device or the pipeline,
-// so unlike the generator/acquisition fields they apply straight away rather than waiting for Run.
-// See each composable's applyLoaded for the null-means-default handling.
+// Syncs the display-only settings — the metrics-picker selection, the oscilloscope's period count,
+// and the spectrum chart's own axis bounds/line-style toggles — whenever a measurement type is
+// (re)loaded. None of these reach the device or the pipeline, so unlike the generator/acquisition
+// fields they apply straight away rather than waiting for Run. See each composable's applyLoaded
+// for the null-means-default handling.
 watch(
   loadedParams,
   (params) => {
     applyLoadedMetrics(params?.selectedMetrics)
     applyLoadedScopePeriods(params?.scopePeriods)
+    applyLoadedChartDisplay(params)
   },
   { immediate: true },
 )
@@ -158,20 +172,41 @@ function selectedSweepPointFor(channel: number) {
 const sweepSelectedLeft = computed(() => selectedSweepPointFor(0))
 const sweepSelectedRight = computed(() => selectedSweepPointFor(1))
 
-// Chart display preferences. Purely local view state — deliberately not part of the measurement
-// type's saved parameters yet, same as the FFT view's own display toggles started out.
+/**
+ * The Spectrum/Oscilloscope preview pair drawn underneath the live one for each checked history
+ * item — same filter ThdSweepChart's own activeOverlays uses (visible, and actually carrying
+ * sweep points), so an FFT-kind result checked on while this screen is open is silently skipped
+ * rather than drawn empty.
+ */
+const visibleSweepOverlays = computed(() => overlays.value.filter((o) => o.visible && o.sweepPoints?.length))
+
+/**
+ * selectedSweepPointFor's counterpart for a stored overlay: never "running" (it's a saved result),
+ * so it always follows the chart cursor, falling back to the channel's last point when nothing is
+ * hovered — same fallback selectedSweepPointFor uses once a live sweep is done.
+ */
+function selectedSweepPointForOverlay(overlay: OverlayEntry, channel: number) {
+  const onChannel = (overlay.sweepPoints ?? []).filter((p) => p.channel === channel)
+  if (onChannel.length === 0) return null
+
+  const targetFreqHz = hoveredSweepFreqHz.value ?? onChannel[onChannel.length - 1].freqHz
+  return nearestSweepPoint(overlay.sweepPoints ?? [], channel, targetFreqHz)
+}
+
+// Chart display preferences. Local view state, persisted into the measurement type's params_json
+// alongside the sweep's own run settings — see applyStoredSweepDisplay/buildTypeParamsJson below.
 const sweepUnit = ref<'percent' | 'db'>('percent')
 const sweepShowNoiseFloor = ref(false)
 
-// Per-trace visibility. THD/D2..D5/D6+ on by default, matching the previous app's Graph data box;
+// Per-trace visibility. THD/D2/D3 on by default; D4/D5/D6+ and noise floor start off, per Joost.
 // Magnitude only appears on the dB axis and starts off.
 const sweepShowMagnitude = ref(false)
 const sweepShowThd = ref(true)
 const sweepShowD2 = ref(true)
 const sweepShowD3 = ref(true)
-const sweepShowD4 = ref(true)
-const sweepShowD5 = ref(true)
-const sweepShowD6Plus = ref(true)
+const sweepShowD4 = ref(false)
+const sweepShowD5 = ref(false)
+const sweepShowD6Plus = ref(false)
 const sweepShowLeft = ref(true)
 const sweepShowRight = ref(false)
 const sweepThickLines = ref(true)
@@ -188,6 +223,76 @@ const sweepXToHz = ref(20000)
 // 0 dB for the Magnitude trace, and no percentage expresses that.
 const sweepYTopDb = ref(20)
 const sweepYBottomDb = ref(-160)
+
+// Suppresses the dirty watcher below while applyStoredSweepDisplay writes these refs from a loaded
+// type's stored params — loading is the opposite of an unsaved edit. Same pattern as
+// SweepConfigPanel.vue's own `restoring` flag; kept separate because these refs live here, not in
+// that component.
+let sweepDisplayRestoring = false
+
+watch(
+  [
+    sweepUnit, sweepShowNoiseFloor, sweepShowMagnitude, sweepShowThd, sweepShowD2, sweepShowD3,
+    sweepShowD4, sweepShowD5, sweepShowD6Plus, sweepShowLeft, sweepShowRight, sweepThickLines,
+    sweepShowDataPoints, sweepYMaxPercent, sweepYMinPercent, sweepXFromHz, sweepXToHz, sweepYTopDb,
+    sweepYBottomDb,
+  ],
+  () => {
+    if (!sweepDisplayRestoring) markDirty()
+  },
+)
+
+/**
+ * Restores the sweep chart's display preferences from a loaded type's stored params_json — the
+ * counterpart of SweepConfigPanel.vue's own applyStoredParams, just for the fields that live here
+ * instead of in that panel's form. Guarded the same way: a parse failure (an FFT type's params, or
+ * a sweep saved before these fields existed) just keeps whatever's already showing.
+ */
+function applyStoredSweepDisplay(paramsJson: string) {
+  let stored: Partial<import('./api/client').ThdVsFrequencyParameters>
+  try {
+    stored = JSON.parse(paramsJson) as Partial<import('./api/client').ThdVsFrequencyParameters>
+  } catch {
+    return
+  }
+
+  sweepDisplayRestoring = true
+  if (stored.chartUnit) sweepUnit.value = stored.chartUnit
+  if (typeof stored.chartShowNoiseFloor === 'boolean') sweepShowNoiseFloor.value = stored.chartShowNoiseFloor
+  if (typeof stored.chartShowMagnitude === 'boolean') sweepShowMagnitude.value = stored.chartShowMagnitude
+  if (typeof stored.chartShowThd === 'boolean') sweepShowThd.value = stored.chartShowThd
+  if (typeof stored.chartShowD2 === 'boolean') sweepShowD2.value = stored.chartShowD2
+  if (typeof stored.chartShowD3 === 'boolean') sweepShowD3.value = stored.chartShowD3
+  if (typeof stored.chartShowD4 === 'boolean') sweepShowD4.value = stored.chartShowD4
+  if (typeof stored.chartShowD5 === 'boolean') sweepShowD5.value = stored.chartShowD5
+  if (typeof stored.chartShowD6Plus === 'boolean') sweepShowD6Plus.value = stored.chartShowD6Plus
+  if (typeof stored.chartShowLeft === 'boolean') sweepShowLeft.value = stored.chartShowLeft
+  if (typeof stored.chartShowRight === 'boolean') sweepShowRight.value = stored.chartShowRight
+  if (typeof stored.chartThickLines === 'boolean') sweepThickLines.value = stored.chartThickLines
+  if (typeof stored.chartShowDataPoints === 'boolean') sweepShowDataPoints.value = stored.chartShowDataPoints
+  if (typeof stored.chartYMaxPercent === 'number') sweepYMaxPercent.value = stored.chartYMaxPercent
+  if (typeof stored.chartYMinPercent === 'number') sweepYMinPercent.value = stored.chartYMinPercent
+  if (typeof stored.chartXFromHz === 'number') sweepXFromHz.value = stored.chartXFromHz
+  if (typeof stored.chartXToHz === 'number') sweepXToHz.value = stored.chartXToHz
+  if (typeof stored.chartYTopDb === 'number') sweepYTopDb.value = stored.chartYTopDb
+  if (typeof stored.chartYBottomDb === 'number') sweepYBottomDb.value = stored.chartYBottomDb
+
+  void nextTick(() => {
+    sweepDisplayRestoring = false
+  })
+}
+
+// Gated on kind, not just "paramsJson is present": a handful of these field names (chartThickLines,
+// chartShowDataPoints, chartXFromHz, chartXToHz) are shared with FftSpectrumParameters' own chart
+// fields, so parsing an FFT type's params here would silently borrow its chart settings for the
+// sweep display refs instead of leaving them alone.
+watch(
+  () => (currentType.value?.kind === 'ThdVsFrequency' ? currentType.value.paramsJson : null),
+  (paramsJson) => {
+    if (paramsJson) applyStoredSweepDisplay(paramsJson)
+  },
+  { immediate: true },
+)
 
 // Drives RUN SWEEP, which lives above the rail while the form it validates stays in the panel.
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
@@ -280,7 +385,7 @@ function runMeasurement(runConfig: RunConfig) {
     // meters left over from before this run even produces its first fresh frame.
     meters.value = {}
     spectrum.value = {}
-    scope.value = {}
+    clearScope()
 
     // Gated on the *device* actually having auto-ranging (status.autoRangeEnabled null means it
     // doesn't — the simulator, currently) rather than unconditionally requesting it: the server
@@ -481,7 +586,7 @@ function clearMeasurement() {
     await api.clearSpectrum()
     meters.value = {}
     spectrum.value = {}
-    scope.value = {}
+    clearScope()
   })
 }
 
@@ -505,6 +610,14 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     snapToBin: generator.snapToBin,
     selectedMetrics: selectedMetrics.value,
     scopePeriods: scopePeriods.value,
+    chartYTopDbv: chartYTop.value,
+    chartYBottomDbv: chartYBottom.value,
+    chartXFromHz: chartXFrom.value,
+    chartXToHz: chartXTo.value,
+    chartThickLines: chartThickLines.value,
+    chartShowDataPoints: chartShowDataPoints.value,
+    chartShowMinMax: chartShowMinMax.value,
+    chartShowPeakHold: chartShowPeakHold.value,
   }
 }
 
@@ -513,9 +626,39 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
  * it snapshots the live pipeline for an FFT type, because nothing about a configured sweep is live
  * device state. So the sweep screen sends its params_json explicitly; every other kind keeps
  * omitting it and lets the server build one. See ProjectsEndpoints' PUT handler.
+ *
+ * The chart display preferences above (sweepUnit, sweepShow*, axis bounds) live in App.vue rather
+ * than SweepConfigPanel's form, so they are merged into that panel's JSON here rather than passed
+ * into it — round-tripping through parse/stringify is simpler than threading nineteen more props
+ * through a component whose own job is the run configuration, not the chart.
  */
 function buildTypeParamsJson(): string | undefined {
-  return isSweepKind.value ? sweepConfigPanel.value?.buildParamsJson() : undefined
+  if (!isSweepKind.value) return undefined
+  const base = sweepConfigPanel.value?.buildParamsJson()
+  if (!base) return undefined
+  const withDisplay = {
+    ...JSON.parse(base),
+    chartUnit: sweepUnit.value,
+    chartShowNoiseFloor: sweepShowNoiseFloor.value,
+    chartShowMagnitude: sweepShowMagnitude.value,
+    chartShowThd: sweepShowThd.value,
+    chartShowD2: sweepShowD2.value,
+    chartShowD3: sweepShowD3.value,
+    chartShowD4: sweepShowD4.value,
+    chartShowD5: sweepShowD5.value,
+    chartShowD6Plus: sweepShowD6Plus.value,
+    chartShowLeft: sweepShowLeft.value,
+    chartShowRight: sweepShowRight.value,
+    chartThickLines: sweepThickLines.value,
+    chartShowDataPoints: sweepShowDataPoints.value,
+    chartYMaxPercent: sweepYMaxPercent.value,
+    chartYMinPercent: sweepYMinPercent.value,
+    chartXFromHz: sweepXFromHz.value,
+    chartXToHz: sweepXToHz.value,
+    chartYTopDb: sweepYTopDb.value,
+    chartYBottomDb: sweepYBottomDb.value,
+  }
+  return JSON.stringify(withDisplay)
 }
 
 function saveCurrentType() {
@@ -608,8 +751,8 @@ function confirmSaveProjectAs(name: string) {
 
       <main class="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
         <template v-if="currentTypeId !== null">
-          <div class="flex items-center gap-2 text-sm">
-            <span class="font-medium">{{ currentType?.name }}</span>
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            <span class="min-w-0 max-w-xs truncate font-medium" :title="currentType?.name">{{ currentType?.name }}</span>
             <span
               v-if="isCurrentTypeDirty"
               class="h-2 w-2 shrink-0 rounded-full bg-red-500"
@@ -713,9 +856,29 @@ function confirmSaveProjectAs(name: string) {
                 <SweepConfigPanel ref="sweepConfigPanel" :running="sweepRunning" @run="runSweep" />
 
                 <!-- Each channel's point currently measuring (while running) or nearest the chart
-                     cursor (once done) — see selectedSweepPointFor. -->
-                <SweepFftPreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
-                <SweepScopePreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
+                     cursor (once done) — see selectedSweepPointFor. Hidden entirely once the sweep
+                     is cleared (or before the first run) rather than showing an empty "No data"
+                     chart — Clear should make these disappear, not just go blank. -->
+                <template v-if="sweepPoints.length > 0">
+                  <SweepFftPreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
+                  <SweepScopePreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
+                </template>
+
+                <!-- One more Spectrum/Oscilloscope pair per history item checked on in the
+                     checklist, underneath the live pair above — same components, same left-blue/
+                     right-red convention, just fed that result's own selected point. -->
+                <template v-for="overlay in visibleSweepOverlays" :key="overlay.id">
+                  <SweepFftPreviewChart
+                    :label="overlay.detail.name"
+                    :point-left="selectedSweepPointForOverlay(overlay, 0)"
+                    :point-right="selectedSweepPointForOverlay(overlay, 1)"
+                  />
+                  <SweepScopePreviewChart
+                    :label="overlay.detail.name"
+                    :point-left="selectedSweepPointForOverlay(overlay, 0)"
+                    :point-right="selectedSweepPointForOverlay(overlay, 1)"
+                  />
+                </template>
               </div>
 
               <div class="flex min-w-0 flex-1 flex-col gap-3">
@@ -751,13 +914,11 @@ function confirmSaveProjectAs(name: string) {
                   :selected-right="sweepSelectedRight"
                   @cursor-freq="onSweepCursorFreq"
                 />
+
+                <MeasurementHistoryPanel @error="reportError" />
               </div>
 
               <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
-                <!-- Same checklist the FFT screen puts next to its chart: tick a saved result to
-                     draw it alongside the live sweep. -->
-                <MeasurementChecklist @error="reportError" />
-
                 <SweepDisplayPanel
                   v-model:unit="sweepUnit"
                   v-model:show-noise-floor="sweepShowNoiseFloor"
@@ -779,6 +940,8 @@ function confirmSaveProjectAs(name: string) {
                   v-model:x-from-hz="sweepXFromHz"
                   v-model:x-to-hz="sweepXToHz"
                 />
+
+                <MeasurementChecklist @error="reportError" />
               </div>
             </div>
           </template>
@@ -878,6 +1041,7 @@ function confirmSaveProjectAs(name: string) {
               />
               <WaterfallChart class="mt-3" :spectrum="spectrum" />
               <OscilloscopeChart class="mt-3" :scope="scope" :status="status" />
+              <MeasurementHistoryPanel class="mt-3" @error="reportError" />
             </div>
 
             <ChartDisplayPanel>
@@ -903,8 +1067,6 @@ function confirmSaveProjectAs(name: string) {
             </div>
           </div>
           </template>
-
-          <MeasurementHistoryPanel @error="reportError" />
         </template>
 
         <p v-else class="text-sm text-neutral-400 dark:text-neutral-600">

@@ -214,6 +214,25 @@ public sealed class MeasurementSaveService(
                 previews.Add(new CapturePreviewInput(point.Channel, CapturePreviewKind.Scope, scope.X, scope.Min, scope.Max));
         }
 
+        // capture_preview is UNIQUE on (capture_id, channel, kind), so two points on one channel at
+        // the same frequency reach SQLite as a raw constraint violation -- a 500 with a stack trace,
+        // long after the sweep that caused it, naming nothing the user could act on. The grouping in
+        // SaveSweepAsync is what should make this impossible (one point per channel per frequency),
+        // so reaching here means the sweep runner produced something it should not have; say which
+        // point, rather than letting the database phrase it.
+        var duplicate = previews
+            .GroupBy(p => (p.Channel, p.Kind))
+            .FirstOrDefault(g => g.Count() > 1);
+
+        if (duplicate is not null)
+        {
+            double freqHz = pointsAtOneFrequency.FirstOrDefault()?.FreqHz ?? double.NaN;
+            throw new InvalidOperationException(
+                $"The sweep produced {duplicate.Count()} '{duplicate.Key.Kind}' previews for channel " +
+                $"{duplicate.Key.Channel} at {freqHz:0.###} Hz, but a frequency may only be measured once per " +
+                "channel. Re-run the sweep before saving; if this repeats, restart the app and report it.");
+        }
+
         return previews;
     }
 
@@ -302,7 +321,15 @@ public sealed class MeasurementSaveService(
             parameters.OutputRangeDbv,
             parameters.AutoRangeEnabled,
             parameters.SelectedMetrics,
-            parameters.ScopePeriods);
+            parameters.ScopePeriods,
+            parameters.ChartYTopDbv,
+            parameters.ChartYBottomDbv,
+            parameters.ChartXFromHz,
+            parameters.ChartXToHz,
+            parameters.ChartThickLines,
+            parameters.ChartShowDataPoints,
+            parameters.ChartShowMinMax,
+            parameters.ChartShowPeakHold);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -339,31 +366,46 @@ public sealed class MeasurementSaveService(
             sampleRateHz, channelCount,
             streamConfig?.BlockFrameCount ?? DeviceSessionService.MinBlockFrameCount,
             inputRangeDbv, session.OutputRangeDbv, autoRangeEnabled,
-            generator, staged?.SelectedMetrics, staged?.ScopePeriods);
+            generator, staged?.SelectedMetrics, staged?.ScopePeriods,
+            staged?.ChartYTopDbv, staged?.ChartYBottomDbv, staged?.ChartXFromHz, staged?.ChartXToHz,
+            staged?.ChartThickLines, staged?.ChartShowDataPoints, staged?.ChartShowMinMax, staged?.ChartShowPeakHold);
     }
 
     public string BuildCurrentParametersJson(StagedMeasurementConfig? staged = null) =>
         JsonSerializer.Serialize(BuildParameters(staged), SerializerOptions);
 
     /// <summary>
-    /// Same as <see cref="BuildCurrentParametersJson"/> with no staged config, except when the live
-    /// generator is fully silent it defaults the left channel on instead of cloning that silence —
-    /// so a brand-new measurement type has something to Run rather than two disabled channels.
-    /// "Fully silent" is the common case here: stopRun() disables both channels on every project/
-    /// type switch (see deviceControl.ts), so by the time "+ New measurement" is pressed the live
-    /// generator is silent regardless of what any previous type actually had configured.
+    /// Same as <see cref="BuildCurrentParametersJson"/> with no staged config, except a brand-new
+    /// type gets sensible defaults instead of cloning whatever the live session happens to be
+    /// sitting on: the left channel is forced on when the generator is fully silent, and SnapToBin
+    /// is always forced on.
     ///
-    /// Deliberately not folded into <see cref="BuildParameters"/> itself: that method also backs the
-    /// update-type endpoint's own blank-params fallback, which a bulk project save relies on to
-    /// clone each dirty-but-not-currently-open type's live state verbatim (see
-    /// ProjectsEndpoints.cs's PUT handler and useProjects.saveProject) — defaulting the channel on
-    /// there would silently rewrite those types' saved generator config.
+    /// <para>The channel case: "fully silent" is the common case here — stopRun() disables both
+    /// channels on every project/type switch (see deviceControl.ts), so by the time "+ New
+    /// measurement" is pressed the live generator is silent regardless of what any previous type
+    /// actually had configured — and a brand-new type needs something to Run rather than two
+    /// disabled channels.</para>
+    ///
+    /// <para>SnapToBin is unconditional rather than gated like the channel: unlike "silent", "off"
+    /// has no fallback state to detect it against — <see cref="GeneratorConfig.SnapToBin"/> is a
+    /// plain bool, so a session left with it off from an earlier experiment (or a type that was
+    /// itself saved with it off, which is a legitimate choice for one measurement) would otherwise
+    /// silently seed every subsequent "+ New measurement" the same way, off having crept in as the
+    /// session's new normal instead of staying the deliberate exception it's meant to be.</para>
+    ///
+    /// <para>Deliberately not folded into <see cref="BuildParameters"/> itself: that method also
+    /// backs the update-type endpoint's own blank-params fallback, which a bulk project save relies
+    /// on to clone each dirty-but-not-currently-open type's live state verbatim (see
+    /// ProjectsEndpoints.cs's PUT handler and useProjects.saveProject) — forcing either default
+    /// there would silently rewrite those types' saved generator config.</para>
     /// </summary>
     public string BuildDefaultParametersJsonForNewType()
     {
         var parameters = BuildParameters();
         if (!parameters.Generator.Left.Enabled && !parameters.Generator.Right.Enabled)
             parameters = parameters with { Generator = parameters.Generator with { Left = parameters.Generator.Left with { Enabled = true } } };
+        if (!parameters.Generator.SnapToBin)
+            parameters = parameters with { Generator = parameters.Generator with { SnapToBin = true } };
         return JsonSerializer.Serialize(parameters, SerializerOptions);
     }
 

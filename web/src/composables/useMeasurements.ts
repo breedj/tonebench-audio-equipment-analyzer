@@ -11,55 +11,21 @@ import {
 } from '../api/client'
 import { THD_VS_FREQUENCY_KIND } from '../measurements/kinds'
 
-// A distinct hue per overlay, cycling once more than 8 are on screen at once — unlikely, and a
-// repeat is harmless since the list rows still disambiguate by name. Used where colour has to
-// identify *which stored measurement* this is (ThdSweepChart, where L/R is already carried by line
-// style) — see colorL/colorR below for the FFT Spectrum chart's own convention.
-export const OVERLAY_COLORS = [
-  '#a855f7', // violet
-  '#14b8a6', // teal
-  '#ec4899', // pink
-  '#f59e0b', // amber
-  '#84cc16', // lime
-  '#06b6d4', // cyan
-  '#ef4444', // red
-  '#6366f1', // indigo
-]
-
-// The live L/R channel colors on SpectrumChart.vue — kept as a second copy rather than an import
-// because that component's own CHANNEL_COLORS is private to its chart-drawing concerns, but the
-// hues themselves have to match exactly for an overlay's tint to read as "a lighter version of the
-// live trace" rather than an unrelated blue/orange.
-const CHANNEL_BASE_COLORS: [string, string] = ['#3b82f6', '#f97316']
-
-// How far each successive overlay's channel colors are lightened toward white, cycling — distinct
-// enough that overlays on screen at once don't collapse into the same look, without ever reaching
-// pure white (which would stop reading as "blue" or "orange" at all).
-const OVERLAY_TINTS = [0.15, 0.3, 0.45, 0.6, 0.22, 0.37, 0.52, 0.67]
-
-/** Blends a `#rrggbb` colour toward white by `amount` (0 = unchanged, 1 = white). */
-function tint(hex: string, amount: number): string {
-  const n = parseInt(hex.slice(1), 16)
-  const mix = (c: number) => Math.round(c + (255 - c) * amount)
-  const r = mix((n >> 16) & 0xff)
-  const g = mix((n >> 8) & 0xff)
-  const b = mix(n & 0xff)
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
-}
+/**
+ * How many overlays of one kind may be *shown* at once — the THD-vs-frequency and FFT-analysis
+ * screens each get their own budget of this many, not a pool shared between the two unrelated
+ * charts. Not a rendering budget so much as what keeps each visible overlay tellable from the
+ * others: both charts identify a stored run by dash pattern or fixed color (sweepOverlayStyles'
+ * SWEEP_OVERLAY_DASH, spectrumOverlayColors' FFT_OVERLAY_COLORS) and there are only so many that stay
+ * distinguishable from each other and from the live trace. Overlays past the limit stay loaded and
+ * simply hidden, so unchecking one frees a slot without a refetch.
+ */
+export const MAX_VISIBLE_OVERLAYS = 3
 
 export interface OverlayEntry {
   /** Same as the underlying measurement_result id — re-adding an already-loaded result is a no-op, not a duplicate. */
   id: number
   detail: MeasurementDetail
-  /** Identifies this overlay on ThdSweepChart, where hue means "which run" and dash means channel. */
-  color: string
-  /**
-   * This overlay's L/R traces on SpectrumChart.vue — a tint of the live channel colors rather than
-   * an arbitrary hue, so a stored trace reads as "an earlier version of this same channel" instead
-   * of two unrelated lines sharing one dash-differentiated color (the old behavior).
-   */
-  colorL: string
-  colorR: string
   visible: boolean
   /**
    * A sweep result's stored points, in the same shape the live sweep produces — so ThdSweepChart
@@ -117,7 +83,30 @@ const items = ref<MeasurementSummary[]>([])
 const filter = ref<MeasurementFilter>({})
 const overlays = ref<OverlayEntry[]>([])
 const error = ref<string | null>(null)
-let nextColorIndex = 0
+
+/**
+ * How many overlays of `kind` are currently drawn — what MAX_VISIBLE_OVERLAYS is counted against.
+ * Scoped per kind (rather than a single computed over the whole list) because `overlays` is one
+ * shared singleton behind both the sweep and FFT screens: a result loaded on one screen stays
+ * loaded, hidden and harmless, when you switch to the other, and a global cap would let 3 checked
+ * THD history items silently block every FFT overlay from ever being shown at all.
+ *
+ * A plain function rather than a computed, since it needs a parameter — but it reads `overlays`
+ * inside, so it stays reactive wherever it's called from a template or another computed.
+ */
+function visibleOverlayCount(kind: string): number {
+  return overlays.value.filter((o) => o.visible && o.detail.kind === kind).length
+}
+
+/** False once MAX_VISIBLE_OVERLAYS of this kind are already on screen: nothing further of that kind may be checked on until one is unchecked. */
+function canShowMoreOverlays(kind: string): boolean {
+  return visibleOverlayCount(kind) < MAX_VISIBLE_OVERLAYS
+}
+
+function requireOverlaySlot(kind: string): void {
+  if (!canShowMoreOverlays(kind))
+    throw new Error(`At most ${MAX_VISIBLE_OVERLAYS} history items can be shown at once — uncheck one first.`)
+}
 
 export function useMeasurements() {
   async function load() {
@@ -184,14 +173,25 @@ export function useMeasurements() {
     }
   }
 
-  /** Adds a stored result as a chart overlay. Re-adding one already on the chart just re-shows it (visible: true) rather than plotting a duplicate trace. */
-  async function addOverlay(resultId: number) {
+  /**
+   * Adds a stored result as a chart overlay. Re-adding one already on the chart just re-shows it
+   * (visible: true) rather than plotting a duplicate trace.
+   *
+   * `kind` is the caller's own measurement type's kind — MeasurementChecklist always knows it
+   * (its items are already server-filtered to the open type), and passing it lets the cap be
+   * checked *before* the fetch, so a rejected click costs nothing. Throws once MAX_VISIBLE_OVERLAYS
+   * of that kind are already shown; the checklist disables its remaining checkboxes at that point,
+   * so this is the backstop for the other entry points rather than the path a user normally hits.
+   */
+  async function addOverlay(resultId: number, kind: string) {
     try {
       const existing = overlays.value.find((o) => o.id === resultId)
       if (existing) {
+        if (!existing.visible) requireOverlaySlot(kind)
         existing.visible = true
         return
       }
+      requireOverlaySlot(kind)
       const detail = await api.getMeasurement(resultId)
       // A sweep result carries no spectra, so its trace has to be fetched separately — see
       // SweepSaveRequest on why only the scalars are stored.
@@ -199,12 +199,7 @@ export function useMeasurements() {
         detail.kind === THD_VS_FREQUENCY_KIND
           ? toSweepPoints((await api.getStoredSweep(resultId)).points)
           : undefined
-      const color = OVERLAY_COLORS[nextColorIndex % OVERLAY_COLORS.length]
-      const tintAmount = OVERLAY_TINTS[nextColorIndex % OVERLAY_TINTS.length]
-      nextColorIndex++
-      const colorL = tint(CHANNEL_BASE_COLORS[0], tintAmount)
-      const colorR = tint(CHANNEL_BASE_COLORS[1], tintAmount)
-      overlays.value = [...overlays.value, { id: resultId, detail, color, colorL, colorR, visible: true, sweepPoints }]
+      overlays.value = [...overlays.value, { id: resultId, detail, visible: true, sweepPoints }]
       error.value = null
     } catch (e) {
       error.value = (e as Error).message
@@ -217,13 +212,21 @@ export function useMeasurements() {
     overlays.value = overlays.value.filter((o) => o.id !== id)
   }
 
-  function setOverlayVisible(id: number, visible: boolean) {
+  /**
+   * Shows or hides an already-loaded overlay. Returns false — leaving the overlay hidden — when
+   * showing it would exceed MAX_VISIBLE_OVERLAYS, rather than throwing: this one is called straight
+   * from click handlers that have nowhere to put an exception. Hiding always succeeds.
+   */
+  function setOverlayVisible(id: number, visible: boolean): boolean {
     const entry = overlays.value.find((o) => o.id === id)
-    if (entry) entry.visible = visible
+    if (!entry) return false
+    if (visible && !entry.visible && !canShowMoreOverlays(entry.detail.kind)) return false
+    entry.visible = visible
+    return true
   }
 
   if (items.value.length === 0) load()
 
-  return { items, filter, overlays, error, load, save,
-    saveSweep, update, remove, addOverlay, removeOverlay, setOverlayVisible }
+  return { items, filter, overlays, error, load, save, saveSweep, update, remove,
+    addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
 }

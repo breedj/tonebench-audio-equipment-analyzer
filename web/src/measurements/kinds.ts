@@ -10,6 +10,9 @@ export interface MeasurementKindMeta {
 /** Mirrors MeasurementSaveService.ThdVsFrequencyKind — the one kind whose data is sweep points rather than a spectrum. */
 export const THD_VS_FREQUENCY_KIND = 'ThdVsFrequency'
 
+/** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
+export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
+
 export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
   {
     kind: 'FFTSpectrum',

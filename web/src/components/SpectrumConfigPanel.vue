@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { AveragingMode, DeviceRanges, WindowType } from '../api/client'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useProjects } from '../composables/useProjects'
+import CollapsibleSection from './CollapsibleSection.vue'
 
 const props = defineProps<{
   ranges: DeviceRanges | null
@@ -105,9 +106,7 @@ defineExpose({ getSampleRateHz })
 </script>
 
 <template>
-  <section class="w-full rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
-    <h2 class="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">FFT settings</h2>
-
+  <CollapsibleSection title="FFT settings" padding="p-4">
     <div v-if="loaded" class="flex flex-col gap-3 text-sm">
       <fieldset class="flex items-center gap-2" title="Which channel(s) to process and display, and which the Run button's generators can actually play — the ADC always samples both.">
         <legend class="sr-only">Channels</legend>
@@ -179,5 +178,5 @@ defineExpose({ getSampleRateHz })
       </div>
     </div>
     <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">Loading…</div>
-  </section>
+  </CollapsibleSection>
 </template>

@@ -18,8 +18,12 @@ import { mergePreviewSeries } from '../sweep/points'
  * Deliberately not SpectrumChart reused smaller: that component streams live full-rate frames and
  * owns viewport/zoom state this never needs -- this only ever redraws on a point change, from data
  * already decimated to at most SpectrumPipeline.PreviewMaxColumns server-side.
+ *
+ * `label`, when given, names whose points these are (a checked history item's own name) so several
+ * of these stacked underneath each other -- the live one plus one per checked overlay -- can still
+ * be told apart. Omitted for the live pair, whose header stays the plain "Spectrum (dBV)" it always was.
  */
-const props = defineProps<{ pointLeft: ThdSweepPoint | null; pointRight: ThdSweepPoint | null }>()
+const props = defineProps<{ pointLeft: ThdSweepPoint | null; pointRight: ThdSweepPoint | null; label?: string }>()
 
 const { isDark } = useAppTheme()
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -111,7 +115,7 @@ const theme = computed(() => currentTheme())
 <template>
   <section class="flex flex-col gap-1 rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
     <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>Spectrum (dBV)</span>
+      <span>{{ label ? `${label} — Spectrum (dBV)` : 'Spectrum (dBV)' }}</span>
       <span class="flex items-center gap-2">
         <span v-if="pointLeft" class="flex items-center gap-1">
           <span class="h-1.5 w-1.5 rounded-full" :style="{ background: theme.left }"></span>

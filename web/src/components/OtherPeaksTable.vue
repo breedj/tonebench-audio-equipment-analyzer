@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { MetersFrame } from '../streaming/protocol'
+import CollapsibleSection from './CollapsibleSection.vue'
 
 const props = defineProps<{ meters: Record<number, MetersFrame>; channel: 0 | 1; channelLabel: 'L' | 'R' }>()
 
@@ -25,10 +26,9 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <section class="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <div class="mb-2 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>{{ channelLabel }}: Other peaks</span>
-      <label class="flex items-center gap-2">
+  <CollapsibleSection :title="`${channelLabel}: Other peaks`" size="xs">
+    <template #header-right>
+      <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
         Show top
         <input
           type="number"
@@ -38,9 +38,9 @@ const rows = computed(() => {
           class="w-16 rounded border border-neutral-300 px-2 py-0.5 dark:border-neutral-700 dark:bg-neutral-800"
         />
       </label>
-    </div>
+    </template>
 
-    <p class="mb-2 text-xs text-neutral-400 dark:text-neutral-600">
+    <p class="text-xs text-neutral-400 dark:text-neutral-600">
       Everything besides the fundamental and its harmonics — mains hum, mixing/intermodulation products, other spurs.
     </p>
 
@@ -65,5 +65,5 @@ const rows = computed(() => {
       </table>
     </div>
     <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">Waiting for data…</div>
-  </section>
+  </CollapsibleSection>
 </template>

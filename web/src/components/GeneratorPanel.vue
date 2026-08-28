@@ -5,6 +5,7 @@ import { useProjects } from '../composables/useProjects'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import GeneratorChannelPanel from './GeneratorChannelPanel.vue'
+import CollapsibleSection from './CollapsibleSection.vue'
 
 // Shared with both channels' Metrics panels — one amplifier load, edited here instead of twice.
 const { loadOhms } = useLoadOhms()
@@ -75,9 +76,7 @@ defineExpose({ buildRequest, resyncTones })
 </script>
 
 <template>
-  <section class="w-full rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
-    <h2 class="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Generator</h2>
-
+  <CollapsibleSection title="Generator" padding="p-4">
     <fieldset class="mb-3 flex items-center gap-4 text-sm" title="Which channel(s) play this stimulus once Run is pressed — the ADC always samples both.">
       <legend class="sr-only">Enabled channels</legend>
       <label class="flex items-center gap-1.5">
@@ -127,5 +126,5 @@ defineExpose({ buildRequest, resyncTones })
         Snap to bin
       </label>
     </div>
-  </section>
+  </CollapsibleSection>
 </template>

@@ -9,6 +9,7 @@ import { freqAxis } from '../freqAxis'
 import { percentToDb } from '../sweep/points'
 import { interpolateOnGrid } from '../sweep/align'
 import type { OverlayEntry } from '../composables/useMeasurements'
+import { dashAttr, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
 import type { ThdSweepPoint } from '../api/client'
 
 /**
@@ -96,9 +97,10 @@ const CHART_HEIGHT = 560
  *
  * Hue identifies the *quantity*, matching the previous app's palette (THD black, D2 blue, D3
  * orange, D4 green, D5 red, D6+ purple) so a trace is recognisable at a glance from either app.
- * Channel is carried by the line style instead — see CHANNEL_DASH. Each colour is a light/dark
- * pair because near-black THD is invisible on a dark background and the saturated harmonic hues
- * are hard to read against one.
+ * Channel and run are carried by lightness, width and dash instead — see sweepLineStyle in
+ * measurements/sweepOverlayStyles.ts, which owns all three. Each colour is a light/dark pair
+ * because near-black THD is invisible on a dark background and the saturated harmonic hues are
+ * hard to read against one.
  */
 const TRACES = [
   // Magnitude is the measured fundamental relative to the generator setpoint, i.e. the DUT's
@@ -112,21 +114,17 @@ const TRACES = [
   { key: 'd4', label: 'D4', width: 0.8, color: ['#1a7a3c', '#4ade80'], show: 'showD4' },
   { key: 'd5', label: 'D5', width: 0.8, color: ['#c62828', '#f87171'], show: 'showD5' },
   { key: 'd6plus', label: 'D6+', width: 0.8, color: ['#6b3fa0', '#c084fc'], show: 'showD6Plus' },
-  // Not in the previous app's legend, so it gets a hue that stays clear of the six above.
-  { key: 'noise', label: 'Noise', width: 0.8, color: ['#525252', '#a3a3a3'], show: 'showNoiseFloor' },
+  // Not in the previous app's legend, so it gets a hue that stays clear of the six above. Teal
+  // rather than the neutral grey it used to be: the right channel is drawn as its hue blended
+  // toward the background (see sweepLineStyle), and blending near-black THD lands on a mid grey
+  // that a neutral Noise trace is very hard to tell from. Grey now belongs to the THD family alone.
+  { key: 'noise', label: 'Noise', width: 0.8, color: ['#0d7d84', '#2dd4bf'], show: 'showNoiseFloor' },
 ] as const
 
 type TraceKey = (typeof TRACES)[number]['key']
 type TraceToggle = (typeof TRACES)[number]['show']
 
-/**
- * Left solid, right dashed. The channel has to be encoded in something other than colour now that
- * colour means "which harmonic": a stereo sweep draws the same twelve hues twice, and telling L
- * from R by line style keeps the palette readable instead of needing sixteen distinct colours.
- */
-const CHANNEL_DASH: (number[] | undefined)[] = [undefined, [6, 3]]
 const CHANNEL_LABELS = ['L', 'R']
-
 
 const THEME = {
   dark: { axis: '#a3a3a3', grid: '#404040' },
@@ -137,9 +135,20 @@ function currentTheme() {
   return isDark.value ? THEME.dark : THEME.light
 }
 
-/** Picks the light or dark half of a [light, dark] colour pair. */
-function themed(pair: readonly [string, string] | string[]): string {
-  return isDark.value ? pair[1] : pair[0]
+/**
+ * How one line looks, for a run (0 = live, 1-based = history slot), a channel and a trace. The one
+ * place stroke/width/dash is decided, shared with the legend below the chart so the two can never
+ * disagree about what a line looks like — see sweepLineStyle's own note on why that matters.
+ */
+function styleOf(runIdx: number, channel: number, trace: (typeof TRACES)[number]) {
+  return sweepLineStyle({
+    runIdx,
+    channel,
+    color: trace.color,
+    traceWidth: trace.width,
+    thickLines: props.thickLines,
+    isDark: isDark.value,
+  })
 }
 
 const activeChannels = computed(() => {
@@ -156,8 +165,9 @@ const activeTraces = computed(() =>
 /**
  * The overlays actually drawable here: visible, and carrying stored sweep points. An FFT result
  * checked on while the sweep screen is open has no points and is skipped rather than drawn empty.
+ * Shared with MeasurementChecklist's swatches so both derive a run's dash from the same slot order.
  */
-const activeOverlays = computed(() => props.overlays.filter((o) => o.visible && o.sweepPoints?.length))
+const activeOverlays = computed(() => sweepOverlays(props.overlays))
 
 /**
  * Distinct sweep frequencies, ascending — the shared x array every series is aligned to.
@@ -277,7 +287,6 @@ function resetZoom() {
 
 function buildOptions(width: number): uPlot.Options {
   const theme = currentTheme()
-  const lineWidth = props.thickLines ? 2 : 1
   // filter names the indices to mark; uPlot draws points when `show || idxs` is truthy, so it must
   // return null (not []) when markers are off, or the "off" state would draw them again via idxs.
   const points = {
@@ -288,45 +297,38 @@ function buildOptions(width: number): uPlot.Options {
   }
 
   const series: uPlot.Series[] = [{}]
-  // uPlot's legend swatch is a CSS border and legend.markers.dash defaults to the literal string
-  // "solid" -- it never looks at series.dash. Without this the plot would draw R dashed while the
-  // legend showed every entry solid, which is exactly the distinction the legend exists to explain.
-  const markerDash: string[] = ['solid']
   for (const ch of activeChannels.value) {
     for (const trace of activeTraces.value) {
       series.push({
         label: `${CHANNEL_LABELS[ch]} ${trace.label}`,
-        stroke: themed(trace.color),
-        width: lineWidth * trace.width,
-        dash: CHANNEL_DASH[ch] ? [...CHANNEL_DASH[ch]] : undefined,
+        ...styleOf(0, ch, trace),
         points,
         scale: 'y',
       })
-      markerDash.push(CHANNEL_DASH[ch] ? 'dashed' : 'solid')
     }
   }
 
-  // Overlays follow SpectrumChart's convention rather than this chart's own: colour identifies the
-  // stored measurement, dash identifies its channel. Hue cannot keep meaning "which quantity" here
-  // — two runs of the same sweep would draw two identical black THD traces — and telling the runs
-  // apart is the entire point of putting them on one chart. Within one overlay the quantity is read
-  // off the legend, which is why only the *active* traces get an overlay series: whatever is
-  // checked on is what is being compared.
-  for (const overlay of activeOverlays.value) {
+  // Overlays keep this chart's own convention rather than SpectrumChart's: colour still means
+  // "which quantity", exactly as it does for the live sweep, and the dash pattern identifies the
+  // stored run. Giving each run a hue of its own (the old behaviour) painted a whole measurement —
+  // THD, D2, D3, D4, D5, D6+ — in one violet, so the comparison a history overlay exists for, the
+  // *same* quantity then versus now, was the one thing it could not show. Same colour, different
+  // pattern puts the two D3 traces side by side and lets the eye do the subtraction.
+  //
+  // The loop nesting here is load-bearing: update()/pushSeriesData walks the same channel-then-trace
+  // order to fill each slot, so the series array and the data array agree position for position.
+  activeOverlays.value.forEach((overlay, overlayIdx) => {
     for (const ch of activeChannels.value) {
       for (const trace of activeTraces.value) {
         series.push({
           label: `${overlay.detail.name} ${CHANNEL_LABELS[ch]} ${trace.label}`,
-          stroke: overlay.color,
-          width: lineWidth * trace.width,
-          dash: CHANNEL_DASH[ch] ? [...CHANNEL_DASH[ch]] : undefined,
+          ...styleOf(overlayIdx + 1, ch, trace),
           points,
           scale: 'y',
         })
-        markerDash.push(CHANNEL_DASH[ch] ? 'dashed' : 'solid')
       }
     }
-  }
+  })
 
   return {
     width,
@@ -392,17 +394,12 @@ function buildOptions(width: number): uPlot.Options {
       // to get one without the other would make both awkward.
       drag: { x: true, y: true, uni: 12 },
     },
-    // Display only. uPlot's legend rows toggle their series on click, and now that the display
-    // panel owns visibility that click would silently desync the two -- a trace off in the chart
-    // with its checkbox still ticked, and nothing to un-stick it but another click on the legend.
-    // live:false drops the per-series value column -- the metrics pane below the chart is what
-    // shows values now (frequency, THD, D2..D6+, power, noise floor, one row per channel), so the
-    // legend's only job is naming which line is which.
-    legend: {
-      show: true,
-      live: false,
-      markers: { dash: (_u: uPlot, i: number) => markerDash[i] ?? 'solid' },
-    },
+    // Replaced by the SVG legend in this component's own template. uPlot's marker is a CSS border
+    // and legend.markers.dash only understands "solid"/"dashed", so it could not show *which* of
+    // the three history dash patterns a row used -- the one thing this chart's legend most needs to
+    // say. Its rows also toggle their series on click, which would silently desync the display
+    // panel's checkboxes; the replacement is inert markup with no such trap.
+    legend: { show: false },
     hooks: {
       // Drives the Reset zoom button. Fires on setData too (the x scale is auto:false, so setData
       // re-applies the same min/max every point of a running sweep), hence the change-gate inside
@@ -484,6 +481,37 @@ const channelRows = computed(() => [
   { channel: 0, point: props.selectedLeft, label: 'Left channel', colorClass: 'text-blue-600 dark:text-blue-400' },
   { channel: 1, point: props.selectedRight, label: 'Right channel', colorClass: 'text-red-600 dark:text-red-400' },
 ])
+
+/**
+ * The legend, one group per run and one swatch per drawn line, built from the same styleOf() the
+ * series are — so a swatch is the line, not an approximation of it. Grouping by run is what makes
+ * the dash readable as an identity: every entry under "before mod" shares one pattern, and the
+ * heading names it.
+ */
+const legendGroups = computed(() => {
+  const groups = [{ key: 'live', name: 'Live sweep', runIdx: 0 }]
+  activeOverlays.value.forEach((overlay, i) =>
+    groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: i + 1 }),
+  )
+
+  return groups.map((group) => ({
+    ...group,
+    entries: activeChannels.value.flatMap((ch) =>
+      activeTraces.value.map((trace) => {
+        const style = styleOf(group.runIdx, ch, trace)
+        return {
+          key: `${group.key}-${ch}-${trace.key}`,
+          // Only worth naming the channel when both are drawn — a mono sweep's legend would
+          // otherwise read "L THD, L D2, L D3" with nothing to contrast against.
+          label: activeChannels.value.length > 1 ? `${CHANNEL_LABELS[ch]} ${trace.label}` : trace.label,
+          stroke: style.stroke,
+          width: style.width,
+          dash: dashAttr(style.dash),
+        }
+      }),
+    ),
+  }))
+})
 
 let plot: uPlot | null = null
 
@@ -708,8 +736,37 @@ onBeforeUnmount(() => {
     </div>
     <div ref="containerRef" class="sweep-chart w-full"></div>
 
+    <!-- Replaces uPlot's own legend, which could only draw a solid or dashed marker and so could
+         never say which of the three history patterns a row belonged to. Every swatch is drawn
+         from the same styleOf() that built the series, so it shows the actual line. -->
+    <div v-if="hasData" class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+      <div v-for="group in legendGroups" :key="group.key" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span class="w-28 shrink-0 truncate text-xs text-neutral-500 dark:text-neutral-400" :title="group.name">
+          {{ group.name }}
+        </span>
+        <span
+          v-for="entry in group.entries"
+          :key="entry.key"
+          class="flex items-center gap-1 text-xs text-neutral-600 dark:text-neutral-300"
+        >
+          <svg width="20" height="6" viewBox="0 0 20 6" aria-hidden="true" class="shrink-0 overflow-visible">
+            <line
+              x1="0"
+              y1="3"
+              x2="20"
+              y2="3"
+              :stroke="entry.stroke"
+              :stroke-width="entry.width"
+              :stroke-dasharray="entry.dash"
+            />
+          </svg>
+          {{ entry.label }}
+        </span>
+      </div>
+    </div>
+
     <!-- The full reading at the selected frequency, one row per channel that has data — replaces
-         the legend's old per-series hover values (see legend.live:false above). -->
+         the legend's old per-series hover values. -->
     <div v-if="selectedLeft || selectedRight" class="flex flex-col gap-2 border-t border-neutral-200 pt-2 dark:border-neutral-800">
       <div v-for="row in channelRows" :key="row.channel">
         <template v-if="row.point">
@@ -730,26 +787,3 @@ onBeforeUnmount(() => {
   </section>
 </template>
 
-<style scoped>
-/*
- * uPlot has no option to make its legend read-only, and its rows toggle their series on click. The
- * display panel owns trace visibility now, so a stray click there would leave a trace hidden with
- * its checkbox still ticked and no way back except clicking the legend again. :deep() because the
- * legend is created by uPlot, not by this template, so it never gets the scope attribute.
- */
-.sweep-chart :deep(.u-legend) {
-  pointer-events: none;
-}
-
-/*
- * uPlot's default legend swatch is a 1em square (see its own uPlot.min.css .u-marker rule) --
- * reshaped into a short horizontal bar so it reads as "a line", matching what it actually
- * represents. Same element for a dashed (right-channel) series; uPlot switches that one to a
- * border-based dash pattern instead of a solid background, which this sizing still applies to.
- */
-.sweep-chart :deep(.u-legend .u-marker) {
-  width: 14px;
-  height: 2px;
-  border-radius: 0;
-}
-</style>

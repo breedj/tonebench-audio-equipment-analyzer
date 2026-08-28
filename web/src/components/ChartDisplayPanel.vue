@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { useChartDisplay } from '../composables/useChartDisplay'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import CollapsibleSection from './CollapsibleSection.vue'
 
 const {
   yTop,
@@ -44,9 +45,8 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
 
 <template>
   <div class="flex w-full flex-col gap-3 lg:w-48 lg:flex-none">
-    <section class="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-      <h2 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">dBV range</h2>
-      <label class="mb-1 flex flex-col gap-1 text-xs">
+    <CollapsibleSection title="dBV range" size="xs">
+      <label class="flex flex-col gap-1 text-xs">
         Top
         <input
           v-model.number="yTop"
@@ -55,7 +55,7 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
           class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
         />
       </label>
-      <label class="mb-2 flex flex-col gap-1 text-xs">
+      <label class="flex flex-col gap-1 text-xs">
         Bottom
         <input
           v-model.number="yBottom"
@@ -72,11 +72,10 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
       >
         Autofit
       </button>
-    </section>
+    </CollapsibleSection>
 
-    <section class="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-      <h2 class="mb-2 text-xs font-semibold text-neutral-900 dark:text-neutral-100">Frequency range</h2>
-      <label class="mb-1 flex flex-col gap-1 text-xs">
+    <CollapsibleSection title="Frequency range" size="xs">
+      <label class="flex flex-col gap-1 text-xs">
         From
         <select
           v-model.number="xFrom"
@@ -85,7 +84,7 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
           <option v-for="f in fromOptions" :key="f" :value="f">{{ f }}</option>
         </select>
       </label>
-      <label class="mb-2 flex flex-col gap-1 text-xs">
+      <label class="flex flex-col gap-1 text-xs">
         To
         <select
           v-model.number="xTo"
@@ -102,48 +101,51 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
       >
         Autofit
       </button>
-    </section>
+    </CollapsibleSection>
 
-    <!-- Measurements checklist injected here by App.vue, matching where the wireframe places it in this column. -->
+    <CollapsibleSection title="Display">
+      <section class="flex flex-col gap-1.5 text-sm">
+        <label class="flex items-center gap-1.5">
+          <input v-model="thickLines" type="checkbox" />
+          Thick lines
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input v-model="showDataPoints" type="checkbox" />
+          Show data points
+        </label>
+      </section>
+
+      <section class="flex flex-col gap-1.5 text-sm">
+        <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processLeft }">
+          <input v-model="visibleL" type="checkbox" :disabled="!processLeft" />
+          Left channel
+        </label>
+        <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processRight }">
+          <input v-model="visibleR" type="checkbox" :disabled="!processRight" />
+          Right channel
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input v-model="showMinMax" type="checkbox" />
+          Min/max
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input v-model="showPeakHold" type="checkbox" />
+          Peak-hold
+        </label>
+        <button
+          v-if="showPeakHold"
+          type="button"
+          class="w-full rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          title="Clears the peak-hold trace and starts capturing fresh maximums."
+          @click="requestResetPeakHold"
+        >
+          Reset peak-hold
+        </button>
+      </section>
+    </CollapsibleSection>
+
+    <!-- Measurements checklist + history, injected here by App.vue so they sit underneath Display
+         at the same column width, for both the FFT and sweep screens. -->
     <slot />
-
-    <section class="flex flex-col gap-1.5 text-sm">
-      <label class="flex items-center gap-1.5">
-        <input v-model="thickLines" type="checkbox" />
-        Thick lines
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showDataPoints" type="checkbox" />
-        Show data points
-      </label>
-    </section>
-
-    <section class="flex flex-col gap-1.5 text-sm">
-      <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processLeft }">
-        <input v-model="visibleL" type="checkbox" :disabled="!processLeft" />
-        Left channel
-      </label>
-      <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processRight }">
-        <input v-model="visibleR" type="checkbox" :disabled="!processRight" />
-        Right channel
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showMinMax" type="checkbox" />
-        Min/max
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showPeakHold" type="checkbox" />
-        Peak-hold
-      </label>
-      <button
-        v-if="showPeakHold"
-        type="button"
-        class="w-full rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        title="Clears the peak-hold trace and starts capturing fresh maximums."
-        @click="requestResetPeakHold"
-      >
-        Reset peak-hold
-      </button>
-    </section>
   </div>
 </template>

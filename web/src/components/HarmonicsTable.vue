@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { MetersFrame } from '../streaming/protocol'
+import CollapsibleSection from './CollapsibleSection.vue'
 
 const props = defineProps<{ meters: Record<number, MetersFrame>; channel: 0 | 1; channelLabel: 'L' | 'R' }>()
 
@@ -20,9 +21,7 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <section class="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <div class="mb-2 text-xs text-neutral-500 dark:text-neutral-400">{{ channelLabel }}: Harmonics</div>
-
+  <CollapsibleSection :title="`${channelLabel}: Harmonics`" size="xs">
     <div v-if="rows.length" class="overflow-x-auto">
       <table class="w-full text-left text-sm">
         <thead>
@@ -44,5 +43,5 @@ const rows = computed(() => {
       </table>
     </div>
     <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">Waiting for data…</div>
-  </section>
+  </CollapsibleSection>
 </template>

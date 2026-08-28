@@ -151,7 +151,9 @@ public sealed record SaveMeasurementTypeRequest(string Kind, string Name, string
 public sealed record StagedMeasurementConfig(
     double SampleRateHz, int ChannelCount, double InputRangeDbv, bool? AutoRangeEnabled,
     GeneratorChannelRequest GeneratorLeft, GeneratorChannelRequest GeneratorRight, bool? SnapToBin,
-    IReadOnlyList<string>? SelectedMetrics = null, int? ScopePeriods = null);
+    IReadOnlyList<string>? SelectedMetrics = null, int? ScopePeriods = null,
+    double? ChartYTopDbv = null, double? ChartYBottomDbv = null, double? ChartXFromHz = null, double? ChartXToHz = null,
+    bool? ChartThickLines = null, bool? ChartShowDataPoints = null, bool? ChartShowMinMax = null, bool? ChartShowPeakHold = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, DateTimeOffset CreatedUtc);
@@ -172,4 +174,12 @@ public sealed record MeasurementTypeAppliedResponse(
     double OutputRangeDbv,
     bool? AutoRangeEnabled,
     IReadOnlyList<string>? SelectedMetrics,
-    int? ScopePeriods);
+    int? ScopePeriods,
+    double? ChartYTopDbv,
+    double? ChartYBottomDbv,
+    double? ChartXFromHz,
+    double? ChartXToHz,
+    bool? ChartThickLines,
+    bool? ChartShowDataPoints,
+    bool? ChartShowMinMax,
+    bool? ChartShowPeakHold);

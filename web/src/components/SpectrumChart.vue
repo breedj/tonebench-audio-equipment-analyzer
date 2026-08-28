@@ -10,6 +10,7 @@ import { useAppTheme } from '../composables/useAppTheme'
 import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
+import { FFT_LIVE_COLOR, fftOverlayColor } from '../measurements/spectrumOverlayColors'
 import type { MeasurementChannel } from '../api/client'
 
 const props = defineProps<{
@@ -69,18 +70,20 @@ function channelVisible(ch: number): boolean {
 const { kind: stimulusKind } = useGeneratorStimulus()
 
 const CHANNEL_LABELS = ['L', 'R']
-const CHANNEL_COLORS = ['#3b82f6', '#f97316']
-// Deliberately not a shade of either channel color — peak-hold needs to read as its own thing at a
-// glance, not a dimmer echo of whichever channel it belongs to.
+// Color now identifies *which measurement* a trace is — the live capture, or one of up to
+// MAX_VISIBLE_OVERLAYS history items (see spectrumOverlayColors.ts for the fixed palette and why
+// it's fixed rather than tinted). Channel is told apart by dash instead: L solid, R dashed, the
+// same split ThdSweepChart uses for its own live L/R.
+const LIVE_COLOR = FFT_LIVE_COLOR
+const CHANNEL_DASH: (number[] | undefined)[] = [undefined, [6, 3]]
+// Deliberately not a shade of either run color — peak-hold needs to read as its own thing at a
+// glance, not a dimmer echo of whichever trace it belongs to.
 const PEAK_HOLD_COLOR = '#eab308'
-// Same hues at low alpha: the band is dense (one stroke per column) so it reads as a solid region
-// even this faint, and the max trace has to stay legible on top of it.
+// The min/max band is live-only (see minMaxBandPlugin — it never reads overlay data) and is drawn
+// as a filled stroke per column rather than a uPlot series, so it can't carry a dash the way the
+// line above it now does. It keeps its own two-hue blue/orange distinction rather than switching to
+// LIVE_COLOR for both, which is the only way left to tell an overlapping L band from an R band.
 const CHANNEL_BAND_COLORS = ['rgba(59, 130, 246, 0.35)', 'rgba(249, 115, 22, 0.35)']
-// L within an overlay dashes short, R dashes long-and-dotted — colored as a tint of the matching
-// live channel (see OverlayEntry.colorL/colorR in useMeasurements.ts) rather than one shared hue,
-// so a stereo overlay reads as "an earlier L and an earlier R" instead of two unrelated traces that
-// happen to share a color.
-const OVERLAY_DASH: [number[], number[]] = [[4, 2], [1, 3]]
 const CHART_HEIGHT = 720
 // Peak-hold: running per-bin maximum, keyed by that bin's column frequency (as broadcast — stable
 // across ticks for a given FFT size/zoom window, since the server's log-decimation always picks
@@ -168,7 +171,7 @@ function minMaxBandPlugin(getSpectrum: () => Record<number, SpectrumFrame>): uPl
           ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height)
           ctx.clip()
 
-          for (let ch = 0; ch < CHANNEL_COLORS.length; ch++) {
+          for (let ch = 0; ch < CHANNEL_LABELS.length; ch++) {
             if (!channelVisible(ch)) continue
             const frame = spectrum[ch]
             if (!frame) continue
@@ -325,15 +328,20 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
   const points = { show: showDataPoints.value }
   const series: uPlot.Series[] = [
     {},
-    { label: CHANNEL_LABELS[0], stroke: CHANNEL_COLORS[0], width: liveWidth, points },
-    { label: CHANNEL_LABELS[1], stroke: CHANNEL_COLORS[1], width: liveWidth, points },
+    { label: CHANNEL_LABELS[0], stroke: LIVE_COLOR, width: liveWidth, dash: CHANNEL_DASH[0] && [...CHANNEL_DASH[0]], points },
+    { label: CHANNEL_LABELS[1], stroke: LIVE_COLOR, width: liveWidth, dash: CHANNEL_DASH[1] && [...CHANNEL_DASH[1]], points },
     { label: `${CHANNEL_LABELS[0]} peak`, stroke: PEAK_HOLD_COLOR, width: 1, dash: [2, 2], points: { show: false } },
     { label: `${CHANNEL_LABELS[1]} peak`, stroke: PEAK_HOLD_COLOR, width: 1, dash: [2, 2], points: { show: false } },
   ]
+  // Fixed per-run color (fftOverlayColor), not per-channel — see LIVE_COLOR's own comment. `overlays`
+  // here is ensurePlot's full, possibly-mixed-kind list; fftOverlayColor filters to FFT-kind and
+  // visible-only internally, so a stray sweep-kind entry just gets the hidden-swatch gray back
+  // (harmless — its line stays null-filled regardless, same as before this change).
   for (const overlay of overlays) {
+    const color = fftOverlayColor(overlays, overlay.id)
     series.push(
-      { label: `${overlay.detail.name} L`, stroke: overlay.colorL, width: overlayWidth, dash: OVERLAY_DASH[0], points },
-      { label: `${overlay.detail.name} R`, stroke: overlay.colorR, width: overlayWidth, dash: OVERLAY_DASH[1], points },
+      { label: `${overlay.detail.name} L`, stroke: color, width: overlayWidth, dash: CHANNEL_DASH[0] && [...CHANNEL_DASH[0]], points },
+      { label: `${overlay.detail.name} R`, stroke: color, width: overlayWidth, dash: CHANNEL_DASH[1] && [...CHANNEL_DASH[1]], points },
     )
   }
 
@@ -448,14 +456,17 @@ function peakTrace(map: Map<number, number>, xs: Float64Array | number[]): (numb
 // setData handles a changing length by itself.
 //
 // The overlay list *does* rebuild the plot (its series count is baked into buildOptions, unlike
-// L/R which are always present) — but that only happens on an explicit add/remove, not per
-// streaming tick or visibility toggle, so it's rare enough that the rebuild cost doesn't matter.
-// What does matter is not silently discarding the user's zoom every time they add one more
+// L/R which are always present) — on an explicit add/remove, and now also on a visibility toggle:
+// fftOverlayColor's color assignment is a *position among the currently visible* FFT overlays (see
+// its own comment for why), so showing or hiding one can change what color every other visible one
+// should draw in, and that's baked into the series at construction the same as the color itself.
+// None of this happens per streaming tick, so it's rare enough that the rebuild cost doesn't
+// matter. What does matter is not silently discarding the user's zoom every time they add one more
 // overlay to compare — the min/max is saved before destroy and reapplied after, same idea as
 // resetZoom below just round-tripped through a rebuild instead of a click.
 let plotOverlaySignature = ''
 function overlaySignature(overlays: OverlayEntry[]): string {
-  return overlays.map((o) => o.id).join(',')
+  return overlays.map((o) => `${o.id}:${o.visible ? 1 : 0}`).join(',')
 }
 // Set by ensurePlot when a rebuild needs to reapply the zoom the user had before it; consumed by
 // update() right after its own setData() call. It can't be applied inside ensurePlot itself: uPlot
@@ -603,6 +614,12 @@ watch(autofitXTrigger, () => {
 function update() {
   const ch0 = props.spectrum[0]
   const ch1 = props.spectrum[1]
+  // The frame that drives the x grid this tick — L when it's being processed, otherwise R. A
+  // measurement with only Right enabled (SpectrumConfigPanel's Left checkbox off) never populates
+  // spectrum[0] at all, so gating everything below on ch0 specifically left the chart permanently
+  // on "Waiting for data…" while Waterfall/Oscilloscope (which have no such L-only assumption) kept
+  // working off the very same stream.
+  const primary = ch0 ?? ch1
   const firstOverlay = props.overlays[0]?.detail
   const firstOverlayChannel = firstOverlay && (channelByIndex(firstOverlay, 0) ?? channelByIndex(firstOverlay, 1))
 
@@ -611,7 +628,7 @@ function update() {
   // bare return leaves whatever the last setData() call painted sitting on the canvas, so the
   // chart would keep showing a stale trace under the "Waiting for data…" label in the header. This
   // also clears the stale fullHiFreqHz that return would otherwise leave behind.
-  if (!ch0 && !firstOverlayChannel) {
+  if (!primary && !firstOverlayChannel) {
     plot?.destroy()
     plot = null
     fullHiFreqHz = -1
@@ -622,18 +639,20 @@ function update() {
   // The axis must always be built from the former, or zooming would redefine "fully zoomed out".
   // With no live data at all (viewing loaded overlays before ever streaming), fall back to the
   // first overlay — recomputed every call, so switching overlays re-fits it.
-  if (ch0 && (ch0.header.flags & STREAM_FLAG_ZOOMED) === 0) {
-    fullLoFreqHz = ch0.loFreqHz
-    fullHiFreqHz = ch0.hiFreqHz
-  } else if (!ch0 && firstOverlayChannel && firstOverlayChannel.columns.length > 0) {
+  if (primary && (primary.header.flags & STREAM_FLAG_ZOOMED) === 0) {
+    fullLoFreqHz = primary.loFreqHz
+    fullHiFreqHz = primary.hiFreqHz
+  } else if (!primary && firstOverlayChannel && firstOverlayChannel.columns.length > 0) {
     fullLoFreqHz = firstOverlayChannel.columns[0].freqHz
     fullHiFreqHz = firstOverlayChannel.columns[firstOverlayChannel.columns.length - 1].freqHz
   }
   if (fullHiFreqHz <= 0) return
 
-  // The active x grid: live L's columns when streaming, otherwise the first overlay's — everything
-  // else gets resampled onto this, since uPlot draws one x array per plot. See measurements/resample.ts.
-  const xs = ch0 ? freqTrace(ch0.columns, ch0.header.nPoints) : channelFreqs(firstOverlayChannel!)
+  // The active x grid: whichever of L/R is actually streaming (L preferred when both are, matching
+  // the original single-channel assumption everywhere else in this file), otherwise the first
+  // overlay's — everything else gets resampled onto this, since uPlot draws one x array per plot.
+  // See measurements/resample.ts.
+  const xs = primary ? freqTrace(primary.columns, primary.header.nPoints) : channelFreqs(firstOverlayChannel!)
   const nPoints = xs.length
 
   ensurePlot(fullHiFreqHz, props.overlays)
@@ -649,9 +668,11 @@ function update() {
 
   // R can only be drawn when it was decimated over the same span as whatever xs came from (the
   // one frame after a zoom where L has already switched and R has not, is the case this guards).
+  // When R is itself the primary (xs) source — L not being processed — it's trivially comparable
+  // to itself, so the ch0 side of the check is skipped rather than required.
   const rComparable =
-    ch0 && ch1 && channelVisible(1) && ch1.header.nPoints === ch0.header.nPoints &&
-    (ch1.header.flags & STREAM_FLAG_ZOOMED) === (ch0.header.flags & STREAM_FLAG_ZOOMED)
+    ch1 && channelVisible(1) && ch1.header.nPoints === nPoints &&
+    (!ch0 || (ch1.header.flags & STREAM_FLAG_ZOOMED) === (ch0.header.flags & STREAM_FLAG_ZOOMED))
   const right = rComparable ? maxTrace(ch1!.columns, ch1!.header.nPoints) : nullFill(nPoints)
 
   // Peak-hold: fold this tick's columns into the running maps (only while enabled — leaving it off
@@ -757,7 +778,7 @@ onBeforeUnmount(() => {
       <span v-if="cursorReadout" class="font-mono">
         {{ cursorReadout.freqHz.toFixed(1) }} Hz · {{ cursorReadout.dbv.toFixed(1) }} dBV
       </span>
-      <span v-else-if="!spectrum[0]">Waiting for data…</span>
+      <span v-else-if="!spectrum[0] && !spectrum[1]">Waiting for data…</span>
     </div>
     <!-- L/R/min-max/thick-lines/show-points/dBV-range/frequency-range controls now live in
          ChartDisplayPanel.vue, a sibling column next to the chart — see App.vue — all reading and

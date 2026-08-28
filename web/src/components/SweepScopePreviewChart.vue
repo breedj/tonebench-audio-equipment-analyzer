@@ -14,8 +14,10 @@ import { mergePreviewSeries } from '../sweep/points'
  * OscilloscopeChart.vue's live trigger search) rather than at an arbitrary tail offset, so it reads
  * as a clean cycle instead of a random-looking squiggle. Colours match the spectrum preview's
  * convention: left blue, right red.
+ *
+ * `label`, when given, names whose points these are -- see SweepFftPreviewChart's own doc on why.
  */
-const props = defineProps<{ pointLeft: ThdSweepPoint | null; pointRight: ThdSweepPoint | null }>()
+const props = defineProps<{ pointLeft: ThdSweepPoint | null; pointRight: ThdSweepPoint | null; label?: string }>()
 
 const { isDark } = useAppTheme()
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -117,7 +119,7 @@ const rightSpan = computed(() => spanMs(props.pointRight))
 <template>
   <section class="flex flex-col gap-1 rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
     <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>Oscilloscope (ms)</span>
+      <span>{{ label ? `${label} — Oscilloscope (ms)` : 'Oscilloscope (ms)' }}</span>
       <span class="flex items-center gap-2">
         <span v-if="pointLeft" class="flex items-center gap-1">
           <span class="h-1.5 w-1.5 rounded-full" :style="{ background: theme.left }"></span>

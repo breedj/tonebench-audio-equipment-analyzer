@@ -19,7 +19,7 @@ async function onDelete(id: number) {
 </script>
 
 <template>
-  <aside class="flex w-44 shrink-0 flex-col gap-2 border-r border-neutral-200 p-2 dark:border-neutral-800">
+  <aside class="flex w-[15.4rem] shrink-0 flex-col gap-2 border-r border-neutral-200 p-2 dark:border-neutral-800">
     <button
       type="button"
       class="flex items-center justify-center gap-1.5 rounded bg-neutral-900 px-2 py-1.5 text-xs font-medium text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
@@ -41,9 +41,9 @@ async function onDelete(id: number) {
             : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
         "
       >
-        <button type="button" class="flex flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm" @click="selectType(t.id)">
+        <button type="button" class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm" @click="selectType(t.id)">
           <MeasurementKindIcon :kind="t.kind" class="shrink-0" />
-          <span class="flex-1 truncate">{{ t.name }}</span>
+          <span class="min-w-0 flex-1 truncate" :title="t.name">{{ t.name }}</span>
           <span
             v-if="dirtyTypeIds.has(t.id)"
             class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"

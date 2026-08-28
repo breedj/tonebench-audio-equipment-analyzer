@@ -12,6 +12,7 @@ import { useSweep } from '../composables/useSweep'
 import { useMeasurements } from '../composables/useMeasurements'
 import { percentToDb } from '../sweep/points'
 import type { ThdSweepPoint } from '../api/client'
+import CollapsibleSection from './CollapsibleSection.vue'
 
 const unit = defineModel<'percent' | 'db'>('unit', { required: true })
 const showMagnitude = defineModel<boolean>('showMagnitude', { required: true })
@@ -234,9 +235,7 @@ function requestAutofitFrequency() {
 </script>
 
 <template>
-  <section class="flex flex-col gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Display</h2>
-
+  <CollapsibleSection title="Display">
     <div class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Units</span>
       <!-- Toggle group rather than a select: two mutually exclusive options that people flip
@@ -424,5 +423,5 @@ function requestAutofitFrequency() {
         Show data points
       </label>
     </div>
-  </section>
+  </CollapsibleSection>
 </template>

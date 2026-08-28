@@ -217,6 +217,15 @@ export interface MeasurementTypeAppliedResponse {
   selectedMetrics?: string[] | null
   /** This type's stored oscilloscope period count — null for a type saved before that feature existed. See useScopeDisplay.ts. */
   scopePeriods?: number | null
+  /** This type's stored spectrum-chart axis bounds and line-style toggles — null for a type saved before the feature existed, or never customized. See useChartDisplay.ts. */
+  chartYTopDbv?: number | null
+  chartYBottomDbv?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartShowMinMax?: boolean | null
+  chartShowPeakHold?: boolean | null
 }
 
 /**
@@ -236,6 +245,15 @@ export interface StagedMeasurementConfig {
   selectedMetrics?: string[] | null
   /** The oscilloscope chart's period count, staged the same way as any other on-screen setting. */
   scopePeriods?: number | null
+  /** The spectrum chart's axis bounds and line-style toggles, staged the same way as any other on-screen setting. See useChartDisplay.ts. */
+  chartYTopDbv?: number | null
+  chartYBottomDbv?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartShowMinMax?: boolean | null
+  chartShowPeakHold?: boolean | null
 }
 
 export interface SaveMeasurementTypeRequest {
@@ -411,6 +429,26 @@ export interface ThdSweepStartRequest {
 export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
   /** The generator amplitude a run actually used — probed for the output-referred level modes, so only known after the fact. 0 on a configured type that has not been run. */
   generatorAmpDbv: number
+  /** The sweep chart's axis bounds, per-trace visibility and line-style toggles — null for a type saved before the feature existed, or never customized. See SweepDisplayPanel.vue. */
+  chartUnit?: 'percent' | 'db' | null
+  chartShowNoiseFloor?: boolean | null
+  chartShowMagnitude?: boolean | null
+  chartShowThd?: boolean | null
+  chartShowD2?: boolean | null
+  chartShowD3?: boolean | null
+  chartShowD4?: boolean | null
+  chartShowD5?: boolean | null
+  chartShowD6Plus?: boolean | null
+  chartShowLeft?: boolean | null
+  chartShowRight?: boolean | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartYMaxPercent?: number | null
+  chartYMinPercent?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartYTopDb?: number | null
+  chartYBottomDb?: number | null
 }
 
 export interface ThdSweepStarted {

@@ -7,9 +7,11 @@ namespace Qa403.Data;
 /// Measurement results: Dapper for <c>measurement_result</c>/<c>capture</c>/<c>metric</c>, raw
 /// <see cref="SqliteCommand"/> + <see cref="SqliteBlob"/> for the <c>spectrum.mag_db</c> BLOB.
 ///
-/// Every result owns exactly one <c>capture</c> row today, at <c>seq_index = 0</c>. That column
-/// exists so a future time-series measurement is just "more capture rows under the same result,"
-/// ordered by <c>seq_index</c> -- no schema change needed when that lands.
+/// A spectrum result owns exactly one <c>capture</c> row, at <c>seq_index = 0</c>; a sweep result
+/// owns one per frequency, ordered by <c>seq_index</c> ascending in frequency -- which is what that
+/// column was put there for, so no schema change was needed when sweeps landed. Anything reading
+/// "the" capture of a result therefore has to say which one it means: see
+/// <see cref="SelectHeadlineCapture"/> for the list view's answer.
 /// </summary>
 public sealed class MeasurementRepository(SqliteConnectionFactory connectionFactory)
 {
@@ -22,8 +24,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             """
             INSERT INTO measurement_result
                 (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
-            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated);
-            SELECT last_insert_rowid();
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated)
+            RETURNING id;
             """,
             new
             {
@@ -43,8 +45,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             """
             INSERT INTO capture
                 (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels)
-            VALUES (@ResultId, 0, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, @GenJson, @Channels);
-            SELECT last_insert_rowid();
+            VALUES (@ResultId, 0, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, @GenJson, @Channels)
+            RETURNING id;
             """,
             new
             {
@@ -97,8 +99,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             """
             INSERT INTO measurement_result
                 (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
-            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated);
-            SELECT last_insert_rowid();
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated)
+            RETURNING id;
             """,
             new
             {
@@ -122,8 +124,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                 """
                 INSERT INTO capture
                     (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels)
-                VALUES (@ResultId, @SeqIndex, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, NULL, @Channels);
-                SELECT last_insert_rowid();
+                VALUES (@ResultId, @SeqIndex, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, NULL, @Channels)
+                RETURNING id;
                 """,
                 new
                 {
@@ -252,8 +254,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         long spectrumId = await connection.ExecuteScalarAsync<long>(
             """
             INSERT INTO spectrum (capture_id, channel, window, s1, s2, enbw_hz, bin_hz, norm, mag_db)
-            VALUES (@CaptureId, @Channel, @Window, @S1, @S2, @EnbwHz, @BinSizeHz, @Norm, zeroblob(@ByteLength));
-            SELECT last_insert_rowid();
+            VALUES (@CaptureId, @Channel, @Window, @S1, @S2, @EnbwHz, @BinSizeHz, @Norm, zeroblob(@ByteLength))
+            RETURNING id;
             """,
             new
             {
@@ -325,7 +327,29 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         if (rows.Count == 0)
             return [];
 
-        var captureIds = rows.Select(r => r.CaptureId).ToArray();
+        // Which capture supplies the headline numbers is a choice, not a given, once a result owns
+        // more than one: a sweep's captures run low frequency first, so seq_index 0 is its 10 or
+        // 20 Hz point -- the worst THD on the curve and not a figure anyone quotes a DUT by. The
+        // list therefore reads the metrics off the sweep's 1 kHz point instead (see
+        // SelectHeadlineCapture); a single-capture result is unaffected, since its one capture is
+        // the only candidate whatever its frequency.
+        long[] resultIds = rows.Select(r => r.ResultId).ToArray();
+        var captureRows = await connection.QueryAsync<HeadlineCaptureRowRaw>(
+            """
+            SELECT c.measurement_result_id AS ResultId, c.id AS CaptureId,
+                   (SELECT MIN(m.value) FROM metric m
+                     WHERE m.capture_id = c.id AND m.name = 'fundamental_hz') AS FundamentalHz
+            FROM capture c
+            WHERE c.measurement_result_id IN @resultIds;
+            """,
+            new { resultIds });
+
+        var capturesByResult = captureRows.ToLookup(c => c.ResultId);
+        var headlineCaptureIds = rows.ToDictionary(
+            r => r.ResultId,
+            r => SelectHeadlineCapture(capturesByResult[r.ResultId]) ?? r.CaptureId);
+
+        long[] captureIds = headlineCaptureIds.Values.Distinct().ToArray();
         var metricRows = await connection.QueryAsync<MetricRowRaw>(
             """
             SELECT capture_id AS CaptureId, channel AS Channel, name AS Name, value AS Value
@@ -338,8 +362,9 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
 
         return rows.Select(r =>
         {
+            long headlineCaptureId = headlineCaptureIds[r.ResultId];
             var channels = new Dictionary<int, ChannelHeadline>();
-            foreach (var group in byCaptureChannel.Where(g => g.Key.CaptureId == r.CaptureId))
+            foreach (var group in byCaptureChannel.Where(g => g.Key.CaptureId == headlineCaptureId))
             {
                 var values = group.ToDictionary(m => m.Name, m => m.Value);
                 channels[(int)group.Key.Channel] = new ChannelHeadline(
@@ -493,7 +518,48 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         long CaptureId, long SampleRateHz, long FftSize, long Channels,
         double? InRangeDbv, double? OutRangeDbv, string? GenJson);
 
+    /// <summary>
+    /// The fundamental a headline THD figure is quoted at. 1 kHz because that is what every
+    /// amplifier datasheet, and QuantAsylum's own software, reports THD at.
+    /// </summary>
+    private const double HeadlineFundamentalHz = 1000.0;
+
+    /// <summary>
+    /// Picks the capture whose metrics stand for the whole result in the history list: the lowest
+    /// measured fundamental at or above <see cref="HeadlineFundamentalHz"/>.
+    /// </summary>
+    /// <remarks>
+    /// A sweep grid rarely lands exactly on 1 kHz, so "the first point at or above it" is the rule
+    /// rather than an exact match -- one step of the grid above 1 kHz, which at the coarsest
+    /// setting is a few hundred Hz away and still on the flat part of a THD curve. A sweep that
+    /// ends below 1 kHz (say 20 Hz to 500 Hz) falls back to its highest point, the nearest thing it
+    /// has, rather than reporting nothing.
+    /// <para>
+    /// Returns null when no capture carries a <c>fundamental_hz</c> metric at all -- a spectrum
+    /// saved with no fundamental found in band -- and the caller keeps the seq_index 0 capture it
+    /// already has.
+    /// </para>
+    /// </remarks>
+    private static long? SelectHeadlineCapture(IEnumerable<HeadlineCaptureRowRaw> captures)
+    {
+        var measured = captures
+            .Where(c => c.FundamentalHz is not null)
+            .OrderBy(c => c.FundamentalHz!.Value)
+            .ToList();
+
+        if (measured.Count == 0)
+            return null;
+
+        var atOrAbove = measured.FirstOrDefault(c => c.FundamentalHz >= HeadlineFundamentalHz);
+        return (atOrAbove ?? measured[^1]).CaptureId;
+    }
+
     private sealed record MetricRowRaw(long CaptureId, long Channel, string Name, double Value);
+
+    // FundamentalHz is nullable: it is a correlated MIN() over the metric rows, which is NULL for a
+    // capture that recorded no fundamental. Both channels of one capture measure the same
+    // frequency, so MIN() collapses them without choosing between them.
+    private sealed record HeadlineCaptureRowRaw(long ResultId, long CaptureId, double? FundamentalHz);
 
     private sealed record SpectrumRowRaw(long Id, string Window, double S1, double S2, double EnbwHz, double BinSizeHz, string Norm, long ByteLength);
 }

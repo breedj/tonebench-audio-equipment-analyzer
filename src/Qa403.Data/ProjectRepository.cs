@@ -18,8 +18,8 @@ public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
         await using var connection = await connectionFactory.OpenAsync(ct);
         return await connection.ExecuteScalarAsync<long>(
             """
-            INSERT INTO project (name, notes, created_utc) VALUES (@name, @notes, @createdUtc);
-            SELECT last_insert_rowid();
+            INSERT INTO project (name, notes, created_utc) VALUES (@name, @notes, @createdUtc)
+            RETURNING id;
             """,
             new { name, notes, createdUtc = Qa403Timestamp.Now() });
     }
@@ -84,8 +84,8 @@ public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
         return await connection.ExecuteScalarAsync<long>(
             """
             INSERT INTO measurement_type (project_id, kind, name, notes, params_json, created_utc)
-            VALUES (@projectId, @kind, @name, @notes, @paramsJson, @createdUtc);
-            SELECT last_insert_rowid();
+            VALUES (@projectId, @kind, @name, @notes, @paramsJson, @createdUtc)
+            RETURNING id;
             """,
             new { projectId, kind, name, notes, paramsJson, createdUtc = Qa403Timestamp.Now() });
     }
@@ -121,6 +121,7 @@ public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
             {
                 await connection.ExecuteAsync("DELETE FROM metric WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
                 await connection.ExecuteAsync("DELETE FROM spectrum WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
+                await connection.ExecuteAsync("DELETE FROM capture_preview WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
                 await connection.ExecuteAsync("DELETE FROM capture WHERE id IN @captureIds;", new { captureIds }, transaction);
             }
 

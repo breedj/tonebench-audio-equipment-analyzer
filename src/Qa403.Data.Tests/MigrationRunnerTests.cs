@@ -60,7 +60,7 @@ public class MigrationRunnerTests
             await new MigrationRunner().RunAsync(connection, CancellationToken.None);
 
             long count = await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_version;");
-            Assert.Equal(4L, count);
+            Assert.Equal(5L, count);
         }
         finally
         {
@@ -86,8 +86,46 @@ public class MigrationRunnerTests
 
             Assert.Equal(
                 [(1L, "001_initial.sql"), (2L, "002_channels_and_indexes.sql"), (3L, "003_project_model.sql"),
-                 (4L, "004_capture_preview.sql")],
+                 (4L, "004_capture_preview.sql"), (5L, "005_orphan_cleanup.sql")],
                 rows);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task Run_ClearsOrphanedCapturePreviewsSoARecycledRowidDoesNotCollide()
+    {
+        // The rows migration 005 exists for: previews left behind by a delete that removed their
+        // capture. SQLite hands the freed rowid to the next capture inserted, and its preview
+        // insert then hits the UNIQUE index on (capture_id, channel, kind) -- a save that fails on
+        // a sweep with nothing wrong with it. Written here at 004's state and then migrated, which
+        // is exactly the shape an existing database is in.
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            await using var connection = await TestDb.OpenMigratedAsync(path);
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = """
+                    DELETE FROM schema_version WHERE version = 5;
+                    INSERT INTO capture_preview (capture_id, channel, kind, x, min, max)
+                    VALUES (4242, 0, 'fft', zeroblob(4), zeroblob(4), zeroblob(4));
+                    INSERT INTO metric (capture_id, channel, name, value, unit)
+                    VALUES (4242, 0, 'thd_percent', 1.0, '%');
+                    """;
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await new MigrationRunner().RunAsync(connection, CancellationToken.None);
+
+            Assert.Equal(0L, await TestDb.ScalarAsync(
+                connection, "SELECT COUNT(*) FROM capture_preview WHERE capture_id NOT IN (SELECT id FROM capture);"));
+            Assert.Equal(0L, await TestDb.ScalarAsync(
+                connection, "SELECT COUNT(*) FROM metric WHERE capture_id NOT IN (SELECT id FROM capture);"));
         }
         finally
         {

@@ -226,6 +226,11 @@ export interface MeasurementTypeAppliedResponse {
   chartShowDataPoints?: boolean | null
   chartShowMinMax?: boolean | null
   chartShowPeakHold?: boolean | null
+  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means all four. */
+  chartShowWaterfall?: boolean | null
+  chartShowOscilloscope?: boolean | null
+  chartShowHarmonics?: boolean | null
+  chartShowOtherPeaks?: boolean | null
 }
 
 /**
@@ -254,6 +259,11 @@ export interface StagedMeasurementConfig {
   chartShowDataPoints?: boolean | null
   chartShowMinMax?: boolean | null
   chartShowPeakHold?: boolean | null
+  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means all four. */
+  chartShowWaterfall?: boolean | null
+  chartShowOscilloscope?: boolean | null
+  chartShowHarmonics?: boolean | null
+  chartShowOtherPeaks?: boolean | null
 }
 
 export interface SaveMeasurementTypeRequest {

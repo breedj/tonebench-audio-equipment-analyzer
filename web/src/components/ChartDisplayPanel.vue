@@ -15,6 +15,10 @@ const {
   visibleR,
   showMinMax,
   showPeakHold,
+  showWaterfall,
+  showOscilloscope,
+  showHarmonics,
+  showOtherPeaks,
   requestAutofitY,
   requestAutofitX,
   requestResetPeakHold,
@@ -141,6 +145,29 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
         >
           Reset peak-hold
         </button>
+      </section>
+
+      <!-- Which of the secondary panels the FFT screen draws at all. Unlike the toggles above,
+           these are not about the spectrum chart's own content: they show and hide whole panels
+           under it, so a measurement that only needs the spectrum doesn't have to scroll past the
+           three that come with it. All on by default -- see useChartDisplay.ts. -->
+      <section class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 text-sm dark:border-neutral-800">
+        <label class="flex items-center gap-1.5">
+          <input v-model="showWaterfall" type="checkbox" />
+          Waterfall
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input v-model="showOscilloscope" type="checkbox" />
+          Oscilloscope
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input v-model="showHarmonics" type="checkbox" />
+          Harmonics
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input v-model="showOtherPeaks" type="checkbox" />
+          Other peaks
+        </label>
       </section>
     </CollapsibleSection>
 

@@ -329,7 +329,11 @@ public sealed class MeasurementSaveService(
             parameters.ChartThickLines,
             parameters.ChartShowDataPoints,
             parameters.ChartShowMinMax,
-            parameters.ChartShowPeakHold);
+            parameters.ChartShowPeakHold,
+            parameters.ChartShowWaterfall,
+            parameters.ChartShowOscilloscope,
+            parameters.ChartShowHarmonics,
+            parameters.ChartShowOtherPeaks);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -368,7 +372,8 @@ public sealed class MeasurementSaveService(
             inputRangeDbv, session.OutputRangeDbv, autoRangeEnabled,
             generator, staged?.SelectedMetrics, staged?.ScopePeriods,
             staged?.ChartYTopDbv, staged?.ChartYBottomDbv, staged?.ChartXFromHz, staged?.ChartXToHz,
-            staged?.ChartThickLines, staged?.ChartShowDataPoints, staged?.ChartShowMinMax, staged?.ChartShowPeakHold);
+            staged?.ChartThickLines, staged?.ChartShowDataPoints, staged?.ChartShowMinMax, staged?.ChartShowPeakHold,
+            staged?.ChartShowWaterfall, staged?.ChartShowOscilloscope, staged?.ChartShowHarmonics, staged?.ChartShowOtherPeaks);
     }
 
     public string BuildCurrentParametersJson(StagedMeasurementConfig? staged = null) =>

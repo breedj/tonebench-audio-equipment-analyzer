@@ -70,6 +70,14 @@ const props = defineProps<{
    */
   selectedLeft: ThdSweepPoint | null
   selectedRight: ThdSweepPoint | null
+  /**
+   * The same selection, per history result checked on in the checklist — App.vue's
+   * selectedSweepPointForOverlay, in the order sweepOverlays() puts them so a group here lines up
+   * with the run of the same name in the legend above. Each one gets its own block in the metrics
+   * table, so a stored sweep can be read off at the cursor frequency next to the live one instead
+   * of only being compared as a line on the chart.
+   */
+  overlaySelections: { id: number; name: string; left: ThdSweepPoint | null; right: ThdSweepPoint | null }[]
 }>()
 
 /**
@@ -460,27 +468,60 @@ function formatPower(watt: number): string {
   return `${value} mW (${loadOhms.value} Ω)`
 }
 
-/** One channel's readout row for the metrics pane below the chart — F, THD, Magnitude, D2..D6+, power, noise floor. */
-function metricsFor(point: ThdSweepPoint): { label: string; value: string }[] {
+/**
+ * The metrics table's columns, in order. One list rather than a label carried alongside every
+ * value: the header is written once per block and the rows underneath it are bare values, so the
+ * two only line up if they come from the same order — see metricsFor, which returns exactly this
+ * many strings.
+ */
+const METRIC_COLUMNS = [
+  'Frequency', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
+] as const
+
+/** One channel's row of values for the metrics table, in METRIC_COLUMNS order. */
+function metricsFor(point: ThdSweepPoint): string[] {
   const [d2, d3, d4, d5] = point.harmonicPercent
   return [
-    { label: 'THD', value: formatDistortion(point.thdPercent) },
-    { label: 'Magnitude', value: formatMagnitude(point.gainDb) },
-    { label: 'D2', value: formatDistortion(d2 ?? Number.NaN) },
-    { label: 'D3', value: formatDistortion(d3 ?? Number.NaN) },
-    { label: 'D4', value: formatDistortion(d4 ?? Number.NaN) },
-    { label: 'D5', value: formatDistortion(d5 ?? Number.NaN) },
-    { label: 'D6+', value: formatDistortion(point.d6PlusPercent) },
-    { label: 'Power', value: formatPower(point.powerWatt) },
-    { label: 'Noise floor', value: formatDistortion(point.noisePercent) },
+    formatHz(point.freqHz),
+    formatDistortion(point.thdPercent),
+    formatMagnitude(point.gainDb),
+    formatDistortion(d2 ?? Number.NaN),
+    formatDistortion(d3 ?? Number.NaN),
+    formatDistortion(d4 ?? Number.NaN),
+    formatDistortion(d5 ?? Number.NaN),
+    formatDistortion(point.d6PlusPercent),
+    formatPower(point.powerWatt),
+    formatDistortion(point.noisePercent),
   ]
 }
 
-/** The metrics pane's two rows — colours match the small preview charts' own left-blue/right-red convention. */
-const channelRows = computed(() => [
-  { channel: 0, point: props.selectedLeft, label: 'Left channel', colorClass: 'text-blue-600 dark:text-blue-400' },
-  { channel: 1, point: props.selectedRight, label: 'Right channel', colorClass: 'text-red-600 dark:text-red-400' },
-])
+/**
+ * The metrics table, one block per run: the live sweep first, then one per checked history result.
+ * A block is a header row plus a row per channel that actually has a point at the selected
+ * frequency — a mono sweep gets one row, not an empty second one. Colours match the small preview
+ * charts' own left-blue/right-red convention.
+ */
+const metricGroups = computed(() => {
+  const groups: {
+    key: string
+    name: string | null
+    rows: { key: string; label: string; colorClass: string; values: string[] }[]
+  }[] = []
+
+  function add(key: string, name: string | null, left: ThdSweepPoint | null, right: ThdSweepPoint | null) {
+    const rows = [
+      { key: `${key}-L`, label: 'Left channel', colorClass: 'text-blue-600 dark:text-blue-400', point: left },
+      { key: `${key}-R`, label: 'Right channel', colorClass: 'text-red-600 dark:text-red-400', point: right },
+    ]
+      .filter((r) => r.point !== null)
+      .map((r) => ({ key: r.key, label: r.label, colorClass: r.colorClass, values: metricsFor(r.point!) }))
+    if (rows.length > 0) groups.push({ key, name, rows })
+  }
+
+  add('live', null, props.selectedLeft, props.selectedRight)
+  for (const sel of props.overlaySelections) add(`o${sel.id}`, sel.name, sel.left, sel.right)
+  return groups
+})
 
 /**
  * The legend, one group per run and one swatch per drawn line, built from the same styleOf() the
@@ -765,24 +806,57 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- The full reading at the selected frequency, one row per channel that has data — replaces
-         the legend's old per-series hover values. -->
-    <div v-if="selectedLeft || selectedRight" class="flex flex-col gap-2 border-t border-neutral-200 pt-2 dark:border-neutral-800">
-      <div v-for="row in channelRows" :key="row.channel">
-        <template v-if="row.point">
-          <div class="flex flex-wrap items-start gap-x-5 gap-y-1.5 text-xs">
-            <div class="font-mono text-neutral-700 dark:text-neutral-300">F: {{ formatHz(row.point.freqHz) }}</div>
-            <div v-for="m in metricsFor(row.point)" :key="m.label" class="flex flex-col">
-              <span class="text-neutral-400 dark:text-neutral-500">{{ m.label }}</span>
-              <span class="font-mono text-neutral-800 dark:text-neutral-100">{{ m.value }}</span>
-            </div>
-          </div>
-          <div class="mt-1 flex items-center gap-1.5 text-xs" :class="row.colorClass">
-            <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
-            {{ row.label }}
-          </div>
-        </template>
-      </div>
+    <!-- The full reading at the selected frequency: one header, then one line per channel, and the
+         same block again for every history result checked on. Replaces the label-above-value
+         columns this used to be, which repeated all ten labels for each channel and again for each
+         run — unreadable as a comparison, which is the only reason to show two runs at once. -->
+    <div v-if="metricGroups.length" class="overflow-x-auto border-t border-neutral-200 pt-2 dark:border-neutral-800">
+      <table class="min-w-full text-xs">
+        <!-- One table for every run, a tbody each, rather than a table per run: a browser sizes a
+             table's columns across all of its rows, so this is what makes THD sit under THD when
+             the live sweep reads 22 Hz and a history result reads 90 kHz. Separate tables each
+             sized their own columns and the blocks came out staggered. The run's name is a
+             full-width row for the same reason — a heading outside the table would not be part of
+             the column grid, and the group would drift from it. -->
+        <tbody v-for="group in metricGroups" :key="group.key">
+          <tr v-if="group.name">
+            <td
+              :colspan="METRIC_COLUMNS.length + 1"
+              class="truncate pt-2 pb-0.5 text-neutral-500 dark:text-neutral-400"
+              :title="group.name"
+            >
+              {{ group.name }}
+            </td>
+          </tr>
+          <tr class="text-neutral-400 dark:text-neutral-500">
+            <th class="py-0.5 pr-4 text-left font-normal"><span class="sr-only">Channel</span></th>
+            <th
+              v-for="col in METRIC_COLUMNS"
+              :key="col"
+              class="py-0.5 pr-4 text-left font-normal whitespace-nowrap"
+            >
+              {{ col }}
+            </th>
+          </tr>
+          <tr
+            v-for="row in group.rows"
+            :key="row.key"
+            class="border-t border-neutral-100 dark:border-neutral-800"
+          >
+            <td class="py-0.5 pr-4 whitespace-nowrap" :class="row.colorClass">
+              <span class="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle"></span>
+              {{ row.label }}
+            </td>
+            <td
+              v-for="(value, i) in row.values"
+              :key="i"
+              class="py-0.5 pr-4 font-mono whitespace-nowrap text-neutral-800 dark:text-neutral-100"
+            >
+              {{ value }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </section>
 </template>

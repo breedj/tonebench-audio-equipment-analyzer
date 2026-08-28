@@ -53,7 +53,15 @@ public sealed record FftSpectrumParameters(
     bool? ChartThickLines = null,
     bool? ChartShowDataPoints = null,
     bool? ChartShowMinMax = null,
-    bool? ChartShowPeakHold = null);
+    bool? ChartShowPeakHold = null,
+    // Which of the FFT screen's secondary panels (waterfall, oscilloscope, harmonics, other peaks)
+    // are drawn -- another display-only preference, on the same terms as the four above. Null means
+    // "shown", which is what a row saved before these existed has to mean: the panels were always
+    // drawn then, so a load must not make them disappear.
+    bool? ChartShowWaterfall = null,
+    bool? ChartShowOscilloscope = null,
+    bool? ChartShowHarmonics = null,
+    bool? ChartShowOtherPeaks = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for

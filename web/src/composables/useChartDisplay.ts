@@ -20,6 +20,15 @@ const visibleR = ref(true)
 const showMinMax = ref(true)
 const showPeakHold = ref(false)
 
+// Which of the FFT screen's secondary panels are drawn at all. Every one of them is fed by the same
+// live stream as the spectrum chart, so hiding one is purely about how much of the screen a
+// measurement is allowed to take -- nothing here reaches the pipeline. All four default to on, so a
+// measurement saved before these existed (and a freshly created one) looks exactly as it used to.
+const showWaterfall = ref(true)
+const showOscilloscope = ref(true)
+const showHarmonics = ref(true)
+const showOtherPeaks = ref(true)
+
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
 // stored params — loading is the opposite of an unsaved edit. Same pattern as
 // SweepConfigPanel.vue's own `restoring` flag.
@@ -30,7 +39,10 @@ let restoring = false
 // through (ChartDisplayPanel.vue binds straight to the refs via v-model), so this watches the
 // values themselves instead — same effect as useSpectrumConfig.ts's apply() marking dirty, just
 // triggered by the ref changing rather than a function call.
-watch([yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold], () => {
+watch([
+  yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold,
+  showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks,
+], () => {
   if (!restoring) useProjects().markDirty()
 })
 
@@ -80,6 +92,10 @@ export function useChartDisplay() {
     chartShowDataPoints?: boolean | null
     chartShowMinMax?: boolean | null
     chartShowPeakHold?: boolean | null
+    chartShowWaterfall?: boolean | null
+    chartShowOscilloscope?: boolean | null
+    chartShowHarmonics?: boolean | null
+    chartShowOtherPeaks?: boolean | null
   } | null | undefined) {
     restoring = true
     yTop.value = loaded?.chartYTopDbv ?? DEFAULT_Y_TOP
@@ -90,6 +106,10 @@ export function useChartDisplay() {
     showDataPoints.value = loaded?.chartShowDataPoints ?? false
     showMinMax.value = loaded?.chartShowMinMax ?? true
     showPeakHold.value = loaded?.chartShowPeakHold ?? false
+    showWaterfall.value = loaded?.chartShowWaterfall ?? true
+    showOscilloscope.value = loaded?.chartShowOscilloscope ?? true
+    showHarmonics.value = loaded?.chartShowHarmonics ?? true
+    showOtherPeaks.value = loaded?.chartShowOtherPeaks ?? true
     void nextTick(() => {
       restoring = false
     })
@@ -118,6 +138,10 @@ export function useChartDisplay() {
     visibleR,
     showMinMax,
     showPeakHold,
+    showWaterfall,
+    showOscilloscope,
+    showHarmonics,
+    showOtherPeaks,
     activeXRange,
     resetPeakHoldTrigger,
     autofitYTrigger,

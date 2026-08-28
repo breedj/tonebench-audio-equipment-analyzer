@@ -153,7 +153,8 @@ public sealed record StagedMeasurementConfig(
     GeneratorChannelRequest GeneratorLeft, GeneratorChannelRequest GeneratorRight, bool? SnapToBin,
     IReadOnlyList<string>? SelectedMetrics = null, int? ScopePeriods = null,
     double? ChartYTopDbv = null, double? ChartYBottomDbv = null, double? ChartXFromHz = null, double? ChartXToHz = null,
-    bool? ChartThickLines = null, bool? ChartShowDataPoints = null, bool? ChartShowMinMax = null, bool? ChartShowPeakHold = null);
+    bool? ChartThickLines = null, bool? ChartShowDataPoints = null, bool? ChartShowMinMax = null, bool? ChartShowPeakHold = null,
+    bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, DateTimeOffset CreatedUtc);
@@ -182,4 +183,8 @@ public sealed record MeasurementTypeAppliedResponse(
     bool? ChartThickLines,
     bool? ChartShowDataPoints,
     bool? ChartShowMinMax,
-    bool? ChartShowPeakHold);
+    bool? ChartShowPeakHold,
+    bool? ChartShowWaterfall,
+    bool? ChartShowOscilloscope,
+    bool? ChartShowHarmonics,
+    bool? ChartShowOtherPeaks);

@@ -22,7 +22,6 @@ import SpectrumConfigPanel from './components/SpectrumConfigPanel.vue'
 import SpectrumChart from './components/SpectrumChart.vue'
 import WaterfallChart from './components/WaterfallChart.vue'
 import OscilloscopeChart from './components/OscilloscopeChart.vue'
-import SystemMetricsPanel from './components/SystemMetricsPanel.vue'
 import MetricsPanel from './components/MetricsPanel.vue'
 import GeneratorMetricsPanel from './components/GeneratorMetricsPanel.vue'
 import HarmonicsTable from './components/HarmonicsTable.vue'
@@ -59,6 +58,10 @@ const {
   showDataPoints: chartShowDataPoints,
   showMinMax: chartShowMinMax,
   showPeakHold: chartShowPeakHold,
+  showWaterfall: chartShowWaterfall,
+  showOscilloscope: chartShowOscilloscope,
+  showHarmonics: chartShowHarmonics,
+  showOtherPeaks: chartShowOtherPeaks,
   applyLoaded: applyLoadedChartDisplay,
 } = useChartDisplay()
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
@@ -192,6 +195,21 @@ function selectedSweepPointForOverlay(overlay: OverlayEntry, channel: number) {
   const targetFreqHz = hoveredSweepFreqHz.value ?? onChannel[onChannel.length - 1].freqHz
   return nearestSweepPoint(overlay.sweepPoints ?? [], channel, targetFreqHz)
 }
+
+/**
+ * The same per-channel selection for every checked history result, for ThdSweepChart's metrics
+ * table — the stored counterpart of sweepSelectedLeft/Right, resolved here rather than in the
+ * chart so one function decides what "the selected point" means for the metrics, the preview
+ * charts and the live readout alike.
+ */
+const sweepOverlaySelections = computed(() =>
+  visibleSweepOverlays.value.map((overlay) => ({
+    id: overlay.id,
+    name: overlay.detail.name,
+    left: selectedSweepPointForOverlay(overlay, 0),
+    right: selectedSweepPointForOverlay(overlay, 1),
+  })),
+)
 
 // Chart display preferences. Local view state, persisted into the measurement type's params_json
 // alongside the sweep's own run settings — see applyStoredSweepDisplay/buildTypeParamsJson below.
@@ -618,6 +636,10 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowDataPoints: chartShowDataPoints.value,
     chartShowMinMax: chartShowMinMax.value,
     chartShowPeakHold: chartShowPeakHold.value,
+    chartShowWaterfall: chartShowWaterfall.value,
+    chartShowOscilloscope: chartShowOscilloscope.value,
+    chartShowHarmonics: chartShowHarmonics.value,
+    chartShowOtherPeaks: chartShowOtherPeaks.value,
   }
 }
 
@@ -912,6 +934,7 @@ function confirmSaveProjectAs(name: string) {
                   :overlays="overlays"
                   :selected-left="sweepSelectedLeft"
                   :selected-right="sweepSelectedRight"
+                  :overlay-selections="sweepOverlaySelections"
                   @cursor-freq="onSweepCursorFreq"
                 />
 
@@ -1039,9 +1062,8 @@ function confirmSaveProjectAs(name: string) {
                 :overlays="overlays"
                 @viewport-change="setViewport"
               />
-              <WaterfallChart class="mt-3" :spectrum="spectrum" />
-              <OscilloscopeChart class="mt-3" :scope="scope" :status="status" />
-              <MeasurementHistoryPanel class="mt-3" @error="reportError" />
+              <WaterfallChart v-if="chartShowWaterfall" class="mt-3" :spectrum="spectrum" />
+              <OscilloscopeChart v-if="chartShowOscilloscope" class="mt-3" :scope="scope" :status="status" />
             </div>
 
             <ChartDisplayPanel>
@@ -1052,20 +1074,29 @@ function confirmSaveProjectAs(name: string) {
           <!-- Everything below isn't part of the new FFT Spectrum design — kept here for now, to be
                repositioned later. -->
           <OverlayList />
-          <SystemMetricsPanel :status="status" :meters="meters[0] ?? meters[1] ?? null" />
 
           <!-- Harmonics/other-peaks only mean something relative to a single fundamental tone —
-               Multitone's comb and White noise have none (see showFundamentalMarkers above). -->
-          <div v-if="showFundamentalMarkers" class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+               Multitone's comb and White noise have none (see showFundamentalMarkers above). The
+               Display panel's own two checkboxes are on top of that, and can hide either table on a
+               stimulus that does have a fundamental. -->
+          <div
+            v-if="showFundamentalMarkers && (chartShowHarmonics || chartShowOtherPeaks)"
+            class="grid grid-cols-1 gap-4 xl:grid-cols-2"
+          >
             <div class="flex flex-col gap-4">
-              <HarmonicsTable :meters="meters" :channel="0" channel-label="L" />
-              <OtherPeaksTable :meters="meters" :channel="0" channel-label="L" />
+              <HarmonicsTable v-if="chartShowHarmonics" :meters="meters" :channel="0" channel-label="L" />
+              <OtherPeaksTable v-if="chartShowOtherPeaks" :meters="meters" :channel="0" channel-label="L" />
             </div>
             <div class="flex flex-col gap-4">
-              <HarmonicsTable :meters="meters" :channel="1" channel-label="R" />
-              <OtherPeaksTable :meters="meters" :channel="1" channel-label="R" />
+              <HarmonicsTable v-if="chartShowHarmonics" :meters="meters" :channel="1" channel-label="R" />
+              <OtherPeaksTable v-if="chartShowOtherPeaks" :meters="meters" :channel="1" channel-label="R" />
             </div>
           </div>
+
+          <!-- History details sits at the bottom, spanning the whole measurement view rather than
+               the centre column it used to share with the charts: its rows are a name, a timestamp,
+               per-channel headlines and three buttons, which a third of the width could only wrap. -->
+          <MeasurementHistoryPanel @error="reportError" />
           </template>
         </template>
 

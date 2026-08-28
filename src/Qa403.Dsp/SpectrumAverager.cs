@@ -57,8 +57,6 @@ public sealed class SpectrumAverager
             return;
         }
 
-        Count = Math.Min(Count + 1, count);
-
         if (mode == AveragingMode.Exponential)
         {
             UpdateExponential(current, count);
@@ -73,6 +71,7 @@ public sealed class SpectrumAverager
         if (_ema is null || _ema.Length != current.Length)
         {
             _ema = current.ToArray();
+            Count = 1;
             return;
         }
 
@@ -81,10 +80,16 @@ public sealed class SpectrumAverager
             _ema[i] += alpha * (current[i] - _ema[i]);
 
         _ema.CopyTo(current);
+        Count = Math.Min(Count + 1, count);
     }
 
     private void UpdateLinear(Span<double> current, int count)
     {
+        // A count change (or FFT-length change) invalidates the history buffer, which must also
+        // reset Count to match — otherwise Count keeps climbing from its pre-change value even
+        // though the average itself just restarted from a single fresh spectrum. That mismatch is
+        // what let the client's "Averages: Linear xN (taken/N)" readout show a stale taken value
+        // that never dropped back down when the target count changed mid-stream.
         if (_history is null || _history.Length != count || _history[0].Length != current.Length)
         {
             _history = new double[count][];
@@ -97,6 +102,7 @@ public sealed class SpectrumAverager
         current.CopyTo(_history[_historyNext]);
         _historyNext = (_historyNext + 1) % count;
         _historyCount = Math.Min(_historyCount + 1, count);
+        Count = _historyCount;
 
         for (int i = 0; i < current.Length; i++)
         {

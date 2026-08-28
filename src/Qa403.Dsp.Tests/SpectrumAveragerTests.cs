@@ -102,6 +102,25 @@ public class SpectrumAveragerTests
     }
 
     [Fact]
+    public void Count_restarts_at_one_when_the_target_count_changes_mid_stream()
+    {
+        var averager = new SpectrumAverager();
+
+        for (int tick = 1; tick <= 47; tick++)
+            averager.Update([1.0], AveragingMode.Linear, count: 47);
+        Assert.Equal(47, averager.Count); // fully averaged at the old target, like "Linear x47 (47/47)"
+
+        // Raising the target count invalidates the history buffer (different length), so the very
+        // next tick is a fresh single-spectrum average, not the 48th tick of the old one — Count
+        // must reflect that instead of climbing from 47.
+        averager.Update([1.0], AveragingMode.Linear, count: 60);
+        Assert.Equal(1, averager.Count);
+
+        averager.Update([1.0], AveragingMode.Linear, count: 60);
+        Assert.Equal(2, averager.Count);
+    }
+
+    [Fact]
     public void Count_resets_to_zero_on_Off_and_on_Reset()
     {
         var averager = new SpectrumAverager();

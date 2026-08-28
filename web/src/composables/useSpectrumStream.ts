@@ -36,6 +36,43 @@ export function useSpectrumStream() {
   // dropped connection would silently demote a zoomed-in view back to the coarse overview.
   let viewport: { loFreqHz: number; hiFreqHz: number } | null = null
 
+  // Scope frames are published a whole tick at a time, never channel by channel. The server sends
+  // L and R as two separate WebSocket messages, so assigning each straight into `scope.value` (what
+  // this used to do) left a window — one message long, but a real one the browser can paint in —
+  // where L was the current tick's and R was still the previous tick's. The oscilloscope triggers
+  // off L's zero-crossing and applies that same sample offset to R, and an R window captured ~50 ms
+  // earlier has an unrelated phase at that offset, so the pair rendered as a phase error that
+  // appeared and vanished frame to frame. Both channels of a tick now share the header's `seq` (see
+  // SpectrumPipeline.ProcessTick), which is what makes a group identifiable at all.
+  //
+  // A group is published when the *next* one starts rather than when it looks complete, because
+  // "complete" isn't knowable here — how many channels a tick sends depends on server-side state
+  // (ProcessLeft/ProcessRight, single-shot hold, the averaging hop gate). Publishing on the next
+  // frame's arrival cannot deadlock the way waiting for an expected partner could, and costs one
+  // tick (~50 ms) of latency on a live display, which is not perceptible.
+  let pendingScope: Record<number, ScopeFrame> = {}
+  let pendingScopeSeq: number | null = null
+
+  function ingestScopeFrame(seq: number, channel: number, frame: ScopeFrame) {
+    if (pendingScopeSeq !== null && seq !== pendingScopeSeq) {
+      scope.value = pendingScope
+      pendingScope = {}
+    }
+    pendingScopeSeq = seq
+    pendingScope = { ...pendingScope, [channel]: frame }
+  }
+
+  /**
+   * Resets the oscilloscope display — use this rather than assigning `scope.value = {}`, which
+   * would clear only what is on screen and leave the half-built group above intact, so the next
+   * frame to arrive would publish a tick captured before the clear.
+   */
+  function clearScope() {
+    pendingScope = {}
+    pendingScopeSeq = null
+    scope.value = {}
+  }
+
   function sendViewport() {
     if (socket?.readyState !== WebSocket.OPEN) return
     // A degenerate range is how the server is told "not zoomed, send me the overview".
@@ -61,6 +98,10 @@ export function useSpectrumStream() {
 
     socket.onopen = () => {
       connected.value = true
+      // A half-built group from before the drop would otherwise be published as this connection's
+      // first tick, and the server restarts its sequence numbering on Start() anyway.
+      pendingScope = {}
+      pendingScopeSeq = null
       if (viewport) sendViewport()
     }
 
@@ -73,8 +114,7 @@ export function useSpectrumStream() {
         const frame = decodeMetersFrame(event.data)
         meters.value = { ...meters.value, [header.channel]: frame }
       } else if (header.msgType === StreamMsgType.Scope) {
-        const frame = decodeScopeFrame(event.data)
-        scope.value = { ...scope.value, [header.channel]: frame }
+        ingestScopeFrame(header.seq, header.channel, decodeScopeFrame(event.data))
       } else if (header.msgType === StreamMsgType.SweepPoint) {
         // Sweep frames go straight into useSweep's singleton store rather than being returned
         // from here: a sweep is one server-side run shared by every component looking at it, not
@@ -102,5 +142,5 @@ export function useSpectrumStream() {
     socket?.close()
   })
 
-  return { spectrum, meters, scope, connected, setViewport }
+  return { spectrum, meters, scope, connected, setViewport, clearScope }
 }

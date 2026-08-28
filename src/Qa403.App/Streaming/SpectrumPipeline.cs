@@ -31,6 +31,17 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     private readonly SpectrumAverager[] _psdAveragers = [new(), new()];
     private readonly object _ringBufferLock = new();
 
+    // Held across a whole *set* of channels -- every append in one Enqueue, every snapshot in one
+    // ProcessTick, every Reset in one Flush. Each SampleRingBuffer already has its own lock, which
+    // keeps that one buffer internally consistent; this one is what keeps the buffers consistent
+    // *with each other*. Enqueue appends a block to L's buffer and then to R's, so without it a
+    // snapshot landing between those two appends captures an L window one whole block (512 frames,
+    // ~10.7 ms at 48 kHz) ahead of the R window. For a periodic signal that aliases to an arbitrary
+    // phase offset, which is why the oscilloscope's two traces could still sit at a fixed, plausible-
+    // looking phase difference even once both channels were snapshotted back-to-back: back-to-back
+    // shrank the race window to microseconds but did not close it.
+    private readonly object _sampleSetLock = new();
+
     // Retained across StopAsync (so a stopped acquisition can still be saved) and cleared only by
     // Flush() (so restarting acquisition drops the stale trace). Holds ampPower -- peak-volts
     // squared, the same pre-dBV quantity ProcessChannel already computes -- rather than the
@@ -140,9 +151,18 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         Interlocked.Increment(ref _flushGeneration);
 
         var ringBuffers = _ringBuffers;
+
+        // Reset the buffers as one set, for the same reason Enqueue appends as one and ProcessTick
+        // snapshots as one (see _sampleSetLock): a snapshot that caught this loop half-done would
+        // pair a freshly-emptied channel against one still holding the previous epoch's audio.
+        lock (_sampleSetLock)
+        {
+            for (int ch = 0; ch < MaxChannels; ch++)
+                ringBuffers[ch]?.Reset(discardFrames);
+        }
+
         for (int ch = 0; ch < MaxChannels; ch++)
         {
-            ringBuffers[ch]?.Reset(discardFrames);
             _ampAveragers[ch].Reset();
             _psdAveragers[ch].Reset();
             Volatile.Write(ref _singleShotHeld[ch], false);
@@ -278,8 +298,15 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
             var ringBuffers = _ringBuffers;
             int channelCount = Math.Min(block.ChannelCount, MaxChannels);
-            for (int ch = 0; ch < channelCount; ch++)
-                ringBuffers[ch]?.AppendInterleaved(block.Samples, ch, block.ChannelCount);
+
+            // One lock around the whole set, so a snapshot never sees this block in some channels'
+            // buffers and not others -- see _sampleSetLock. Taken after EnsureRingBuffers, which
+            // needs _ringBufferLock and must not nest inside this one.
+            lock (_sampleSetLock)
+            {
+                for (int ch = 0; ch < channelCount; ch++)
+                    ringBuffers[ch]?.AppendInterleaved(block.Samples, ch, block.ChannelCount);
+            }
         }
     }
 
@@ -351,26 +378,82 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
     {
         var options = _options;
         var ringBuffers = _ringBuffers;
+        int n = options.FftSize;
+
+        // Snapshot every eligible channel's ring-buffer tail in one pass, before any channel's FFT
+        // runs -- ProcessChannel used to call SnapshotLatest itself, right before analyzing that
+        // channel, and analysis (window + FFT + averaging) is easily slow enough that by the time
+        // channel 1's snapshot happened, its buffer had already advanced past where channel 0's
+        // snapshot ended -- by an amount that varies tick to tick with however long channel 0 took.
+        // Two channels analyzed off windows taken at different instants no longer describe the same
+        // moment: a stimulus that is genuinely phase-locked across L and R showed a relative phase in
+        // the oscilloscope that drifted from frame to frame, because the chart indexes both channels'
+        // buffers by the same offset from L's trigger, and that offset only means the same instant in
+        // both when the two snapshots were actually taken together.
+        //
+        // Under _sampleSetLock, so this pass is atomic against Enqueue's own per-channel append loop
+        // as well -- adjacent snapshot calls are not enough on their own, see that field.
+        var pending = new (double[] TimeBuf, long WrittenAtSnapshot)?[_channelCount];
+        lock (_sampleSetLock)
+        {
+            for (int ch = 0; ch < _channelCount; ch++)
+            {
+                bool enabled = ch == 0 ? options.ProcessLeft : options.ProcessRight;
+                if (!enabled)
+                    continue;
+
+                if (options.SingleShot && Volatile.Read(ref _singleShotHeld[ch]))
+                    continue;
+
+                var rb = ringBuffers[ch];
+                if (rb is null || rb.Capacity != n || !rb.IsFull)
+                    continue;
+
+                // Checked here rather than inside ProcessChannel so a tick that has nothing new to
+                // add skips the FFT entirely instead of computing one and throwing it away.
+                if (!HasFreshSignalForAverage(ch, rb, options))
+                    continue;
+
+                double[] timeBuf = ArrayPool<double>.Shared.Rent(n);
+                long writtenAtSnapshot = rb.SamplesWritten;
+                rb.SnapshotLatest(timeBuf.AsSpan(0, n));
+                pending[ch] = (timeBuf, writtenAtSnapshot);
+            }
+        }
+
+        // One sequence number for the whole tick, shared by every channel analyzed from the snapshot
+        // set above -- it identifies the *record*, and after the change above both channels' records
+        // genuinely describe one instant. Allocating it per broadcast instead (the old
+        // `Interlocked.Increment` inside ProcessChannel) gave L and R of the same tick consecutive
+        // but different numbers, which left a client no way to tell a matched L/R pair from a stale
+        // one; see useSpectrumStream.ts, where the oscilloscope's two traces are re-paired by it.
+        // Sweep point frames already use the header's seq this way (both channels of one frequency
+        // share the point index), so this is the same convention rather than a new one.
+        //
+        // Only advanced when the tick actually has something to analyze, so an idle pipeline does not
+        // burn sequence numbers.
+        bool anyPending = false;
+        for (int ch = 0; ch < _channelCount; ch++)
+            anyPending |= pending[ch] is not null;
+        if (!anyPending)
+            return;
+
+        uint seq = Interlocked.Increment(ref _seq);
 
         for (int ch = 0; ch < _channelCount; ch++)
         {
-            bool enabled = ch == 0 ? options.ProcessLeft : options.ProcessRight;
-            if (!enabled)
+            var p = pending[ch];
+            if (p is null)
                 continue;
 
-            if (options.SingleShot && Volatile.Read(ref _singleShotHeld[ch]))
-                continue;
-
-            var rb = ringBuffers[ch];
-            if (rb is null || rb.Capacity != options.FftSize || !rb.IsFull)
-                continue;
-
-            // Checked here rather than inside ProcessChannel so a tick that has nothing new to add
-            // skips the FFT entirely instead of computing one and throwing it away.
-            if (!HasFreshSignalForAverage(ch, rb, options))
-                continue;
-
-            ProcessChannel(ch, rb, options);
+            try
+            {
+                ProcessChannel(ch, options, p.Value.TimeBuf, p.Value.WrittenAtSnapshot, seq);
+            }
+            finally
+            {
+                ArrayPool<double>.Shared.Return(p.Value.TimeBuf);
+            }
         }
     }
 
@@ -396,7 +479,14 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         return rb.SamplesWritten - last >= needed;
     }
 
-    private void ProcessChannel(int channelIndex, SampleRingBuffer rb, SpectrumPipelineOptions options)
+    /// <summary>
+    /// Analyzes a window already captured by <see cref="ProcessTick"/> -- <paramref name="timeBuf"/>
+    /// and <paramref name="writtenAtSnapshot"/> come from that channel's <see cref="SampleRingBuffer.SnapshotLatest"/>,
+    /// taken with every other channel's before any channel's FFT ran, so that a multi-channel record
+    /// actually describes one instant rather than one per channel. <paramref name="seq"/> identifies
+    /// that record and is shared by every channel of the tick.
+    /// </summary>
+    private void ProcessChannel(int channelIndex, SpectrumPipelineOptions options, double[] timeBuf, long writtenAtSnapshot, uint seq)
     {
         // The generation this record belongs to. Everything below describes the signal as it was
         // when this line ran; if a Flush lands while the FFT is in flight, that description is of
@@ -406,19 +496,12 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         int n = options.FftSize;
         int specLen = (n / 2) + 1;
 
-        double[] timeBuf = ArrayPool<double>.Shared.Rent(n);
         double[] windowed = ArrayPool<double>.Shared.Rent(n);
         Complex[] spec = ArrayPool<Complex>.Shared.Rent(specLen);
         double[] ampBuf = ArrayPool<double>.Shared.Rent(specLen);
         double[] psdBuf = ArrayPool<double>.Shared.Rent(specLen);
         try
         {
-            // Read alongside the samples it describes, not after the FFT: more samples land while
-            // this tick runs, and crediting the average with those would let the next one through
-            // early by however long the FFT took.
-            long writtenAtSnapshot = rb.SamplesWritten;
-            rb.SnapshotLatest(timeBuf.AsSpan(0, n));
-
             var window = Window.Get(options.Window, n);
             Window.Apply(timeBuf.AsSpan(0, n), window, windowed.AsSpan(0, n));
 
@@ -440,7 +523,6 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             _psdAveragers[channelIndex].Update(psdValues, options.Averaging, options.AverageCount);
             var psd = PsdSpectrum.FromValues(psdValues, _sampleRateHz, binSizeHz, window.Sums);
 
-            uint seq = Interlocked.Increment(ref _seq);
             var channel = channelIndex == 0 ? StreamChannel.Left : StreamChannel.Right;
 
             // Either averager reports the same count (both Updated together, just above, with the
@@ -500,7 +582,6 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
         }
         finally
         {
-            ArrayPool<double>.Shared.Return(timeBuf);
             ArrayPool<double>.Shared.Return(windowed);
             ArrayPool<Complex>.Shared.Return(spec);
             ArrayPool<double>.Shared.Return(ampBuf);

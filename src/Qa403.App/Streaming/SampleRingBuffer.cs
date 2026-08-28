@@ -133,10 +133,20 @@ internal sealed class SampleRingBuffer(int capacity)
 
         lock (_lock)
         {
+            // Two block copies rather than a modulo per element: the window is contiguous in at most
+            // two runs (oldest sample to the end of the storage, then wrap to the write head). This
+            // is not just tidier -- SpectrumPipeline holds one lock across *every* channel's snapshot
+            // so the channels describe the same instant, and that lock blocks the acquisition drain
+            // loop, so the per-element version's cost at a 1M-point FFT was a real risk of dropped
+            // RX chunks (which invalidate a noise measurement outright).
             int cap = _buffer.Length;
             long start = Math.Max(0, _writeIndex - cap);
-            for (int i = 0; i < cap; i++)
-                destination[i] = _buffer[(start + i) % cap];
+            int head = (int)(start % cap);
+
+            int firstRun = cap - head;
+            _buffer.AsSpan(head, firstRun).CopyTo(destination);
+            if (firstRun < cap)
+                _buffer.AsSpan(0, cap - firstRun).CopyTo(destination[firstRun..]);
         }
     }
 }

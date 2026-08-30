@@ -1,4 +1,5 @@
 using Qa403.App.Endpoints;
+using Qa403.App.Diagnostics;
 using Qa403.App.Streaming;
 using Qa403.Device;
 using Qa403.Device.Hardware;
@@ -115,7 +116,31 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// </summary>
     public long DroppedRxChunks => device.DroppedRxChunks;
 
+    /// <summary>
+    /// Assembled blocks dropped after calibration because this service's own drain loop fell behind
+    /// — see <see cref="IAnalyzerDevice.DroppedBlocks"/>. Reported alongside
+    /// <see cref="DroppedRxChunks"/> rather than folded into it, because the two name different
+    /// halves of the pipeline and only reporting one of them is what hid this for weeks.
+    /// </summary>
+    public long DroppedBlocks => device.DroppedBlocks;
+
     public double OutputRangeDbv => _outputRangeDbv;
+
+    /// <summary>
+    /// The device state to stamp on a diagnostic record, read at the instant the record is analyzed
+    /// rather than pushed on change — see <see cref="Qa403.App.Diagnostics.DiagnosticContext"/>.
+    /// Reads <see cref="IAnalyzerDevice.InputRangeDbv"/> off the device, not the
+    /// <c>_inputRangeDbv</c> mirror, because autoranging steps the range inside the device and the
+    /// mirror is exactly the value that goes stale when it does. Field reads only: this runs on the
+    /// pipeline's DSP thread and must not take <see cref="_sessionLock"/>.
+    /// </summary>
+    public DiagnosticContext CaptureDiagnosticContext() => new(
+        InputRangeDbv: device.InputRangeDbv,
+        OutputRangeDbv: _outputRangeDbv,
+        AutoRangeEnabled: AutoRangeEnabled ?? false,
+        Generator: _generatorConfig,
+        DroppedRxChunks: device.DroppedRxChunks,
+        DroppedBlocks: device.DroppedBlocks);
 
     /// <summary>The effective (already bin-snapped, if snapping is on) generator config — what the device is actually playing.</summary>
     public GeneratorConfig EffectiveGeneratorConfig => _generatorConfig;
@@ -308,12 +333,12 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         if (_info is not { } info)
             return new DeviceStatusResponse(
                 false, "", "", "", false, 0, 0, false, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
-                _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks);
+                _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks, device.DroppedBlocks);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
             device.InputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
-            _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks);
+            _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks, device.DroppedBlocks);
     }
 
     /// <summary>
@@ -435,8 +460,9 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         _inputRangeDbv = dbv;
 
         // A range change is a gain step in the analog path — same reasoning as the generator
-        // change in ConfigureGeneratorAsync. (Autoranging steps the range inside the device without
-        // telling us, so those transients can't be flushed this way.)
+        // change in ConfigureGeneratorAsync. (An *autorange* step originates inside the device and
+        // so cannot be flushed from here; it announces itself in-band instead, on the first block
+        // after the step — see PumpAsync and PcmBlock.StartsAfterDiscontinuity.)
         if (_isAcquiring)
             spectrumPipeline.Flush(StimulusLatencyFrames);
     }
@@ -704,9 +730,37 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
             await foreach (var block in device.StreamAsync(config, ct).WithCancellation(ct))
             {
                 if (_isAcquiring)
+                {
+                    // Autoranging steps the input range inside the device, and the quiesce that does
+                    // it discards ~a queue depth of already-captured RX on top of the relay settle
+                    // frames — a hole of order 110 ms that DroppedRxChunks does not count and the
+                    // block sequence numbers do not show. Flushing here is the same reasoning as
+                    // SetInputRangeCoreAsync's flush for a manual range change; the difference is
+                    // that the news arrives on the block rather than from the caller.
+                    //
+                    // Bare, with no stimulus-latency discard: nothing changed on the way *out*, so
+                    // there is no in-flight DAC audio to outrun. See PcmBlock.StartsAfterDiscontinuity.
+                    if (block.StartsAfterDiscontinuity)
+                    {
+                        // Information, not Debug, and logged here rather than at the step itself:
+                        // this is the one event that makes an otherwise inexplicable one-record
+                        // noise-floor jump attributable, and the pump thread is the wrong place to
+                        // do file I/O. Repeated lines roughly a second apart mean the ranger is
+                        // hunting at a threshold rather than tracking a real level change.
+                        logger.LogInformation(
+                            "Input range stepped to {RangeDbv} dBV by autoranging — flushing the "
+                                + "analysis window, since the step discarded the RX transfers in flight",
+                            device.InputRangeDbv);
+
+                        spectrumPipeline.Flush();
+                    }
+
                     spectrumPipeline.Enqueue(block); // takes ownership — disposes the block itself
+                }
                 else
+                {
                     block.Dispose();
+                }
             }
         }
         catch (OperationCanceledException)

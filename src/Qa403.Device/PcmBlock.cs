@@ -19,7 +19,9 @@ public sealed class PcmBlock : IDisposable
 {
     private float[]? _buffer;
 
-    public PcmBlock(float[] buffer, int sampleCount, double sampleRateHz, int channelCount, long sequenceNumber, long timestampTicks)
+    public PcmBlock(
+        float[] buffer, int sampleCount, double sampleRateHz, int channelCount, long sequenceNumber,
+        long timestampTicks, bool startsAfterDiscontinuity = false)
     {
         if (sampleCount < 0 || sampleCount > buffer.Length)
             throw new ArgumentOutOfRangeException(nameof(sampleCount));
@@ -32,6 +34,7 @@ public sealed class PcmBlock : IDisposable
         ChannelCount = channelCount;
         SequenceNumber = sequenceNumber;
         TimestampTicks = timestampTicks;
+        StartsAfterDiscontinuity = startsAfterDiscontinuity;
     }
 
     public double SampleRateHz { get; }
@@ -43,6 +46,29 @@ public sealed class PcmBlock : IDisposable
 
     /// <summary>Monotonic capture timestamp: a <see cref="System.Diagnostics.Stopwatch"/> tick count (see <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/>), not wall-clock time.</summary>
     public long TimestampTicks { get; }
+
+    /// <summary>
+    /// True when the samples immediately preceding this block are missing — the stream is not
+    /// continuous across its leading edge.
+    ///
+    /// <para>Set for the first block after an input-range step. That step quiesces EP2, and the
+    /// quiesce's drain discards every already-completed RX transfer (about one queue depth, ~64 ms
+    /// at 192 kHz) on top of the relay settle frames the assembler drops — a hole of order 110 ms.
+    /// It is not counted by <see cref="IAnalyzerDevice.DroppedRxChunks"/>, which counts only chunks
+    /// the consumer was too slow to take, and it is invisible in <see cref="SequenceNumber"/>,
+    /// which is assigned locally and stays contiguous across it.</para>
+    ///
+    /// <para>A consumer that concatenates blocks into an analysis window must break the window
+    /// here. <c>SampleRingBuffer</c> concatenates unconditionally, so a record spanning this splice
+    /// shows the tone smeared into a broad skirt and the whole broadband floor lifted for exactly
+    /// one record — the visible "glitch". <c>DeviceSessionService.PumpAsync</c> answers it with
+    /// <c>SpectrumPipeline.Flush()</c>, which trades that record for a brief pause in updates.</para>
+    ///
+    /// <para>Flushed bare, with no stimulus-latency discard: unlike a generator or output-range
+    /// change this is not a change on the way *out*, so there is no pre-change audio still queued
+    /// for the DAC to outrun. Everything from this block on is already post-step.</para>
+    /// </summary>
+    public bool StartsAfterDiscontinuity { get; }
 
     /// <summary>Number of valid interleaved samples in <see cref="Samples"/> (may be less than the rented buffer's length).</summary>
     public int SampleCount { get; }

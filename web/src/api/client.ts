@@ -37,6 +37,7 @@ export interface DeviceStatus {
    * are suspect, not just that a display frame was skipped.
    */
   droppedRxChunks: number
+  droppedBlocks: number
 }
 
 /** Patch for the simulated DUT's signal profile — omitted fields are left alone. */

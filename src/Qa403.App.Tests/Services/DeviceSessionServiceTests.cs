@@ -15,6 +15,29 @@ public class DeviceSessionServiceTests
         new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
         NullLogger<DeviceSessionService>.Instance);
 
+    /// <summary>
+    /// Both drop counters have to reach the status response. Only <c>DroppedRxChunks</c> did, and
+    /// because the counters are deliberately separate (they name different halves of the pipeline)
+    /// that meant the API and the UI reported a clean stream through runs that dropped 14, 74 and
+    /// 439 assembled blocks. A counter that is logged but never surfaced sends the next person
+    /// looking in the wrong place, which is exactly what it did.
+    /// </summary>
+    [Fact]
+    public async Task GetStatus_ReportsBothDropCounters()
+    {
+        var device = new StubDevice { RxChunkDrops = 7, BlockDrops = 3 };
+        var session = new DeviceSessionService(
+            device,
+            new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
+            NullLogger<DeviceSessionService>.Instance);
+
+        await session.ConnectAsync(CancellationToken.None);
+        var status = session.GetStatus();
+
+        Assert.Equal(7, status.DroppedRxChunks);
+        Assert.Equal(3, status.DroppedBlocks);
+    }
+
     [Fact]
     public async Task StartAcquisitionAsync_RejectsBlockFrameCountBelowHardwareQueueDepth()
     {
@@ -340,6 +363,8 @@ public class DeviceSessionServiceTests
 
         public long DroppedRxChunks => 0;
 
+        public long DroppedBlocks => 0;
+
         public bool AutoRangeEnabled { get; set; }
 
         public double AutoRangeStepDownDelayMs { get; set; }
@@ -397,7 +422,14 @@ public class DeviceSessionServiceTests
 
         public double InputRangeDbv { get; private set; }
 
-        public long DroppedRxChunks => 0;
+        /// <summary>Settable, and independently of <see cref="BlockDrops"/>, so a status response that summed the two could not pass this test.</summary>
+        public long RxChunkDrops { get; init; }
+
+        public long BlockDrops { get; init; }
+
+        public long DroppedRxChunks => RxChunkDrops;
+
+        public long DroppedBlocks => BlockDrops;
 
         public bool AutoRangeEnabled { get; set; }
 

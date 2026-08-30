@@ -36,10 +36,35 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     /// <summary>
     /// Headroom, in dB, to keep a signal below a range's nominal full scale: step up once the peak
     /// exceeds <c>currentRangeDbv - HeadroomDb</c>, and step down once it would still sit at least
-    /// this far below the next lower range's full scale. Same 5 dB figure as
+    /// this far below the next lower range's full scale — plus
+    /// <see cref="StepDownHysteresisDb"/>, without which the two comparisons are the same boundary.
+    /// Same 5 dB figure as
     /// <c>QaLibrary.DetermineAttenuation</c> / <c>attenuation.ts</c>' <c>determineAttenuation</c>.
     /// </summary>
     public const double HeadroomDb = 5.0;
+
+    /// <summary>
+    /// Extra margin, in dB, a peak must sit below the *lower* range's own step-up threshold before
+    /// this steps down onto it.
+    ///
+    /// <para>Without it the two thresholds are the same number and the ranger has no level
+    /// hysteresis at all. On a 6 dB ladder with <see cref="HeadroomDb"/> = 5, range 6 stepped down
+    /// when the peak was <c>&lt;= 0 - 5 = -5</c> dBV, and range 0 stepped straight back up when the
+    /// peak was <c>&gt; 0 - 5 = -5</c> dBV — the same boundary in both directions. A signal sitting
+    /// near it therefore oscillated indefinitely: the only thing separating the two decisions was
+    /// <see cref="StepDownDelayMs"/>, so the pattern was one step down after a second of quiet
+    /// followed immediately by a step back up. Observed on real hardware as clusters of register
+    /// writes ~1.07 s apart — the delay plus one block — in the pump's own stall log.</para>
+    ///
+    /// <para>That is not a cosmetic problem. Every step quiesces EP2, and
+    /// <c>TransferPump.QuiesceAndWriteRegister</c>'s <c>Drain()</c> discards every already-completed
+    /// RX transfer — roughly one queue depth, ~64 ms at 192 kHz — on top of the settle frames the
+    /// consumer drops. That is a ~110 ms hole punched in the sample stream once a second, and
+    /// <c>SampleRingBuffer</c> concatenates straight across it. Hysteresis is what stops the hole
+    /// from being self-inflicted; <c>PcmBlock.StartsAfterDiscontinuity</c> is what keeps the
+    /// unavoidable ones off the display.</para>
+    /// </summary>
+    public const double StepDownHysteresisDb = 2.0;
 
     /// <summary>
     /// Default for <see cref="StepDownDelayMs"/> — how long a peak must stay under-range before
@@ -96,7 +121,10 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
             return currentIndex < inputRangesDbv.Count - 1 ? RangeStepDecision.StepUp : RangeStepDecision.Hold;
         }
 
-        if (currentIndex > 0 && peakDbv <= inputRangesDbv[currentIndex - 1] - HeadroomDb)
+        // StepDownHysteresisDb below the lower range's *own* step-up threshold, not level with it —
+        // level with it is the same number in both directions, which is a ranger that hunts. See
+        // StepDownHysteresisDb.
+        if (currentIndex > 0 && peakDbv <= inputRangesDbv[currentIndex - 1] - HeadroomDb - StepDownHysteresisDb)
         {
             _underRangeElapsedMs += blockDurationMs;
             if (_underRangeElapsedMs >= StepDownDelayMs)

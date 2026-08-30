@@ -27,6 +27,8 @@ namespace Qa403.App.Json;
 /// itself needs reflection to construct a converter per enum type and would have the same problem.
 /// </summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true)]
+[JsonSerializable(typeof(DiagnosticsEndpoints.DiagnosticsConfigRequest))]
+[JsonSerializable(typeof(DiagnosticsEndpoints.DiagnosticsStatus))]
 [JsonSerializable(typeof(AcquisitionStartRequest))]
 [JsonSerializable(typeof(SpectrumConfigRequest))]
 [JsonSerializable(typeof(SpectrumPipelineOptions))]

@@ -101,6 +101,21 @@ function onSimulatedHumChange(e: Event) {
       >
         {{ status.droppedRxChunks }} dropped
       </span>
+
+      <!--
+        The other half of the pipeline, and shown separately for the same reason the server keeps two
+        counters: RX chunks drop before calibration, blocks drop after it. Only droppedRxChunks was
+        ever displayed, so this bar read clean through runs that lost 439 blocks — 1.8 M frames, over
+        9 seconds of audio — which is exactly the "the numbers on screen are wrong" case it exists to
+        warn about.
+      -->
+      <span
+        v-if="status.droppedBlocks > 0"
+        class="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
+        title="Assembled blocks dropped because the consumer fell behind calibration. Each one is a hole in the sample stream, so noise-floor and THD+N readings taken since are unreliable."
+      >
+        {{ status.droppedBlocks }} blocks dropped
+      </span>
     </div>
 
     <div class="ml-auto flex items-center gap-4">

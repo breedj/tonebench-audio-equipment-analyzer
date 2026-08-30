@@ -67,6 +67,25 @@ public interface IAnalyzerDevice
     long DroppedRxChunks { get; }
 
     /// <summary>
+    /// Assembled PCM blocks discarded since connect because whoever consumes
+    /// <see cref="StreamAsync"/> could not keep up with calibration, cumulative across streams.
+    /// Always 0 for the simulator.
+    ///
+    /// <para>Deliberately separate from <see cref="DroppedRxChunks"/> rather than summed into it:
+    /// the two name different halves of the pipeline. RX chunks drop when the *assembler* fell
+    /// behind the transfer pump; blocks drop when the *consumer* fell behind the assembler. One
+    /// combined number says "something fell behind" and leaves the next person to guess which.</para>
+    ///
+    /// <para>Separate, but it must still be <i>reported</i>. This existed and was logged for weeks
+    /// while only <see cref="DroppedRxChunks"/> reached the status endpoint, so the UI and the API
+    /// both said 0 through runs that dropped 14, 74 and even 439 blocks — 439 being 1.8 million
+    /// frames, over 9 seconds of audio missing from a single run. A hole this size splices every FFT
+    /// record spanning it, and two separate investigations were sent down the wrong path by a status
+    /// field that read clean. A counter that is not surfaced is not instrumentation.</para>
+    /// </summary>
+    long DroppedBlocks { get; }
+
+    /// <summary>
     /// Frames of audio that are already committed to the hardware when a stimulus change
     /// (<see cref="ConfigureGeneratorAsync"/>, <see cref="SetInputRangeAsync"/>,
     /// <see cref="SetOutputRangeAsync"/>) returns, and which therefore still carry the *old*

@@ -56,8 +56,26 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// buffers (stream.py:27, <c>dacQueue = queue.Queue(maxsize=5)</c>), i.e. 20480 frames ≈ 107 ms at
     /// 192 kHz. This app does more per chunk than baremetal, so baremetal's depth is not enough; 64 ms
     /// stays comfortably under PyQa40x's ceiling.
+    ///
+    /// <para><b>Raised from 0.064 to 0.128 on measured evidence.</b> 64 ms was chosen against the
+    /// references, but the thing it has to survive is a pump iteration that blocks longer than the
+    /// buffer it is protecting, and those were measured on this app once the waveform was captured:
+    /// pump stalls of 46.5, 81.0, 92.7, 94.4 and 125.3 ms, every one of them spent in
+    /// <c>read wait</c> — waiting for a LibUsbDotNet RX completion delivered through the thread
+    /// pool. A stall longer than the queue drains the DAC by construction, so at 64 ms four of
+    /// those five had to produce a gap no matter how rare they are. The captured generator output
+    /// shows exactly that: held-constant DC spans of 0.3-3.6 ms, each lifting one 341 ms FFT
+    /// record's broadband floor by ~70 dB.
+    ///
+    /// <para>128 ms covers the worst stall seen with margin. It is above PyQa40x's ~107 ms, which is
+    /// the highest of the references, so it is no longer bracketed by them — but the references do
+    /// not do per-chunk work on the consumer side and this app does. <see cref="MaxQueueDepth"/> is
+    /// 48, which is exactly 128 ms at 192 kHz, so this is also the most the clamp allows there.
+    /// The cost is latency, not throughput: <c>StimulusLatencyFrames</c> doubles, and every
+    /// stimulus-driven flush already derives its discard from <see cref="QueueDepthFor"/>, so that
+    /// follows automatically.</para>
     /// </summary>
-    private const double TargetInFlightSeconds = 0.064;
+    private const double TargetInFlightSeconds = 0.128;
 
     private const int MinQueueDepth = 4;
     private const int MaxQueueDepth = 48;
@@ -93,8 +111,18 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// </summary>
     private volatile TransferPump? _activePump;
 
+    /// <summary>
+    /// The assembler owning the current stream, for the same reason <see cref="_activePump"/> is
+    /// held: <see cref="DroppedBlocks"/> has to report drops as they happen, not only once the
+    /// stream has ended and its total has been folded in.
+    /// </summary>
+    private volatile BlockAssembler? _activeAssembler;
+
     /// <summary>Drops from streams that have already ended. Live drops come off <see cref="_activePump"/> — see <see cref="DroppedRxChunks"/>.</summary>
     private long _droppedRxChunks;
+
+    /// <summary>Block drops from streams that have already ended. Live drops come off <see cref="_activeAssembler"/> — see <see cref="DroppedBlocks"/>.</summary>
+    private long _droppedBlocks;
 
     public event EventHandler? DeviceLost;
 
@@ -151,6 +179,9 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
     /// <inheritdoc />
     public long DroppedRxChunks => Interlocked.Read(ref _droppedRxChunks) + (_activePump?.DroppedChunks ?? 0);
+
+    /// <inheritdoc />
+    public long DroppedBlocks => Interlocked.Read(ref _droppedBlocks) + (_activeAssembler?.DroppedBlocks ?? 0);
 
     /// <summary>Transfers kept in flight per direction at a given sample rate — see <see cref="TargetInFlightSeconds"/>.</summary>
     internal static int QueueDepthFor(double sampleRateHz) => Math.Clamp(
@@ -410,6 +441,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         try
         {
             _activePump = pump;
+            _activeAssembler = assembler;
             pump.Start(ct);
             assembler.Start();
 
@@ -451,6 +483,10 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             // fall through to writing directly rather than queueing onto a pump that is going away.
             _activePump = null;
 
+            // Cleared alongside the pump, and before the join for the same reason: past this point
+            // the live term must stop contributing so the fold-in below cannot double-count it.
+            _activeAssembler = null;
+
             // Strictly before the pump's join, and that order is load-bearing: StopAndJoinAsync ends
             // by draining whatever RxChunks are still sitting in the channel and returning their
             // buffers to the pool. An assembler still reading that same channel would be returning
@@ -475,6 +511,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             if (dropped > 0 || droppedBlocks > 0)
             {
                 Interlocked.Add(ref _droppedRxChunks, dropped);
+                Interlocked.Add(ref _droppedBlocks, droppedBlocks);
 
                 // The two counters answer different questions, which is the entire reason they are
                 // separate. RX chunks drop when the *assembler* could not keep up with the pump;
@@ -576,15 +613,29 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                     + "register+prime {RegisterMs:0.0}), TX slack now {SlackMs:0.0} ms of {PrimedMs:0.0}; "
                     + "GC pause {GcPauseMs:0.0} ms total (gen0 {Gen0}/gen1 {Gen1}/gen2 {Gen2}), "
                     + "pool {ThreadPoolThreads} threads / {ThreadPoolPending} queued"
-                    + "{ShortWriteNote}",
+                    + "{MissingNote}",
                 stall.Cause, stall.Iteration, stall.IterationMs,
                 stall.ReadWaitMs, stall.WriteWaitMs, stall.SubmitMs, stall.RegisterMs,
                 stall.SlackMs, diagnostics.PrimedSlackMs,
                 stall.GcPauseMs, stall.Gen0, stall.Gen1, stall.Gen2,
                 stall.ThreadPoolThreads, stall.ThreadPoolPending,
-                stall.ShortWriteBytes > 0 ? $"; {stall.ShortWriteBytes} TX bytes never sent" : string.Empty);
+                MissingBytesNote(stall));
         }
     }
+
+    /// <summary>
+    /// The tail of a stall line, naming what the event actually lost. The two directions fail
+    /// differently and must not read alike: TX bytes never sent are a gap in the generator output,
+    /// RX bytes never delivered are a splice in the analysis.
+    /// </summary>
+    private static string MissingBytesNote(in PumpStall stall) => stall switch
+    {
+        { MissingBytes: <= 0 } => string.Empty,
+        { Cause: PumpStallCause.ShortWrite } => $"; {stall.MissingBytes} TX bytes never sent",
+        { Cause: PumpStallCause.ShortRead } =>
+            $"; {stall.MissingBytes} RX bytes never delivered — any FFT record spanning this instant is spliced",
+        _ => $"; {stall.MissingBytes} bytes lost",
+    };
 
     /// <summary>
     /// One burst of lost data, logged the moment the consumer notices the counters moved rather than
@@ -613,20 +664,22 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
         // A few ms is host-vs-device clock drift over a long run, not starvation — see the slack
         // metric's remarks. Report at Warning only once it is past anything drift can explain.
-        var level = lostMs > 2.0 || diagnostics.ShortWrites > 0
+        var level = lostMs > 2.0 || diagnostics.ShortWrites > 0 || diagnostics.ShortReads > 0
             ? Microsoft.Extensions.Logging.LogLevel.Warning
             : Microsoft.Extensions.Logging.LogLevel.Information;
 
         logger.Log(
             level,
-            "QA403 TX summary at {SampleRateHz:0} Hz: {Iterations} iterations, worst {WorstMs:0.0} ms, "
+            "QA403 transfer summary at {SampleRateHz:0} Hz: {Iterations} iterations, worst {WorstMs:0.0} ms, "
                 + "TX slack floor {MinSlackMs:0.0} ms of {PrimedMs:0.0} (≈{LostMs:0.0} ms of DAC time lost), "
                 + "{ShortWrites} short writes ({ShortWriteBytes} bytes), "
+                + "{ShortReads} short reads ({ShortReadBytes} bytes), "
                 + "{GcPauseMs:0.0} ms GC pause over gen0 {Gen0}/gen1 {Gen1}/gen2 {Gen2}"
                 + "{Suppressed}",
             sampleRateHz, diagnostics.Iterations, diagnostics.WorstIterationMs,
             diagnostics.MinSlackMs, diagnostics.PrimedSlackMs, lostMs,
             diagnostics.ShortWrites, diagnostics.ShortWriteBytes,
+            diagnostics.ShortReads, diagnostics.ShortReadBytes,
             diagnostics.GcPauseDuringStream.TotalMilliseconds,
             diagnostics.Gen0Collections, diagnostics.Gen1Collections, diagnostics.Gen2Collections,
             diagnostics.SuppressedStalls > 0 ? $", {diagnostics.SuppressedStalls} further events not logged" : string.Empty);
@@ -846,6 +899,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             int framesInBlock = 0;
             long sequenceNumber = 0;
             int settleFramesRemaining = 0;
+            bool startsAfterDiscontinuity = false;
 
             try
             {
@@ -859,7 +913,29 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                         // the register write, so this chunk's own samples are still valid at its
                         // stated range.
                         if (chunk.SettleFrames > 0)
+                        {
                             settleFramesRemaining = chunk.SettleFrames;
+
+                            // The step is a hole in the stream, not just a level change: the quiesce
+                            // that performed it drained and discarded every completed RX transfer
+                            // (~one queue depth, ~64 ms at 192 kHz) before these settle frames were
+                            // even captured. Whatever is half-assembled here is pre-step audio with
+                            // post-step audio about to be appended straight onto it, so the block it
+                            // would become is spliced at an arbitrary interior point. Drop it and
+                            // start clean; the flag rides the next completed block out to the
+                            // consumer, which flushes rather than analyzing across the hole. See
+                            // PcmBlock.StartsAfterDiscontinuity.
+                            if (blockBuffer is not null)
+                            {
+                                ArrayPool<float>.Shared.Return(blockBuffer);
+                                blockBuffer = null;
+                                framesInBlock = 0;
+                            }
+
+                            // Not assigned: a second step landing before the flagged block has been
+                            // emitted must not clear the flag the first one raised.
+                            startsAfterDiscontinuity = true;
+                        }
 
                         int chunkFrameCount = chunk.Length / BytesPerFrame;
                         for (int i = 0; i < chunkFrameCount; i++)
@@ -906,7 +982,12 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                             {
                                 var block = new PcmBlock(
                                     blockBuffer, _config.BlockFrameCount * _config.ChannelCount, _config.SampleRateHz,
-                                    _config.ChannelCount, sequenceNumber++, Stopwatch.GetTimestamp());
+                                    _config.ChannelCount, sequenceNumber++, Stopwatch.GetTimestamp(),
+                                    startsAfterDiscontinuity);
+
+                                // Cleared only once it has actually been handed to a block, so a step
+                                // that lands mid-block still reaches the consumer.
+                                startsAfterDiscontinuity = false;
 
                                 // DropOldest never blocks, so a stalled consumer can never stall this
                                 // thread and therefore can never stall the RX drain. TryWrite reports
@@ -1228,6 +1309,16 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                     var (readTask, readBuffer) = _pendingReads.Dequeue();
                     int transferLength = readTask.GetAwaiter().GetResult();
                     long tAfterRead = Stopwatch.GetTimestamp();
+
+                    // Checked for the same reason the write below is, and it was the *only* one of
+                    // the two that wasn't. A short bulk read is reported as a length, not an error
+                    // (a timeout is deliberately not fatal — see Qa40xTransport.ReadDataAsync), and
+                    // the assembler appends exactly the frames it is handed. So the missing ones are
+                    // a silent hole in the sample stream: DroppedRxChunks does not count them, the
+                    // block sequence numbers stay contiguous across them, and the only trace is a
+                    // spliced FFT record.
+                    if (transferLength != ChunkByteSize)
+                        _diagnostics.RecordShortRead(_frameIndex, ChunkByteSize, transferLength);
 
                     byte[] nextReadBuffer = ArrayPool<byte>.Shared.Rent(ChunkByteSize);
                     _pendingReads.Enqueue((transport.ReadDataAsync(nextReadBuffer, ChunkByteSize, _ct), nextReadBuffer));

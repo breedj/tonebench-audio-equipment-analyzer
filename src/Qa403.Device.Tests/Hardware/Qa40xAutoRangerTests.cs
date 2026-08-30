@@ -133,6 +133,73 @@ public class Qa40xAutoRangerTests
         Assert.Equal(RangeStepDecision.StepDown, decision);
     }
 
+    /// <summary>
+    /// The regression test for the range hunt. With no level hysteresis the step-down threshold of
+    /// range 6 and the step-up threshold of range 0 are the same number (0 - 5 = -5 dBV), so a peak
+    /// parked between them stepped down, stepped straight back up, and repeated for as long as the
+    /// signal was there — once per <see cref="Qa40xAutoRanger.StepDownDelayMs"/>. Every one of those
+    /// steps quiesces EP2 and discards a queue depth of already-captured RX, so it was a ~110 ms
+    /// hole punched in the sample stream every second, and each hole is one broadband smear on the
+    /// display.
+    /// </summary>
+    [Fact]
+    public void Evaluate_PeakInTheHysteresisBand_DoesNotOscillateBetweenTwoRanges()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv);
+
+        // Between range 0's step-up threshold (-5 dBV) and range 6's step-down threshold
+        // (-5 - StepDownHysteresisDb): the level that used to hunt.
+        const double peakDbv = -6.0;
+
+        // Sitting on 6: never drops to 0, however long it stays under-range.
+        for (int i = 0; i < 20; i++)
+            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(6.0, peakDbv, BlockDurationMs));
+
+        // And sitting on 0 with the same signal: never climbs back to 6 either. Both directions
+        // have to hold, or the deadband just moves the oscillation somewhere else.
+        for (int i = 0; i < 20; i++)
+            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(0.0, peakDbv, BlockDurationMs));
+    }
+
+    /// <summary>
+    /// The deadband must not swallow a genuine step-down: a peak below the hysteresis band still
+    /// moves, so a real drop in level is still tracked.
+    /// </summary>
+    [Fact]
+    public void Evaluate_PeakBelowTheHysteresisBand_StillStepsDown()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv);
+
+        // Just under range 6's step-down threshold of 0 - HeadroomDb - StepDownHysteresisDb.
+        double peakDbv = -Qa40xAutoRanger.HeadroomDb - Qa40xAutoRanger.StepDownHysteresisDb - 0.1;
+
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(6.0, peakDbv, BlockDurationMs));   // 400 ms
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(6.0, peakDbv, BlockDurationMs));   // 800 ms
+        var third = ranger.Evaluate(6.0, peakDbv, BlockDurationMs);                             // 1200 ms
+
+        Assert.Equal(RangeStepDecision.StepDown, third);
+        Assert.Equal(0.0, ranger.NextRangeDbv(6.0, third));
+    }
+
+    /// <summary>
+    /// The two thresholds either side of one ladder step must not be the same number — that
+    /// equality, not the timer, was the hunt. Stated against the constants so it survives a change
+    /// to either.
+    /// </summary>
+    [Fact]
+    public void StepDownThreshold_SitsBelowTheLowerRangesStepUpThreshold()
+    {
+        const double lowerRangeDbv = 0.0;
+
+        double stepUpAtLowerRange = lowerRangeDbv - Qa40xAutoRanger.HeadroomDb;
+        double stepDownOntoLowerRange = lowerRangeDbv - Qa40xAutoRanger.HeadroomDb - Qa40xAutoRanger.StepDownHysteresisDb;
+
+        Assert.True(
+            stepDownOntoLowerRange < stepUpAtLowerRange,
+            $"step-down onto {lowerRangeDbv} dBV ({stepDownOntoLowerRange}) must be below that "
+                + $"range's own step-up threshold ({stepUpAtLowerRange}), or the ranger hunts");
+    }
+
     [Fact]
     public void SettleFrameCount_DerivesFromTheDocumentedPlaceholderMs()
     {

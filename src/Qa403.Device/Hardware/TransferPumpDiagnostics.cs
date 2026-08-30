@@ -16,6 +16,9 @@ internal enum PumpStallCause
 
     /// <summary>A bulk TX transfer moved fewer bytes than it was given. Those frames never reached the DAC at all.</summary>
     ShortWrite,
+
+    /// <summary>A bulk RX transfer returned fewer bytes than it asked for. Those frames are a hole in the sample stream, not a DAC problem.</summary>
+    ShortRead,
 }
 
 /// <summary>One recorded starvation event. A struct in a preallocated array — see <see cref="TransferPumpDiagnostics"/>.</summary>
@@ -34,7 +37,9 @@ internal readonly record struct PumpStall(
     int Gen2,
     int ThreadPoolThreads,
     long ThreadPoolPending,
-    int ShortWriteBytes);
+
+    /// <summary>Bytes this event lost, if it lost any — TX bytes never sent for <see cref="PumpStallCause.ShortWrite"/>, RX bytes never delivered for <see cref="PumpStallCause.ShortRead"/>, zero otherwise. The cause says which.</summary>
+    int MissingBytes);
 
 /// <summary>
 /// Measures whether the QA403's DAC is actually being kept fed, and attributes every shortfall.
@@ -61,18 +66,25 @@ internal readonly record struct PumpStall(
 /// </summary>
 internal sealed class TransferPumpDiagnostics(double sampleRateHz, int queueDepth, int chunkFrames)
 {
-    /// <summary>Events retained per stream. Past this only the counters advance — 128 is far more than a diagnosis needs, and it bounds both memory and log spam on a long run.</summary>
+    /// <summary>Events held between drains. The consumer drains every assembled block, so this bounds a burst, not the run — see <see cref="Record"/>, which wraps rather than stopping.</summary>
     private const int Capacity = 128;
 
     /// <summary>An iteration is recorded once it burns this much slack beyond its own chunk period. Below a few ms it is transfer-completion jitter, not a threat to a 64 ms queue.</summary>
     private const double LateIterationMs = 4.0;
 
     private readonly PumpStall[] _stalls = new PumpStall[Capacity];
+
+    /// <summary>Consumer-owned copy target, so <see cref="TryDrain"/> can hand out a stable span while the pump keeps writing.</summary>
+    private readonly PumpStall[] _drainBuffer = new PumpStall[Capacity];
     private readonly double _chunkMs = chunkFrames * 1000.0 / sampleRateHz;
     private readonly Stopwatch _clock = new();
 
-    private int _recorded;
-    private int _drained;
+    /// <summary>Total events ever recorded. Pump-thread writes only, published with a release write.</summary>
+    private long _written;
+
+    /// <summary>Total events ever handed to the consumer. Consumer-thread only.</summary>
+    private long _drained;
+
     private long _iteration;
     private long _suppressed;
 
@@ -92,6 +104,12 @@ internal sealed class TransferPumpDiagnostics(double sampleRateHz, int queueDept
     public long ShortWrites { get; private set; }
 
     public long ShortWriteBytes { get; private set; }
+
+    /// <summary>RX transfers that came back short — see <see cref="RecordShortRead"/>.</summary>
+    public long ShortReads { get; private set; }
+
+    /// <summary>Bytes of captured audio never delivered because a read came back short.</summary>
+    public long ShortReadBytes { get; private set; }
 
     /// <summary>Lowest slack seen. <c>PrimedSlackMs</c> minus this is the total DAC time lost over the run.</summary>
     public double MinSlackMs => _minSlackMs == double.MaxValue ? PrimedSlackMs : _minSlackMs;
@@ -164,7 +182,7 @@ internal sealed class TransferPumpDiagnostics(double sampleRateHz, int queueDept
             GC.CollectionCount(2) - _gen2AtStart,
             ThreadPool.ThreadCount,
             ThreadPool.PendingWorkItemCount,
-            ShortWriteBytes: 0));
+            MissingBytes: 0));
     }
 
     /// <summary>
@@ -196,19 +214,62 @@ internal sealed class TransferPumpDiagnostics(double sampleRateHz, int queueDept
             expectedBytes - actualBytes));
     }
 
+    /// <summary>
+    /// A bulk RX transfer that came back with fewer bytes than were asked for.
+    ///
+    /// <para>The mirror of <see cref="RecordShortWrite"/>, and it was the asymmetry that hid it: the
+    /// TX side has always checked its returned length, while the RX side passed
+    /// <c>transferLength</c> straight through to the assembler, which appends exactly what it is
+    /// given. So a short read is a hole in the sample stream that nothing counts —
+    /// <see cref="Qa40xUsbDevice.DroppedRxChunks"/> counts only chunks the consumer was too slow to
+    /// take, and the block sequence numbers stay contiguous across it. Per
+    /// <c>SampleRingBuffer</c>'s contract that hole splices the next FFT record, lifting the
+    /// broadband floor for exactly one record.</para>
+    ///
+    /// <para>Counted rather than acted on. A short read is not known to occur in normal operation on
+    /// this device, so the first thing needed is to find out whether it does at all; treating one as
+    /// a discontinuity and flushing on it would, if they turn out to be routine, freeze the display
+    /// instead of showing a glitch.</para>
+    /// </summary>
+    public void RecordShortRead(long framesSubmitted, int expectedBytes, int actualBytes)
+    {
+        ShortReads++;
+        ShortReadBytes += expectedBytes - actualBytes;
+
+        Record(new PumpStall(
+            _iteration,
+            PumpStallCause.ShortRead,
+            IterationMs: 0,
+            ReadWaitMs: 0,
+            WriteWaitMs: 0,
+            SubmitMs: 0,
+            RegisterMs: 0,
+            SlackMs(framesSubmitted),
+            (GC.GetTotalPauseDuration() - _gcPauseAtStart).TotalMilliseconds,
+            GC.CollectionCount(0) - _gen0AtStart,
+            GC.CollectionCount(1) - _gen1AtStart,
+            GC.CollectionCount(2) - _gen2AtStart,
+            ThreadPool.ThreadCount,
+            ThreadPool.PendingWorkItemCount,
+            expectedBytes - actualBytes));
+    }
+
+    /// <summary>
+    /// Appends one event. A ring, deliberately: this used to stop recording entirely once
+    /// <see cref="Capacity"/> events had been seen in a stream, so a long run went blind after its
+    /// first 128 — measured on a 12-minute run that logged its last starvation event 2 minutes in
+    /// and then reported "237 further events not logged", which is precisely the window an
+    /// intermittent artifact lands in. Recent events are the ones worth keeping; old ones are
+    /// dropped and counted instead.
+    /// </summary>
     private void Record(in PumpStall stall)
     {
-        if (_recorded >= Capacity)
-        {
-            _suppressed++;
-            return;
-        }
-
-        _stalls[_recorded] = stall;
+        long written = _written;
+        _stalls[(int)(written % Capacity)] = stall;
 
         // Published last, with a release write, so a consumer that sees the new count is guaranteed
         // to see the fully-written struct behind it. Only the pump thread ever writes here.
-        Volatile.Write(ref _recorded, _recorded + 1);
+        Volatile.Write(ref _written, written + 1);
     }
 
     /// <summary>
@@ -218,15 +279,28 @@ internal sealed class TransferPumpDiagnostics(double sampleRateHz, int queueDept
     /// </summary>
     public bool TryDrain(out ReadOnlySpan<PumpStall> stalls)
     {
-        int recorded = Volatile.Read(ref _recorded);
-        if (recorded == _drained)
+        long written = Volatile.Read(ref _written);
+        if (written == _drained)
         {
             stalls = default;
             return false;
         }
 
-        stalls = _stalls.AsSpan(_drained, recorded - _drained);
-        _drained = recorded;
+        // Whatever the ring has already overwritten since the last drain is gone; count it rather
+        // than pretend. The consumer drains once per assembled block (~21 ms at 192 kHz), so losing
+        // anything here needs 128 events inside one block — a storm, and the count says so.
+        long from = Math.Max(_drained, written - Capacity);
+        _suppressed += from - _drained;
+
+        // Copied out rather than handed over as a span into the live ring: the pump keeps writing
+        // while the consumer formats these. A very long stall burst can still tear the oldest entry
+        // of a drain, which for a diagnostic is a fair trade against the blind spot above.
+        int count = (int)(written - from);
+        for (int i = 0; i < count; i++)
+            _drainBuffer[i] = _stalls[(int)((from + i) % Capacity)];
+
+        _drained = written;
+        stalls = _drainBuffer.AsSpan(0, count);
         return true;
     }
 }

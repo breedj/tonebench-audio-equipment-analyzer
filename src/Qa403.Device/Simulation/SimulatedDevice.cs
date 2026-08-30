@@ -69,6 +69,9 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     /// <summary>The simulator generates blocks on demand rather than off a bounded USB queue, so it has nothing to drop.</summary>
     public long DroppedRxChunks => 0;
 
+    /// <inheritdoc />
+    public long DroppedBlocks => 0;
+
     /// <summary>
     /// Zero: each block is synthesized from the generator config as it is handed out, so a change is
     /// audible in the very next block and nothing is ever committed ahead. This is precisely why the

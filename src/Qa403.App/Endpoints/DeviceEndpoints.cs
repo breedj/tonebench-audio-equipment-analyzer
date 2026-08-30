@@ -138,7 +138,15 @@ public sealed record DeviceStatusResponse(
     /// <summary>Whether generator tones are snapped to the nearest coherent FFT bin. The Tones lists above are the snapped (effective) frequencies.</summary>
     bool GeneratorSnapToBin,
     /// <summary>RX chunks dropped since connect. Non-zero means FFT records contain splices and noise readings are suspect — see <see cref="Qa403.Device.IAnalyzerDevice.DroppedRxChunks"/>.</summary>
-    long DroppedRxChunks);
+    long DroppedRxChunks,
+    /// <summary>
+    /// Assembled blocks dropped since connect — the *other* half of the pipeline, and just as much a
+    /// hole in the sample stream. Reported separately rather than summed with
+    /// <see cref="DroppedRxChunks"/> so a non-zero value still names which side fell behind; see
+    /// <see cref="Qa403.Device.IAnalyzerDevice.DroppedBlocks"/> for why leaving it out of this
+    /// response was a bug rather than an omission.
+    /// </summary>
+    long DroppedBlocks);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);

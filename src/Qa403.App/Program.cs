@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.FileProviders;
+using Qa403.App.Diagnostics;
 using Qa403.App.Endpoints;
 using Qa403.App.Json;
 using Qa403.App.Services;
@@ -17,6 +18,36 @@ var noBrowser = args.Contains("--no-browser");
 
 // Default is real QA403 hardware; pass --simulate to fall back to the synthetic device.
 var simulate = args.Contains("--simulate");
+
+string poolFloorNote;
+
+// The QA403's RX transfer completions are delivered through the thread pool, and the USB transfer
+// pump blocks on them: a completion that arrives late is a pump iteration that submits no TX, which
+// drains the DAC's queue (Qa40xUsbDevice.TargetInFlightSeconds) and puts a flat span in the
+// generator output. That span is a real
+// dropout — measured at 0.3-3.6 ms in captured waveforms, enough to lift a 341 ms FFT record's
+// broadband floor by ~70 dB and show up as one bright row in the waterfall.
+//
+// The pool's own starvation response is the problem: past its minimum it injects roughly one thread
+// per second, so a burst of DSP/broadcast work parks completions behind a queue that takes seconds
+// to clear. Measured on this machine (12 cores) during dropouts: "pool 14 threads / 47 queued", with
+// pump read waits of 44-125 ms against a normal 2.7 ms chunk period. GC is *not* the cause — total
+// GC pause moved under 1 ms across a 125 ms stall.
+//
+// Raising the floor means those threads already exist when a burst arrives, so a completion never
+// waits on thread injection. Costs nothing while idle: unused pool threads are not created eagerly.
+{
+    ThreadPool.GetMinThreads(out int minWorker, out int minIo);
+    int floor = Math.Max(Environment.ProcessorCount * 4, 32);
+
+    // Return value checked, not discarded: SetMinThreads fails silently if the value exceeds the
+    // pool maximum, and a floor that was never applied looks exactly like one that did not help.
+    bool applied = ThreadPool.SetMinThreads(Math.Max(minWorker, floor), Math.Max(minIo, floor));
+    ThreadPool.GetMinThreads(out int nowWorker, out int nowIo);
+    poolFloorNote = applied
+        ? $"thread pool floor {minWorker}/{minIo} -> {nowWorker}/{nowIo}"
+        : $"thread pool floor NOT applied, still {nowWorker}/{nowIo}";
+}
 
 var logDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
 Log.Logger = new LoggerConfiguration()
@@ -61,6 +92,7 @@ try
     // before the QA403 is touched.
     builder.Host.ConfigureHostOptions(options => options.ShutdownTimeout = TimeSpan.FromSeconds(3));
 
+    builder.Services.AddSingleton<DiagnosticRecorder>();
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<DeviceSessionService>();
@@ -108,9 +140,17 @@ try
     app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = wwwroot });
     app.UseStaticFiles(new StaticFileOptions { FileProvider = wwwroot });
 
+    // Wired here rather than in either constructor: the recorder is created by the pipeline's
+    // dependency graph and so cannot take the session (which depends on the pipeline), while the
+    // session has a primary constructor with nowhere to put the assignment. One visible line at
+    // composition time is clearer than either workaround.
+    app.Services.GetRequiredService<DiagnosticRecorder>().ContextProvider =
+        app.Services.GetRequiredService<DeviceSessionService>().CaptureDiagnosticContext;
+
     app.MapDeviceEndpoints();
     app.MapGeneratorEndpoints();
     app.MapAcquisitionEndpoints();
+    app.MapDiagnosticsEndpoints();
     app.MapSweepEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
@@ -121,6 +161,10 @@ try
 
     var url = $"http://127.0.0.1:{port}";
     Log.Information("QA403 Audio Analyzer listening on {Url} (simulate={Simulate})", url, simulate);
+
+    // Logged, because "the fix is in the binary" and "the fix took effect" are different claims and
+    // a pump stall looks the same either way.
+    Log.Information("QA403 {PoolFloorNote}", poolFloorNote);
 
     if (!noBrowser)
         LaunchBrowser(url);

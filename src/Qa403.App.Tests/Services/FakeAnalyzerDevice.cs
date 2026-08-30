@@ -71,6 +71,8 @@ internal class FakeAnalyzerDevice : IAnalyzerDevice
 
     public long DroppedRxChunks => _inner.DroppedRxChunks;
 
+    public long DroppedBlocks => _inner.DroppedBlocks;
+
     public int StimulusLatencyFrames(double sampleRateHz) => _inner.StimulusLatencyFrames(sampleRateHz);
 
     public IAsyncEnumerable<PcmBlock> StreamAsync(AcquisitionConfig config, CancellationToken ct) => _inner.StreamAsync(config, ct);

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Numerics;
+using Qa403.App.Diagnostics;
 using Qa403.Device;
 using Qa403.Dsp;
 using Qa403.Dsp.Fft;
@@ -22,7 +23,12 @@ namespace Qa403.App.Streaming;
 /// window gets re-analyzed across a couple of ticks until enough new samples slide in.</item>
 /// </list>
 /// </summary>
-public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumPipeline> logger)
+/// <remarks>
+/// <paramref name="diagnostics"/> is optional so the many tests that construct a pipeline directly
+/// keep doing so unchanged; DI always supplies the singleton, and every call below is null-guarded.
+/// </remarks>
+public sealed class SpectrumPipeline(
+    SpectrumBroadcastHub hub, ILogger<SpectrumPipeline> logger, DiagnosticRecorder? diagnostics = null)
 {
     private const int MaxChannels = 2;
 
@@ -199,6 +205,11 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
             for (int ch = 0; ch < MaxChannels; ch++)
                 _retained[ch] = new RetainedSpectrum();
         }
+
+        // The records either side of a flush are not comparable -- a new stimulus, range or rate is
+        // exactly the "the floor moved" the trigger looks for. Without this every generator change
+        // would write a capture.
+        diagnostics?.ResetBaseline();
     }
 
     /// <summary>
@@ -576,6 +587,11 @@ public sealed class SpectrumPipeline(SpectrumBroadcastHub hub, ILogger<SpectrumP
 
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
             var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options, averagesTaken);
+
+            // Past the flush-generation check above, so a record that gets discarded is never logged
+            // as though it had been displayed -- the log has to describe what the user actually saw.
+            // No-ops unless diagnostics have been armed; see DiagnosticRecorder for the cost.
+            diagnostics?.Observe(channelIndex, seq, timeBuf.AsSpan(0, n), _sampleRateHz, meters, writtenAtSnapshot);
 
             // Only computed for a sweep (see SpectrumPipelineOptions.CapturePreview) -- the ~2400x
             // more expensive full-resolution retained trace already exists for the live view, and a

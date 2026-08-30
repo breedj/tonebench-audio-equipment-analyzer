@@ -4,22 +4,37 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
-import { formatHz, useSweep } from '../composables/useSweep'
-import { freqAxis } from '../freqAxis'
+import { useSweep } from '../composables/useSweep'
 import { percentToDb } from '../sweep/points'
+import {
+  decadeOrFallbackSplits,
+  formatSweepX,
+  logMinorGridAxis,
+  sweepXAxis,
+  sweepXLabel,
+  sweepXValue,
+  type SweepXAxis,
+} from '../sweep/xAxis'
 import { interpolateOnGrid } from '../sweep/align'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { dashAttr, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
 import type { ThdSweepPoint } from '../api/client'
 
 /**
- * The THD-vs-frequency result chart.
+ * The sweep result chart, for both sweep axes.
  *
  * Structurally a trimmed SpectrumChart: one uPlot instance created once and fed through setData(),
- * rebuilt only on a theme/series-shape change, and the same shared log-frequency x-axis from
- * freqAxis.ts so a sweep and a spectrum tick their frequency axis identically. What it drops is
- * everything tied to a streaming min/max spectrum — no band plugin, no peak hold, no viewport
- * reporting — because a sweep point is a single value per frequency, not a decimated column.
+ * rebuilt only on a theme/series-shape change, and the same shared log x-axis from freqAxis.ts so a
+ * sweep and a spectrum tick their frequency axis identically. What it drops is everything tied to a
+ * streaming min/max spectrum — no band plugin, no peak hold, no viewport reporting — because a sweep
+ * point is a single value, not a decimated column.
+ *
+ * What varies along x is a prop (see sweep/xAxis.ts): frequency for a THD-vs-frequency sweep, and
+ * one of output voltage / output power / input voltage for a THD-vs-amplitude one. Everything below
+ * is written against "the point's x value" rather than against its frequency, because on the two
+ * output-referred axes the left and right channels land on *different* x values — that is a real
+ * property of the measurement, not a grid mismatch, and the shared-x union already built for
+ * overlays is what absorbs it.
  *
  * The y axis has two modes. Percent is logarithmic (distr: 3): distortion spans four or five
  * decades across a sweep and a linear axis renders all of it as a flat line on zero. dB is the same
@@ -54,8 +69,11 @@ const props = defineProps<{
   yMinPercent: number
   yTopDb: number
   yBottomDb: number
-  xFromHz: number
-  xToHz: number
+  /** X bounds, in whatever unit `xAxis` is in — hertz, volts or watts. */
+  xFrom: number
+  xTo: number
+  /** Which quantity x plots. See sweep/xAxis.ts. */
+  xAxis: SweepXAxis
   /**
    * Stored sweeps plotted alongside the live one, checked on in the History list — the same
    * OverlayEntry list SpectrumChart draws, filtered to the ones that actually carry sweep points.
@@ -81,14 +99,14 @@ const props = defineProps<{
 }>()
 
 /**
- * The frequency under the pointer, or null once it leaves the plot area — App.vue uses this to
- * drive the small FFT/scope preview charts once a sweep is done ("nearest point to the cursor").
- * uPlot's own cursor.idx is an index into the shared x (frequency) array built in update(), so it
- * names a frequency something on the chart was measured at, not an interpolated pixel position —
- * though with overlays on that grid it may be one only an *overlay* measured, which is why the
- * consumer (App.vue's selectedSweepPointFor) resolves it through nearestSweepPoint.
+ * The x value under the pointer, or null once it leaves the plot area — App.vue uses this to drive
+ * the small FFT/scope preview charts once a sweep is done ("nearest point to the cursor"). uPlot's
+ * own cursor.idx is an index into the shared x array built in update(), so it names a value
+ * something on the chart was measured at, not an interpolated pixel position — though with overlays
+ * on that grid it may be one only an *overlay* measured, which is why the consumer (App.vue's
+ * selectedSweepPointFor) resolves it through nearestSweepPoint.
  */
-const emit = defineEmits<{ cursorFreq: [freqHz: number | null] }>()
+const emit = defineEmits<{ cursorX: [x: number | null] }>()
 
 const { points } = useSweep()
 const { isDark } = useAppTheme()
@@ -134,13 +152,34 @@ type TraceToggle = (typeof TRACES)[number]['show']
 
 const CHANNEL_LABELS = ['L', 'R']
 
+// `grid` is the weight every axis has always drawn at. `gridMajor`/`gridMinor` are the decade
+// split used by the volt and watt x axes: the decades are what the labels name, so they carry the
+// stronger line, and the 2..9 positions between them sit back far enough to read as structure
+// rather than as data.
 const THEME = {
-  dark: { axis: '#a3a3a3', grid: '#404040' },
-  light: { axis: '#525252', grid: '#e5e5e5' },
+  dark: { axis: '#a3a3a3', grid: '#404040', gridMajor: '#585858', gridMinor: '#333333' },
+  light: { axis: '#525252', grid: '#e5e5e5', gridMajor: '#c8c8c8', gridMinor: '#ededed' },
 } as const
 
 function currentTheme() {
   return isDark.value ? THEME.dark : THEME.light
+}
+
+/** Minimum pixels between two labelled distortion ticks, for the sub-decade fallback. Tighter than the x axis': a number is far shorter than it is tall. */
+const Y_AXIS_SPACE = 30
+
+/** One label-less axis whose only job is the thin 2..9 gridlines of a log scale. */
+function minorGridAxis(scale: 'x' | 'y', side: 1 | 2 | 3, theme: ReturnType<typeof currentTheme>): uPlot.Axis {
+  return {
+    ...logMinorGridAxis(),
+    scale,
+    side,
+    size: 0,
+    gap: 0,
+    stroke: theme.axis,
+    grid: { stroke: theme.gridMinor, width: 1 },
+    ticks: { show: false },
+  }
 }
 
 /**
@@ -177,32 +216,45 @@ const activeTraces = computed(() =>
  */
 const activeOverlays = computed(() => sweepOverlays(props.overlays))
 
+/** This point's position on the axis currently selected — the one number everything below sorts, indexes and plots by. */
+function xOf(point: ThdSweepPoint): number {
+  return sweepXValue(point, props.xAxis)
+}
+
 /**
- * Distinct sweep frequencies, ascending — the shared x array every series is aligned to.
+ * Distinct x values, ascending — the shared array every series is aligned to.
  *
  * The union of the live sweep's grid and every visible overlay's, not just the live one: a stored
- * sweep run at different start/end/steps lands on different frequencies, and uPlot aligns all
- * series to one x array, so anything missing from it simply would not be drawn.
+ * sweep run at different start/end/steps lands on different values, and uPlot aligns all series to
+ * one x array, so anything missing from it simply would not be drawn. On the output-referred
+ * amplitude axes the two *channels* of one sweep contribute different values for the same reason —
+ * each channel's x is its own measured output level.
  *
- * A trace does *not* read back as a gap at the frequencies it has no point at — see
- * sweep/align.ts. Two grids that interleave rather than coincide (adaptive vs fixed, 4 vs 5 points
- * per decade) would otherwise leave every series as value/null/value/null, which uPlot draws as
- * disconnected stubs. Each trace is interpolated along its own measured points instead, within its
- * own frequency range only.
+ * A trace does *not* read back as a gap at the values it has no point at — see sweep/align.ts. Two
+ * grids that interleave rather than coincide (adaptive vs fixed, 4 vs 5 points per decade) would
+ * otherwise leave every series as value/null/value/null, which uPlot draws as disconnected stubs.
+ * Each trace is interpolated along its own measured points instead, within its own range only.
+ *
+ * Non-positive values are dropped rather than clamped: the axis is logarithmic, and a point whose
+ * fundamental was never found reports an output voltage of 0, which has no position on it.
  */
-const frequencies = computed(() => {
-  const all = new Set(points.value.map((p) => p.freqHz))
-  for (const overlay of activeOverlays.value)
-    for (const point of overlay.sweepPoints ?? []) all.add(point.freqHz)
+const xValues = computed(() => {
+  const all = new Set<number>()
+  const add = (point: ThdSweepPoint) => {
+    const x = xOf(point)
+    if (x > 0 && Number.isFinite(x)) all.add(x)
+  }
+  points.value.forEach(add)
+  for (const overlay of activeOverlays.value) (overlay.sweepPoints ?? []).forEach(add)
   return [...all].sort((a, b) => a - b)
 })
 
-const hasData = computed(() => frequencies.value.length > 0)
+const hasData = computed(() => xValues.value.length > 0)
 
-/** Frequency -> its slot in the shared x array. The grid is built from these very numbers, so this is exact. */
-const gridIndexByFreq = computed(() => {
+/** x value -> its slot in the shared array. The grid is built from these very numbers, so this is exact. */
+const gridIndexByX = computed(() => {
   const index = new Map<number, number>()
-  frequencies.value.forEach((hz, i) => index.set(hz, i))
+  xValues.value.forEach((x, i) => index.set(x, i))
   return index
 })
 
@@ -273,8 +325,8 @@ function sameBound(a: number | null | undefined, b: number): boolean {
 function isZoomedNow(u: uPlot): boolean {
   const [bottom, top] = yRange()
   return !(
-    sameBound(u.scales.x.min, props.xFromHz) &&
-    sameBound(u.scales.x.max, props.xToHz) &&
+    sameBound(u.scales.x.min, props.xFrom) &&
+    sameBound(u.scales.x.max, props.xTo) &&
     sameBound(u.scales.y?.min, bottom) &&
     sameBound(u.scales.y?.max, top)
   )
@@ -289,12 +341,19 @@ function isZoomedNow(u: uPlot): boolean {
 function resetZoom() {
   if (!plot) return
   const [bottom, top] = yRange()
-  plot.setScale('x', { min: props.xFromHz, max: props.xToHz })
+  plot.setScale('x', { min: props.xFrom, max: props.xTo })
   plot.setScale('y', { min: bottom, max: top })
 }
 
 function buildOptions(width: number): uPlot.Options {
   const theme = currentTheme()
+  // Decade emphasis on x is for the level axes only. The frequency axis is shared with the FFT
+  // screen (freqAxis), where the 1/2/5 ladder and its kHz labels are long-standing.
+  const decadeGridX = props.xAxis !== 'frequency'
+
+  // On y it follows the unit, not the screen: percent is logarithmic and has decades to emphasise,
+  // dB is linear and does not -- 10 dB apart is 10 dB apart wherever you are on that axis.
+  const decadeGridY = props.unit === 'percent'
   // filter names the indices to mark; uPlot draws points when `show || idxs` is truthy, so it must
   // return null (not []) when markers are off, or the "off" state would draw them again via idxs.
   const points = {
@@ -360,7 +419,7 @@ function buildOptions(width: number): uPlot.Options {
         distr: 3,
         log: 10,
         auto: false,
-        range: (_u, min, max) => [min ?? props.xFromHz, max ?? props.xToHz],
+        range: (_u, min, max) => [min ?? props.xFrom, max ?? props.xTo],
       },
       // Percent is log (distr 3) across up to seven decades; dB is the same numbers on a linear
       // axis, so the bounds go through percentToDb and swap ends -- a smaller percentage is a more
@@ -377,19 +436,33 @@ function buildOptions(width: number): uPlot.Options {
     },
     axes: [
       {
-        ...freqAxis(),
+        ...sweepXAxis(props.xAxis),
         stroke: theme.axis,
-        grid: { stroke: theme.grid, width: 1 },
+        grid: { stroke: decadeGridX ? theme.gridMajor : theme.grid, width: decadeGridX ? 1.5 : 1 },
         ticks: { stroke: theme.grid, width: 1 },
       },
       {
         scale: 'y',
         size: 62,
+        ...(decadeGridY
+          ? {
+              splits: (u, axisIdx, scaleMin, scaleMax) =>
+                decadeOrFallbackSplits(u, axisIdx, scaleMin, scaleMax, Y_AXIS_SPACE),
+              // Same reason as the x axis: uPlot's own log filter keeps only round mantissas, which
+              // on a sub-decade zoom is none of them.
+              filter: (_u, splits) => splits,
+            }
+          : {}),
         values: (_u, vals) => vals.map((v) => (v == null ? null : formatYTick(v))),
         stroke: theme.axis,
-        grid: { stroke: theme.grid, width: 1 },
+        grid: { stroke: decadeGridY ? theme.gridMajor : theme.grid, width: decadeGridY ? 1.5 : 1 },
         ticks: { stroke: theme.grid, width: 1 },
       },
+      // The 2..9 lines of each emphasised axis, as their own label-less axis on the same scale --
+      // see logMinorGridAxis on why this cannot be folded into the axis above. Listed after both, so
+      // the lighter strokes are drawn over nothing; the two sets of positions never coincide.
+      ...(decadeGridX ? [minorGridAxis('x', 2, theme)] : []),
+      ...(decadeGridY ? [minorGridAxis('y', 3, theme)] : []),
     ],
     series,
     cursor: {
@@ -419,26 +492,35 @@ function buildOptions(width: number): uPlot.Options {
           if (next !== zoomed.value) zoomed.value = next
         },
       ],
-      // u.cursor.idx indexes the shared x (frequency) array from update() -- not a pixel-derived
-      // value, so it always names a frequency something was actually plotted at. null once the
-      // pointer leaves the plot area (uPlot clears idx on mouseleave), which is the "nothing
-      // hovered" state the small preview charts fall back from.
+      // u.cursor.idx indexes the shared x array from update() -- not a pixel-derived value, so it
+      // always names a value something was actually plotted at. null once the pointer leaves the
+      // plot area (uPlot clears idx on mouseleave), which is the "nothing hovered" state the small
+      // preview charts fall back from.
       setCursor: [
         (u: uPlot) => {
           const idx = u.cursor.idx
-          emit('cursorFreq', idx != null && idx >= 0 ? (frequencies.value[idx] ?? null) : null)
+          emit('cursorX', idx != null && idx >= 0 ? (xValues.value[idx] ?? null) : null)
         },
       ],
     },
   }
 }
 
-/** 0.001 / 0.01 / 0.1 / 1 / 10 for percent (no trailing-zero noise across five decades), plain integers for dB. */
+/**
+ * 0.001 / 0.01 / 0.1 / 1 / 10 for percent (no trailing-zero noise across five decades), plain
+ * integers for dB.
+ *
+ * The extra digit over the decade's own exponent, then trimmed, is what makes this right for a tick
+ * that is *not* a decade — 0.25 would otherwise print as "0.3". Those only appear on a zoom inside
+ * one decade, where the axis falls back to 1/2/5 ticks (see decadeOrFallbackSplits); at every other
+ * zoom the trim takes the padding straight back off and the label is the decade, unchanged.
+ */
 function formatYTick(v: number): string {
   if (props.unit === 'db') return `${v}`
   if (v >= 1) return `${v}`
-  const decimals = Math.min(6, Math.max(0, Math.ceil(-Math.log10(v))))
-  return v.toFixed(decimals)
+
+  const text = v.toFixed(Math.min(8, Math.max(0, Math.ceil(-Math.log10(v)) + 1)))
+  return text.includes('.') ? text.replace(/\.?0+$/, '') : text
 }
 
 /**
@@ -474,15 +556,15 @@ function formatPower(watt: number): string {
  * two only line up if they come from the same order — see metricsFor, which returns exactly this
  * many strings.
  */
-const METRIC_COLUMNS = [
-  'Frequency', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
-] as const
+const METRIC_COLUMNS = computed(() => [
+  sweepXLabel(props.xAxis), 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
+])
 
 /** One channel's row of values for the metrics table, in METRIC_COLUMNS order. */
 function metricsFor(point: ThdSweepPoint): string[] {
   const [d2, d3, d4, d5] = point.harmonicPercent
   return [
-    formatHz(point.freqHz),
+    formatSweepX(xOf(point), props.xAxis),
     formatDistortion(point.thdPercent),
     formatMagnitude(point.gainDb),
     formatDistortion(d2 ?? Number.NaN),
@@ -575,10 +657,13 @@ function signature(): string {
     // be visible. A sweep is ~50 points; rebuilding costs nothing next to tracking scale updates.
     props.yMaxPercent,
     props.yMinPercent,
-    props.xFromHz,
-    props.xToHz,
+    props.xFrom,
+    props.xTo,
     props.yTopDb,
     props.yBottomDb,
+    // The whole x grid is rebuilt from a different quantity, so switching axis is a data change as
+    // much as an axis one -- and the axis config itself is baked in at construction.
+    props.xAxis,
   ].join('|')
 }
 
@@ -594,7 +679,7 @@ function signature(): string {
  * other — but the frequency window is the same either way and is worth keeping across the toggle.
  */
 function xWindowKey(): string {
-  return `${props.xFromHz}|${props.xToHz}`
+  return `${props.xAxis}|${props.xFrom}|${props.xTo}`
 }
 function yWindowKey(): string {
   return `${props.unit}|${props.yMinPercent}|${props.yMaxPercent}|${props.yBottomDb}|${props.yTopDb}`
@@ -662,8 +747,8 @@ function update() {
   ensurePlot()
   if (!plot) return
 
-  const freqs = frequencies.value
-  if (freqs.length === 0) {
+  const xs = xValues.value
+  if (xs.length === 0) {
     measuredIdxBySeries = []
     plot.setData([[]] as unknown as uPlot.AlignedData)
     // Nothing plotted, so nothing to hold a zoom against — drop it rather than reapply it to an
@@ -674,27 +759,27 @@ function update() {
   }
 
   measuredIdxBySeries = [null] // slot 0 is the x series
-  const data: (number | null)[][] = [freqs]
-  pushSeriesData(data, freqs, points.value)
+  const data: (number | null)[][] = [xs]
+  pushSeriesData(data, xs, points.value)
   // Order has to match buildOptions' series order exactly — live block first, then one block per
   // active overlay in the same iteration order.
-  for (const overlay of activeOverlays.value) pushSeriesData(data, freqs, overlay.sweepPoints ?? [])
+  for (const overlay of activeOverlays.value) pushSeriesData(data, xs, overlay.sweepPoints ?? [])
 
   plot.setData(data as unknown as uPlot.AlignedData)
   applyPendingScaleRestore()
 }
 
 /**
- * Appends one channel x trace block of y arrays for a set of sweep points, aligned to `freqs`.
+ * Appends one channel x trace block of y arrays for a set of sweep points, aligned to `xs`.
  * Shared by the live sweep and every overlay so a stored sweep goes through the same valueOf/toY
  * conversion the running one does.
  *
  * Each series is expressed on the shared grid by interpolating between this block's own measured
- * frequencies (sweep/align.ts) rather than by an exact per-frequency lookup — a block measured on
- * a different grid than the one on screen would otherwise be all gaps except where the two grids
+ * x values (sweep/align.ts) rather than by an exact per-value lookup — a block measured on a
+ * different grid than the one on screen would otherwise be all gaps except where the two grids
  * happen to collide.
  */
-function pushSeriesData(data: (number | null)[][], freqs: number[], sweepPoints: ThdSweepPoint[]) {
+function pushSeriesData(data: (number | null)[][], xs: number[], sweepPoints: ThdSweepPoint[]) {
   // Index the points once per block rather than searching per series per frequency: a stereo
   // sweep with nine traces would otherwise be O(traces x freqs x points).
   const byChannel = new Map<number, ThdSweepPoint[]>()
@@ -708,16 +793,18 @@ function pushSeriesData(data: (number | null)[][], freqs: number[], sweepPoints:
   // a log interpolation in the first case and a linear one in the second. Magnitude is dB-only, so
   // one flag per update covers every trace.
   const logY = props.unit === 'percent'
-  const index = gridIndexByFreq.value
+  const index = gridIndexByX.value
 
   for (const ch of activeChannels.value) {
     // Ascending grid slots this channel has a measurement at. Sorted explicitly: a running sweep
-    // appends points as they are measured, and the union grid may reorder them anyway.
-    const channelPoints = (byChannel.get(ch) ?? []).slice().sort((a, b) => a.freqHz - b.freqHz)
+    // appends points as they are measured, and the union grid may reorder them anyway. On an
+    // output-referred axis the sort is also not free -- a compressing DUT can measure a *lower*
+    // output at a higher drive, so the points are not guaranteed monotonic in x.
+    const channelPoints = (byChannel.get(ch) ?? []).slice().sort((a, b) => xOf(a) - xOf(b))
     const anchorIdx: number[] = []
     const anchorPoints: ThdSweepPoint[] = []
     for (const point of channelPoints) {
-      const idx = index.get(point.freqHz)
+      const idx = index.get(xOf(point))
       if (idx === undefined) continue
       anchorIdx.push(idx)
       anchorPoints.push(point)
@@ -725,7 +812,7 @@ function pushSeriesData(data: (number | null)[][], freqs: number[], sweepPoints:
 
     for (const trace of activeTraces.value) {
       const anchorValues = anchorPoints.map((p) => toY(valueOf(p, trace.key), trace.key))
-      data.push(interpolateOnGrid(freqs, anchorIdx, anchorValues, logY))
+      data.push(interpolateOnGrid(xs, anchorIdx, anchorValues, logY))
       // Markers belong at the measured frequencies only, and only where there is a value to mark.
       measuredIdxBySeries.push(anchorIdx.filter((_, k) => anchorValues[k] != null))
     }
@@ -758,7 +845,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>Distortion vs frequency</span>
+      <span>Distortion vs {{ sweepXLabel(props.xAxis).toLowerCase() }}</span>
       <span v-if="!hasData">No sweep data yet — press Run sweep.</span>
       <!-- The only visible sign that the axes are no longer the window the display panel's
            dropdowns name — double-clicking the plot does the same thing, but nothing on screen

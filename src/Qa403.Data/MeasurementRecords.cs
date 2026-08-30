@@ -172,6 +172,55 @@ public sealed record StoredSweepPoint(
     IReadOnlyDictionary<int, IReadOnlyDictionary<string, double>> MetricsByChannel,
     IReadOnlyDictionary<int, IReadOnlyDictionary<string, StoredPreviewSeries>>? PreviewsByChannel = null);
 
+/// <summary>
+/// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
+/// the 'ThdVsAmplitude' measurement kind. Its own record rather than nullable fields on
+/// <see cref="ThdVsFrequencyParameters"/>: the two axes disagree about most of their run settings
+/// (there is no level mode to solve for, no adaptive resolution and no noise-floor pass here, and
+/// the start/end pair is volts rather than hertz) and about their chart bounds, which are the x
+/// axis' own unit.
+/// </summary>
+public sealed record ThdVsAmplitudeParameters(
+    /// <summary>The one frequency every point is measured at.</summary>
+    double FixedFreqHz,
+    double StartAmplitudeVolt,
+    double EndAmplitudeVolt,
+    int StepsPerOctave,
+    double LoadOhms,
+    bool ProcessLeft,
+    bool ProcessRight,
+    int FftSize,
+    WindowType Window,
+    int AverageCount,
+    double SampleRateHz,
+    /// <summary>Whether the run captured a generator-off residual before stepping the level.</summary>
+    bool MeasureNoiseFloor = true,
+    // The sweep chart's display preferences, exactly as ThdVsFrequencyParameters carries its own --
+    // never fed into the runner. Optional with defaults so a row saved before a field existed still
+    // deserializes.
+    /// <summary>Which quantity the x axis plots -- 'outputVolt' | 'outputWatt' | 'inputVolt'.</summary>
+    string? ChartXAxis = null,
+    string? ChartUnit = null,
+    bool? ChartShowNoiseFloor = null,
+    bool? ChartShowMagnitude = null,
+    bool? ChartShowThd = null,
+    bool? ChartShowD2 = null,
+    bool? ChartShowD3 = null,
+    bool? ChartShowD4 = null,
+    bool? ChartShowD5 = null,
+    bool? ChartShowD6Plus = null,
+    bool? ChartShowLeft = null,
+    bool? ChartShowRight = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    double? ChartYMaxPercent = null,
+    double? ChartYMinPercent = null,
+    /// <summary>X-axis bounds in the selected <see cref="ChartXAxis"/>'s own unit (volts or watts).</summary>
+    double? ChartXFrom = null,
+    double? ChartXTo = null,
+    double? ChartYTopDb = null,
+    double? ChartYBottomDb = null);
+
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm
 {

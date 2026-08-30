@@ -75,9 +75,11 @@ public sealed class ThdSweepRunner(
     private Task? _sweepTask;
 
     private ThdSweepPhase _phase = ThdSweepPhase.Idle;
+    private SweepAxis _axis = SweepAxis.Frequency;
     private int _index;
     private int _total;
     private double _currentFreqHz;
+    private double _currentAmplitudeVolt;
     private double _generatorAmpDbv;
     private string? _error;
     private List<ThdSweepPoint> _points = [];
@@ -99,7 +101,8 @@ public sealed class ThdSweepRunner(
             lock (_stateLock)
             {
                 return new ThdSweepStatus(
-                    Running, _phase, _index, _total, _currentFreqHz, _generatorAmpDbv, _error, [.. _points]);
+                    Running, _phase, _index, _total, _currentFreqHz, _generatorAmpDbv, _error, [.. _points],
+                    _axis, _currentAmplitudeVolt);
             }
         }
     }
@@ -124,27 +127,19 @@ public sealed class ThdSweepRunner(
             if (Running)
                 throw new InvalidOperationException("A sweep is already running.");
 
-            double sampleRateHz = request.EffectiveSampleRateHz;
-            double maxHz = MaxFrequencyNyquistFraction * sampleRateHz / 2.0;
-            var desired = SweepPoints.LogPerOctave(request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave);
-
-            // Both paths produce the same shape; the fixed one just reports one size for every
-            // point, so the runner below never has to branch on the mode again.
-            var steps = request.AdaptiveResolution
-                ? SweepPoints.SnapAndDedupeAdaptive(desired, sampleRateHz, request.FftSizeAt, maxHz)
-                : [.. SweepPoints.SnapAndDedupe(desired, sampleRateHz, request.FftSize, maxHz)
-                    .Select(t => new SweepStep(t.FrequencyHz, request.FftSize))];
-
-            if (steps.Length == 0)
-                throw new ArgumentOutOfRangeException(nameof(request), $"No sweep frequency falls below {maxHz:0} Hz at this sample rate.");
+            var steps = BuildSteps(request);
 
             lock (_stateLock)
             {
                 _phase = ThdSweepPhase.DeterminingLevel;
+                _axis = request.Axis;
                 _index = 0;
                 _total = steps.Length;
                 _currentFreqHz = 0.0;
-                _generatorAmpDbv = request.LevelMode == ThdSweepLevelMode.GeneratorVoltage ? request.LevelDbv : ProbeStartDbv;
+                _currentAmplitudeVolt = 0.0;
+                _generatorAmpDbv = request.Axis == SweepAxis.Amplitude
+                    ? steps[0].GeneratorDbv
+                    : request.LevelMode == ThdSweepLevelMode.GeneratorVoltage ? request.LevelDbv : ProbeStartDbv;
                 _error = null;
                 _points = [];
             }
@@ -155,7 +150,10 @@ public sealed class ThdSweepRunner(
             _cts = cts;
             _sweepTask = Task.Run(() => RunAsync(request, steps, cts.Token), CancellationToken.None);
 
-            return new ThdSweepStarted(steps.Length, [.. steps.Select(s => s.FrequencyHz)]);
+            return new ThdSweepStarted(
+                steps.Length,
+                [.. steps.Select(s => s.FrequencyHz)],
+                request.Axis == SweepAxis.Amplitude ? [.. steps.Select(s => DbvToVolt(s.GeneratorDbv))] : []);
         }
         finally
         {
@@ -217,6 +215,7 @@ public sealed class ThdSweepRunner(
             _index = 0;
             _total = 0;
             _currentFreqHz = 0;
+            _currentAmplitudeVolt = 0;
             _generatorAmpDbv = 0;
             _error = null;
 
@@ -224,7 +223,7 @@ public sealed class ThdSweepRunner(
         }
     }
 
-    private async Task RunAsync(ThdSweepRequest request, SweepStep[] steps, CancellationToken ct)
+    private async Task RunAsync(ThdSweepRequest request, SweepStepPlan[] steps, CancellationToken ct)
     {
         var savedOptions = pipeline.Options;
         bool startedAcquisition = false;
@@ -238,17 +237,31 @@ public sealed class ThdSweepRunner(
             // The as-run configuration, once, before anything else. Nothing recorded it before, so a
             // log showing dropped chunks during a sweep could not answer the first question anyone
             // asks of it — which resolution mode and FFT size were actually in play.
-            logger.LogInformation(
-                "THD sweep starting: {StartHz:0.##}-{EndHz:0.##} Hz, {StepsPerOctave}/octave, {Points} points, "
-                    + "{SampleRateHz:0} Hz, adaptive {Adaptive} ({FftDescription}), {Averages} averages, "
-                    + "level {LevelValue:0.##} {LevelUnit} ({LevelMode}), noise floor first: {NoiseFloor}",
-                request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave, steps.Length,
-                request.EffectiveSampleRateHz, request.AdaptiveResolution,
-                request.AdaptiveResolution
-                    ? $"{steps.Max(s => s.FftSize)}-{steps.Min(s => s.FftSize)} points"
-                    : $"fixed {request.FftSize} points",
-                request.AverageCount, request.LevelValue, request.LevelUnit, request.LevelMode,
-                request.MeasureNoiseFloor);
+            if (request.Axis == SweepAxis.Amplitude)
+            {
+                logger.LogInformation(
+                    "THD-vs-amplitude sweep starting: {StartVolt:0.####}-{EndVolt:0.####} V at {FreqHz:0.##} Hz, "
+                        + "{StepsPerOctave}/octave, {Points} points, {SampleRateHz:0} Hz, fixed {FftSize} points, "
+                        + "{Averages} averages, load {LoadOhms:0.##} Ohm",
+                    request.StartAmplitudeVolt, request.EndAmplitudeVolt,
+                    steps.Length > 0 ? steps[0].FrequencyHz : request.FixedFreqHz,
+                    request.StepsPerOctave, steps.Length, request.SampleRateHz, request.FftSize,
+                    request.AverageCount, request.LoadOhms);
+            }
+            else
+            {
+                logger.LogInformation(
+                    "THD sweep starting: {StartHz:0.##}-{EndHz:0.##} Hz, {StepsPerOctave}/octave, {Points} points, "
+                        + "{SampleRateHz:0} Hz, adaptive {Adaptive} ({FftDescription}), {Averages} averages, "
+                        + "level {LevelValue:0.##} {LevelUnit} ({LevelMode}), noise floor first: {NoiseFloor}",
+                    request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave, steps.Length,
+                    request.EffectiveSampleRateHz, request.AdaptiveResolution,
+                    request.AdaptiveResolution
+                        ? $"{steps.Max(s => s.FftSize)}-{steps.Min(s => s.FftSize)} points"
+                        : $"fixed {request.FftSize} points",
+                    request.AverageCount, request.LevelValue, request.LevelUnit, request.LevelMode,
+                    request.MeasureNoiseFloor);
+            }
 
             pipeline.Options = BuildSweepOptions(savedOptions, request);
 
@@ -258,7 +271,12 @@ public sealed class ThdSweepRunner(
                 startedAcquisition = true;
             }
 
-            double generatorAmpDbv = await ResolveGeneratorAmplitudeAsync(request, ct);
+            // The level probe means nothing when the level is the thing being stepped -- there is no
+            // single amplitude to solve for -- so it is skipped explicitly rather than left to lean
+            // on its own early return. The noise-floor pass is axis-independent and runs on both.
+            double generatorAmpDbv = request.Axis == SweepAxis.Amplitude
+                ? VoltToDbv(request.StartAmplitudeVolt)
+                : await ResolveGeneratorAmplitudeAsync(request, ct);
             SetGeneratorAmpDbv(generatorAmpDbv);
 
             var noiseVrms = await MeasureNoiseFloorAsync(request, ct);
@@ -270,16 +288,34 @@ public sealed class ThdSweepRunner(
                 ct.ThrowIfCancellationRequested();
 
                 var step = steps[i];
-                SetProgress(i, step.FrequencyHz);
-                BroadcastProgress(i, steps.Length, step.FrequencyHz, ThdSweepPhase.Sweeping);
+
+                // The level is the sweep-wide one on the frequency axis and the swept variable on the
+                // amplitude axis; the status readout follows whichever it is.
+                double stepAmpDbv = request.Axis == SweepAxis.Amplitude ? step.GeneratorDbv : generatorAmpDbv;
+                if (request.Axis == SweepAxis.Amplitude)
+                    SetGeneratorAmpDbv(stepAmpDbv);
+
+                SetProgress(i, step.FrequencyHz, DbvToVolt(stepAmpDbv));
+                BroadcastProgress(i, steps.Length, ProgressX(request, step.FrequencyHz, stepAmpDbv), ThdSweepPhase.Sweeping);
 
                 // Bracketed around the capture, not sampled after the run. A hole in the sample stream
                 // splices whatever FFT record spans it, so the question that matters is which point's
                 // record it landed in — and a total read at the end cannot say.
                 long dropsBefore = session.DroppedRxChunks;
 
+                // Not the same reasoning as the drop counter above: an autorange step is *handled*.
+                // It announces itself in-band on the first block after the step
+                // (PcmBlock.StartsAfterDiscontinuity) and DeviceSessionService.PumpAsync answers with
+                // a bare SpectrumPipeline.Flush, which empties the analysis window and clears the
+                // single-shot hold -- so this point re-captures from scratch at the new range rather
+                // than analysing a record spliced across the ~110 ms hole the quiesce punched. This
+                // is logged because it costs a record of time and moves the analyzer's own residual
+                // (0 dBV range: -161 dB re 1 V/sqrt(Hz); 24 dBV: -126), which is worth being able to
+                // attribute afterwards -- not because the reading is suspect.
+                double inputRangeBefore = session.InputRangeDbv;
+
                 var snapshots = await CaptureWithStimulusAsync(
-                    ToneConfig(step.FrequencyHz, generatorAmpDbv, request), request, step.FftSize, ct);
+                    ToneConfig(step.FrequencyHz, stepAmpDbv, request), request, step.FftSize, ct);
 
                 long dropsDuring = session.DroppedRxChunks - dropsBefore;
                 if (dropsDuring > 0)
@@ -290,14 +326,24 @@ public sealed class ThdSweepRunner(
                         i + 1, steps.Length, step.FrequencyHz, step.FftSize, dropsDuring);
                 }
 
-                foreach (var point in BuildPoints(step.FrequencyHz, generatorAmpDbv, request, snapshots, noiseVrms))
+                double inputRangeAfter = session.InputRangeDbv;
+                if (Math.Abs(inputRangeAfter - inputRangeBefore) > 0.01)
+                {
+                    logger.LogInformation(
+                        "Sweep point {Index}/{Total} at {GenDbv:0.##} dBV: autoranging stepped the input range "
+                            + "{FromDbv:0.#} -> {ToDbv:0.#} dBV during the capture, so the point was re-measured at "
+                            + "the new range. Its residual is that range's, not the one the noise-floor pass used",
+                        i + 1, steps.Length, stepAmpDbv, inputRangeBefore, inputRangeAfter);
+                }
+
+                foreach (var point in BuildPoints(step.FrequencyHz, stepAmpDbv, request, snapshots, noiseVrms))
                 {
                     AddPoint(point);
                     hub.Broadcast(StreamFrame.EncodeSweepPoint(point, (uint)i));
                 }
             }
 
-            SetProgress(steps.Length, 0.0);
+            SetProgress(steps.Length, 0.0, 0.0);
             terminalPhase = ThdSweepPhase.Finished;
         }
         catch (OperationCanceledException)
@@ -349,6 +395,51 @@ public sealed class ThdSweepRunner(
     }
 
     /// <summary>
+    /// The points a sweep will measure, in order — one frequency and one generator level each,
+    /// whichever of the two is the axis. Both axes produce the same shape so the loop in
+    /// <see cref="RunAsync"/> never has to branch on the mode again.
+    /// </summary>
+    private static SweepStepPlan[] BuildSteps(ThdSweepRequest request) =>
+        request.Axis == SweepAxis.Amplitude ? BuildAmplitudeSteps(request) : BuildFrequencySteps(request);
+
+    private static SweepStepPlan[] BuildFrequencySteps(ThdSweepRequest request)
+    {
+        double sampleRateHz = request.EffectiveSampleRateHz;
+        double maxHz = MaxFrequencyNyquistFraction * sampleRateHz / 2.0;
+        var desired = SweepPoints.LogPerOctave(request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave);
+        double levelDbv = request.LevelDbv;
+
+        SweepStepPlan[] steps = request.AdaptiveResolution
+            ? [.. SweepPoints.SnapAndDedupeAdaptive(desired, sampleRateHz, request.FftSizeAt, maxHz)
+                .Select(s => new SweepStepPlan(s.FrequencyHz, s.FftSize, levelDbv))]
+            : [.. SweepPoints.SnapAndDedupe(desired, sampleRateHz, request.FftSize, maxHz)
+                .Select(t => new SweepStepPlan(t.FrequencyHz, request.FftSize, levelDbv))];
+
+        if (steps.Length == 0)
+            throw new ArgumentOutOfRangeException(nameof(request), $"No sweep frequency falls below {maxHz:0} Hz at this sample rate.");
+
+        return steps;
+    }
+
+    /// <summary>
+    /// One tone, snapped once, played at each of a log-spaced ladder of generator amplitudes.
+    ///
+    /// There is no snap-and-dedupe pass here, and no adaptive sizing: the frequency never moves, so
+    /// coherence is settled before the sweep starts, and two adjacent amplitudes are never "the same
+    /// point" the way two frequencies rounding into one bin are.
+    /// <see cref="SweepPoints.LogPerOctave"/> is pure log spacing over any positive quantity — a
+    /// voltage octave is a doubling — which is exactly what the previous app's
+    /// <c>GetLineairSpacedLogarithmicValuesPerOctave</c> did for this screen.
+    /// </summary>
+    private static SweepStepPlan[] BuildAmplitudeSteps(ThdSweepRequest request)
+    {
+        var tone = CoherentFrequency.Nearest(request.FixedFreqHz, request.SampleRateHz, request.FftSize);
+        var volts = SweepPoints.LogPerOctave(request.StartAmplitudeVolt, request.EndAmplitudeVolt, request.StepsPerOctave);
+
+        return [.. volts.Select(v => new SweepStepPlan(tone.FrequencyHz, request.FftSize, VoltToDbv(v)))];
+    }
+
+    /// <summary>
     /// The sweep's analysis settings. Two of these differ from anything the live view would set and
     /// are the difference between a working sweep and a broken one:
     ///
@@ -390,7 +481,7 @@ public sealed class ThdSweepRunner(
             // 50 % is the standard trade: eight averages cost 4.5 records instead of 8 and keep
             // about 90 % of the variance reduction of fully independent ones.
             AverageHopFraction = AverageHopFraction,
-            FundamentalMinSearchHz = Math.Min(current.FundamentalMinSearchHz, request.StartFreqHz / 2.0),
+            FundamentalMinSearchHz = Math.Min(current.FundamentalMinSearchHz, request.SweepToneFreqHz / 2.0),
         };
 
     /// <summary>
@@ -692,6 +783,7 @@ public sealed class ThdSweepRunner(
                 harmonicPercent,
                 d6Plus,
                 noisePercent,
+                generatorAmpDbv,
                 snapshot.PreviewFft,
                 snapshot.PreviewScope);
         }
@@ -734,14 +826,27 @@ public sealed class ThdSweepRunner(
         }
     }
 
-    private void SetProgress(int index, double currentFreqHz)
+    private void SetProgress(int index, double currentFreqHz, double currentAmplitudeVolt)
     {
         lock (_stateLock)
         {
             _index = index;
             _currentFreqHz = currentFreqHz;
+            _currentAmplitudeVolt = currentAmplitudeVolt;
         }
     }
+
+    /// <summary>
+    /// The x coordinate a progress frame carries: Hz on the frequency axis, generator volts on the
+    /// amplitude one. The frame has one x slot (see <see cref="StreamFrame.EncodeSweepProgress"/>)
+    /// and the client already knows which axis it started.
+    /// </summary>
+    private static double ProgressX(ThdSweepRequest request, double freqHz, double ampDbv) =>
+        request.Axis == SweepAxis.Amplitude ? DbvToVolt(ampDbv) : freqHz;
+
+    private static double DbvToVolt(double dbv) => Math.Pow(10.0, dbv / 20.0);
+
+    private static double VoltToDbv(double volt) => 20.0 * Math.Log10(Math.Max(volt, double.Epsilon));
 
     private void SetGeneratorAmpDbv(double ampDbv)
     {
@@ -749,6 +854,14 @@ public sealed class ThdSweepRunner(
             _generatorAmpDbv = ampDbv;
     }
 
-    private void BroadcastProgress(int index, int total, double currentFreqHz, ThdSweepPhase phase) =>
-        hub.Broadcast(StreamFrame.EncodeSweepProgress(index, total, currentFreqHz, phase));
+    private void BroadcastProgress(int index, int total, double currentX, ThdSweepPhase phase) =>
+        hub.Broadcast(StreamFrame.EncodeSweepProgress(index, total, currentX, phase));
+
+    /// <summary>
+    /// One planned sweep point: the tone to play, the level to play it at, and the FFT size to
+    /// analyze it with. <see cref="Qa403.Dsp.SweepStep"/> is the frequency-axis half of this and
+    /// stays in the DSP layer where the grid math lives; the level is a device concern, so the
+    /// combined plan is the runner's own type.
+    /// </summary>
+    private readonly record struct SweepStepPlan(double FrequencyHz, int FftSize, double GeneratorDbv);
 }

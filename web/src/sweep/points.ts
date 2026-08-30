@@ -179,22 +179,27 @@ export function percentToDb(percent: number): number {
 }
 
 /**
- * The point nearest `targetFreqHz` on the given channel, or null if that channel has no points at
- * all. A plain linear scan rather than a binary search over the (frequency-sorted) array: a sweep
- * tops out around a few hundred points, so the O(n) cost here is not worth the bug surface of a
- * hand-rolled nearest-neighbour binary search.
+ * The point nearest `target` on the given channel, or null if that channel has no points at all. A
+ * plain linear scan rather than a binary search over the sorted array: a sweep tops out around a
+ * few hundred points, so the O(n) cost here is not worth the bug surface of a hand-rolled
+ * nearest-neighbour binary search.
+ *
+ * `valueOf` is what "nearest" is measured along, defaulting to frequency. An amplitude sweep passes
+ * the chart's own x accessor instead (sweep/xAxis.ts), so hovering the chart selects the point that
+ * is nearest *on screen* rather than the one nearest in a quantity that never varies.
  */
 export function nearestSweepPoint<T extends { channel: number; freqHz: number }>(
   points: T[],
   channel: number,
-  targetFreqHz: number,
+  target: number,
+  valueOf: (point: T) => number = (point) => point.freqHz,
 ): T | null {
   let best: T | null = null
   let bestDist = Infinity
 
   for (const point of points) {
     if (point.channel !== channel) continue
-    const dist = Math.abs(point.freqHz - targetFreqHz)
+    const dist = Math.abs(valueOf(point) - target)
     if (dist < bestDist) {
       bestDist = dist
       best = point

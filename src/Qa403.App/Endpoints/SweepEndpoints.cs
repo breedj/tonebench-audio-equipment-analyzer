@@ -44,6 +44,47 @@ public static class SweepEndpoints
             }
         });
 
+        // The amplitude axis. A far smaller request than its frequency counterpart because most of
+        // what that one carries has no meaning here: the level *is* the swept variable, so there is
+        // no level mode to solve for and no adaptive resolution to size a moving tone with, and the
+        // analysis preset is fixed (see ThdSweepRequest.AmplitudeSweepFftSize).
+        group.MapPost("/thd-vs-amplitude/start", async (ThdAmplitudeSweepStartRequest request, ThdSweepRunner runner, CancellationToken ct) =>
+        {
+            var sweep = new ThdSweepRequest(
+                StartFreqHz: request.FixedFreqHz,
+                EndFreqHz: request.FixedFreqHz,
+                StepsPerOctave: request.StepsPerOctave,
+                LevelMode: ThdSweepLevelMode.GeneratorVoltage,
+                LevelValue: 0.0,
+                LevelUnit: ThdSweepLevelUnit.Dbv,
+                LoadOhms: request.LoadOhms,
+                ProcessLeft: request.ProcessLeft,
+                ProcessRight: request.ProcessRight,
+                FftSize: ThdSweepRequest.AmplitudeSweepFftSize,
+                Window: WindowType.Hann,
+                AverageCount: request.AverageCount,
+                SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
+                MeasureNoiseFloor: request.MeasureNoiseFloor,
+                AdaptiveResolution: false,
+                Axis: SweepAxis.Amplitude,
+                FixedFreqHz: request.FixedFreqHz,
+                StartAmplitudeVolt: request.StartAmplitudeVolt,
+                EndAmplitudeVolt: request.EndAmplitudeVolt);
+
+            try
+            {
+                return Results.Ok(await runner.StartAsync(sweep, ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         group.MapPost("/cancel", async (ThdSweepRunner runner) =>
         {
             await runner.CancelAsync();
@@ -117,6 +158,24 @@ public sealed record ThdSweepStartRequest(
     bool MeasureNoiseFloor,
     /// <summary>Size the FFT per point and pick the sample rate from the sweep range — see <see cref="ThdSweepRequest.AdaptiveResolution"/>. Defaults off so an older client keeps the fixed behaviour.</summary>
     bool AdaptiveResolution = false);
+
+/// <summary>
+/// Wire shape for starting a THD-vs-amplitude sweep. No enums, so nothing to parse: the window,
+/// FFT size, sample rate, level mode and noise-floor pass are all fixed for this axis and filled in
+/// server-side, which is also what stops a client asking for a combination
+/// <see cref="ThdSweepRequest.Validate"/> would only reject.
+/// </summary>
+public sealed record ThdAmplitudeSweepStartRequest(
+    double FixedFreqHz,
+    double StartAmplitudeVolt,
+    double EndAmplitudeVolt,
+    int StepsPerOctave,
+    double LoadOhms,
+    bool ProcessLeft,
+    bool ProcessRight,
+    int AverageCount,
+    /// <summary>Capture one generator-off record before the sweep, for the residual the distortion traces sit above.</summary>
+    bool MeasureNoiseFloor = true);
 
 public sealed record SaveSweepRequest(long MeasurementTypeId, string Name, string? Notes);
 

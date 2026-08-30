@@ -417,6 +417,123 @@ public class SweepRepositoryTests
         }
     }
 
+    /// <summary>
+    /// An amplitude sweep's captures all share one frequency, so <c>seq_index</c> and the stored
+    /// <c>generator_volt</c> metric are the only things that order and identify them. This is the
+    /// read-back the chart and the CSV exporter both depend on.
+    /// </summary>
+    [Fact]
+    public async Task SaveAmplitudeSweep_ReadBack_KeepsOnePointPerLevelAtOneFrequency()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateAmplitudeSweepTypeAsync(factory);
+            var repo = new MeasurementRepository(factory);
+
+            var request = BuildAmplitudeSweepRequest(typeId);
+            long resultId = await repo.SaveSweepResultAsync(request, CancellationToken.None);
+
+            SqliteConnection.ClearAllPools();
+            var reloaded = new MeasurementRepository(new SqliteConnectionFactory(new Qa403DatabaseOptions { Path = path }));
+            var points = await reloaded.GetSweepPointsAsync(resultId, CancellationToken.None);
+
+            Assert.Equal(AmplitudePointCount, points.Count);
+            Assert.All(points, pt => Assert.Equal(AmplitudeSweepFreqHz, pt.FreqHz, 6));
+
+            for (int i = 0; i < points.Count; i++)
+                Assert.Equal(i, points[i].SeqIndex);
+
+            for (int i = 1; i < points.Count; i++)
+            {
+                Assert.True(
+                    points[i].MetricsByChannel[0]["generator_volt"] > points[i - 1].MetricsByChannel[0]["generator_volt"],
+                    "levels must read back ascending");
+            }
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The history list's headline THD for an amplitude sweep has to come from its highest level.
+    /// The 1 kHz frequency rule cannot choose here -- every capture reports the same fundamental --
+    /// and would silently return seq_index 0, the 1 mV point, whose THD is the analyzer's own
+    /// residual rather than anything about the DUT.
+    /// </summary>
+    [Fact]
+    public async Task SaveAmplitudeSweep_HeadlineThd_ComesFromTheHighestLevel()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateAmplitudeSweepTypeAsync(factory);
+            var repo = new MeasurementRepository(factory);
+
+            var request = BuildAmplitudeSweepRequest(typeId);
+            long resultId = await repo.SaveSweepResultAsync(request, CancellationToken.None);
+
+            var listed = await repo.ListResultsAsync(new MeasurementFilter(), CancellationToken.None);
+            var headlines = listed.Single(r => r.ResultId == resultId).ChannelHeadlines;
+
+            var top = request.Captures[^1];
+            double expected = top.Metrics.Single(m => m.Channel == 0 && m.Name == "thd_percent").Value;
+            double atSeqZero = request.Captures[0].Metrics.Single(m => m.Channel == 0 && m.Name == "thd_percent").Value;
+
+            Assert.Equal(expected, headlines[0].ThdPercent, 9);
+            Assert.NotEqual(atSeqZero, headlines[0].ThdPercent, 9);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    private static async Task<long> CreateAmplitudeSweepTypeAsync(SqliteConnectionFactory factory)
+    {
+        var projectRepo = new ProjectRepository(factory);
+        long projectId = await projectRepo.CreateProjectAsync("GM70", null, CancellationToken.None);
+        return await projectRepo.CreateTypeAsync(projectId, "ThdVsAmplitude", "level sweep", null, "{}", CancellationToken.None);
+    }
+
+    private const int AmplitudePointCount = 8;
+    private const double AmplitudeSweepFreqHz = 1000.0;
+
+    /// <summary>
+    /// A level sweep as <c>MeasurementSaveService.SaveSweepAsync</c> writes one: every capture at the
+    /// same frequency, distinguished by <c>generator_dbv</c>/<c>generator_volt</c>, with THD rising
+    /// toward the top of the level range the way a real amplifier's does.
+    /// </summary>
+    private static SweepSaveRequest BuildAmplitudeSweepRequest(long typeId)
+    {
+        var captures = new List<SweepCaptureInput>(AmplitudePointCount);
+        for (int i = 0; i < AmplitudePointCount; i++)
+        {
+            double genDbv = -40.0 + (i * 5.0);
+            double genVolt = Math.Pow(10.0, genDbv / 20.0);
+            double thd = 0.01 * (i + 1);
+
+            captures.Add(new SweepCaptureInput(i, AmplitudeSweepFreqHz, [
+                new MeasurementMetric(0, "fundamental_hz", AmplitudeSweepFreqHz, "Hz"),
+                new MeasurementMetric(0, "fundamental_dbv", genDbv, "dBV"),
+                new MeasurementMetric(0, "power_watt", genVolt * genVolt / 8.0, "W"),
+                new MeasurementMetric(0, "thd_percent", thd, "%"),
+                new MeasurementMetric(0, "h2_percent", thd * 0.9, "%"),
+                new MeasurementMetric(0, "generator_dbv", genDbv, "dBV"),
+                new MeasurementMetric(0, "generator_volt", genVolt, "V"),
+            ]));
+        }
+
+        return new SweepSaveRequest(
+            typeId, "level sweep run", null, "{}", "QA403", "SIM-0001", "sim-1.0", IsSimulated: true,
+            SampleRateHz: 192000, FftSize: 131072, Channels: 1,
+            InRangeDbv: 0, OutRangeDbv: -12, captures);
+    }
+
     private static async Task<long> CreateSweepTypeAsync(SqliteConnectionFactory factory)
     {
         var projectRepo = new ProjectRepository(factory);

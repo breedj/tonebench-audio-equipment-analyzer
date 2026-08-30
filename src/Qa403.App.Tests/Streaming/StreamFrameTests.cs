@@ -175,7 +175,7 @@ public class StreamFrameTests
             FreqHz: 1000.0, Channel: 1, MeasuredFreqHz: 999.8, FundamentalDbv: -20.0, GainDb: -0.1,
             PowerWatt: 0.00125, ThdPercent: 0.05, ThdNPercent: 0.06, SnrDb: 90.0,
             HarmonicPercent: [0.03, 0.01], D6PlusPercent: 0.002, NoisePercent: 0.001,
-            PreviewFft: previewFft, PreviewScope: previewScope);
+            GeneratorDbv: -19.9, PreviewFft: previewFft, PreviewScope: previewScope);
 
         byte[] frame = StreamFrame.EncodeSweepPoint(point, pointIndex: 7);
         var decoded = StreamFrame.DecodeSweepPoint(frame);
@@ -184,6 +184,7 @@ public class StreamFrameTests
         Assert.Equal(StreamChannel.Right, decoded.Channel);
         Assert.Equal(7u, decoded.PointIndex);
         Assert.Equal(2, decoded.HarmonicPercent.Length);
+        Assert.Equal(-19.9f, decoded.GeneratorDbv, precision: 3);
 
         Assert.NotNull(decoded.PreviewFft);
         Assert.Equal(previewFft.X, decoded.PreviewFft!.X);
@@ -208,7 +209,7 @@ public class StreamFrameTests
             FreqHz: 1000.0, Channel: 0, MeasuredFreqHz: 1000.0, FundamentalDbv: -20.0, GainDb: 0.0,
             PowerWatt: 0.0, ThdPercent: 0.0, ThdNPercent: 0.0, SnrDb: 0.0,
             HarmonicPercent: [], D6PlusPercent: 0.0, NoisePercent: 0.0,
-            PreviewFft: null, PreviewScope: null);
+            GeneratorDbv: -20.0, PreviewFft: null, PreviewScope: null);
 
         byte[] frame = StreamFrame.EncodeSweepPoint(point, pointIndex: 0);
         var decoded = StreamFrame.DecodeSweepPoint(frame);

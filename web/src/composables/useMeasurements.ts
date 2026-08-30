@@ -9,7 +9,7 @@ import {
   type ThdSweepPoint,
   type UpdateMeasurementRequest,
 } from '../api/client'
-import { THD_VS_FREQUENCY_KIND } from '../measurements/kinds'
+import { isSweepKind } from '../measurements/kinds'
 
 /**
  * How many overlays of one kind may be *shown* at once — the THD-vs-frequency and FFT-analysis
@@ -69,6 +69,10 @@ export function toSweepPoints(stored: StoredSweepPoint[]): ThdSweepPoint[] {
         harmonicPercent,
         d6PlusPercent: value('d6plus_percent'),
         noisePercent: value('noise_percent'),
+        // Absent from sweeps saved before the amplitude axis existed. NaN rather than 0 there: 0 dBV
+        // is a real level, and an overlay plotted at 1 V that was actually measured at 20 mV is
+        // worse than one the chart drops.
+        generatorDbv: value('generator_dbv'),
         previewFft: previews?.fft ?? null,
         previewScope: previews?.scope ?? null,
       })
@@ -195,10 +199,9 @@ export function useMeasurements() {
       const detail = await api.getMeasurement(resultId)
       // A sweep result carries no spectra, so its trace has to be fetched separately — see
       // SweepSaveRequest on why only the scalars are stored.
-      const sweepPoints =
-        detail.kind === THD_VS_FREQUENCY_KIND
-          ? toSweepPoints((await api.getStoredSweep(resultId)).points)
-          : undefined
+      const sweepPoints = isSweepKind(detail.kind)
+        ? toSweepPoints((await api.getStoredSweep(resultId)).points)
+        : undefined
       overlays.value = [...overlays.value, { id: resultId, detail, visible: true, sweepPoints }]
       error.value = null
     } catch (e) {

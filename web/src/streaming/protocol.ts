@@ -278,6 +278,8 @@ export interface SweepPointFrame {
   d6PlusPercent: number
   /** Generator-off residual as a % of this point's fundamental; 0 when the noise pass was skipped. */
   noisePercent: number
+  /** The generator amplitude this point was played at — constant on a frequency sweep, the x axis on an amplitude one. */
+  generatorDbv: number
   /** D2..D5 as a % of the fundamental, index 0 = 2nd harmonic. May be short near Nyquist. */
   harmonicPercent: number[]
   /** A small decimated spectrum around this point's fundamental, in dBV. Null if the pipeline wasn't asked to capture one. */
@@ -296,8 +298,9 @@ export interface SweepPointFrame {
  * 20 f32  powerWatt
  * 24 f32  d6PlusPercent
  * 28 f32  noisePercent
- * 32 u32  harmonicCount
- * 36 f32 * harmonicCount   — D2..D5 as a % of the fundamental
+ * 32 f32  generatorDbv
+ * 36 u32  harmonicCount
+ * 40 f32 * harmonicCount   — D2..D5 as a % of the fundamental
  * ..  u32  fftPreviewCount
  * ..  (f32 x, f32 min, f32 max) * fftPreviewCount
  * ..  u32  scopePreviewCount
@@ -325,6 +328,7 @@ export function decodeSweepPointFrame(buffer: ArrayBuffer): SweepPointFrame {
   const powerWatt = readF32()
   const d6PlusPercent = readF32()
   const noisePercent = readF32()
+  const generatorDbv = readF32()
   const harmonicCount = view.getUint32(offset, true)
   offset += 4
 
@@ -363,6 +367,7 @@ export function decodeSweepPointFrame(buffer: ArrayBuffer): SweepPointFrame {
     powerWatt,
     d6PlusPercent,
     noisePercent,
+    generatorDbv,
     harmonicPercent,
     previewFft,
     previewScope,
@@ -373,8 +378,13 @@ export interface SweepProgressFrame {
   header: StreamFrameHeader
   index: number
   total: number
-  /** The frequency currently being measured; 0 when the sweep is not on a point. */
-  currentFreqHz: number
+  /**
+   * The point currently being measured, in the running sweep's own unit — hertz for a frequency
+   * sweep, generator volts for an amplitude one — and 0 when the sweep is not on a point. One slot
+   * for two units because the client already knows which axis it started; see
+   * StreamFrame.EncodeSweepProgress.
+   */
+  currentX: number
   phase: SweepPhase
 }
 
@@ -385,7 +395,7 @@ export function decodeSweepProgressFrame(buffer: ArrayBuffer): SweepProgressFram
     header,
     index: header.nPoints,
     total: Math.round(header.dx),
-    currentFreqHz: header.x0,
+    currentX: header.x0,
     phase: header.seq as SweepPhase,
   }
 }

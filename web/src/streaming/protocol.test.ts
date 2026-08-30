@@ -11,6 +11,7 @@ function buildSweepPointFrame(opts: {
   channel: number
   pointIndex: number
   harmonicPercent: number[]
+  generatorDbv?: number
   fftPreview: { x: number; min: number; max: number }[] | null
   scopePreview: { x: number; min: number; max: number }[] | null
 }): ArrayBuffer {
@@ -18,7 +19,7 @@ function buildSweepPointFrame(opts: {
   const scopeCount = opts.scopePreview?.length ?? 0
   const length =
     HEADER_LENGTH +
-    8 * 4 +
+    9 * 4 +
     4 +
     opts.harmonicPercent.length * 4 +
     4 +
@@ -51,6 +52,7 @@ function buildSweepPointFrame(opts: {
   writeF32(0.00125) // powerWatt
   writeF32(0.002) // d6PlusPercent
   writeF32(0.001) // noisePercent
+  writeF32(opts.generatorDbv ?? -20) // generatorDbv
   view.setUint32(offset, opts.harmonicPercent.length, true)
   offset += 4
   for (const h of opts.harmonicPercent) writeF32(h)
@@ -77,6 +79,7 @@ describe('decodeSweepPointFrame', () => {
       channel: 1,
       pointIndex: 7,
       harmonicPercent: [0.03, 0.01],
+      generatorDbv: -19.9,
       fftPreview: [
         { x: 100, min: -90, max: -85 },
         { x: 200, min: -80, max: -75 },
@@ -92,6 +95,7 @@ describe('decodeSweepPointFrame', () => {
     expect(frame.freqHz).toBeCloseTo(1000, 3)
     expect(frame.channel).toBe(1)
     expect(frame.pointIndex).toBe(7)
+    expect(frame.generatorDbv).toBeCloseTo(-19.9, 3)
     expect(frame.harmonicPercent).toEqual([
       expect.closeTo(0.03, 5),
       expect.closeTo(0.01, 5),

@@ -30,6 +30,17 @@ public sealed class MeasurementSaveService(
     /// <summary>The <c>measurement_type.kind</c> value for a THD-vs-frequency sweep. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string ThdVsFrequencyKind = "ThdVsFrequency";
 
+    /// <summary>The <c>measurement_type.kind</c> value for a THD-vs-amplitude sweep. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string ThdVsAmplitudeKind = "ThdVsAmplitude";
+
+    /// <summary>
+    /// Whether a kind's result is a run of sweep points rather than a single spectrum. The
+    /// distinction, not the individual kind, is what every branch here actually cares about: a
+    /// sweep type has no live server state to snapshot, its params_json is not an
+    /// <see cref="FftSpectrumParameters"/>, and its result rows carry no spectra.
+    /// </summary>
+    public static bool IsSweepKind(string kind) => kind is ThdVsFrequencyKind or ThdVsAmplitudeKind;
+
     /// <summary>
     /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
     /// snapshot — a configured sweep exists only as SweepConfigPanel's form — so a new one starts
@@ -61,6 +72,26 @@ public sealed class MeasurementSaveService(
             MeasureNoiseFloor: true), SerializerOptions);
 
     /// <summary>
+    /// A brand-new THD-vs-amplitude type's <c>params_json</c>, on the same terms as
+    /// <see cref="DefaultSweepParametersJson"/> and kept in step with
+    /// <c>AmplitudeSweepConfigPanel.vue</c>'s own defaults.
+    /// </summary>
+    public string DefaultAmplitudeSweepParametersJson() =>
+        JsonSerializer.Serialize(new ThdVsAmplitudeParameters(
+            FixedFreqHz: 1000.0,
+            StartAmplitudeVolt: 0.001,
+            EndAmplitudeVolt: 1.0,
+            StepsPerOctave: 5,
+            LoadOhms: 8.0,
+            ProcessLeft: true,
+            ProcessRight: false,
+            FftSize: ThdSweepRequest.AmplitudeSweepFftSize,
+            Window: WindowType.Hann,
+            AverageCount: 4,
+            SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
+            MeasureNoiseFloor: true), SerializerOptions);
+
+    /// <summary>
     /// What a create-or-update of a measurement type should write to <c>params_json</c>.
     ///
     /// The interesting case is an omitted <paramref name="requestedJson"/>, which means "snapshot
@@ -77,8 +108,11 @@ public sealed class MeasurementSaveService(
         if (!string.IsNullOrWhiteSpace(requestedJson))
             return requestedJson;
 
-        if (kind == ThdVsFrequencyKind)
-            return existingParamsJson ?? DefaultSweepParametersJson();
+        if (IsSweepKind(kind))
+        {
+            return existingParamsJson
+                ?? (kind == ThdVsAmplitudeKind ? DefaultAmplitudeSweepParametersJson() : DefaultSweepParametersJson());
+        }
 
         // Creating (no stored params yet) with nothing staged: seed from the live state, but with a
         // generator channel switched on so the new type has something to Run.
@@ -169,25 +203,47 @@ public sealed class MeasurementSaveService(
         var request = sweepRunner.LastRequest
             ?? throw new InvalidOperationException("No sweep has been run yet.");
 
-        var parameters = new ThdVsFrequencyParameters(
-            request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave,
-            request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
-            request.LoadOhms, request.ProcessLeft, request.ProcessRight,
-            request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
-            request.MeasureNoiseFloor, status.GeneratorAmpDbv);
+        bool amplitudeAxis = request.Axis == SweepAxis.Amplitude;
 
-        // One capture per frequency, in sweep order. Points arrive per channel, so group them back
-        // together first -- both channels of one frequency share a capture row.
-        var captures = status.Points
-            .GroupBy(p => p.FreqHz)
+        string paramsJson = amplitudeAxis
+            ? JsonSerializer.Serialize(
+                new ThdVsAmplitudeParameters(
+                    request.FixedFreqHz, request.StartAmplitudeVolt, request.EndAmplitudeVolt,
+                    request.StepsPerOctave, request.LoadOhms, request.ProcessLeft, request.ProcessRight,
+                    request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
+                    request.MeasureNoiseFloor),
+                SerializerOptions)
+            : JsonSerializer.Serialize(
+                new ThdVsFrequencyParameters(
+                    request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave,
+                    request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
+                    request.LoadOhms, request.ProcessLeft, request.ProcessRight,
+                    request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
+                    request.MeasureNoiseFloor, status.GeneratorAmpDbv),
+                SerializerOptions);
+
+        // One capture per sweep point, in sweep order. Points arrive per channel, so group them back
+        // together first -- both channels of one point share a capture row. The grouping key is the
+        // sweep's own axis: grouping an amplitude sweep by frequency would collapse all fifty of its
+        // points into a single capture, since they all play the same tone.
+        var captures = (amplitudeAxis
+                ? status.Points.GroupBy(p => p.GeneratorDbv)
+                : status.Points.GroupBy(p => p.FreqHz))
             .OrderBy(g => g.Key)
-            .Select((group, index) => new SweepCaptureInput(index, group.Key, BuildSweepMetrics(group), BuildSweepPreviews(group)))
+            .Select((group, index) => new SweepCaptureInput(
+                index,
+                // capture.freq_hz stays the tone that was played, on either axis -- for an amplitude
+                // sweep that is the one fixed frequency, which is true and keeps
+                // GetSweepPointsAsync's fundamental_hz recovery working unchanged.
+                group.First().FreqHz,
+                BuildSweepMetrics(group),
+                BuildSweepPreviews(group)))
             .ToList();
 
         var info = session.Info;
         var saveRequest = new SweepSaveRequest(
             measurementTypeId, name, notes,
-            JsonSerializer.Serialize(parameters, SerializerOptions),
+            paramsJson,
             info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
             request.SampleRateHz, request.FftSize,
             (request.ProcessLeft ? 1 : 0) + (request.ProcessRight ? 1 : 0),
@@ -226,11 +282,13 @@ public sealed class MeasurementSaveService(
 
         if (duplicate is not null)
         {
-            double freqHz = pointsAtOneFrequency.FirstOrDefault()?.FreqHz ?? double.NaN;
+            var first = pointsAtOneFrequency.FirstOrDefault();
+            double freqHz = first?.FreqHz ?? double.NaN;
+            double genDbv = first?.GeneratorDbv ?? double.NaN;
             throw new InvalidOperationException(
                 $"The sweep produced {duplicate.Count()} '{duplicate.Key.Kind}' previews for channel " +
-                $"{duplicate.Key.Channel} at {freqHz:0.###} Hz, but a frequency may only be measured once per " +
-                "channel. Re-run the sweep before saving; if this repeats, restart the app and report it.");
+                $"{duplicate.Key.Channel} at {freqHz:0.###} Hz / {genDbv:0.##} dBV, but a sweep point may only be " +
+                "measured once per channel. Re-run the sweep before saving; if this repeats, restart the app and report it.");
         }
 
         return previews;
@@ -256,6 +314,13 @@ public sealed class MeasurementSaveService(
             metrics.Add(new MeasurementMetric(ch, "snr_db", point.SnrDb, "dB"));
             metrics.Add(new MeasurementMetric(ch, "d6plus_percent", point.D6PlusPercent, "%"));
             metrics.Add(new MeasurementMetric(ch, "noise_percent", point.NoisePercent, "%"));
+
+            // The level this point was played at. Constant across a frequency sweep and the x axis of
+            // an amplitude one -- and, being written by every sweep, also what tells the two apart
+            // when a stored sweep is read back without its params_json (CsvExporter.ExportSweep,
+            // MeasurementRepository.SelectHeadlineCapture both key off it varying).
+            metrics.Add(new MeasurementMetric(ch, "generator_dbv", point.GeneratorDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(ch, "generator_volt", Math.Pow(10.0, point.GeneratorDbv / 20.0), "V"));
 
             for (int i = 0; i < point.HarmonicPercent.Count; i++)
                 metrics.Add(new MeasurementMetric(ch, $"h{i + 2}_percent", point.HarmonicPercent[i], "%"));
@@ -284,7 +349,7 @@ public sealed class MeasurementSaveService(
         // to be an exception rather than a screen. None of it belongs on the spectrum pipeline
         // either -- the runner applies its own analysis settings when it starts, and SweepConfigPanel
         // owns the rest -- so this hands back the live device state and touches nothing.
-        if (type.Kind == ThdVsFrequencyKind)
+        if (IsSweepKind(type.Kind))
             return ToAppliedResponse(BuildParameters());
 
         var parameters = JsonSerializer.Deserialize<FftSpectrumParameters>(type.ParamsJson, SerializerOptions)

@@ -75,6 +75,41 @@ public class SweepTypeParamsTests
         });
     }
 
+    /// <summary>
+    /// The amplitude axis has its own record and its own defaults, and the seeding branch has to
+    /// pick the right one off the kind — seeding a level sweep with a frequency sweep's parameters
+    /// deserializes to nothing the panel can read, the exact failure the test above documents.
+    /// </summary>
+    [Fact]
+    public async Task NewAmplitudeSweepType_SeedsItsOwnParametersNotTheFrequencySweeps()
+    {
+        await WithSaveServiceAsync(saveService =>
+        {
+            string resolved = saveService.ResolveTypeParamsJson(
+                requestedJson: null,
+                kind: MeasurementSaveService.ThdVsAmplitudeKind,
+                existingParamsJson: null,
+                staged: null);
+
+            using var document = JsonDocument.Parse(resolved);
+            var root = document.RootElement;
+
+            Assert.Equal(1000.0, root.GetProperty("fixedFreqHz").GetDouble());
+            Assert.Equal(0.001, root.GetProperty("startAmplitudeVolt").GetDouble());
+            Assert.Equal(1.0, root.GetProperty("endAmplitudeVolt").GetDouble());
+            Assert.True(root.GetProperty("stepsPerOctave").GetInt32() >= 1);
+            Assert.True(root.GetProperty("loadOhms").GetDouble() > 0);
+            Assert.Equal(JsonValueKind.String, root.GetProperty("window").ValueKind);
+
+            // Shared with the frequency sweep -- both axes offer the generator-off residual pass.
+            Assert.True(root.GetProperty("measureNoiseFloor").GetBoolean());
+
+            // The frequency sweep's own fields must not be here — that record is a different shape.
+            Assert.False(root.TryGetProperty("startFreqHz", out _), $"amplitude params carry a frequency sweep's fields: {resolved}");
+            Assert.False(root.TryGetProperty("levelMode", out _));
+        });
+    }
+
     [Fact]
     public async Task ExplicitParams_AreWrittenThroughUnchanged()
     {

@@ -32,6 +32,32 @@ public class ThdSweepRunnerTests
             ProcessLeft: true, ProcessRight: false,
             fftSize, WindowType.Hann, AverageCount: 1, sampleRateHz, measureNoiseFloor);
 
+    /// <summary>
+    /// The amplitude axis' counterpart of <see cref="Request"/>. The level mode and adaptive
+    /// resolution are fixed at what <see cref="ThdSweepRequest.Validate"/> demands here, so a test
+    /// that means to break one of them has to say so explicitly. The noise floor defaults off only
+    /// to keep these tests short -- it is a supported option on this axis, exercised below.
+    /// </summary>
+    private static ThdSweepRequest AmplitudeRequest(
+        double startVolt = 0.01,
+        double endVolt = 1.0,
+        double fixedFreqHz = 1000.0,
+        int stepsPerOctave = 1,
+        int fftSize = FastFftSize,
+        double sampleRateHz = SampleRateHz,
+        double loadOhms = 8.0,
+        bool adaptiveResolution = false,
+        bool measureNoiseFloor = false,
+        ThdSweepLevelMode levelMode = ThdSweepLevelMode.GeneratorVoltage) =>
+        new(
+            StartFreqHz: fixedFreqHz, EndFreqHz: fixedFreqHz, StepsPerOctave: stepsPerOctave,
+            LevelMode: levelMode, LevelValue: 0.0, LevelUnit: ThdSweepLevelUnit.Dbv, LoadOhms: loadOhms,
+            ProcessLeft: true, ProcessRight: false,
+            FftSize: fftSize, Window: WindowType.Hann, AverageCount: 1, SampleRateHz: sampleRateHz,
+            MeasureNoiseFloor: measureNoiseFloor, AdaptiveResolution: adaptiveResolution,
+            Axis: SweepAxis.Amplitude, FixedFreqHz: fixedFreqHz,
+            StartAmplitudeVolt: startVolt, EndAmplitudeVolt: endVolt);
+
     private sealed record Harness(ThdSweepRunner Runner, DeviceSessionService Session, SpectrumPipeline Pipeline);
 
     private static async Task<Harness> CreateAsync()
@@ -437,5 +463,204 @@ public class ThdSweepRunnerTests
             var (_, ceiling) = SweepResolution.BoundsFor(sampleRateHz);
             Assert.Equal(1.0 / SweepResolution.MaxRecordSeconds, sampleRateHz / ceiling, 3);
         }
+    }
+
+    // ---------------------------------------------------------------- THD vs amplitude
+
+    /// <summary>
+    /// The defining property of the second axis: the tone stands still and the level moves. Both
+    /// halves are asserted, because getting only the first right is exactly what a copy-paste of the
+    /// frequency runner would produce.
+    /// </summary>
+    [Fact]
+    public async Task AmplitudeSweep_StepsTheLevelAtOneFixedFrequency()
+    {
+        var harness = await CreateAsync();
+        var request = AmplitudeRequest(startVolt: 0.01, endVolt: 1.0, stepsPerOctave: 1);
+
+        var started = await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(started.PointCount, status.Points.Count);
+        Assert.Equal(started.PointCount, started.AmplitudesVolt!.Count);
+
+        // One frequency for the whole sweep -- the coherent bin nearest the requested 1 kHz.
+        Assert.All(status.Points, p => Assert.Equal(status.Points[0].FreqHz, p.FreqHz, precision: 6));
+
+        for (int i = 1; i < status.Points.Count; i++)
+            Assert.True(status.Points[i].GeneratorDbv > status.Points[i - 1].GeneratorDbv);
+
+        // The ends are the ends: 0.01 V is -40 dBV and 1 V is 0 dBV.
+        Assert.Equal(-40.0, status.Points[0].GeneratorDbv, precision: 3);
+        Assert.Equal(0.0, status.Points[^1].GeneratorDbv, precision: 3);
+    }
+
+    /// <summary>
+    /// Each point has to be measured at its own level, not merely labelled with it. In loopback the
+    /// simulator returns what it was driven with, so the measured fundamental has to climb with the
+    /// generator -- a sweep that set the generator once and re-read one capture would plot a flat
+    /// line here and still pass every other assertion.
+    /// </summary>
+    [Fact]
+    public async Task AmplitudeSweep_MeasuredFundamental_FollowsTheGeneratorLevel()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(AmplitudeRequest(startVolt: 0.01, endVolt: 1.0, stepsPerOctave: 1), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.True(status.Points.Count >= 4, $"expected several points, got {status.Points.Count}");
+
+        for (int i = 1; i < status.Points.Count; i++)
+        {
+            Assert.True(
+                status.Points[i].FundamentalDbv > status.Points[i - 1].FundamentalDbv,
+                $"point {i} at {status.Points[i].GeneratorDbv:0.##} dBV measured {status.Points[i].FundamentalDbv:0.##} dBV, "
+                    + $"not above point {i - 1}'s {status.Points[i - 1].FundamentalDbv:0.##} dBV");
+        }
+
+        Assert.Equal(status.Points[^1].GeneratorDbv, status.Points[^1].FundamentalDbv, tolerance: 1.5);
+    }
+
+    /// <summary>
+    /// The level probe does not run on this axis -- there is nothing to solve for. It is unobservable
+    /// after the fact, but its side effect is not: it would leave GeneratorAmpDbv at the level it
+    /// solved for rather than at the sweep's last step.
+    /// </summary>
+    [Fact]
+    public async Task AmplitudeSweep_SolvesNoLevel()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(AmplitudeRequest(startVolt: 0.01, endVolt: 1.0), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(status.Points[^1].GeneratorDbv, status.GeneratorAmpDbv, precision: 6);
+    }
+
+    /// <summary>
+    /// The noise-floor pass is axis-independent: a level sweep wants a residual for its distortion
+    /// traces to sit above just as much as a frequency sweep does -- more, since the bottom of a
+    /// level sweep is exactly where the DUT's own distortion disappears into it. Asserted the same
+    /// way the frequency axis' own noise test is: a real residual, below the measured distortion.
+    /// </summary>
+    [Fact]
+    public async Task AmplitudeSweep_WithNoiseFloor_ReferencesEveryPointAgainstIt()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(
+            AmplitudeRequest(startVolt: 0.01, endVolt: 1.0, measureNoiseFloor: true), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.All(status.Points, p => Assert.True(p.NoisePercent > 0.0, $"point at {p.GeneratorDbv:0.##} dBV has no noise reading"));
+
+        // The residual is a fixed voltage, so as a percentage of the fundamental it has to fall as
+        // the sweep climbs -- the one property that distinguishes a real per-point reference from a
+        // constant written onto every point.
+        Assert.True(
+            status.Points[^1].NoisePercent < status.Points[0].NoisePercent,
+            $"noise share should fall with level: {status.Points[0].NoisePercent} -> {status.Points[^1].NoisePercent}");
+    }
+
+    /// <summary>Without the pass there is no residual, and every point reports 0 rather than a stale figure.</summary>
+    [Fact]
+    public async Task AmplitudeSweep_WithoutNoiseFloor_ReportsNoResidual()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(AmplitudeRequest(startVolt: 0.01, endVolt: 1.0), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.All(status.Points, p => Assert.Equal(0.0, p.NoisePercent));
+    }
+
+    /// <summary>The same restoration guarantee the frequency axis has -- a sweep must not leave the live view's pipeline reconfigured.</summary>
+    [Fact]
+    public async Task AmplitudeSweep_RestoresThePipelineOptionsItChanged()
+    {
+        var harness = await CreateAsync();
+        var before = harness.Pipeline.Options;
+
+        await harness.Runner.StartAsync(AmplitudeRequest(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+
+        Assert.Equal(before, harness.Pipeline.Options);
+        Assert.False(harness.Pipeline.Options.SingleShot);
+        Assert.Null(harness.Pipeline.Options.HarmonicMaxFreqHz);
+    }
+
+    /// <summary>A saved sweep's x axis is this field, so a frequency sweep has to carry it too -- constant, at the level it ran at.</summary>
+    [Fact]
+    public async Task FrequencySweep_EveryPoint_CarriesTheOneLevelItRanAt()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(startHz: 500.0, endHz: 4000.0, levelValue: -20.0), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.NotEmpty(status.Points);
+        Assert.All(status.Points, p => Assert.Equal(-20.0, p.GeneratorDbv, precision: 6));
+    }
+
+    [Fact]
+    public void AmplitudeSweep_Validate_RejectsAnEndAmplitudeAboveTheOutputRangeCeiling()
+    {
+        var request = AmplitudeRequest(startVolt: 0.1, endVolt: 8.0);
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+        Assert.Contains("7.9 V", ex.Message);
+    }
+
+    [Fact]
+    public void AmplitudeSweep_Validate_RejectsAStartBelowOneMillivolt()
+    {
+        var request = AmplitudeRequest(startVolt: 0.0005, endVolt: 1.0);
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+        Assert.Contains("1 mV", ex.Message);
+    }
+
+    /// <summary>
+    /// The two settings that only mean something when the frequency moves are rejected rather than
+    /// ignored -- a sweep that silently dropped them would look configured and measure something
+    /// else. The noise floor is deliberately not one of them; see the pair of tests above.
+    /// </summary>
+    [Theory]
+    [InlineData(true, ThdSweepLevelMode.GeneratorVoltage)]
+    [InlineData(false, ThdSweepLevelMode.OutputPower)]
+    public void AmplitudeSweep_Validate_RejectsTheFrequencyOnlySettings(
+        bool adaptiveResolution, ThdSweepLevelMode levelMode)
+    {
+        var request = AmplitudeRequest(adaptiveResolution: adaptiveResolution, levelMode: levelMode);
+
+        Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+    }
+
+    [Fact]
+    public void AmplitudeSweep_Validate_AcceptsTheNoiseFloorPass()
+    {
+        AmplitudeRequest(measureNoiseFloor: true).Validate();
+    }
+
+    /// <summary>
+    /// The tone is fixed, so the too-few-bins rule applies to it rather than to a start frequency --
+    /// and the message still has to name the FFT size that would work, since that is the only thing
+    /// the caller can change.
+    /// </summary>
+    [Fact]
+    public void AmplitudeSweep_Validate_RejectsAToneTooFewBinsUp()
+    {
+        var request = AmplitudeRequest(fixedFreqHz: 20.0, fftSize: 4096, sampleRateHz: 48_000.0);
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+        Assert.Equal("FixedFreqHz", ex.ParamName);
+        Assert.Contains("16384", ex.Message);
     }
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import { api, type SimulatedProfileRequest, type StagedMeasurementConfig } from './api/client'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { api, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { useDevice } from './composables/useDevice'
 import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
@@ -36,12 +36,15 @@ import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
 import UpdateBanner from './components/UpdateBanner.vue'
 import SweepConfigPanel from './components/SweepConfigPanel.vue'
+import AmplitudeSweepConfigPanel from './components/AmplitudeSweepConfigPanel.vue'
 import SweepDisplayPanel from './components/SweepDisplayPanel.vue'
 import ThdSweepChart from './components/ThdSweepChart.vue'
 import SweepFftPreviewChart from './components/SweepFftPreviewChart.vue'
 import SweepScopePreviewChart from './components/SweepScopePreviewChart.vue'
 import { useSweep } from './composables/useSweep'
 import { nearestSweepPoint } from './sweep/points'
+import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
+import { THD_VS_AMPLITUDE_KIND, isSweepKind as isSweepKindName } from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
 const { spectrum, meters, scope, setViewport, clearScope } = useSpectrumStream()
@@ -139,15 +142,31 @@ const {
   generatorAmpDbv: sweepGeneratorAmpDbv,
   error: sweepError,
   points: sweepPoints,
+  viewAxis: sweepViewAxis,
   start: startSweep,
+  startAmplitude: startAmplitudeSweep,
   cancel: cancelSweepRun,
   clear: clearSweepRun,
   refresh: refreshSweep,
 } = useSweep()
 
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
-// which was fine while FFTSpectrum was the only kind.
-const isSweepKind = computed(() => currentType.value?.kind === 'ThdVsFrequency')
+// which was fine while FFTSpectrum was the only kind. The two sweep kinds share one screen —
+// identical layout, identical chart, identical history and preview rail — and differ only in which
+// config panel is mounted and what the chart's x axis plots.
+const isSweepKind = computed(() => isSweepKindName(currentType.value?.kind))
+const isAmplitudeSweep = computed(() => currentType.value?.kind === THD_VS_AMPLITUDE_KIND)
+
+// One runner holds one set of points, and the two screens cannot read each other's: see useSweep's
+// own `viewAxis`. Kept in step with the selected type rather than set on navigation, so a reload
+// straight onto either screen is right on the first frame.
+watch(
+  isAmplitudeSweep,
+  (amplitude) => {
+    sweepViewAxis.value = amplitude ? 'Amplitude' : 'Frequency'
+  },
+  { immediate: true },
+)
 
 // The small FFT/oscilloscope preview charts below the sweep rail: while a sweep is running they
 // track the point each channel just measured (points arrive frequency-sorted and a sweep always
@@ -157,9 +176,14 @@ const isSweepKind = computed(() => currentType.value?.kind === 'ThdVsFrequency')
 // channel with no points (never part of this sweep, i.e. disabled in the generator) resolves to
 // null and the charts simply draw nothing for it, rather than this deciding up front which one
 // channel to show.
-const hoveredSweepFreqHz = ref<number | null>(null)
-function onSweepCursorFreq(freqHz: number | null) {
-  hoveredSweepFreqHz.value = freqHz
+const hoveredSweepX = ref<number | null>(null)
+function onSweepCursorX(x: number | null) {
+  hoveredSweepX.value = x
+}
+
+/** The x accessor the chart is currently plotting with — what "nearest to the cursor" is measured along. */
+function sweepXOf(point: ThdSweepPoint): number {
+  return sweepXValue(point, sweepChartXAxis.value)
 }
 
 function selectedSweepPointFor(channel: number) {
@@ -168,8 +192,8 @@ function selectedSweepPointFor(channel: number) {
 
   if (sweepRunning.value) return onChannel[onChannel.length - 1]
 
-  const targetFreqHz = hoveredSweepFreqHz.value ?? onChannel[onChannel.length - 1].freqHz
-  return nearestSweepPoint(sweepPoints.value, channel, targetFreqHz)
+  const target = hoveredSweepX.value ?? sweepXOf(onChannel[onChannel.length - 1])
+  return nearestSweepPoint(sweepPoints.value, channel, target, sweepXOf)
 }
 
 const sweepSelectedLeft = computed(() => selectedSweepPointFor(0))
@@ -192,8 +216,8 @@ function selectedSweepPointForOverlay(overlay: OverlayEntry, channel: number) {
   const onChannel = (overlay.sweepPoints ?? []).filter((p) => p.channel === channel)
   if (onChannel.length === 0) return null
 
-  const targetFreqHz = hoveredSweepFreqHz.value ?? onChannel[onChannel.length - 1].freqHz
-  return nearestSweepPoint(overlay.sweepPoints ?? [], channel, targetFreqHz)
+  const target = hoveredSweepX.value ?? sweepXOf(onChannel[onChannel.length - 1])
+  return nearestSweepPoint(overlay.sweepPoints ?? [], channel, target, sweepXOf)
 }
 
 /**
@@ -237,6 +261,52 @@ const sweepYMinPercent = ref(0.00001)
 const sweepXFromHz = ref(10)
 const sweepXToHz = ref(20000)
 
+/**
+ * Which quantity the amplitude screen's x axis plots. Output voltage by default, matching the
+ * previous app. Ignored entirely on the frequency screen, where the axis is not a choice —
+ * `sweepChartXAxis` below is what the chart and the display panel actually read.
+ */
+const sweepAmplitudeXAxis = ref<SweepXAxis>('outputVolt')
+
+/**
+ * X bounds for the amplitude screen, one pair *per axis choice* rather than one pair shared.
+ * The three axes are in two different units and three different ranges — a window of 1 mV to 10 V
+ * means nothing in watts — so a single pair would leave the chart empty every time the axis was
+ * switched, and re-Autofitting would be mandatory rather than a convenience.
+ */
+const sweepAmplitudeBounds = reactive<Record<string, { from: number; to: number }>>({
+  outputVolt: { from: 0.001, to: 10 },
+  outputWatt: { from: 0.000001, to: 100 },
+  inputVolt: { from: 0.001, to: 10 },
+})
+
+/** The axis the chart is on right now: the amplitude screen's choice, or plain frequency. */
+const sweepChartXAxis = computed<SweepXAxis>({
+  get: () => (isAmplitudeSweep.value ? sweepAmplitudeXAxis.value : 'frequency'),
+  set: (value) => {
+    // The frequency screen hides the selector, so this can only ever be written from the amplitude
+    // one; guarded anyway so a stray write cannot leave that screen on a volt axis.
+    if (isAmplitudeSweep.value && value !== 'frequency') sweepAmplitudeXAxis.value = value
+  },
+})
+
+/** The x bounds for whichever axis is showing — the Hz pair, or the current amplitude axis' own pair. */
+const sweepXFrom = computed<number>({
+  get: () => (isAmplitudeSweep.value ? sweepAmplitudeBounds[sweepAmplitudeXAxis.value].from : sweepXFromHz.value),
+  set: (value) => {
+    if (isAmplitudeSweep.value) sweepAmplitudeBounds[sweepAmplitudeXAxis.value].from = value
+    else sweepXFromHz.value = value
+  },
+})
+
+const sweepXTo = computed<number>({
+  get: () => (isAmplitudeSweep.value ? sweepAmplitudeBounds[sweepAmplitudeXAxis.value].to : sweepXToHz.value),
+  set: (value) => {
+    if (isAmplitudeSweep.value) sweepAmplitudeBounds[sweepAmplitudeXAxis.value].to = value
+    else sweepXToHz.value = value
+  },
+})
+
 // The dB axis keeps its own bounds rather than reusing the percent ones: it has to reach above
 // 0 dB for the Magnitude trace, and no percentage expresses that.
 const sweepYTopDb = ref(20)
@@ -253,11 +323,14 @@ watch(
     sweepUnit, sweepShowNoiseFloor, sweepShowMagnitude, sweepShowThd, sweepShowD2, sweepShowD3,
     sweepShowD4, sweepShowD5, sweepShowD6Plus, sweepShowLeft, sweepShowRight, sweepThickLines,
     sweepShowDataPoints, sweepYMaxPercent, sweepYMinPercent, sweepXFromHz, sweepXToHz, sweepYTopDb,
-    sweepYBottomDb,
+    sweepYBottomDb, sweepAmplitudeXAxis, sweepAmplitudeBounds,
   ],
   () => {
     if (!sweepDisplayRestoring) markDirty()
   },
+  // Deep, for sweepAmplitudeBounds: its per-axis pairs are mutated in place by the computed setters
+  // above, which a shallow watcher on the reactive object would not see.
+  { deep: true },
 )
 
 /**
@@ -267,14 +340,25 @@ watch(
  * a sweep saved before these fields existed) just keeps whatever's already showing.
  */
 function applyStoredSweepDisplay(paramsJson: string) {
-  let stored: Partial<import('./api/client').ThdVsFrequencyParameters>
+  // The two records share every chart field but the x pair, so one loose shape reads both: the
+  // frequency sweep stores chartXFromHz/chartXToHz in hertz, the amplitude one chartXFrom/chartXTo
+  // in the selected axis' own unit, and each is applied to the state that owns it.
+  type StoredDisplay = Partial<import('./api/client').ThdVsFrequencyParameters> &
+    Partial<import('./api/client').ThdVsAmplitudeParameters>
+
+  let stored: StoredDisplay
   try {
-    stored = JSON.parse(paramsJson) as Partial<import('./api/client').ThdVsFrequencyParameters>
+    stored = JSON.parse(paramsJson) as StoredDisplay
   } catch {
     return
   }
 
   sweepDisplayRestoring = true
+  if (stored.chartXAxis) sweepAmplitudeXAxis.value = stored.chartXAxis
+  if (typeof stored.chartXFrom === 'number' && stored.chartXFrom > 0)
+    sweepAmplitudeBounds[sweepAmplitudeXAxis.value].from = stored.chartXFrom
+  if (typeof stored.chartXTo === 'number' && stored.chartXTo > 0)
+    sweepAmplitudeBounds[sweepAmplitudeXAxis.value].to = stored.chartXTo
   if (stored.chartUnit) sweepUnit.value = stored.chartUnit
   if (typeof stored.chartShowNoiseFloor === 'boolean') sweepShowNoiseFloor.value = stored.chartShowNoiseFloor
   if (typeof stored.chartShowMagnitude === 'boolean') sweepShowMagnitude.value = stored.chartShowMagnitude
@@ -305,15 +389,22 @@ function applyStoredSweepDisplay(paramsJson: string) {
 // fields, so parsing an FFT type's params here would silently borrow its chart settings for the
 // sweep display refs instead of leaving them alone.
 watch(
-  () => (currentType.value?.kind === 'ThdVsFrequency' ? currentType.value.paramsJson : null),
+  () => (isSweepKindName(currentType.value?.kind) ? currentType.value?.paramsJson ?? null : null),
   (paramsJson) => {
     if (paramsJson) applyStoredSweepDisplay(paramsJson)
   },
   { immediate: true },
 )
 
-// Drives RUN SWEEP, which lives above the rail while the form it validates stays in the panel.
+// Drives RUN SWEEP, which lives above the rail while the form it validates stays in the panel. One
+// ref per panel because only one of the two is mounted at a time; activeSweepPanel is what the
+// button and the save path actually read, and both panels expose the same { run, invalid,
+// buildParamsJson } contract.
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
+const amplitudeSweepConfigPanel = ref<InstanceType<typeof AmplitudeSweepConfigPanel> | null>(null)
+const activeSweepPanel = computed(() =>
+  isAmplitudeSweep.value ? amplitudeSweepConfigPanel.value : sweepConfigPanel.value,
+)
 
 function runSweep(request: import('./api/client').ThdSweepStartRequest) {
   // Mirror the channel selection onto the chart so a stereo sweep actually draws both traces.
@@ -321,6 +412,14 @@ function runSweep(request: import('./api/client').ThdSweepStartRequest) {
   sweepShowRight.value = request.processRight
   return withErrorReporting(async () => {
     await startSweep(request)
+  })
+}
+
+function runAmplitudeSweep(request: import('./api/client').ThdAmplitudeSweepStartRequest) {
+  sweepShowLeft.value = request.processLeft
+  sweepShowRight.value = request.processRight
+  return withErrorReporting(async () => {
+    await startAmplitudeSweep(request)
   })
 }
 
@@ -336,7 +435,7 @@ function cancelSweep() {
 function clearSweep() {
   return withErrorReporting(async () => {
     await clearSweepRun()
-    hoveredSweepFreqHz.value = null
+    hoveredSweepX.value = null
   })
 }
 
@@ -656,10 +755,17 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
  */
 function buildTypeParamsJson(): string | undefined {
   if (!isSweepKind.value) return undefined
-  const base = sweepConfigPanel.value?.buildParamsJson()
+  const base = activeSweepPanel.value?.buildParamsJson()
   if (!base) return undefined
+  // The x pair goes into whichever field name that kind's record declares — hertz bounds for a
+  // frequency sweep, the selected axis and its own bounds for an amplitude one. Writing both would
+  // put fields into a record that does not declare them, which the server's deserializer rejects.
+  const xFields = isAmplitudeSweep.value
+    ? { chartXAxis: sweepAmplitudeXAxis.value, chartXFrom: sweepXFrom.value, chartXTo: sweepXTo.value }
+    : { chartXFromHz: sweepXFromHz.value, chartXToHz: sweepXToHz.value }
   const withDisplay = {
     ...JSON.parse(base),
+    ...xFields,
     chartUnit: sweepUnit.value,
     chartShowNoiseFloor: sweepShowNoiseFloor.value,
     chartShowMagnitude: sweepShowMagnitude.value,
@@ -675,8 +781,6 @@ function buildTypeParamsJson(): string | undefined {
     chartShowDataPoints: sweepShowDataPoints.value,
     chartYMaxPercent: sweepYMaxPercent.value,
     chartYMinPercent: sweepYMinPercent.value,
-    chartXFromHz: sweepXFromHz.value,
-    chartXToHz: sweepXToHz.value,
     chartYTopDb: sweepYTopDb.value,
     chartYBottomDb: sweepYBottomDb.value,
   }
@@ -856,9 +960,14 @@ function confirmSaveProjectAs(name: string) {
                     v-if="!sweepRunning"
                     type="button"
                     class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
-                    :disabled="!!sweepConfigPanel?.invalid"
-                    :title="sweepConfigPanel?.invalid ?? 'Steps the generator across the configured frequency range and records the harmonics at each point.'"
-                    @click="sweepConfigPanel?.run()"
+                    :disabled="!!activeSweepPanel?.invalid"
+                    :title="
+                      activeSweepPanel?.invalid ??
+                      (isAmplitudeSweep
+                        ? 'Steps the generator across the configured voltage range at one frequency and records the harmonics at each point.'
+                        : 'Steps the generator across the configured frequency range and records the harmonics at each point.')
+                    "
+                    @click="activeSweepPanel?.run()"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
                     RUN SWEEP
@@ -875,7 +984,13 @@ function confirmSaveProjectAs(name: string) {
                   </button>
                 </div>
 
-                <SweepConfigPanel ref="sweepConfigPanel" :running="sweepRunning" @run="runSweep" />
+                <AmplitudeSweepConfigPanel
+                  v-if="isAmplitudeSweep"
+                  ref="amplitudeSweepConfigPanel"
+                  :running="sweepRunning"
+                  @run="runAmplitudeSweep"
+                />
+                <SweepConfigPanel v-else ref="sweepConfigPanel" :running="sweepRunning" @run="runSweep" />
 
                 <!-- Each channel's point currently measuring (while running) or nearest the chart
                      cursor (once done) — see selectedSweepPointFor. Hidden entirely once the sweep
@@ -929,13 +1044,14 @@ function confirmSaveProjectAs(name: string) {
                   :y-min-percent="sweepYMinPercent"
                   :y-top-db="sweepYTopDb"
                   :y-bottom-db="sweepYBottomDb"
-                  :x-from-hz="sweepXFromHz"
-                  :x-to-hz="sweepXToHz"
+                  :x-from="sweepXFrom"
+                  :x-to="sweepXTo"
+                  :x-axis="sweepChartXAxis"
                   :overlays="overlays"
                   :selected-left="sweepSelectedLeft"
                   :selected-right="sweepSelectedRight"
                   :overlay-selections="sweepOverlaySelections"
-                  @cursor-freq="onSweepCursorFreq"
+                  @cursor-x="onSweepCursorX"
                 />
 
                 <MeasurementHistoryPanel @error="reportError" />
@@ -960,8 +1076,9 @@ function confirmSaveProjectAs(name: string) {
                   v-model:y-min-percent="sweepYMinPercent"
                   v-model:y-top-db="sweepYTopDb"
                   v-model:y-bottom-db="sweepYBottomDb"
-                  v-model:x-from-hz="sweepXFromHz"
-                  v-model:x-to-hz="sweepXToHz"
+                  v-model:x-from="sweepXFrom"
+                  v-model:x-to="sweepXTo"
+                  v-model:x-axis="sweepChartXAxis"
                 />
 
                 <MeasurementChecklist @error="reportError" />

@@ -121,6 +121,32 @@ public class CsvExporterTests
         Assert.Equal("", row.Split(',')[6]); // freq, magnitude, thd, d2, d3, d4, d5
     }
 
+    /// <summary>
+    /// An amplitude sweep's rows are told apart by the level, not the frequency -- every point
+    /// shares one tone, so a freq_hz column would repeat the same number down the file and identify
+    /// nothing. The frequency moves into a header comment instead, where it is stated once.
+    /// </summary>
+    [Fact]
+    public void ExportSweep_LevelSteppedSweep_LeadsWithTheGeneratorVoltage()
+    {
+        var detail = BuildAmplitudeSweepDetail();
+
+        string csv = CsvExporter.ExportSweep(detail, [AmplitudePoint(0, -40.0), AmplitudePoint(1, -20.0)]);
+        var lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToArray();
+        var dataLines = lines.Where(l => !l.StartsWith('#')).ToArray();
+
+        Assert.Contains(lines, l => l.StartsWith("# freq_hz: 1000.000000"));
+
+        Assert.Equal(
+            "generator_volt,ch0_output_dbv,ch0_power_w,ch0_magnitude_db,ch0_thd_percent,ch0_d2_percent,"
+                + "ch0_d3_percent,ch0_d4_percent,ch0_d5_percent,ch0_d6plus_percent,ch0_noise_percent",
+            dataLines[0]);
+
+        // 0.01 V and 0.1 V -- the levels, ascending, not the repeated 1 kHz.
+        Assert.StartsWith("0.010000,", dataLines[1]);
+        Assert.StartsWith("0.100000,", dataLines[2]);
+    }
+
     [Fact]
     public void ExportSweep_NoPoints_Throws()
     {
@@ -141,6 +167,29 @@ public class CsvExporterTests
         ["h5_percent"] = 0.001,
         ["d6plus_percent"] = 0.0005,
         ["noise_percent"] = 0.0001,
+    };
+
+    /// <summary>One level-swept point: the frequency-sweep metrics plus the two that mark the axis.</summary>
+    private static StoredSweepPoint AmplitudePoint(int seqIndex, double generatorDbv)
+    {
+        double volt = Math.Pow(10.0, generatorDbv / 20.0);
+        var metrics = SweepMetrics(generatorDbv).ToDictionary(kv => kv.Key, kv => kv.Value);
+        metrics["generator_dbv"] = generatorDbv;
+        metrics["generator_volt"] = volt;
+        metrics["fundamental_dbv"] = generatorDbv;
+        metrics["power_watt"] = volt * volt / 8.0;
+
+        return new StoredSweepPoint(seqIndex, 1000.0, new Dictionary<int, IReadOnlyDictionary<string, double>>
+        {
+            [0] = metrics,
+        });
+    }
+
+    private static MeasurementDetail BuildAmplitudeSweepDetail() => BuildDetail() with
+    {
+        Kind = "ThdVsAmplitude",
+        MeasurementTypeName = "THD vs amplitude",
+        ParamsJson = """{"fixedFreqHz":1000}""",
     };
 
     private static MeasurementDetail BuildSweepDetail() => BuildDetail() with

@@ -3,6 +3,7 @@ import { computed, reactive, watch } from 'vue'
 import Modal from './Modal.vue'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
+import { isSweepKind } from '../measurements/kinds'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -48,7 +49,7 @@ async function onSave() {
   // Which endpoint depends on the kind: a sweep's result is N captures built from the runner's
   // points, an FFT's is the pipeline's single retained spectrum. Same dialog either way — the
   // name/notes it collects are all the difference the user cares about.
-  if (currentType.value.kind === 'ThdVsFrequency') await saveSweep(req)
+  if (isSweepKind(currentType.value.kind)) await saveSweep(req)
   else await save(req)
   emit('saved')
   emit('close')

@@ -62,12 +62,36 @@ public static class CsvExporter
     ];
 
     /// <summary>
-    /// Renders a saved THD-vs-frequency sweep as CSV: one row per frequency, one column group per
-    /// channel. A sweep result has no <c>spectrum</c> rows at all (metrics only, by design -- see
+    /// The amplitude axis' column set: the frequency sweep's, plus two columns that only mean
+    /// something here -- the level actually reached at the DUT's output, and the power that works
+    /// out to. Both are what the chart's own x-axis choices plot, so the CSV can reproduce any of
+    /// the three views.
+    /// </summary>
+    private static readonly (string Metric, string Column)[] AmplitudeSweepColumns =
+    [
+        ("fundamental_dbv", "output_dbv"),
+        ("power_watt", "power_w"),
+        ("gain_db", "magnitude_db"),
+        ("thd_percent", "thd_percent"),
+        ("h2_percent", "d2_percent"),
+        ("h3_percent", "d3_percent"),
+        ("h4_percent", "d4_percent"),
+        ("h5_percent", "d5_percent"),
+        ("d6plus_percent", "d6plus_percent"),
+        ("noise_percent", "noise_percent"),
+    ];
+
+    /// <summary>
+    /// Renders a saved sweep as CSV: one row per point, one column group per channel. A sweep
+    /// result has no <c>spectrum</c> rows at all (metrics only, by design -- see
     /// <see cref="SweepSaveRequest"/>), so <see cref="Export"/> cannot render one and this is the
     /// separate path rather than a branch inside it.
     ///
-    /// A metric missing for a channel at one frequency is written as an empty field, not 0: a
+    /// The leading column is the sweep's own axis: <c>freq_hz</c> for THD vs frequency,
+    /// <c>generator_volt</c> for THD vs amplitude -- which is also the only thing that identifies a
+    /// row there, since every point of an amplitude sweep shares one frequency.
+    ///
+    /// A metric missing for a channel at one point is written as an empty field, not 0: a
     /// harmonic above Nyquist is genuinely absent there (<c>BuildSweepMetrics</c> stops at the
     /// highest order actually found), and a 0 would plot as a real -infinity reading.
     /// </summary>
@@ -82,6 +106,9 @@ public static class CsvExporter
             .Order()
             .ToList();
 
+        bool amplitudeAxis = points.Any(p => p.MetricsByChannel.Values.Any(m => m.ContainsKey(AmplitudeAxisMetric)));
+        var columns = amplitudeAxis ? AmplitudeSweepColumns : SweepColumns;
+
         var sb = new StringBuilder();
         WriteComment(sb, "project", detail.ProjectName);
         WriteComment(sb, "measurement_type", detail.MeasurementTypeName);
@@ -94,19 +121,23 @@ public static class CsvExporter
         WriteComment(sb, "point_count", points.Count.ToString(CultureInfo.InvariantCulture));
         WriteComment(sb, "params_json", detail.ParamsJson);
 
-        sb.Append("freq_hz");
+        if (amplitudeAxis)
+            WriteComment(sb, "freq_hz", points[0].FreqHz.ToString("F6", CultureInfo.InvariantCulture));
+
+        sb.Append(amplitudeAxis ? "generator_volt" : "freq_hz");
         foreach (int channel in channels)
-            foreach (var (_, column) in SweepColumns)
+            foreach (var (_, column) in columns)
                 sb.Append(",ch").Append(channel).Append('_').Append(column);
         sb.Append('\n');
 
         foreach (var point in points.OrderBy(p => p.SeqIndex))
         {
-            sb.Append(point.FreqHz.ToString("F6", CultureInfo.InvariantCulture));
+            double x = amplitudeAxis ? AmplitudeOf(point) : point.FreqHz;
+            sb.Append(x.ToString("F6", CultureInfo.InvariantCulture));
             foreach (int channel in channels)
             {
                 point.MetricsByChannel.TryGetValue(channel, out var metrics);
-                foreach (var (metric, _) in SweepColumns)
+                foreach (var (metric, _) in columns)
                 {
                     sb.Append(',');
                     if (metrics is not null && metrics.TryGetValue(metric, out double value))
@@ -117,6 +148,22 @@ public static class CsvExporter
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>The metric whose presence marks a sweep as level-stepped rather than frequency-stepped.</summary>
+    private const string AmplitudeAxisMetric = "generator_volt";
+
+    /// <summary>
+    /// A point's generator level in volts. Written per channel but identical across them (it is one
+    /// stimulus), so the first channel that has it answers for the point.
+    /// </summary>
+    private static double AmplitudeOf(StoredSweepPoint point)
+    {
+        foreach (var metrics in point.MetricsByChannel.Values)
+            if (metrics.TryGetValue(AmplitudeAxisMetric, out double volt))
+                return volt;
+
+        return double.NaN;
     }
 
     private static void WriteHeaderComments(StringBuilder sb, MeasurementDetail detail, IReadOnlyList<StoredSpectrum> spectra)

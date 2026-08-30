@@ -1,9 +1,17 @@
 import { computed, ref, shallowRef } from 'vue'
-import { api, type ThdSweepPoint, type ThdSweepStartRequest, type ThdSweepStatus } from '../api/client'
+import {
+  api,
+  type ThdAmplitudeSweepStartRequest,
+  type ThdSweepPoint,
+  type ThdSweepStartRequest,
+  type ThdSweepStatus,
+} from '../api/client'
 import { SweepPhase, type SweepPointFrame, type SweepProgressFrame } from '../streaming/protocol'
+import { siPrefixed } from '../sweep/xAxis'
 
 /**
- * The THD-vs-frequency sweep's client-side state.
+ * The sweep's client-side state — one store for both axes, because there is one runner and so only
+ * ever one sweep in flight.
  *
  * Module-level singleton refs, the same stand-in for a store the rest of this app uses (see
  * useSpectrumConfig.ts) — the chart, the config panel and the progress readout are separate
@@ -19,13 +27,32 @@ const running = ref(false)
 const phase = ref<SweepPhase>(SweepPhase.Idle)
 const index = ref(0)
 const total = ref(0)
-const currentFreqHz = ref(0)
+/** Which quantity the running (or last) sweep steps. Mirrors ThdSweepStatus.axis. */
+const axis = ref<'Frequency' | 'Amplitude'>('Frequency')
+
+/** The point being measured, in the running sweep's own unit — hertz, or generator volts. */
+const currentX = ref(0)
 const generatorAmpDbv = ref(0)
 const error = ref<string | null>(null)
 
 // shallowRef + whole-array replacement: a sweep point is immutable once measured, and replacing
 // the array is what makes the chart's watcher fire without deep-watching hundreds of objects.
-const points = shallowRef<ThdSweepPoint[]>([])
+const measured = shallowRef<ThdSweepPoint[]>([])
+
+/**
+ * Which sweep screen is open, set by App.vue. There is one runner and so one set of points, but two
+ * screens that can display them, and a set measured on one axis is meaningless on the other: an
+ * amplitude sweep's fifty points all share one frequency, so a frequency chart would stack the
+ * whole run into a single vertical line.
+ */
+const viewAxis = ref<'Frequency' | 'Amplitude'>('Frequency')
+
+/**
+ * The points the open screen should draw: the ones measured, or nothing at all when they came from
+ * the other axis. Deliberately not a server-side clear — the sweep is still there, and switching
+ * back to the screen that ran it shows it again.
+ */
+const points = computed(() => (axis.value === viewAxis.value ? measured.value : []))
 
 const phaseLabel: Record<SweepPhase, string> = {
   [SweepPhase.Idle]: 'Idle',
@@ -52,19 +79,26 @@ function applyStatus(status: ThdSweepStatus) {
   phase.value = PHASE_BY_NAME[status.phase] ?? SweepPhase.Idle
   index.value = status.index
   total.value = status.total
-  currentFreqHz.value = status.currentFreqHz
+  axis.value = status.axis ?? 'Frequency'
+  currentX.value = axis.value === 'Amplitude' ? status.currentAmplitudeVolt : status.currentFreqHz
   generatorAmpDbv.value = status.generatorAmpDbv
   error.value = status.error
-  points.value = status.points
+  measured.value = status.points
 }
 
 /**
- * Folds one live sweep-point frame in. Keyed by (channel, frequency) rather than appended blindly:
- * a reload that calls refresh() and then starts receiving frames again would otherwise duplicate
- * every point it had already loaded.
+ * Folds one live sweep-point frame in. Keyed by (channel, frequency, level) rather than appended
+ * blindly: a reload that calls refresh() and then starts receiving frames again would otherwise
+ * duplicate every point it had already loaded.
+ *
+ * Both coordinates are in the key, and neither alone would do — a frequency sweep repeats its level
+ * at every point and an amplitude sweep repeats its frequency at every point, so keying on either
+ * one on its own collapses the other axis' entire sweep into a single point.
  */
 function ingestPoint(frame: SweepPointFrame) {
-  const next = points.value.filter((p) => !(p.channel === frame.channel && p.freqHz === frame.freqHz))
+  const next = measured.value.filter(
+    (p) => !(p.channel === frame.channel && p.freqHz === frame.freqHz && p.generatorDbv === frame.generatorDbv),
+  )
   next.push({
     freqHz: frame.freqHz,
     channel: frame.channel,
@@ -77,17 +111,18 @@ function ingestPoint(frame: SweepPointFrame) {
     harmonicPercent: frame.harmonicPercent,
     d6PlusPercent: frame.d6PlusPercent,
     noisePercent: frame.noisePercent,
+    generatorDbv: frame.generatorDbv,
     previewFft: frame.previewFft,
     previewScope: frame.previewScope,
   })
-  next.sort((a, b) => a.freqHz - b.freqHz || a.channel - b.channel)
-  points.value = next
+  next.sort((a, b) => a.freqHz - b.freqHz || a.generatorDbv - b.generatorDbv || a.channel - b.channel)
+  measured.value = next
 }
 
 function ingestProgress(frame: SweepProgressFrame) {
   phase.value = frame.phase
   index.value = frame.index
-  currentFreqHz.value = frame.currentFreqHz
+  currentX.value = frame.currentX
   if (frame.total > 0) total.value = frame.total
   running.value =
     frame.phase === SweepPhase.DeterminingLevel ||
@@ -103,14 +138,24 @@ async function refresh() {
 }
 
 async function start(request: ThdSweepStartRequest) {
-  points.value = []
+  return began('Frequency', await beginWith(() => api.startThdSweep(request)))
+}
+
+async function startAmplitude(request: ThdAmplitudeSweepStartRequest) {
+  return began('Amplitude', await beginWith(() => api.startThdAmplitudeSweep(request)))
+}
+
+async function beginWith<T>(call: () => Promise<T>): Promise<T> {
+  measured.value = []
   error.value = null
   index.value = 0
-  currentFreqHz.value = 0
+  currentX.value = 0
+  return call()
+}
 
-  const started = await api.startThdSweep(request)
-
-  // Optimistic, so the progress line appears on the click rather than on the first frame.
+/** Optimistic, so the progress line appears on the click rather than on the first frame. */
+function began(startedAxis: 'Frequency' | 'Amplitude', started: { pointCount: number }) {
+  axis.value = startedAxis
   running.value = true
   phase.value = SweepPhase.DeterminingLevel
   total.value = started.pointCount
@@ -138,16 +183,19 @@ export function useSweep() {
     phase,
     index,
     total,
-    currentFreqHz,
+    axis,
+    viewAxis,
+    currentX,
     generatorAmpDbv,
     error,
     points,
 
-    /** "Point 7/31 · 1.26 kHz" — the progress readout, in the style of metrics.ts's formatAveraging. */
+    /** "Point 7/31 · 1.26 kHz" (or "· 250 mV") — the progress readout, in the style of metrics.ts's formatAveraging. */
     progressLabel: computed(() => {
       if (phase.value === SweepPhase.Idle) return ''
       if (phase.value === SweepPhase.Sweeping && total.value > 0) {
-        return `Point ${Math.min(index.value + 1, total.value)}/${total.value} · ${formatHz(currentFreqHz.value)}`
+        const where = axis.value === 'Amplitude' ? formatVolts(currentX.value) : formatHz(currentX.value)
+        return `Point ${Math.min(index.value + 1, total.value)}/${total.value} · ${where}`
       }
       if (phase.value === SweepPhase.Finished && total.value > 0) {
         return `Finished · ${total.value} points`
@@ -156,12 +204,19 @@ export function useSweep() {
     }),
 
     start,
+    startAmplitude,
     cancel,
     clear,
     refresh,
     ingestPoint,
     ingestProgress,
   }
+}
+
+/** "250 mV" / "1.5 V" — the amplitude axis' counterpart of formatHz. */
+export function formatVolts(volt: number): string {
+  if (!(volt > 0)) return '—'
+  return `${siPrefixed(volt)} V`
 }
 
 /** "1.26 kHz" / "250 Hz" — shared with the small preview charts' own frequency readout. */

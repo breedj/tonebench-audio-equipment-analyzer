@@ -173,8 +173,11 @@ export function freqTickLabels(splits: (number | null)[], min: number, max: numb
   })
 }
 
-/** Plot-area width in CSS pixels — the x scale's two edges are exactly the plot area's two edges. */
-function plotWidthPx(u: uPlot, scaleKey: string, min: number, max: number): number {
+/**
+ * Plot-area width in CSS pixels — the x scale's two edges are exactly the plot area's two edges.
+ * Exported for sweep/xAxis.ts, which reuses this file's tick placement on volt and watt axes.
+ */
+export function plotWidthPx(u: uPlot, scaleKey: string, min: number, max: number): number {
   const width = Math.abs(u.valToPos(max, scaleKey) - u.valToPos(min, scaleKey))
   return Number.isFinite(width) && width > 0 ? width : 800
 }

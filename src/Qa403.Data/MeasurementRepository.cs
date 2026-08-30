@@ -336,13 +336,23 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         long[] resultIds = rows.Select(r => r.ResultId).ToArray();
         var captureRows = await connection.QueryAsync<HeadlineCaptureRowRaw>(
             """
+            -- IFNULL, not a bare subquery and not CAST(... AS REAL): SQLite types a column from the
+            -- values it actually returns, so a correlated subquery that is NULL for every row of a
+            -- result set arrives with no type at all, Dapper materializes it as byte[], and binding
+            -- the record fails with "a parameterless default constructor ... is required" -- an error
+            -- naming nothing that is wrong. generator_dbv is NULL for every single-spectrum result,
+            -- which is most of them, so this is the common path rather than an edge case.
+            -- NoGeneratorLevelDbv stands in for "this capture recorded no level"; see its remarks.
             SELECT c.measurement_result_id AS ResultId, c.id AS CaptureId,
                    (SELECT MIN(m.value) FROM metric m
-                     WHERE m.capture_id = c.id AND m.name = 'fundamental_hz') AS FundamentalHz
+                     WHERE m.capture_id = c.id AND m.name = 'fundamental_hz') AS FundamentalHz,
+                   IFNULL((SELECT MIN(m.value) FROM metric m
+                            WHERE m.capture_id = c.id AND m.name = 'generator_dbv'), @noLevel) AS GeneratorDbv,
+                   c.seq_index AS SeqIndex
             FROM capture c
             WHERE c.measurement_result_id IN @resultIds;
             """,
-            new { resultIds });
+            new { resultIds, noLevel = NoGeneratorLevelDbv });
 
         var capturesByResult = captureRows.ToLookup(c => c.ResultId);
         var headlineCaptureIds = rows.ToDictionary(
@@ -525,8 +535,17 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     private const double HeadlineFundamentalHz = 1000.0;
 
     /// <summary>
+    /// Stands in for "this capture recorded no <c>generator_dbv</c> metric" in the headline query.
+    /// A sentinel rather than NULL because of the Dapper/SQLite typing trap documented at the query
+    /// itself; well below any level a generator can be asked for, so it can never be mistaken for a
+    /// real reading.
+    /// </summary>
+    private const double NoGeneratorLevelDbv = -1.0e9;
+
+    /// <summary>
     /// Picks the capture whose metrics stand for the whole result in the history list: the lowest
-    /// measured fundamental at or above <see cref="HeadlineFundamentalHz"/>.
+    /// measured fundamental at or above <see cref="HeadlineFundamentalHz"/>, or -- for a sweep whose
+    /// axis is the level rather than the frequency -- its highest level.
     /// </summary>
     /// <remarks>
     /// A sweep grid rarely lands exactly on 1 kHz, so "the first point at or above it" is the rule
@@ -535,6 +554,13 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     /// ends below 1 kHz (say 20 Hz to 500 Hz) falls back to its highest point, the nearest thing it
     /// has, rather than reporting nothing.
     /// <para>
+    /// An amplitude sweep measures every point at the same frequency, so that rule would silently
+    /// return its <em>first</em> capture -- the 1 mV point, whose THD is the analyzer's own residual
+    /// and not a figure anyone quotes a DUT by. Such a sweep is recognised by its captures carrying
+    /// more than one distinct <c>generator_dbv</c> (a frequency sweep holds the level constant and a
+    /// single spectrum has no such metric at all), and headlines its highest level instead.
+    /// </para>
+    /// <para>
     /// Returns null when no capture carries a <c>fundamental_hz</c> metric at all -- a spectrum
     /// saved with no fundamental found in band -- and the caller keeps the seq_index 0 capture it
     /// already has.
@@ -542,7 +568,13 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     /// </remarks>
     private static long? SelectHeadlineCapture(IEnumerable<HeadlineCaptureRowRaw> captures)
     {
-        var measured = captures
+        var all = captures.ToList();
+
+        var levels = all.Where(c => c.GeneratorDbv > NoGeneratorLevelDbv).ToList();
+        if (levels.Select(c => c.GeneratorDbv).Distinct().Count() > 1)
+            return levels.OrderBy(c => c.GeneratorDbv).ThenBy(c => c.SeqIndex).Last().CaptureId;
+
+        var measured = all
             .Where(c => c.FundamentalHz is not null)
             .OrderBy(c => c.FundamentalHz!.Value)
             .ToList();
@@ -559,7 +591,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     // FundamentalHz is nullable: it is a correlated MIN() over the metric rows, which is NULL for a
     // capture that recorded no fundamental. Both channels of one capture measure the same
     // frequency, so MIN() collapses them without choosing between them.
-    private sealed record HeadlineCaptureRowRaw(long ResultId, long CaptureId, double? FundamentalHz);
+    private sealed record HeadlineCaptureRowRaw(long ResultId, long CaptureId, double? FundamentalHz, double GeneratorDbv, long SeqIndex);
 
     private sealed record SpectrumRowRaw(long Id, string Window, double S1, double S2, double EnbwHz, double BinSizeHz, string Norm, long ByteLength);
 }

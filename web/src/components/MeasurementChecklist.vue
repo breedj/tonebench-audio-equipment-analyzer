@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
 import { dashAttr, sweepOverlayDash } from '../measurements/sweepOverlayStyles'
-import { THD_VS_FREQUENCY_KIND } from '../measurements/kinds'
+import { isSweepKind } from '../measurements/kinds'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const emit = defineEmits<{ error: [message: string] }>()
@@ -36,7 +36,7 @@ function isChecked(resultId: number): boolean {
  * Undefined on the FFT screen: those overlays are told apart by colour instead, and OverlayList
  * already renders their swatches.
  */
-const showsSweepDash = computed(() => currentKind.value === THD_VS_FREQUENCY_KIND)
+const showsSweepDash = computed(() => isSweepKind(currentKind.value))
 
 function sweepDashFor(resultId: number): string | undefined {
   return dashAttr(sweepOverlayDash(overlays.value, resultId))

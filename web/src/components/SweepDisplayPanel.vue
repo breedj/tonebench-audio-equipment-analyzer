@@ -1,16 +1,22 @@
 <script setup lang="ts">
 /**
- * Display options for the THD-vs-frequency chart. Everything here is a pure view preference —
+ * Display options for the sweep chart, on either axis. Everything here is a pure view preference —
  * nothing reaches the device or re-runs a sweep, so all of it stays enabled while one is running.
  *
  * Every trace has its own checkbox, and this panel is the only place they can be switched: the
  * chart's legend is read-only, so the checkbox and the chart can never disagree. Same arrangement
  * as the previous app's Graph data box.
+ *
+ * The `xAxis` model is what tells the two screens apart. It is 'frequency' on the THD-vs-frequency
+ * screen, where it never changes and its selector is hidden; on the amplitude screen it is one of
+ * the three DUT-referred choices and the user picks between them here.
  */
 
+import { computed } from 'vue'
 import { useSweep } from '../composables/useSweep'
 import { useMeasurements } from '../composables/useMeasurements'
 import { percentToDb } from '../sweep/points'
+import { AMPLITUDE_X_AXES, sweepXLabel, sweepXUnit, sweepXValue, type SweepXAxis } from '../sweep/xAxis'
 import type { ThdSweepPoint } from '../api/client'
 import CollapsibleSection from './CollapsibleSection.vue'
 
@@ -40,13 +46,26 @@ const yMaxPercent = defineModel<number>('yMaxPercent', { required: true })
 const yMinPercent = defineModel<number>('yMinPercent', { required: true })
 const yTopDb = defineModel<number>('yTopDb', { required: true })
 const yBottomDb = defineModel<number>('yBottomDb', { required: true })
-const xFromHz = defineModel<number>('xFromHz', { required: true })
-const xToHz = defineModel<number>('xToHz', { required: true })
+/** X bounds, in whatever unit `xAxis` is in — hertz, volts or watts. */
+const xFrom = defineModel<number>('xFrom', { required: true })
+const xTo = defineModel<number>('xTo', { required: true })
+const xAxis = defineModel<SweepXAxis>('xAxis', { required: true })
+
+/** True on the THD-vs-frequency screen — the one axis with a fixed set of useful bounds. */
+const isFrequencyAxis = computed(() => xAxis.value === 'frequency')
 
 const Y_MAX_OPTIONS = [100, 10, 1]
 const Y_MIN_OPTIONS = [0.1, 0.01, 0.001, 0.0001, 0.00001, 0.000001]
 const X_FROM_OPTIONS = [5, 10, 20, 50, 100, 200, 500]
 const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+
+/**
+ * Smallest x bound the volt/watt axes accept. They are typed rather than picked from a list — the
+ * useful window depends entirely on the DUT (a headphone amp and a 100 W power amp share no
+ * sensible preset, and output power spans microwatts to tens of watts) — so the only rule that has
+ * to be enforced is the one the log scale itself imposes: strictly positive.
+ */
+const X_MIN_VALUE = 1e-9
 
 /** 0.00001 rather than 1e-5 — toString() switches to exponent notation at 1e-7, but 1e-6 is fine. */
 function percentLabel(v: number): string {
@@ -207,7 +226,8 @@ function requestAutofitDistortion() {
   }
 }
 
-function computeFrequencyExtent(): { min: number; max: number } | null {
+/** The measured span along whichever axis is selected — the same sweepXValue the chart plots with. */
+function computeXExtent(): { min: number; max: number } | null {
   const channels = activeChannels()
   if (channels.length === 0) return null
 
@@ -215,9 +235,11 @@ function computeFrequencyExtent(): { min: number; max: number } | null {
   let max = -Infinity
   function consider(pts: ThdSweepPoint[]) {
     for (const p of pts) {
-      if (!channels.includes(p.channel) || !(p.freqHz > 0)) continue
-      if (p.freqHz > max) max = p.freqHz
-      if (p.freqHz < min) min = p.freqHz
+      if (!channels.includes(p.channel)) continue
+      const x = sweepXValue(p, xAxis.value)
+      if (!(x > 0) || !Number.isFinite(x)) continue
+      if (x > max) max = x
+      if (x < min) min = x
     }
   }
   consider(sweepPoints.value)
@@ -226,11 +248,61 @@ function computeFrequencyExtent(): { min: number; max: number } | null {
   return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
 }
 
-function requestAutofitFrequency() {
-  const extent = computeFrequencyExtent()
+/** Down to the next 1/2/5 step below `v` — the same mantissa ladder the log axis ticks on. */
+function roundOutDown(v: number): number {
+  const decade = 10 ** Math.floor(Math.log10(v))
+  const mantissa = v / decade
+  const step = mantissa >= 5 ? 5 : mantissa >= 2 ? 2 : 1
+  return step * decade
+}
+
+/** Up to the next 1/2/5 step above `v`. */
+function roundOutUp(v: number): number {
+  const decade = 10 ** Math.floor(Math.log10(v))
+  const mantissa = v / decade
+  const step = mantissa > 5 ? 10 : mantissa > 2 ? 5 : mantissa > 1 ? 2 : 1
+  return step * decade
+}
+
+function requestAutofitX() {
+  const extent = computeXExtent()
   if (!extent) return
-  xFromHz.value = largestAtMost(X_FROM_OPTIONS, extent.min)
-  xToHz.value = smallestAtLeast(X_TO_OPTIONS, extent.max)
+
+  if (isFrequencyAxis.value) {
+    xFrom.value = largestAtMost(X_FROM_OPTIONS, extent.min)
+    xTo.value = smallestAtLeast(X_TO_OPTIONS, extent.max)
+    return
+  }
+
+  const from = Math.max(X_MIN_VALUE, roundOutDown(extent.min))
+  const to = roundOutUp(extent.max)
+  xFrom.value = from
+  xTo.value = to > from ? to : from * 10
+}
+
+/**
+ * Typed x bounds, clamped on commit. Same `:value` + `@change` shape as the dB fields above, and for
+ * the same two reasons — a defineModel write comes back as a prop next tick, so a clamp written
+ * against the model reads the previous value; and `change` fires on blur/Enter rather than per
+ * keystroke, so the axis does not thrash mid-typing.
+ */
+function commitX(event: Event, current: number, lo: number, hi: number): number {
+  const el = event.target as HTMLInputElement
+  const typed = Number(el.value)
+  const next = Number.isFinite(typed) && typed > 0 ? Math.min(hi, Math.max(lo, typed)) : current
+
+  el.value = String(next)
+  return next
+}
+
+// Neither end may cross the other: a log scale needs from < to, and equal ends are a zero-width
+// axis rather than a chart. A decade of separation is the smallest window worth drawing here.
+function onXFromChange(event: Event) {
+  xFrom.value = commitX(event, xFrom.value, X_MIN_VALUE, xTo.value / 1.5)
+}
+
+function onXToChange(event: Event) {
+  xTo.value = commitX(event, xTo.value, xFrom.value * 1.5, Number.MAX_VALUE)
 }
 </script>
 
@@ -382,31 +454,71 @@ function requestAutofitFrequency() {
       </button>
     </div>
 
+    <!-- Only the amplitude screen has a choice to make: output voltage and output power are what
+         the DUT delivered, input voltage is what it was driven with. -->
+    <div v-if="!isFrequencyAxis" class="flex flex-col gap-1.5 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">X axis</span>
+      <select
+        v-model="xAxis"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="a in AMPLITUDE_X_AXES" :key="a.value" :value="a.value">{{ a.label }}</option>
+      </select>
+    </div>
+
     <div class="flex flex-col gap-1.5 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Frequency range (Hz)</span>
-      <label class="flex items-center justify-between gap-2">
-        From
-        <select
-          v-model.number="xFromHz"
-          class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
-        </select>
-      </label>
-      <label class="flex items-center justify-between gap-2">
-        To
-        <select
-          v-model.number="xToHz"
-          class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
-        </select>
-      </label>
+      <span class="text-neutral-500 dark:text-neutral-400">
+        {{ sweepXLabel(xAxis) }} range ({{ sweepXUnit(xAxis) }})
+      </span>
+      <template v-if="isFrequencyAxis">
+        <label class="flex items-center justify-between gap-2">
+          From
+          <select
+            v-model.number="xFrom"
+            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          >
+            <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
+          </select>
+        </label>
+        <label class="flex items-center justify-between gap-2">
+          To
+          <select
+            v-model.number="xTo"
+            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          >
+            <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
+          </select>
+        </label>
+      </template>
+      <template v-else>
+        <label class="flex items-center justify-between gap-2">
+          From
+          <input
+            :value="xFrom"
+            type="number"
+            step="any"
+            :min="X_MIN_VALUE"
+            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="onXFromChange"
+          />
+        </label>
+        <label class="flex items-center justify-between gap-2">
+          To
+          <input
+            :value="xTo"
+            type="number"
+            step="any"
+            :min="X_MIN_VALUE"
+            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="onXToChange"
+          />
+        </label>
+      </template>
       <button
         type="button"
         class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        title="Fits From/To to the lowest and highest measured frequency, snapped to the enclosing dropdown preset."
-        @click="requestAutofitFrequency"
+        title="Fits From/To to the lowest and highest measured value on this axis."
+        @click="requestAutofitX"
       >
         Autofit
       </button>

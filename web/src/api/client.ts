@@ -462,10 +462,80 @@ export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
   chartYBottomDb?: number | null
 }
 
+/**
+ * Mirrors Qa403.App.Endpoints.ThdAmplitudeSweepStartRequest. Much smaller than its frequency
+ * counterpart because most of that request has no meaning on this axis: the level *is* the swept
+ * variable, so there is no level mode, no adaptive resolution and no noise-floor pass, and the
+ * window / FFT size / sample rate are fixed server-side.
+ */
+export interface ThdAmplitudeSweepStartRequest {
+  /** The one frequency every point is measured at. */
+  fixedFreqHz: number
+  /** Generator amplitude, in volts RMS. At least 0.001 V. */
+  startAmplitudeVolt: number
+  /** Generator amplitude, in volts RMS. At most 7.9 V — the ceiling of the widest output range. */
+  endAmplitudeVolt: number
+  stepsPerOctave: number
+  loadOhms: number
+  processLeft: boolean
+  processRight: boolean
+  averageCount: number
+  /** Capture one generator-off record before the sweep, for the residual the distortion traces sit above. */
+  measureNoiseFloor: boolean
+}
+
+/**
+ * Mirrors Qa403.Data.ThdVsAmplitudeParameters — what a ThdVsAmplitude measurement type stores in
+ * `params_json`. Its own type rather than an extension of the request for the same reason the
+ * frequency sweep's is: the request is what the client asks for, this is what was configured, and
+ * this one also carries the chart's display state.
+ */
+export interface ThdVsAmplitudeParameters {
+  fixedFreqHz: number
+  startAmplitudeVolt: number
+  endAmplitudeVolt: number
+  stepsPerOctave: number
+  loadOhms: number
+  processLeft: boolean
+  processRight: boolean
+  fftSize: number
+  window: WindowType
+  averageCount: number
+  sampleRateHz: number
+  measureNoiseFloor: boolean
+  /** Which quantity the x axis plots. Absent on a type saved before the field existed. */
+  chartXAxis?: SweepXAxisName | null
+  chartUnit?: 'percent' | 'db' | null
+  chartShowNoiseFloor?: boolean | null
+  chartShowMagnitude?: boolean | null
+  chartShowThd?: boolean | null
+  chartShowD2?: boolean | null
+  chartShowD3?: boolean | null
+  chartShowD4?: boolean | null
+  chartShowD5?: boolean | null
+  chartShowD6Plus?: boolean | null
+  chartShowLeft?: boolean | null
+  chartShowRight?: boolean | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartYMaxPercent?: number | null
+  chartYMinPercent?: number | null
+  /** X bounds in the selected axis' own unit — volts or watts. */
+  chartXFrom?: number | null
+  chartXTo?: number | null
+  chartYTopDb?: number | null
+  chartYBottomDb?: number | null
+}
+
+/** The three x-axis choices a THD-vs-amplitude chart offers. Mirrors the old app's E_X_AxisType. */
+export type SweepXAxisName = 'outputVolt' | 'outputWatt' | 'inputVolt'
+
 export interface ThdSweepStarted {
   pointCount: number
-  /** The coherent frequencies the sweep will actually step through, ascending. */
+  /** The coherent frequencies the sweep will actually step through, ascending. One repeated value on the amplitude axis. */
   frequenciesHz: number[]
+  /** The generator levels an amplitude sweep will step through, in volts, ascending. Empty on the frequency axis. */
+  amplitudesVolt: number[]
 }
 
 /** One decimated (x, min, max) trace — mirrors the streaming protocol's SweepPreviewSeries and Qa403.Data.StoredPreviewSeries. */
@@ -490,6 +560,11 @@ export interface ThdSweepPoint {
   harmonicPercent: number[]
   d6PlusPercent: number
   noisePercent: number
+  /**
+   * The generator amplitude this point was played at. Constant across a frequency sweep; the swept
+   * variable — and the "input voltage" x axis — on an amplitude one.
+   */
+  generatorDbv: number
   /** A small decimated spectrum captured alongside this point, in dBV. Null if the pipeline wasn't asked to capture one. */
   previewFft: SweepPreviewSeries | null
   /** A small decimated oscilloscope trace, in volts. Null if not captured. */
@@ -515,8 +590,12 @@ export interface ThdSweepStatus {
   index: number
   total: number
   currentFreqHz: number
-  /** The generator amplitude actually used — solved by probing for the output-referred modes. */
+  /** The generator amplitude actually used — solved by probing for the output-referred modes, or the level of the point being measured on the amplitude axis. */
   generatorAmpDbv: number
+  /** Which quantity the running sweep steps. Mirrors Qa403.App.Services.SweepAxis. */
+  axis: 'Frequency' | 'Amplitude'
+  /** The generator amplitude of the point being measured, in volts. Only moves on the amplitude axis. */
+  currentAmplitudeVolt: number
   error: string | null
   /** Every point measured so far. Present on a finished, cancelled or still-running sweep alike. */
   points: ThdSweepPoint[]
@@ -615,6 +694,10 @@ export const api = {
 
   startThdSweep: (req: ThdSweepStartRequest) =>
     request<ThdSweepStarted>('/sweep/thd-vs-frequency/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  /** The level axis. Cancel/status/clear/save are shared with the frequency sweep — one runner, one sweep at a time. */
+  startThdAmplitudeSweep: (req: ThdAmplitudeSweepStartRequest) =>
+    request<ThdSweepStarted>('/sweep/thd-vs-amplitude/start', { method: 'POST', body: JSON.stringify(req) }),
 
   cancelSweep: () => request<ThdSweepStatus>('/sweep/cancel', { method: 'POST' }),
 

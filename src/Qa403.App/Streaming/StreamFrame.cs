@@ -225,21 +225,22 @@ public static class StreamFrame
     /// 40  f32  powerWatt       -- V1^2 / load; 0 when no load was given
     /// 44  f32  d6PlusPercent   -- 6th harmonic and above, power-summed
     /// 48  f32  noisePercent    -- generator-off residual as a % of this point's fundamental; 0 if the noise pass was skipped
-    /// 52  u32  harmonicCount   -- how many of D2..D5 follow (may be short near Nyquist)
-    /// 56  f32 * harmonicCount  -- D2..D5 as a % of the fundamental
+    /// 52  f32  generatorDbv    -- the level this point was played at; constant on a frequency sweep, the x axis on an amplitude one
+    /// 56  u32  harmonicCount   -- how many of D2..D5 follow (may be short near Nyquist)
+    /// 60  f32 * harmonicCount  -- D2..D5 as a % of the fundamental
     /// ..  u32  fftPreviewCount
     /// ..  (f32 freqHz, f32 dbvMin, f32 dbvMax) * fftPreviewCount  -- see SweepPreviewSeries
     /// ..  u32  scopePreviewCount
     /// ..  (f32 timeS, f32 vMin, f32 vMax) * scopePreviewCount     -- see SweepPreviewSeries
     /// </code>
     /// x0 = the point's frequency (Hz), dx = 0, nPoints = harmonicCount, seq = the point's index in
-    /// the sweep, channel = 0/1. One frame per channel per frequency, so a stereo sweep sends two.
+    /// the sweep, channel = 0/1. One frame per channel per point, so a stereo sweep sends two.
     /// A count of 0 (both preview arrays absent, e.g. <see cref="Qa403.App.Streaming.SpectrumPipelineOptions.CapturePreview"/>
     /// was off) is a valid, empty payload — decoding never assumes either count is nonzero.
     /// </summary>
     public static byte[] EncodeSweepPoint(ThdSweepPoint point, uint pointIndex)
     {
-        const int scalarsAndCountLength = (8 * sizeof(float)) + sizeof(uint);
+        const int scalarsAndCountLength = (9 * sizeof(float)) + sizeof(uint);
         int harmonicCount = point.HarmonicPercent.Count;
         int fftCount = point.PreviewFft?.X.Length ?? 0;
         int scopeCount = point.PreviewScope?.X.Length ?? 0;
@@ -261,6 +262,7 @@ public static class StreamFrame
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.PowerWatt); offset += 4;
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.D6PlusPercent); offset += 4;
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.NoisePercent); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.GeneratorDbv); offset += 4;
         BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)harmonicCount); offset += 4;
 
         foreach (double percent in point.HarmonicPercent)
@@ -291,20 +293,26 @@ public static class StreamFrame
     }
 
     /// <summary>
-    /// Encodes a sweep progress frame: x0 = the frequency currently being measured (Hz, 0 when not
-    /// on a point), dx = the total point count, nPoints = the index reached, seq = the phase as its
-    /// <see cref="ThdSweepPhase"/> ordinal. No payload.
+    /// Encodes a sweep progress frame: x0 = the point currently being measured on the sweep's own
+    /// axis — hertz for a <see cref="SweepAxis.Frequency"/> sweep, generator volts for a
+    /// <see cref="SweepAxis.Amplitude"/> one, and 0 when not on a point — dx = the total point
+    /// count, nPoints = the index reached, seq = the phase as its <see cref="ThdSweepPhase"/>
+    /// ordinal. No payload.
+    ///
+    /// One x slot for two possible units is deliberate: the frame is a progress readout, and the
+    /// client already knows which axis it started (it chose the endpoint). Splitting it into two
+    /// message types would double the decoder for a label.
     ///
     /// The phase rides in <c>seq</c> rather than in <see cref="StreamFlags"/> because it is an
     /// enumeration, not a set of independent bits — a sweep is determining its level, or measuring
     /// the noise floor, or sweeping, never two at once.
     /// </summary>
-    public static byte[] EncodeSweepProgress(int index, int total, double currentFreqHz, ThdSweepPhase phase)
+    public static byte[] EncodeSweepProgress(int index, int total, double currentX, ThdSweepPhase phase)
     {
         byte[] buffer = new byte[HeaderLength];
         WriteHeader(
             buffer, StreamMsgType.SweepProgress, StreamChannel.Left, StreamFlags.None,
-            (uint)phase, (float)currentFreqHz, total, (uint)Math.Max(0, index));
+            (uint)phase, (float)currentX, total, (uint)Math.Max(0, index));
 
         return buffer;
     }
@@ -429,6 +437,7 @@ public static class StreamFrame
         float powerWatt = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
         float d6PlusPercent = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
         float noisePercent = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float generatorDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
         uint harmonicCount = BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
 
         var harmonicPercent = new float[harmonicCount];
@@ -443,7 +452,7 @@ public static class StreamFrame
 
         return new DecodedSweepPoint(
             header.X0, header.Channel, header.Seq, thdPercent, thdNPercent, snrDb, fundamentalDbv,
-            gainDb, powerWatt, d6PlusPercent, noisePercent, harmonicPercent, previewFft, previewScope);
+            gainDb, powerWatt, d6PlusPercent, noisePercent, generatorDbv, harmonicPercent, previewFft, previewScope);
     }
 
     private static SweepPreviewSeries? ReadSweepPreview(ReadOnlySpan<byte> frame, ref int offset)
@@ -490,7 +499,8 @@ public readonly record struct DecodedMeters(
 public readonly record struct DecodedSweepPoint(
     float FreqHz, StreamChannel Channel, uint PointIndex,
     float ThdPercent, float ThdNPercent, float SnrDb, float FundamentalDbv,
-    float GainDb, float PowerWatt, float D6PlusPercent, float NoisePercent, float[] HarmonicPercent,
-    SweepPreviewSeries? PreviewFft, SweepPreviewSeries? PreviewScope);
+    float GainDb, float PowerWatt, float D6PlusPercent, float NoisePercent, float GeneratorDbv,
+    float[] HarmonicPercent, SweepPreviewSeries? PreviewFft, SweepPreviewSeries? PreviewScope);
 
-public readonly record struct DecodedSweepProgress(int Index, int Total, float CurrentFreqHz, ThdSweepPhase Phase);
+/// <param name="CurrentX">The point being measured, in the sweep axis' own unit — Hz or generator volts.</param>
+public readonly record struct DecodedSweepProgress(int Index, int Total, float CurrentX, ThdSweepPhase Phase);

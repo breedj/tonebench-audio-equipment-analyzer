@@ -435,6 +435,19 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
 
     public void SetAutoRangeStepDownDelayMs(double delayMs) => device.AutoRangeStepDownDelayMs = delayMs;
 
+    /// <summary>
+    /// Whether hardware autoranging may step to a *more sensitive* range on its own. Null with the
+    /// same convention as <see cref="AutoRangeEnabled"/>.
+    ///
+    /// <para>Deliberately not on <see cref="DeviceStatus"/> and not exposed over the API: this is
+    /// not a user setting but a scoped suppression <see cref="ThdSweepRunner"/> holds for the length
+    /// of a sweep, restoring whatever it found. A checkbox for it would be a second, slower way to
+    /// express what the Auto checkbox already covers, and one a sweep would then have to fight.</para>
+    /// </summary>
+    public bool? AutoRangeStepDownEnabled => device is SimulatedDevice ? null : device.AutoRangeStepDownEnabled;
+
+    public void SetAutoRangeStepDownEnabled(bool enabled) => device.AutoRangeStepDownEnabled = enabled;
+
     public async Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {
         await _sessionLock.WaitAsync(ct).ConfigureAwait(false);

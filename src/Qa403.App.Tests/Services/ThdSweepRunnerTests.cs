@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
+using Qa403.Device;
 using Qa403.Device.Simulation;
 using Qa403.Dsp;
 
@@ -60,9 +61,10 @@ public class ThdSweepRunnerTests
 
     private sealed record Harness(ThdSweepRunner Runner, DeviceSessionService Session, SpectrumPipeline Pipeline);
 
-    private static async Task<Harness> CreateAsync()
+    private static Task<Harness> CreateAsync() => CreateAsync(new SimulatedDevice(randomSeed: 1));
+
+    private static async Task<Harness> CreateAsync(IAnalyzerDevice device)
     {
-        var device = new SimulatedDevice(randomSeed: 1);
         var hub = new SpectrumBroadcastHub();
         var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
         {
@@ -662,5 +664,110 @@ public class ThdSweepRunnerTests
         var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
         Assert.Equal("FixedFreqHz", ex.ParamName);
         Assert.Contains("16384", ex.Message);
+    }
+
+    /// <summary>
+    /// Records what a sweep does to the input range and to autorange step-down. Wraps the simulator
+    /// through <see cref="FakeAnalyzerDevice"/> rather than using it directly because the simulator
+    /// reports <c>AutoRangeEnabled == false</c> — it has no ranger — and a sweep reads that flag as
+    /// "the user is driving the range by hand" and leaves the range alone.
+    /// </summary>
+    private sealed class RangeRecordingDevice : FakeAnalyzerDevice
+    {
+        public List<double> InputRangeWrites { get; } = [];
+
+        public List<bool> StepDownWrites { get; } = [];
+
+        public override bool AutoRangeStepDownEnabled
+        {
+            get => base.AutoRangeStepDownEnabled;
+            set
+            {
+                StepDownWrites.Add(value);
+                base.AutoRangeStepDownEnabled = value;
+            }
+        }
+
+        public override Task SetInputRangeAsync(double dbv, CancellationToken ct)
+        {
+            InputRangeWrites.Add(dbv);
+            return base.SetInputRangeAsync(dbv, ct);
+        }
+    }
+
+    /// <summary>
+    /// Feed-forward ranging on the amplitude axis: each point's range comes from the previous
+    /// point's measured peak plus the generator step, so it is programmed between points instead of
+    /// being discovered mid-record by the ranger. Two properties are asserted, and the second is the
+    /// one that stops the hunting the previous app's <c>Math.Max(predicted, newAttenuation)</c> also
+    /// stopped: the range only ever moves *up* within one amplitude sweep.
+    /// </summary>
+    [Fact]
+    public async Task AmplitudeSweep_PredictsTheInputRangePerPointAndNeverRangesBackDown()
+    {
+        var device = new RangeRecordingDevice();
+        var harness = await CreateAsync(device);
+
+        // ConnectAsync pushes the default ranges to the device; only what the sweep itself does is
+        // under test here.
+        device.InputRangeWrites.Clear();
+
+        await harness.Runner.StartAsync(AmplitudeRequest(startVolt: 0.01, endVolt: 1.0, stepsPerOctave: 1), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.NotEmpty(device.InputRangeWrites);
+
+        for (int i = 1; i < device.InputRangeWrites.Count; i++)
+        {
+            Assert.True(
+                device.InputRangeWrites[i] > device.InputRangeWrites[i - 1],
+                $"input range went {device.InputRangeWrites[i - 1]} -> {device.InputRangeWrites[i]} dBV: "
+                    + "an amplitude sweep must never range back down");
+        }
+
+        // The last point is a 0 dBV tone, which needs the 6 dBV range once the 5 dB of THD headroom
+        // is added. Reading it off the device, not off a cached copy of what was asked for.
+        Assert.True(
+            harness.Session.InputRangeDbv >= 6.0,
+            $"ended on the {harness.Session.InputRangeDbv} dBV range, too sensitive for a 0 dBV tone");
+    }
+
+    /// <summary>
+    /// The prediction is only worth anything if the range it programs stays programmed, and with
+    /// step-down live it does not: anything more than HeadroomDb under the range is walked back down
+    /// one step per StepDownDelayMs. So the sweep suppresses that half for its duration — and has to
+    /// put it back, or the live view is left with a ranger that can only ever get less sensitive.
+    /// </summary>
+    [Fact]
+    public async Task AmplitudeSweep_SuppressesAutorangeStepDownAndRestoresItAfterwards()
+    {
+        var device = new RangeRecordingDevice();
+        var harness = await CreateAsync(device);
+
+        await harness.Runner.StartAsync(AmplitudeRequest(startVolt: 0.01, endVolt: 0.1, stepsPerOctave: 1), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+
+        Assert.Equal([false, true], device.StepDownWrites);
+        Assert.True(device.AutoRangeStepDownEnabled);
+    }
+
+    /// <summary>
+    /// With the Auto checkbox off the user has picked a range deliberately. A sweep reprogramming it
+    /// under them would be the same surprise autoranging itself was before that checkbox existed —
+    /// so prediction stands down entirely, and there is then nothing to suppress either.
+    /// </summary>
+    [Fact]
+    public async Task AmplitudeSweep_WithAutorangeOff_LeavesTheUsersInputRangeAlone()
+    {
+        var device = new RangeRecordingDevice { AutoRangeEnabled = false };
+        var harness = await CreateAsync(device);
+        device.InputRangeWrites.Clear();
+
+        await harness.Runner.StartAsync(AmplitudeRequest(startVolt: 0.01, endVolt: 1.0, stepsPerOctave: 1), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+
+        Assert.Empty(device.InputRangeWrites);
+        Assert.Empty(device.StepDownWrites);
     }
 }

@@ -52,7 +52,7 @@ internal class FakeAnalyzerDevice : IAnalyzerDevice
         return Task.FromResult(false);
     }
 
-    public Task SetInputRangeAsync(double dbv, CancellationToken ct) =>
+    public virtual Task SetInputRangeAsync(double dbv, CancellationToken ct) =>
         Unplugged ? FailAsLost("input range write") : _inner.SetInputRangeAsync(dbv, ct);
 
     public Task SetOutputRangeAsync(double dbv, CancellationToken ct) =>
@@ -65,9 +65,19 @@ internal class FakeAnalyzerDevice : IAnalyzerDevice
 
     public double InputRangeDbv => _inner.InputRangeDbv;
 
-    public bool AutoRangeEnabled { get => _inner.AutoRangeEnabled; set => _inner.AutoRangeEnabled = value; }
+    /// <summary>
+    /// Autoranging state is held here rather than delegated to <see cref="_inner"/>: the simulator
+    /// hardwires <see cref="SimulatedDevice.AutoRangeEnabled"/> to false because it has no ranger,
+    /// while this stands in for a device that does — and callers key off that flag to decide whether
+    /// they may touch the input range at all (see <c>ThdSweepRunner</c>). Defaults match
+    /// <see cref="Qa40xUsbDevice"/>'s.
+    /// </summary>
+    public bool AutoRangeEnabled { get; set; } = true;
 
-    public double AutoRangeStepDownDelayMs { get => _inner.AutoRangeStepDownDelayMs; set => _inner.AutoRangeStepDownDelayMs = value; }
+    // The hardware default, spelled out: Qa40xAutoRanger is internal to Qa403.Device.
+    public double AutoRangeStepDownDelayMs { get; set; } = 1000.0;
+
+    public virtual bool AutoRangeStepDownEnabled { get; set; } = true;
 
     public long DroppedRxChunks => _inner.DroppedRxChunks;
 

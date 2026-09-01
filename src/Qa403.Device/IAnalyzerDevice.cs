@@ -59,6 +59,16 @@ public interface IAnalyzerDevice
     double AutoRangeStepDownDelayMs { get; set; }
 
     /// <summary>
+    /// Whether autoranging may step to a *more sensitive* range on its own. Clearing this while
+    /// <see cref="AutoRangeEnabled"/> stays set leaves clip protection live but makes an explicit
+    /// <see cref="SetInputRangeAsync"/> stick — what a caller that predicts the range itself needs,
+    /// since with step-down live any range set above the signal is walked back down. Settable while
+    /// connected; ignored (but harmlessly stored) on devices with no autoranging of their own.
+    /// See <see cref="Hardware.Qa40xAutoRanger.StepDownEnabled"/>.
+    /// </summary>
+    bool AutoRangeStepDownEnabled { get; set; }
+
+    /// <summary>
     /// RX chunks discarded since connect because the consumer could not keep up, cumulative across
     /// streams. Not a cosmetic statistic: a dropped chunk is a hole in the sample stream, so the next
     /// FFT record is spliced — which smears tones into skirts and lifts the broadband noise floor.

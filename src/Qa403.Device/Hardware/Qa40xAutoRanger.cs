@@ -89,6 +89,24 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     public double StepDownDelayMs { get; set; } = DefaultStepDownDelayMs;
 
     /// <summary>
+    /// Whether <see cref="Evaluate"/> may return <see cref="RangeStepDecision.StepDown"/> at all.
+    /// Clearing this leaves the step-*up* (clip protection) path fully live, which is the only
+    /// combination that lets a caller program the input range itself and have it stay programmed:
+    /// with both directions enabled, any explicit <c>SetInputRangeAsync</c> to a range more than
+    /// <see cref="HeadroomDb"/> above the signal is walked straight back down one step per
+    /// <see cref="StepDownDelayMs"/> (see <c>Qa40xUsbDevice.AutoRangeEnabled</c>'s historical note),
+    /// and disabling autoranging outright gives up clip protection instead.
+    ///
+    /// <para>That combination is what a sweep wants. <c>ThdSweepRunner</c> predicts each point's
+    /// level from the previous point's measurement and programs the range for it *between* points,
+    /// where the change rides along with the generator change's flush and costs nothing; the ranger
+    /// stays on purely as the backstop for a DUT that turns out louder than predicted. Reactive
+    /// step-down during a sweep is not just redundant there, it is harmful — it undoes the
+    /// prediction, and every step punches a ~110 ms hole in the sample stream mid-point.</para>
+    /// </summary>
+    public bool StepDownEnabled { get; set; } = true;
+
+    /// <summary>
     /// TODO: no relay settling time is documented anywhere in docs/protocol.md for register 5 —
     /// none of the three reference trees state one either (qa40x-rs-main's internal timing
     /// constant is deliberately not used here per the task instruction: if protocol.md doesn't
@@ -124,7 +142,7 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
         // StepDownHysteresisDb below the lower range's *own* step-up threshold, not level with it —
         // level with it is the same number in both directions, which is a ranger that hunts. See
         // StepDownHysteresisDb.
-        if (currentIndex > 0 && peakDbv <= inputRangesDbv[currentIndex - 1] - HeadroomDb - StepDownHysteresisDb)
+        if (StepDownEnabled && currentIndex > 0 && peakDbv <= inputRangesDbv[currentIndex - 1] - HeadroomDb - StepDownHysteresisDb)
         {
             _underRangeElapsedMs += blockDurationMs;
             if (_underRangeElapsedMs >= StepDownDelayMs)

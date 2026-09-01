@@ -93,6 +93,9 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     /// </summary>
     public double AutoRangeStepDownDelayMs { get; set; } = Hardware.Qa40xAutoRanger.DefaultStepDownDelayMs;
 
+    /// <summary>Stored and never read, for the same reason as <see cref="AutoRangeStepDownDelayMs"/> — there is no ranger here to suppress.</summary>
+    public bool AutoRangeStepDownEnabled { get; set; } = true;
+
     public Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {
         RequireSupportedRange(Capabilities.InputRangesDbv, dbv, nameof(dbv));

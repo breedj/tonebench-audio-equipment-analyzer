@@ -200,6 +200,51 @@ public class Qa40xAutoRangerTests
                 + $"range's own step-up threshold ({stepUpAtLowerRange}), or the ranger hunts");
     }
 
+    /// <summary>
+    /// The half a caller can turn off is the step-*down* half, and only that half. A sweep that
+    /// predicts each point's range needs its programmed range to survive — with step-down live,
+    /// anything more than HeadroomDb under the range is walked back down one step per delay, which
+    /// is the prediction being undone a second at a time — while still needing clip protection for
+    /// a DUT that turns out louder than predicted.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WithStepDownDisabled_HoldsUnderRangeButStillStepsUpOnClip()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv) { StepDownEnabled = false };
+        const double lowPeakDbv = -10.0; // Well under range 12's next step down (6 - 5 - 2 = -1 dBV).
+
+        // Far longer than StepDownDelayMs: it is the flag, not the timer, holding this.
+        for (int i = 0; i < 10; i++)
+            Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs));
+
+        // Same ranger, same instant: the clip backstop is untouched.
+        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 8.0, BlockDurationMs);
+
+        Assert.Equal(RangeStepDecision.StepUp, decision);
+        Assert.Equal(18.0, ranger.NextRangeDbv(12.0, decision));
+    }
+
+    /// <summary>
+    /// Re-enabling must not inherit the under-range time that accumulated while it was off —
+    /// otherwise the first block after a sweep ends steps down immediately, on a second of "quiet"
+    /// that was never observed as such.
+    /// </summary>
+    [Fact]
+    public void Evaluate_ReEnablingStepDown_StartsTheDelayAfresh()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv) { StepDownEnabled = false };
+        const double lowPeakDbv = -10.0;
+
+        for (int i = 0; i < 10; i++)
+            ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs);
+
+        ranger.StepDownEnabled = true;
+
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 400 ms
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 800 ms
+        Assert.Equal(RangeStepDecision.StepDown, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 1200 ms
+    }
+
     [Fact]
     public void SettleFrameCount_DerivesFromTheDocumentedPlaceholderMs()
     {

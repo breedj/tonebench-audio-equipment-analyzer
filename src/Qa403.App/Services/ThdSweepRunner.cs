@@ -227,6 +227,7 @@ public sealed class ThdSweepRunner(
     {
         var savedOptions = pipeline.Options;
         bool startedAcquisition = false;
+        bool stepDownSuppressed = false;
 
         // Set only once everything below has been unwound -- see the end of the finally block.
         var terminalPhase = ThdSweepPhase.Failed;
@@ -274,11 +275,59 @@ public sealed class ThdSweepRunner(
             // The level probe means nothing when the level is the thing being stepped -- there is no
             // single amplitude to solve for -- so it is skipped explicitly rather than left to lean
             // on its own early return. The noise-floor pass is axis-independent and runs on both.
-            double generatorAmpDbv = request.Axis == SweepAxis.Amplitude
-                ? VoltToDbv(request.StartAmplitudeVolt)
-                : await ResolveGeneratorAmplitudeAsync(request, ct);
+            //
+            // The probe's own last reading doubles as the seed for the range prediction below: it is
+            // a measurement of this DUT's output at a known generator level, which is exactly what
+            // the predictor is. Its generator level comes back with it rather than being assumed to
+            // be the returned one -- a probe that runs out of iterations returns a level it has not
+            // measured at, and pairing that with the earlier peak would offset every prediction.
+            double generatorAmpDbv;
+            double predictorPeakDbv = double.NegativeInfinity;
+            double predictorGenDbv;
+
+            if (request.Axis == SweepAxis.Amplitude)
+            {
+                generatorAmpDbv = VoltToDbv(request.StartAmplitudeVolt);
+                predictorGenDbv = generatorAmpDbv;
+            }
+            else
+            {
+                (generatorAmpDbv, predictorPeakDbv, predictorGenDbv) = await ResolveGeneratorAmplitudeAsync(request, ct);
+            }
+
             SetGeneratorAmpDbv(generatorAmpDbv);
 
+            // Manual range control means manual: with the Auto checkbox off the user has picked a
+            // range deliberately, and a sweep quietly reprogramming it would be the same class of
+            // surprise autoranging used to be before that checkbox existed.
+            bool predictionOwnsRange = session.AutoRangeEnabled != false;
+
+            // Never steps back down within one sweep on the amplitude axis -- see
+            // ApplyPredictedInputRangeAsync.
+            double rangeRatchetDbv = double.NegativeInfinity;
+
+            // Suppressing step-down is what makes a programmed range stay programmed; it is deferred
+            // until there is something to predict *from*, so a sweep with no probe still gets a
+            // freely-ranging first point to seed itself off instead of being pinned to whatever
+            // range happened to be left over from the last measurement.
+            void TakeOverRangingFromStepDown()
+            {
+                if (stepDownSuppressed || !predictionOwnsRange || session.AutoRangeStepDownEnabled is not true)
+                    return;
+
+                session.SetAutoRangeStepDownEnabled(false);
+                stepDownSuppressed = true;
+                logger.LogInformation(
+                    "Input range is now predicted per point from the measured level; autorange step-down "
+                        + "suppressed for the rest of the sweep (step-up stays live as the clip backstop)");
+            }
+
+            if (!double.IsNegativeInfinity(predictorPeakDbv))
+                TakeOverRangingFromStepDown();
+
+            // Deliberately after the suppression above: with step-down live, a generator-off pass is
+            // the one thing guaranteed to walk the range down to the most sensitive setting, so the
+            // floor would be measured on a range no sweep point then runs at.
             var noiseVrms = await MeasureNoiseFloorAsync(request, ct);
 
             SetPhase(ThdSweepPhase.Sweeping);
@@ -297,6 +346,24 @@ public sealed class ThdSweepRunner(
 
                 SetProgress(i, step.FrequencyHz, DbvToVolt(stepAmpDbv));
                 BroadcastProgress(i, steps.Length, ProgressX(request, step.FrequencyHz, stepAmpDbv), ThdSweepPhase.Sweeping);
+
+                // Feed-forward ranging. What this point will measure is already known well enough to
+                // range for: the previous point measured this DUT's output, and while it is linear a
+                // generator step of x dB moves that output by x dB. Programming the range from that
+                // *here* puts the change between points, where it rides along with the generator
+                // change's own flush and costs nothing -- rather than leaving it to be discovered
+                // mid-record by the ranger, which costs a ~110 ms hole and a re-captured point.
+                //
+                // Where linearity fails it fails safe: past clipping the real output is lower than
+                // predicted, so the range is coarser than ideal -- a slightly higher floor, never a
+                // clipped record. The opposite direction (a DUT louder than predicted -- a gain peak
+                // between two frequencies, an amp going unstable) is what the ranger's step-up half
+                // is still there for.
+                if (predictionOwnsRange && !double.IsNegativeInfinity(predictorPeakDbv))
+                {
+                    rangeRatchetDbv = await ApplyPredictedInputRangeAsync(
+                        predictorPeakDbv + (stepAmpDbv - predictorGenDbv), request.Axis, rangeRatchetDbv, ct);
+                }
 
                 // Bracketed around the capture, not sampled after the run. A hole in the sample stream
                 // splices whatever FFT record spans it, so the question that matters is which point's
@@ -326,6 +393,17 @@ public sealed class ThdSweepRunner(
                         i + 1, steps.Length, step.FrequencyHz, step.FftSize, dropsDuring);
                 }
 
+                // The predictor is the measured peak, not the fundamental: it is the same
+                // peak-to-RMS-equivalent "Pk dBV" quantity Qa40xAutoRanger evaluates, so prediction
+                // and the backstop that catches its mistakes agree on what "too hot" means.
+                double pointPeakDbv = MeasuredPeakDbv(snapshots);
+                if (!double.IsNegativeInfinity(pointPeakDbv))
+                {
+                    predictorPeakDbv = pointPeakDbv;
+                    predictorGenDbv = stepAmpDbv;
+                    TakeOverRangingFromStepDown();
+                }
+
                 double inputRangeAfter = session.InputRangeDbv;
                 if (Math.Abs(inputRangeAfter - inputRangeBefore) > 0.01)
                 {
@@ -334,6 +412,12 @@ public sealed class ThdSweepRunner(
                             + "{FromDbv:0.#} -> {ToDbv:0.#} dBV during the capture, so the point was re-measured at "
                             + "the new range. Its residual is that range's, not the one the noise-floor pass used",
                         i + 1, steps.Length, stepAmpDbv, inputRangeBefore, inputRangeAfter);
+
+                    // With prediction running this is the backstop firing, i.e. the hardware saying
+                    // the prediction was low. The ratchet has to learn from it, or the next point
+                    // predicts its way straight back down onto a range this DUT has already overrun.
+                    if (request.Axis == SweepAxis.Amplitude)
+                        rangeRatchetDbv = Math.Max(rangeRatchetDbv, inputRangeAfter);
                 }
 
                 foreach (var point in BuildPoints(step.FrequencyHz, stepAmpDbv, request, snapshots, noiseVrms))
@@ -368,6 +452,21 @@ public sealed class ThdSweepRunner(
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Could not silence the generator after the sweep");
+            }
+
+            // Before the acquisition stops, and unconditionally: the suppression is scoped to this
+            // sweep, and leaving it set would hand the live view a ranger that can only ever get
+            // less sensitive — indistinguishable from a stuck range, and only fixable by a restart.
+            if (stepDownSuppressed)
+            {
+                try
+                {
+                    session.SetAutoRangeStepDownEnabled(true);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not restore autorange step-down after the sweep");
+                }
             }
 
             if (startedAcquisition)
@@ -489,10 +588,13 @@ public sealed class ThdSweepRunner(
     /// for the output-referred modes it is solved by probing at 1 kHz, exactly as the previous app
     /// did: measure what comes back, correct the generator by the shortfall, repeat.
     /// </summary>
-    private async Task<double> ResolveGeneratorAmplitudeAsync(ThdSweepRequest request, CancellationToken ct)
+    private async Task<(double GenDbv, double PeakDbv, double PeakAtGenDbv)> ResolveGeneratorAmplitudeAsync(
+        ThdSweepRequest request, CancellationToken ct)
     {
+        // Nothing was measured, so there is nothing to seed the range predictor with — the first
+        // sweep point measures at whatever range is set and seeds it itself.
         if (request.LevelMode == ThdSweepLevelMode.GeneratorVoltage)
-            return request.LevelDbv;
+            return (request.LevelDbv, double.NegativeInfinity, request.LevelDbv);
 
         SetPhase(ThdSweepPhase.DeterminingLevel);
         BroadcastProgress(0, 0, ProbeFrequencyHz, ThdSweepPhase.DeterminingLevel);
@@ -518,12 +620,21 @@ public sealed class ThdSweepRunner(
         var probeTone = CoherentFrequency.Nearest(ProbeFrequencyHz, request.EffectiveSampleRateHz, probeFftSize);
         double genDbv = ProbeStartDbv;
 
+        // Tracked as a pair: the peak, and the generator level it was measured at. The loop can exit
+        // having just applied an unmeasured correction, and a peak paired with the wrong generator
+        // level is a constant offset on every prediction the sweep then makes.
+        double peakDbv = double.NegativeInfinity;
+        double peakAtGenDbv = genDbv;
+
         for (int i = 0; i < MaxProbeIterations; i++)
         {
             ct.ThrowIfCancellationRequested();
 
             var snapshots = await CaptureWithStimulusAsync(
                 ToneConfig(probeTone.FrequencyHz, genDbv, request), request, probeFftSize, ct);
+
+            peakDbv = MeasuredPeakDbv(snapshots);
+            peakAtGenDbv = genDbv;
 
             double measuredDbv = MeasuredFundamentalDbv(snapshots);
             if (double.IsNegativeInfinity(measuredDbv))
@@ -555,7 +666,7 @@ public sealed class ThdSweepRunner(
             SetGeneratorAmpDbv(genDbv);
         }
 
-        return genDbv;
+        return (genDbv, peakDbv, peakAtGenDbv);
     }
 
     /// <summary>
@@ -578,11 +689,65 @@ public sealed class ThdSweepRunner(
         if (ranges.Count == 0)
             return;
 
-        double wanted = expectedLevelDbv + InputRangeHeadroomDb;
-        double selected = ranges.Where(r => r >= wanted).DefaultIfEmpty(ranges.Max()).Min();
-
+        double selected = SelectInputRange(ranges, expectedLevelDbv);
         if (Math.Abs(selected - session.InputRangeDbv) > 0.01)
             await session.SetInputRangeAsync(selected, ct);
+    }
+
+    /// <summary>
+    /// Programs the range for a level this sweep has predicted rather than measured, and returns the
+    /// ratchet floor to carry into the next point.
+    ///
+    /// <para>On the amplitude axis the selection is monotone — never a more sensitive range than one
+    /// already used in this sweep, which is the previous WinForms app's
+    /// <c>newAttenuation = Math.Max(predicted, newAttenuation)</c>
+    /// (<c>frmThdAmplitude.cs</c>). An ascending amplitude ladder needs the range to move one way
+    /// only, and pinning that removes the last source of hunting: without it a point that reads low
+    /// (a compressing DUT, a mis-seeded predictor) drops the range, and the next point's step-up
+    /// backstop puts it straight back, at the cost of a hole in the stream each way.</para>
+    ///
+    /// <para>Deliberately not applied on the frequency axis. Gain there is not monotone — a
+    /// transformer resonance or an HF peak is a bump in the middle of the sweep — so a ratchet would
+    /// hold every later point at the range one peak needed and give away sensitivity across the rest
+    /// of the response. Following the previous point's measurement is what tracks that curve.</para>
+    /// </summary>
+    private async Task<double> ApplyPredictedInputRangeAsync(
+        double predictedPeakDbv, SweepAxis axis, double ratchetFloorDbv, CancellationToken ct)
+    {
+        var ranges = session.Capabilities.InputRangesDbv;
+        if (ranges.Count == 0)
+            return ratchetFloorDbv;
+
+        double selected = SelectInputRange(ranges, predictedPeakDbv);
+
+        if (axis == SweepAxis.Amplitude)
+        {
+            selected = Math.Max(selected, ratchetFloorDbv);
+            ratchetFloorDbv = selected;
+        }
+
+        if (Math.Abs(selected - session.InputRangeDbv) > 0.01)
+        {
+            logger.LogDebug(
+                "Predicted peak {PredictedDbv:0.##} dBV for the next point — input range {FromDbv:0.#} -> {ToDbv:0.#} dBV",
+                predictedPeakDbv, session.InputRangeDbv, selected);
+
+            await session.SetInputRangeAsync(selected, ct);
+        }
+
+        return ratchetFloorDbv;
+    }
+
+    /// <summary>
+    /// The lowest range in <paramref name="ranges"/> that still leaves
+    /// <see cref="InputRangeHeadroomDb"/> above <paramref name="expectedLevelDbv"/>, or the largest
+    /// range offered when nothing fits. Same ladder and same headroom the device's own ranger uses,
+    /// which is what lets the two disagree only about *when*, never about *where*.
+    /// </summary>
+    private static double SelectInputRange(IReadOnlyList<double> ranges, double expectedLevelDbv)
+    {
+        double wanted = expectedLevelDbv + InputRangeHeadroomDb;
+        return ranges.Where(r => r >= wanted).DefaultIfEmpty(ranges.Max()).Min();
     }
 
     /// <summary>
@@ -735,6 +900,23 @@ public sealed class ThdSweepRunner(
         {
             if (snapshot.Meters is { } meters)
                 best = Math.Max(best, meters.FundamentalDbv);
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// The largest time-domain peak level any measured channel saw, in the same "Pk dBV"
+    /// (peak volts / sqrt(2)) convention <c>Qa40xAutoRanger</c> compares against — one input range
+    /// serves both channels, so the louder one decides. Negative infinity when nothing was measured.
+    /// </summary>
+    private static double MeasuredPeakDbv(SpectrumSnapshot[] snapshots)
+    {
+        double best = double.NegativeInfinity;
+        foreach (var snapshot in snapshots)
+        {
+            if (snapshot.Meters is { } meters)
+                best = Math.Max(best, meters.PeakDbv);
         }
 
         return best;

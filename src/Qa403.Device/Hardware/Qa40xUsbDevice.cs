@@ -174,6 +174,24 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         }
     }
 
+    /// <summary>
+    /// Same before/after-connect arrangement as <see cref="_autoRangeStepDownDelayMs"/>: the live
+    /// source of truth is the ranger's own property once one exists.
+    /// </summary>
+    private bool _autoRangeStepDownEnabled = true;
+
+    /// <inheritdoc />
+    public bool AutoRangeStepDownEnabled
+    {
+        get => _autoRanger?.StepDownEnabled ?? _autoRangeStepDownEnabled;
+        set
+        {
+            _autoRangeStepDownEnabled = value;
+            if (_autoRanger is not null)
+                _autoRanger.StepDownEnabled = value;
+        }
+    }
+
     /// <inheritdoc />
     public double InputRangeDbv => Volatile.Read(ref _inputRangeDbv);
 
@@ -252,7 +270,11 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
             _transport = transport;
             _calibration = calibration;
-            _autoRanger = new Qa40xAutoRanger(Capabilities.InputRangesDbv) { StepDownDelayMs = _autoRangeStepDownDelayMs };
+            _autoRanger = new Qa40xAutoRanger(Capabilities.InputRangesDbv)
+            {
+                StepDownDelayMs = _autoRangeStepDownDelayMs,
+                StepDownEnabled = _autoRangeStepDownEnabled,
+            };
             _connected = true;
 
             // This instance is reusable across an unplug/replug: HandleDeviceLost releases the dead

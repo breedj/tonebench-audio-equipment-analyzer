@@ -6,6 +6,7 @@ namespace Qa403.Dsp.Fft;
 public sealed class FftSharpBackend : IFftBackend
 {
     private double[] _scratch = [];
+    private Complex[] _complexScratch = [];
 
     public void Forward(ReadOnlySpan<double> timeIn, Span<Complex> specOut)
     {
@@ -18,5 +19,15 @@ public sealed class FftSharpBackend : IFftBackend
 
         Complex[] spectrum = FftSharp.FFT.ForwardReal(_scratch);
         spectrum.CopyTo(specOut);
+    }
+
+    public void Inverse(ReadOnlySpan<Complex> specIn, Span<double> timeOut)
+    {
+        if (_complexScratch.Length != timeOut.Length)
+            _complexScratch = new Complex[timeOut.Length];
+
+        HermitianInverse.Expand(specIn, _complexScratch, timeOut.Length);
+        FftSharp.FFT.Forward(_complexScratch.AsSpan());
+        HermitianInverse.Finish(_complexScratch, timeOut);
     }
 }

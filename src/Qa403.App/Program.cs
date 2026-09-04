@@ -97,6 +97,7 @@ try
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<DeviceSessionService>();
     builder.Services.AddSingleton<ThdSweepRunner>();
+    builder.Services.AddSingleton<FrequencyResponseRunner>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
 
     // Update-check (docs/qa403-app-stack-spec.md §8): a short timeout and silent-on-failure
@@ -152,6 +153,7 @@ try
     app.MapAcquisitionEndpoints();
     app.MapDiagnosticsEndpoints();
     app.MapSweepEndpoints();
+    app.MapFrequencyResponseEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapMeasurementsEndpoints();

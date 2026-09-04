@@ -128,7 +128,12 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.stepsPerOctave === 'number') form.stepsPerOctave = stored.stepsPerOctave
   if (stored.levelMode) form.levelMode = stored.levelMode
   if (typeof stored.levelValue === 'number') form.levelValue = stored.levelValue
-  if (stored.levelUnit) form.levelUnit = stored.levelUnit
+  // Watts is never restored into this field, which holds the *voltage* unit and nothing else: the
+  // unit a run actually sends is derived from the mode (see buildRequest), and the power mode hides
+  // this control entirely. Restoring it would leave the field holding "Watt" behind that hidden
+  // control, so switching the type back to a voltage mode would send a voltage level in watts —
+  // which the server rejects outright, from a form that looks perfectly ordinary.
+  if (stored.levelUnit && stored.levelUnit !== 'Watt') form.levelUnit = stored.levelUnit
   if (typeof stored.loadOhms === 'number' && stored.loadOhms > 0) loadOhms.value = stored.loadOhms
   if (typeof stored.processLeft === 'boolean') form.processLeft = stored.processLeft
   if (typeof stored.processRight === 'boolean') form.processRight = stored.processRight

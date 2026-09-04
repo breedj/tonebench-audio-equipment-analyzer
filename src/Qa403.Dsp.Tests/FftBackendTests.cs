@@ -115,4 +115,57 @@ public class FftBackendTests
             Assert.Equal(n / 2.0, spectrum[n / 8].Magnitude, 6);
         }
     }
+
+    [Theory]
+    [MemberData(nameof(Backends))]
+    public void Inverse_RoundTripsForward(IFftBackend backend)
+    {
+        const int n = 256;
+        var samples = new double[n];
+        var random = new Random(1234);
+        for (int i = 0; i < n; i++)
+            samples[i] = (random.NextDouble() * 2.0) - 1.0;
+
+        var spectrum = new Complex[(n / 2) + 1];
+        var restored = new double[n];
+
+        backend.Forward(samples, spectrum);
+        backend.Inverse(spectrum, restored);
+
+        for (int i = 0; i < n; i++)
+            Assert.Equal(samples[i], restored[i], 9);
+    }
+
+    [Theory]
+    [MemberData(nameof(Backends))]
+    public void Inverse_OfADelayedImpulseSpectrum_PutsThePeakAtTheDelay(IFftBackend backend)
+    {
+        // The property the frequency-response latency estimator depends on: a linear phase ramp in
+        // the spectrum comes back as a single sample at that offset, not smeared across the record.
+        const int n = 128;
+        const int delay = 37;
+
+        var spectrum = new Complex[(n / 2) + 1];
+        for (int k = 0; k < spectrum.Length; k++)
+            spectrum[k] = Complex.FromPolarCoordinates(1.0, -2.0 * Math.PI * k * delay / n);
+
+        var impulse = new double[n];
+        backend.Inverse(spectrum, impulse);
+
+        int peak = 0;
+        for (int i = 0; i < n; i++)
+            if (Math.Abs(impulse[i]) > Math.Abs(impulse[peak]))
+                peak = i;
+
+        Assert.Equal(delay, peak);
+    }
+
+    [Theory]
+    [MemberData(nameof(Backends))]
+    public void Inverse_RejectsWrongSpecInLength(IFftBackend backend)
+    {
+        var spectrum = new Complex[64]; // should be 33
+        var timeOut = new double[64];
+        Assert.Throws<ArgumentException>(() => backend.Inverse(spectrum, timeOut));
+    }
 }

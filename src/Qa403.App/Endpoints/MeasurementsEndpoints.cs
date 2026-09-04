@@ -63,7 +63,15 @@ public static class MeasurementsEndpoints
             // renderer -- one row per frequency. Branching on the stored kind rather than on
             // "found no spectra" keeps a genuinely empty FFT result a 404 instead of a 0-row CSV.
             string csv;
-            if (MeasurementSaveService.IsSweepKind(detail.Kind))
+            if (MeasurementSaveService.IsFrequencyResponseKind(detail.Kind))
+            {
+                var traces = await repo.GetResponseTracesAsync(detail.ResultId, ct);
+                if (traces.Count == 0)
+                    return Results.NotFound();
+
+                csv = CsvExporter.ExportResponse(detail, traces);
+            }
+            else if (MeasurementSaveService.IsSweepKind(detail.Kind))
             {
                 var points = await repo.GetSweepPointsAsync(detail.ResultId, ct);
                 if (points.Count == 0)

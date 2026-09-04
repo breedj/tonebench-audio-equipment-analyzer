@@ -287,7 +287,8 @@ public sealed class SpectrumPipeline(
                 (result ??= []).Add(new SpectrumSnapshot(
                     ch == 0 ? StreamChannel.Left : StreamChannel.Right, retained.Seq, retained.CapturedUtc,
                     retained.SampleRateHz, retained.BinSizeHz, retained.FftSize,
-                    retained.Window, retained.Sums, dbv, retained.Meters, retained.PreviewFft, retained.PreviewScope));
+                    retained.Window, retained.Sums, dbv, retained.Meters, retained.PreviewFft, retained.PreviewScope,
+                    retained.Complex));
             }
 
             return result?.ToArray() ?? [];
@@ -604,7 +605,17 @@ public sealed class SpectrumPipeline(
                 previewScope = BuildScopePreview(timeBuf.AsSpan(0, n), _sampleRateHz, meters?.FundamentalFreqHz);
             }
 
-            UpdateRetainedSnapshot(channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, seq, previewFft, previewScope);
+            // The frequency-response measurement needs phase, which AmplitudeSpectrum throws away.
+            // Off by default so the live path is untouched: on at ~20 ticks/sec this would copy a
+            // 65537-element Complex array per channel per tick for nobody. Note the spectrum is of
+            // the *windowed* signal, so a caller doing anything with the phase wants
+            // WindowType.Rectangular -- which is also the correct window for a stimulus that is
+            // exactly periodic in the record. See FrequencyResponseRunner.
+            var retainedComplex = options.RetainComplexSpectrum
+                ? specSpan
+                : ReadOnlySpan<Complex>.Empty;
+
+            UpdateRetainedSnapshot(channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, seq, previewFft, previewScope, retainedComplex);
 
             // Only now, once the trace this signal refers to is actually retained. `held` is the
             // "your capture is ready" flag SingleShotComplete exposes, and ThdSweepRunner reads
@@ -895,7 +906,8 @@ public sealed class SpectrumPipeline(
     private void UpdateRetainedSnapshot(
         int channelIndex, ReadOnlySpan<double> ampPower, double binSizeHz, int fftSize,
         WindowType windowType, WindowSums sums, SpectrumMeters? meters, uint seq,
-        SweepPreviewSeries? previewFft, SweepPreviewSeries? previewScope)
+        SweepPreviewSeries? previewFft, SweepPreviewSeries? previewScope,
+        ReadOnlySpan<Complex> complexSpectrum)
     {
         lock (_retainedLock)
         {
@@ -914,6 +926,19 @@ public sealed class SpectrumPipeline(
             retained.Seq = seq;
             retained.PreviewFft = previewFft;
             retained.PreviewScope = previewScope;
+
+            // Copied rather than aliased: `spec` is a pooled buffer that ProcessChannel returns the
+            // moment it finishes, and the retained snapshot outlives the tick that produced it.
+            if (complexSpectrum.IsEmpty)
+            {
+                retained.Complex = null;
+            }
+            else
+            {
+                if (retained.Complex is null || retained.Complex.Length != complexSpectrum.Length)
+                    retained.Complex = new Complex[complexSpectrum.Length];
+                complexSpectrum.CopyTo(retained.Complex);
+            }
         }
     }
 
@@ -1059,6 +1084,7 @@ public sealed class SpectrumPipeline(
         public uint Seq;
         public SweepPreviewSeries? PreviewFft;
         public SweepPreviewSeries? PreviewScope;
+        public Complex[]? Complex;
     }
 
     /// <summary>

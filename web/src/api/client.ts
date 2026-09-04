@@ -88,6 +88,177 @@ export interface GeneratorChannelState {
   chirp: EchoChirpSettings
 }
 
+
+// ---------------------------------------------------------------------------
+// Frequency response (chirp)
+// ---------------------------------------------------------------------------
+
+/** Mirrors Qa403.App.Services.FrequencyResponseTraceKind. */
+export type ResponseTraceKindName = 'Left' | 'Right' | 'Gain'
+
+/** Mirrors Qa403.App.Services.FrequencyResponsePhase. */
+export type ResponsePhaseName =
+  | 'Idle'
+  | 'DeterminingLevel'
+  | 'DeterminingRange'
+  | 'Measuring'
+  | 'Finished'
+  | 'Cancelled'
+  | 'Failed'
+
+/** The three spans the UI offers, in Hz. These are Nyquist values — the sample rate is twice each. */
+export const RESPONSE_SPANS_HZ = [24000, 48000, 96000] as const
+
+/**
+ * FFT-size multipliers and the bin width each produces. The base size scales with the sample rate,
+ * so the same three resolutions are available at every span.
+ */
+export const RESPONSE_RESOLUTIONS: { multiplier: number; label: string }[] = [
+  { multiplier: 1, label: '1.46' },
+  { multiplier: 2, label: '0.73' },
+  { multiplier: 4, label: '0.37' },
+]
+
+/** Smoothing widths, as the N in 1/N octave. 0 is none; 69 is the narrowest and 3 the widest. */
+export const RESPONSE_SMOOTHING: { denominator: number; label: string }[] = [
+  { denominator: 0, label: 'None' },
+  { denominator: 69, label: '1/69 (min)' },
+  { denominator: 48, label: '1/48' },
+  { denominator: 24, label: '1/24' },
+  { denominator: 12, label: '1/12' },
+  { denominator: 6, label: '1/6' },
+  { denominator: 3, label: '1/3 (max)' },
+]
+
+export interface FrequencyResponseStartRequest {
+  frequencySpanHz: number
+  resolutionMultiplier: number
+  /** GeneratorVoltage is the UI's "Input voltage" — the level fed to the DUT. */
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  /** The load a `Watt` level is defined against. Only read by the OutputPower mode; V = sqrt(P·R). */
+  loadOhms: number
+  rightChannelIsReference: boolean
+  smoothingDenominator: number
+  averageCount: number
+  /**
+   * Where the sweep starts, in Hz. Below ~10 Hz a transformer-coupled DUT sees several times the
+   * core flux it does in the band anyone reads (flux goes as V/f), so the bottom of the sweep is not
+   * free — raising this is how you find out whether it is disturbing the measurement above it.
+   */
+  chirpStartHz: number
+  /** RUN sets this and keeps measuring until stopped; SINGLE leaves it false. */
+  continuous: boolean
+}
+
+/**
+ * A frequency-response measurement type's stored settings. The `chart*` fields are display state
+ * and all optional, so a type saved before one of them existed still loads.
+ */
+export interface FrequencyResponseParameters {
+  frequencySpanHz: number
+  resolutionMultiplier: number
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  rightChannelIsReference: boolean
+  smoothingDenominator: number
+  averageCount: number
+  /** Absent on a type saved before the chirp start was configurable. */
+  chirpStartHz?: number
+  /** The load an OutputPower level was defined against. Absent on a type saved before that mode existed. */
+  loadOhms?: number | null
+  generatorAmpDbv?: number | null
+  chartView?: ResponseView | null
+  chartShowLeft?: boolean | null
+  chartShowRight?: boolean | null
+  chartShowPhase?: boolean | null
+  chartShowCoherence?: boolean | null
+  chartShowOneDb?: boolean | null
+  chartShowThreeDb?: boolean | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartYTopDb?: number | null
+  chartYBottomDb?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+}
+
+/** Which y quantity the chart is showing — the old app's "FR (dBV)" / "Gain (dB)" buttons. */
+export type ResponseView = 'Dbv' | 'Gain'
+
+export interface FrequencyResponseStarted {
+  sampleRateHz: number
+  fftSize: number
+  binHz: number
+  averageCount: number
+  recordSeconds: number
+  continuous: boolean
+}
+
+/** A -1 dB or -3 dB reading. A clamped end means the curve never got there, not that the corner is at that frequency. */
+export interface ResponseBandwidthJson {
+  dropDb: number
+  lowerHz: number
+  upperHz: number
+  bandwidthHz: number
+  lowerClamped: boolean
+  upperClamped: boolean
+}
+
+export interface FrequencyResponseTraceJson {
+  kind: ResponseTraceKindName
+  startFreqHz: number
+  endFreqHz: number
+  freqHz: number[]
+  magnitudeMinDb: number[]
+  magnitudeMaxDb: number[]
+  phaseDeg: number[]
+  coherence: number[]
+  oneDb: ResponseBandwidthJson
+  threeDb: ResponseBandwidthJson
+  peakDb: number
+  peakFreqHz: number
+}
+
+export interface FrequencyResponseStatus {
+  running: boolean
+  phase: ResponsePhaseName
+  continuous: boolean
+  passesCompleted: number
+  averagesTaken: number
+  averageCount: number
+  generatorAmpDbv: number
+  binHz: number
+  sampleRateHz: number
+  fftSize: number
+  /** DUT propagation delay in samples, or null when the run had no measured reference. */
+  latencySamples: number | null
+  error: string | null
+  traces: FrequencyResponseTraceJson[]
+}
+
+/** One stored curve, as `GET /api/measurements/{id}/response-traces` returns it. */
+export interface StoredResponseTrace {
+  kind: 'left' | 'right' | 'gain'
+  startHz: number
+  endHz: number
+  peakDb: number
+  peakHz: number
+  oneDb: { lowerHz: number; upperHz: number; lowerClamped: boolean; upperClamped: boolean }
+  threeDb: { lowerHz: number; upperHz: number; lowerClamped: boolean; upperClamped: boolean }
+  freqHz: number[]
+  magnitudeMinDb: number[]
+  magnitudeMaxDb: number[]
+  phaseDeg: number[]
+  coherence: number[]
+}
+
+export interface StoredResponseTracesResponse {
+  traces: StoredResponseTrace[]
+}
+
 export interface DeviceRanges {
   sampleRatesHz: number[]
   inputRangesDbv: number[]
@@ -712,6 +883,25 @@ export const api = {
     request<{ id: number }>('/sweep/save', { method: 'POST', body: JSON.stringify(req) }),
 
   getStoredSweep: (measurementId: number) => request<StoredSweepResponse>(`/measurements/${measurementId}/sweep-points`),
+
+  startFrequencyResponse: (req: FrequencyResponseStartRequest) =>
+    request<FrequencyResponseStarted>('/frequency-response/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelFrequencyResponse: () =>
+    request<FrequencyResponseStatus>('/frequency-response/cancel', { method: 'POST' }),
+
+  clearFrequencyResponse: () =>
+    request<FrequencyResponseStatus>('/frequency-response/clear', { method: 'POST' }),
+
+  // Carries the finished curves, not just a counter — how a browser that reloaded mid-measurement
+  // redraws what was measured instead of having to run it again.
+  getFrequencyResponseStatus: () => request<FrequencyResponseStatus>('/frequency-response/status'),
+
+  saveFrequencyResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/frequency-response/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  getStoredResponse: (measurementId: number) =>
+    request<StoredResponseTracesResponse>(`/measurements/${measurementId}/response-traces`),
 
   getUpdateStatus: () => request<UpdateStatus>('/update-check'),
 }

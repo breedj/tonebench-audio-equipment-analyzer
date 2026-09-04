@@ -82,6 +82,28 @@ public sealed record EchoChirpSettings
 
     /// <summary>Display smoothing for the resulting frequency-response trace — stored only, see <see cref="SmoothingOctaves"/>.</summary>
     public SmoothingOctaves Smoothing { get; init; } = SmoothingOctaves.None;
+
+    /// <summary>
+    /// Frames after which the sweep restarts. <b>The frequency-response measurement sets this to its
+    /// own FFT size, and that equality is what makes the measurement work at all.</b>
+    ///
+    /// <para>The QA403 streams continuously and offers no capture trigger, so an analyzer record
+    /// begins at an arbitrary point in the stimulus. When the period is exactly the record length,
+    /// every record holds exactly one whole sweep — circularly rotated by an unknown amount — and a
+    /// circular rotation leaves a magnitude spectrum completely unchanged. The response is then
+    /// correct with no triggering, no synchronous start, and no alignment search; only phase carries
+    /// the rotation, and removing it is the same step that removes real DUT delay.</para>
+    ///
+    /// <para>A period in <i>frames</i> rather than seconds is what makes that exact. Seconds would
+    /// have to be converted at some sample rate and rounded, and a period off by a single frame puts
+    /// a drifting ripple on every trace. It also means the value only has meaning alongside the
+    /// sample rate it will be played at.</para>
+    ///
+    /// <para>The default matches the largest FFT the app uses, so a chirp configured through
+    /// <c>POST /api/generator</c> without a measurement behind it is still periodic and still
+    /// analysable.</para>
+    /// </summary>
+    public int RepeatFrames { get; init; } = 131072;
 }
 
 /// <summary>

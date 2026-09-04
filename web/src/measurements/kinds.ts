@@ -13,6 +13,9 @@ export const THD_VS_FREQUENCY_KIND = 'ThdVsFrequency'
 /** Mirrors MeasurementSaveService.ThdVsAmplitudeKind — a sweep of drive levels at one frequency. */
 export const THD_VS_AMPLITUDE_KIND = 'ThdVsAmplitude'
 
+/** Mirrors MeasurementSaveService.FrequencyResponseKind — a chirp-driven frequency response. */
+export const FREQUENCY_RESPONSE_KIND = 'FrequencyResponse'
+
 /** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
 export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
 
@@ -24,6 +27,16 @@ export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
  */
 export function isSweepKind(kind: string | null | undefined): boolean {
   return kind === THD_VS_FREQUENCY_KIND || kind === THD_VS_AMPLITUDE_KIND
+}
+
+/**
+ * Whether a kind's data is a set of frequency-response curves. Its own predicate rather than a third
+ * arm of `isSweepKind`, mirroring `MeasurementSaveService.IsFrequencyResponseKind`: a response
+ * result saves and loads through its own endpoints, and a kind that answered true to "is a sweep"
+ * would be fetched as sweep points and come back empty.
+ */
+export function isFrequencyResponseKind(kind: string | null | undefined): boolean {
+  return kind === FREQUENCY_RESPONSE_KIND
 }
 
 export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
@@ -42,5 +55,11 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     label: 'THD vs amplitude',
     description:
       'Steps the generator level at one fixed frequency and plots THD, D2–D5 and D6+ against output voltage, output power or input voltage.',
+  },
+  {
+    kind: FREQUENCY_RESPONSE_KIND,
+    label: 'Frequency response',
+    description:
+      'Sweeps a chirp across the band and plots gain or level against frequency, with −1 dB and −3 dB bandwidth markers.',
   },
 ]

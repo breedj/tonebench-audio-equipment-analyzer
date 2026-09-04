@@ -1,3 +1,4 @@
+using System.Numerics;
 using Qa403.Dsp;
 
 namespace Qa403.App.Streaming;
@@ -48,6 +49,12 @@ public sealed record SweepPreviewSeries(float[] X, float[] Min, float[] Max);
 /// <see cref="PreviewFft"/>/<see cref="PreviewScope"/> are populated only when
 /// <see cref="SpectrumPipelineOptions.CapturePreview"/> was on for the tick that produced this
 /// snapshot -- see that option's remarks for why this isn't computed on every live tick.
+///
+/// <see cref="Complex"/> is likewise populated only under
+/// <see cref="SpectrumPipelineOptions.RetainComplexSpectrum"/>. It is the raw one-sided DFT of the
+/// windowed record, phase included, which <see cref="Dbv"/> cannot express -- the frequency-response
+/// measurement divides two of them to get a transfer function, and a magnitude alone would leave it
+/// unable to tell a delay from a filter.
 /// </summary>
 public sealed record SpectrumSnapshot(
     StreamChannel Channel,
@@ -61,4 +68,5 @@ public sealed record SpectrumSnapshot(
     double[] Dbv,
     SpectrumMeters? Meters,
     SweepPreviewSeries? PreviewFft = null,
-    SweepPreviewSeries? PreviewScope = null);
+    SweepPreviewSeries? PreviewScope = null,
+    Complex[]? Complex = null);

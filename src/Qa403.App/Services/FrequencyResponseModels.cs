@@ -1,0 +1,333 @@
+using Qa403.Dsp;
+
+namespace Qa403.App.Services;
+
+/// <summary>
+/// Which curve a <see cref="FrequencyResponseTrace"/> carries. The wire header's channel byte holds
+/// this, the same way a sweep frame's holds the channel.
+/// </summary>
+public enum FrequencyResponseTraceKind
+{
+    /// <summary>Left input's own response, dBV.</summary>
+    Left = 0,
+
+    /// <summary>Right input's own response, dBV.</summary>
+    Right = 1,
+
+    /// <summary>
+    /// Gain, dB. Left relative to the right input when that is the reference, otherwise left
+    /// relative to the synthesised stimulus.
+    /// </summary>
+    Gain = 2,
+}
+
+/// <summary>What a frequency-response run is doing right now. Mirrors <see cref="ThdSweepPhase"/>'s role.</summary>
+public enum FrequencyResponsePhase
+{
+    Idle,
+    DeterminingLevel,
+    Measuring,
+    Finished,
+    Cancelled,
+    Failed,
+
+    /// <summary>
+    /// Probing for the input range the DUT's output needs. Appended rather than slotted in next to
+    /// <see cref="DeterminingLevel"/> on purpose: the ordinal rides in the progress frame's <c>seq</c>
+    /// field, so renumbering the existing members would make an older browser mislabel every phase.
+    /// </summary>
+    DeterminingRange = 6,
+}
+
+/// <summary>
+/// One −1 dB or −3 dB reading, as the UI's Measurements table shows it. <see cref="LowerClamped"/>
+/// / <see cref="UpperClamped"/> say the trace never reached the threshold on that side inside the
+/// measured band, so the frequency is where the search stopped, not a corner — the old app printed
+/// a bare number there and read "&gt; 96 kHz" as if it were measured.
+/// </summary>
+public sealed record BandwidthReading(
+    double DropDb,
+    double LowerHz,
+    double UpperHz,
+    double BandwidthHz,
+    bool LowerClamped,
+    bool UpperClamped)
+{
+    public static BandwidthReading From(BandwidthResult result) =>
+        new(result.DropDb, result.LowerHz, result.UpperHz, result.BandwidthHz, result.LowerClamped, result.UpperClamped);
+}
+
+/// <summary>
+/// One decimated curve ready for the chart, plus the scalars the Measurements table reads.
+///
+/// <para><see cref="MagnitudeMinDb"/>/<see cref="MagnitudeMaxDb"/> are the min and max of the full
+/// resolution bins that fell into each column — never their mean, per the project's decimation rule.
+/// Both must be drawn: the max as the line, the min as the band beneath it, or a rippled response
+/// is rendered as a curve sitting above where its ripple actually is.</para>
+///
+/// <para>The peak and the bandwidth readings are computed server-side on the <b>full-resolution,
+/// smoothed</b> trace, not on these columns — decimation would move a corner by up to a column, and
+/// a column near 20 kHz is far wider than the corner it is reporting.</para>
+/// </summary>
+public sealed record FrequencyResponseTrace(
+    FrequencyResponseTraceKind Kind,
+    double StartFreqHz,
+    double EndFreqHz,
+    float[] FreqHz,
+    float[] MagnitudeMinDb,
+    float[] MagnitudeMaxDb,
+    float[] PhaseDeg,
+    float[] Coherence,
+    BandwidthReading OneDb,
+    BandwidthReading ThreeDb,
+    double PeakDb,
+    double PeakFreqHz);
+
+/// <summary>
+/// A frequency-response run's configuration, flat and immutable, mirroring
+/// <see cref="ThdSweepRequest"/>'s role. Everything the measurement needs; nothing it derives.
+/// </summary>
+/// <param name="Continuous">
+/// Keep re-measuring until stopped, rather than running once. RUN sets this; SINGLE does not — the
+/// same split the FFT screen has. Each pass is a whole independent measurement (fresh averaging,
+/// fresh estimate), so what the chart shows is one complete sweep and not a running blend of them.
+/// The level probe is deliberately <b>not</b> repeated per pass: it is slow, and re-solving it every
+/// second would make the trace jump whenever the DUT drifted rather than showing the drift.
+/// </param>
+public sealed record FrequencyResponseRequest(
+    double FrequencySpanHz,
+    int ResolutionMultiplier,
+    ThdSweepLevelMode LevelMode,
+    double LevelValue,
+    ThdSweepLevelUnit LevelUnit,
+    bool RightChannelIsReference,
+    int SmoothingDenominator,
+    int AverageCount,
+    bool Continuous = false,
+    // The literal, not the const: a primary constructor's default value cannot reference a member of
+    // the type it is declaring. Kept equal to DefaultChirpStartHz by ChirpStartDefaultMatchesTheConstant.
+    double ChirpStartHz = 2.0,
+    /// <summary>
+    /// The amplifier load a target power is defined against, in ohms. Only read by
+    /// <see cref="ThdSweepLevelMode.OutputPower"/> — the other two modes name a voltage, which needs
+    /// no load. Defaulted so every existing caller keeps compiling and measuring the same thing.
+    /// </summary>
+    double LoadOhms = 8.0)
+{
+    /// <summary>
+    /// Spans the UI offers, in Hz. These are <b>Nyquist</b> values — the label the old app showed —
+    /// so the sample rate is twice each one, which is also why they are exactly the QA403's three
+    /// supported rates halved.
+    /// </summary>
+    public static readonly double[] SupportedSpansHz = [24_000.0, 48_000.0, 96_000.0];
+
+    /// <summary>
+    /// Bin width at <see cref="ResolutionMultiplier"/> 1, in Hz. The base FFT size scales with the
+    /// sample rate (32768 / 65536 / 131072 for 48 / 96 / 192 kHz), so this is the same number at
+    /// every span — which is why the UI can offer one resolution list regardless of the span.
+    /// </summary>
+    public const double BaseBinHz = 48_000.0 / 32768.0;
+
+    /// <summary>The multipliers the UI offers: 1 -&gt; 1.46 Hz, 2 -&gt; 0.73 Hz, 4 -&gt; 0.37 Hz.</summary>
+    public static readonly int[] SupportedResolutionMultipliers = [1, 2, 4];
+
+    public const int MinAverageCount = 1;
+    public const int MaxAverageCount = 10;
+
+    /// <summary>
+    /// Where the chirp starts by default. Deliberately below anything worth reporting: the sweep's
+    /// own fade-in lives at the very bottom of the band, and a corner measured inside it would be
+    /// measuring the stimulus rather than the DUT.
+    ///
+    /// <para>It is a setting rather than a constant because the bottom of the sweep is not free.
+    /// Peak flux in a transformer-coupled DUT goes as V/f, so the 2-8 Hz stretch asks several times
+    /// more of the core than the band anyone reads — measured against a tube amplifier at -18 dBV,
+    /// the chirp read up to <b>1.2 dB below a stepped-sine Bode plot</b> across 9-16 Hz while
+    /// agreeing with it everywhere else and at -28 dBV. Raising the start is the one knob that tests
+    /// whether the sweep's own sub-10 Hz excitation is what causes that.</para>
+    /// </summary>
+    public const double DefaultChirpStartHz = 2.0;
+
+    public const double MinChirpStartHz = 0.5;
+
+    public const double MaxChirpStartHz = 1000.0;
+
+    /// <summary>Fraction of Nyquist the chirp sweeps up to. The last bins are where the anti-alias filter lives, not the DUT.</summary>
+    public const double ChirpEndNyquistFraction = 0.98;
+
+    /// <summary>
+    /// Bottom of the band actually reported and searched for corners — inset past the sweep's
+    /// fade-in.
+    ///
+    /// <para>The 4 Hz floor is what the 2 Hz default has always produced, so the default behaviour
+    /// is unchanged. Above that the inset is only 25 %, not the octave the floor implies: the fade
+    /// is a fixed 5 ms and spans under 2 % of a decade at any start frequency, and a wider inset
+    /// would put the interesting band out of reach — a chirp started at 8 Hz to escape the flux
+    /// question has to still report the 9-16 Hz it was raised to test.</para>
+    /// </summary>
+    public double AnalysisLowHz => Math.Max(4.0, ChirpStartHz * 1.25);
+
+    public const double AnalysisHighNyquistFraction = 0.95;
+
+    public double SampleRateHz => FrequencySpanHz * 2.0;
+
+    /// <summary>Analysis size: the base size for this sample rate, times the resolution multiplier.</summary>
+    public int FftSize => (int)Math.Round(SampleRateHz / BaseBinHz) * ResolutionMultiplier;
+
+    public double BinHz => SampleRateHz / FftSize;
+
+    public double ChirpEndHz => ChirpEndNyquistFraction * SampleRateHz / 2.0;
+
+    public double AnalysisHighHz => AnalysisHighNyquistFraction * SampleRateHz / 2.0;
+
+    /// <summary>The requested drive level in dBV, whatever unit it was entered in.</summary>
+    public double LevelDbv => LevelUnit switch
+    {
+        ThdSweepLevelUnit.Dbv => LevelValue,
+        ThdSweepLevelUnit.Volt => VoltToDbv(LevelValue),
+        ThdSweepLevelUnit.MilliVolt => VoltToDbv(LevelValue / 1000.0),
+        // P = V²/R, so the voltage to solve for is sqrt(P·R) — the same conversion
+        // ThdSweepRequest.LevelDbv makes, and the only arithmetic the power mode adds over
+        // OutputVoltage. Everything downstream of here sees a target voltage and cannot tell which
+        // of the two modes named it.
+        ThdSweepLevelUnit.Watt => VoltToDbv(Math.Sqrt(Math.Max(LevelValue, 0.0) * LoadOhms)),
+        _ => throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "Unknown drive level unit."),
+    };
+
+    /// <summary>
+    /// True when the generator amplitude has to be found by probing rather than taken from the
+    /// request — both output-referred modes, since both name a level at the DUT's <em>output</em>.
+    ///
+    /// <para>A predicate rather than three <c>== OutputVoltage</c> comparisons scattered through the
+    /// runner: the phase it starts in, the amplitude it seeds, and which side of the level probe the
+    /// input-range work lands on are all this same question, and a mode added to the enum without
+    /// touching every one of them would probe for a level and then range for a different one.</para>
+    /// </summary>
+    public bool SolvesGeneratorLevel => LevelMode != ThdSweepLevelMode.GeneratorVoltage;
+
+    public void Validate()
+    {
+        if (!SupportedSpansHz.Contains(FrequencySpanHz))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(FrequencySpanHz), FrequencySpanHz,
+                $"Frequency span must be one of {string.Join(", ", SupportedSpansHz)} Hz.");
+        }
+
+        if (!SupportedResolutionMultipliers.Contains(ResolutionMultiplier))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ResolutionMultiplier), ResolutionMultiplier,
+                $"Resolution multiplier must be one of {string.Join(", ", SupportedResolutionMultipliers)}.");
+        }
+
+        if (LevelMode is not (ThdSweepLevelMode.GeneratorVoltage or ThdSweepLevelMode.OutputVoltage or ThdSweepLevelMode.OutputPower))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(LevelMode), LevelMode,
+                "A frequency response is driven by generator (input) voltage, DUT output voltage or DUT output power.");
+        }
+
+        // Watts are only a level once a load says what voltage they are. That load is what the
+        // output-power mode carries, so the unit is confined to it rather than guessed at elsewhere
+        // — the same rule ThdSweepRequest applies.
+        //
+        // A power target is otherwise nothing special here: it converts to a target voltage up
+        // front (see LevelDbv) and the run then solves for the generator exactly as OutputVoltage
+        // does. What it deliberately does *not* claim is that the DUT delivers that power across
+        // the whole sweep — the level is solved once, from the sweep's median gain, so the power is
+        // the band-average one, not a per-frequency guarantee.
+        if (LevelUnit == ThdSweepLevelUnit.Watt && LevelMode != ThdSweepLevelMode.OutputPower)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(LevelUnit), LevelUnit, "Watts only make sense for the output-power level mode.");
+        }
+
+        if (LevelMode == ThdSweepLevelMode.OutputPower)
+        {
+            if (LevelUnit != ThdSweepLevelUnit.Watt)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(LevelUnit), LevelUnit, "An output-power level is specified in watts.");
+            }
+
+            if (!(LoadOhms > 0.0))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(LoadOhms), LoadOhms, "A target power needs a load above 0 Ω to name a voltage.");
+            }
+        }
+
+        if (!FractionalOctaveSmoother.SupportedDenominators.Contains(SmoothingDenominator))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(SmoothingDenominator), SmoothingDenominator,
+                $"Smoothing must be one of {string.Join(", ", FractionalOctaveSmoother.SupportedDenominators)} (0 = none).");
+        }
+
+        if (AverageCount is < MinAverageCount or > MaxAverageCount)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(AverageCount), AverageCount,
+                $"Averages must be between {MinAverageCount} and {MaxAverageCount}.");
+        }
+
+        if (double.IsNaN(ChirpStartHz) || ChirpStartHz < MinChirpStartHz || ChirpStartHz > MaxChirpStartHz)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ChirpStartHz), ChirpStartHz,
+                $"The chirp start must be between {MinChirpStartHz} and {MaxChirpStartHz} Hz.");
+        }
+
+        // The sweep has to have somewhere to go, and the harmonic geometry the impulse gate is
+        // derived from degenerates as the ratio approaches 1.
+        if (ChirpStartHz >= ChirpEndHz / 10.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ChirpStartHz), ChirpStartHz,
+                $"The chirp start must be at least a decade below its end ({ChirpEndHz:0} Hz).");
+        }
+
+        if (double.IsNaN(LevelValue) || double.IsInfinity(LevelValue))
+            throw new ArgumentOutOfRangeException(nameof(LevelValue), LevelValue, "Amplitude must be a finite number.");
+
+        if (LevelUnit != ThdSweepLevelUnit.Dbv && LevelValue <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(LevelValue), LevelValue,
+                LevelUnit == ThdSweepLevelUnit.Watt ? "A target power must be positive." : "A voltage amplitude must be positive.");
+        }
+    }
+
+    private static double VoltToDbv(double volts) => 20.0 * Math.Log10(Math.Max(volts, 1e-12));
+}
+
+/// <summary>What a client polling <c>GET /api/frequency-response/status</c> sees.</summary>
+/// <param name="LatencySamples">
+/// The DUT's propagation delay in samples, or null when nothing measured it. Only a run whose
+/// reference is the right input channel can: against the synthesised chirp the recovered rotation
+/// is the record's arbitrary start point in a periodic stimulus, not a delay.
+/// </param>
+public sealed record FrequencyResponseStatus(
+    bool Running,
+    FrequencyResponsePhase Phase,
+    bool Continuous,
+    int PassesCompleted,
+    int AveragesTaken,
+    int AverageCount,
+    double GeneratorAmpDbv,
+    double BinHz,
+    double SampleRateHz,
+    int FftSize,
+    double? LatencySamples,
+    string? Error,
+    IReadOnlyList<FrequencyResponseTrace> Traces);
+
+/// <summary>The immediate answer to a start request — what the run will do, before it does it.</summary>
+public sealed record FrequencyResponseStarted(
+    double SampleRateHz,
+    int FftSize,
+    double BinHz,
+    int AverageCount,
+    double RecordSeconds,
+    bool Continuous);

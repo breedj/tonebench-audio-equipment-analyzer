@@ -16,6 +16,17 @@ public enum StreamMsgType : byte
 
     /// <summary>Where a running sweep is. Carries no per-channel data; channel is always 0 — see <see cref="StreamFrame.EncodeSweepProgress"/>.</summary>
     SweepProgress = 5,
+
+    /// <summary>
+    /// One finished frequency-response curve. The header's channel byte carries a
+    /// <see cref="FrequencyResponseTraceKind"/> (0 left, 1 right, 2 gain) rather than an input
+    /// channel — the gain trace belongs to no single input. See
+    /// <see cref="StreamFrame.EncodeFrequencyResponse"/>.
+    /// </summary>
+    FrequencyResponse = 6,
+
+    /// <summary>How many records a running frequency-response measurement has taken — see <see cref="StreamFrame.EncodeFrequencyResponseProgress"/>.</summary>
+    FrequencyResponseProgress = 7,
 }
 
 public enum StreamChannel : byte
@@ -317,11 +328,119 @@ public static class StreamFrame
         return buffer;
     }
 
+    /// <summary>
+    /// Encodes one frequency-response curve. Header: x0/dx are the band's low and high edge
+    /// frequencies, nPoints the column count, channel the <see cref="FrequencyResponseTraceKind"/>.
+    /// Payload, all little-endian:
+    /// <code>
+    /// per column (20 bytes x nPoints):
+    ///   f32  freqHz
+    ///   f32  magnitudeMinDb
+    ///   f32  magnitudeMaxDb
+    ///   f32  phaseDeg
+    ///   f32  coherence
+    /// then two bandwidth readings (-1 dB, then -3 dB), 20 bytes each:
+    ///   f32  dropDb
+    ///   f32  lowerHz
+    ///   f32  upperHz
+    ///   f32  bandwidthHz
+    ///   u8   lowerClamped
+    ///   u8   upperClamped
+    ///   u16  (padding)
+    /// then:
+    ///   f32  peakDb
+    ///   f32  peakFreqHz
+    /// </code>
+    ///
+    /// Both magnitude values are sent, and a client must draw both: the max as the line and the min
+    /// as a band under it. Plotting the max alone redraws a rippled response as a curve riding along
+    /// the top of its own ripple — the same aggregation bias the spectrum path's min/max band exists
+    /// to avoid.
+    /// </summary>
+    public static byte[] EncodeFrequencyResponse(FrequencyResponseTrace trace)
+    {
+        int columns = trace.FreqHz.Length;
+        if (trace.MagnitudeMinDb.Length != columns || trace.MagnitudeMaxDb.Length != columns
+            || trace.PhaseDeg.Length != columns || trace.Coherence.Length != columns)
+        {
+            throw new ArgumentException("Every trace array must be the same length.", nameof(trace));
+        }
+
+        const int perColumn = 5 * sizeof(float);
+        const int perBandwidth = (4 * sizeof(float)) + 4;
+        const int trailer = 2 * sizeof(float);
+
+        byte[] buffer = new byte[HeaderLength + (columns * perColumn) + (2 * perBandwidth) + trailer];
+        WriteHeader(
+            buffer, StreamMsgType.FrequencyResponse, (byte)trace.Kind,
+            StreamFlags.Decimated | StreamFlags.LogSpaced, seq: 0,
+            (float)trace.StartFreqHz, (float)trace.EndFreqHz, (uint)columns);
+
+        int offset = HeaderLength;
+        for (int i = 0; i < columns; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), trace.FreqHz[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 4, 4), trace.MagnitudeMinDb[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 8, 4), trace.MagnitudeMaxDb[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 12, 4), trace.PhaseDeg[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 16, 4), trace.Coherence[i]);
+            offset += perColumn;
+        }
+
+        offset = WriteBandwidth(buffer, offset, trace.OneDb);
+        offset = WriteBandwidth(buffer, offset, trace.ThreeDb);
+
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)trace.PeakDb);
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 4, 4), (float)trace.PeakFreqHz);
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// How many records a running measurement has taken. Header only: seq is the
+    /// <see cref="FrequencyResponsePhase"/> ordinal, nPoints the records taken, dx the total, and x0
+    /// the generator level in dBV. Same shape as <see cref="EncodeSweepProgress"/>, and for the same
+    /// reason — the phase is an enumeration, not a set of independent bits, so it rides in seq
+    /// rather than in the flags.
+    ///
+    /// <para>The level is here rather than left to the status endpoint because in output-voltage
+    /// mode it is <i>solved</i> by the probe, so it is the one number a reader most wants during a
+    /// run — and nothing polls status while one is going, which left the readout showing whatever
+    /// the previous run had settled on.</para>
+    /// </summary>
+    public static byte[] EncodeFrequencyResponseProgress(
+        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv)
+    {
+        byte[] buffer = new byte[HeaderLength];
+        WriteHeader(
+            buffer, StreamMsgType.FrequencyResponseProgress, (byte)StreamChannel.Left, StreamFlags.None,
+            (uint)phase, (float)generatorAmpDbv, total, (uint)Math.Max(0, taken));
+
+        return buffer;
+    }
+
+    private static int WriteBandwidth(Span<byte> buffer, int offset, BandwidthReading reading)
+    {
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(offset, 4), (float)reading.DropDb);
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(offset + 4, 4), (float)reading.LowerHz);
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(offset + 8, 4), (float)reading.UpperHz);
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(offset + 12, 4), (float)reading.BandwidthHz);
+        buffer[offset + 16] = reading.LowerClamped ? (byte)1 : (byte)0;
+        buffer[offset + 17] = reading.UpperClamped ? (byte)1 : (byte)0;
+        buffer[offset + 18] = 0;
+        buffer[offset + 19] = 0;
+        return offset + 20;
+    }
+
     private static void WriteHeader(
         Span<byte> buffer, StreamMsgType msgType, StreamChannel channel, StreamFlags flags, uint seq, float x0, float dx, uint nPoints)
+        => WriteHeader(buffer, msgType, (byte)channel, flags, seq, x0, dx, nPoints);
+
+    private static void WriteHeader(
+        Span<byte> buffer, StreamMsgType msgType, byte channel, StreamFlags flags, uint seq, float x0, float dx, uint nPoints)
     {
         buffer[0] = (byte)msgType;
-        buffer[1] = (byte)channel;
+        buffer[1] = channel;
         BinaryPrimitives.WriteUInt16LittleEndian(buffer.Slice(2, 2), (ushort)flags);
         BinaryPrimitives.WriteUInt32LittleEndian(buffer.Slice(4, 4), seq);
         BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(8, 4), x0);
@@ -484,6 +603,68 @@ public static class StreamFrame
 
         return new DecodedSweepProgress((int)header.NPoints, (int)header.Dx, header.X0, (ThdSweepPhase)header.Seq);
     }
+
+    /// <summary>Decodes a <see cref="StreamMsgType.FrequencyResponse"/> frame — see <see cref="EncodeFrequencyResponse"/>.</summary>
+    public static FrequencyResponseTrace DecodeFrequencyResponse(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.FrequencyResponse)
+            throw new ArgumentException($"Frame is {header.MsgType}, not a frequency response.", nameof(frame));
+
+        int columns = (int)header.NPoints;
+        var freqHz = new float[columns];
+        var magMin = new float[columns];
+        var magMax = new float[columns];
+        var phaseDeg = new float[columns];
+        var coherence = new float[columns];
+
+        int offset = HeaderLength;
+        for (int i = 0; i < columns; i++)
+        {
+            freqHz[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4));
+            magMin[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 4, 4));
+            magMax[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 8, 4));
+            phaseDeg[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 12, 4));
+            coherence[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 16, 4));
+            offset += 20;
+        }
+
+        (var oneDb, offset) = ReadBandwidth(frame, offset);
+        (var threeDb, offset) = ReadBandwidth(frame, offset);
+
+        float peakDb = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4));
+        float peakFreqHz = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 4, 4));
+
+        return new FrequencyResponseTrace(
+            (FrequencyResponseTraceKind)(byte)header.Channel,
+            header.X0, header.Dx,
+            freqHz, magMin, magMax, phaseDeg, coherence,
+            oneDb, threeDb, peakDb, peakFreqHz);
+    }
+
+    /// <summary>Decodes a <see cref="StreamMsgType.FrequencyResponseProgress"/> frame — see <see cref="EncodeFrequencyResponseProgress"/>.</summary>
+    public static DecodedFrequencyResponseProgress DecodeFrequencyResponseProgress(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.FrequencyResponseProgress)
+            throw new ArgumentException($"Frame is {header.MsgType}, not frequency-response progress.", nameof(frame));
+
+        return new DecodedFrequencyResponseProgress(
+            (int)header.NPoints, (int)header.Dx, (FrequencyResponsePhase)header.Seq, header.X0);
+    }
+
+    private static (BandwidthReading Reading, int Offset) ReadBandwidth(ReadOnlySpan<byte> frame, int offset)
+    {
+        var reading = new BandwidthReading(
+            BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 4, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 8, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 12, 4)),
+            frame[offset + 16] != 0,
+            frame[offset + 17] != 0);
+
+        return (reading, offset + 20);
+    }
 }
 
 public readonly record struct StreamFrameHeader(
@@ -504,3 +685,6 @@ public readonly record struct DecodedSweepPoint(
 
 /// <param name="CurrentX">The point being measured, in the sweep axis' own unit — Hz or generator volts.</param>
 public readonly record struct DecodedSweepProgress(int Index, int Total, float CurrentX, ThdSweepPhase Phase);
+
+public readonly record struct DecodedFrequencyResponseProgress(
+    int Taken, int Total, FrequencyResponsePhase Phase, float GeneratorAmpDbv);

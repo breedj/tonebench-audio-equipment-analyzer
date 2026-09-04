@@ -60,7 +60,7 @@ public class MigrationRunnerTests
             await new MigrationRunner().RunAsync(connection, CancellationToken.None);
 
             long count = await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_version;");
-            Assert.Equal(5L, count);
+            Assert.Equal(7L, count);
         }
         finally
         {
@@ -86,7 +86,8 @@ public class MigrationRunnerTests
 
             Assert.Equal(
                 [(1L, "001_initial.sql"), (2L, "002_channels_and_indexes.sql"), (3L, "003_project_model.sql"),
-                 (4L, "004_capture_preview.sql"), (5L, "005_orphan_cleanup.sql")],
+                 (4L, "004_capture_preview.sql"), (5L, "005_orphan_cleanup.sql"), (6L, "006_response_trace.sql"),
+                 (7L, "007_response_trace_orphans.sql")],
                 rows);
         }
         finally
@@ -103,6 +104,11 @@ public class MigrationRunnerTests
         // insert then hits the UNIQUE index on (capture_id, channel, kind) -- a save that fails on
         // a sweep with nothing wrong with it. Written here at 004's state and then migrated, which
         // is exactly the shape an existing database is in.
+        //
+        // Winding the database back means winding back *every* version above 004, not just 005:
+        // the runner resumes from MAX(version), so leaving a higher row in place makes it skip the
+        // migration under test entirely and this passes or fails for the wrong reason. Each later
+        // migration therefore has to undo whatever it created here as well.
         string path = TestDb.CreateTempPath();
         try
         {
@@ -111,7 +117,8 @@ public class MigrationRunnerTests
             await using (var command = connection.CreateCommand())
             {
                 command.CommandText = """
-                    DELETE FROM schema_version WHERE version = 5;
+                    DELETE FROM schema_version WHERE version >= 5;
+                    DROP TABLE response_trace;
                     INSERT INTO capture_preview (capture_id, channel, kind, x, min, max)
                     VALUES (4242, 0, 'fft', zeroblob(4), zeroblob(4), zeroblob(4));
                     INSERT INTO metric (capture_id, channel, name, value, unit)

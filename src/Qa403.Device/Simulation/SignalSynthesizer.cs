@@ -10,17 +10,9 @@ namespace Qa403.Device.Simulation;
 /// sequence. Note that since <see cref="GeneratorKind.WhiteNoise"/> exists, that statefulness now
 /// reaches <see cref="ComputeChannelSample"/> too, not just the shared noise floor.
 /// </summary>
-internal sealed class SignalSynthesizer(Random random)
+internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
 {
     private const double HumHarmonicDecayDb = -6.0;
-
-    /// <summary>
-    /// How long one <see cref="GeneratorKind.EchoChirp"/> sweep takes before it restarts. A fixed
-    /// constant rather than a user parameter: the spec exposes no sweep length, and the real record
-    /// length is a property of the frequency-response measurement (still to come), not of the
-    /// stimulus. Wrapping on a constant period is also what keeps the chirp a pure function of t.
-    /// </summary>
-    private const double EchoChirpRepeatSeconds = 1.0;
 
     /// <summary>Raised-cosine fade at each end of a sweep, so the wrap back to the start frequency isn't a step.</summary>
     private const double EchoChirpFadeSeconds = 0.005;
@@ -33,9 +25,10 @@ internal sealed class SignalSynthesizer(Random random)
     /// intermodulation pair when that channel has never been configured — see
     /// <see cref="SimulatedSignalProfile.GeneratorLeft"/>.
     /// </summary>
-    public double ComputeChannelSample(SimulatedSignalProfile profile, double t, int channelIndex)
+    public double ComputeChannelSample(SimulatedSignalProfile profile, long frameIndex, int channelIndex)
     {
         var channel = channelIndex == 0 ? profile.GeneratorLeft : profile.GeneratorRight;
+        double t = frameIndex / sampleRateHz;
 
         // Never configured: the legacy demo-tone path, which is also the only path the profile's
         // own IntermodulationMode override applies to (a DUT-simulation knob, not a stimulus kind).
@@ -51,7 +44,7 @@ internal sealed class SignalSynthesizer(Random random)
             GeneratorKind.Tones => ComputeTones(profile, t, channel.Tones),
             GeneratorKind.Multitone => ComputeMultitone(channel.Tones, t),
             GeneratorKind.WhiteNoise => ComputeWhiteNoise(channel.Noise),
-            GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, t),
+            GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, frameIndex),
             _ => 0.0,
         };
     }
@@ -199,35 +192,43 @@ internal sealed class SignalSynthesizer(Random random)
 
     /// <summary>
     /// Exponential ("Farina") sine sweep from <c>StartFrequencyHz</c> to <c>EndFrequencyHz</c>,
-    /// restarting every <see cref="EchoChirpRepeatSeconds"/>. Instantaneous frequency is
-    /// <c>f(tau) = f1 (f2/f1)^(tau/T)</c>, so the phase integrates to
+    /// restarting every <see cref="EchoChirpSettings.RepeatFrames"/> frames. Instantaneous frequency
+    /// is <c>f(tau) = f1 (f2/f1)^(tau/T)</c>, so the phase integrates to
     /// <c>2*pi*f1*T/k * (e^(k*tau/T) - 1)</c> with <c>k = ln(f2/f1)</c>. Uses sin (not cos) so the
     /// sweep starts at zero crossing, and fades in/out so the wrap isn't a step.
+    ///
+    /// <para>The period is a frame count, and the wrap is computed with integer modulo on the frame
+    /// index, because the frequency-response measurement sets it to its own FFT size and depends on
+    /// the two matching exactly — see <see cref="EchoChirpSettings.RepeatFrames"/>. That the
+    /// simulator honours this too is what lets the measurement be tested without hardware.</para>
     /// </summary>
-    private static double ComputeEchoChirp(EchoChirpSettings? settings, double t)
+    private double ComputeEchoChirp(EchoChirpSettings? settings, long frameIndex)
     {
         if (settings is null)
             return 0.0;
 
         double startHz = settings.StartFrequencyHz;
         double endHz = settings.EndFrequencyHz;
-        if (startHz <= 0.0 || endHz <= startHz)
+        if (startHz <= 0.0 || endHz <= startHz || settings.RepeatFrames < 1)
             return 0.0;
 
-        double tau = t % EchoChirpRepeatSeconds;
-        if (tau < 0.0)
-            tau += EchoChirpRepeatSeconds;
+        long frameInPeriod = frameIndex % settings.RepeatFrames;
+        if (frameInPeriod < 0)
+            frameInPeriod += settings.RepeatFrames;
+
+        double periodSeconds = settings.RepeatFrames / sampleRateHz;
+        double tau = frameInPeriod / sampleRateHz;
 
         double k = Math.Log(endHz / startHz);
-        double phase = 2.0 * Math.PI * startHz * EchoChirpRepeatSeconds / k
-            * (Math.Exp(k * tau / EchoChirpRepeatSeconds) - 1.0);
+        double phase = 2.0 * Math.PI * startHz * periodSeconds / k
+            * (Math.Exp(k * tau / periodSeconds) - 1.0);
 
-        return DbvToPeakV(settings.AmplitudeDbv) * Math.Sin(phase) * EchoChirpFade(tau);
+        return DbvToPeakV(settings.AmplitudeDbv) * Math.Sin(phase) * EchoChirpFade(tau, periodSeconds);
     }
 
-    private static double EchoChirpFade(double tau)
+    private static double EchoChirpFade(double tau, double periodSeconds)
     {
-        double fromEdge = Math.Min(tau, EchoChirpRepeatSeconds - tau);
+        double fromEdge = Math.Min(tau, periodSeconds - tau);
         if (fromEdge >= EchoChirpFadeSeconds)
             return 1.0;
 

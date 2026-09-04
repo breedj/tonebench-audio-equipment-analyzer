@@ -5,11 +5,13 @@ import {
   type MeasurementFilter,
   type MeasurementSummary,
   type SaveMeasurementRequest,
+  type StoredResponseTrace,
   type StoredSweepPoint,
   type ThdSweepPoint,
   type UpdateMeasurementRequest,
 } from '../api/client'
-import { isSweepKind } from '../measurements/kinds'
+import { isFrequencyResponseKind, isSweepKind } from '../measurements/kinds'
+import type { ResponseTrace } from './useFrequencyResponse'
 
 /**
  * How many overlays of one kind may be *shown* at once — the THD-vs-frequency and FFT-analysis
@@ -33,6 +35,52 @@ export interface OverlayEntry {
    * for an FFTSpectrum result, whose trace lives in `detail.channelsData` instead.
    */
   sweepPoints?: ThdSweepPoint[]
+
+  /**
+   * A frequency-response result's stored curves, in the same shape the live measurement produces —
+   * so FrequencyResponseChart draws a stored response through exactly the code path it draws the
+   * running one with. Undefined for every other kind.
+   */
+  responseTraces?: ResponseTrace[]
+}
+
+/**
+ * A saved response's rows back into the shape the live measurement produces. The stored kind is
+ * lower-case (`response_trace.kind`, mirroring the SQL) while the wire and the UI use the enum
+ * names, so this is where the two conventions meet — one place rather than at every read site.
+ */
+export function toResponseTraces(stored: StoredResponseTrace[]): ResponseTrace[] {
+  const kinds: Record<string, ResponseTrace['kind']> = { left: 'Left', right: 'Right', gain: 'Gain' }
+
+  return stored.map((trace) => ({
+    kind: kinds[trace.kind] ?? 'Gain',
+    startFreqHz: trace.startHz,
+    endFreqHz: trace.endHz,
+    freqHz: trace.freqHz,
+    magnitudeMinDb: trace.magnitudeMinDb,
+    magnitudeMaxDb: trace.magnitudeMaxDb,
+    phaseDeg: trace.phaseDeg,
+    coherence: trace.coherence,
+    // The stored rows keep the two corner frequencies and their clamped flags but not the width,
+    // which is exactly their difference — recomputed here rather than stored twice and able to
+    // disagree.
+    oneDb: {
+      lowerHz: trace.oneDb.lowerHz,
+      upperHz: trace.oneDb.upperHz,
+      bandwidthHz: Math.max(0, trace.oneDb.upperHz - trace.oneDb.lowerHz),
+      lowerClamped: trace.oneDb.lowerClamped,
+      upperClamped: trace.oneDb.upperClamped,
+    },
+    threeDb: {
+      lowerHz: trace.threeDb.lowerHz,
+      upperHz: trace.threeDb.upperHz,
+      bandwidthHz: Math.max(0, trace.threeDb.upperHz - trace.threeDb.lowerHz),
+      lowerClamped: trace.threeDb.lowerClamped,
+      upperClamped: trace.threeDb.upperClamped,
+    },
+    peakDb: trace.peakDb,
+    peakFreqHz: trace.peakHz,
+  }))
 }
 
 /**
@@ -154,6 +202,23 @@ export function useMeasurements() {
     }
   }
 
+  /**
+   * A frequency-response result is built from the response runner's own curves, not from the
+   * pipeline's retained spectrum, so it saves through its own endpoint — the same split as
+   * `saveSweep`, and for the same reason.
+   */
+  async function saveResponse(req: { measurementTypeId: number; name: string; notes: string | null }) {
+    try {
+      const result = await api.saveFrequencyResponse(req)
+      await load()
+      error.value = null
+      return result
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   async function update(id: number, req: UpdateMeasurementRequest) {
     try {
       await api.updateMeasurement(id, req)
@@ -202,7 +267,14 @@ export function useMeasurements() {
       const sweepPoints = isSweepKind(detail.kind)
         ? toSweepPoints((await api.getStoredSweep(resultId)).points)
         : undefined
-      overlays.value = [...overlays.value, { id: resultId, detail, visible: true, sweepPoints }]
+      // Likewise a response result: its curves live in response_trace, not in spectrum rows.
+      const responseTraces = isFrequencyResponseKind(detail.kind)
+        ? toResponseTraces((await api.getStoredResponse(resultId)).traces)
+        : undefined
+      overlays.value = [
+        ...overlays.value,
+        { id: resultId, detail, visible: true, sweepPoints, responseTraces },
+      ]
       error.value = null
     } catch (e) {
       error.value = (e as Error).message
@@ -230,6 +302,6 @@ export function useMeasurements() {
 
   if (items.value.length === 0) load()
 
-  return { items, filter, overlays, error, load, save, saveSweep, update, remove,
+  return { items, filter, overlays, error, load, save, saveSweep, saveResponse, update, remove,
     addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
 }

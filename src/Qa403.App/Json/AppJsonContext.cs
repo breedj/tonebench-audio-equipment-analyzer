@@ -62,6 +62,12 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ThdVsFrequencyParameters))]
 [JsonSerializable(typeof(ThdAmplitudeSweepStartRequest))]
 [JsonSerializable(typeof(ThdVsAmplitudeParameters))]
+[JsonSerializable(typeof(FrequencyResponseStartRequest))]
+[JsonSerializable(typeof(FrequencyResponseStarted))]
+[JsonSerializable(typeof(FrequencyResponseStatus))]
+[JsonSerializable(typeof(SaveFrequencyResponseRequest))]
+[JsonSerializable(typeof(StoredResponseTracesResponse))]
+[JsonSerializable(typeof(FrequencyResponseParameters))]
 // Serialized directly to params_json/gen_json by MeasurementSaveService, not returned from an
 // endpoint — same trim-metadata requirement applies.
 [JsonSerializable(typeof(FftSpectrumParameters))]

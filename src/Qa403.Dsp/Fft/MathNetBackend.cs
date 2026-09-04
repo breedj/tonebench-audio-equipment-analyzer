@@ -12,8 +12,7 @@ public sealed class MathNetBackend : IFftBackend
     {
         int specLength = FftBackendValidation.ValidateAndGetSpecLength(timeIn.Length, specOut.Length);
 
-        if (_scratch.Length != timeIn.Length)
-            _scratch = new Complex[timeIn.Length];
+        EnsureScratch(timeIn.Length);
 
         for (int i = 0; i < timeIn.Length; i++)
             _scratch[i] = new Complex(timeIn[i], 0.0);
@@ -23,5 +22,20 @@ public sealed class MathNetBackend : IFftBackend
         Fourier.Forward(_scratch, FourierOptions.NoScaling);
 
         _scratch.AsSpan(0, specLength).CopyTo(specOut);
+    }
+
+    public void Inverse(ReadOnlySpan<Complex> specIn, Span<double> timeOut)
+    {
+        EnsureScratch(timeOut.Length);
+
+        HermitianInverse.Expand(specIn, _scratch, timeOut.Length);
+        Fourier.Forward(_scratch, FourierOptions.NoScaling);
+        HermitianInverse.Finish(_scratch, timeOut);
+    }
+
+    private void EnsureScratch(int length)
+    {
+        if (_scratch.Length != length)
+            _scratch = new Complex[length];
     }
 }

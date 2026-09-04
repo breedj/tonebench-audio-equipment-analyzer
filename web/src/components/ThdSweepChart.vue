@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
+import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useSweep } from '../composables/useSweep'
@@ -114,7 +115,7 @@ const { loadOhms } = useLoadOhms()
 
 const containerRef = ref<HTMLDivElement | null>(null)
 
-const CHART_HEIGHT = 560
+const CHART_HEIGHT = RESULT_CHART_HEIGHT_PX
 
 /**
  * One entry per drawn trace. Order is fixed and shared by buildOptions and update() — the series

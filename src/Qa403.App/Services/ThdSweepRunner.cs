@@ -56,8 +56,8 @@ public sealed class ThdSweepRunner(
     /// </summary>
     private const double AverageHopFraction = 0.5;
 
-    /// <summary>Headroom left above the expected level when picking an input range, in dB. From the previous app's <c>DetermineAttenuation</c>.</summary>
-    private const double InputRangeHeadroomDb = 5.0;
+    /// <summary>Headroom left above the expected level when picking an input range, in dB — see <see cref="InputRangeSelector.HeadroomDb"/>, which owns the ladder this and the device's own ranger share.</summary>
+    private const double InputRangeHeadroomDb = InputRangeSelector.HeadroomDb;
 
     /// <summary>
     /// Fraction of Nyquist the highest sweep point may reach. A tone at Nyquist itself has no
@@ -744,11 +744,8 @@ public sealed class ThdSweepRunner(
     /// range offered when nothing fits. Same ladder and same headroom the device's own ranger uses,
     /// which is what lets the two disagree only about *when*, never about *where*.
     /// </summary>
-    private static double SelectInputRange(IReadOnlyList<double> ranges, double expectedLevelDbv)
-    {
-        double wanted = expectedLevelDbv + InputRangeHeadroomDb;
-        return ranges.Where(r => r >= wanted).DefaultIfEmpty(ranges.Max()).Min();
-    }
+    private static double SelectInputRange(IReadOnlyList<double> ranges, double expectedLevelDbv) =>
+        InputRangeSelector.For(ranges, expectedLevelDbv);
 
     /// <summary>
     /// The generator-off residual, per channel: the <em>mean level of one bin</em> across the

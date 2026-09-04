@@ -29,6 +29,14 @@ export const StreamMsgType = {
   SweepPoint: 4,
   /** Where a running sweep is; carries no per-channel data — see decodeSweepProgressFrame. */
   SweepProgress: 5,
+  /**
+   * One finished frequency-response curve. The header's channel byte holds a
+   * FrequencyResponseTraceKind, not an input channel — the gain curve belongs to neither input.
+   * See decodeFrequencyResponseFrame.
+   */
+  FrequencyResponse: 6,
+  /** How many records a running frequency-response measurement has taken — see decodeFrequencyResponseProgressFrame. */
+  FrequencyResponseProgress: 7,
 } as const
 export type StreamMsgType = (typeof StreamMsgType)[keyof typeof StreamMsgType]
 
@@ -397,5 +405,138 @@ export function decodeSweepProgressFrame(buffer: ArrayBuffer): SweepProgressFram
     total: Math.round(header.dx),
     currentX: header.x0,
     phase: header.seq as SweepPhase,
+  }
+}
+
+/**
+ * Mirrors Qa403.App.Services.FrequencyResponseTraceKind. These are the header's channel byte, so a
+ * client must not read that byte as a StreamChannel on these frames — Gain is 2, which is not a
+ * channel at all.
+ */
+export const ResponseTraceKind = {
+  Left: 0,
+  Right: 1,
+  Gain: 2,
+} as const
+export type ResponseTraceKind = (typeof ResponseTraceKind)[keyof typeof ResponseTraceKind]
+
+/** Mirrors Qa403.App.Services.FrequencyResponsePhase. Ordinals, for the same reason as SweepPhase. */
+export const ResponsePhase = {
+  Idle: 0,
+  DeterminingLevel: 1,
+  Measuring: 2,
+  Finished: 3,
+  Cancelled: 4,
+  Failed: 5,
+  /** Appended, not slotted in beside DeterminingLevel — the ordinal is on the wire. */
+  DeterminingRange: 6,
+} as const
+export type ResponsePhase = (typeof ResponsePhase)[keyof typeof ResponsePhase]
+
+/**
+ * One -1 dB or -3 dB reading. `lowerClamped`/`upperClamped` mean the curve never fell to the
+ * threshold on that side inside the measured band, so the frequency is where the search stopped
+ * rather than a corner — render those as "> 96 kHz" rather than as a number.
+ */
+export interface ResponseBandwidth {
+  dropDb: number
+  lowerHz: number
+  upperHz: number
+  bandwidthHz: number
+  lowerClamped: boolean
+  upperClamped: boolean
+}
+
+export interface FrequencyResponseFrame {
+  header: StreamFrameHeader
+  kind: ResponseTraceKind
+  startFreqHz: number
+  endFreqHz: number
+  freqHz: Float32Array
+  /** Both bounds are sent and both must be drawn — max as the line, min as the band beneath it. */
+  magnitudeMinDb: Float32Array
+  magnitudeMaxDb: Float32Array
+  phaseDeg: Float32Array
+  coherence: Float32Array
+  oneDb: ResponseBandwidth
+  threeDb: ResponseBandwidth
+  peakDb: number
+  peakFreqHz: number
+}
+
+export interface FrequencyResponseProgressFrame {
+  header: StreamFrameHeader
+  taken: number
+  total: number
+  phase: ResponsePhase
+  /** dBV. Solved by the probe in output-voltage mode, so it is the one number worth watching mid-run. */
+  generatorAmpDbv: number
+}
+
+/** Hand-mirrors StreamFrame.EncodeFrequencyResponse. See that method for the byte layout. */
+export function decodeFrequencyResponseFrame(buffer: ArrayBuffer): FrequencyResponseFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  const columns = header.nPoints
+
+  // Copied out rather than viewed in place: the columns are interleaved, so a zero-copy view would
+  // have to be strided, and unlike a spectrum frame these arrive once per measurement rather than
+  // twenty times a second.
+  const freqHz = new Float32Array(columns)
+  const magnitudeMinDb = new Float32Array(columns)
+  const magnitudeMaxDb = new Float32Array(columns)
+  const phaseDeg = new Float32Array(columns)
+  const coherence = new Float32Array(columns)
+
+  let offset = HEADER_LENGTH
+  for (let i = 0; i < columns; i++) {
+    freqHz[i] = view.getFloat32(offset, true)
+    magnitudeMinDb[i] = view.getFloat32(offset + 4, true)
+    magnitudeMaxDb[i] = view.getFloat32(offset + 8, true)
+    phaseDeg[i] = view.getFloat32(offset + 12, true)
+    coherence[i] = view.getFloat32(offset + 16, true)
+    offset += 20
+  }
+
+  const oneDb = readBandwidth(view, offset)
+  const threeDb = readBandwidth(view, offset + 20)
+  offset += 40
+
+  return {
+    header,
+    kind: header.channel as number as ResponseTraceKind,
+    startFreqHz: header.x0,
+    endFreqHz: header.dx,
+    freqHz,
+    magnitudeMinDb,
+    magnitudeMaxDb,
+    phaseDeg,
+    coherence,
+    oneDb,
+    threeDb,
+    peakDb: view.getFloat32(offset, true),
+    peakFreqHz: view.getFloat32(offset + 4, true),
+  }
+}
+
+function readBandwidth(view: DataView, offset: number): ResponseBandwidth {
+  return {
+    dropDb: view.getFloat32(offset, true),
+    lowerHz: view.getFloat32(offset + 4, true),
+    upperHz: view.getFloat32(offset + 8, true),
+    bandwidthHz: view.getFloat32(offset + 12, true),
+    lowerClamped: view.getUint8(offset + 16) !== 0,
+    upperClamped: view.getUint8(offset + 17) !== 0,
+  }
+}
+
+export function decodeFrequencyResponseProgressFrame(buffer: ArrayBuffer): FrequencyResponseProgressFrame {
+  const header = decodeHeader(buffer)
+  return {
+    header,
+    taken: header.nPoints,
+    total: Math.round(header.dx),
+    phase: header.seq as ResponsePhase,
+    generatorAmpDbv: header.x0,
   }
 }

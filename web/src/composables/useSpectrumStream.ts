@@ -6,12 +6,15 @@ import {
   decodeSpectrumFrame,
   decodeSweepPointFrame,
   decodeSweepProgressFrame,
+  decodeFrequencyResponseFrame,
+  decodeFrequencyResponseProgressFrame,
   encodeSetViewport,
   StreamMsgType,
   type MetersFrame,
   type ScopeFrame,
   type SpectrumFrame,
 } from '../streaming/protocol'
+import { useFrequencyResponse } from './useFrequencyResponse'
 import { useSweep } from './useSweep'
 
 const RECONNECT_DELAY_MS = 1000
@@ -27,6 +30,7 @@ export function useSpectrumStream() {
   const scope = shallowRef<Record<number, ScopeFrame>>({})
   const connected = ref(false)
   const sweep = useSweep()
+  const response = useFrequencyResponse()
 
   let socket: WebSocket | null = null
   let reconnectHandle: ReturnType<typeof setTimeout> | undefined
@@ -122,6 +126,12 @@ export function useSpectrumStream() {
         sweep.ingestPoint(decodeSweepPointFrame(event.data))
       } else if (header.msgType === StreamMsgType.SweepProgress) {
         sweep.ingestProgress(decodeSweepProgressFrame(event.data))
+      } else if (header.msgType === StreamMsgType.FrequencyResponse) {
+        // Same reasoning as the sweep frames above: one server-side run shared by every component
+        // looking at it, so it goes into useFrequencyResponse's singleton rather than a local ref.
+        response.ingestTrace(decodeFrequencyResponseFrame(event.data))
+      } else if (header.msgType === StreamMsgType.FrequencyResponseProgress) {
+        response.ingestProgress(decodeFrequencyResponseProgressFrame(event.data))
       }
     }
 

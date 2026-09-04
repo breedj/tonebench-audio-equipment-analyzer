@@ -139,7 +139,7 @@ public sealed class SimulatedDevice : IAnalyzerDevice
 
         _stopRequested = false;
 
-        var synthesizer = new SignalSynthesizer(_random);
+        var synthesizer = new SignalSynthesizer(_random, config.SampleRateHz);
         var period = TimeSpan.FromSeconds(config.BlockFrameCount / config.SampleRateHz);
         using var timer = new PeriodicTimer(period);
 
@@ -164,7 +164,8 @@ public sealed class SimulatedDevice : IAnalyzerDevice
 
             for (int frame = 0; frame < config.BlockFrameCount; frame++)
             {
-                double t = (frameIndex + frame) / config.SampleRateHz;
+                long absoluteFrame = frameIndex + frame;
+                double t = absoluteFrame / config.SampleRateHz;
 
                 // Hum/noise are drawn once per frame and shared across channels (same as before);
                 // only the generator tones differ per channel (see ComputeChannelSample).
@@ -179,7 +180,7 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                     // the ADC's soft input saturation. Hum/noise are not products of the DAC, so
                     // they deliberately sit outside the output clip.
                     double generated = SignalSynthesizer.HardClip(
-                        synthesizer.ComputeChannelSample(profile, t, ch), outputClipPeakV);
+                        synthesizer.ComputeChannelSample(profile, absoluteFrame, ch), outputClipPeakV);
 
                     double sample = SignalSynthesizer.SoftClip(generated + sharedAdditive, inputClipPeakV);
                     buffer[(frame * config.ChannelCount) + ch] = (float)sample;

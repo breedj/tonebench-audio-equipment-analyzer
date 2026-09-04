@@ -18,6 +18,7 @@ public sealed class MeasurementSaveService(
     DeviceSessionService session,
     SpectrumPipeline spectrumPipeline,
     ThdSweepRunner sweepRunner,
+    FrequencyResponseRunner responseRunner,
     ProjectRepository projectRepository,
     MeasurementRepository measurementRepository,
     IOptions<JsonOptions> jsonOptions)
@@ -40,6 +41,21 @@ public sealed class MeasurementSaveService(
     /// <see cref="FftSpectrumParameters"/>, and its result rows carry no spectra.
     /// </summary>
     public static bool IsSweepKind(string kind) => kind is ThdVsFrequencyKind or ThdVsAmplitudeKind;
+
+    /// <summary>The <c>measurement_type.kind</c> value for a chirp frequency response. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string FrequencyResponseKind = "FrequencyResponse";
+
+    /// <summary>
+    /// Whether a kind's result is a set of frequency-response curves. Its own predicate rather than
+    /// a third arm of <see cref="IsSweepKind"/>: a response shares with a sweep only the property
+    /// that it has no live state to snapshot. Its result rows are curves, not points, so every path
+    /// that reads a result has to tell the two apart, and a kind that answered true to "is a sweep"
+    /// would be read back through <c>GetSweepPointsAsync</c> and come out empty.
+    /// </summary>
+    public static bool IsFrequencyResponseKind(string kind) => kind == FrequencyResponseKind;
+
+    /// <summary>Whether a kind's configuration lives only in its panel, with nothing live to snapshot — see <see cref="ResolveTypeParamsJson"/>.</summary>
+    public static bool HasNoLiveConfiguration(string kind) => IsSweepKind(kind) || IsFrequencyResponseKind(kind);
 
     /// <summary>
     /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
@@ -92,6 +108,25 @@ public sealed class MeasurementSaveService(
             MeasureNoiseFloor: true), SerializerOptions);
 
     /// <summary>
+    /// A brand-new frequency-response type's <c>params_json</c>, on the same terms as
+    /// <see cref="DefaultSweepParametersJson"/> and kept in step with
+    /// <c>FrequencyResponseConfigPanel.vue</c>'s own defaults. Those defaults are the previous
+    /// app's: 96 kHz span, 1.46 Hz bins, 0 dBV of DUT output, 1/24 octave, one average, and the
+    /// right input as the reference.
+    /// </summary>
+    public string DefaultFrequencyResponseParametersJson() =>
+        JsonSerializer.Serialize(new FrequencyResponseParameters(
+            FrequencySpanHz: 96000.0,
+            ResolutionMultiplier: 1,
+            LevelMode: nameof(ThdSweepLevelMode.OutputVoltage),
+            LevelValue: 0.0,
+            LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
+            RightChannelIsReference: true,
+            SmoothingDenominator: 24,
+            AverageCount: 1,
+            LoadOhms: 8.0), SerializerOptions);
+
+    /// <summary>
     /// What a create-or-update of a measurement type should write to <c>params_json</c>.
     ///
     /// The interesting case is an omitted <paramref name="requestedJson"/>, which means "snapshot
@@ -107,6 +142,9 @@ public sealed class MeasurementSaveService(
     {
         if (!string.IsNullOrWhiteSpace(requestedJson))
             return requestedJson;
+
+        if (IsFrequencyResponseKind(kind))
+            return existingParamsJson ?? DefaultFrequencyResponseParametersJson();
 
         if (IsSweepKind(kind))
         {
@@ -254,6 +292,70 @@ public sealed class MeasurementSaveService(
     }
 
     /// <summary>
+    /// Saves the frequency-response curves currently on screen as one measurement result.
+    ///
+    /// <para>Reads <see cref="FrequencyResponseRunner.Status"/> rather than taking the traces as an
+    /// argument, for the same reason <see cref="SaveSweepAsync"/> reads the runner's: what is saved
+    /// must be exactly what is displayed, not a separately-supplied copy that could differ.</para>
+    /// </summary>
+    public async Task<long> SaveFrequencyResponseAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = responseRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before saving.");
+        if (status.Traces.Count == 0)
+            throw new InvalidOperationException("No frequency response has been measured yet.");
+
+        var request = responseRunner.LastRequest
+            ?? throw new InvalidOperationException("No frequency response has been measured yet.");
+
+        string paramsJson = JsonSerializer.Serialize(
+            new FrequencyResponseParameters(
+                request.FrequencySpanHz, request.ResolutionMultiplier,
+                request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
+                request.RightChannelIsReference, request.SmoothingDenominator, request.AverageCount,
+                status.GeneratorAmpDbv,
+                ChirpStartHz: request.ChirpStartHz,
+                LoadOhms: request.LoadOhms),
+            SerializerOptions);
+
+        var info = session.Info;
+        var saveRequest = new ResponseSaveRequest(
+            measurementTypeId, name, notes,
+            paramsJson,
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            request.SampleRateHz, request.FftSize,
+            Channels: 2,
+            session.InputRangeDbv, session.OutputRangeDbv,
+            [.. status.Traces.Select(ToTraceInput)]);
+
+        return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
+    }
+
+    private static ResponseTraceInput ToTraceInput(FrequencyResponseTrace trace) =>
+        new(
+            TraceKindName(trace.Kind),
+            trace.StartFreqHz,
+            trace.EndFreqHz,
+            trace.PeakDb,
+            trace.PeakFreqHz,
+            new ResponseBandwidth(trace.OneDb.LowerHz, trace.OneDb.UpperHz, trace.OneDb.LowerClamped, trace.OneDb.UpperClamped),
+            new ResponseBandwidth(trace.ThreeDb.LowerHz, trace.ThreeDb.UpperHz, trace.ThreeDb.LowerClamped, trace.ThreeDb.UpperClamped),
+            trace.FreqHz,
+            trace.MagnitudeMinDb,
+            trace.MagnitudeMaxDb,
+            trace.PhaseDeg,
+            trace.Coherence);
+
+    private static string TraceKindName(FrequencyResponseTraceKind kind) => kind switch
+    {
+        FrequencyResponseTraceKind.Left => ResponseTraceKind.Left,
+        FrequencyResponseTraceKind.Right => ResponseTraceKind.Right,
+        FrequencyResponseTraceKind.Gain => ResponseTraceKind.Gain,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown response trace kind."),
+    };
+
+    /// <summary>
     /// One frequency's preview traces, per channel and kind (FFT/scope) -- absent entirely for a
     /// point whose channel never captured one (the sweep runner always turns capture on, so in
     /// practice this only happens for a sweep saved before this feature existed... except there is
@@ -344,12 +446,16 @@ public sealed class MeasurementSaveService(
         var type = await projectRepository.GetTypeAsync(measurementTypeId, ct)
             ?? throw new KeyNotFoundException($"Measurement type {measurementTypeId} not found.");
 
-        // A sweep type's params_json is a ThdVsFrequencyParameters, which would not deserialize as
-        // an FftSpectrumParameters at all (every property there is required), so selecting one used
-        // to be an exception rather than a screen. None of it belongs on the spectrum pipeline
-        // either -- the runner applies its own analysis settings when it starts, and SweepConfigPanel
-        // owns the rest -- so this hands back the live device state and touches nothing.
-        if (IsSweepKind(type.Kind))
+        // A sweep or response type's params_json is its own record, not an FftSpectrumParameters,
+        // and none of it belongs on the spectrum pipeline either -- each runner applies its own
+        // analysis settings when it starts, and the config panel owns the rest. So this hands back
+        // the live device state and touches nothing.
+        //
+        // Deliberately the broad predicate rather than IsSweepKind: deserializing another kind's
+        // JSON as an FftSpectrumParameters does not throw, it yields an object full of nulls, and
+        // the first read of one is a NullReferenceException 500 when the type is merely *selected*.
+        // That is what a response type did before this line was widened.
+        if (HasNoLiveConfiguration(type.Kind))
             return ToAppliedResponse(BuildParameters());
 
         var parameters = JsonSerializer.Deserialize<FftSpectrumParameters>(type.ParamsJson, SerializerOptions)

@@ -176,6 +176,171 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     }
 
     /// <summary>
+    /// Saves a frequency-response measurement: one result row, one capture, and its curves.
+    ///
+    /// <para>Its own method rather than a branch inside <see cref="SaveSweepResultAsync"/>, for the
+    /// same reason that one is separate from <see cref="SaveResultAsync"/>: the row shapes have
+    /// almost nothing in common (one capture holding continuous curves, versus N captures holding
+    /// scalars), and widening a working save path to cover both would put every existing
+    /// measurement through new code for no gain.</para>
+    /// </summary>
+    public async Task<long> SaveResponseResultAsync(ResponseSaveRequest request, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        await using var transaction = connection.BeginTransaction();
+
+        long resultId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO measurement_result
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated)
+            RETURNING id;
+            """,
+            new
+            {
+                request.MeasurementTypeId,
+                request.Name,
+                request.Notes,
+                Ts = Qa403Timestamp.Now(),
+                request.ParamsJson,
+                request.DeviceName,
+                request.Serial,
+                request.FwVer,
+                request.IsSimulated,
+            },
+            transaction);
+
+        long captureId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO capture
+                (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels)
+            VALUES (@ResultId, 0, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, NULL, @Channels)
+            RETURNING id;
+            """,
+            new
+            {
+                ResultId = resultId,
+                Ts = Qa403Timestamp.Now(),
+                Fs = request.SampleRateHz,
+                N = request.FftSize,
+                request.InRangeDbv,
+                request.OutRangeDbv,
+                request.Channels,
+            },
+            transaction);
+
+        foreach (var trace in request.Traces)
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO response_trace
+                    (capture_id, kind, start_hz, end_hz, peak_db, peak_hz,
+                     bw1_lower_hz, bw1_upper_hz, bw1_lower_clamped, bw1_upper_clamped,
+                     bw3_lower_hz, bw3_upper_hz, bw3_lower_clamped, bw3_upper_clamped,
+                     freq_hz, mag_min_db, mag_max_db, phase_deg, coherence)
+                VALUES
+                    (@CaptureId, @Kind, @StartHz, @EndHz, @PeakDb, @PeakHz,
+                     @Bw1LowerHz, @Bw1UpperHz, @Bw1LowerClamped, @Bw1UpperClamped,
+                     @Bw3LowerHz, @Bw3UpperHz, @Bw3LowerClamped, @Bw3UpperClamped,
+                     @FreqHz, @MagMinDb, @MagMaxDb, @PhaseDeg, @Coherence);
+                """,
+                new
+                {
+                    CaptureId = captureId,
+                    trace.Kind,
+                    trace.StartHz,
+                    trace.EndHz,
+                    trace.PeakDb,
+                    trace.PeakHz,
+                    Bw1LowerHz = trace.OneDb.LowerHz,
+                    Bw1UpperHz = trace.OneDb.UpperHz,
+                    Bw1LowerClamped = trace.OneDb.LowerClamped ? 1 : 0,
+                    Bw1UpperClamped = trace.OneDb.UpperClamped ? 1 : 0,
+                    Bw3LowerHz = trace.ThreeDb.LowerHz,
+                    Bw3UpperHz = trace.ThreeDb.UpperHz,
+                    Bw3LowerClamped = trace.ThreeDb.LowerClamped ? 1 : 0,
+                    Bw3UpperClamped = trace.ThreeDb.UpperClamped ? 1 : 0,
+                    FreqHz = PreviewCodec.Encode(trace.FreqHz),
+                    MagMinDb = PreviewCodec.Encode(trace.MagnitudeMinDb),
+                    MagMaxDb = PreviewCodec.Encode(trace.MagnitudeMaxDb),
+                    PhaseDeg = PreviewCodec.Encode(trace.PhaseDeg),
+                    Coherence = PreviewCodec.Encode(trace.Coherence),
+                },
+                transaction);
+        }
+
+        await transaction.CommitAsync(ct);
+        return resultId;
+    }
+
+    /// <summary>Every curve of a saved frequency-response measurement, for redrawing or overlaying it.</summary>
+    public async Task<IReadOnlyList<StoredResponseTrace>> GetResponseTracesAsync(long resultId, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        var rows = await connection.QueryAsync<ResponseTraceRow>(
+            """
+            SELECT rt.kind AS Kind, rt.start_hz AS StartHz, rt.end_hz AS EndHz,
+                   rt.peak_db AS PeakDb, rt.peak_hz AS PeakHz,
+                   rt.bw1_lower_hz AS Bw1LowerHz, rt.bw1_upper_hz AS Bw1UpperHz,
+                   rt.bw1_lower_clamped AS Bw1LowerClamped, rt.bw1_upper_clamped AS Bw1UpperClamped,
+                   rt.bw3_lower_hz AS Bw3LowerHz, rt.bw3_upper_hz AS Bw3UpperHz,
+                   rt.bw3_lower_clamped AS Bw3LowerClamped, rt.bw3_upper_clamped AS Bw3UpperClamped,
+                   rt.freq_hz AS FreqHz, rt.mag_min_db AS MagMinDb, rt.mag_max_db AS MagMaxDb,
+                   rt.phase_deg AS PhaseDeg, rt.coherence AS Coherence
+            FROM response_trace rt
+            JOIN capture c ON c.id = rt.capture_id
+            WHERE c.measurement_result_id = @ResultId
+            ORDER BY rt.id;
+            """,
+            new { ResultId = resultId });
+
+        return
+        [
+            .. rows.Select(row => new StoredResponseTrace(
+                row.Kind,
+                row.StartHz,
+                row.EndHz,
+                row.PeakDb,
+                row.PeakHz,
+                new ResponseBandwidth(row.Bw1LowerHz, row.Bw1UpperHz, row.Bw1LowerClamped != 0, row.Bw1UpperClamped != 0),
+                new ResponseBandwidth(row.Bw3LowerHz, row.Bw3UpperHz, row.Bw3LowerClamped != 0, row.Bw3UpperClamped != 0),
+                PreviewCodec.Decode(row.FreqHz),
+                PreviewCodec.Decode(row.MagMinDb),
+                PreviewCodec.Decode(row.MagMaxDb),
+                PreviewCodec.Decode(row.PhaseDeg),
+                PreviewCodec.Decode(row.Coherence))),
+        ];
+    }
+
+    /// <summary>
+    /// Flat Dapper row for <see cref="GetResponseTracesAsync"/>. A class with settable properties
+    /// rather than a positional record: Dapper matches a positional record's constructor by
+    /// position, so a column list that drifts out of order binds silently and wrongly.
+    /// </summary>
+    private sealed class ResponseTraceRow
+    {
+        public string Kind { get; set; } = "";
+        public double StartHz { get; set; }
+        public double EndHz { get; set; }
+        public double PeakDb { get; set; }
+        public double PeakHz { get; set; }
+        public double Bw1LowerHz { get; set; }
+        public double Bw1UpperHz { get; set; }
+        public long Bw1LowerClamped { get; set; }
+        public long Bw1UpperClamped { get; set; }
+        public double Bw3LowerHz { get; set; }
+        public double Bw3UpperHz { get; set; }
+        public long Bw3LowerClamped { get; set; }
+        public long Bw3UpperClamped { get; set; }
+        public byte[] FreqHz { get; set; } = [];
+        public byte[] MagMinDb { get; set; } = [];
+        public byte[] MagMaxDb { get; set; } = [];
+        public byte[] PhaseDeg { get; set; } = [];
+        public byte[] Coherence { get; set; } = [];
+    }
+
+    /// <summary>
     /// Every point of a saved sweep, ascending by <c>seq_index</c>. Reads all the metrics in one
     /// query joined through <c>capture</c> rather than one query per point -- a 50-point stereo
     /// sweep is 50 round trips otherwise.
@@ -343,16 +508,22 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             -- naming nothing that is wrong. generator_dbv is NULL for every single-spectrum result,
             -- which is most of them, so this is the common path rather than an edge case.
             -- NoGeneratorLevelDbv stands in for "this capture recorded no level"; see its remarks.
+            --
+            -- fundamental_hz needs exactly the same guard, and got it only once a kind arrived whose
+            -- results have no metric rows at all. Until then every result set contained at least one
+            -- capture that had recorded a fundamental, so the column always came back typed and the
+            -- bare subquery looked safe. Filtering the list to a frequency-response type made every
+            -- row NULL and turned the whole history list into a 500.
             SELECT c.measurement_result_id AS ResultId, c.id AS CaptureId,
-                   (SELECT MIN(m.value) FROM metric m
-                     WHERE m.capture_id = c.id AND m.name = 'fundamental_hz') AS FundamentalHz,
+                   IFNULL((SELECT MIN(m.value) FROM metric m
+                            WHERE m.capture_id = c.id AND m.name = 'fundamental_hz'), @noFundamental) AS FundamentalHz,
                    IFNULL((SELECT MIN(m.value) FROM metric m
                             WHERE m.capture_id = c.id AND m.name = 'generator_dbv'), @noLevel) AS GeneratorDbv,
                    c.seq_index AS SeqIndex
             FROM capture c
             WHERE c.measurement_result_id IN @resultIds;
             """,
-            new { resultIds, noLevel = NoGeneratorLevelDbv });
+            new { resultIds, noLevel = NoGeneratorLevelDbv, noFundamental = NoFundamentalHz });
 
         var capturesByResult = captureRows.ToLookup(c => c.ResultId);
         var headlineCaptureIds = rows.ToDictionary(
@@ -476,7 +647,17 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         return affected > 0;
     }
 
-    /// <summary>Deletes the result's captures (and their spectra/metrics) then the result itself.</summary>
+    /// <summary>
+    /// Deletes the result's captures (and their spectra, metrics, previews and response traces) then
+    /// the result itself.
+    ///
+    /// <para>Every child table has to be listed here by hand: foreign keys are off (see
+    /// <c>SqliteConnectionFactory</c>), so a table missed from this cascade is orphaned silently and
+    /// then collides with a future capture that reuses the freed rowid. That has now happened twice
+    /// — <c>capture_preview</c> (migration 005) and <c>response_trace</c> (007) — both times because
+    /// the table was added after this method was written. A new child of <c>capture</c> belongs in
+    /// this list, in <c>ProjectRepository.DeleteTypeAsync</c>, and in a repair migration.</para>
+    /// </summary>
     public async Task<bool> DeleteResultAsync(long resultId, CancellationToken ct)
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
@@ -490,6 +671,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             await connection.ExecuteAsync("DELETE FROM metric WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM spectrum WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM capture_preview WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
+            await connection.ExecuteAsync("DELETE FROM response_trace WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM capture WHERE id IN @captureIds;", new { captureIds }, transaction);
         }
 
@@ -543,6 +725,12 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     private const double NoGeneratorLevelDbv = -1.0e9;
 
     /// <summary>
+    /// Stands in for "this capture recorded no <c>fundamental_hz</c> metric", for the same reason as
+    /// <see cref="NoGeneratorLevelDbv"/>. Negative, so it can never be confused with a frequency.
+    /// </summary>
+    private const double NoFundamentalHz = -1.0;
+
+    /// <summary>
     /// Picks the capture whose metrics stand for the whole result in the history list: the lowest
     /// measured fundamental at or above <see cref="HeadlineFundamentalHz"/>, or -- for a sweep whose
     /// axis is the level rather than the frequency -- its highest level.
@@ -575,8 +763,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             return levels.OrderBy(c => c.GeneratorDbv).ThenBy(c => c.SeqIndex).Last().CaptureId;
 
         var measured = all
-            .Where(c => c.FundamentalHz is not null)
-            .OrderBy(c => c.FundamentalHz!.Value)
+            .Where(c => c.FundamentalHz > NoFundamentalHz)
+            .OrderBy(c => c.FundamentalHz)
             .ToList();
 
         if (measured.Count == 0)
@@ -588,10 +776,12 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
 
     private sealed record MetricRowRaw(long CaptureId, long Channel, string Name, double Value);
 
-    // FundamentalHz is nullable: it is a correlated MIN() over the metric rows, which is NULL for a
-    // capture that recorded no fundamental. Both channels of one capture measure the same
-    // frequency, so MIN() collapses them without choosing between them.
-    private sealed record HeadlineCaptureRowRaw(long ResultId, long CaptureId, double? FundamentalHz, double GeneratorDbv, long SeqIndex);
+    // FundamentalHz and GeneratorDbv are correlated MIN()s over the metric rows, NULL for a capture
+    // that recorded neither -- and both arrive as a sentinel rather than a null, because a column
+    // that is NULL for every row of a result set has no SQLite type and Dapper then materializes it
+    // as byte[]. See the query. Both channels of one capture measure the same frequency, so MIN()
+    // collapses them without choosing between them.
+    private sealed record HeadlineCaptureRowRaw(long ResultId, long CaptureId, double FundamentalHz, double GeneratorDbv, long SeqIndex);
 
     private sealed record SpectrumRowRaw(long Id, string Window, double S1, double S2, double EnbwHz, double BinSizeHz, string Norm, long ByteLength);
 }

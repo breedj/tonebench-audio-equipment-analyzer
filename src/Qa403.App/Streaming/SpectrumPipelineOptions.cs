@@ -152,4 +152,21 @@ public sealed record SpectrumPipelineOptions
     /// preview has to be taken at the only moment the samples exist.
     /// </summary>
     public bool CapturePreview { get; init; } = false;
+
+    /// <summary>
+    /// Keep each analyzed record's raw complex spectrum on the retained snapshot
+    /// (<see cref="SpectrumSnapshot.Complex"/>), not just its magnitudes.
+    ///
+    /// <para>Off by default and meant to be turned on only for the duration of a
+    /// frequency-response capture. The live path has no use for phase, and retaining it there would
+    /// copy a 65537-element <c>Complex</c> array per channel on every one of ~20 ticks a second for
+    /// nobody.</para>
+    ///
+    /// <para>The spectrum is of the <b>windowed</b> record, so anything reading the phase should
+    /// also set <see cref="Window"/> to <see cref="WindowType.Rectangular"/>. For the chirp that is
+    /// not a compromise but the correct choice: the stimulus is exactly periodic in the record, so
+    /// the untapered DFT is exact, and a taper would destroy the periodicity the measurement
+    /// depends on.</para>
+    /// </summary>
+    public bool RetainComplexSpectrum { get; init; } = false;
 }

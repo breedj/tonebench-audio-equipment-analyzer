@@ -41,10 +41,19 @@ import SweepDisplayPanel from './components/SweepDisplayPanel.vue'
 import ThdSweepChart from './components/ThdSweepChart.vue'
 import SweepFftPreviewChart from './components/SweepFftPreviewChart.vue'
 import SweepScopePreviewChart from './components/SweepScopePreviewChart.vue'
+import FrequencyResponseConfigPanel from './components/FrequencyResponseConfigPanel.vue'
+import FrequencyResponseDisplayPanel from './components/FrequencyResponseDisplayPanel.vue'
+import FrequencyResponseChart from './components/FrequencyResponseChart.vue'
+import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
+import { useFrequencyResponse } from './composables/useFrequencyResponse'
 import { useSweep } from './composables/useSweep'
 import { nearestSweepPoint } from './sweep/points'
 import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
-import { THD_VS_AMPLITUDE_KIND, isSweepKind as isSweepKindName } from './measurements/kinds'
+import {
+  THD_VS_AMPLITUDE_KIND,
+  isFrequencyResponseKind,
+  isSweepKind as isSweepKindName,
+} from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
 const { spectrum, meters, scope, setViewport, clearScope } = useSpectrumStream()
@@ -150,12 +159,31 @@ const {
   refresh: refreshSweep,
 } = useSweep()
 
+const {
+  running: responseRunning,
+  traces: responseTraces,
+  error: responseError,
+  progressLabel: responseProgressLabel,
+  generatorAmpDbv: responseGeneratorAmpDbv,
+  binHz: responseBinHz,
+  latencySamples: responseLatencySamples,
+  start: startResponse,
+  cancel: cancelResponseRun,
+  clear: clearResponseRun,
+  refresh: refreshResponse,
+} = useFrequencyResponse()
+
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
 // which was fine while FFTSpectrum was the only kind. The two sweep kinds share one screen —
 // identical layout, identical chart, identical history and preview rail — and differ only in which
 // config panel is mounted and what the chart's x axis plots.
 const isSweepKind = computed(() => isSweepKindName(currentType.value?.kind))
 const isAmplitudeSweep = computed(() => currentType.value?.kind === THD_VS_AMPLITUDE_KIND)
+
+// The chirp frequency response is a third screen rather than a variant of the sweep one: it shares
+// the three-column layout but nothing else — one continuous curve instead of stepped points, its
+// own runner, its own endpoints, and a readout table the sweeps have no equivalent of.
+const isFrequencyResponse = computed(() => isFrequencyResponseKind(currentType.value?.kind))
 
 // One runner holds one set of points, and the two screens cannot read each other's: see useSweep's
 // own `viewAxis`. Kept in step with the selected type rather than set on navigation, so a reload
@@ -206,6 +234,14 @@ const sweepSelectedRight = computed(() => selectedSweepPointFor(1))
  * rather than drawn empty.
  */
 const visibleSweepOverlays = computed(() => overlays.value.filter((o) => o.visible && o.sweepPoints?.length))
+
+/**
+ * The same filter for the response screen. Gated on the curves actually being there, so a result of
+ * another kind that happens to be checked on is skipped rather than drawn empty.
+ */
+const visibleResponseOverlays = computed(() =>
+  overlays.value.filter((o) => o.visible && o.responseTraces?.length),
+)
 
 /**
  * selectedSweepPointFor's counterpart for a stored overlay: never "running" (it's a saved result),
@@ -400,11 +436,123 @@ watch(
 // ref per panel because only one of the two is mounted at a time; activeSweepPanel is what the
 // button and the save path actually read, and both panels expose the same { run, invalid,
 // buildParamsJson } contract.
+const responseConfigPanel = ref<InstanceType<typeof FrequencyResponseConfigPanel> | null>(null)
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
 const amplitudeSweepConfigPanel = ref<InstanceType<typeof AmplitudeSweepConfigPanel> | null>(null)
 const activeSweepPanel = computed(() =>
   isAmplitudeSweep.value ? amplitudeSweepConfigPanel.value : sweepConfigPanel.value,
 )
+
+// Frequency-response chart display preferences. Local view state, persisted into the measurement
+// type's params_json alongside the run settings — the same arrangement as the sweep screen's, and
+// for the same reason: none of it is server state the host could snapshot on its own.
+const responseView = ref<import('./api/client').ResponseView>('Gain')
+const responseShowLeft = ref(true)
+const responseShowRight = ref(false)
+const responseShowPhase = ref(false)
+const responseShowCoherence = ref(false)
+const responseShowOneDb = ref(true)
+const responseShowThreeDb = ref(true)
+const responseThickLines = ref(true)
+const responseShowDataPoints = ref(false)
+const responseYTopDb = ref(10)
+const responseYBottomDb = ref(-10)
+const responseXFromHz = ref(10)
+const responseXToHz = ref(100000)
+
+// Same guard as sweepDisplayRestoring: applying a type's stored display state is the opposite of an
+// unsaved edit, and marking it dirty there would light Save up on every selection.
+let responseDisplayRestoring = false
+
+/**
+ * Restores a frequency-response type's stored chart state. Every field is optional and guarded, so
+ * a type saved before one of them existed simply keeps whatever is showing.
+ */
+function applyStoredResponseDisplay(paramsJson: string) {
+  type StoredDisplay = Partial<import('./api/client').FrequencyResponseParameters>
+
+  let stored: StoredDisplay
+  try {
+    stored = JSON.parse(paramsJson) as StoredDisplay
+  } catch {
+    return
+  }
+
+  responseDisplayRestoring = true
+  if (stored.chartView) responseView.value = stored.chartView
+  if (typeof stored.chartShowLeft === 'boolean') responseShowLeft.value = stored.chartShowLeft
+  if (typeof stored.chartShowRight === 'boolean') responseShowRight.value = stored.chartShowRight
+  if (typeof stored.chartShowPhase === 'boolean') responseShowPhase.value = stored.chartShowPhase
+  if (typeof stored.chartShowCoherence === 'boolean') responseShowCoherence.value = stored.chartShowCoherence
+  if (typeof stored.chartShowOneDb === 'boolean') responseShowOneDb.value = stored.chartShowOneDb
+  if (typeof stored.chartShowThreeDb === 'boolean') responseShowThreeDb.value = stored.chartShowThreeDb
+  if (typeof stored.chartThickLines === 'boolean') responseThickLines.value = stored.chartThickLines
+  if (typeof stored.chartShowDataPoints === 'boolean') responseShowDataPoints.value = stored.chartShowDataPoints
+  if (typeof stored.chartYTopDb === 'number') responseYTopDb.value = stored.chartYTopDb
+  if (typeof stored.chartYBottomDb === 'number') responseYBottomDb.value = stored.chartYBottomDb
+  if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) responseXFromHz.value = stored.chartXFromHz
+  if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) responseXToHz.value = stored.chartXToHz
+
+  void nextTick(() => {
+    responseDisplayRestoring = false
+  })
+}
+
+// Kind-gated for the same reason the sweep watcher is: an FFT type's params_json parses fine, and
+// reading chart fields out of it would apply another screen's state to this one.
+watch(
+  () => (isFrequencyResponse.value ? currentType.value?.paramsJson : undefined),
+  (paramsJson) => {
+    if (paramsJson) applyStoredResponseDisplay(paramsJson)
+  },
+  { immediate: true },
+)
+
+watch(
+  [
+    responseView, responseShowLeft, responseShowRight, responseShowPhase, responseShowCoherence,
+    responseShowOneDb, responseShowThreeDb, responseThickLines, responseShowDataPoints,
+    responseYTopDb, responseYBottomDb, responseXFromHz, responseXToHz,
+  ],
+  () => {
+    if (!responseDisplayRestoring && isFrequencyResponse.value) markDirty()
+  },
+)
+
+/**
+ * RUN keeps measuring until stopped; SINGLE measures once. The panel builds the request and this
+ * decides which of the two it is — the panel has no reason to know, and putting the choice in one
+ * place is what keeps the two buttons from drifting apart.
+ */
+function runFrequencyResponse(continuous: boolean) {
+  const request = responseConfigPanel.value?.buildRequest(continuous)
+  if (!request) return
+
+  // Without a reference channel the right input is a trace in its own right and worth showing; with
+  // one it is the yardstick, and the previous app hid it for exactly that reason.
+  responseShowRight.value = !request.rightChannelIsReference
+  return withErrorReporting(async () => {
+    await startResponse(request)
+  })
+}
+
+function cancelFrequencyResponse() {
+  return withErrorReporting(async () => {
+    await cancelResponseRun()
+  })
+}
+
+function clearFrequencyResponse() {
+  return withErrorReporting(async () => {
+    await clearResponseRun()
+  })
+}
+
+// A measurement runs server-side, so a reload (or a second tab) mid-run has to re-attach rather
+// than start from an empty chart.
+watch(isFrequencyResponse, (isResponse) => {
+  if (isResponse) void refreshResponse().catch(() => undefined)
+})
 
 function runSweep(request: import('./api/client').ThdSweepStartRequest) {
   // Mirror the channel selection onto the chart so a stereo sweep actually draws both traces.
@@ -754,6 +902,27 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
  * through a component whose own job is the run configuration, not the chart.
  */
 function buildTypeParamsJson(): string | undefined {
+  if (isFrequencyResponse.value) {
+    const base = responseConfigPanel.value?.buildParamsJson()
+    if (!base) return undefined
+    return JSON.stringify({
+      ...JSON.parse(base),
+      chartView: responseView.value,
+      chartShowLeft: responseShowLeft.value,
+      chartShowRight: responseShowRight.value,
+      chartShowPhase: responseShowPhase.value,
+      chartShowCoherence: responseShowCoherence.value,
+      chartShowOneDb: responseShowOneDb.value,
+      chartShowThreeDb: responseShowThreeDb.value,
+      chartThickLines: responseThickLines.value,
+      chartShowDataPoints: responseShowDataPoints.value,
+      chartYTopDb: responseYTopDb.value,
+      chartYBottomDb: responseYBottomDb.value,
+      chartXFromHz: responseXFromHz.value,
+      chartXToHz: responseXToHz.value,
+    })
+  }
+
   if (!isSweepKind.value) return undefined
   const base = activeSweepPanel.value?.buildParamsJson()
   if (!base) return undefined
@@ -902,7 +1071,7 @@ function confirmSaveProjectAs(name: string) {
               Save as…
             </button>
             <button
-              v-if="!isSweepKind"
+              v-if="!isSweepKind && !isFrequencyResponse"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -912,7 +1081,7 @@ function confirmSaveProjectAs(name: string) {
               Save measurement result
             </button>
             <button
-              v-if="!isSweepKind"
+              v-if="!isSweepKind && !isFrequencyResponse"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -922,7 +1091,7 @@ function confirmSaveProjectAs(name: string) {
               Clear
             </button>
             <button
-              v-else
+              v-if="isSweepKind"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="sweepRunning || sweepPoints.length === 0"
@@ -930,6 +1099,26 @@ function confirmSaveProjectAs(name: string) {
               @click="openSaveDialog"
             >
               Save sweep result
+            </button>
+            <button
+              v-if="isFrequencyResponse"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="responseRunning || responseTraces.length === 0"
+              title="Saves the curves on screen as a new measurement result, with their bandwidth readings."
+              @click="openSaveDialog"
+            >
+              Save response result
+            </button>
+            <button
+              v-if="isFrequencyResponse"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="responseRunning || responseTraces.length === 0"
+              title="Clears the curves on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
+              @click="clearFrequencyResponse"
+            >
+              Clear
             </button>
             <!-- The sweep screen's Clear, in the same slot and the same shape as the FFT screen's
                  above. Disabled while a sweep runs for the same reason CANCEL exists separately:
@@ -952,7 +1141,128 @@ function confirmSaveProjectAs(name: string) {
                same slot and the same shape as the FFT screen's RUN, so the button that starts a
                measurement is in one place whichever screen you are on. It drives SweepConfigPanel
                through its exposed run(), which keeps the form and its validation in the panel. -->
-          <template v-if="isSweepKind">
+          <!-- Frequency response (chirp): the same three-column shape as the sweep screen, so RUN,
+               the history list and the display rail all sit where they do everywhere else. What
+               differs is the middle — one continuous curve rather than stepped points — and the
+               Measurements readout under the settings, which the sweeps have no equivalent of. -->
+          <template v-if="isFrequencyResponse">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+                <!-- RUN / SINGLE / STOP, the same trio and the same shape as the FFT screen's, so
+                     the button that starts a measurement sits in one place whichever screen you are
+                     on. RUN repeats until stopped; SINGLE measures once and stops itself. -->
+                <div class="flex gap-3">
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    :disabled="responseRunning || !!responseConfigPanel?.invalid"
+                    :title="
+                      responseConfigPanel?.invalid ??
+                      'Sweeps a chirp across the band and re-measures until you press Stop.'
+                    "
+                    @click="runFrequencyResponse(true)"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    RUN
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-300 py-4 text-sm font-bold tracking-wide transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    :disabled="responseRunning || !!responseConfigPanel?.invalid"
+                    :title="
+                      responseConfigPanel?.invalid ??
+                      'Measures the frequency response once and stops.'
+                    "
+                    @click="runFrequencyResponse(false)"
+                  >
+                    SINGLE
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
+                    :class="responseRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    :disabled="!responseRunning"
+                    title="Stops the measurement and silences the generator. The curves from the last completed pass stay on screen."
+                    @click="cancelFrequencyResponse"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
+                    STOP
+                  </button>
+                </div>
+
+                <FrequencyResponseConfigPanel ref="responseConfigPanel" :running="responseRunning" />
+
+                <ResponseMeasurementsPanel
+                  v-model:show-one-db="responseShowOneDb"
+                  v-model:show-three-db="responseShowThreeDb"
+                  :traces="responseTraces"
+                  :view="responseView"
+                  :show-left="responseShowLeft"
+                />
+              </div>
+
+              <div class="flex min-w-0 flex-1 flex-col gap-3">
+                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  <span>{{ responseProgressLabel || 'Idle' }}</span>
+                  <!-- Number.isFinite, not truthiness: 0 dBV is a perfectly ordinary drive level
+                       and a plain v-if hides it, which is exactly what a loopback measurement shows. -->
+                  <span v-if="Number.isFinite(responseGeneratorAmpDbv) && responseTraces.length">
+                    · gen {{ responseGeneratorAmpDbv.toFixed(2) }} dBV
+                  </span>
+                  <span v-if="responseBinHz">· {{ responseBinHz.toFixed(2) }} Hz/bin</span>
+                  <!-- Only shown when the right input was the reference: that is the one case
+                       where the recovered rotation is the DUT's delay rather than the record's
+                       arbitrary start point in a periodic stimulus. -->
+                  <span v-if="responseLatencySamples !== null">
+                    · DUT delay {{ responseLatencySamples.toFixed(1) }} samples
+                  </span>
+                </div>
+                <p v-if="responseError" class="text-xs text-red-600 dark:text-red-400">{{ responseError }}</p>
+
+                <FrequencyResponseChart
+                  :traces="responseTraces"
+                  :overlays="visibleResponseOverlays"
+                  :view="responseView"
+                  :show-left="responseShowLeft"
+                  :show-right="responseShowRight"
+                  :show-phase="responseShowPhase"
+                  :show-coherence="responseShowCoherence"
+                  :show-one-db="responseShowOneDb"
+                  :show-three-db="responseShowThreeDb"
+                  :thick-lines="responseThickLines"
+                  :show-data-points="responseShowDataPoints"
+                  :y-top-db="responseYTopDb"
+                  :y-bottom-db="responseYBottomDb"
+                  :x-from-hz="responseXFromHz"
+                  :x-to-hz="responseXToHz"
+                />
+
+                <MeasurementHistoryPanel @error="reportError" />
+              </div>
+
+              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+                <FrequencyResponseDisplayPanel
+                  v-model:view="responseView"
+                  v-model:show-left="responseShowLeft"
+                  v-model:show-right="responseShowRight"
+                  v-model:show-phase="responseShowPhase"
+                  v-model:show-coherence="responseShowCoherence"
+                  v-model:show-one-db="responseShowOneDb"
+                  v-model:show-three-db="responseShowThreeDb"
+                  v-model:thick-lines="responseThickLines"
+                  v-model:show-data-points="responseShowDataPoints"
+                  v-model:y-top-db="responseYTopDb"
+                  v-model:y-bottom-db="responseYBottomDb"
+                  v-model:x-from-hz="responseXFromHz"
+                  v-model:x-to-hz="responseXToHz"
+                />
+
+                <MeasurementChecklist @error="reportError" />
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="isSweepKind">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
               <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
                 <div class="flex gap-3">

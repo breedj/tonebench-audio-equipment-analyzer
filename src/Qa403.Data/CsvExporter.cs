@@ -82,6 +82,93 @@ public static class CsvExporter
     ];
 
     /// <summary>
+    /// A frequency-response result as CSV: one row per display column, the curves side by side.
+    ///
+    /// <para>Its own renderer for the same reason <see cref="ExportSweep"/> is: a response stores
+    /// neither spectra nor per-point metrics, so neither of the other two paths has anything to
+    /// read. The rows are the decimated display columns rather than raw bins — that is what was
+    /// measured *and* what was shown, and a full-resolution export at the finest setting would be a
+    /// quarter of a million rows of a curve nobody drew.</para>
+    ///
+    /// <para>Both magnitude bounds are written per curve, not just the max. A single value would
+    /// quietly discard the ripple inside each column, which is the same aggregation bias the
+    /// min/max rule exists to prevent on screen.</para>
+    /// </summary>
+    public static string ExportResponse(MeasurementDetail detail, IReadOnlyList<StoredResponseTrace> traces)
+    {
+        if (traces.Count == 0)
+            throw new ArgumentException("A response with at least one trace is required.", nameof(traces));
+
+        var sb = new StringBuilder();
+        WriteComment(sb, "project", detail.ProjectName);
+        WriteComment(sb, "measurement_type", detail.MeasurementTypeName);
+        WriteComment(sb, "kind", detail.Kind);
+        WriteComment(sb, "name", detail.Name);
+        WriteComment(sb, "notes", detail.Notes ?? "");
+        WriteComment(sb, "timestamp_utc", Qa403Timestamp.FormatUtc(detail.TimestampUtc));
+        WriteComment(sb, "sample_rate_hz", detail.SampleRateHz.ToString(CultureInfo.InvariantCulture));
+        WriteComment(sb, "fft_size", detail.FftSize.ToString(CultureInfo.InvariantCulture));
+        WriteComment(sb, "params_json", detail.ParamsJson);
+
+        // The Measurements table's numbers, as comments: they are properties of a whole curve, not
+        // of any one row, and were computed at full resolution before these columns existed.
+        foreach (var trace in traces)
+        {
+            WriteComment(sb, $"{trace.Kind}_peak_db", trace.PeakDb.ToString("F4", CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_peak_hz", trace.PeakHz.ToString("F4", CultureInfo.InvariantCulture));
+            WriteBandwidthComment(sb, trace.Kind, "1db", trace.OneDb);
+            WriteBandwidthComment(sb, trace.Kind, "3db", trace.ThreeDb);
+        }
+
+        sb.Append("freq_hz");
+        foreach (var trace in traces)
+        {
+            sb.Append(',').Append(trace.Kind).Append("_min_db");
+            sb.Append(',').Append(trace.Kind).Append("_max_db");
+            sb.Append(',').Append(trace.Kind).Append("_phase_deg");
+            sb.Append(',').Append(trace.Kind).Append("_coherence");
+        }
+
+        sb.Append('\n');
+
+        // Every curve comes from one measurement and so shares a column grid; the shortest is used
+        // defensively rather than assumed, since a ragged row would silently shift columns.
+        int rows = traces.Min(t => t.FreqHz.Length);
+        for (int i = 0; i < rows; i++)
+        {
+            sb.Append(traces[0].FreqHz[i].ToString("F6", CultureInfo.InvariantCulture));
+            foreach (var trace in traces)
+            {
+                sb.Append(',').Append(trace.MagnitudeMinDb[i].ToString("F4", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(trace.MagnitudeMaxDb[i].ToString("F4", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(trace.PhaseDeg[i].ToString("F4", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(trace.Coherence[i].ToString("F6", CultureInfo.InvariantCulture));
+            }
+
+            sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// One corner reading. A clamped end is written as an empty field rather than the frequency the
+    /// search stopped at: the curve never reached the threshold there, so there is no corner, and a
+    /// number would read as a measured one.
+    /// </summary>
+    private static void WriteBandwidthComment(StringBuilder sb, string kind, string drop, ResponseBandwidth bandwidth)
+    {
+        WriteComment(
+            sb,
+            $"{kind}_{drop}_lower_hz",
+            bandwidth.LowerClamped ? "" : bandwidth.LowerHz.ToString("F4", CultureInfo.InvariantCulture));
+        WriteComment(
+            sb,
+            $"{kind}_{drop}_upper_hz",
+            bandwidth.UpperClamped ? "" : bandwidth.UpperHz.ToString("F4", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
     /// Renders a saved sweep as CSV: one row per point, one column group per channel. A sweep
     /// result has no <c>spectrum</c> rows at all (metrics only, by design -- see
     /// <see cref="SweepSaveRequest"/>), so <see cref="Export"/> cannot render one and this is the

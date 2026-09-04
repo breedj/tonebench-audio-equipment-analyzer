@@ -217,4 +217,102 @@ public class StreamFrameTests
         Assert.Null(decoded.PreviewFft);
         Assert.Null(decoded.PreviewScope);
     }
+
+    private static FrequencyResponseTrace SampleTrace(FrequencyResponseTraceKind kind = FrequencyResponseTraceKind.Gain) =>
+        new(
+            kind,
+            StartFreqHz: 4.0,
+            EndFreqHz: 22800.0,
+            FreqHz: [4.0f, 100.0f, 1000.0f],
+            MagnitudeMinDb: [-3.5f, -0.2f, -0.1f],
+            MagnitudeMaxDb: [-3.0f, 0.1f, 0.2f],
+            PhaseDeg: [-12.0f, -1.0f, 0.5f],
+            Coherence: [0.4f, 0.99f, 1.0f],
+            OneDb: new BandwidthReading(1.0, 8.8, 63200.0, 63191.2, false, false),
+            ThreeDb: new BandwidthReading(3.0, 4.4, 90800.0, 90795.6, false, true),
+            PeakDb: 34.49,
+            PeakFreqHz: 461.4);
+
+    [Fact]
+    public void FrequencyResponse_RoundTrips()
+    {
+        var trace = SampleTrace();
+
+        var decoded = StreamFrame.DecodeFrequencyResponse(StreamFrame.EncodeFrequencyResponse(trace));
+
+        Assert.Equal(trace.Kind, decoded.Kind);
+        Assert.Equal(trace.FreqHz, decoded.FreqHz);
+        Assert.Equal(trace.MagnitudeMinDb, decoded.MagnitudeMinDb);
+        Assert.Equal(trace.MagnitudeMaxDb, decoded.MagnitudeMaxDb);
+        Assert.Equal(trace.PhaseDeg, decoded.PhaseDeg);
+        Assert.Equal(trace.Coherence, decoded.Coherence);
+        Assert.Equal(trace.StartFreqHz, decoded.StartFreqHz, 3);
+        Assert.Equal(trace.EndFreqHz, decoded.EndFreqHz, 3);
+        Assert.Equal(trace.PeakDb, decoded.PeakDb, 3);
+        Assert.Equal(trace.PeakFreqHz, decoded.PeakFreqHz, 2);
+    }
+
+    [Fact]
+    public void FrequencyResponse_RoundTripsTheClampedFlagsSeparatelyPerEnd()
+    {
+        // The whole point of the flags: "rolls off at 90.8 kHz" and "was still flat where we stopped
+        // looking" are different statements, and they can differ between the two ends of one reading.
+        var decoded = StreamFrame.DecodeFrequencyResponse(StreamFrame.EncodeFrequencyResponse(SampleTrace()));
+
+        Assert.False(decoded.OneDb.LowerClamped);
+        Assert.False(decoded.OneDb.UpperClamped);
+        Assert.False(decoded.ThreeDb.LowerClamped);
+        Assert.True(decoded.ThreeDb.UpperClamped);
+
+        Assert.Equal(1.0, decoded.OneDb.DropDb, 3);
+        Assert.Equal(3.0, decoded.ThreeDb.DropDb, 3);
+        Assert.Equal(90800.0, decoded.ThreeDb.UpperHz, 1);
+    }
+
+    [Theory]
+    [InlineData(FrequencyResponseTraceKind.Left)]
+    [InlineData(FrequencyResponseTraceKind.Right)]
+    [InlineData(FrequencyResponseTraceKind.Gain)]
+    public void FrequencyResponse_CarriesTheTraceKindInTheChannelByte(FrequencyResponseTraceKind kind)
+    {
+        // Gain belongs to no input channel, which is why the byte holds a trace kind here rather
+        // than a StreamChannel -- a client keying off it as left/right would mislabel the gain curve.
+        byte[] frame = StreamFrame.EncodeFrequencyResponse(SampleTrace(kind));
+
+        Assert.Equal((byte)kind, frame[1]);
+        Assert.Equal(kind, StreamFrame.DecodeFrequencyResponse(frame).Kind);
+    }
+
+    [Fact]
+    public void FrequencyResponse_RejectsRaggedArrays()
+    {
+        var trace = SampleTrace() with { Coherence = [1.0f] };
+        Assert.Throws<ArgumentException>(() => StreamFrame.EncodeFrequencyResponse(trace));
+    }
+
+    [Fact]
+    public void FrequencyResponseProgress_RoundTrips()
+    {
+        byte[] frame = StreamFrame.EncodeFrequencyResponseProgress(3, 8, FrequencyResponsePhase.Measuring, -12.5);
+
+        var decoded = StreamFrame.DecodeFrequencyResponseProgress(frame);
+
+        Assert.Equal(3, decoded.Taken);
+        Assert.Equal(8, decoded.Total);
+        Assert.Equal(FrequencyResponsePhase.Measuring, decoded.Phase);
+
+        // The level rides on the frame because nothing polls status during a run, and in
+        // output-voltage mode the probe is what decides it.
+        Assert.Equal(-12.5f, decoded.GeneratorAmpDbv, 3);
+    }
+
+    [Fact]
+    public void FrequencyResponseProgress_CarriesAZeroLevelFaithfully()
+    {
+        // 0 dBV is an ordinary drive level, not "absent" — a reader treating it as falsy hides it.
+        var decoded = StreamFrame.DecodeFrequencyResponseProgress(
+            StreamFrame.EncodeFrequencyResponseProgress(1, 1, FrequencyResponsePhase.Measuring, 0.0));
+
+        Assert.Equal(0.0f, decoded.GeneratorAmpDbv);
+    }
 }

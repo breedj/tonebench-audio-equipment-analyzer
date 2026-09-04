@@ -1079,7 +1079,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         private readonly Queue<(Task<int> Task, byte[] Buffer)> _pendingReads = new();
         private readonly Queue<(Task<int> Task, byte[] Buffer)> _pendingWrites = new();
         private readonly int _queueDepth = QueueDepthFor(sampleRateHz);
-        private readonly Qa40xGeneratorWaveform _waveform = new(new Random());
+        private readonly Qa40xGeneratorWaveform _waveform = new(new Random(), sampleRateHz);
 
         /// <summary>Wall-clock duration of one <see cref="TransferChunkFrames"/> chunk at this stream's sample rate — what <see cref="StepRangeIfNeeded"/> feeds <see cref="Qa40xAutoRanger.Evaluate"/> as its under-range hysteresis tick.</summary>
         private readonly double _blockDurationMs = TransferChunkFrames * 1000.0 / sampleRateHz;
@@ -1565,9 +1565,9 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
             for (int frame = 0; frame < TransferChunkFrames; frame++)
             {
-                double t = (startFrameIndex + frame) / sampleRateHz;
-                double slot0Volts = waveform.ComputeSample(generatorConfig.Right, t);
-                double slot1Volts = waveform.ComputeSample(generatorConfig.Left, t);
+                long frameIndex = startFrameIndex + frame;
+                double slot0Volts = waveform.ComputeSample(generatorConfig.Right, frameIndex);
+                double slot1Volts = waveform.ComputeSample(generatorConfig.Left, frameIndex);
                 int slot0Raw = calibration.VoltsToRaw(slot0Volts, outputRangeDbv, channel: 0);
                 int slot1Raw = calibration.VoltsToRaw(slot1Volts, outputRangeDbv, channel: 1);
 

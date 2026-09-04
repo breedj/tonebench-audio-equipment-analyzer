@@ -16,21 +16,32 @@ namespace Qa403.Device.Hardware;
 /// list for both kinds (the derived comb, in the multitone case). White noise has no pink shaping
 /// (that's the DUT-only knob too). The chirp phase formula is the one piece of real math shared
 /// with the simulator, re-derived here rather than exposed cross-namespace, to keep this file
-/// fully decoupled from <c>Simulation</c>.
+/// fully decoupled from <c>Simulation</c>. <c>Qa403.Dsp.ExponentialChirp</c> holds a third copy —
+/// the one the frequency-response analysis builds its reference spectrum from — and
+/// <c>Qa403.App.Tests.Services.ChirpFormulaAgreementTests</c> pins all three together sample for
+/// sample. That test is not optional: a drift between the played sweep and the reference it is
+/// deconvolved against does not fail loudly, it quietly reports the drift as DUT response.
 /// </summary>
-internal sealed class Qa40xGeneratorWaveform(Random random)
+internal sealed class Qa40xGeneratorWaveform(Random random, double sampleRateHz)
 {
-    /// <summary>Matches <c>Simulation.SignalSynthesizer.EchoChirpRepeatSeconds</c> — the spec exposes no sweep length, so a fixed period keeps the chirp a pure function of t.</summary>
-    private const double EchoChirpRepeatSeconds = 1.0;
-
-    /// <summary>Matches <c>Simulation.SignalSynthesizer.EchoChirpFadeSeconds</c> — raised-cosine fade at each sweep-wrap boundary.</summary>
+    /// <summary>Matches <c>Simulation.SignalSynthesizer.EchoChirpFadeSeconds</c> and <c>Qa403.Dsp.ExponentialChirp.DefaultFadeSeconds</c> — raised-cosine fade at each sweep-wrap boundary.</summary>
     private const double EchoChirpFadeSeconds = 0.005;
 
-    /// <summary>This channel's generator output at time <paramref name="t"/> seconds, in volts.</summary>
-    public double ComputeSample(ChannelGeneratorConfig channel, double t)
+    /// <summary>
+    /// This channel's generator output at <paramref name="frameIndex"/> frames into the stream, in volts.
+    ///
+    /// <para>The frame index rather than a time in seconds, because
+    /// <see cref="EchoChirpSettings.RepeatFrames"/> is a frame count and the whole
+    /// frequency-response measurement depends on the wrap landing on exactly that frame. Deriving
+    /// the frame back out of a <c>double</c> time would be one rounding away from a period that is
+    /// off by a sample, which puts a slow drifting ripple on every measured trace.</para>
+    /// </summary>
+    public double ComputeSample(ChannelGeneratorConfig channel, long frameIndex)
     {
         if (!channel.Enabled)
             return 0.0;
+
+        double t = frameIndex / sampleRateHz;
 
         return channel.Kind switch
         {
@@ -38,7 +49,7 @@ internal sealed class Qa40xGeneratorWaveform(Random random)
             GeneratorKind.Tones => SumTones(channel.Tones, t),
             GeneratorKind.Multitone => SumTones(channel.Tones, t),
             GeneratorKind.WhiteNoise => ComputeWhiteNoise(channel.Noise),
-            GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, t),
+            GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, frameIndex),
             _ => 0.0,
         };
     }
@@ -67,30 +78,35 @@ internal sealed class Qa40xGeneratorWaveform(Random random)
     }
 
     /// <summary>Same closed-form exponential sweep as <c>Simulation.SignalSynthesizer.ComputeEchoChirp</c> — see that method's doc comment for the derivation.</summary>
-    private static double ComputeEchoChirp(EchoChirpSettings? settings, double t)
+    private double ComputeEchoChirp(EchoChirpSettings? settings, long frameIndex)
     {
         if (settings is null)
             return 0.0;
 
         double startHz = settings.StartFrequencyHz;
         double endHz = settings.EndFrequencyHz;
-        if (startHz <= 0.0 || endHz <= startHz)
+        if (startHz <= 0.0 || endHz <= startHz || settings.RepeatFrames < 1)
             return 0.0;
 
-        double tau = t % EchoChirpRepeatSeconds;
-        if (tau < 0.0)
-            tau += EchoChirpRepeatSeconds;
+        // Integer modulo on the frame index, so the wrap lands on exactly the requested frame no
+        // matter how long the stream has been running.
+        long frameInPeriod = frameIndex % settings.RepeatFrames;
+        if (frameInPeriod < 0)
+            frameInPeriod += settings.RepeatFrames;
+
+        double periodSeconds = settings.RepeatFrames / sampleRateHz;
+        double tau = frameInPeriod / sampleRateHz;
 
         double k = Math.Log(endHz / startHz);
-        double phase = 2.0 * Math.PI * startHz * EchoChirpRepeatSeconds / k
-            * (Math.Exp(k * tau / EchoChirpRepeatSeconds) - 1.0);
+        double phase = 2.0 * Math.PI * startHz * periodSeconds / k
+            * (Math.Exp(k * tau / periodSeconds) - 1.0);
 
-        return PeakVolts(settings.AmplitudeDbv) * Math.Sin(phase) * EchoChirpFade(tau);
+        return PeakVolts(settings.AmplitudeDbv) * Math.Sin(phase) * EchoChirpFade(tau, periodSeconds);
     }
 
-    private static double EchoChirpFade(double tau)
+    private static double EchoChirpFade(double tau, double periodSeconds)
     {
-        double fromEdge = Math.Min(tau, EchoChirpRepeatSeconds - tau);
+        double fromEdge = Math.Min(tau, periodSeconds - tau);
         if (fromEdge >= EchoChirpFadeSeconds)
             return 1.0;
 

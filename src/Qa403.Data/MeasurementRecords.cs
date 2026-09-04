@@ -320,3 +320,113 @@ public sealed record MeasurementDetail(
     string? GenJson,
     IReadOnlyList<int> AvailableChannels,
     IReadOnlyDictionary<int, IReadOnlyDictionary<string, double>> MetricsByChannel);
+
+/// <summary>
+/// One frequency-response curve on the way into the database — a <c>response_trace</c> row.
+///
+/// <para>The arrays are the decimated display columns, all the same length. <see cref="Kind"/> is
+/// <c>'left'</c>, <c>'right'</c> or <c>'gain'</c>; the gain curve is a ratio between two inputs and
+/// so has no channel of its own, which is why this is keyed by kind rather than by channel like
+/// every other per-curve table.</para>
+/// </summary>
+public sealed record ResponseTraceInput(
+    string Kind,
+    double StartHz,
+    double EndHz,
+    double PeakDb,
+    double PeakHz,
+    ResponseBandwidth OneDb,
+    ResponseBandwidth ThreeDb,
+    float[] FreqHz,
+    float[] MagnitudeMinDb,
+    float[] MagnitudeMaxDb,
+    float[] PhaseDeg,
+    float[] Coherence);
+
+/// <summary>
+/// A stored −1 dB or −3 dB reading. The clamped flags say the curve never reached the threshold on
+/// that side within the measured band, so the frequency is where the search stopped rather than a
+/// corner — a distinction a bare number cannot carry, and one the old app lost.
+/// </summary>
+public sealed record ResponseBandwidth(double LowerHz, double UpperHz, bool LowerClamped, bool UpperClamped);
+
+/// <summary>The <c>response_trace.kind</c> values — mirrors Qa403.App.Services.FrequencyResponseTraceKind.</summary>
+public static class ResponseTraceKind
+{
+    public const string Left = "left";
+    public const string Right = "right";
+    public const string Gain = "gain";
+}
+
+/// <summary>One save of a frequency-response measurement: a result row, its single capture, and the curves.</summary>
+public sealed record ResponseSaveRequest(
+    long MeasurementTypeId,
+    string Name,
+    string? Notes,
+    string ParamsJson,
+    string? DeviceName,
+    string? Serial,
+    string? FwVer,
+    bool IsSimulated,
+    double SampleRateHz,
+    int FftSize,
+    int Channels,
+    double? InRangeDbv,
+    double? OutRangeDbv,
+    IReadOnlyList<ResponseTraceInput> Traces);
+
+/// <summary>One frequency-response curve read back out of the database.</summary>
+public sealed record StoredResponseTrace(
+    string Kind,
+    double StartHz,
+    double EndHz,
+    double PeakDb,
+    double PeakHz,
+    ResponseBandwidth OneDb,
+    ResponseBandwidth ThreeDb,
+    float[] FreqHz,
+    float[] MagnitudeMinDb,
+    float[] MagnitudeMaxDb,
+    float[] PhaseDeg,
+    float[] Coherence);
+
+/// <summary>
+/// A frequency-response measurement type's <c>params_json</c>: the run settings, then the chart's
+/// display state.
+///
+/// <para>Same split, and same reason, as <see cref="ThdVsFrequencyParameters"/> — the run settings
+/// are what the measurement was taken with and must round-trip exactly, while the <c>Chart*</c>
+/// fields are how it was being looked at and are all nullable so an older stored type simply keeps
+/// the app's defaults instead of failing to load.</para>
+/// </summary>
+public sealed record FrequencyResponseParameters(
+    double FrequencySpanHz,
+    int ResolutionMultiplier,
+    string LevelMode,
+    double LevelValue,
+    string LevelUnit,
+    bool RightChannelIsReference,
+    int SmoothingDenominator,
+    int AverageCount,
+    double? GeneratorAmpDbv = null,
+    string? ChartView = null,
+    bool? ChartShowLeft = null,
+    bool? ChartShowRight = null,
+    bool? ChartShowPhase = null,
+    bool? ChartShowCoherence = null,
+    bool? ChartShowOneDb = null,
+    bool? ChartShowThreeDb = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    double? ChartYTopDb = null,
+    double? ChartYBottomDb = null,
+    double? ChartXFromHz = null,
+    double? ChartXToHz = null,
+    /// <summary>Null on a type saved before the chirp start was configurable; the runner then uses its default.</summary>
+    double? ChirpStartHz = null,
+    /// <summary>
+    /// The load an <c>OutputPower</c> level was defined against, in ohms. Null on a type saved
+    /// before the power mode existed — which is also every type whose level is a voltage, where it
+    /// means nothing.
+    /// </summary>
+    double? LoadOhms = null);

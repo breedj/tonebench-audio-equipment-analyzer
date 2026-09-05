@@ -21,6 +21,37 @@ public enum FrequencyResponseTraceKind
     Gain = 2,
 }
 
+/// <summary>
+/// What phase a run measured, and therefore what the UI may draw and what it should call it.
+///
+/// <para>There is only ever one phase quantity in these measurements — <c>arg(L/R)</c> — and the
+/// computation is identical however it is configured. What changes is whether it is available at
+/// all and what it <em>means</em>, and that is a property of how the run was set up, not of which
+/// view happens to be on screen. Reported on the status so the UI keys off the data it is showing
+/// rather than off the config panel's current form, which can have moved on since.</para>
+/// </summary>
+public enum ResponsePhaseKind
+{
+    /// <summary>Nothing measured a phase — the right input carried no stimulus to compare against.</summary>
+    None,
+
+    /// <summary>
+    /// Every trace carries its own phase against whatever its estimator's reference was, so the
+    /// curve to draw is the one belonging to the trace on screen. The chirp, whose Left and Right
+    /// traces are estimated against the synthesised sweep.
+    /// </summary>
+    PerTrace,
+
+    /// <summary><c>arg(L/R)</c> with the right input as the reference — the DUT's own phase response.</summary>
+    DutResponse,
+
+    /// <summary>
+    /// <c>arg(L/R)</c> with the right input measuring something of its own rather than serving as a
+    /// reference — a phase difference between two measured paths, which is a different claim.
+    /// </summary>
+    ChannelDifference,
+}
+
 /// <summary>What a frequency-response run is doing right now. Mirrors <see cref="ThdSweepPhase"/>'s role.</summary>
 public enum FrequencyResponsePhase
 {
@@ -37,6 +68,13 @@ public enum FrequencyResponsePhase
     /// field, so renumbering the existing members would make an older browser mislabel every phase.
     /// </summary>
     DeterminingRange = 6,
+
+    /// <summary>
+    /// Stepping a tone across the band — the stepped-sine Bode plot's counterpart of
+    /// <see cref="Measuring"/>. Appended, and with an explicit ordinal, for the same reason
+    /// <see cref="DeterminingRange"/> is.
+    /// </summary>
+    Sweeping = 7,
 }
 
 /// <summary>
@@ -321,7 +359,29 @@ public sealed record FrequencyResponseStatus(
     int FftSize,
     double? LatencySamples,
     string? Error,
-    IReadOnlyList<FrequencyResponseTrace> Traces);
+    IReadOnlyList<FrequencyResponseTrace> Traces,
+    /// <summary>
+    /// Points measured, and points to measure, for a <see cref="SteppedResponseRunner"/> run. Both 0
+    /// for a chirp, which has no points — its progress is <see cref="AveragesTaken"/> records.
+    /// Separate fields rather than borrowing those two: a stepped run has both an average count and
+    /// a point count, and overloading one to carry the other leaves the readout stating a number the
+    /// run never used.
+    /// </summary>
+    int PointsMeasured = 0,
+    int PointCount = 0,
+    /// <summary>
+    /// What phase this run measured — see <see cref="ResponsePhaseKind"/>. Defaults to
+    /// <see cref="ResponsePhaseKind.PerTrace"/>, which is the chirp's behaviour, so a runner that
+    /// does not set it keeps behaving exactly as it did.
+    /// </summary>
+    ResponsePhaseKind PhaseKind = ResponsePhaseKind.PerTrace,
+    /// <summary>
+    /// The right input was fed the stimulus as a yardstick rather than measured as a signal of its
+    /// own, so its dBV trace is the generator and there is nothing to offer as a curve. A separate
+    /// field from <see cref="PhaseKind"/> even though the two coincide today: a future mode with a
+    /// reference but no phase would make a phase-derived answer to this question wrong.
+    /// </summary>
+    bool RightChannelIsReference = false);
 
 /// <summary>The immediate answer to a start request — what the run will do, before it does it.</summary>
 public sealed record FrequencyResponseStarted(

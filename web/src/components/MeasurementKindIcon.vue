@@ -21,6 +21,15 @@ defineProps<{ kind: string }>()
     <path d="M3 3v18h18" />
     <path d="M6 18c1.5 0 2-9 4-9h5c2 0 2.5 6 4 6" />
   </svg>
+  <!-- The same passband shape as the chirp's, drawn as discrete points: one tone at a time. -->
+  <svg v-else-if="kind === 'SteppedResponse'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v18h18" />
+    <circle cx="6.5" cy="17" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="9.5" cy="10" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="13" cy="9" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="16.5" cy="9.5" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="20" cy="15" r="1.1" fill="currentColor" stroke="none" />
+  </svg>
   <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
     <circle cx="12" cy="12" r="9" />
   </svg>

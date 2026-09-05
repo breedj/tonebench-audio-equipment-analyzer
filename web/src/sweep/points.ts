@@ -60,9 +60,9 @@ const ADAPTIVE_MAX_RECORD_SECONDS = 131072 / 192000
 const ADAPTIVE_HARMONIC_ORDER = 5
 const SUPPORTED_SAMPLE_RATES_HZ = [48000, 96000, 192000]
 
-function powerOfTwoAtLeast(value: number): number {
+function powerOfTwoAtLeast(value: number, cap = ADAPTIVE_MAX_FFT_SIZE): number {
   let n = 1
-  while (n < value && n < ADAPTIVE_MAX_FFT_SIZE) n *= 2
+  while (n < value && n < cap) n *= 2
   return n
 }
 
@@ -88,19 +88,34 @@ export function adaptiveFftBounds(sampleRateHz: number): { floor: number; ceilin
   return { floor: Math.min(rawFloor, ceiling), ceiling }
 }
 
-/** The FFT size a point at `freqHz` is analyzed at under adaptive resolution. */
-export function adaptiveFftSize(freqHz: number, sampleRateHz: number): number {
-  const { floor, ceiling } = adaptiveFftBounds(sampleRateHz)
+/**
+ * The FFT size a point at `freqHz` is analyzed at under adaptive resolution.
+ *
+ * `maxFftSize` raises the record-time ceiling `adaptiveFftBounds` imposes — only the stepped-sine
+ * response uses it, and only for a run that asks to start below what that ceiling can measure. See
+ * SteppedResponseRequest.FftSizeAt, which this mirrors.
+ */
+export function adaptiveFftSize(freqHz: number, sampleRateHz: number, maxFftSize?: number): number {
+  const { floor, ceiling: standardCeiling } = adaptiveFftBounds(sampleRateHz)
+  const ceiling = Math.max(standardCeiling, maxFftSize ?? 0)
   if (!(freqHz > 0)) return ceiling
-  const n = powerOfTwoAtLeast((ADAPTIVE_TARGET_BINS * sampleRateHz) / freqHz)
+  const n = powerOfTwoAtLeast((ADAPTIVE_TARGET_BINS * sampleRateHz) / freqHz, ceiling)
   return Math.min(Math.max(n, floor), ceiling)
 }
 
-/** The sample rate an adaptive sweep ending at `endFreqHz` will run at. */
-export function adaptiveSampleRateHz(endFreqHz: number): number {
+/**
+ * The sample rate an adaptive sweep ending at `endFreqHz` will run at. Mirrors
+ * SweepResolution.SampleRateFor.
+ *
+ * `harmonicOrder` is how many harmonics of the top point have to stay in band. Five for a THD
+ * sweep, which measures them; **one** for a stepped-sine response, which measures only the tone
+ * itself — and that is a real saving rather than a corner cut, since it drops a 20 kHz run from
+ * 192 kHz to 48 kHz.
+ */
+export function adaptiveSampleRateHz(endFreqHz: number, harmonicOrder = ADAPTIVE_HARMONIC_ORDER): number {
   const highest = SUPPORTED_SAMPLE_RATES_HZ[SUPPORTED_SAMPLE_RATES_HZ.length - 1]
   if (!(endFreqHz > 0)) return highest
-  const needed = ADAPTIVE_HARMONIC_ORDER * endFreqHz
+  const needed = harmonicOrder * endFreqHz
   const usable = SUPPORTED_SAMPLE_RATES_HZ.filter((rate) => 0.98 * (rate / 2) >= needed)
   return usable.length > 0 ? Math.min(...usable) : highest
 }
@@ -125,10 +140,14 @@ export function estimateDurationSeconds(
   averageCount: number,
   hopFraction = 0.5,
   stimulusLatencySeconds = 0.065,
+  recordsBeforeAverages = 1,
 ): number {
   if (!(pointCount > 0) || !(sampleRateHz > 0)) return 0
   const recordSeconds = fftSize / sampleRateHz
-  return pointCount * perPointSeconds(recordSeconds, averageCount, hopFraction, stimulusLatencySeconds)
+  return (
+    pointCount *
+    perPointSeconds(recordSeconds, averageCount, hopFraction, stimulusLatencySeconds, recordsBeforeAverages)
+  )
 }
 
 /**
@@ -142,14 +161,30 @@ export function estimateAdaptiveDurationSeconds(
   averageCount: number,
   hopFraction = 0.5,
   stimulusLatencySeconds = 0.065,
+  options: AdaptiveDurationOptions = {},
 ): number {
   if (!(sampleRateHz > 0)) return 0
   let total = 0
   for (const freqHz of frequenciesHz) {
-    const recordSeconds = adaptiveFftSize(freqHz, sampleRateHz) / sampleRateHz
-    total += perPointSeconds(recordSeconds, averageCount, hopFraction, stimulusLatencySeconds)
+    const recordSeconds = adaptiveFftSize(freqHz, sampleRateHz, options.maxFftSize) / sampleRateHz
+    total += perPointSeconds(
+      recordSeconds, averageCount, hopFraction, stimulusLatencySeconds, options.recordsBeforeAverages,
+    )
   }
   return total
+}
+
+export interface AdaptiveDurationOptions {
+  /** Raises the record-time ceiling — see `adaptiveFftSize`. */
+  maxFftSize?: number
+  /**
+   * Whole records spent before the averages begin. 1 for a THD sweep, whose first record after the
+   * stimulus change is the one it measures. 2 for the stepped-sine response, which throws that
+   * record away because it holds part of the previous tone — a level measurement cannot tolerate
+   * what a ratio of harmonics within one record cancels. See
+   * SteppedResponseRunner.CaptureWithStimulusAsync.
+   */
+  recordsBeforeAverages?: number
 }
 
 function perPointSeconds(
@@ -157,10 +192,11 @@ function perPointSeconds(
   averageCount: number,
   hopFraction: number,
   stimulusLatencySeconds: number,
+  recordsBeforeAverages = 1,
 ): number {
   const averages = Math.max(1, averageCount)
   const averageSeconds = (1 + (averages - 1) * hopFraction) * recordSeconds
-  return recordSeconds + averageSeconds + stimulusLatencySeconds
+  return recordsBeforeAverages * recordSeconds + averageSeconds + stimulusLatencySeconds
 }
 
 /** "2 m 30 s" / "45 s" — for the config panel's duration hint. */

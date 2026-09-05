@@ -10,7 +10,7 @@ import {
   type ThdSweepPoint,
   type UpdateMeasurementRequest,
 } from '../api/client'
-import { isFrequencyResponseKind, isSweepKind } from '../measurements/kinds'
+import { isFrequencyResponseKind, isSteppedResponseKind, isSweepKind } from '../measurements/kinds'
 import type { ResponseTrace } from './useFrequencyResponse'
 
 /**
@@ -206,10 +206,19 @@ export function useMeasurements() {
    * A frequency-response result is built from the response runner's own curves, not from the
    * pipeline's retained spectrum, so it saves through its own endpoint — the same split as
    * `saveSweep`, and for the same reason.
+   *
+   * The two response kinds have a runner each, so the *save* has to name which one even though the
+   * rows it writes are identical. Reading back does not: a stored response is a stored response,
+   * which is why `isFrequencyResponseKind` covers both everywhere else.
    */
-  async function saveResponse(req: { measurementTypeId: number; name: string; notes: string | null }) {
+  async function saveResponse(
+    req: { measurementTypeId: number; name: string; notes: string | null },
+    kind?: string | null,
+  ) {
     try {
-      const result = await api.saveFrequencyResponse(req)
+      const result = isSteppedResponseKind(kind)
+        ? await api.saveSteppedResponse(req)
+        : await api.saveFrequencyResponse(req)
       await load()
       error.value = null
       return result

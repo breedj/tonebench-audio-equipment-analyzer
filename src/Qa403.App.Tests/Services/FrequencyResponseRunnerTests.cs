@@ -564,6 +564,47 @@ public class FrequencyResponseRunnerTests
             Assert.InRange(left.MagnitudeMaxDb[i], 5.0, 7.0);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TheChirp_StillReportsAPerTracePhase(bool rightIsReference)
+    {
+        // The guard on "leave the chirp alone". Its Left and Right traces are estimated against the
+        // synthesised sweep and so carry phases of their own, unlike a stepped sine's -- which is
+        // exactly what PerTrace means, and why the chart still reads the phase off the trace on
+        // screen for this measurement and off the Gain trace for the other one.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(rightIsReference: rightIsReference), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(ResponsePhaseKind.PerTrace, status.PhaseKind);
+
+        // Reported so the display panel can drop the Right trace selector -- nothing about this
+        // measurement's own behaviour turns on it.
+        Assert.Equal(rightIsReference, status.RightChannelIsReference);
+    }
+
+    [Fact]
+    public async Task TheChirp_KeepsAPhaseOnEveryTraceRatherThanOnTheGainAlone()
+    {
+        // The other half of "unchanged": a stepped sine zeroes Left and Right because arg(L/R) is the
+        // only relationship it can measure, and if the chirp ever started doing the same, PerTrace
+        // would be a lie and the chart would draw a flat line in FR (dBV) view.
+        // Against a DUT with a phase to find: a plain loopback has none, so the left channel against
+        // the synthesised sweep would read ~0 either way and prove nothing.
+        var harness = await CreateAsync(new OnePoleLowPassDevice(CleanDevice(), cornerHz: 2_000.0));
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+
+        var left = Trace(status, FrequencyResponseTraceKind.Left);
+        Assert.Contains(left.PhaseDeg, deg => Math.Abs(deg) > 5.0);
+    }
+
     [Fact]
     public async Task Probe_RestoresAutorangeStepDownWhenTheRunEnds()
     {
@@ -934,71 +975,6 @@ public class FrequencyResponseRunnerTests
                         block.Samples[f * block.ChannelCount] *= 0.1f;
 
                     Interlocked.Add(ref _remaining, -frames);
-                }
-
-                yield return block;
-            }
-        }
-    }
-
-    private sealed class OnePoleLowPassDevice(SimulatedDevice inner, double cornerHz) : IAnalyzerDevice
-    {
-        private readonly double _alpha = 1.0 - Math.Exp(-2.0 * Math.PI * cornerHz / 48_000.0);
-        private double _state;
-
-        public DeviceCapabilities Capabilities => inner.Capabilities;
-
-        public double InputRangeDbv => inner.InputRangeDbv;
-
-        public long DroppedRxChunks => inner.DroppedRxChunks;
-
-        public long DroppedBlocks => inner.DroppedBlocks;
-
-        // Its own ranging state rather than the simulator's: SimulatedDevice hard-returns
-        // AutoRangeEnabled false with a no-op setter, because it has no ranger to speak of. This
-        // class stands in for hardware that does, which is the only way to exercise the runner's
-        // "take over the input range and suppress step-down" path at all.
-        public bool AutoRangeEnabled { get; set; } = true;
-
-        public bool AutoRangeStepDownEnabled { get; set; } = true;
-
-        public double AutoRangeStepDownDelayMs
-        {
-            get => inner.AutoRangeStepDownDelayMs;
-            set => inner.AutoRangeStepDownDelayMs = value;
-        }
-
-        public event EventHandler? DeviceLost
-        {
-            add => inner.DeviceLost += value;
-            remove => inner.DeviceLost -= value;
-        }
-
-        public Task<DeviceInfo> ConnectAsync(CancellationToken ct) => inner.ConnectAsync(ct);
-
-        public Task<bool> PingAsync(CancellationToken ct) => inner.PingAsync(ct);
-
-        public int StimulusLatencyFrames(double sampleRateHz) => inner.StimulusLatencyFrames(sampleRateHz);
-
-        public Task SetInputRangeAsync(double dbv, CancellationToken ct) => inner.SetInputRangeAsync(dbv, ct);
-
-        public Task SetOutputRangeAsync(double dbv, CancellationToken ct) => inner.SetOutputRangeAsync(dbv, ct);
-
-        public Task ConfigureGeneratorAsync(GeneratorConfig config, CancellationToken ct) => inner.ConfigureGeneratorAsync(config, ct);
-
-        public Task StopAsync() => inner.StopAsync();
-
-        public async IAsyncEnumerable<PcmBlock> StreamAsync(
-            AcquisitionConfig config,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-        {
-            await foreach (var block in inner.StreamAsync(config, ct).WithCancellation(ct))
-            {
-                // Left is interleaved slot 0; filter it in place and pass the block straight on.
-                for (int i = 0; i < block.SampleCount; i += block.ChannelCount)
-                {
-                    _state += _alpha * (block.Samples[i] - _state);
-                    block.Samples[i] = (float)_state;
                 }
 
                 yield return block;

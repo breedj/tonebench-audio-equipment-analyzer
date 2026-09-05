@@ -422,6 +422,15 @@ public sealed record FrequencyResponseParameters(
     double? ChartYBottomDb = null,
     double? ChartXFromHz = null,
     double? ChartXToHz = null,
+    /// <summary>
+    /// Null on a type saved before the phase axis was independently rangeable, in which case the
+    /// client falls back to its own ±180° default. Kept as a pair with
+    /// <see cref="ChartPhaseBottomDeg"/> rather than folded into <see cref="ChartYTopDb"/>'s pair:
+    /// the phase axis is unwrapped and can run past ±180°, so it needs a window of its own and
+    /// cannot share the dB one's.
+    /// </summary>
+    double? ChartPhaseTopDeg = null,
+    double? ChartPhaseBottomDeg = null,
     /// <summary>Null on a type saved before the chirp start was configurable; the runner then uses its default.</summary>
     double? ChirpStartHz = null,
     /// <summary>
@@ -430,3 +439,55 @@ public sealed record FrequencyResponseParameters(
     /// means nothing.
     /// </summary>
     double? LoadOhms = null);
+
+/// <summary>
+/// A stepped-sine response measurement type's <c>params_json</c>: the run settings, then the chart's
+/// display state.
+///
+/// <para>Its own record rather than more optional properties on
+/// <see cref="FrequencyResponseParameters"/>, for the reason <see cref="ThdVsAmplitudeParameters"/>
+/// is separate from <see cref="ThdVsFrequencyParameters"/> — the two disagree about most of their
+/// run settings. A chirp is described by a span and a resolution multiplier; a stepped sweep by a
+/// frequency range, a step density and an FFT size, and neither set means anything to the other.
+/// What they do share is the <c>Chart*</c> half, which describes how a response is being looked at
+/// rather than how it was taken, and which is nullable throughout so a type stored before a field
+/// existed simply keeps the app's defaults instead of failing to load.</para>
+///
+/// <para>Every run setting has to be here. A stored result that cannot say what produced it is the
+/// failure mode <c>ChirpStartHz</c> caused on the chirp path: three runs at different settings came
+/// back identical and nothing complained.</para>
+/// </summary>
+public sealed record SteppedResponseParameters(
+    double StartFreqHz,
+    double EndFreqHz,
+    int StepsPerOctave,
+    string LevelMode,
+    double LevelValue,
+    string LevelUnit,
+    double LoadOhms,
+    bool GenerateLeft,
+    bool GenerateRight,
+    int FftSize,
+    WindowType Window,
+    int AverageCount,
+    double SampleRateHz,
+    bool AdaptiveResolution,
+    bool RightChannelIsReference,
+    /// <summary>The generator amplitude the run actually used — solved by probing for the output-referred modes, so it is only known after the fact.</summary>
+    double? GeneratorAmpDbv = null,
+    string? ChartView = null,
+    bool? ChartShowLeft = null,
+    bool? ChartShowRight = null,
+    bool? ChartShowPhase = null,
+    bool? ChartShowCoherence = null,
+    bool? ChartShowOneDb = null,
+    bool? ChartShowThreeDb = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    double? ChartYTopDb = null,
+    double? ChartYBottomDb = null,
+    double? ChartXFromHz = null,
+    double? ChartXToHz = null,
+    /// <summary>Null on a type saved before the phase axis was independently rangeable — see <see cref="FrequencyResponseParameters.ChartPhaseTopDeg"/>.</summary>
+    double? ChartPhaseTopDeg = null,
+    double? ChartPhaseBottomDeg = null);

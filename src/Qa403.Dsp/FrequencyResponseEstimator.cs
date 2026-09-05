@@ -241,28 +241,18 @@ public sealed class FrequencyResponseEstimator
 
         ApplyGate();
 
-        double previousDeg = 0.0;
-        double turns = 0.0;
+        // Unwrap as we go: keep each step within half a turn of the last, so a response that
+        // accumulates several turns of phase reads as a continuous curve rather than a sawtooth.
+        // Shared with the stepped-sine response, which does the same across sweep points -- see
+        // PhaseUnwrapper.
+        var unwrapper = new PhaseUnwrapper();
 
         for (int k = 0; k < _binCount; k++)
         {
             Complex h = _h[k];
             magnitude[k] = h.Magnitude;
 
-            // Unwrap as we go: keep each step within half a turn of the last, so a response that
-            // accumulates several turns of phase reads as a continuous curve rather than a sawtooth.
-            double raw = h.Phase * (180.0 / Math.PI);
-            if (k > 0)
-            {
-                double step = raw + turns - previousDeg;
-                if (step > 180.0)
-                    turns -= 360.0 * Math.Ceiling((step - 180.0) / 360.0);
-                else if (step < -180.0)
-                    turns += 360.0 * Math.Ceiling((-step - 180.0) / 360.0);
-            }
-
-            phaseDeg[k] = raw + turns;
-            previousDeg = phaseDeg[k];
+            phaseDeg[k] = unwrapper.NextFromRadians(h.Phase);
 
             double denominator = _sxx[k] * _syy[k];
             coherence[k] = denominator > 0.0

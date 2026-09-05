@@ -4,6 +4,13 @@ import type { ResponseView } from '../api/client'
 import { useFrequencyResponse } from '../composables/useFrequencyResponse'
 import CollapsibleSection from './CollapsibleSection.vue'
 
+/**
+ * Whether coherence is a meaningful thing to offer. A chirp measures it from the cross-spectra of
+ * several records; a stepped sine has one deterministic capture per point and nothing to compare it
+ * with, so the toggle is hidden there rather than offering a control that always reads 1.
+ */
+const props = withDefaults(defineProps<{ allowCoherence?: boolean }>(), { allowCoherence: true })
+
 const view = defineModel<ResponseView>('view', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
@@ -17,13 +24,26 @@ const yTopDb = defineModel<number>('yTopDb', { required: true })
 const yBottomDb = defineModel<number>('yBottomDb', { required: true })
 const xFromHz = defineModel<number>('xFromHz', { required: true })
 const xToHz = defineModel<number>('xToHz', { required: true })
+const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
+const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
 
-const { traces, averageCount } = useFrequencyResponse()
+const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable } = useFrequencyResponse()
+
 
 const DB_MIN = -200
 const DB_MAX = 200
 const DB_STEP = 2
 const DB_MIN_SPAN = 4
+
+// Wide enough for several turns of accumulated phase (a DUT with real excess delay runs well past
+// 360°) without being unbounded; matches the chart's own axis-tick increments.
+const PHASE_MIN = -1440
+const PHASE_MAX = 1440
+const PHASE_STEP = 15
+// Two of the chart's own rounding ticks (see PHASE_TICK_DEG below) — narrower than that would
+// magnify a flat phase into noise the way the dB window's own minimum span guards against.
+const PHASE_TICK_DEG = 45
+const PHASE_MIN_SPAN = PHASE_TICK_DEG * 2
 
 const X_FROM_OPTIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500]
 const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
@@ -34,8 +54,11 @@ const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
  * as a prop, so a handler in the same tick still reads the *previous* value and clamps against it,
  * writing the old bound back over what was just typed. And `change` fires on blur, Enter and each
  * spinner click but not per keystroke, so the axis does not thrash while someone types "-160".
+ *
+ * Shared by the dB and the phase range boxes below — both are a bounded number pinned against its
+ * own partner field, just with different limits.
  */
-function commitDb(event: Event, current: number, lo: number, hi: number): number {
+function commitBoundedNumber(event: Event, current: number, lo: number, hi: number): number {
   const el = event.target as HTMLInputElement
   const typed = Number(el.value)
   const next = Number.isFinite(typed) && el.value.trim() !== '' ? Math.min(hi, Math.max(lo, typed)) : current
@@ -45,11 +68,19 @@ function commitDb(event: Event, current: number, lo: number, hi: number): number
 }
 
 function onTopDbChange(event: Event) {
-  yTopDb.value = commitDb(event, yTopDb.value, yBottomDb.value + DB_MIN_SPAN, DB_MAX)
+  yTopDb.value = commitBoundedNumber(event, yTopDb.value, yBottomDb.value + DB_MIN_SPAN, DB_MAX)
 }
 
 function onBottomDbChange(event: Event) {
-  yBottomDb.value = commitDb(event, yBottomDb.value, DB_MIN, yTopDb.value - DB_MIN_SPAN)
+  yBottomDb.value = commitBoundedNumber(event, yBottomDb.value, DB_MIN, yTopDb.value - DB_MIN_SPAN)
+}
+
+function onTopPhaseChange(event: Event) {
+  phaseTopDeg.value = commitBoundedNumber(event, phaseTopDeg.value, phaseBottomDeg.value + PHASE_MIN_SPAN, PHASE_MAX)
+}
+
+function onBottomPhaseChange(event: Event) {
+  phaseBottomDeg.value = commitBoundedNumber(event, phaseBottomDeg.value, PHASE_MIN, phaseTopDeg.value - PHASE_MIN_SPAN)
 }
 
 /** The curve autofit sizes against: whichever one the current view is actually about. */
@@ -66,6 +97,14 @@ const fitTrace = computed(() => {
  * DB_MIN_SPAN. Sized off the min *and* max columns, not just the plotted line: the band beneath it
  * is part of the curve, and fitting to the line alone clips the ripple out of view.
  */
+/**
+ * Matches the chart's own `phaseTrace` — Autofit has to size the curve that is actually drawn, and
+ * the phase curve belongs to the measurement rather than to the view.
+ */
+const phaseTrace = computed(() =>
+  phaseKind.value === 'PerTrace' ? fitTrace.value : traces.value.find((t) => t.kind === 'Gain') ?? null,
+)
+
 function autofitDb() {
   const trace = fitTrace.value
   if (!trace || trace.magnitudeMaxDb.length === 0) return
@@ -86,6 +125,42 @@ function autofitDb() {
 
   yTopDb.value = Math.min(DB_MAX, Math.max(top, bottom + DB_MIN_SPAN))
   yBottomDb.value = Math.max(DB_MIN, Math.min(bottom, yTopDb.value - DB_MIN_SPAN))
+}
+
+/**
+ * Fits the phase window to the curve, rounded outward to PHASE_TICK_DEG and never tighter than
+ * PHASE_MIN_SPAN — the same shape as autofitDb, on the trace's phaseDeg rather than its magnitude.
+ *
+ * Sized against `phaseTrace`, not `fitTrace`: the phase curve belongs to the measurement rather than
+ * to the view, so this has to fit whichever curve the chart is actually drawing.
+ */
+function autofitPhase() {
+  const trace = phaseTrace.value
+  if (!trace || trace.phaseDeg.length === 0) return
+
+  let lo = Infinity
+  let hi = -Infinity
+  for (let i = 0; i < trace.phaseDeg.length; i++) {
+    const freqHz = trace.freqHz[i]
+    if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
+    const deg = trace.phaseDeg[i]
+    if (!Number.isFinite(deg)) continue
+    lo = Math.min(lo, deg)
+    hi = Math.max(hi, deg)
+  }
+
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return
+
+  let bottom = Math.floor(lo / PHASE_TICK_DEG) * PHASE_TICK_DEG
+  let top = Math.ceil(hi / PHASE_TICK_DEG) * PHASE_TICK_DEG
+  if (top - bottom < PHASE_MIN_SPAN) {
+    const mid = (top + bottom) / 2
+    bottom = mid - PHASE_TICK_DEG
+    top = mid + PHASE_TICK_DEG
+  }
+
+  phaseTopDeg.value = Math.min(PHASE_MAX, top)
+  phaseBottomDeg.value = Math.max(PHASE_MIN, bottom)
 }
 
 /** Fits the frequency range to the measured band, snapped to the dropdown's own options. */
@@ -136,7 +211,11 @@ function autofitX() {
     <div v-if="view === 'Dbv'" class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Channels</span>
       <label class="flex items-center gap-1.5"><input v-model="showLeft" type="checkbox" /> Left</label>
-      <label class="flex items-center gap-1.5"><input v-model="showRight" type="checkbox" /> Right</label>
+      <!-- Not offered when the right input is the reference: what its dBV trace shows then is the
+           generator, not a measurement of anything. -->
+      <label v-if="!rightChannelIsReference" class="flex items-center gap-1.5">
+        <input v-model="showRight" type="checkbox" /> Right
+      </label>
     </div>
 
     <div class="flex flex-col gap-1 text-xs">
@@ -151,10 +230,23 @@ function autofitX() {
 
     <div class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Extra traces</span>
-      <label class="flex items-center gap-1.5" title="Unwrapped phase, with the bulk propagation delay removed, on its own axis at the right in degrees. The axis fits itself to the measured range.">
-        <input v-model="showPhase" type="checkbox" /> Phase
+      <!-- Hidden outright when the measurement on screen has no phase: with no stimulus on the right
+           input there is nothing to compare the left against, and a single channel's own angle is
+           meaningless without a capture trigger. See the store's phaseAvailable. -->
+      <label
+        v-if="phaseAvailable"
+        class="flex items-center gap-1.5"
+        :title="
+          phaseKind === 'ChannelDifference'
+            ? 'Unwrapped phase of the left input relative to the right, on its own axis at the right in degrees. Both inputs are measuring signals of their own here, so this is the difference between two paths rather than the DUT\'s phase response. Range set below, independently of the dB one.'
+            : 'Unwrapped phase, with the bulk propagation delay removed, on its own axis at the right in degrees. Range set below, independently of the dB one.'
+        "
+      >
+        <input v-model="showPhase" type="checkbox" />
+        {{ phaseKind === 'ChannelDifference' ? 'Phase difference' : 'Phase' }}
       </label>
       <label
+        v-if="props.allowCoherence"
         class="flex items-center gap-1.5"
         :title="
           averageCount > 1
@@ -164,9 +256,46 @@ function autofitX() {
       >
         <input v-model="showCoherence" type="checkbox" /> Coherence
       </label>
-      <p v-if="showCoherence && averageCount <= 1" class="text-[11px] text-amber-600 dark:text-amber-400">
+      <p
+        v-if="props.allowCoherence && showCoherence && averageCount <= 1"
+        class="text-[11px] text-amber-600 dark:text-amber-400"
+      >
         Coherence needs 2+ averages; a single record reads 1 everywhere.
       </p>
+    </div>
+
+    <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
+         shown-but-inert, since the axis it configures is not drawn otherwise. -->
+    <div v-if="showPhase && phaseAvailable" class="flex flex-col gap-1 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">Phase range (°)</span>
+      <label class="flex items-center justify-between gap-2">
+        Top
+        <input
+          :value="phaseTopDeg"
+          type="number"
+          :step="PHASE_STEP"
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onTopPhaseChange"
+        />
+      </label>
+      <label class="flex items-center justify-between gap-2">
+        Bottom
+        <input
+          :value="phaseBottomDeg"
+          type="number"
+          :step="PHASE_STEP"
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onBottomPhaseChange"
+        />
+      </label>
+      <button
+        type="button"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
+        @click="autofitPhase"
+      >
+        Autofit
+      </button>
     </div>
 
     <div class="flex flex-col gap-1 text-xs">

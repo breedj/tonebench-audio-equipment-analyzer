@@ -19,6 +19,7 @@ public sealed class MeasurementSaveService(
     SpectrumPipeline spectrumPipeline,
     ThdSweepRunner sweepRunner,
     FrequencyResponseRunner responseRunner,
+    SteppedResponseRunner steppedResponseRunner,
     ProjectRepository projectRepository,
     MeasurementRepository measurementRepository,
     IOptions<JsonOptions> jsonOptions)
@@ -45,14 +46,24 @@ public sealed class MeasurementSaveService(
     /// <summary>The <c>measurement_type.kind</c> value for a chirp frequency response. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string FrequencyResponseKind = "FrequencyResponse";
 
+    /// <summary>The <c>measurement_type.kind</c> value for a stepped-sine Bode plot. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string SteppedResponseKind = "SteppedResponse";
+
     /// <summary>
     /// Whether a kind's result is a set of frequency-response curves. Its own predicate rather than
     /// a third arm of <see cref="IsSweepKind"/>: a response shares with a sweep only the property
     /// that it has no live state to snapshot. Its result rows are curves, not points, so every path
     /// that reads a result has to tell the two apart, and a kind that answered true to "is a sweep"
     /// would be read back through <c>GetSweepPointsAsync</c> and come out empty.
+    ///
+    /// <para>Both response kinds answer true, and that is the point of the predicate rather than an
+    /// oversight: a chirp and a stepped sine are acquired completely differently but produce the
+    /// same curves, save into the same <c>response_trace</c> rows, and are read back, exported and
+    /// overlaid by exactly the same code. Everything downstream branches on <em>this</em>, not on
+    /// the individual kind. Only <see cref="ResolveTypeParamsJson"/> and the save methods, which
+    /// deal in each kind's own settings record, have to tell them apart.</para>
     /// </summary>
-    public static bool IsFrequencyResponseKind(string kind) => kind == FrequencyResponseKind;
+    public static bool IsFrequencyResponseKind(string kind) => kind is FrequencyResponseKind or SteppedResponseKind;
 
     /// <summary>Whether a kind's configuration lives only in its panel, with nothing live to snapshot — see <see cref="ResolveTypeParamsJson"/>.</summary>
     public static bool HasNoLiveConfiguration(string kind) => IsSweepKind(kind) || IsFrequencyResponseKind(kind);
@@ -127,6 +138,35 @@ public sealed class MeasurementSaveService(
             LoadOhms: 8.0), SerializerOptions);
 
     /// <summary>
+    /// A brand-new stepped-sine response type's <c>params_json</c>, on the same terms as
+    /// <see cref="DefaultSweepParametersJson"/> and kept in step with
+    /// <c>SteppedResponseConfigPanel.vue</c>'s own defaults.
+    ///
+    /// <para>The grid defaults match the THD sweep's (20 Hz–20 kHz, 5 per octave), since that is the
+    /// stimulus this measurement borrows. <c>AdaptiveResolution</c> defaults <b>on</b>, unlike the
+    /// THD sweep's — see <see cref="SteppedResponseRequest.EffectiveSampleRateHz"/>: with no
+    /// harmonics to keep in band it costs nothing and saves three quarters of the run's USB and FFT
+    /// load.</para>
+    /// </summary>
+    public string DefaultSteppedResponseParametersJson() =>
+        JsonSerializer.Serialize(new SteppedResponseParameters(
+            StartFreqHz: 20.0,
+            EndFreqHz: 20000.0,
+            StepsPerOctave: 5,
+            LevelMode: nameof(ThdSweepLevelMode.GeneratorVoltage),
+            LevelValue: -20.0,
+            LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
+            LoadOhms: 8.0,
+            GenerateLeft: true,
+            GenerateRight: true,
+            FftSize: SteppedResponseRequest.DefaultFftSize,
+            Window: WindowType.Hann,
+            AverageCount: 1,
+            SampleRateHz: SteppedResponseRequest.DefaultSampleRateHz,
+            AdaptiveResolution: true,
+            RightChannelIsReference: true), SerializerOptions);
+
+    /// <summary>
     /// What a create-or-update of a measurement type should write to <c>params_json</c>.
     ///
     /// The interesting case is an omitted <paramref name="requestedJson"/>, which means "snapshot
@@ -142,6 +182,12 @@ public sealed class MeasurementSaveService(
     {
         if (!string.IsNullOrWhiteSpace(requestedJson))
             return requestedJson;
+
+        // Before the broad predicate below, which both response kinds answer true to: a new stepped
+        // type seeded from the chirp panel's defaults would come up configured for a measurement it
+        // cannot run.
+        if (kind == SteppedResponseKind)
+            return existingParamsJson ?? DefaultSteppedResponseParametersJson();
 
         if (IsFrequencyResponseKind(kind))
             return existingParamsJson ?? DefaultFrequencyResponseParametersJson();
@@ -325,6 +371,54 @@ public sealed class MeasurementSaveService(
             paramsJson,
             info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
             request.SampleRateHz, request.FftSize,
+            Channels: 2,
+            session.InputRangeDbv, session.OutputRangeDbv,
+            [.. status.Traces.Select(ToTraceInput)]);
+
+        return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
+    /// Saves the stepped-sine curves currently on screen as one measurement result.
+    ///
+    /// <para>Everything below the parameters record is shared with
+    /// <see cref="SaveFrequencyResponseAsync"/> — same <see cref="ResponseSaveRequest"/>, same
+    /// <c>response_trace</c> rows, same reader on the way back out. Only the settings differ, and
+    /// only because the two are configured differently.</para>
+    ///
+    /// <para>Reads <see cref="SteppedResponseRunner.Status"/> rather than taking the traces as an
+    /// argument, for the same reason the other two save methods read their runner's: what is saved
+    /// must be exactly what is displayed, not a separately-supplied copy that could differ.</para>
+    /// </summary>
+    public async Task<long> SaveSteppedResponseAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = steppedResponseRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before saving.");
+        if (status.Traces.Count == 0)
+            throw new InvalidOperationException("No stepped response has been measured yet.");
+
+        var request = steppedResponseRunner.LastRequest
+            ?? throw new InvalidOperationException("No stepped response has been measured yet.");
+
+        string paramsJson = JsonSerializer.Serialize(
+            new SteppedResponseParameters(
+                request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave,
+                request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
+                request.LoadOhms, request.GenerateLeft, request.GenerateRight,
+                request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
+                request.AdaptiveResolution, request.RightChannelIsReference,
+                status.GeneratorAmpDbv),
+            SerializerOptions);
+
+        var info = session.Info;
+        var saveRequest = new ResponseSaveRequest(
+            measurementTypeId, name, notes,
+            paramsJson,
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            // The as-run rate and size, which under adaptive resolution are neither of the requested
+            // ones -- and the size is the one the *first* point used, since it varies across the run.
+            status.SampleRateHz, status.FftSize,
             Channels: 2,
             session.InputRangeDbv, session.OutputRangeDbv,
             [.. status.Traces.Select(ToTraceInput)]);

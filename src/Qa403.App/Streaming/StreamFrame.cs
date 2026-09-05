@@ -75,6 +75,21 @@ public enum StreamFlags : ushort
     /// this channel are coming until the next arm.
     /// </summary>
     Held = 1 << 3,
+
+    /// <summary>
+    /// Response-frame-only: this frame came from <see cref="Qa403.App.Services.SteppedResponseRunner"/>
+    /// rather than <see cref="Qa403.App.Services.FrequencyResponseRunner"/>.
+    ///
+    /// <para>The two measurements produce identical frame types and a client keeps a separate state
+    /// for each, so without this a frame has no origin and lands on whichever screen happens to be
+    /// open — a long stepped run painting the chirp's chart the moment you switch away to look at an
+    /// old result. Routing on the client's own idea of which screen it is showing is a guess; this
+    /// is the fact.</para>
+    ///
+    /// <para>Backward compatible: an older client ignores flag bits it does not know, and the
+    /// chirp's frames are byte-identical to what they were before this existed.</para>
+    /// </summary>
+    SteppedResponse = 1 << 4,
 }
 
 /// <summary>
@@ -357,7 +372,7 @@ public static class StreamFrame
     /// the top of its own ripple — the same aggregation bias the spectrum path's min/max band exists
     /// to avoid.
     /// </summary>
-    public static byte[] EncodeFrequencyResponse(FrequencyResponseTrace trace)
+    public static byte[] EncodeFrequencyResponse(FrequencyResponseTrace trace, bool stepped = false)
     {
         int columns = trace.FreqHz.Length;
         if (trace.MagnitudeMinDb.Length != columns || trace.MagnitudeMaxDb.Length != columns
@@ -373,7 +388,8 @@ public static class StreamFrame
         byte[] buffer = new byte[HeaderLength + (columns * perColumn) + (2 * perBandwidth) + trailer];
         WriteHeader(
             buffer, StreamMsgType.FrequencyResponse, (byte)trace.Kind,
-            StreamFlags.Decimated | StreamFlags.LogSpaced, seq: 0,
+            StreamFlags.Decimated | StreamFlags.LogSpaced | (stepped ? StreamFlags.SteppedResponse : StreamFlags.None),
+            seq: 0,
             (float)trace.StartFreqHz, (float)trace.EndFreqHz, (uint)columns);
 
         int offset = HeaderLength;
@@ -409,11 +425,12 @@ public static class StreamFrame
     /// the previous run had settled on.</para>
     /// </summary>
     public static byte[] EncodeFrequencyResponseProgress(
-        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv)
+        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv, bool stepped = false)
     {
         byte[] buffer = new byte[HeaderLength];
         WriteHeader(
-            buffer, StreamMsgType.FrequencyResponseProgress, (byte)StreamChannel.Left, StreamFlags.None,
+            buffer, StreamMsgType.FrequencyResponseProgress, (byte)StreamChannel.Left,
+            stepped ? StreamFlags.SteppedResponse : StreamFlags.None,
             (uint)phase, (float)generatorAmpDbv, total, (uint)Math.Max(0, taken));
 
         return buffer;

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  adaptiveFftSize,
+  adaptiveSampleRateHz,
   estimateDurationSeconds,
   estimatePointCount,
   formatDuration,
@@ -151,5 +153,59 @@ describe('mergePreviewSeries', () => {
 
   it('returns an empty series when neither channel has data', () => {
     expect(mergePreviewSeries(null, null)).toEqual({ x: [], leftMin: [], leftMax: [], rightMin: [], rightMax: [] })
+  })
+})
+
+describe('adaptiveSampleRateHz', () => {
+  it('leaves room for five harmonics of the top point by default', () => {
+    // A THD sweep measures D2..D5, so the rate has to carry 5x the highest tone. Mirrors
+    // SweepResolution.HarmonicHeadroomOrder.
+    expect(adaptiveSampleRateHz(20000)).toBe(192000)
+    expect(adaptiveSampleRateHz(4000)).toBe(48000)
+  })
+
+  it('needs only the tone itself when asked for one harmonic', () => {
+    // What a stepped-sine response asks for: it reads no harmonics, so a 20 kHz run fits in 48 kHz
+    // rather than 192 kHz -- a quarter of the USB and FFT load. Mirrors
+    // SteppedResponseRequest.EffectiveSampleRateHz, and the two must agree or the panel's duration
+    // estimate and analysis readout describe a run the server does not perform.
+    expect(adaptiveSampleRateHz(20000, 1)).toBe(48000)
+    expect(adaptiveSampleRateHz(40000, 1)).toBe(96000)
+    expect(adaptiveSampleRateHz(90000, 1)).toBe(192000)
+  })
+
+  it('falls back to the highest rate when nothing fits', () => {
+    expect(adaptiveSampleRateHz(200000, 1)).toBe(192000)
+  })
+})
+
+describe('adaptiveFftSize', () => {
+  it('clamps to the record-time ceiling the sweeps use, by default', () => {
+    // 0.6827 s at every rate, so 1.465 Hz bins at every rate.
+    expect(adaptiveFftSize(1, 48000)).toBe(32768)
+    expect(adaptiveFftSize(1, 96000)).toBe(65536)
+    expect(adaptiveFftSize(1, 192000)).toBe(131072)
+  })
+
+  it('reaches the raised ceiling only where the ladder asks for it', () => {
+    // The stepped-sine response passes a raised ceiling when its start frequency is below what the
+    // standard one can measure. Mirrors SteppedResponseRequest.FftSizeAt — a point the standard
+    // ceiling already serves must be sized identically either way, or the low end of a sweep would
+    // drag the whole run's record length up with it.
+    expect(adaptiveFftSize(2, 48000, 131072)).toBe(131072)
+    expect(adaptiveFftSize(1000, 48000, 131072)).toBe(adaptiveFftSize(1000, 48000))
+    expect(adaptiveFftSize(1000, 48000, 131072)).toBe(4096)
+  })
+})
+
+describe('estimateDurationSeconds', () => {
+  it('counts the extra record a stepped-sine point spends', () => {
+    // The record armed by each stimulus change is thrown away, so a stepped point is two records
+    // plus its averages where a sweep point is one. Under-counting it would promise half the time.
+    const sweep = estimateDurationSeconds(10, 32768, 48000, 1)
+    const stepped = estimateDurationSeconds(10, 32768, 48000, 1, 0.5, 0.065, 2)
+
+    const recordSeconds = 32768 / 48000
+    expect(stepped - sweep).toBeCloseTo(10 * recordSeconds, 6)
   })
 })

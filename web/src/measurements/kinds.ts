@@ -16,6 +16,9 @@ export const THD_VS_AMPLITUDE_KIND = 'ThdVsAmplitude'
 /** Mirrors MeasurementSaveService.FrequencyResponseKind — a chirp-driven frequency response. */
 export const FREQUENCY_RESPONSE_KIND = 'FrequencyResponse'
 
+/** Mirrors MeasurementSaveService.SteppedResponseKind — a stepped-sine Bode plot. */
+export const STEPPED_RESPONSE_KIND = 'SteppedResponse'
+
 /** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
 export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
 
@@ -34,9 +37,19 @@ export function isSweepKind(kind: string | null | undefined): boolean {
  * arm of `isSweepKind`, mirroring `MeasurementSaveService.IsFrequencyResponseKind`: a response
  * result saves and loads through its own endpoints, and a kind that answered true to "is a sweep"
  * would be fetched as sweep points and come back empty.
+ *
+ * Both response kinds answer true, and that is the point of the predicate rather than an oversight:
+ * a chirp and a stepped sine are acquired completely differently but produce the same curves, are
+ * stored in the same rows, and are read back, exported and overlaid by exactly the same code. Only
+ * the config panel and the start endpoint have to tell them apart — `isSteppedResponseKind` below.
  */
 export function isFrequencyResponseKind(kind: string | null | undefined): boolean {
-  return kind === FREQUENCY_RESPONSE_KIND
+  return kind === FREQUENCY_RESPONSE_KIND || kind === STEPPED_RESPONSE_KIND
+}
+
+/** Whether this response is stepped rather than chirp-driven — which config panel to mount, and which endpoints to drive. */
+export function isSteppedResponseKind(kind: string | null | undefined): boolean {
+  return kind === STEPPED_RESPONSE_KIND
 }
 
 export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
@@ -61,5 +74,11 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     label: 'Frequency response',
     description:
       'Sweeps a chirp across the band and plots gain or level against frequency, with −1 dB and −3 dB bandwidth markers.',
+  },
+  {
+    kind: STEPPED_RESPONSE_KIND,
+    label: 'Stepped sine response',
+    description:
+      'Steps one tone at a time across the band and plots the same level, gain and phase curves — slower than the chirp, but nothing else is playing while each point is measured.',
   },
 ]

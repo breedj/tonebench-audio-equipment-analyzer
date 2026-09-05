@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { OverlayEntry } from '../composables/useMeasurements'
+import type { ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
@@ -28,6 +29,13 @@ const props = defineProps<{
   yBottomDb: number
   xFromHz: number
   xToHz: number
+  /** The phase axis' own window, in degrees — set in the display panel, independent of the dB one because unwrapped phase can run past ±180°. */
+  phaseTopDeg: number
+  phaseBottomDeg: number
+  /** What phase this run measured — decides which curve carries it and what it is called. See ResponsePhaseKind. */
+  phaseKind: ResponsePhaseKindName
+  /** The button that starts this screen's measurement — RUN on the chirp, RUN SWEEP on the stepped sine. */
+  runLabel?: string
 }>()
 
 const { isDark } = useAppTheme()
@@ -110,42 +118,32 @@ const primaryTrace = computed<ResponseTrace | null>(() => {
  * the only way a phase reading can actually be read off the plot. It was previously squeezed onto
  * the dB window, which put a number next to it that meant nothing.
  *
- * The range is fitted to the data rather than fixed at ±180°, because the phase here is *unwrapped*
- * and the bulk delay has already been removed: a well-behaved DUT sits inside a few tens of degrees,
- * where a fixed ±180° axis would flatten it into a straight line, while a DUT with real excess phase
- * runs well past 180° and a fixed axis would clip it. Rounded outward to a multiple of
- * PHASE_TICK_DEG so the gridlines land on round numbers, and never narrower than that, so a flat
- * phase does not get magnified into noise.
+ * The window is a display-panel setting (props.phaseTopDeg/phaseBottomDeg) rather than fitted to the
+ * data, so it stays put while a run comes in instead of rescaling under the curve; the panel's own
+ * Autofit button covers the case the old auto-fit did. Independent of the dB window because the
+ * phase here is *unwrapped* and the bulk delay already removed: a well-behaved DUT sits inside a few
+ * tens of degrees, while a DUT with real excess phase runs well past 180° — the two cannot share one
+ * pair of bounds.
  */
-const PHASE_TICK_DEG = 45
+const phaseRange = computed<[number, number]>(() => [props.phaseBottomDeg, props.phaseTopDeg])
 
-const phaseRange = computed<[number, number]>(() => {
-  const source = primaryTrace.value
-  if (!props.showPhase || !source || source.phaseDeg.length === 0) return [-180, 180]
+/**
+ * The curve the phase series is drawn from — <b>not</b> `primaryTrace</b>, which is what the view is
+ * about rather than what was measured.
+ *
+ * Phase is a property of the measurement, not of whichever magnitude curve is on screen. Sourcing it
+ * from `primaryTrace` meant FR (dBV) view plotted the Left trace's phase, and for a stepped sine that
+ * is a genuine array of zeros (only the Gain trace is a relationship between the two inputs) — drawn
+ * as a solid 0° line, indistinguishable from a DUT with no phase shift at all. `PerTrace` is the one
+ * case where the trace on screen really does carry its own: the chirp estimates Left and Right
+ * against the synthesised sweep.
+ */
+const phaseTrace = computed<ResponseTrace | null>(() =>
+  props.phaseKind === 'PerTrace' ? primaryTrace.value : gainTrace.value,
+)
 
-  let lo = Infinity
-  let hi = -Infinity
-  for (let i = 0; i < source.phaseDeg.length; i++) {
-    const freqHz = source.freqHz[i]
-    if (freqHz < props.xFromHz || freqHz > props.xToHz) continue
-    const deg = source.phaseDeg[i]
-    if (!Number.isFinite(deg)) continue
-    lo = Math.min(lo, deg)
-    hi = Math.max(hi, deg)
-  }
-
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [-180, 180]
-
-  let bottom = Math.floor(lo / PHASE_TICK_DEG) * PHASE_TICK_DEG
-  let top = Math.ceil(hi / PHASE_TICK_DEG) * PHASE_TICK_DEG
-  if (top - bottom < PHASE_TICK_DEG * 2) {
-    const mid = (top + bottom) / 2
-    bottom = mid - PHASE_TICK_DEG
-    top = mid + PHASE_TICK_DEG
-  }
-
-  return [bottom, top]
-})
+/** What the phase curve is entitled to be called — a difference between two measured paths is not a DUT's phase response. */
+const phaseLabel = computed(() => (props.phaseKind === 'ChannelDifference' ? 'Phase difference' : 'Phase'))
 
 /**
  * Draws the min of each column as a vertical stroke under its max, exactly as the spectrum chart's
@@ -297,7 +295,7 @@ function buildData(): uPlot.AlignedData {
   // Both go out in their own units now that each has its own scale — degrees and 0..1 — so the
   // cursor and the axis agree with each other.
   if (props.showPhase) {
-    const source = primaryTrace.value
+    const source = phaseTrace.value
     series.push(source ? Float64Array.from(source.phaseDeg) : new Float64Array(x.length))
   }
 
@@ -360,7 +358,7 @@ function buildSeries(): uPlot.Series[] {
 
   if (props.showPhase) {
     series.push({
-      label: 'Phase',
+      label: phaseLabel.value,
       scale: 'phase',
       stroke: color(PHASE_COLOR),
       width,
@@ -429,7 +427,7 @@ const readoutSeries = computed<ReadoutSeries[]>(() => {
   }
 
   if (props.showPhase) {
-    entries.push({ key: 'phase', label: 'Phase', color: color(PHASE_COLOR), unit: '°', digits: 1 })
+    entries.push({ key: 'phase', label: phaseLabel.value, color: color(PHASE_COLOR), unit: '°', digits: 1 })
   }
 
   if (props.showCoherence) {
@@ -514,6 +512,9 @@ const signature = computed(() =>
     props.view,
     visibleTraces.value.map((t) => t.kind).join(','),
     props.showPhase,
+    // The series label is baked in at build time, so a change of kind needs a rebuild rather than a
+    // redraw -- and the kind also decides which curve the phase is read from.
+    props.phaseKind,
     props.showCoherence,
     overlayCurves.value.map((o) => o.id).join(','),
     props.thickLines,
@@ -745,8 +746,9 @@ watch([() => props.traces, () => props.overlays], refresh)
 // signature now, for the reason its own remarks give.
 watch(() => [props.showOneDb, props.showThreeDb], () => refresh())
 
-// The phase axis auto-fits, so its bounds are data, not settings — a redraw has to follow them or a
-// new measurement is drawn against the previous one's axis.
+// A settings change, not a data change, but still only a re-range: the phase scale is not part of
+// the drag-zoom (uPlot zooms the first plotted series, which is the dB one), so nothing about the
+// series or their styling needs rebuilding here.
 watch(phaseRange, () => refresh())
 </script>
 
@@ -782,7 +784,7 @@ watch(phaseRange, () => refresh())
 
     <div ref="container" class="w-full" :style="{ height: `${CHART_HEIGHT_PX}px` }" />
     <p v-if="traces.length === 0 && overlays.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">
-      No frequency response measured yet. Press RUN.
+      No frequency response measured yet. Press {{ props.runLabel ?? 'RUN' }}.
     </p>
   </div>
 </template>

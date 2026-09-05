@@ -28,13 +28,16 @@ public readonly record struct BandwidthResult(
 /// the actual roll-off and jumps around between runs. Walking outward and stopping at the first
 /// crossing is both stable and what a reader would point at on the plot.</para>
 ///
-/// <para>The crossing is then interpolated <b>in log frequency</b> between the two bracketing bins,
-/// because the axis is logarithmic and the roll-off is close to straight in that space. This also
-/// removes the reference app's off-by-one, where the lower corner was reported as
-/// <c>(i+1)·df</c> and the upper as <c>i·df</c>.</para>
+/// <para>The crossing is then interpolated <b>in log frequency</b> between the two bracketing
+/// samples, because the axis is logarithmic and the roll-off is close to straight in that space.
+/// This also removes the reference app's off-by-one, where the lower corner was reported as
+/// <c>(i+1)·df</c> and the upper as <c>i·df</c>. Interpolating in log frequency is also what lets
+/// the same code serve a log-spaced stepped sweep unchanged — see the frequency-array overloads.</para>
 ///
 /// <para>Run this on the <b>smoothed</b> trace. On raw bins a single noisy bin at −3.1 dB ends the
-/// search early, and the reported bandwidth then tracks the noise floor rather than the DUT.</para>
+/// search early, and the reported bandwidth then tracks the noise floor rather than the DUT.
+/// (A stepped sine has nothing to smooth: every sample is already an averaged measurement of one
+/// tone rather than one noisy bin.)</para>
 /// </summary>
 public static class BandwidthAnalyzer
 {
@@ -49,20 +52,26 @@ public static class BandwidthAnalyzer
         int firstBin = 1,
         int lastBin = int.MaxValue)
     {
-        (int first, int last) = ClampRange(traceDb.Length, firstBin, lastBin);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binHz);
+        return FindPeakCore(traceDb, FrequencyAxis.Uniform(binHz), firstBin, lastBin);
+    }
 
-        int peakBin = first;
-        double peakDb = double.NegativeInfinity;
-        for (int i = first; i <= last; i++)
-        {
-            if (traceDb[i] > peakDb)
-            {
-                peakDb = traceDb[i];
-                peakBin = i;
-            }
-        }
-
-        return new ResponsePeak(peakBin, peakBin * binHz, peakDb);
+    /// <summary>
+    /// The highest sample of <paramref name="traceDb"/>, where <paramref name="freqHz"/> gives each
+    /// sample's own frequency rather than a constant bin spacing — a stepped sweep's log-spaced
+    /// grid.
+    ///
+    /// <para><paramref name="firstIndex"/> defaults to 0, not 1: there is no DC sample to skip here.
+    /// Every entry is a tone that was actually played.</para>
+    /// </summary>
+    public static ResponsePeak FindPeak(
+        ReadOnlySpan<double> traceDb,
+        ReadOnlySpan<double> freqHz,
+        int firstIndex = 0,
+        int lastIndex = int.MaxValue)
+    {
+        RequireMatchingAxis(traceDb, freqHz);
+        return FindPeakCore(traceDb, FrequencyAxis.Explicit(freqHz), firstIndex, lastIndex);
     }
 
     /// <summary>
@@ -79,30 +88,79 @@ public static class BandwidthAnalyzer
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binHz);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dropDb);
 
-        (int first, int last) = ClampRange(traceDb.Length, firstBin, lastBin);
+        return FindCore(traceDb, FrequencyAxis.Uniform(binHz), dropDb, firstBin, lastBin);
+    }
 
-        var peak = FindPeak(traceDb, binHz, first, last);
+    /// <summary>
+    /// As <see cref="Find(ReadOnlySpan{double}, double, double, int, int)"/>, for a trace whose
+    /// samples carry their own frequencies instead of sitting on a uniform grid.
+    /// </summary>
+    public static BandwidthResult Find(
+        ReadOnlySpan<double> traceDb,
+        ReadOnlySpan<double> freqHz,
+        double dropDb,
+        int firstIndex = 0,
+        int lastIndex = int.MaxValue)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dropDb);
+        RequireMatchingAxis(traceDb, freqHz);
+
+        return FindCore(traceDb, FrequencyAxis.Explicit(freqHz), dropDb, firstIndex, lastIndex);
+    }
+
+    private static ResponsePeak FindPeakCore(
+        ReadOnlySpan<double> traceDb,
+        scoped FrequencyAxis axis,
+        int firstIndex,
+        int lastIndex)
+    {
+        (int first, int last) = ClampRange(traceDb.Length, firstIndex, lastIndex);
+
+        int peakIndex = first;
+        double peakDb = double.NegativeInfinity;
+        for (int i = first; i <= last; i++)
+        {
+            if (traceDb[i] > peakDb)
+            {
+                peakDb = traceDb[i];
+                peakIndex = i;
+            }
+        }
+
+        return new ResponsePeak(peakIndex, axis.At(peakIndex), peakDb);
+    }
+
+    private static BandwidthResult FindCore(
+        ReadOnlySpan<double> traceDb,
+        scoped FrequencyAxis axis,
+        double dropDb,
+        int firstIndex,
+        int lastIndex)
+    {
+        (int first, int last) = ClampRange(traceDb.Length, firstIndex, lastIndex);
+
+        var peak = FindPeakCore(traceDb, axis, first, last);
         double threshold = peak.LevelDb - dropDb;
 
-        double lowerHz = first * binHz;
+        double lowerHz = axis.At(first);
         bool lowerClamped = true;
         for (int i = peak.Bin - 1; i >= first; i--)
         {
             if (traceDb[i] <= threshold)
             {
-                lowerHz = InterpolateCrossing(i, traceDb[i], i + 1, traceDb[i + 1], threshold, binHz);
+                lowerHz = InterpolateCrossing(axis, i, traceDb[i], i + 1, traceDb[i + 1], threshold);
                 lowerClamped = false;
                 break;
             }
         }
 
-        double upperHz = last * binHz;
+        double upperHz = axis.At(last);
         bool upperClamped = true;
         for (int i = peak.Bin + 1; i <= last; i++)
         {
             if (traceDb[i] <= threshold)
             {
-                upperHz = InterpolateCrossing(i - 1, traceDb[i - 1], i, traceDb[i], threshold, binHz);
+                upperHz = InterpolateCrossing(axis, i - 1, traceDb[i - 1], i, traceDb[i], threshold);
                 upperClamped = false;
                 break;
             }
@@ -118,20 +176,20 @@ public static class BandwidthAnalyzer
     }
 
     /// <summary>
-    /// Where the line between two adjacent bins crosses <paramref name="threshold"/>, interpolated in
-    /// log frequency. Falls back to the nearer bin's own frequency when the two levels are equal,
-    /// which would otherwise divide by zero.
+    /// Where the line between two adjacent samples crosses <paramref name="threshold"/>,
+    /// interpolated in log frequency. Falls back to the nearer sample's own frequency when the two
+    /// levels are equal, which would otherwise divide by zero.
     /// </summary>
     private static double InterpolateCrossing(
-        int binA,
+        scoped FrequencyAxis axis,
+        int indexA,
         double levelA,
-        int binB,
+        int indexB,
         double levelB,
-        double threshold,
-        double binHz)
+        double threshold)
     {
-        double freqA = binA * binHz;
-        double freqB = binB * binHz;
+        double freqA = axis.At(indexA);
+        double freqB = axis.At(indexB);
 
         // Bin 0 has no logarithm; the caller's firstBin keeps us off it in practice, but a caller
         // passing firstBin 0 should get a sane answer rather than a NaN.
@@ -157,5 +215,43 @@ public static class BandwidthAnalyzer
         int first = Math.Clamp(firstBin, 0, length - 1);
         int last = Math.Clamp(lastBin, first, length - 1);
         return (first, last);
+    }
+
+    private static void RequireMatchingAxis(ReadOnlySpan<double> traceDb, ReadOnlySpan<double> freqHz)
+    {
+        if (freqHz.Length != traceDb.Length)
+        {
+            throw new ArgumentException(
+                $"The frequency axis has {freqHz.Length} entries but the trace has {traceDb.Length}.",
+                nameof(freqHz));
+        }
+    }
+
+    /// <summary>
+    /// Where a sample sits in frequency: either a constant bin spacing (an FFT trace) or one
+    /// frequency per sample (a stepped sweep's log-spaced grid).
+    ///
+    /// <para>The whole of this analyzer only ever asks "what frequency is sample i", so making that
+    /// the one thing the two cases disagree about is what lets both share the search and the
+    /// interpolation verbatim. A <c>ref struct</c> so the explicit case carries the caller's span
+    /// rather than a copy — a full-resolution FFT trace would otherwise cost a 262144-element array
+    /// per call to express something the uniform case already knows from one number.</para>
+    /// </summary>
+    private readonly ref struct FrequencyAxis
+    {
+        private readonly double _binHz;
+        private readonly ReadOnlySpan<double> _freqHz;
+
+        private FrequencyAxis(double binHz, ReadOnlySpan<double> freqHz)
+        {
+            _binHz = binHz;
+            _freqHz = freqHz;
+        }
+
+        public static FrequencyAxis Uniform(double binHz) => new(binHz, default);
+
+        public static FrequencyAxis Explicit(ReadOnlySpan<double> freqHz) => new(0.0, freqHz);
+
+        public double At(int index) => _freqHz.IsEmpty ? index * _binHz : _freqHz[index];
     }
 }

@@ -1,0 +1,75 @@
+using Qa403.App.Services;
+using Qa403.App.Streaming;
+
+namespace Qa403.App.Tests.Streaming;
+
+/// <summary>
+/// The chirp and the stepped sine emit identical frame types, and the browser keeps a separate state
+/// for each. Without a marker a frame has no origin, so it lands on whichever screen happens to be
+/// open — which is how running one measurement put its curves on the other's chart.
+/// </summary>
+public class ResponseFrameOriginTests
+{
+    private static FrequencyResponseTrace Trace() =>
+        new(
+            FrequencyResponseTraceKind.Gain,
+            StartFreqHz: 20.0,
+            EndFreqHz: 20_000.0,
+            FreqHz: [20f, 20_000f],
+            MagnitudeMinDb: [0f, 0f],
+            MagnitudeMaxDb: [0f, 0f],
+            PhaseDeg: [0f, -45f],
+            Coherence: [1f, 1f],
+            OneDb: new BandwidthReading(1.0, 20.0, 20_000.0, 19_980.0, false, false),
+            ThreeDb: new BandwidthReading(3.0, 20.0, 20_000.0, 19_980.0, false, false),
+            PeakDb: 0.0,
+            PeakFreqHz: 1_000.0);
+
+    private static StreamFlags FlagsOf(byte[] frame) => StreamFrame.DecodeHeader(frame).Flags;
+
+    [Fact]
+    public void ASteppedTraceFrame_SaysSo()
+    {
+        Assert.True(FlagsOf(StreamFrame.EncodeFrequencyResponse(Trace(), stepped: true)).HasFlag(StreamFlags.SteppedResponse));
+        Assert.False(FlagsOf(StreamFrame.EncodeFrequencyResponse(Trace())).HasFlag(StreamFlags.SteppedResponse));
+    }
+
+    [Fact]
+    public void ASteppedProgressFrame_SaysSo()
+    {
+        var stepped = StreamFrame.EncodeFrequencyResponseProgress(3, 50, FrequencyResponsePhase.Sweeping, -20.0, stepped: true);
+        var chirp = StreamFrame.EncodeFrequencyResponseProgress(3, 50, FrequencyResponsePhase.Measuring, -20.0);
+
+        Assert.True(FlagsOf(stepped).HasFlag(StreamFlags.SteppedResponse));
+        Assert.False(FlagsOf(chirp).HasFlag(StreamFlags.SteppedResponse));
+    }
+
+    [Fact]
+    public void TheChirpsFramesAreUnchanged()
+    {
+        // The flag is additive, so an older client keeps reading these exactly as it did. Asserting
+        // the whole frame rather than just the flag: the marker had to fit in spare header space
+        // without moving a single payload byte.
+        var trace = StreamFrame.EncodeFrequencyResponse(Trace());
+        Assert.Equal(StreamFlags.Decimated | StreamFlags.LogSpaced, FlagsOf(trace));
+
+        var progress = StreamFrame.EncodeFrequencyResponseProgress(3, 50, FrequencyResponsePhase.Measuring, -20.0);
+        Assert.Equal(StreamFlags.None, FlagsOf(progress));
+    }
+
+    [Fact]
+    public void TheFlagChangesNothingButTheFlags()
+    {
+        // A stepped frame has to decode to the same numbers as a chirp one — the marker rides in the
+        // header's spare bits, so the payload is byte-for-byte identical.
+        var chirp = StreamFrame.EncodeFrequencyResponse(Trace());
+        var stepped = StreamFrame.EncodeFrequencyResponse(Trace(), stepped: true);
+
+        Assert.Equal(chirp.Length, stepped.Length);
+        Assert.Equal(chirp[4..], stepped[4..]);
+
+        var decoded = StreamFrame.DecodeFrequencyResponse(stepped);
+        Assert.Equal(FrequencyResponseTraceKind.Gain, decoded.Kind);
+        Assert.Equal(-45f, decoded.PhaseDeg[1]);
+    }
+}

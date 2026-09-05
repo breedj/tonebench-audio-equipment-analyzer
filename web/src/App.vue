@@ -42,6 +42,7 @@ import ThdSweepChart from './components/ThdSweepChart.vue'
 import SweepFftPreviewChart from './components/SweepFftPreviewChart.vue'
 import SweepScopePreviewChart from './components/SweepScopePreviewChart.vue'
 import FrequencyResponseConfigPanel from './components/FrequencyResponseConfigPanel.vue'
+import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.vue'
 import FrequencyResponseDisplayPanel from './components/FrequencyResponseDisplayPanel.vue'
 import FrequencyResponseChart from './components/FrequencyResponseChart.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
@@ -52,6 +53,7 @@ import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
 import {
   THD_VS_AMPLITUDE_KIND,
   isFrequencyResponseKind,
+  isSteppedResponseKind,
   isSweepKind as isSweepKindName,
 } from './measurements/kinds'
 
@@ -168,9 +170,14 @@ const {
   binHz: responseBinHz,
   latencySamples: responseLatencySamples,
   start: startResponse,
+  startStepped: startSteppedResponse,
   cancel: cancelResponseRun,
   clear: clearResponseRun,
   refresh: refreshResponse,
+  setTarget: setResponseTarget,
+  phaseKind: responsePhaseKind,
+  rightChannelIsReference: responseRightChannelIsReference,
+  phaseAvailable: responsePhaseAvailable,
 } = useFrequencyResponse()
 
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
@@ -180,10 +187,17 @@ const {
 const isSweepKind = computed(() => isSweepKindName(currentType.value?.kind))
 const isAmplitudeSweep = computed(() => currentType.value?.kind === THD_VS_AMPLITUDE_KIND)
 
-// The chirp frequency response is a third screen rather than a variant of the sweep one: it shares
-// the three-column layout but nothing else — one continuous curve instead of stepped points, its
-// own runner, its own endpoints, and a readout table the sweeps have no equivalent of.
+// The frequency response is a third screen rather than a variant of the sweep one: it shares the
+// three-column layout but nothing else — its own runner, its own endpoints, and a readout table the
+// sweeps have no equivalent of.
+//
+// Two kinds land on it. A chirp and a stepped sine are acquired completely differently but produce
+// the same three curves, so they share the chart, the readout, the display rail, the save path and
+// the history overlay — everything below keys off this. Only three things have to tell them apart:
+// which config panel is mounted, whether RUN can repeat, and whether coherence means anything.
 const isFrequencyResponse = computed(() => isFrequencyResponseKind(currentType.value?.kind))
+const isSteppedResponse = computed(() => isSteppedResponseKind(currentType.value?.kind))
+const isChirpResponse = computed(() => isFrequencyResponse.value && !isSteppedResponse.value)
 
 // One runner holds one set of points, and the two screens cannot read each other's: see useSweep's
 // own `viewAxis`. Kept in step with the selected type rather than set on navigation, so a reload
@@ -437,10 +451,18 @@ watch(
 // button and the save path actually read, and both panels expose the same { run, invalid,
 // buildParamsJson } contract.
 const responseConfigPanel = ref<InstanceType<typeof FrequencyResponseConfigPanel> | null>(null)
+const steppedResponseConfigPanel = ref<InstanceType<typeof SteppedResponseConfigPanel> | null>(null)
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
 const amplitudeSweepConfigPanel = ref<InstanceType<typeof AmplitudeSweepConfigPanel> | null>(null)
 const activeSweepPanel = computed(() =>
   isAmplitudeSweep.value ? amplitudeSweepConfigPanel.value : sweepConfigPanel.value,
+)
+
+// The same arrangement on the response screen: one ref per panel because only one of the two is
+// ever mounted, and this is what the RUN button and the save path read. Both expose the same
+// { run, invalid, buildParamsJson } contract, so neither of those has to know which is up.
+const activeResponsePanel = computed(() =>
+  isSteppedResponse.value ? steppedResponseConfigPanel.value : responseConfigPanel.value,
 )
 
 // Frequency-response chart display preferences. Local view state, persisted into the measurement
@@ -459,6 +481,11 @@ const responseYTopDb = ref(10)
 const responseYBottomDb = ref(-10)
 const responseXFromHz = ref(10)
 const responseXToHz = ref(100000)
+// Independent of the dB window because unwrapped phase can run past +/-180 deg on a DUT with real
+// excess phase, so the two axes cannot share one pair of bounds. +/-180 is the useful default: it
+// is the widest range a wrapped reading could ever need, and Autofit takes over from there.
+const responsePhaseTopDeg = ref(180)
+const responsePhaseBottomDeg = ref(-180)
 
 // Same guard as sweepDisplayRestoring: applying a type's stored display state is the opposite of an
 // unsaved edit, and marking it dirty there would light Save up on every selection.
@@ -492,6 +519,8 @@ function applyStoredResponseDisplay(paramsJson: string) {
   if (typeof stored.chartYBottomDb === 'number') responseYBottomDb.value = stored.chartYBottomDb
   if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) responseXFromHz.value = stored.chartXFromHz
   if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) responseXToHz.value = stored.chartXToHz
+  if (typeof stored.chartPhaseTopDeg === 'number') responsePhaseTopDeg.value = stored.chartPhaseTopDeg
+  if (typeof stored.chartPhaseBottomDeg === 'number') responsePhaseBottomDeg.value = stored.chartPhaseBottomDeg
 
   void nextTick(() => {
     responseDisplayRestoring = false
@@ -513,6 +542,7 @@ watch(
     responseView, responseShowLeft, responseShowRight, responseShowPhase, responseShowCoherence,
     responseShowOneDb, responseShowThreeDb, responseThickLines, responseShowDataPoints,
     responseYTopDb, responseYBottomDb, responseXFromHz, responseXToHz,
+    responsePhaseTopDeg, responsePhaseBottomDeg,
   ],
   () => {
     if (!responseDisplayRestoring && isFrequencyResponse.value) markDirty()
@@ -548,8 +578,41 @@ function clearFrequencyResponse() {
   })
 }
 
+/**
+ * The stepped-sine Bode plot. Single-shot only — a hundred-point run is minutes long, so repeating
+ * it is the sweep screen's model (one RUN SWEEP button) rather than the chirp's RUN/SINGLE pair.
+ *
+ * Driven from the panel's own `run` emit, exactly as the two sweep panels are: the button calls
+ * `run()` and the validated form arrives here, which keeps the form and its validation in one place.
+ */
+function runSteppedResponse(request: import('./api/client').SteppedResponseStartRequest) {
+  // Without a reference channel the right input is a trace in its own right and worth showing; with
+  // one it is the yardstick, and the previous app hid it for exactly that reason.
+  responseShowRight.value = !request.rightChannelIsReference
+  return withErrorReporting(async () => {
+    await startSteppedResponse(request)
+  })
+}
+
+// The store keeps one state per measurement and this is what says which of them the screen is
+// showing — set from the selected kind rather than at call time, and before the re-attach below,
+// since every verb reads it.
+//
+// The re-poll is here rather than only on the isFrequencyResponse watcher below because that flag is
+// true for *both* response kinds, so switching from one to the other never changes it and never
+// fired. That is what left the previous kind's curves on screen.
+watch(
+  isSteppedResponse,
+  (stepped) => {
+    setResponseTarget(stepped ? 'Stepped' : 'Chirp')
+    if (isFrequencyResponse.value) void refreshResponse().catch(() => undefined)
+  },
+  { immediate: true },
+)
+
 // A measurement runs server-side, so a reload (or a second tab) mid-run has to re-attach rather
-// than start from an empty chart.
+// than start from an empty chart. Covers arriving from a non-response kind, which the watcher above
+// does not see.
 watch(isFrequencyResponse, (isResponse) => {
   if (isResponse) void refreshResponse().catch(() => undefined)
 })
@@ -903,7 +966,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
  */
 function buildTypeParamsJson(): string | undefined {
   if (isFrequencyResponse.value) {
-    const base = responseConfigPanel.value?.buildParamsJson()
+    const base = activeResponsePanel.value?.buildParamsJson()
     if (!base) return undefined
     return JSON.stringify({
       ...JSON.parse(base),
@@ -920,6 +983,8 @@ function buildTypeParamsJson(): string | undefined {
       chartYBottomDb: responseYBottomDb.value,
       chartXFromHz: responseXFromHz.value,
       chartXToHz: responseXToHz.value,
+      chartPhaseTopDeg: responsePhaseTopDeg.value,
+      chartPhaseBottomDeg: responsePhaseBottomDeg.value,
     })
   }
 
@@ -1153,6 +1218,7 @@ function confirmSaveProjectAs(name: string) {
                      on. RUN repeats until stopped; SINGLE measures once and stops itself. -->
                 <div class="flex gap-3">
                   <button
+                    v-if="isChirpResponse"
                     type="button"
                     class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
                     :disabled="responseRunning || !!responseConfigPanel?.invalid"
@@ -1166,6 +1232,7 @@ function confirmSaveProjectAs(name: string) {
                     RUN
                   </button>
                   <button
+                    v-if="isChirpResponse"
                     type="button"
                     class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-300 py-4 text-sm font-bold tracking-wide transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
                     :disabled="responseRunning || !!responseConfigPanel?.invalid"
@@ -1176,6 +1243,23 @@ function confirmSaveProjectAs(name: string) {
                     @click="runFrequencyResponse(false)"
                   >
                     SINGLE
+                  </button>
+                  <!-- One button rather than the chirp's RUN/SINGLE pair: a stepped run is minutes
+                       long, so repeating it until stopped is not a mode anyone wants. Same shape and
+                       same slot as the sweep screen's RUN SWEEP. -->
+                  <button
+                    v-if="isSteppedResponse"
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    :disabled="responseRunning || !!steppedResponseConfigPanel?.invalid"
+                    :title="
+                      steppedResponseConfigPanel?.invalid ??
+                      'Steps a tone across the band, measuring level and phase at each point.'
+                    "
+                    @click="steppedResponseConfigPanel?.run()"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    RUN SWEEP
                   </button>
                   <button
                     type="button"
@@ -1190,7 +1274,17 @@ function confirmSaveProjectAs(name: string) {
                   </button>
                 </div>
 
-                <FrequencyResponseConfigPanel ref="responseConfigPanel" :running="responseRunning" />
+                <FrequencyResponseConfigPanel
+                  v-if="isChirpResponse"
+                  ref="responseConfigPanel"
+                  :running="responseRunning"
+                />
+                <SteppedResponseConfigPanel
+                  v-else
+                  ref="steppedResponseConfigPanel"
+                  :running="responseRunning"
+                  @run="runSteppedResponse"
+                />
 
                 <ResponseMeasurementsPanel
                   v-model:show-one-db="responseShowOneDb"
@@ -1219,14 +1313,19 @@ function confirmSaveProjectAs(name: string) {
                 </div>
                 <p v-if="responseError" class="text-xs text-red-600 dark:text-red-400">{{ responseError }}</p>
 
+                <!-- show-coherence is forced off for a stepped run whatever the stored preference
+                     says: its coherence is 1.0 by construction, so drawing it would be a flat line
+                     claiming a measurement nobody made. -->
                 <FrequencyResponseChart
+                  :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
                   :view="responseView"
                   :show-left="responseShowLeft"
-                  :show-right="responseShowRight"
-                  :show-phase="responseShowPhase"
-                  :show-coherence="responseShowCoherence"
+                  :show-right="!responseRightChannelIsReference && responseShowRight"
+                  :show-phase="responsePhaseAvailable && responseShowPhase"
+                  :phase-kind="responsePhaseKind"
+                  :show-coherence="isChirpResponse && responseShowCoherence"
                   :show-one-db="responseShowOneDb"
                   :show-three-db="responseShowThreeDb"
                   :thick-lines="responseThickLines"
@@ -1235,6 +1334,8 @@ function confirmSaveProjectAs(name: string) {
                   :y-bottom-db="responseYBottomDb"
                   :x-from-hz="responseXFromHz"
                   :x-to-hz="responseXToHz"
+                  :phase-top-deg="responsePhaseTopDeg"
+                  :phase-bottom-deg="responsePhaseBottomDeg"
                 />
 
                 <MeasurementHistoryPanel @error="reportError" />
@@ -1242,6 +1343,7 @@ function confirmSaveProjectAs(name: string) {
 
               <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
                 <FrequencyResponseDisplayPanel
+                  :allow-coherence="isChirpResponse"
                   v-model:view="responseView"
                   v-model:show-left="responseShowLeft"
                   v-model:show-right="responseShowRight"
@@ -1255,6 +1357,8 @@ function confirmSaveProjectAs(name: string) {
                   v-model:y-bottom-db="responseYBottomDb"
                   v-model:x-from-hz="responseXFromHz"
                   v-model:x-to-hz="responseXToHz"
+                  v-model:phase-top-deg="responsePhaseTopDeg"
+                  v-model:phase-bottom-deg="responsePhaseBottomDeg"
                 />
 
                 <MeasurementChecklist @error="reportError" />

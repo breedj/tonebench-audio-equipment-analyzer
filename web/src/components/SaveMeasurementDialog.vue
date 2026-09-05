@@ -50,7 +50,7 @@ async function onSave() {
   // points, a response's is its runner's curves, an FFT's is the pipeline's single retained
   // spectrum. Same dialog either way — the name/notes it collects are all the difference the user
   // cares about.
-  if (isFrequencyResponseKind(currentType.value.kind)) await saveResponse(req)
+  if (isFrequencyResponseKind(currentType.value.kind)) await saveResponse(req, currentType.value.kind)
   else if (isSweepKind(currentType.value.kind)) await saveSweep(req)
   else await save(req)
   emit('saved')

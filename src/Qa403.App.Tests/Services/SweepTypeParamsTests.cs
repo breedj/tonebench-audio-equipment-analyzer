@@ -179,8 +179,11 @@ public class SweepTypeParamsTests
                 session, pipeline, new SpectrumBroadcastHub(), NullLogger<ThdSweepRunner>.Instance);
             var responseRunner = new FrequencyResponseRunner(
                 session, pipeline, new SpectrumBroadcastHub(), NullLogger<FrequencyResponseRunner>.Instance);
+            var steppedRunner = new SteppedResponseRunner(
+                session, pipeline, new SpectrumBroadcastHub(), NullLogger<SteppedResponseRunner>.Instance);
             var saveService = new MeasurementSaveService(
-                session, pipeline, sweepRunner, responseRunner, new ProjectRepository(factory), new MeasurementRepository(factory),
+                session, pipeline, sweepRunner, responseRunner, steppedRunner,
+                new ProjectRepository(factory), new MeasurementRepository(factory),
                 Options.Create(jsonOptions));
 
             await body(saveService);

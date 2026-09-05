@@ -96,12 +96,21 @@ export interface GeneratorChannelState {
 /** Mirrors Qa403.App.Services.FrequencyResponseTraceKind. */
 export type ResponseTraceKindName = 'Left' | 'Right' | 'Gain'
 
+/**
+ * Mirrors Qa403.App.Services.ResponsePhaseKind — what phase a run measured, and so what the UI may
+ * draw and what it should call it. There is only one phase quantity in these measurements,
+ * `arg(L/R)`; what changes is whether it exists and what it means.
+ */
+export type ResponsePhaseKindName = 'None' | 'PerTrace' | 'DutResponse' | 'ChannelDifference'
+
 /** Mirrors Qa403.App.Services.FrequencyResponsePhase. */
 export type ResponsePhaseName =
   | 'Idle'
   | 'DeterminingLevel'
   | 'DeterminingRange'
   | 'Measuring'
+  /** The stepped-sine Bode plot's counterpart of Measuring. */
+  | 'Sweeping'
   | 'Finished'
   | 'Cancelled'
   | 'Failed'
@@ -183,6 +192,9 @@ export interface FrequencyResponseParameters {
   chartYBottomDb?: number | null
   chartXFromHz?: number | null
   chartXToHz?: number | null
+  /** Absent on a type saved before the phase axis was independently rangeable; the client falls back to ±180°. */
+  chartPhaseTopDeg?: number | null
+  chartPhaseBottomDeg?: number | null
 }
 
 /** Which y quantity the chart is showing — the old app's "FR (dBV)" / "Gain (dB)" buttons. */
@@ -195,6 +207,83 @@ export interface FrequencyResponseStarted {
   averageCount: number
   recordSeconds: number
   continuous: boolean
+}
+
+/**
+ * Starting a stepped-sine Bode plot. The stimulus half mirrors ThdSweepStartRequest — same grid,
+ * same level modes — and `rightChannelIsReference` comes from the chirp measurement, because that
+ * is what makes the gain trace a real transfer function and gives it a phase.
+ *
+ * The analysis preset (`fftSize`, `window`, `sampleRateHz`) is not offered in the panel and is only
+ * here so the wire record can carry it: with `adaptiveResolution` on — the default, since there are
+ * no harmonics to keep in band — the server picks both from the sweep's own range instead.
+ */
+export interface SteppedResponseStartRequest {
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  /** GeneratorVoltage is the UI's "Input voltage" — the level fed to the DUT. */
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  /** The load a `Watt` level is defined against. Only read by the OutputPower mode; V = sqrt(P·R). */
+  loadOhms: number
+  /** Which generator channels play the tone. Both inputs are analyzed regardless — the gain trace is a ratio between them. */
+  generateLeft: boolean
+  generateRight: boolean
+  averageCount: number
+  rightChannelIsReference: boolean
+  adaptiveResolution: boolean
+}
+
+export interface SteppedResponseStarted {
+  pointCount: number
+  frequenciesHz: number[]
+  sampleRateHz: number
+  averageCount: number
+  /** What the run should take, in seconds. The level probe is not counted; it is a couple of short captures. */
+  estimatedSeconds: number
+}
+
+/**
+ * A stepped-sine response type's stored settings. Its own shape rather than more optional fields on
+ * FrequencyResponseParameters, for the same reason the two sweep kinds have separate records: a
+ * chirp is described by a span and a resolution multiplier, a stepped sweep by a frequency range and
+ * a step density, and neither set means anything to the other. The `chart*` half is shared, and all
+ * optional so a type saved before one of them existed still loads.
+ */
+export interface SteppedResponseParameters {
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  loadOhms: number
+  generateLeft: boolean
+  generateRight: boolean
+  fftSize: number
+  window: WindowType
+  averageCount: number
+  sampleRateHz: number
+  adaptiveResolution: boolean
+  rightChannelIsReference: boolean
+  generatorAmpDbv?: number | null
+  chartView?: ResponseView | null
+  chartShowLeft?: boolean | null
+  chartShowRight?: boolean | null
+  chartShowPhase?: boolean | null
+  chartShowCoherence?: boolean | null
+  chartShowOneDb?: boolean | null
+  chartShowThreeDb?: boolean | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartYTopDb?: number | null
+  chartYBottomDb?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartPhaseTopDeg?: number | null
+  chartPhaseBottomDeg?: number | null
 }
 
 /** A -1 dB or -3 dB reading. A clamped end means the curve never got there, not that the corner is at that frequency. */
@@ -237,6 +326,17 @@ export interface FrequencyResponseStatus {
   latencySamples: number | null
   error: string | null
   traces: FrequencyResponseTraceJson[]
+  /**
+   * Points measured, and points to measure, for a stepped-sine run. Both 0 for a chirp, whose
+   * progress is `averagesTaken` records — a stepped run has both an average count and a point count,
+   * so neither can stand in for the other.
+   */
+  pointsMeasured: number
+  pointCount: number
+  /** Absent on a status from a build that predates the field, where 'PerTrace' is the behaviour that build had. */
+  phaseKind?: ResponsePhaseKindName
+  /** The right input was a yardstick rather than a measurement, so it is not offered as a trace. */
+  rightChannelIsReference?: boolean
 }
 
 /** One stored curve, as `GET /api/measurements/{id}/response-traces` returns it. */
@@ -899,6 +999,22 @@ export const api = {
 
   saveFrequencyResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/frequency-response/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  // The stepped-sine Bode plot. Deliberately the same five verbs and the same status payload as the
+  // chirp above: the two produce identical data and the browser drives them through one store.
+  startSteppedResponse: (req: SteppedResponseStartRequest) =>
+    request<SteppedResponseStarted>('/stepped-response/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelSteppedResponse: () =>
+    request<FrequencyResponseStatus>('/stepped-response/cancel', { method: 'POST' }),
+
+  clearSteppedResponse: () =>
+    request<FrequencyResponseStatus>('/stepped-response/clear', { method: 'POST' }),
+
+  getSteppedResponseStatus: () => request<FrequencyResponseStatus>('/stepped-response/status'),
+
+  saveSteppedResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/stepped-response/save', { method: 'POST', body: JSON.stringify(req) }),
 
   getStoredResponse: (measurementId: number) =>
     request<StoredResponseTracesResponse>(`/measurements/${measurementId}/response-traces`),

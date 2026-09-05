@@ -98,6 +98,7 @@ try
     builder.Services.AddSingleton<DeviceSessionService>();
     builder.Services.AddSingleton<ThdSweepRunner>();
     builder.Services.AddSingleton<FrequencyResponseRunner>();
+    builder.Services.AddSingleton<SteppedResponseRunner>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
 
     // Update-check (docs/qa403-app-stack-spec.md §8): a short timeout and silent-on-failure
@@ -154,6 +155,7 @@ try
     app.MapDiagnosticsEndpoints();
     app.MapSweepEndpoints();
     app.MapFrequencyResponseEndpoints();
+    app.MapSteppedResponseEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapMeasurementsEndpoints();

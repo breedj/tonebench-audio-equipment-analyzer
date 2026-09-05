@@ -74,6 +74,14 @@ public sealed class FrequencyResponseRunner(
     private int _fftSize;
     private double? _latencySamples;
     private string? _error;
+
+    /// <summary>
+    /// Reported so the display panel can drop the Right trace selector for a run whose right input
+    /// is a yardstick rather than a measurement. Nothing about this measurement's own behaviour
+    /// depends on it — the phase kind stays at its PerTrace default, which is what this runner has
+    /// always done.
+    /// </summary>
+    private bool _rightChannelIsReference;
     private List<FrequencyResponseTrace> _traces = [];
     private FrequencyResponseRequest? _lastRequest;
 
@@ -102,7 +110,8 @@ public sealed class FrequencyResponseRunner(
                 return new FrequencyResponseStatus(
                     Running, _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
-                    [.. _traces]);
+                    [.. _traces], PointsMeasured: 0, PointCount: 0,
+                    PhaseKind: ResponsePhaseKind.PerTrace, RightChannelIsReference: _rightChannelIsReference);
             }
         }
     }
@@ -142,6 +151,7 @@ public sealed class FrequencyResponseRunner(
                 _fftSize = request.FftSize;
                 _latencySamples = null;
                 _error = null;
+                _rightChannelIsReference = request.RightChannelIsReference;
                 _traces = [];
             }
 

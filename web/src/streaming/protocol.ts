@@ -62,6 +62,15 @@ export const STREAM_FLAG_ZOOMED = 1 << 2
  * signal a client waiting on a single shot polls for — see decodeMetersFrame's `held`.
  */
 export const STREAM_FLAG_HELD = 1 << 3
+/**
+ * Response-frame-only: this frame came from the stepped-sine runner rather than the chirp one.
+ *
+ * The two measurements produce identical frame types and the client keeps a separate state for each,
+ * so without this a frame has no origin and lands on whichever screen happens to be open — a long
+ * stepped run painting the chirp's chart the moment you switch away. Mirrors
+ * StreamFlags.SteppedResponse server-side.
+ */
+export const STREAM_FLAG_STEPPED_RESPONSE = 1 << 4
 
 /** Client -> server control message kinds. Everything else is REST. */
 export const ClientControlType = {
@@ -430,6 +439,8 @@ export const ResponsePhase = {
   Failed: 5,
   /** Appended, not slotted in beside DeterminingLevel — the ordinal is on the wire. */
   DeterminingRange: 6,
+  /** Stepping a tone across the band — the stepped-sine Bode plot's counterpart of Measuring. */
+  Sweeping: 7,
 } as const
 export type ResponsePhase = (typeof ResponsePhase)[keyof typeof ResponsePhase]
 

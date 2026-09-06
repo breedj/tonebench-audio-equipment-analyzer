@@ -1,8 +1,10 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Net.Http.Headers;
 using Qa403.App.Diagnostics;
 using Qa403.App.Endpoints;
 using Qa403.App.Json;
@@ -99,6 +101,8 @@ try
     builder.Services.AddSingleton<ThdSweepRunner>();
     builder.Services.AddSingleton<FrequencyResponseRunner>();
     builder.Services.AddSingleton<SteppedResponseRunner>();
+    builder.Services.AddSingleton<ILoopbackReferenceStore, SqliteLoopbackReferenceStore>();
+    builder.Services.AddSingleton<ImpulseResponseRunner>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
 
     // Update-check (docs/qa403-app-stack-spec.md §8): a short timeout and silent-on-failure
@@ -140,7 +144,7 @@ try
 
     var wwwroot = new ManifestEmbeddedFileProvider(typeof(Program).Assembly, "wwwroot");
     app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = wwwroot });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = wwwroot });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = wwwroot, OnPrepareResponse = CacheHeaders });
 
     // Wired here rather than in either constructor: the recorder is created by the pipeline's
     // dependency graph and so cannot take the session (which depends on the pipeline), while the
@@ -155,13 +159,14 @@ try
     app.MapDiagnosticsEndpoints();
     app.MapSweepEndpoints();
     app.MapFrequencyResponseEndpoints();
+    app.MapImpulseResponseEndpoints();
     app.MapSteppedResponseEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapMeasurementsEndpoints();
     app.MapUpdateCheckEndpoints();
 
-    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = wwwroot });
+    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = wwwroot, OnPrepareResponse = CacheHeaders });
 
     var url = $"http://127.0.0.1:{port}";
     Log.Information("QA403 Audio Analyzer listening on {Url} (simulate={Simulate})", url, simulate);
@@ -312,6 +317,39 @@ static int FindAvailablePort(int start, int end)
     }
 
     throw new InvalidOperationException($"No available port found in range {start}-{end}.");
+}
+
+/// <summary>
+/// Cache headers for the embedded UI. Vite fingerprints every asset, so those may be cached
+/// forever — but <c>index.html</c> is the file that names which fingerprints are current, and it
+/// must never be served from cache without revalidating.
+///
+/// <para>It shipped with no <c>Cache-Control</c> at all, which leaves browsers free to apply
+/// heuristic caching. A tab left open across a rebuild then kept an <c>index.html</c> naming chunks
+/// that no longer exist, and the only part of the app that loads chunks lazily is the manual — so
+/// every manual page came up <b>blank</b> while the rest of the app, already in memory, worked
+/// perfectly. A blank page with no error is the worst possible symptom for a stale cache, which is
+/// why the header is set rather than left to the browser's judgement.</para>
+/// </summary>
+static void CacheHeaders(StaticFileResponseContext context)
+{
+    var headers = context.Context.Response.GetTypedHeaders();
+
+    if (context.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+    {
+        // Revalidate every time. The ETag makes that a 304 in the ordinary case, so it costs a
+        // round trip and no body.
+        headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+        return;
+    }
+
+    // Everything else is content-addressed by Vite's hash, so a changed file is a changed URL.
+    headers.CacheControl = new CacheControlHeaderValue
+    {
+        Public = true,
+        MaxAge = TimeSpan.FromDays(365),
+        Extensions = { new NameValueHeaderValue("immutable") },
+    };
 }
 
 static void LaunchBrowser(string url)

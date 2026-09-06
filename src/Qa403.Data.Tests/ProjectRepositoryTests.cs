@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 
 namespace Qa403.Data.Tests;
 
@@ -206,8 +206,18 @@ public class ProjectRepositoryTests
             {
                 await using (var command = connection.CreateCommand())
                 {
-                    command.CommandText =
-                        "ALTER TABLE measurement_type DROP COLUMN sort_order; DELETE FROM schema_version WHERE version = 8;";
+                    // Every version at or above 008 is wound back, not just 008: the runner resumes
+                    // from MAX(version), so leaving a later row in place makes it skip the migration
+                    // under test entirely and this passes for the wrong reason. Each later migration
+                    // therefore has to undo whatever it created, which is why the impulse tables go
+                    // too.
+                    command.CommandText = """
+                        ALTER TABLE measurement_type DROP COLUMN sort_order;
+                        DROP TABLE impulse_result;
+                        DROP TABLE impulse_harmonic;
+                        DROP TABLE impulse_reference;
+                        DELETE FROM schema_version WHERE version >= 8;
+                        """;
                     await command.ExecuteNonQueryAsync();
                 }
 

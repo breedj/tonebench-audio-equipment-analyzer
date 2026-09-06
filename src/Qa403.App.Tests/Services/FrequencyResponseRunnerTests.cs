@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Device;
@@ -358,25 +358,32 @@ public class FrequencyResponseRunnerTests
         await harness.Runner.StartAsync(request, CancellationToken.None);
 
         // Waits for the measurement itself: the input-range probe also plays a chirp, at its own
-        // shorter size, so sampling the first enabled chirp would read the probe's period.
+        // shorter size, and the phase flips to Measuring *before* MeasureOnceAsync configures the
+        // real one. Sampling on the phase alone therefore reads the probe's period about one run in
+        // four -- so the wait is for the period under test to appear, and the assertion is that it
+        // appeared at all. A runner that configured the wrong size never satisfies the loop and
+        // fails on the deadline instead of racing.
         var deadline = DateTime.UtcNow.AddSeconds(20);
-        EchoChirpSettings? chirp = null;
+        bool measuredAtTheAnalysisSize = false;
         while (DateTime.UtcNow < deadline)
         {
-            var status = harness.Runner.Status;
-            chirp = harness.Session.EffectiveGeneratorConfig.Left.Chirp;
-            if (status.Phase == FrequencyResponsePhase.Measuring
+            var chirp = harness.Session.EffectiveGeneratorConfig.Left.Chirp;
+            if (harness.Runner.Status.Phase == FrequencyResponsePhase.Measuring
                 && chirp is not null
-                && harness.Session.EffectiveGeneratorConfig.Left.Enabled)
+                && harness.Session.EffectiveGeneratorConfig.Left.Enabled
+                && chirp.RepeatFrames == request.FftSize)
             {
+                measuredAtTheAnalysisSize = true;
                 break;
             }
 
             await Task.Delay(10);
         }
 
-        Assert.NotNull(chirp);
-        Assert.Equal(request.FftSize, chirp.RepeatFrames);
+        Assert.True(
+            measuredAtTheAnalysisSize,
+            $"the measurement never played a chirp whose period was its {request.FftSize}-sample analysis size; "
+                + $"the generator was last left at {harness.Session.EffectiveGeneratorConfig.Left.Chirp?.RepeatFrames.ToString() ?? "no chirp"}");
 
         await harness.Runner.CancelAsync();
     }

@@ -23,7 +23,7 @@ function onEdit(item: MeasurementSummary) {
 
 function applyFilter() {
   filter.value = {
-    typeId: currentTypeId.value ?? undefined,
+    measurementTypeId: currentTypeId.value ?? undefined,
     from: form.fromDate ? new Date(`${form.fromDate}T00:00:00Z`).toISOString() : undefined,
     // Exclusive upper bound (ts >= @from AND ts < @to server-side) — add a day so the picked end
     // date's own results are still included, not cut off at its midnight.

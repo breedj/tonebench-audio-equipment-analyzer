@@ -1,4 +1,4 @@
-using Qa403.Device;
+﻿using Qa403.Device;
 using Qa403.Dsp;
 
 namespace Qa403.Data;
@@ -539,3 +539,162 @@ public sealed record SteppedResponseParameters(
     bool? ChartInvertLoopSign = null,
     /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
     bool? ChartRestoreDelay = null);
+
+/// <summary>The <c>impulse_result.kind</c> values — mirrors the subset of FrequencyResponseTraceKind an impulse response has.</summary>
+public static class ImpulseTraceKind
+{
+    public const string Left = "left";
+    public const string Gain = "gain";
+}
+
+/// <summary>
+/// One impulse response on the way into the database.
+/// </summary>
+/// <param name="Ir">
+/// The gated impulse response at full resolution, truncated around its peak. Not decimated, unlike
+/// every curve stored beside it: a decimated impulse response cannot be re-gated, re-transformed or
+/// analysed for decay, and those are the only reasons to keep it at all.
+/// </param>
+/// <param name="PeakIndex">Where the linear impulse sits inside <paramref name="Ir"/> — the array keeps samples on both sides of it.</param>
+public sealed record ImpulseTraceInput(
+    string Kind,
+    double SampleRateHz,
+    int PeakIndex,
+    double PeakVolts,
+    double GatePreMs,
+    double GatePostMs,
+    string GateWindow,
+    double ResolutionLimitHz,
+    string ReferenceMode,
+    string? ReferenceName,
+    double? LatencySamples,
+    float[] Ir);
+
+/// <summary>One harmonic order's distortion curve on the way into the database.</summary>
+public sealed record HarmonicCurveInput(
+    int Order,
+    double UpperValidHz,
+    float[] FundamentalHz,
+    float[] LevelDbc);
+
+/// <summary>
+/// One save of an impulse-response measurement: a result row, its single capture, the gated
+/// magnitude/phase curves (which go into <c>response_trace</c>, because they are the same curves a
+/// frequency response produces), the impulse responses, and the harmonic curves.
+/// </summary>
+public sealed record ImpulseSaveRequest(
+    long MeasurementTypeId,
+    string Name,
+    string? Notes,
+    string ParamsJson,
+    string? DeviceName,
+    string? Serial,
+    string? FwVer,
+    bool IsSimulated,
+    double SampleRateHz,
+    int FftSize,
+    int Channels,
+    double? InRangeDbv,
+    double? OutRangeDbv,
+    IReadOnlyList<ResponseTraceInput> Traces,
+    IReadOnlyList<ImpulseTraceInput> Impulses,
+    IReadOnlyList<HarmonicCurveInput> Harmonics);
+
+/// <summary>One impulse response read back out of the database.</summary>
+public sealed record StoredImpulseTrace(
+    string Kind,
+    double SampleRateHz,
+    int PeakIndex,
+    double PeakVolts,
+    double GatePreMs,
+    double GatePostMs,
+    string GateWindow,
+    double ResolutionLimitHz,
+    string ReferenceMode,
+    string? ReferenceName,
+    double? LatencySamples,
+    float[] Ir);
+
+/// <summary>One harmonic curve read back out of the database.</summary>
+public sealed record StoredHarmonicCurve(
+    int Order,
+    double UpperValidHz,
+    float[] FundamentalHz,
+    float[] LevelDbc);
+
+/// <summary>
+/// The impulse-response-specific half of a stored result. The magnitude and phase curves are not
+/// here — they are <c>response_trace</c> rows and come back from
+/// <see cref="MeasurementRepository.GetResponseTracesAsync"/>, the same as a frequency response's.
+/// </summary>
+public sealed record StoredImpulseResult(
+    IReadOnlyList<StoredImpulseTrace> Impulses,
+    IReadOnlyList<StoredHarmonicCurve> Harmonics);
+
+/// <summary>
+/// A stored loopback calibration: the analyzer's own impulse response, with the peak sitting
+/// <see cref="PeakOffset"/> samples into <see cref="Ir"/>.
+/// </summary>
+public sealed record StoredLoopbackReference(
+    long Id,
+    string Name,
+    DateTimeOffset TakenUtc,
+    double SampleRateHz,
+    int SourceFftSize,
+    double ChirpStartHz,
+    double ChirpEndHz,
+    double RemovedDelaySamples,
+    int PeakOffset,
+    float[] Ir,
+    string? DeviceSerial,
+    bool IsSimulated);
+
+/// <summary>
+/// An impulse-response measurement type's <c>params_json</c>: the run settings, then the chart's
+/// display state.
+///
+/// <para>Every run setting has to appear here, and that is not a formality — a stored result whose
+/// params cannot say what produced it is not a measurement, it is a picture. The same field-by-field
+/// discipline as the wire record, and for the same reason: a setting added to the request and
+/// forgotten here comes back as a default and the result claims settings the user did not use.</para>
+/// </summary>
+public sealed record ImpulseResponseParameters(
+    double FrequencySpanHz,
+    int ResolutionMultiplier,
+    string LevelMode,
+    double LevelValue,
+    string LevelUnit,
+    int SmoothingDenominator,
+    int AverageCount,
+    string ReferenceMode,
+    long? ReferenceCalibrationId,
+    double GatePreMs,
+    double GatePostMs,
+    string GateWindow,
+    bool ExtractHarmonics,
+    int MaxHarmonicOrder,
+    /// <summary>What the level probe settled the generator at. Read-only history — a run does not take it as an input.</summary>
+    double? GeneratorAmpDbv = null,
+    double ChirpStartHz = 2.0,
+    double LoadOhms = 8.0,
+    string? ChartView = null,
+    bool? ChartNormalisedImpulse = null,
+    bool? ChartShowPhase = null,
+    bool? ChartShowCoherence = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    /// <summary>The impulse view's own level window. The other two views keep theirs separately —
+    /// they read different quantities (dB re peak, gain, dBc), so one shared window lands on the
+    /// previous view's range every time the selector moves.</summary>
+    double? ChartYTopDb = null,
+    double? ChartYBottomDb = null,
+    double? ChartResponseYTopDb = null,
+    double? ChartResponseYBottomDb = null,
+    double? ChartHarmonicsYTopDb = null,
+    double? ChartHarmonicsYBottomDb = null,
+    double? ChartPhaseTopDeg = null,
+    double? ChartPhaseBottomDeg = null,
+    double? ChartTimeFromMs = null,
+    double? ChartTimeToMs = null,
+    double? ChartFreqFromHz = null,
+    double? ChartFreqToHz = null);

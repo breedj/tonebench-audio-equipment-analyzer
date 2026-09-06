@@ -1,4 +1,4 @@
-namespace Qa403.Data.Tests;
+﻿namespace Qa403.Data.Tests;
 
 public class MigrationRunnerTests
 {
@@ -56,11 +56,16 @@ public class MigrationRunnerTests
         {
             await using var connection = await TestDb.OpenMigratedAsync(path);
 
+            long before = await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_version;");
+
             // Running against an already-current database must not throw or re-apply anything.
             await new MigrationRunner().RunAsync(connection, CancellationToken.None);
 
-            long count = await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_version;");
-            Assert.Equal(8L, count);
+            // Compared against the first run rather than against a hard-coded count: idempotency is
+            // the claim, and a literal here only means every future migration has to edit this test.
+            // Run_RecordsEachVersionInSchemaVersion is where the actual list is pinned.
+            Assert.Equal(before, await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_version;"));
+            Assert.True(before > 0);
         }
         finally
         {
@@ -87,7 +92,8 @@ public class MigrationRunnerTests
             Assert.Equal(
                 [(1L, "001_initial.sql"), (2L, "002_channels_and_indexes.sql"), (3L, "003_project_model.sql"),
                  (4L, "004_capture_preview.sql"), (5L, "005_orphan_cleanup.sql"), (6L, "006_response_trace.sql"),
-                 (7L, "007_response_trace_orphans.sql"), (8L, "008_measurement_type_sort_order.sql")],
+                 (7L, "007_response_trace_orphans.sql"), (8L, "008_measurement_type_sort_order.sql"),
+                 (9L, "009_impulse_response.sql"), (10L, "010_impulse_orphans.sql")],
                 rows);
         }
         finally
@@ -120,6 +126,9 @@ public class MigrationRunnerTests
                     DELETE FROM schema_version WHERE version >= 5;
                     DROP TABLE response_trace;
                     ALTER TABLE measurement_type DROP COLUMN sort_order;
+                    DROP TABLE impulse_result;
+                    DROP TABLE impulse_harmonic;
+                    DROP TABLE impulse_reference;
                     INSERT INTO capture_preview (capture_id, channel, kind, x, min, max)
                     VALUES (4242, 0, 'fft', zeroblob(4), zeroblob(4), zeroblob(4));
                     INSERT INTO metric (capture_id, channel, name, value, unit)

@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.Sqlite;
 
 namespace Qa403.Data;
@@ -341,6 +341,332 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     }
 
     /// <summary>
+    /// Saves an impulse-response measurement: one result, one capture, and three kinds of child row
+    /// beneath it.
+    ///
+    /// <para>The gated magnitude and phase curves go into <c>response_trace</c> rather than a table
+    /// of their own. They are the same curves a frequency response produces — same deconvolution,
+    /// same decimation, same corner readings — so reusing the rows means reusing the reader, the CSV
+    /// export and the overlay path rather than growing second copies of all three.</para>
+    /// </summary>
+    public async Task<long> SaveImpulseResultAsync(ImpulseSaveRequest request, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        await using var transaction = connection.BeginTransaction();
+
+        long resultId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO measurement_result
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated)
+            RETURNING id;
+            """,
+            new
+            {
+                request.MeasurementTypeId,
+                request.Name,
+                request.Notes,
+                Ts = Qa403Timestamp.Now(),
+                request.ParamsJson,
+                request.DeviceName,
+                request.Serial,
+                request.FwVer,
+                request.IsSimulated,
+            },
+            transaction);
+
+        long captureId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO capture
+                (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels)
+            VALUES (@ResultId, 0, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, NULL, @Channels)
+            RETURNING id;
+            """,
+            new
+            {
+                ResultId = resultId,
+                Ts = Qa403Timestamp.Now(),
+                Fs = request.SampleRateHz,
+                N = request.FftSize,
+                request.InRangeDbv,
+                request.OutRangeDbv,
+                request.Channels,
+            },
+            transaction);
+
+        foreach (var trace in request.Traces)
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO response_trace
+                    (capture_id, kind, start_hz, end_hz, peak_db, peak_hz,
+                     bw1_lower_hz, bw1_upper_hz, bw1_lower_clamped, bw1_upper_clamped,
+                     bw3_lower_hz, bw3_upper_hz, bw3_lower_clamped, bw3_upper_clamped,
+                     freq_hz, mag_min_db, mag_max_db, phase_deg, coherence)
+                VALUES
+                    (@CaptureId, @Kind, @StartHz, @EndHz, @PeakDb, @PeakHz,
+                     @Bw1LowerHz, @Bw1UpperHz, @Bw1LowerClamped, @Bw1UpperClamped,
+                     @Bw3LowerHz, @Bw3UpperHz, @Bw3LowerClamped, @Bw3UpperClamped,
+                     @FreqHz, @MagMinDb, @MagMaxDb, @PhaseDeg, @Coherence);
+                """,
+                new
+                {
+                    CaptureId = captureId,
+                    trace.Kind,
+                    trace.StartHz,
+                    trace.EndHz,
+                    trace.PeakDb,
+                    trace.PeakHz,
+                    Bw1LowerHz = trace.OneDb.LowerHz,
+                    Bw1UpperHz = trace.OneDb.UpperHz,
+                    Bw1LowerClamped = trace.OneDb.LowerClamped ? 1 : 0,
+                    Bw1UpperClamped = trace.OneDb.UpperClamped ? 1 : 0,
+                    Bw3LowerHz = trace.ThreeDb.LowerHz,
+                    Bw3UpperHz = trace.ThreeDb.UpperHz,
+                    Bw3LowerClamped = trace.ThreeDb.LowerClamped ? 1 : 0,
+                    Bw3UpperClamped = trace.ThreeDb.UpperClamped ? 1 : 0,
+                    FreqHz = PreviewCodec.Encode(trace.FreqHz),
+                    MagMinDb = PreviewCodec.Encode(trace.MagnitudeMinDb),
+                    MagMaxDb = PreviewCodec.Encode(trace.MagnitudeMaxDb),
+                    PhaseDeg = PreviewCodec.Encode(trace.PhaseDeg),
+                    Coherence = PreviewCodec.Encode(trace.Coherence),
+                },
+                transaction);
+        }
+
+        foreach (var impulse in request.Impulses)
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO impulse_result
+                    (capture_id, kind, sample_rate_hz, peak_index, peak_volts,
+                     gate_pre_ms, gate_post_ms, gate_window, resolution_limit_hz,
+                     reference_mode, reference_name, latency_samples, ir_samples, ir)
+                VALUES
+                    (@CaptureId, @Kind, @SampleRateHz, @PeakIndex, @PeakVolts,
+                     @GatePreMs, @GatePostMs, @GateWindow, @ResolutionLimitHz,
+                     @ReferenceMode, @ReferenceName, @LatencySamples, @IrSamples, @Ir);
+                """,
+                new
+                {
+                    CaptureId = captureId,
+                    impulse.Kind,
+                    impulse.SampleRateHz,
+                    impulse.PeakIndex,
+                    impulse.PeakVolts,
+                    impulse.GatePreMs,
+                    impulse.GatePostMs,
+                    impulse.GateWindow,
+                    impulse.ResolutionLimitHz,
+                    impulse.ReferenceMode,
+                    impulse.ReferenceName,
+                    impulse.LatencySamples,
+                    IrSamples = impulse.Ir.Length,
+                    Ir = PreviewCodec.Encode(impulse.Ir),
+                },
+                transaction);
+        }
+
+        foreach (var harmonic in request.Harmonics)
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO impulse_harmonic (capture_id, ord, upper_valid_hz, fundamental_hz, level_dbc)
+                VALUES (@CaptureId, @Ord, @UpperValidHz, @FundamentalHz, @LevelDbc);
+                """,
+                new
+                {
+                    CaptureId = captureId,
+                    Ord = harmonic.Order,
+                    harmonic.UpperValidHz,
+                    FundamentalHz = PreviewCodec.Encode(harmonic.FundamentalHz),
+                    LevelDbc = PreviewCodec.Encode(harmonic.LevelDbc),
+                },
+                transaction);
+        }
+
+        await transaction.CommitAsync(ct);
+        return resultId;
+    }
+
+    /// <summary>The impulse responses and harmonic curves of a saved measurement. Null when the result has none.</summary>
+    public async Task<StoredImpulseResult?> GetImpulseResultAsync(long resultId, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        var impulseRows = await connection.QueryAsync<ImpulseResultRow>(
+            """
+            SELECT ir.kind AS Kind, ir.sample_rate_hz AS SampleRateHz, ir.peak_index AS PeakIndex,
+                   ir.peak_volts AS PeakVolts, ir.gate_pre_ms AS GatePreMs, ir.gate_post_ms AS GatePostMs,
+                   ir.gate_window AS GateWindow, ir.resolution_limit_hz AS ResolutionLimitHz,
+                   ir.reference_mode AS ReferenceMode, ir.reference_name AS ReferenceName,
+                   ir.latency_samples AS LatencySamples, ir.ir AS Ir
+            FROM impulse_result ir
+            JOIN capture c ON c.id = ir.capture_id
+            WHERE c.measurement_result_id = @ResultId
+            ORDER BY ir.id;
+            """,
+            new { ResultId = resultId });
+
+        var impulses = impulseRows.ToList();
+        if (impulses.Count == 0)
+            return null;
+
+        var harmonicRows = await connection.QueryAsync<HarmonicCurveRow>(
+            """
+            SELECT h.ord AS Ord, h.upper_valid_hz AS UpperValidHz,
+                   h.fundamental_hz AS FundamentalHz, h.level_dbc AS LevelDbc
+            FROM impulse_harmonic h
+            JOIN capture c ON c.id = h.capture_id
+            WHERE c.measurement_result_id = @ResultId
+            ORDER BY h.ord;
+            """,
+            new { ResultId = resultId });
+
+        return new StoredImpulseResult(
+            [
+                .. impulses.Select(row => new StoredImpulseTrace(
+                    row.Kind, row.SampleRateHz, (int)row.PeakIndex, row.PeakVolts,
+                    row.GatePreMs, row.GatePostMs, row.GateWindow, row.ResolutionLimitHz,
+                    row.ReferenceMode, row.ReferenceName, row.LatencySamples,
+                    PreviewCodec.Decode(row.Ir))),
+            ],
+            [
+                .. harmonicRows.Select(row => new StoredHarmonicCurve(
+                    (int)row.Ord, row.UpperValidHz,
+                    PreviewCodec.Decode(row.FundamentalHz), PreviewCodec.Decode(row.LevelDbc))),
+            ]);
+    }
+
+    /// <summary>
+    /// Stores a loopback calibration, replacing any with the same name.
+    ///
+    /// <para>Not a child of <c>capture</c>, deliberately: a calibration describes the analyzer and
+    /// its cables rather than any one measurement, and keeping it outside the capture tree keeps it
+    /// out of both hand-written delete cascades — which is where this schema has twice lost rows.</para>
+    /// </summary>
+    public async Task<long> SaveLoopbackReferenceAsync(StoredLoopbackReference reference, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        return await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO impulse_reference
+                (name, taken_utc, sample_rate_hz, source_fft_size, chirp_start_hz, chirp_end_hz,
+                 removed_delay_samples, peak_offset, ir_samples, ir, device_serial, is_simulated)
+            VALUES
+                (@Name, @TakenUtc, @SampleRateHz, @SourceFftSize, @ChirpStartHz, @ChirpEndHz,
+                 @RemovedDelaySamples, @PeakOffset, @IrSamples, @Ir, @DeviceSerial, @IsSimulated)
+            ON CONFLICT(name) DO UPDATE SET
+                taken_utc = excluded.taken_utc,
+                sample_rate_hz = excluded.sample_rate_hz,
+                source_fft_size = excluded.source_fft_size,
+                chirp_start_hz = excluded.chirp_start_hz,
+                chirp_end_hz = excluded.chirp_end_hz,
+                removed_delay_samples = excluded.removed_delay_samples,
+                peak_offset = excluded.peak_offset,
+                ir_samples = excluded.ir_samples,
+                ir = excluded.ir,
+                device_serial = excluded.device_serial,
+                is_simulated = excluded.is_simulated
+            RETURNING id;
+            """,
+            new
+            {
+                reference.Name,
+                TakenUtc = Qa403Timestamp.Now(),
+                reference.SampleRateHz,
+                reference.SourceFftSize,
+                reference.ChirpStartHz,
+                reference.ChirpEndHz,
+                reference.RemovedDelaySamples,
+                reference.PeakOffset,
+                IrSamples = reference.Ir.Length,
+                Ir = PreviewCodec.Encode(reference.Ir),
+                reference.DeviceSerial,
+                IsSimulated = reference.IsSimulated ? 1 : 0,
+            });
+    }
+
+    public async Task<IReadOnlyList<StoredLoopbackReference>> ListLoopbackReferencesAsync(CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<LoopbackReferenceRow>(LoopbackReferenceSelect + " ORDER BY r.name;");
+        return [.. rows.Select(ToStoredReference)];
+    }
+
+    public async Task<StoredLoopbackReference?> GetLoopbackReferenceAsync(long id, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        var row = await connection.QuerySingleOrDefaultAsync<LoopbackReferenceRow>(
+            LoopbackReferenceSelect + " WHERE r.id = @Id;", new { Id = id });
+
+        return row is null ? null : ToStoredReference(row);
+    }
+
+    public async Task<bool> DeleteLoopbackReferenceAsync(long id, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        int deleted = await connection.ExecuteAsync("DELETE FROM impulse_reference WHERE id = @Id;", new { Id = id });
+        return deleted > 0;
+    }
+
+    private const string LoopbackReferenceSelect =
+        """
+        SELECT r.id AS Id, r.name AS Name, r.taken_utc AS TakenUtc, r.sample_rate_hz AS SampleRateHz,
+               r.source_fft_size AS SourceFftSize, r.chirp_start_hz AS ChirpStartHz, r.chirp_end_hz AS ChirpEndHz,
+               r.removed_delay_samples AS RemovedDelaySamples, r.peak_offset AS PeakOffset,
+               r.ir AS Ir, r.device_serial AS DeviceSerial, r.is_simulated AS IsSimulated
+        FROM impulse_reference r
+        """;
+
+    private static StoredLoopbackReference ToStoredReference(LoopbackReferenceRow row) =>
+        new(row.Id, row.Name, Qa403Timestamp.Parse(row.TakenUtc), row.SampleRateHz, (int)row.SourceFftSize,
+            row.ChirpStartHz, row.ChirpEndHz, row.RemovedDelaySamples, (int)row.PeakOffset,
+            PreviewCodec.Decode(row.Ir), row.DeviceSerial, row.IsSimulated != 0);
+
+    /// <summary>Flat Dapper rows. Classes with settable properties, never positional records — see <see cref="ResponseTraceRow"/>.</summary>
+    private sealed class ImpulseResultRow
+    {
+        public string Kind { get; set; } = "";
+        public double SampleRateHz { get; set; }
+        public long PeakIndex { get; set; }
+        public double PeakVolts { get; set; }
+        public double GatePreMs { get; set; }
+        public double GatePostMs { get; set; }
+        public string GateWindow { get; set; } = "";
+        public double ResolutionLimitHz { get; set; }
+        public string ReferenceMode { get; set; } = "";
+        public string? ReferenceName { get; set; }
+        public double? LatencySamples { get; set; }
+        public byte[] Ir { get; set; } = [];
+    }
+
+    private sealed class HarmonicCurveRow
+    {
+        public long Ord { get; set; }
+        public double UpperValidHz { get; set; }
+        public byte[] FundamentalHz { get; set; } = [];
+        public byte[] LevelDbc { get; set; } = [];
+    }
+
+    private sealed class LoopbackReferenceRow
+    {
+        public long Id { get; set; }
+        public string Name { get; set; } = "";
+        public string TakenUtc { get; set; } = "";
+        public double SampleRateHz { get; set; }
+        public long SourceFftSize { get; set; }
+        public double ChirpStartHz { get; set; }
+        public double ChirpEndHz { get; set; }
+        public double RemovedDelaySamples { get; set; }
+        public long PeakOffset { get; set; }
+        public byte[] Ir { get; set; } = [];
+        public string? DeviceSerial { get; set; }
+        public long IsSimulated { get; set; }
+    }
+
+    /// <summary>
     /// Every point of a saved sweep, ascending by <c>seq_index</c>. Reads all the metrics in one
     /// query joined through <c>capture</c> rather than one query per point -- a 50-point stereo
     /// sweep is 50 round trips otherwise.
@@ -672,6 +998,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             await connection.ExecuteAsync("DELETE FROM spectrum WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM capture_preview WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM response_trace WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
+            await connection.ExecuteAsync("DELETE FROM impulse_result WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
+            await connection.ExecuteAsync("DELETE FROM impulse_harmonic WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
             await connection.ExecuteAsync("DELETE FROM capture WHERE id IN @captureIds;", new { captureIds }, transaction);
         }
 

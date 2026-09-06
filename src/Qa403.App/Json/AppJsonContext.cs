@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Qa403.App.Endpoints;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
@@ -68,6 +68,27 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(SaveFrequencyResponseRequest))]
 [JsonSerializable(typeof(StoredResponseTracesResponse))]
 [JsonSerializable(typeof(FrequencyResponseParameters))]
+// The stepped-sine response's own DTOs. Missing until now, which is exactly the failure this file's
+// remarks describe: reflection-based JSON is still on in a debug build, so the endpoints worked
+// everywhere except a trimmed publish, where they would have thrown "JsonTypeInfo metadata ... was
+// not provided". (Its /save endpoint reuses SaveFrequencyResponseRequest, so that one was already
+// covered.) AppJsonContextTests now checks the whole surface rather than trusting the next
+// person to remember.
+// Found by AppJsonContextTests when it was written, alongside the stepped-sine three: the sidebar
+// reorder endpoint has been unable to accept a body on a trimmed publish since it shipped.
+[JsonSerializable(typeof(ReorderMeasurementTypesRequest))]
+[JsonSerializable(typeof(SteppedResponseStartRequest))]
+[JsonSerializable(typeof(SteppedResponseStarted))]
+[JsonSerializable(typeof(SteppedResponseParameters))]
+[JsonSerializable(typeof(ImpulseResponseStartRequest))]
+[JsonSerializable(typeof(ImpulseResponseStarted))]
+[JsonSerializable(typeof(ImpulseResponseStatus))]
+[JsonSerializable(typeof(SaveImpulseResponseRequest))]
+[JsonSerializable(typeof(ImpulseReferenceCaptureRequest))]
+[JsonSerializable(typeof(LoopbackReferenceInfo))]
+[JsonSerializable(typeof(LoopbackReferencesResponse))]
+[JsonSerializable(typeof(StoredImpulseResult))]
+[JsonSerializable(typeof(ImpulseResponseParameters))]
 // Serialized directly to params_json/gen_json by MeasurementSaveService, not returned from an
 // endpoint — same trim-metadata requirement applies.
 [JsonSerializable(typeof(FftSpectrumParameters))]

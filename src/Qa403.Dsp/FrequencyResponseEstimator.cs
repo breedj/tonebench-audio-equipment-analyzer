@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Qa403.Dsp.Fft;
 
 namespace Qa403.Dsp;
@@ -23,6 +23,43 @@ public sealed record FrequencyResponseResult(
     double[] Coherence,
     double[] Confidence,
     double LatencySamples);
+
+/// <summary>
+/// The impulse responses behind a finished estimate, as
+/// <see cref="FrequencyResponseEstimator.CompleteImpulse"/> returns them.
+///
+/// <para>Both are needed and neither substitutes for the other. The <paramref name="Gated"/> one is
+/// the linear response — what the display, the gated magnitude and phase, and any decay analysis
+/// read. The <paramref name="Ungated"/> one is the <i>only</i> place the DUT's harmonic distortion
+/// packets still exist; the gate's whole purpose is to delete them, so
+/// <see cref="FrequencyResponseEstimator.Complete"/> throws them away by construction.</para>
+/// </summary>
+/// <param name="Ungated">
+/// IFFT of the accumulated H: circular, <c>fftSize</c> long, in the record's own rotation.
+/// </param>
+/// <param name="Gated">
+/// The same array with the estimator's <see cref="ImpulseGate"/> applied about
+/// <paramref name="PeakIndex"/>. A copy of <paramref name="Ungated"/> when the estimator was
+/// constructed ungated.
+/// </param>
+/// <param name="PeakIndex">
+/// Index of the largest-magnitude sample of <paramref name="Ungated"/> — the linear impulse, which
+/// outweighs every distortion packet by orders of magnitude. Not rotated to zero: the packet
+/// extractor indexes backwards from it, a display gate indexes either side of it, and only a wire
+/// encoder wants it at the origin. Rotating here would force two of those three to undo it.
+/// </param>
+/// <param name="AppliedRotationSamples">
+/// The mean per-record rotation <see cref="FrequencyResponseEstimator.Add"/> already removed.
+/// <b>Fractional</b> — <c>EstimateLatencySamples</c> refines the peak with a parabola — so these
+/// arrays are a bandlimited (sinc-interpolated) shift of the DUT's true sampled impulse response,
+/// not a sample-aligned copy of it. A test comparing sample-for-sample against an analytic
+/// <c>h[n]</c> must apply the same shift, or it fails around −20 dB for a reason that is not a bug.
+/// </param>
+public sealed record ImpulseResponseResult(
+    double[] Ungated,
+    double[] Gated,
+    int PeakIndex,
+    double AppliedRotationSamples);
 
 /// <summary>
 /// A circular window applied to the estimated impulse response before magnitude and phase are read
@@ -263,6 +300,53 @@ public sealed class FrequencyResponseEstimator
         }
 
         return new FrequencyResponseResult(magnitude, phaseDeg, coherence, confidence, _latencySum / _records);
+    }
+
+    /// <summary>
+    /// The impulse response behind the current estimate, gated and ungated. Throws if nothing has
+    /// been accumulated, on the same contract as <see cref="Complete"/>.
+    ///
+    /// <para><b>This recomputes H into a scratch array rather than reading <c>_h</c>, and that is
+    /// load-bearing.</b> <see cref="Complete"/> gates <c>_h</c> <i>in place</i>, so it is not
+    /// idempotent: reading <c>_h</c> here would make the impulse response depend on whether
+    /// <see cref="Complete"/> had already been called, and on how many times. Pinned by
+    /// <c>CompleteImpulse_AfterComplete_ReturnsTheSameIr</c>.</para>
+    ///
+    /// <para>Costs one extra inverse transform, which is why it is a separate call rather than part
+    /// of <see cref="Complete"/>: only the impulse-response measurement wants it.</para>
+    /// </summary>
+    public ImpulseResponseResult CompleteImpulse()
+    {
+        if (_records == 0)
+            throw new InvalidOperationException("No records have been accumulated.");
+
+        double maxSxx = 0.0;
+        for (int k = 0; k < _binCount; k++)
+            maxSxx = Math.Max(maxSxx, _sxx[k]);
+
+        double lambda = RegularisationFraction * maxSxx;
+
+        var h = new Complex[_binCount];
+        for (int k = 0; k < _binCount; k++)
+            h[k] = _sxy[k] / (_sxx[k] + lambda);
+
+        double[] ungated = new double[_fftSize];
+        _fft.Inverse(h, ungated);
+
+        int peak = PeakIndex(ungated);
+
+        double[] gated = new double[_fftSize];
+        if (_gateWindow is null)
+        {
+            ungated.CopyTo(gated, 0);
+        }
+        else
+        {
+            for (int i = 0; i < _fftSize; i++)
+                gated[i] = ungated[i] * _gateWindow[((i - peak) % _fftSize + _fftSize) % _fftSize];
+        }
+
+        return new ImpulseResponseResult(ungated, gated, peak, _latencySum / _records);
     }
 
     public void Reset()

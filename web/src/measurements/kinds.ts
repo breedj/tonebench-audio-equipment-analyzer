@@ -19,6 +19,9 @@ export const FREQUENCY_RESPONSE_KIND = 'FrequencyResponse'
 /** Mirrors MeasurementSaveService.SteppedResponseKind — a stepped-sine Bode plot. */
 export const STEPPED_RESPONSE_KIND = 'SteppedResponse'
 
+/** Mirrors MeasurementSaveService.ImpulseResponseKind — a chirp-driven impulse response. */
+export const IMPULSE_RESPONSE_KIND = 'ImpulseResponse'
+
 /** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
 export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
 
@@ -52,6 +55,19 @@ export function isSteppedResponseKind(kind: string | null | undefined): boolean 
   return kind === STEPPED_RESPONSE_KIND
 }
 
+/**
+ * Whether a kind's result is an impulse response. Mirrors
+ * `MeasurementSaveService.IsImpulseResponseKind`, and deliberately <b>not</b> a third arm of
+ * `isFrequencyResponseKind` even though an impulse-response result does carry the same gated
+ * magnitude and phase curves. That predicate decides which start endpoint the UI drives and which
+ * reader a stored result loads through, and an impulse response has more to read back than curves —
+ * the impulse itself and the harmonic curves — so a kind answering true to it would load half a
+ * measurement with no sign of the rest.
+ */
+export function isImpulseResponseKind(kind: string | null | undefined): boolean {
+  return kind === IMPULSE_RESPONSE_KIND
+}
+
 export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
   {
     kind: 'FFTSpectrum',
@@ -74,6 +90,12 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     label: 'Frequency response',
     description:
       'Sweeps a chirp across the band and plots gain or level against frequency, with −1 dB and −3 dB bandwidth markers.',
+  },
+  {
+    kind: IMPULSE_RESPONSE_KIND,
+    label: 'Impulse response',
+    description:
+      'Sweeps a chirp and deconvolves it to the impulse response, then reads a gated (reflection-free) magnitude and phase off it, plus harmonic distortion against frequency.',
   },
   {
     kind: STEPPED_RESPONSE_KIND,

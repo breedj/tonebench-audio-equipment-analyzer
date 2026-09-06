@@ -1,4 +1,4 @@
-using Qa403.App.Services;
+﻿using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Data;
 using Qa403.Dsp;
@@ -26,11 +26,17 @@ public static class MeasurementsEndpoints
             }
         });
 
+        // The query parameter names ARE the wire contract, and getting one wrong fails open rather
+        // than loudly: minimal APIs bind by name and silently ignore a parameter they do not
+        // recognise, so a misspelled filter yields an unfiltered list rather than a 400. A caller
+        // that then acts on every row -- deleting them, say -- does so believing it was scoped to
+        // one measurement type. So these match the names used everywhere else in the API
+        // (`measurementTypeId`, as on every save request) rather than a shorter local spelling.
         group.MapGet("", async (
-            long? projectId, long? typeId, DateTimeOffset? from, DateTimeOffset? to, int? skip, int? take,
+            long? projectId, long? measurementTypeId, DateTimeOffset? from, DateTimeOffset? to, int? skip, int? take,
             MeasurementRepository repo, CancellationToken ct) =>
         {
-            var filter = new MeasurementFilter(projectId, typeId, from, to, skip ?? 0, take ?? 100);
+            var filter = new MeasurementFilter(projectId, measurementTypeId, from, to, skip ?? 0, take ?? 100);
             var items = await repo.ListResultsAsync(filter, ct);
             return Results.Ok(new MeasurementListResponse(items.Select(ToSummaryResponse).ToArray()));
         });

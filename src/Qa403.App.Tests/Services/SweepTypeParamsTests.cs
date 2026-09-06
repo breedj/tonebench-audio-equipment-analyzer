@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -183,6 +183,9 @@ public class SweepTypeParamsTests
                 session, pipeline, new SpectrumBroadcastHub(), NullLogger<SteppedResponseRunner>.Instance);
             var saveService = new MeasurementSaveService(
                 session, pipeline, sweepRunner, responseRunner, steppedRunner,
+                new ImpulseResponseRunner(
+                    session, pipeline, new SqliteLoopbackReferenceStore(new MeasurementRepository(factory)),
+                    NullLogger<ImpulseResponseRunner>.Instance),
                 new ProjectRepository(factory), new MeasurementRepository(factory),
                 Options.Create(jsonOptions));
 

@@ -15,6 +15,13 @@ const { showPage } = useManual()
       every bin.
     </p>
 
+    <p>
+      The same sweep can be read as an
+      <a href="#" @click.prevent="showPage('impulse-response')">impulse response</a> instead, which
+      is what you want if the DUT is a loudspeaker in a room: gating the impulse throws the
+      reflections away and leaves the DUT alone.
+    </p>
+
     <h2>What it measures</h2>
     <p>
       The chirp is made exactly periodic over the analysis record, so every record holds one

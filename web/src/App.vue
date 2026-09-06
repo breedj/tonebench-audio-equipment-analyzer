@@ -47,11 +47,17 @@ import FrequencyResponseConfigPanel from './components/FrequencyResponseConfigPa
 import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.vue'
 import FrequencyResponseDisplayPanel from './components/FrequencyResponseDisplayPanel.vue'
 import FrequencyResponseChart from './components/FrequencyResponseChart.vue'
+import ImpulseResponseConfigPanel from './components/ImpulseResponseConfigPanel.vue'
+import ImpulseResponseDisplayPanel from './components/ImpulseResponseDisplayPanel.vue'
+import ImpulseResponseChart from './components/ImpulseResponseChart.vue'
+import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
+import LoopbackReferenceDialog from './components/LoopbackReferenceDialog.vue'
 import ResponsePolarChart from './components/ResponsePolarChart.vue'
 import ResponseStabilityPanel from './components/ResponseStabilityPanel.vue'
 import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import { useFrequencyResponse } from './composables/useFrequencyResponse'
+import { useImpulseResponse } from './composables/useImpulseResponse'
 import { useSweep } from './composables/useSweep'
 import { nearestSweepPoint } from './sweep/points'
 import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
@@ -59,6 +65,7 @@ import {
   THD_VS_AMPLITUDE_KIND,
   isFrequencyResponseKind,
   isSteppedResponseKind,
+  isImpulseResponseKind,
   isSweepKind as isSweepKindName,
 } from './measurements/kinds'
 
@@ -192,6 +199,20 @@ const {
   phaseAvailable: responsePhaseAvailable,
 } = useFrequencyResponse()
 
+const {
+  status: impulseStatus,
+  running: impulseRunning,
+  traces: impulseTraces,
+  impulse: impulseTrace,
+  harmonics: impulseHarmonics,
+  gateResolutionHz: impulseGateResolutionHz,
+  refresh: refreshImpulse,
+  start: startImpulse,
+  cancel: cancelImpulse,
+  clear: clearImpulse,
+  refreshReferences: refreshLoopbackReferences,
+} = useImpulseResponse()
+
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
 // which was fine while FFTSpectrum was the only kind. The two sweep kinds share one screen —
 // identical layout, identical chart, identical history and preview rail — and differ only in which
@@ -210,6 +231,12 @@ const isAmplitudeSweep = computed(() => currentType.value?.kind === THD_VS_AMPLI
 const isFrequencyResponse = computed(() => isFrequencyResponseKind(currentType.value?.kind))
 const isSteppedResponse = computed(() => isSteppedResponseKind(currentType.value?.kind))
 const isChirpResponse = computed(() => isFrequencyResponse.value && !isSteppedResponse.value)
+
+// A fourth screen. It shares the chirp with the response screen and even redraws its gated magnitude
+// with the same chart, but the impulse itself, the gate and the harmonic curves have no counterpart
+// there, and the two run through different endpoints — so it keys off its own flag rather than
+// becoming a third arm of isFrequencyResponse.
+const isImpulseResponse = computed(() => isImpulseResponseKind(currentType.value?.kind))
 
 // One runner holds one set of points, and the two screens cannot read each other's: see useSweep's
 // own `viewAxis`. Kept in step with the selected type rather than set on navigation, so a reload
@@ -1053,7 +1080,178 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
  * into it — round-tripping through parse/stringify is simpler than threading nineteen more props
  * through a component whose own job is the run configuration, not the chart.
  */
+
+// Impulse-response screen. Its own state rather than a variant of the response screen's: it shares
+// the chirp and the gated magnitude/phase curves, but the impulse itself, the gate and the harmonic
+// curves have no counterpart there, and the two run through different endpoints.
+const impulseConfigPanel = ref<InstanceType<typeof ImpulseResponseConfigPanel> | null>(null)
+const loopbackDialogOpen = ref(false)
+
+const impulseView = ref<import('./api/client').ImpulseView>('Impulse')
+const impulseNormalised = ref(false)
+const impulseShowPhase = ref(false)
+const impulseShowCoherence = ref(false)
+const impulseThickLines = ref(true)
+const impulseShowDataPoints = ref(false)
+/**
+ * A level window per view, not one shared pair. The three views read completely different
+ * quantities — dB below the impulse's own peak, gain in dB, and distortion in dBc — so a single
+ * window means switching view lands on a range that belongs to the previous one. The gated response
+ * defaults to -120 dB because that is where a response's noise floor lives, and the harmonics to the
+ * same, because on a clean DUT every curve sits below -80 dBc and a -60 dB floor shows an empty plot.
+ */
+const impulseYWindows = reactive<Record<import('./api/client').ImpulseView, { top: number; bottom: number }>>({
+  Impulse: { top: 0, bottom: -60 },
+  Response: { top: 0, bottom: -120 },
+  Harmonics: { top: 0, bottom: -120 },
+})
+const impulseYTopDb = computed({
+  get: () => impulseYWindows[impulseView.value].top,
+  set: (value: number) => {
+    impulseYWindows[impulseView.value].top = value
+  },
+})
+const impulseYBottomDb = computed({
+  get: () => impulseYWindows[impulseView.value].bottom,
+  set: (value: number) => {
+    impulseYWindows[impulseView.value].bottom = value
+  },
+})
+const impulsePhaseTopDeg = ref(180)
+const impulsePhaseBottomDeg = ref(-180)
+const impulseTimeFromMs = ref(-1)
+const impulseTimeToMs = ref(20)
+const impulseFreqFromHz = ref(20)
+const impulseFreqToHz = ref(20000)
+
+let impulseDisplayRestoring = false
+
+/** Restores an impulse-response type's stored chart state. Every field is optional and guarded. */
+function applyStoredImpulseDisplay(paramsJson: string) {
+  type StoredDisplay = Partial<import('./api/client').ImpulseResponseParameters>
+
+  let stored: StoredDisplay
+  try {
+    stored = JSON.parse(paramsJson) as StoredDisplay
+  } catch {
+    return
+  }
+
+  impulseDisplayRestoring = true
+  if (stored.chartView) impulseView.value = stored.chartView
+  if (typeof stored.chartNormalisedImpulse === 'boolean') impulseNormalised.value = stored.chartNormalisedImpulse
+  if (typeof stored.chartShowPhase === 'boolean') impulseShowPhase.value = stored.chartShowPhase
+  if (typeof stored.chartShowCoherence === 'boolean') impulseShowCoherence.value = stored.chartShowCoherence
+  if (typeof stored.chartThickLines === 'boolean') impulseThickLines.value = stored.chartThickLines
+  if (typeof stored.chartShowDataPoints === 'boolean') impulseShowDataPoints.value = stored.chartShowDataPoints
+  if (typeof stored.chartYTopDb === 'number') impulseYWindows.Impulse.top = stored.chartYTopDb
+  if (typeof stored.chartYBottomDb === 'number') impulseYWindows.Impulse.bottom = stored.chartYBottomDb
+  if (typeof stored.chartResponseYTopDb === 'number') impulseYWindows.Response.top = stored.chartResponseYTopDb
+  if (typeof stored.chartResponseYBottomDb === 'number') impulseYWindows.Response.bottom = stored.chartResponseYBottomDb
+  if (typeof stored.chartHarmonicsYTopDb === 'number') impulseYWindows.Harmonics.top = stored.chartHarmonicsYTopDb
+  if (typeof stored.chartHarmonicsYBottomDb === 'number') impulseYWindows.Harmonics.bottom = stored.chartHarmonicsYBottomDb
+  if (typeof stored.chartPhaseTopDeg === 'number') impulsePhaseTopDeg.value = stored.chartPhaseTopDeg
+  if (typeof stored.chartPhaseBottomDeg === 'number') impulsePhaseBottomDeg.value = stored.chartPhaseBottomDeg
+  if (typeof stored.chartTimeFromMs === 'number') impulseTimeFromMs.value = stored.chartTimeFromMs
+  if (typeof stored.chartTimeToMs === 'number') impulseTimeToMs.value = stored.chartTimeToMs
+  if (typeof stored.chartFreqFromHz === 'number' && stored.chartFreqFromHz > 0)
+    impulseFreqFromHz.value = stored.chartFreqFromHz
+  if (typeof stored.chartFreqToHz === 'number' && stored.chartFreqToHz > 0) impulseFreqToHz.value = stored.chartFreqToHz
+
+  void nextTick(() => {
+    impulseDisplayRestoring = false
+  })
+}
+
+// Kind-gated for the same reason the response watcher is: another kind's params_json parses fine,
+// and reading chart fields out of it would apply a different screen's state to this one.
+watch(
+  () => (isImpulseResponse.value ? currentType.value?.paramsJson : undefined),
+  (paramsJson) => {
+    if (paramsJson) applyStoredImpulseDisplay(paramsJson)
+  },
+  { immediate: true },
+)
+
+watch(
+  [
+    impulseView, impulseNormalised, impulseShowPhase, impulseShowCoherence, impulseThickLines,
+    impulseShowDataPoints, impulseYWindows, impulseTimeFromMs, impulseTimeToMs,
+    impulseFreqFromHz, impulseFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
+  ],
+  () => {
+    if (!impulseDisplayRestoring && isImpulseResponse.value) markDirty()
+  },
+  { deep: true },
+)
+
+function runImpulseResponse(continuous: boolean) {
+  const request = impulseConfigPanel.value?.buildRequest(continuous)
+  if (!request) return
+
+  return withErrorReporting(async () => {
+    await startImpulse(request)
+  })
+}
+
+function cancelImpulseResponse() {
+  return withErrorReporting(async () => {
+    await cancelImpulse()
+  })
+}
+
+function clearImpulseResponse() {
+  return withErrorReporting(async () => {
+    await clearImpulse()
+  })
+}
+
+/** A run lives server-side, so arriving on this screen mid-run has to re-attach rather than show an empty chart. */
+watch(
+  isImpulseResponse,
+  (isImpulse) => {
+    if (!isImpulse) return
+    void refreshImpulse().catch(() => undefined)
+    // The calibration list is what the reference picker offers; fetched on arrival rather than on
+    // first open so the dropdown is never briefly empty.
+    void refreshLoopbackReferences().catch(() => undefined)
+  },
+  { immediate: true },
+)
+
+/** The calibration just captured becomes the selected one — capturing it is what the user wanted it for. */
+function onLoopbackCaptured(id: number) {
+  const panel = impulseConfigPanel.value
+  if (panel) panel.selectReference(id)
+}
+
 function buildTypeParamsJson(): string | undefined {
+  if (isImpulseResponse.value) {
+    const base = impulseConfigPanel.value?.buildParamsJson()
+    if (!base) return undefined
+    return JSON.stringify({
+      ...JSON.parse(base),
+      chartView: impulseView.value,
+      chartNormalisedImpulse: impulseNormalised.value,
+      chartShowPhase: impulseShowPhase.value,
+      chartShowCoherence: impulseShowCoherence.value,
+      chartThickLines: impulseThickLines.value,
+      chartShowDataPoints: impulseShowDataPoints.value,
+      chartYTopDb: impulseYWindows.Impulse.top,
+      chartYBottomDb: impulseYWindows.Impulse.bottom,
+      chartResponseYTopDb: impulseYWindows.Response.top,
+      chartResponseYBottomDb: impulseYWindows.Response.bottom,
+      chartHarmonicsYTopDb: impulseYWindows.Harmonics.top,
+      chartHarmonicsYBottomDb: impulseYWindows.Harmonics.bottom,
+      chartPhaseTopDeg: impulsePhaseTopDeg.value,
+      chartPhaseBottomDeg: impulsePhaseBottomDeg.value,
+      chartTimeFromMs: impulseTimeFromMs.value,
+      chartTimeToMs: impulseTimeToMs.value,
+      chartFreqFromHz: impulseFreqFromHz.value,
+      chartFreqToHz: impulseFreqToHz.value,
+    })
+  }
+
   if (isFrequencyResponse.value) {
     const base = activeResponsePanel.value?.buildParamsJson()
     if (!base) return undefined
@@ -1260,7 +1458,7 @@ function confirmSaveProjectAs(name: string) {
               Save as…
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -1270,7 +1468,7 @@ function confirmSaveProjectAs(name: string) {
               Save measurement result
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -1298,6 +1496,26 @@ function confirmSaveProjectAs(name: string) {
               @click="openSaveDialog"
             >
               Save response result
+            </button>
+            <button
+              v-if="isImpulseResponse"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="impulseRunning || impulseTraces.length === 0"
+              title="Saves the impulse response on screen as a new measurement result, with its gated curves and harmonic distortion."
+              @click="openSaveDialog"
+            >
+              Save impulse result
+            </button>
+            <button
+              v-if="isImpulseResponse"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="impulseRunning || impulseTraces.length === 0"
+              title="Clears what is on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
+              @click="clearImpulseResponse"
+            >
+              Clear
             </button>
             <button
               v-if="isFrequencyResponse"
@@ -1334,7 +1552,149 @@ function confirmSaveProjectAs(name: string) {
                the history list and the display rail all sit where they do everywhere else. What
                differs is the middle — one continuous curve rather than stepped points — and the
                Measurements readout under the settings, which the sweeps have no equivalent of. -->
-          <template v-if="isFrequencyResponse">
+          <!-- Impulse response: the same three-column shape as the response and sweep screens, so
+               RUN, the history list and the display rail sit where they do everywhere else. What
+               differs is the middle, which shows one of three things the same measurement produced —
+               the impulse itself on a linear time axis, the gated magnitude and phase off it, or the
+               harmonic distortion pulled out of the stretch of record the frequency-response
+               measurement discards. -->
+          <template v-if="isImpulseResponse">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+                <div class="flex gap-3">
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    :disabled="impulseRunning || !!impulseConfigPanel?.invalid"
+                    :title="impulseConfigPanel?.invalid ?? 'Sweeps a chirp and re-measures the impulse response until you press Stop.'"
+                    @click="runImpulseResponse(true)"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    RUN
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-300 py-4 text-sm font-bold tracking-wide transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    :disabled="impulseRunning || !!impulseConfigPanel?.invalid"
+                    :title="impulseConfigPanel?.invalid ?? 'Measures the impulse response once and stops.'"
+                    @click="runImpulseResponse(false)"
+                  >
+                    SINGLE
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
+                    :class="impulseRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    :disabled="!impulseRunning"
+                    title="Stops the measurement and silences the generator. The last completed pass stays on screen."
+                    @click="cancelImpulseResponse"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
+                    STOP
+                  </button>
+                </div>
+
+                <ImpulseResponseConfigPanel
+                  ref="impulseConfigPanel"
+                  :running="impulseRunning"
+                  @capture-reference="loopbackDialogOpen = true"
+                />
+              </div>
+
+              <div class="flex min-w-0 flex-1 flex-col gap-3">
+                <ImpulseResponseChart
+                  v-if="impulseView === 'Impulse'"
+                  :impulse="impulseTrace"
+                  :normalised="impulseNormalised"
+                  :thick-lines="impulseThickLines"
+                  :time-from-ms="impulseTimeFromMs"
+                  :time-to-ms="impulseTimeToMs"
+                  :y-top-db="impulseYTopDb"
+                  :y-bottom-db="impulseYBottomDb"
+                />
+                <!-- The gated magnitude and phase are the same curves a frequency response produces,
+                     so they are drawn by the same chart rather than a second one that would have to
+                     be kept in step with it. -->
+                <FrequencyResponseChart
+                  v-else-if="impulseView === 'Response'"
+                  run-label="RUN"
+                  :traces="impulseTraces"
+                  :overlays="[]"
+                  view="Gain"
+                  :show-left="true"
+                  :show-right="false"
+                  :show-phase="impulseShowPhase"
+                  :show-coherence="impulseShowCoherence"
+                  :show-one-db="false"
+                  :show-three-db="false"
+                  :thick-lines="impulseThickLines"
+                  :show-data-points="false"
+                  :y-top-db="impulseYTopDb"
+                  :y-bottom-db="impulseYBottomDb"
+                  :y-top-dbv="impulseYTopDb"
+                  :y-bottom-dbv="impulseYBottomDb"
+                  :x-from-hz="impulseFreqFromHz"
+                  :x-to-hz="impulseFreqToHz"
+                  :phase-top-deg="impulsePhaseTopDeg"
+                  :phase-bottom-deg="impulsePhaseBottomDeg"
+                  phase-kind="PerTrace"
+                />
+                <ImpulseHarmonicsChart
+                  v-else
+                  :harmonics="impulseHarmonics"
+                  :thick-lines="impulseThickLines"
+                  :show-data-points="impulseShowDataPoints"
+                  :freq-from-hz="impulseFreqFromHz"
+                  :freq-to-hz="impulseFreqToHz"
+                  :y-top-db="impulseYTopDb"
+                  :y-bottom-db="impulseYBottomDb"
+                />
+
+                <!-- The gate's resolution limit, restated under the chart it applies to. It is the
+                     one number that decides whether the left-hand end of a gated response means
+                     anything, and a reader looking at the curve is not looking at the settings rail. -->
+                <p
+                  v-if="impulseView === 'Response' && impulseGateResolutionHz > 0"
+                  class="text-[11px] text-amber-700 dark:text-amber-500"
+                >
+                  Gated to {{ impulseStatus?.gatePreMs }}/{{ impulseStatus?.gatePostMs }} ms — nothing below
+                  ≈{{ impulseGateResolutionHz.toFixed(0) }} Hz is resolved, however convincing the curve looks there.
+                </p>
+
+                <MeasurementHistoryPanel @error="reportError" />
+              </div>
+
+              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+                <ImpulseResponseDisplayPanel
+                  v-model:view="impulseView"
+                  v-model:normalised-impulse="impulseNormalised"
+                  v-model:show-phase="impulseShowPhase"
+                  v-model:show-coherence="impulseShowCoherence"
+                  v-model:thick-lines="impulseThickLines"
+                  v-model:show-data-points="impulseShowDataPoints"
+                  v-model:y-top-db="impulseYTopDb"
+                  v-model:y-bottom-db="impulseYBottomDb"
+                  v-model:time-from-ms="impulseTimeFromMs"
+                  v-model:time-to-ms="impulseTimeToMs"
+                  v-model:freq-from-hz="impulseFreqFromHz"
+                  v-model:freq-to-hz="impulseFreqToHz"
+                  v-model:phase-top-deg="impulsePhaseTopDeg"
+                  v-model:phase-bottom-deg="impulsePhaseBottomDeg"
+                />
+
+                <MeasurementChecklist @error="reportError" />
+              </div>
+            </div>
+
+            <LoopbackReferenceDialog
+              :open="loopbackDialogOpen"
+              :defaults="impulseConfigPanel?.referenceCaptureDefaults() ?? { frequencySpanHz: 96000, resolutionMultiplier: 1, chirpStartHz: 2 }"
+              @close="loopbackDialogOpen = false"
+              @captured="onLoopbackCaptured"
+            />
+          </template>
+
+          <template v-else-if="isFrequencyResponse">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
               <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
                 <!-- RUN / SINGLE / STOP, the same trio and the same shape as the FFT screen's, so

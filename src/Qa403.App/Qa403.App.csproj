@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
     <ProjectReference Include="..\Qa403.Device\Qa403.Device.csproj" />
@@ -43,6 +43,12 @@
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.10" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <!-- The chirp measurements' shared pure helpers (ResponseCaptureSupport) are internal; the level
+       probe's correction step is pinned by ProbeCorrectionTests. Same arrangement as Qa403.Data. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Qa403.App.Tests" />
   </ItemGroup>
 
 </Project>

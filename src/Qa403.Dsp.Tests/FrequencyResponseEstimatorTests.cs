@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Qa403.Dsp.Fft;
 
 namespace Qa403.Dsp.Tests;
@@ -282,6 +282,153 @@ public class FrequencyResponseEstimatorTests
         Assert.Throws<ArgumentException>(() => new FrequencyResponseEstimator(size, new MathNetBackend()));
 
     // -- helpers ------------------------------------------------------------------------------
+
+    [Fact]
+    public void CompleteImpulse_WithNoRecords_Throws()
+    {
+        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend());
+        Assert.Throws<InvalidOperationException>(() => estimator.CompleteImpulse());
+    }
+
+    /// <summary>
+    /// A straight loopback deconvolves to a single impulse, and the per-record latency removal parks
+    /// it at the origin. Bandlimited to the swept band, so it is a sinc rather than a lone sample —
+    /// hence "dominates its neighbours" rather than an equality against 1.
+    /// </summary>
+    [Fact]
+    public void CompleteImpulse_OfAStraightLoopback_IsAnImpulseAtTheOrigin()
+    {
+        var stimulus = Chirp();
+
+        var impulse = Impulse(stimulus, stimulus);
+
+        Assert.True(Math.Min(impulse.PeakIndex, FftSize - impulse.PeakIndex) <= 1,
+            $"peak landed at {impulse.PeakIndex}");
+
+        double peak = Math.Abs(impulse.Ungated[impulse.PeakIndex]);
+        double farAway = 0.0;
+        for (int i = 2000; i < FftSize - 2000; i++)
+            farAway = Math.Max(farAway, Math.Abs(impulse.Ungated[i]));
+
+        Assert.True(farAway < peak / 100.0, $"peak {peak:0.000000}, tail {farAway:0.000000}");
+    }
+
+    /// <summary>
+    /// The guard against the in-place-gating trap. <see cref="FrequencyResponseEstimator.Complete"/>
+    /// gates its working spectrum in place and is therefore not idempotent, so
+    /// <c>CompleteImpulse</c> must rebuild H from the accumulators rather than read that spectrum.
+    /// Written as a call-order test because that is exactly how the bug would present: correct on a
+    /// fresh estimator, wrong on the one the runner actually uses.
+    /// </summary>
+    [Fact]
+    public void CompleteImpulse_AfterComplete_ReturnsTheSameIr()
+    {
+        var stimulus = DistortionChirp();
+        var response = CubicDut(stimulus, 0.05);
+
+        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), DistortionGate());
+        estimator.Add(Spectrum(stimulus), Spectrum(response));
+
+        var before = estimator.CompleteImpulse();
+        estimator.Complete();
+        estimator.Complete();
+        var after = estimator.CompleteImpulse();
+
+        Assert.Equal(before.PeakIndex, after.PeakIndex);
+        for (int i = 0; i < FftSize; i++)
+        {
+            Assert.Equal(before.Ungated[i], after.Ungated[i], 15);
+            Assert.Equal(before.Gated[i], after.Gated[i], 15);
+        }
+    }
+
+    /// <summary>
+    /// Why both arrays are returned. The k-th harmonic packet sits <c>N·ln(k)/ln(f₂/f₁)</c> samples
+    /// ahead of the linear impulse — folded to the far end of the circular record — and the gate's
+    /// whole purpose is to delete it. So the gated IR is the linear response and the ungated one is
+    /// the only place the distortion still exists, which is what
+    /// <c>HarmonicPacketExtractor</c> reads.
+    ///
+    /// <para>Probed at the <b>third</b> harmonic, not the second: <c>y = x + d·x³</c> expands to a
+    /// fundamental and a third harmonic and produces no second at all, so the H2 position holds only
+    /// the floor, and measuring there would pass against a gate that did nothing.</para>
+    ///
+    /// <para>The reference level is the <i>same DUT without the distortion</i> rather than a stretch
+    /// of record picked as "empty". There is no empty stretch to pick: the packet is as wide as the
+    /// band the DUT distorts over, and its skirts reach far enough that a point half way to the H2
+    /// position still reads a fifth of the packet's own height. Only removing the nonlinearity
+    /// changes one thing at a time.</para>
+    /// </summary>
+    [Fact]
+    public void CompleteImpulse_OfACubicDut_KeepsTheHarmonicPacketUngatedAndDeletesItGated()
+    {
+        var stimulus = DistortionChirp();
+
+        var distorting = Impulse(stimulus, CubicDut(stimulus, 0.05), DistortionGate());
+        var linear = Impulse(stimulus, stimulus, DistortionGate());
+
+        int thirdHarmonicOffset = (int)Math.Round(
+            FftSize * Math.Log(3.0) / Math.Log(DistortionEndHz / DistortionStartHz));
+
+        double packet = PeakNear(distorting.Ungated, distorting.PeakIndex - thirdHarmonicOffset);
+        double floor = PeakNear(linear.Ungated, linear.PeakIndex - thirdHarmonicOffset);
+        double gatedPacket = PeakNear(distorting.Gated, distorting.PeakIndex - thirdHarmonicOffset);
+
+        Assert.True(packet > 100.0 * floor,
+            $"H3 packet {packet:0.0000000} against {floor:0.0000000} from the same DUT undistorted");
+        Assert.Equal(0.0, gatedPacket);
+    }
+
+    /// <summary>Largest magnitude within ±200 samples of a circular index.</summary>
+    private static double PeakNear(double[] impulse, int centre)
+    {
+        double peak = 0.0;
+        for (int offset = -200; offset <= 200; offset++)
+            peak = Math.Max(peak, Math.Abs(impulse[(((centre + offset) % FftSize) + FftSize) % FftSize]));
+        return peak;
+    }
+
+    /// <summary>
+    /// The rotation is reported, not silently absorbed: a caller comparing the recovered IR against
+    /// an analytic h[n] needs it, because <c>Add</c> removes a <i>fractional</i> latency and what
+    /// comes back is a sinc-interpolated shift rather than a sample-aligned copy.
+    ///
+    /// <para>The measured figure here is <b>5000.66</b> for a record rotated by exactly 5000, and
+    /// that 0.66 is not error to be tightened away: a one-pole impulse response is one-sided, so the
+    /// parabola fitted through the peak and its two neighbours has its vertex pulled towards the
+    /// decaying side. It is exactly the offset that makes a naive sample-for-sample comparison
+    /// against an analytic h[n] fail around −20 dB, and exactly why this number is on the record at
+    /// all.</para>
+    /// </summary>
+    [Fact]
+    public void CompleteImpulse_OfARotatedRecord_ReportsTheRotationItRemoved()
+    {
+        const int rotation = 5000;
+        var stimulus = Chirp();
+        var response = Rotate(OnePoleLowPass(stimulus, 1000.0), rotation);
+
+        var impulse = Impulse(stimulus, response);
+
+        Assert.InRange(impulse.AppliedRotationSamples, rotation, rotation + 1.0);
+        Assert.True(Math.Min(impulse.PeakIndex, FftSize - impulse.PeakIndex) <= 2,
+            $"peak landed at {impulse.PeakIndex}");
+    }
+
+    private static ImpulseResponseResult Impulse(double[] stimulus, double[] response, ImpulseGate? gate = null)
+    {
+        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), gate);
+        estimator.Add(Spectrum(stimulus), Spectrum(response));
+        return estimator.CompleteImpulse();
+    }
+
+    /// <summary>A memoryless cubic: <c>y = x + d·x³</c>, i.e. a third harmonic and no second.</summary>
+    private static double[] CubicDut(double[] stimulus, double distortion)
+    {
+        var response = new double[stimulus.Length];
+        for (int i = 0; i < stimulus.Length; i++)
+            response[i] = stimulus[i] + (distortion * stimulus[i] * stimulus[i] * stimulus[i]);
+        return response;
+    }
 
     private static double[] Chirp()
     {

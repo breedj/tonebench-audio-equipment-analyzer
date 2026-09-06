@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 using Qa403.App.Endpoints;
@@ -20,6 +20,7 @@ public sealed class MeasurementSaveService(
     ThdSweepRunner sweepRunner,
     FrequencyResponseRunner responseRunner,
     SteppedResponseRunner steppedResponseRunner,
+    ImpulseResponseRunner impulseRunner,
     ProjectRepository projectRepository,
     MeasurementRepository measurementRepository,
     IOptions<JsonOptions> jsonOptions)
@@ -65,8 +66,24 @@ public sealed class MeasurementSaveService(
     /// </summary>
     public static bool IsFrequencyResponseKind(string kind) => kind is FrequencyResponseKind or SteppedResponseKind;
 
+    /// <summary>The <c>measurement_type.kind</c> value for a swept-sine impulse response. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string ImpulseResponseKind = "ImpulseResponse";
+
+    /// <summary>
+    /// Whether a kind's result is an impulse response.
+    ///
+    /// <para>Deliberately <b>not</b> a third arm of <see cref="IsFrequencyResponseKind"/>, even
+    /// though an impulse-response result does store gated magnitude and phase curves in the same
+    /// <c>response_trace</c> rows. That predicate decides which start endpoint the UI drives and
+    /// which reader a stored result goes through, and an impulse response has more to read back than
+    /// curves — the impulse itself and the harmonic curves — so a kind that answered true to it
+    /// would load half a measurement and show no sign of the rest.</para>
+    /// </summary>
+    public static bool IsImpulseResponseKind(string kind) => kind is ImpulseResponseKind;
+
     /// <summary>Whether a kind's configuration lives only in its panel, with nothing live to snapshot — see <see cref="ResolveTypeParamsJson"/>.</summary>
-    public static bool HasNoLiveConfiguration(string kind) => IsSweepKind(kind) || IsFrequencyResponseKind(kind);
+    public static bool HasNoLiveConfiguration(string kind) =>
+        IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind);
 
     /// <summary>
     /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
@@ -138,6 +155,33 @@ public sealed class MeasurementSaveService(
             LoadOhms: 8.0), SerializerOptions);
 
     /// <summary>
+    /// A brand-new impulse-response type's <c>params_json</c>, on the same terms as
+    /// <see cref="DefaultFrequencyResponseParametersJson"/> and kept in step with
+    /// <c>ImpulseResponseConfigPanel.vue</c>'s own defaults.
+    ///
+    /// <para>No reference by default: a stored loopback has to be captured before it can be picked,
+    /// and defaulting to the right channel would silently require the user to have wired it.</para>
+    /// </summary>
+    public string DefaultImpulseResponseParametersJson() =>
+        JsonSerializer.Serialize(new ImpulseResponseParameters(
+            FrequencySpanHz: 96000.0,
+            ResolutionMultiplier: 1,
+            LevelMode: nameof(ThdSweepLevelMode.OutputVoltage),
+            LevelValue: 0.0,
+            LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
+            SmoothingDenominator: 24,
+            AverageCount: 1,
+            ReferenceMode: nameof(ImpulseReferenceMode.None),
+            ReferenceCalibrationId: null,
+            GatePreMs: ImpulseResponseRequest.DefaultGatePreMs,
+            GatePostMs: ImpulseResponseRequest.DefaultGatePostMs,
+            GateWindow: nameof(WindowType.Hann),
+            ExtractHarmonics: true,
+            MaxHarmonicOrder: ImpulseResponseRequest.DefaultMaxHarmonicOrder,
+            ChirpStartHz: FrequencyResponseRequest.DefaultChirpStartHz,
+            LoadOhms: 8.0), SerializerOptions);
+
+    /// <summary>
     /// A brand-new stepped-sine response type's <c>params_json</c>, on the same terms as
     /// <see cref="DefaultSweepParametersJson"/> and kept in step with
     /// <c>SteppedResponseConfigPanel.vue</c>'s own defaults.
@@ -188,6 +232,9 @@ public sealed class MeasurementSaveService(
         // cannot run.
         if (kind == SteppedResponseKind)
             return existingParamsJson ?? DefaultSteppedResponseParametersJson();
+
+        if (IsImpulseResponseKind(kind))
+            return existingParamsJson ?? DefaultImpulseResponseParametersJson();
 
         if (IsFrequencyResponseKind(kind))
             return existingParamsJson ?? DefaultFrequencyResponseParametersJson();
@@ -425,6 +472,103 @@ public sealed class MeasurementSaveService(
 
         return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
     }
+
+
+    /// <summary>
+    /// Saves the impulse response currently on screen as one measurement result.
+    ///
+    /// <para>The gated magnitude and phase curves go into the same <c>response_trace</c> rows a
+    /// frequency response uses, because they are the same curves; only the impulse responses and the
+    /// harmonic curves need tables of their own.</para>
+    ///
+    /// <para>The impulse is written at <b>full resolution</b>, not as the decimated display columns
+    /// the status carries — a decimated impulse response cannot be re-gated or re-transformed, which
+    /// is the only reason to keep one. It is truncated around the peak to
+    /// <see cref="MaxStoredIrSamples"/> so a row is bounded at every sample rate.</para>
+    /// </summary>
+    public async Task<long> SaveImpulseResponseAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = impulseRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before saving.");
+        if (status.Impulses.Count == 0)
+            throw new InvalidOperationException("No impulse response has been measured yet.");
+
+        var request = impulseRunner.LastRequest
+            ?? throw new InvalidOperationException("No impulse response has been measured yet.");
+
+        var impulse = impulseRunner.LastImpulse
+            ?? throw new InvalidOperationException("No impulse response has been measured yet.");
+
+        string paramsJson = JsonSerializer.Serialize(
+            new ImpulseResponseParameters(
+                request.FrequencySpanHz, request.ResolutionMultiplier,
+                request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
+                request.SmoothingDenominator, request.AverageCount,
+                request.ReferenceMode.ToString(), request.ReferenceCalibrationId,
+                request.GatePreMs, request.GatePostMs, request.GateWindow.ToString(),
+                request.ExtractHarmonics, request.MaxHarmonicOrder,
+                status.GeneratorAmpDbv, request.ChirpStartHz, request.LoadOhms),
+            SerializerOptions);
+
+        var info = session.Info;
+        var saveRequest = new ImpulseSaveRequest(
+            measurementTypeId, name, notes,
+            paramsJson,
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            request.SampleRateHz, request.FftSize,
+            Channels: 2,
+            session.InputRangeDbv, session.OutputRangeDbv,
+            [.. status.Traces.Select(ToTraceInput)],
+            [ToImpulseInput(request, status, impulse)],
+            [.. status.Harmonics.Select(ToHarmonicInput)]);
+
+        return await measurementRepository.SaveImpulseResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
+    /// How much of the gated impulse response is stored, either side of its peak. At the finest
+    /// resolution the gated span is 1.45 s of which everything past a few hundred milliseconds is
+    /// analyzer noise floor, so this bounds a row at every sample rate while keeping far more than
+    /// any display gate or decay analysis reads.
+    /// </summary>
+    public const int MaxStoredIrSamples = 131072;
+
+    private static ImpulseTraceInput ToImpulseInput(
+        ImpulseResponseRequest request, ImpulseResponseStatus status, ImpulseResponseResult impulse)
+    {
+        var displayed = status.Impulses.First(i => i.Kind == FrequencyResponseTraceKind.Left);
+
+        // Centred on the peak and read circularly, because the impulse response of a periodic sweep
+        // is a circular record: a peak near index 0 has its pre-impulse ringing at the far end of the
+        // array, and a linear read would replace that half with the record's own tail.
+        int keep = Math.Min(MaxStoredIrSamples, impulse.Gated.Length);
+        int before = keep / 2;
+
+        var ir = new float[keep];
+        for (int j = 0; j < keep; j++)
+        {
+            int index = impulse.PeakIndex - before + j;
+            ir[j] = (float)impulse.Gated[((index % impulse.Gated.Length) + impulse.Gated.Length) % impulse.Gated.Length];
+        }
+
+        return new ImpulseTraceInput(
+            ImpulseTraceKind.Left,
+            request.SampleRateHz,
+            PeakIndex: before,
+            displayed.PeakVolts,
+            request.GatePreMs,
+            request.GatePostMs,
+            request.GateWindow.ToString(),
+            displayed.ResolutionLimitHz,
+            request.ReferenceMode.ToString(),
+            status.ReferenceCalibrationName,
+            status.LatencySamples,
+            ir);
+    }
+
+    private static HarmonicCurveInput ToHarmonicInput(HarmonicCurve curve) =>
+        new(curve.Order, curve.UpperValidHz, curve.FundamentalHz, curve.LevelDbc);
 
     private static ResponseTraceInput ToTraceInput(FrequencyResponseTrace trace) =>
         new(

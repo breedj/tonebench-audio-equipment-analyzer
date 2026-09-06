@@ -1,4 +1,4 @@
-using Qa403.Dsp;
+﻿using Qa403.Dsp;
 
 namespace Qa403.App.Services;
 
@@ -75,6 +75,20 @@ public enum FrequencyResponsePhase
     /// <see cref="DeterminingRange"/> is.
     /// </summary>
     Sweeping = 7,
+
+    /// <summary>
+    /// Turning a captured impulse response into curves — <see cref="ImpulseResponseRunner"/> only.
+    /// Its own phase because on that measurement the analysis is not instant, and a run that read as
+    /// finished while it was still computing would let a save through against half a result.
+    ///
+    /// <para>Appended with an explicit ordinal for the same reason the two above are: the ordinal
+    /// rides in the progress frame's <c>seq</c> field, so renumbering would make an older browser
+    /// mislabel every phase. And it belongs in <see cref="ImpulseResponseRunner"/>'s <c>Running</c>
+    /// and in neither of the other two runners' — the rule is that every phase a runner can
+    /// <i>enter</i> must be in its own <c>Running</c>, which
+    /// <c>RunnerPhaseCoverageTests</c> now checks mechanically for all three.</para>
+    /// </summary>
+    Analyzing = 8,
 }
 
 /// <summary>

@@ -10,7 +10,7 @@ import {
   type ThdSweepPoint,
   type UpdateMeasurementRequest,
 } from '../api/client'
-import { isFrequencyResponseKind, isSteppedResponseKind, isSweepKind } from '../measurements/kinds'
+import { isFrequencyResponseKind, isImpulseResponseKind, isSteppedResponseKind, isSweepKind } from '../measurements/kinds'
 import type { ResponseTrace } from './useFrequencyResponse'
 
 /**
@@ -228,6 +228,23 @@ export function useMeasurements() {
     }
   }
 
+  /**
+   * Saves the impulse response on screen. Its own verb rather than a third arm of
+   * `saveResponse`: an impulse result writes the same `response_trace` rows plus two tables of its
+   * own, so it goes through its own endpoint even though the curves are identical.
+   */
+  async function saveImpulse(req: { measurementTypeId: number; name: string; notes: string | null }) {
+    try {
+      const result = await api.saveImpulseResponse(req)
+      await load()
+      error.value = null
+      return result
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   async function update(id: number, req: UpdateMeasurementRequest) {
     try {
       await api.updateMeasurement(id, req)
@@ -276,10 +293,15 @@ export function useMeasurements() {
       const sweepPoints = isSweepKind(detail.kind)
         ? toSweepPoints((await api.getStoredSweep(resultId)).points)
         : undefined
-      // Likewise a response result: its curves live in response_trace, not in spectrum rows.
-      const responseTraces = isFrequencyResponseKind(detail.kind)
-        ? toResponseTraces((await api.getStoredResponse(resultId)).traces)
-        : undefined
+      // Likewise a response result: its curves live in response_trace, not in spectrum rows, and
+      // likewise an impulse result: its gated magnitude and phase are response_trace rows, so they
+      // come back through the same reader and overlay onto the same chart. The impulse itself and
+      // the harmonic curves are not overlaid — they are read through their own endpoint by the
+      // screen that draws them.
+      const responseTraces =
+        isFrequencyResponseKind(detail.kind) || isImpulseResponseKind(detail.kind)
+          ? toResponseTraces((await api.getStoredResponse(resultId)).traces)
+          : undefined
       overlays.value = [
         ...overlays.value,
         { id: resultId, detail, visible: true, sweepPoints, responseTraces },
@@ -311,6 +333,6 @@ export function useMeasurements() {
 
   if (items.value.length === 0) load()
 
-  return { items, filter, overlays, error, load, save, saveSweep, saveResponse, update, remove,
+  return { items, filter, overlays, error, load, save, saveSweep, saveResponse, saveImpulse, update, remove,
     addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
 }

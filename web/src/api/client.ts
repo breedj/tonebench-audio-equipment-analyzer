@@ -379,6 +379,202 @@ export interface FrequencyResponseStatus {
   rightChannelIsReference?: boolean
 }
 
+/** What an impulse-response run divides the captured response by. Mirrors `ImpulseReferenceMode`. */
+export type ImpulseReferenceModeName = 'None' | 'RightChannel' | 'StoredLoopback'
+
+/** Gate windows the impulse-response panel offers. Rectangular is a real choice: a bare cut isolates a reflection exactly. */
+export const IMPULSE_GATE_WINDOWS: { value: WindowType; label: string }[] = [
+  { value: 'Rectangular', label: 'Rectangular (bare cut)' },
+  { value: 'Hann', label: 'Hann' },
+  { value: 'BlackmanHarris', label: 'Blackman-Harris' },
+]
+
+export const IMPULSE_REFERENCE_MODES: { value: ImpulseReferenceModeName; label: string }[] = [
+  { value: 'None', label: 'None (the generated sweep)' },
+  { value: 'RightChannel', label: 'Right input channel' },
+  { value: 'StoredLoopback', label: 'Stored loopback calibration' },
+]
+
+export interface ImpulseResponseStartRequest {
+  frequencySpanHz: number
+  resolutionMultiplier: number
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  smoothingDenominator: number
+  averageCount: number
+  referenceMode: ImpulseReferenceModeName
+  referenceCalibrationId: number | null
+  /** The *display* gate, in ms either side of the impulse — not the sweep's own anti-distortion gate. */
+  gatePreMs: number
+  gatePostMs: number
+  gateWindow: WindowType
+  extractHarmonics: boolean
+  maxHarmonicOrder: number
+  continuous: boolean
+  chirpStartHz: number
+  loadOhms: number
+}
+
+export interface ImpulseResponseStarted {
+  sampleRateHz: number
+  fftSize: number
+  binHz: number
+  averageCount: number
+  recordSeconds: number
+  continuous: boolean
+  gateResolutionHz: number
+}
+
+/** One decimated impulse response. Time is relative to the impulse, so index 0 is `-gatePreMs`. */
+export interface ImpulseTraceJson {
+  kind: ResponseTraceKindName
+  timeS: number[]
+  minVolts: number[]
+  maxVolts: number[]
+  peakVolts: number
+  sampleRateHz: number
+  fullSampleCount: number
+  gatePreMs: number
+  gatePostMs: number
+  /** 1 / gate length. Below this the gated magnitude describes the window, not the DUT. */
+  resolutionLimitHz: number
+}
+
+/** One harmonic order's distortion against the *fundamental* that produced it. */
+export interface HarmonicCurveJson {
+  order: number
+  fundamentalHz: number[]
+  levelDbc: number[]
+  /** Where this curve has to stop: the k-th harmonic is only observable up to the sweep's end over k. */
+  upperValidHz: number
+}
+
+export interface ImpulseResponseStatus {
+  running: boolean
+  phase: ResponsePhaseName
+  continuous: boolean
+  passesCompleted: number
+  averagesTaken: number
+  averageCount: number
+  generatorAmpDbv: number
+  binHz: number
+  sampleRateHz: number
+  fftSize: number
+  latencySamples: number | null
+  error: string | null
+  /** The gated magnitude and phase — the same shape a frequency response produces, drawn by the same chart. */
+  traces: FrequencyResponseTraceJson[]
+  impulses: ImpulseTraceJson[]
+  harmonics: HarmonicCurveJson[]
+  referenceMode: ImpulseReferenceModeName
+  referenceCalibrationName: string | null
+  gateResolutionHz: number
+  gatePreMs: number
+  gatePostMs: number
+}
+
+/** A stored loopback calibration, as the picker lists it. */
+export interface LoopbackReferenceInfo {
+  id: number
+  name: string
+  takenUtc: string
+  sampleRateHz: number
+  chirpStartHz: number
+  chirpEndHz: number
+  /** The analyzer's own round-trip delay, in samples. Informational — it is not reapplied. */
+  removedDelaySamples: number
+  irSamples: number
+  deviceSerial: string | null
+  isSimulated: boolean
+}
+
+export interface ImpulseReferenceCaptureRequest {
+  name: string
+  frequencySpanHz: number
+  resolutionMultiplier: number
+  generatorLevelDbv: number
+  averageCount: number
+  chirpStartHz: number
+}
+
+/**
+ * An impulse-response type's stored settings. Its own shape rather than more optional fields on
+ * `FrequencyResponseParameters`: the two share a stimulus but not a configuration, and the gate,
+ * the reference mode and the harmonic settings mean nothing to a frequency response.
+ */
+export interface ImpulseResponseParameters {
+  frequencySpanHz: number
+  resolutionMultiplier: number
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  smoothingDenominator: number
+  averageCount: number
+  referenceMode: ImpulseReferenceModeName
+  referenceCalibrationId?: number | null
+  gatePreMs: number
+  gatePostMs: number
+  gateWindow: WindowType
+  extractHarmonics: boolean
+  maxHarmonicOrder: number
+  generatorAmpDbv?: number | null
+  chirpStartHz: number
+  loadOhms: number
+  chartView?: ImpulseView | null
+  /** The impulse view drawn as dB below its own peak rather than volts. */
+  chartNormalisedImpulse?: boolean | null
+  chartShowPhase?: boolean | null
+  chartShowCoherence?: boolean | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  /** The impulse view's own level window; the other two views keep their own, below. */
+  chartYTopDb?: number | null
+  chartYBottomDb?: number | null
+  chartResponseYTopDb?: number | null
+  chartResponseYBottomDb?: number | null
+  chartHarmonicsYTopDb?: number | null
+  chartHarmonicsYBottomDb?: number | null
+  chartPhaseTopDeg?: number | null
+  chartPhaseBottomDeg?: number | null
+  chartTimeFromMs?: number | null
+  chartTimeToMs?: number | null
+  chartFreqFromHz?: number | null
+  chartFreqToHz?: number | null
+}
+
+/** Which of the three things an impulse-response measurement produces is on screen. */
+export type ImpulseView = 'Impulse' | 'Response' | 'Harmonics'
+
+/** One stored impulse response, as `GET /api/measurements/{id}/impulse` returns it. */
+export interface StoredImpulseTrace {
+  kind: 'left' | 'gain'
+  sampleRateHz: number
+  peakIndex: number
+  peakVolts: number
+  gatePreMs: number
+  gatePostMs: number
+  gateWindow: string
+  resolutionLimitHz: number
+  referenceMode: string
+  referenceName: string | null
+  latencySamples: number | null
+  /** Full resolution and unquantized, unlike every curve beside it — a decimated one could not be re-gated. */
+  ir: number[]
+}
+
+export interface StoredHarmonicCurve {
+  order: number
+  upperValidHz: number
+  fundamentalHz: number[]
+  levelDbc: number[]
+}
+
+export interface StoredImpulseResult {
+  impulses: StoredImpulseTrace[]
+  harmonics: StoredHarmonicCurve[]
+}
+
 /** One stored curve, as `GET /api/measurements/{id}/response-traces` returns it. */
 export interface StoredResponseTrace {
   kind: 'left' | 'right' | 'gain'
@@ -618,7 +814,11 @@ export interface MeasurementListResponse {
 
 export interface MeasurementFilter {
   projectId?: number
-  typeId?: number
+  /**
+   * Named to match the query parameter and the save requests, not shortened. See
+   * `measurementsQuery` for why the spelling is load-bearing.
+   */
+  measurementTypeId?: number
   /** ISO-8601 UTC, e.g. new Date().toISOString(). */
   from?: string
   to?: string
@@ -703,6 +903,25 @@ function toQuery(params: Record<string, string | number | undefined>): string {
   const entries = Object.entries(params).filter((entry): entry is [string, string | number] => entry[1] !== undefined)
   if (entries.length === 0) return ''
   return '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
+}
+
+/**
+ * The path `listMeasurements` fetches, including its filter query.
+ *
+ * Exported and pure so the parameter <em>names</em> can be pinned by a test, which they need to be:
+ * the server binds them by name and silently ignores one it does not recognise, so a misspelling
+ * here does not fail — it returns the whole unfiltered list. A caller that trusts the filter and
+ * acts on every row then does so believing it was scoped to one measurement type.
+ */
+export function measurementsQuery(filter: MeasurementFilter = {}): string {
+  return `/measurements${toQuery({
+    projectId: filter.projectId,
+    measurementTypeId: filter.measurementTypeId,
+    from: filter.from,
+    to: filter.to,
+    skip: filter.skip,
+    take: filter.take,
+  })}`
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,9 +1226,7 @@ export const api = {
     request<MeasurementDetail>('/measurements', { method: 'POST', body: JSON.stringify(req) }),
 
   listMeasurements: (filter: MeasurementFilter = {}) =>
-    request<MeasurementListResponse>(
-      `/measurements${toQuery({ projectId: filter.projectId, typeId: filter.typeId, from: filter.from, to: filter.to, skip: filter.skip, take: filter.take })}`,
-    ),
+    request<MeasurementListResponse>(measurementsQuery(filter)),
 
   getMeasurement: (id: number) => request<MeasurementDetail>(`/measurements/${id}`),
 
@@ -1073,6 +1290,38 @@ export const api = {
 
   saveSteppedResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/stepped-response/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  // The impulse response. The same five verbs as the two response measurements above, plus the
+  // loopback calibration sub-resource — capturing one has a physical precondition (patch the
+  // generator output straight back to the input) and produces a calibration, not a result.
+  startImpulseResponse: (req: ImpulseResponseStartRequest) =>
+    request<ImpulseResponseStarted>('/impulse-response/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelImpulseResponse: () =>
+    request<ImpulseResponseStatus>('/impulse-response/cancel', { method: 'POST' }),
+
+  clearImpulseResponse: () =>
+    request<ImpulseResponseStatus>('/impulse-response/clear', { method: 'POST' }),
+
+  getImpulseResponseStatus: () => request<ImpulseResponseStatus>('/impulse-response/status'),
+
+  saveImpulseResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/impulse-response/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  listLoopbackReferences: () =>
+    request<{ references: LoopbackReferenceInfo[] }>('/impulse-response/reference'),
+
+  captureLoopbackReference: (req: ImpulseReferenceCaptureRequest) =>
+    request<LoopbackReferenceInfo>('/impulse-response/reference/capture', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  deleteLoopbackReference: (id: number) =>
+    request<void>(`/impulse-response/reference/${id}`, { method: 'DELETE' }),
+
+  getStoredImpulse: (measurementId: number) =>
+    request<StoredImpulseResult>(`/measurements/${measurementId}/impulse`),
 
   getStoredResponse: (measurementId: number) =>
     request<StoredResponseTracesResponse>(`/measurements/${measurementId}/response-traces`),

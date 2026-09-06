@@ -30,6 +30,11 @@ defineProps<{ kind: string }>()
     <circle cx="16.5" cy="9.5" r="1.1" fill="currentColor" stroke="none" />
     <circle cx="20" cy="15" r="1.1" fill="currentColor" stroke="none" />
   </svg>
+  <!-- A spike with a decaying tail on a baseline: an impulse response. -->
+  <svg v-else-if="kind === 'ImpulseResponse'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 12h4" />
+    <path d="M7 12 8.5 4 10 19l1.5-11 1.5 8 1.5-5 1.5 3.5 1.5-2L21 12" />
+  </svg>
   <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
     <circle cx="12" cy="12" r="9" />
   </svg>

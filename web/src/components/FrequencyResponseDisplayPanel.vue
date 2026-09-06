@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { ResponseView } from '../api/client'
-import { useFrequencyResponse } from '../composables/useFrequencyResponse'
+import { computed, watch } from 'vue'
+import type { NyquistRadiusName, ResponseProjection, ResponseView } from '../api/client'
+import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
+import { useMeasurements, type OverlayEntry } from '../composables/useMeasurements'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -12,6 +13,10 @@ import CollapsibleSection from './CollapsibleSection.vue'
 const props = withDefaults(defineProps<{ allowCoherence?: boolean }>(), { allowCoherence: true })
 
 const view = defineModel<ResponseView>('view', { required: true })
+const projection = defineModel<ResponseProjection>('projection', { required: true })
+const nyquistRadius = defineModel<NyquistRadiusName>('nyquistRadius', { required: true })
+const nyquistRadiusFloorDb = defineModel<number>('nyquistRadiusFloorDb', { required: true })
+const restoreDelay = defineModel<boolean>('restoreDelay', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
 const showPhase = defineModel<boolean>('showPhase', { required: true })
@@ -20,15 +25,66 @@ const showOneDb = defineModel<boolean>('showOneDb', { required: true })
 const showThreeDb = defineModel<boolean>('showThreeDb', { required: true })
 const thickLines = defineModel<boolean>('thickLines', { required: true })
 const showDataPoints = defineModel<boolean>('showDataPoints', { required: true })
-const yTopDb = defineModel<number>('yTopDb', { required: true })
-const yBottomDb = defineModel<number>('yBottomDb', { required: true })
+// Model names stay yTopDb/yBottomDb for backward compat (App.vue/params_json), but they now name
+// the Gain (dB) view's own window only -- see the yTopDb/yBottomDb computed proxies below, which
+// pick this pair or yTopDbv/yBottomDbv depending on which view is showing.
+const yTopDbGain = defineModel<number>('yTopDb', { required: true })
+const yBottomDbGain = defineModel<number>('yBottomDb', { required: true })
+const yTopDbv = defineModel<number>('yTopDbv', { required: true })
+const yBottomDbv = defineModel<number>('yBottomDbv', { required: true })
 const xFromHz = defineModel<number>('xFromHz', { required: true })
 const xToHz = defineModel<number>('xToHz', { required: true })
 const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
 const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
+const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 
-const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable } = useFrequencyResponse()
+const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable, running, latencySamples } =
+  useFrequencyResponse()
 
+/**
+ * A complex response needs a magnitude and a phase measured against the *same* reference.
+ * `ChannelDifference` does not have that -- its gain is against the commanded generator level and
+ * its phase against the right input -- so the projections are refused rather than offered with a
+ * caveat. Empty is exempt for the same reason `phaseAvailable` exempts it: a type that has run
+ * nothing has no phase yet, and hiding the control there suggests it never has one.
+ */
+const complexAvailable = computed(
+  () => phaseKind.value === 'DutResponse' || phaseKind.value === 'PerTrace' || traces.value.length === 0,
+)
+
+const projectionHint = computed(() =>
+  complexAvailable.value
+    ? 'Bode is magnitude and phase against frequency; Nyquist and Nichols are the same data as one complex curve.'
+    : phaseKind.value === 'ChannelDifference'
+      ? 'This run measures gain against the generator but phase against the right input, so it has no single complex response. Make the right channel the reference.'
+      : 'This run measured no phase. Turn the right-channel generator on and make it the reference.',
+)
+
+/** Bode-only controls: the dB window, the bandwidth markers, the channel checkboxes and both Autofits. */
+const bodeShowing = computed(() => projection.value === 'Bode' || !complexAvailable.value)
+
+const PROJECTIONS: { value: ResponseProjection; label: string }[] = [
+  { value: 'Bode', label: 'Bode' },
+  { value: 'Nyquist', label: 'Nyquist' },
+  { value: 'Nichols', label: 'Nichols' },
+]
+const { overlays } = useMeasurements()
+
+/** The y window actually in effect -- FR (dBV) and Gain (dB) are independent so switching views never clobbers the other one's range. */
+const yTopDb = computed({
+  get: () => (view.value === 'Dbv' ? yTopDbv.value : yTopDbGain.value),
+  set: (v: number) => {
+    if (view.value === 'Dbv') yTopDbv.value = v
+    else yTopDbGain.value = v
+  },
+})
+const yBottomDb = computed({
+  get: () => (view.value === 'Dbv' ? yBottomDbv.value : yBottomDbGain.value),
+  set: (v: number) => {
+    if (view.value === 'Dbv') yBottomDbv.value = v
+    else yBottomDbGain.value = v
+  },
+})
 
 const DB_MIN = -200
 const DB_MAX = 200
@@ -83,13 +139,31 @@ function onBottomPhaseChange(event: Event) {
   phaseBottomDeg.value = commitBoundedNumber(event, phaseBottomDeg.value, PHASE_MIN, phaseTopDeg.value - PHASE_MIN_SPAN)
 }
 
-/** The curve autofit sizes against: whichever one the current view is actually about. */
-const fitTrace = computed(() => {
-  if (view.value === 'Gain') return traces.value.find((t) => t.kind === 'Gain') ?? null
-  return (showLeft.value ? traces.value.find((t) => t.kind === 'Left') : null)
-    ?? traces.value.find((t) => t.kind === 'Right')
-    ?? traces.value.find((t) => t.kind === 'Left')
-    ?? null
+/** Stored responses actually drawable right now — checked on and carrying traces of this kind. */
+function activeOverlayResponseTraces(): OverlayEntry[] {
+  return overlays.value.filter((o) => o.visible && o.responseTraces?.length)
+}
+
+/** Every currently-checked trace of a given kind, live plus visible overlays. */
+function tracesOfKind(kind: ResponseTrace['kind']): ResponseTrace[] {
+  const live = traces.value.find((t) => t.kind === kind)
+  const overlayTraces = activeOverlayResponseTraces()
+    .map((o) => o.responseTraces!.find((t) => t.kind === kind))
+    .filter((t): t is ResponseTrace => !!t)
+  return live ? [live, ...overlayTraces] : overlayTraces
+}
+
+/**
+ * The curves autofit sizes against: every checked channel the current view is actually about, live
+ * plus visible history overlays — not just Left, and not just the live measurement.
+ */
+const fitTraces = computed<ResponseTrace[]>(() => {
+  if (view.value === 'Gain') return tracesOfKind('Gain')
+
+  const kinds: ResponseTrace['kind'][] = []
+  if (showLeft.value) kinds.push('Left')
+  if (showRight.value) kinds.push('Right')
+  return kinds.flatMap((kind) => tracesOfKind(kind))
 })
 
 /**
@@ -101,21 +175,23 @@ const fitTrace = computed(() => {
  * Matches the chart's own `phaseTrace` — Autofit has to size the curve that is actually drawn, and
  * the phase curve belongs to the measurement rather than to the view.
  */
-const phaseTrace = computed(() =>
-  phaseKind.value === 'PerTrace' ? fitTrace.value : traces.value.find((t) => t.kind === 'Gain') ?? null,
+const phaseTraces = computed<ResponseTrace[]>(() =>
+  phaseKind.value === 'PerTrace' ? fitTraces.value : tracesOfKind('Gain'),
 )
 
 function autofitDb() {
-  const trace = fitTrace.value
-  if (!trace || trace.magnitudeMaxDb.length === 0) return
+  const list = fitTraces.value.filter((t) => t.magnitudeMaxDb.length > 0)
+  if (list.length === 0) return
 
   let lo = Infinity
   let hi = -Infinity
-  for (let i = 0; i < trace.magnitudeMaxDb.length; i++) {
-    const freqHz = trace.freqHz[i]
-    if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
-    lo = Math.min(lo, trace.magnitudeMinDb[i])
-    hi = Math.max(hi, trace.magnitudeMaxDb[i])
+  for (const trace of list) {
+    for (let i = 0; i < trace.magnitudeMaxDb.length; i++) {
+      const freqHz = trace.freqHz[i]
+      if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
+      lo = Math.min(lo, trace.magnitudeMinDb[i])
+      hi = Math.max(hi, trace.magnitudeMaxDb[i])
+    }
   }
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) return
@@ -129,24 +205,26 @@ function autofitDb() {
 
 /**
  * Fits the phase window to the curve, rounded outward to PHASE_TICK_DEG and never tighter than
- * PHASE_MIN_SPAN — the same shape as autofitDb, on the trace's phaseDeg rather than its magnitude.
+ * PHASE_MIN_SPAN — the same shape as autofitDb, on the traces' phaseDeg rather than their magnitude.
  *
- * Sized against `phaseTrace`, not `fitTrace`: the phase curve belongs to the measurement rather than
- * to the view, so this has to fit whichever curve the chart is actually drawing.
+ * Sized against `phaseTraces`, not `fitTraces`: the phase curve belongs to the measurement rather
+ * than to the view, so this has to fit whichever curve(s) the chart is actually drawing.
  */
 function autofitPhase() {
-  const trace = phaseTrace.value
-  if (!trace || trace.phaseDeg.length === 0) return
+  const list = phaseTraces.value.filter((t) => t.phaseDeg.length > 0)
+  if (list.length === 0) return
 
   let lo = Infinity
   let hi = -Infinity
-  for (let i = 0; i < trace.phaseDeg.length; i++) {
-    const freqHz = trace.freqHz[i]
-    if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
-    const deg = trace.phaseDeg[i]
-    if (!Number.isFinite(deg)) continue
-    lo = Math.min(lo, deg)
-    hi = Math.max(hi, deg)
+  for (const trace of list) {
+    for (let i = 0; i < trace.phaseDeg.length; i++) {
+      const freqHz = trace.freqHz[i]
+      if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
+      const deg = trace.phaseDeg[i]
+      if (!Number.isFinite(deg)) continue
+      lo = Math.min(lo, deg)
+      hi = Math.max(hi, deg)
+    }
   }
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) return
@@ -165,20 +243,110 @@ function autofitPhase() {
 
 /** Fits the frequency range to the measured band, snapped to the dropdown's own options. */
 function autofitX() {
-  const trace = fitTrace.value
-  if (!trace || trace.freqHz.length === 0) return
+  const list = fitTraces.value.filter((t) => t.freqHz.length > 0)
+  if (list.length === 0) return
 
-  const from = trace.startFreqHz
-  const to = trace.endFreqHz
+  const from = Math.min(...list.map((t) => t.startFreqHz))
+  const to = Math.max(...list.map((t) => t.endFreqHz))
 
   xFromHz.value = [...X_FROM_OPTIONS].reverse().find((v) => v <= from) ?? X_FROM_OPTIONS[0]
   xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
 }
+
+// "Autofit when measurement done": running is watched here (rather than in App.vue) because the
+// autofit functions and the running/traces state are both already local to this file and to
+// useFrequencyResponse() -- this is the same running->not-running transition that flips RUN back
+// to a start-labeled button.
+watch(running, (isRunning, wasRunning) => {
+  // Gated on the Bode chart actually being up: these fit the dB and frequency windows, and firing
+  // them under a polar projection silently rewrites a window the user cannot see.
+  if (wasRunning && !isRunning && autofitOnDone.value && bodeShowing.value) {
+    autofitDb()
+    autofitX()
+    if (showPhase.value && phaseAvailable.value) autofitPhase()
+  }
+})
 </script>
 
 <template>
   <CollapsibleSection title="Display">
     <div class="flex flex-col gap-1 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">Projection</span>
+      <div
+        class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700"
+        :title="projectionHint"
+      >
+        <button
+          v-for="option in PROJECTIONS"
+          :key="option.value"
+          type="button"
+          class="flex-1 border-l border-neutral-300 px-2 py-1 first:border-l-0 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700"
+          :class="
+            projection === option.value
+              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
+              : 'bg-white dark:bg-neutral-800'
+          "
+          :disabled="option.value !== 'Bode' && !complexAvailable"
+          @click="projection = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Only meaningful under a polar projection, so it is not shown under Bode at all rather than
+         sitting there inert. -->
+    <div v-if="!bodeShowing && projection === 'Nyquist'" class="flex flex-col gap-1 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">Radius</span>
+      <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+        <button
+          type="button"
+          class="flex-1 px-2 py-1"
+          :class="
+            nyquistRadius === 'Linear'
+              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
+              : 'bg-white dark:bg-neutral-800'
+          "
+          title="The textbook plot: distances mean what they look like."
+          @click="nyquistRadius = 'Linear'"
+        >
+          Linear
+        </button>
+        <button
+          type="button"
+          class="flex-1 border-l border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          :class="
+            nyquistRadius === 'Db'
+              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
+              : 'bg-white dark:bg-neutral-800'
+          "
+          title="Keeps a wide range on screen, but distance to −1 is no longer metric."
+          @click="nyquistRadius = 'Db'"
+        >
+          dB
+        </button>
+      </div>
+      <label v-if="nyquistRadius === 'Db'" class="flex items-center justify-between gap-2">
+        Floor (dB)
+        <input
+          v-model.number="nyquistRadiusFloorDb"
+          type="number"
+          max="-6"
+          step="10"
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        />
+      </label>
+    </div>
+
+    <!-- Only the chirp removes a delay, so only the chirp can put one back. -->
+    <label v-if="!bodeShowing && latencySamples !== null" class="flex items-center gap-1.5 text-xs">
+      <input v-model="restoreDelay" type="checkbox" />
+      <span title="The chirp estimator removes a bulk delay per record; this puts it back, so the contour is the physical one. Overlays are always drawn uncorrected.">
+        Restore removed delay
+      </span>
+    </label>
+
+    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">View</span>
       <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
         <button
@@ -208,7 +376,11 @@ function autofitX() {
       </div>
     </div>
 
-    <div v-if="view === 'Dbv'" class="flex flex-col gap-1 text-xs">
+    <label class="flex items-center gap-1.5 text-xs">
+      <input v-model="autofitOnDone" type="checkbox" /> Autofit when measurement done
+    </label>
+
+    <div v-if="bodeShowing && view === 'Dbv'" class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Channels</span>
       <label class="flex items-center gap-1.5"><input v-model="showLeft" type="checkbox" /> Left</label>
       <!-- Not offered when the right input is the reference: what its dBV trace shows then is the
@@ -218,7 +390,7 @@ function autofitX() {
       </label>
     </div>
 
-    <div class="flex flex-col gap-1 text-xs">
+    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Bandwidth</span>
       <label class="flex items-center gap-1.5" title="Dashed markers and a labelled arrow at the -1 dB corners.">
         <input v-model="showOneDb" type="checkbox" /> −1 dB
@@ -228,7 +400,7 @@ function autofitX() {
       </label>
     </div>
 
-    <div class="flex flex-col gap-1 text-xs">
+    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Extra traces</span>
       <!-- Hidden outright when the measurement on screen has no phase: with no stimulus on the right
            input there is nothing to compare the left against, and a single channel's own angle is
@@ -266,7 +438,7 @@ function autofitX() {
 
     <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
          shown-but-inert, since the axis it configures is not drawn otherwise. -->
-    <div v-if="showPhase && phaseAvailable" class="flex flex-col gap-1 text-xs">
+    <div v-if="bodeShowing && showPhase && phaseAvailable" class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Phase range (°)</span>
       <label class="flex items-center justify-between gap-2">
         Top
@@ -290,7 +462,7 @@ function autofitX() {
       </label>
       <button
         type="button"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
         @click="autofitPhase"
       >
@@ -298,8 +470,8 @@ function autofitX() {
       </button>
     </div>
 
-    <div class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">dB range</span>
+    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">{{ view === 'Dbv' ? 'dBV range' : 'Gain range' }}</span>
       <label class="flex items-center justify-between gap-2">
         Top
         <input
@@ -322,7 +494,7 @@ function autofitX() {
       </label>
       <button
         type="button"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         @click="autofitDb"
       >
         Autofit
@@ -351,7 +523,7 @@ function autofitX() {
       </label>
       <button
         type="button"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         @click="autofitX"
       >
         Autofit

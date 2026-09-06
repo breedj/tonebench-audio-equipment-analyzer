@@ -54,6 +54,10 @@ public sealed record FftSpectrumParameters(
     bool? ChartShowDataPoints = null,
     bool? ChartShowMinMax = null,
     bool? ChartShowPeakHold = null,
+    // Off (null/false) unless the user opts in -- see ChartDisplayPanel.vue's "Autofit when
+    // measurement done" checkbox. Null on a type saved before this existed, same as the toggles
+    // above, and treated as false so nothing changes for it.
+    bool? ChartAutofitOnDone = null,
     // Which of the FFT screen's secondary panels (waterfall, oscilloscope, harmonics, other peaks)
     // are drawn -- another display-only preference, on the same terms as the four above. Null means
     // "shown", which is what a row saved before these existed has to mean: the panels were always
@@ -110,7 +114,9 @@ public sealed record ThdVsFrequencyParameters(
     double? ChartXFromHz = null,
     double? ChartXToHz = null,
     double? ChartYTopDb = null,
-    double? ChartYBottomDb = null);
+    double? ChartYBottomDb = null,
+    /// <summary>Off unless the user opts in -- see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. Null on a type saved before this existed, treated as false.</summary>
+    bool? ChartAutofitOnDone = null);
 
 /// <summary>
 /// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a
@@ -219,7 +225,9 @@ public sealed record ThdVsAmplitudeParameters(
     double? ChartXFrom = null,
     double? ChartXTo = null,
     double? ChartYTopDb = null,
-    double? ChartYBottomDb = null);
+    double? ChartYBottomDb = null,
+    /// <summary>Off unless the user opts in -- see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. Null on a type saved before this existed, treated as false.</summary>
+    bool? ChartAutofitOnDone = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm
@@ -438,7 +446,29 @@ public sealed record FrequencyResponseParameters(
     /// before the power mode existed — which is also every type whose level is a voltage, where it
     /// means nothing.
     /// </summary>
-    double? LoadOhms = null);
+    double? LoadOhms = null,
+    /// <summary>
+    /// The FR (dBV) view's own y window, independent of <see cref="ChartYTopDb"/>/<see
+    /// cref="ChartYBottomDb"/> which (despite the name) is now the Gain (dB) view's window only --
+    /// null on a type saved before the two views had separate ranges, in which case the client
+    /// falls back to its own default rather than reusing the Gain pair.
+    /// </summary>
+    double? ChartYTopDbv = null,
+    double? ChartYBottomDbv = null,
+    /// <summary>Off unless the user opts in -- see FrequencyResponseDisplayPanel.vue's "Autofit when measurement done" checkbox. Null on a type saved before this existed, treated as false.</summary>
+    bool? ChartAutofitOnDone = null,
+    /// <summary>
+    /// Which projection the chart draws -- "Bode", "Nyquist" or "Nichols". Null on a type saved
+    /// before the polar views existed, where "Bode" is the behaviour that build had.
+    /// </summary>
+    string? ChartProjection = null,
+    /// <summary>How a Nyquist plot maps magnitude onto radius -- "Linear" or "Db".</summary>
+    string? ChartNyquistRadius = null,
+    double? ChartNyquistRadiusFloorDb = null,
+    /// <summary>Adds 180 degrees to the measured phase: the summing-junction inversion a loop-gain injection may or may not include, which the analyzer cannot see.</summary>
+    bool? ChartInvertLoopSign = null,
+    /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
+    bool? ChartRestoreDelay = null);
 
 /// <summary>
 /// A stepped-sine response measurement type's <c>params_json</c>: the run settings, then the chart's
@@ -490,4 +520,21 @@ public sealed record SteppedResponseParameters(
     double? ChartXToHz = null,
     /// <summary>Null on a type saved before the phase axis was independently rangeable — see <see cref="FrequencyResponseParameters.ChartPhaseTopDeg"/>.</summary>
     double? ChartPhaseTopDeg = null,
-    double? ChartPhaseBottomDeg = null);
+    double? ChartPhaseBottomDeg = null,
+    /// <summary>The FR (dBV) view's own y window — see <see cref="FrequencyResponseParameters.ChartYTopDbv"/>.</summary>
+    double? ChartYTopDbv = null,
+    double? ChartYBottomDbv = null,
+    /// <summary>Off unless the user opts in -- see FrequencyResponseDisplayPanel.vue's "Autofit when measurement done" checkbox. Null on a type saved before this existed, treated as false.</summary>
+    bool? ChartAutofitOnDone = null,
+    /// <summary>
+    /// Which projection the chart draws -- "Bode", "Nyquist" or "Nichols". Null on a type saved
+    /// before the polar views existed, where "Bode" is the behaviour that build had.
+    /// </summary>
+    string? ChartProjection = null,
+    /// <summary>How a Nyquist plot maps magnitude onto radius -- "Linear" or "Db".</summary>
+    string? ChartNyquistRadius = null,
+    double? ChartNyquistRadiusFloorDb = null,
+    /// <summary>Adds 180 degrees to the measured phase: the summing-junction inversion a loop-gain injection may or may not include, which the analyzer cannot see.</summary>
+    bool? ChartInvertLoopSign = null,
+    /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
+    bool? ChartRestoreDelay = null);

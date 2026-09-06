@@ -6,6 +6,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import type { ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
+import { useZoomBounds } from '../composables/useZoomBounds'
 import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
@@ -25,8 +26,12 @@ const props = defineProps<{
   showThreeDb: boolean
   thickLines: boolean
   showDataPoints: boolean
+  /** The Gain (dB) view's own y window — independent of yTopDbv/yBottomDbv below so switching views never clobbers the other one's range. */
   yTopDb: number
   yBottomDb: number
+  /** The FR (dBV) view's own y window. */
+  yTopDbv: number
+  yBottomDbv: number
   xFromHz: number
   xToHz: number
   /** The phase axis' own window, in degrees — set in the display panel, independent of the dB one because unwrapped phase can run past ±180°. */
@@ -126,6 +131,33 @@ const primaryTrace = computed<ResponseTrace | null>(() => {
  * pair of bounds.
  */
 const phaseRange = computed<[number, number]>(() => [props.phaseBottomDeg, props.phaseTopDeg])
+
+/**
+ * The y window actually in effect — the FR (dBV) pair or the Gain (dB) pair, whichever `view` is
+ * showing. The two are independent so switching views never clobbers the other one's range.
+ */
+const activeYTop = computed(() => (props.view === 'Dbv' ? props.yTopDbv : props.yTopDb))
+const activeYBottom = computed(() => (props.view === 'Dbv' ? props.yBottomDbv : props.yBottomDb))
+
+/**
+ * Whether any currently-visible magnitude trace, within the plotted frequency window, sits above
+ * or below the dB/dBV window — the cue that there is real data off the top or bottom of the chart.
+ * Scoped to the primary magnitude axis only, not phase/coherence.
+ */
+const outOfRange = computed(() => {
+  let above = false
+  let below = false
+  for (const trace of visibleTraces.value) {
+    for (let i = 0; i < trace.freqHz.length; i++) {
+      const freqHz = trace.freqHz[i]
+      if (freqHz < props.xFromHz || freqHz > props.xToHz) continue
+      if (trace.magnitudeMaxDb[i] > activeYTop.value) above = true
+      if (trace.magnitudeMinDb[i] < activeYBottom.value) below = true
+      if (above && below) return { above, below }
+    }
+  }
+  return { above, below }
+})
 
 /**
  * The curve the phase series is drawn from — <b>not</b> `primaryTrace</b>, which is what the view is
@@ -466,34 +498,10 @@ function formatReading(value: number, series: ReadoutSeries): string {
  * the user has dragged a zoom. Drives the Reset zoom button, which is the only visible cue that the
  * axes are no longer the ones the panel's From/To and dB boxes name.
  */
-const zoomed = ref(false)
-
-/** Tolerant equality: a zoom is compared against bounds that have been through a log round trip. */
-function sameBound(a: number | null | undefined, b: number): boolean {
-  return a != null && Math.abs(a - b) <= 1e-9 + Math.abs(b) * 1e-6
-}
-
-function isZoomedNow(u: uPlot): boolean {
-  return !(
-    sameBound(u.scales.x.min, props.xFromHz) &&
-    sameBound(u.scales.x.max, props.xToHz) &&
-    sameBound(u.scales.y?.min, props.yBottomDb) &&
-    sameBound(u.scales.y?.max, props.yTopDb)
-  )
-}
-
-/**
- * Back to the window the display panel names — not to the data extent, which is what uPlot's own
- * double-click handler (autoScaleX) does. On an auto:false chart that extent *is* whatever the zoom
- * already shows, so uPlot's reset is a no-op and there would be no way back out; ours is bound on
- * the same element afterwards, so it runs second and puts both axes back explicitly.
- */
-function resetZoom() {
-  const u = plot.value
-  if (!u) return
-  u.setScale('x', { min: props.xFromHz, max: props.xToHz })
-  u.setScale('y', { min: props.yBottomDb, max: props.yTopDb })
-}
+const { zoomed, noteScale, resetZoom } = useZoomBounds(
+  () => plot.value,
+  () => ({ xMin: props.xFromHz, xMax: props.xToHz, yMin: activeYBottom.value, yMax: activeYTop.value }),
+)
 
 /**
  * A signature of everything uPlot cannot be told about without rebuilding — the series list and
@@ -522,8 +530,8 @@ const signature = computed(() =>
     isDark.value,
     props.xFromHz,
     props.xToHz,
-    props.yBottomDb,
-    props.yTopDb,
+    activeYBottom.value,
+    activeYTop.value,
   ].join('|'),
 )
 
@@ -537,7 +545,7 @@ function xWindowKey(): string {
 }
 
 function yWindowKey(): string {
-  return `${props.yBottomDb}|${props.yTopDb}`
+  return `${activeYBottom.value}|${activeYTop.value}`
 }
 
 let plotXWindowKey = ''
@@ -574,7 +582,7 @@ function buildOptions(width: number, height: number): uPlot.Options {
       },
       y: {
         auto: false,
-        range: (_u, min, max) => [min ?? props.yBottomDb, max ?? props.yTopDb],
+        range: (_u, min, max) => [min ?? activeYBottom.value, max ?? activeYTop.value],
       },
       // The two right-hand scales are deliberately left auto-ranged and are not what a y drag
       // zooms (uPlot zooms the scale of the first plotted series, which is a magnitude curve).
@@ -639,13 +647,8 @@ function buildOptions(width: number, height: number): uPlot.Options {
     legend: { show: false },
     hooks: {
       // Drives the Reset zoom button. Fires on setData too (both scales are auto:false, so setData
-      // re-applies the same window), hence the change gate.
-      setScale: [
-        (u: uPlot) => {
-          const next = isZoomedNow(u)
-          if (next !== zoomed.value) zoomed.value = next
-        },
-      ],
+      // re-applies the same window), hence the change gate inside noteScale.
+      setScale: [(u: uPlot) => noteScale(u)],
       // u.cursor.idx indexes the shared x array buildData produced — not a pixel-derived value, so
       // it always names a column something was actually plotted at, and the readout can index every
       // series at it. null once the pointer leaves the plot (uPlot clears idx on mouseleave).
@@ -708,7 +711,7 @@ function rebuild() {
   if (restore?.x) u.setScale('x', restore.x)
   if (restore?.y) u.setScale('y', restore.y)
 
-  zoomed.value = isZoomedNow(u)
+  noteScale(u)
 }
 
 function refresh() {
@@ -782,7 +785,24 @@ watch(phaseRange, () => refresh())
       <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
 
-    <div ref="container" class="w-full" :style="{ height: `${CHART_HEIGHT_PX}px` }" />
+    <div class="relative w-full" :style="{ height: `${CHART_HEIGHT_PX}px` }">
+      <div ref="container" class="h-full w-full" />
+      <!-- Off-scale cue: real data sits above/below the currently visible dB/dBV window. -->
+      <div
+        v-if="outOfRange.above"
+        class="pointer-events-none absolute right-2 top-2 text-amber-500 dark:text-amber-400"
+        title="Data above the visible range"
+      >
+        ▲
+      </div>
+      <div
+        v-if="outOfRange.below"
+        class="pointer-events-none absolute bottom-2 right-2 text-amber-500 dark:text-amber-400"
+        title="Data below the visible range"
+      >
+        ▼
+      </div>
+    </div>
     <p v-if="traces.length === 0 && overlays.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">
       No frequency response measured yet. Press {{ props.runLabel ?? 'RUN' }}.
     </p>

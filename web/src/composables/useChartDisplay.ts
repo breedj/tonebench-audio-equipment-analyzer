@@ -19,6 +19,10 @@ const visibleL = ref(true)
 const visibleR = ref(true)
 const showMinMax = ref(true)
 const showPeakHold = ref(false)
+// Off by default so nothing changes for a type saved before this existed -- the SINGLE/STOP
+// running->not-running transition that drives it is watched in App.vue, which already holds
+// device status; see requestAutofitY/requestAutofitX below, which it calls into.
+const autofitOnDone = ref(false)
 
 // Which of the FFT screen's secondary panels are drawn at all. Every one of them is fed by the same
 // live stream as the spectrum chart, so hiding one is purely about how much of the screen a
@@ -40,7 +44,7 @@ let restoring = false
 // values themselves instead — same effect as useSpectrumConfig.ts's apply() marking dirty, just
 // triggered by the ref changing rather than a function call.
 watch([
-  yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold,
+  yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold, autofitOnDone,
   showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks,
 ], () => {
   if (!restoring) useProjects().markDirty()
@@ -92,6 +96,7 @@ export function useChartDisplay() {
     chartShowDataPoints?: boolean | null
     chartShowMinMax?: boolean | null
     chartShowPeakHold?: boolean | null
+    chartAutofitOnDone?: boolean | null
     chartShowWaterfall?: boolean | null
     chartShowOscilloscope?: boolean | null
     chartShowHarmonics?: boolean | null
@@ -106,6 +111,7 @@ export function useChartDisplay() {
     showDataPoints.value = loaded?.chartShowDataPoints ?? false
     showMinMax.value = loaded?.chartShowMinMax ?? true
     showPeakHold.value = loaded?.chartShowPeakHold ?? false
+    autofitOnDone.value = loaded?.chartAutofitOnDone ?? false
     showWaterfall.value = loaded?.chartShowWaterfall ?? true
     showOscilloscope.value = loaded?.chartShowOscilloscope ?? true
     showHarmonics.value = loaded?.chartShowHarmonics ?? true
@@ -138,6 +144,7 @@ export function useChartDisplay() {
     visibleR,
     showMinMax,
     showPeakHold,
+    autofitOnDone,
     showWaterfall,
     showOscilloscope,
     showHarmonics,

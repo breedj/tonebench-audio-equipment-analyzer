@@ -176,3 +176,26 @@ export function sweepLineStyle(input: SweepLineStyleInput): SweepLineStyle {
 export function dashAttr(dash: number[] | undefined | null): string | undefined {
   return dash && dash.length > 0 ? dash.join(',') : undefined
 }
+
+/**
+ * The overlays a *response* chart can draw: visible, and carrying stored response curves.
+ *
+ * Separate from `sweepOverlays` because that one filters on `sweepPoints`, which every response
+ * overlay lacks — so `sweepOverlayDash` returns null for all of them and `FrequencyResponseChart`
+ * falls back to a single shared pattern. That is invisible on a Bode plot, where the curves sit at
+ * different heights and are told apart by position. On a polar plot three overlays superimpose on
+ * one contour, and one dash pattern between them is unreadable.
+ */
+export function responseOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
+  return overlays.filter((o) => o.visible && o.responseTraces?.length)
+}
+
+/**
+ * The dash pattern one stored response draws in, by its position among the currently-visible ones —
+ * exactly `sweepOverlayDash`'s rule, over the response-shaped list.
+ */
+export function responseOverlayDash(overlays: OverlayEntry[], id: number): number[] | null {
+  const idx = responseOverlays(overlays).findIndex((o) => o.id === id)
+  if (idx < 0) return null
+  return SWEEP_OVERLAY_DASH[idx % SWEEP_OVERLAY_DASH.length] ?? null
+}

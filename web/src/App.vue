@@ -45,6 +45,9 @@ import FrequencyResponseConfigPanel from './components/FrequencyResponseConfigPa
 import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.vue'
 import FrequencyResponseDisplayPanel from './components/FrequencyResponseDisplayPanel.vue'
 import FrequencyResponseChart from './components/FrequencyResponseChart.vue'
+import ResponsePolarChart from './components/ResponsePolarChart.vue'
+import ResponseStabilityPanel from './components/ResponseStabilityPanel.vue'
+import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import { useFrequencyResponse } from './composables/useFrequencyResponse'
 import { useSweep } from './composables/useSweep'
@@ -72,11 +75,14 @@ const {
   showDataPoints: chartShowDataPoints,
   showMinMax: chartShowMinMax,
   showPeakHold: chartShowPeakHold,
+  autofitOnDone: chartAutofitOnDone,
   showWaterfall: chartShowWaterfall,
   showOscilloscope: chartShowOscilloscope,
   showHarmonics: chartShowHarmonics,
   showOtherPeaks: chartShowOtherPeaks,
   applyLoaded: applyLoadedChartDisplay,
+  requestAutofitY: requestChartAutofitY,
+  requestAutofitX: requestChartAutofitX,
 } = useChartDisplay()
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
 // fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
@@ -169,6 +175,7 @@ const {
   generatorAmpDbv: responseGeneratorAmpDbv,
   binHz: responseBinHz,
   latencySamples: responseLatencySamples,
+  sampleRateHz: responseSampleRateHz,
   start: startResponse,
   startStepped: startSteppedResponse,
   cancel: cancelResponseRun,
@@ -362,6 +369,10 @@ const sweepXTo = computed<number>({
 const sweepYTopDb = ref(20)
 const sweepYBottomDb = ref(-160)
 
+// Off by default so nothing changes for a type saved before this existed. Shared by both sweep
+// kinds, same as every other ref on this screen.
+const sweepAutofitOnDone = ref(false)
+
 // Suppresses the dirty watcher below while applyStoredSweepDisplay writes these refs from a loaded
 // type's stored params — loading is the opposite of an unsaved edit. Same pattern as
 // SweepConfigPanel.vue's own `restoring` flag; kept separate because these refs live here, not in
@@ -373,7 +384,7 @@ watch(
     sweepUnit, sweepShowNoiseFloor, sweepShowMagnitude, sweepShowThd, sweepShowD2, sweepShowD3,
     sweepShowD4, sweepShowD5, sweepShowD6Plus, sweepShowLeft, sweepShowRight, sweepThickLines,
     sweepShowDataPoints, sweepYMaxPercent, sweepYMinPercent, sweepXFromHz, sweepXToHz, sweepYTopDb,
-    sweepYBottomDb, sweepAmplitudeXAxis, sweepAmplitudeBounds,
+    sweepYBottomDb, sweepAutofitOnDone, sweepAmplitudeXAxis, sweepAmplitudeBounds,
   ],
   () => {
     if (!sweepDisplayRestoring) markDirty()
@@ -428,6 +439,7 @@ function applyStoredSweepDisplay(paramsJson: string) {
   if (typeof stored.chartXToHz === 'number') sweepXToHz.value = stored.chartXToHz
   if (typeof stored.chartYTopDb === 'number') sweepYTopDb.value = stored.chartYTopDb
   if (typeof stored.chartYBottomDb === 'number') sweepYBottomDb.value = stored.chartYBottomDb
+  if (typeof stored.chartAutofitOnDone === 'boolean') sweepAutofitOnDone.value = stored.chartAutofitOnDone
 
   void nextTick(() => {
     sweepDisplayRestoring = false
@@ -477,8 +489,14 @@ const responseShowOneDb = ref(true)
 const responseShowThreeDb = ref(true)
 const responseThickLines = ref(true)
 const responseShowDataPoints = ref(false)
+// The Gain (dB) view's own window.
 const responseYTopDb = ref(10)
 const responseYBottomDb = ref(-10)
+// The FR (dBV) view's own window -- independent of the pair above so switching views never
+// clobbers the other one's range. Same default (10/-10) as the Gain pair always used, so first
+// load behaves exactly as before the two were split.
+const responseYTopDbv = ref(10)
+const responseYBottomDbv = ref(-10)
 const responseXFromHz = ref(10)
 const responseXToHz = ref(100000)
 // Independent of the dB window because unwrapped phase can run past +/-180 deg on a DUT with real
@@ -486,6 +504,46 @@ const responseXToHz = ref(100000)
 // is the widest range a wrapped reading could ever need, and Autofit takes over from there.
 const responsePhaseTopDeg = ref(180)
 const responsePhaseBottomDeg = ref(-180)
+// Off by default so nothing changes for a type saved before this existed.
+const responseAutofitOnDone = ref(false)
+
+// Which projection of the response is on screen. A separate axis of state from responseView, which
+// still means only "which y quantity the Bode chart shows" -- see ResponseProjection's own remarks.
+const responseProjection = ref<import('./api/client').ResponseProjection>('Bode')
+// Linear is the textbook Nyquist plot and the only one whose distances mean what they look like;
+// the dB map trades that away to keep 60 dB of range on screen.
+const responseNyquistRadius = ref<import('./api/client').NyquistRadiusName>('Linear')
+const responseNyquistRadiusFloorDb = ref(-40)
+const responseInvertLoopSign = ref(false)
+const responseRestoreDelay = ref(false)
+
+/**
+ * Whether the measurement on screen has a complex response at all.
+ *
+ * Not `responsePhaseAvailable`, which is the looser gate the Bode phase series uses. A
+ * ChannelDifference run measures its gain against the commanded generator level and its phase
+ * against the right input — two different ratios — so 10^(dB/20)·e^(jφ) built from the pair is a
+ * complex number describing nothing. It plots, and it looks entirely plausible, which is why it is
+ * excluded by construction rather than by a warning.
+ */
+const responseHasComplexResponse = computed(
+  () => responsePhaseKind.value === 'DutResponse' || responsePhaseKind.value === 'PerTrace',
+)
+
+// Falls back to the Bode chart whenever the run cannot support a projection, so selecting a
+// stored polar preference on a type that no longer qualifies never leaves a blank screen.
+const activeResponseProjection = computed(() =>
+  responseProjection.value !== 'Bode' && responseHasComplexResponse.value ? responseProjection.value : 'Bode',
+)
+
+const responsePolarChart = ref<InstanceType<typeof ResponsePolarChart> | null>(null)
+const responsePoleZeroPanel = ref<InstanceType<typeof ResponsePoleZeroPanel> | null>(null)
+
+// Fit settings. Not persisted into params_json: unlike the projection or the radius map these
+// describe an analysis of one measurement rather than how the screen is set up, and a stored order
+// would silently be applied to a different DUT's curve on load.
+const responseFitAutoOrder = ref(true)
+const responseFitOrder = ref(2)
 
 // Same guard as sweepDisplayRestoring: applying a type's stored display state is the opposite of an
 // unsaved edit, and marking it dirty there would light Save up on every selection.
@@ -517,10 +575,19 @@ function applyStoredResponseDisplay(paramsJson: string) {
   if (typeof stored.chartShowDataPoints === 'boolean') responseShowDataPoints.value = stored.chartShowDataPoints
   if (typeof stored.chartYTopDb === 'number') responseYTopDb.value = stored.chartYTopDb
   if (typeof stored.chartYBottomDb === 'number') responseYBottomDb.value = stored.chartYBottomDb
+  if (typeof stored.chartYTopDbv === 'number') responseYTopDbv.value = stored.chartYTopDbv
+  if (typeof stored.chartYBottomDbv === 'number') responseYBottomDbv.value = stored.chartYBottomDbv
   if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) responseXFromHz.value = stored.chartXFromHz
   if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) responseXToHz.value = stored.chartXToHz
   if (typeof stored.chartPhaseTopDeg === 'number') responsePhaseTopDeg.value = stored.chartPhaseTopDeg
   if (typeof stored.chartPhaseBottomDeg === 'number') responsePhaseBottomDeg.value = stored.chartPhaseBottomDeg
+  if (typeof stored.chartAutofitOnDone === 'boolean') responseAutofitOnDone.value = stored.chartAutofitOnDone
+  if (stored.chartProjection) responseProjection.value = stored.chartProjection
+  if (stored.chartNyquistRadius) responseNyquistRadius.value = stored.chartNyquistRadius
+  if (typeof stored.chartNyquistRadiusFloorDb === 'number' && stored.chartNyquistRadiusFloorDb < 0)
+    responseNyquistRadiusFloorDb.value = stored.chartNyquistRadiusFloorDb
+  if (typeof stored.chartInvertLoopSign === 'boolean') responseInvertLoopSign.value = stored.chartInvertLoopSign
+  if (typeof stored.chartRestoreDelay === 'boolean') responseRestoreDelay.value = stored.chartRestoreDelay
 
   void nextTick(() => {
     responseDisplayRestoring = false
@@ -541,8 +608,10 @@ watch(
   [
     responseView, responseShowLeft, responseShowRight, responseShowPhase, responseShowCoherence,
     responseShowOneDb, responseShowThreeDb, responseThickLines, responseShowDataPoints,
-    responseYTopDb, responseYBottomDb, responseXFromHz, responseXToHz,
-    responsePhaseTopDeg, responsePhaseBottomDeg,
+    responseYTopDb, responseYBottomDb, responseYTopDbv, responseYBottomDbv, responseXFromHz, responseXToHz,
+    responsePhaseTopDeg, responsePhaseBottomDeg, responseAutofitOnDone,
+    responseProjection, responseNyquistRadius, responseNyquistRadiusFloorDb,
+    responseInvertLoopSign, responseRestoreDelay,
   ],
   () => {
     if (!responseDisplayRestoring && isFrequencyResponse.value) markDirty()
@@ -820,6 +889,20 @@ watch(meters, (m) => {
   })
 })
 
+// "Autofit when measurement done" for the FFT/Spectrum screen: fires on the acquiring->not
+// transition, whether that's a SINGLE capture auto-stopping (above) or a manual STOP -- there is
+// no other "done" signal for a screen that otherwise streams continuously. requestChartAutofitY/X
+// are the same trigger functions ChartDisplayPanel.vue's own Autofit buttons call.
+watch(
+  () => status.value?.acquiring,
+  (isAcquiring, wasAcquiring) => {
+    if (wasAcquiring && !isAcquiring && chartAutofitOnDone.value) {
+      requestChartAutofitY()
+      requestChartAutofitX()
+    }
+  },
+)
+
 // Generator field edits (frequency, level, kind, enabled, snap-to-bin — see GeneratorPanel's
 // `change` emit) only need to reach the device at all if something's already live: pushing while
 // idle would just be pointless traffic, since the values are already staged locally and Run reads
@@ -946,6 +1029,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowDataPoints: chartShowDataPoints.value,
     chartShowMinMax: chartShowMinMax.value,
     chartShowPeakHold: chartShowPeakHold.value,
+    chartAutofitOnDone: chartAutofitOnDone.value,
     chartShowWaterfall: chartShowWaterfall.value,
     chartShowOscilloscope: chartShowOscilloscope.value,
     chartShowHarmonics: chartShowHarmonics.value,
@@ -971,6 +1055,11 @@ function buildTypeParamsJson(): string | undefined {
     return JSON.stringify({
       ...JSON.parse(base),
       chartView: responseView.value,
+      chartProjection: responseProjection.value,
+      chartNyquistRadius: responseNyquistRadius.value,
+      chartNyquistRadiusFloorDb: responseNyquistRadiusFloorDb.value,
+      chartInvertLoopSign: responseInvertLoopSign.value,
+      chartRestoreDelay: responseRestoreDelay.value,
       chartShowLeft: responseShowLeft.value,
       chartShowRight: responseShowRight.value,
       chartShowPhase: responseShowPhase.value,
@@ -981,10 +1070,13 @@ function buildTypeParamsJson(): string | undefined {
       chartShowDataPoints: responseShowDataPoints.value,
       chartYTopDb: responseYTopDb.value,
       chartYBottomDb: responseYBottomDb.value,
+      chartYTopDbv: responseYTopDbv.value,
+      chartYBottomDbv: responseYBottomDbv.value,
       chartXFromHz: responseXFromHz.value,
       chartXToHz: responseXToHz.value,
       chartPhaseTopDeg: responsePhaseTopDeg.value,
       chartPhaseBottomDeg: responsePhaseBottomDeg.value,
+      chartAutofitOnDone: responseAutofitOnDone.value,
     })
   }
 
@@ -1017,6 +1109,7 @@ function buildTypeParamsJson(): string | undefined {
     chartYMinPercent: sweepYMinPercent.value,
     chartYTopDb: sweepYTopDb.value,
     chartYBottomDb: sweepYBottomDb.value,
+    chartAutofitOnDone: sweepAutofitOnDone.value,
   }
   return JSON.stringify(withDisplay)
 }
@@ -1286,6 +1379,22 @@ function confirmSaveProjectAs(name: string) {
                   @run="runSteppedResponse"
                 />
 
+                <ResponseStabilityPanel
+                  v-if="activeResponseProjection !== 'Bode' && responsePolarChart"
+                  :margins="responsePolarChart.margins"
+                  :radius-mode="responseNyquistRadius"
+                  :projection="activeResponseProjection"
+                  v-model:invert-sign="responseInvertLoopSign"
+                />
+
+                <ResponsePoleZeroPanel
+                  v-if="activeResponseProjection !== 'Bode' && responsePolarChart"
+                  ref="responsePoleZeroPanel"
+                  :curve="responsePolarChart.curve"
+                  v-model:order="responseFitOrder"
+                  v-model:auto-order="responseFitAutoOrder"
+                />
+
                 <ResponseMeasurementsPanel
                   v-model:show-one-db="responseShowOneDb"
                   v-model:show-three-db="responseShowThreeDb"
@@ -1317,6 +1426,7 @@ function confirmSaveProjectAs(name: string) {
                      says: its coherence is 1.0 by construction, so drawing it would be a flat line
                      claiming a measurement nobody made. -->
                 <FrequencyResponseChart
+                  v-if="activeResponseProjection === 'Bode'"
                   :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
@@ -1332,10 +1442,32 @@ function confirmSaveProjectAs(name: string) {
                   :show-data-points="responseShowDataPoints"
                   :y-top-db="responseYTopDb"
                   :y-bottom-db="responseYBottomDb"
+                  :y-top-dbv="responseYTopDbv"
+                  :y-bottom-dbv="responseYBottomDbv"
                   :x-from-hz="responseXFromHz"
                   :x-to-hz="responseXToHz"
                   :phase-top-deg="responsePhaseTopDeg"
                   :phase-bottom-deg="responsePhaseBottomDeg"
+                />
+                <ResponsePolarChart
+                  v-else
+                  ref="responsePolarChart"
+                  :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
+                  :traces="responseTraces"
+                  :overlays="visibleResponseOverlays"
+                  :projection="activeResponseProjection"
+                  :radius-mode="responseNyquistRadius"
+                  :radius-floor-db="responseNyquistRadiusFloorDb"
+                  :invert-sign="responseInvertLoopSign"
+                  :restore-delay="responseRestoreDelay"
+                  :latency-samples="responseLatencySamples"
+                  :sample-rate-hz="responseSampleRateHz"
+                  :phase-kind="responsePhaseKind"
+                  :x-from-hz="responseXFromHz"
+                  :x-to-hz="responseXToHz"
+                  :thick-lines="responseThickLines"
+                  :show-data-points="responseShowDataPoints"
+                  :fitted-model="responsePoleZeroPanel?.fit?.model ?? null"
                 />
 
                 <MeasurementHistoryPanel @error="reportError" />
@@ -1345,6 +1477,10 @@ function confirmSaveProjectAs(name: string) {
                 <FrequencyResponseDisplayPanel
                   :allow-coherence="isChirpResponse"
                   v-model:view="responseView"
+                  v-model:projection="responseProjection"
+                  v-model:nyquist-radius="responseNyquistRadius"
+                  v-model:nyquist-radius-floor-db="responseNyquistRadiusFloorDb"
+                  v-model:restore-delay="responseRestoreDelay"
                   v-model:show-left="responseShowLeft"
                   v-model:show-right="responseShowRight"
                   v-model:show-phase="responseShowPhase"
@@ -1355,10 +1491,13 @@ function confirmSaveProjectAs(name: string) {
                   v-model:show-data-points="responseShowDataPoints"
                   v-model:y-top-db="responseYTopDb"
                   v-model:y-bottom-db="responseYBottomDb"
+                  v-model:y-top-dbv="responseYTopDbv"
+                  v-model:y-bottom-dbv="responseYBottomDbv"
                   v-model:x-from-hz="responseXFromHz"
                   v-model:x-to-hz="responseXToHz"
                   v-model:phase-top-deg="responsePhaseTopDeg"
                   v-model:phase-bottom-deg="responsePhaseBottomDeg"
+                  v-model:autofit-on-done="responseAutofitOnDone"
                 />
 
                 <MeasurementChecklist @error="reportError" />
@@ -1493,6 +1632,7 @@ function confirmSaveProjectAs(name: string) {
                   v-model:x-from="sweepXFrom"
                   v-model:x-to="sweepXTo"
                   v-model:x-axis="sweepChartXAxis"
+                  v-model:autofit-on-done="sweepAutofitOnDone"
                 />
 
                 <MeasurementChecklist @error="reportError" />

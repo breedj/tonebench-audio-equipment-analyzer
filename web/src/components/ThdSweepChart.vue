@@ -19,6 +19,7 @@ import {
 import { interpolateOnGrid } from '../sweep/align'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { dashAttr, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
+import { useZoomBounds } from '../composables/useZoomBounds'
 import type { ThdSweepPoint } from '../api/client'
 
 /**
@@ -316,35 +317,45 @@ function yRange(): [number, number] {
  * for — i.e. the user has dragged a zoom. Drives the Reset zoom button, which is the only visible
  * cue that the axes are no longer the ones the dropdowns name.
  */
-const zoomed = ref(false)
-
-/** Tolerant equality: a zoom is compared against bounds that came from the same numbers, but they have been through a log/linear round trip. */
-function sameBound(a: number | null | undefined, b: number): boolean {
-  return a != null && Math.abs(a - b) <= 1e-9 + Math.abs(b) * 1e-6
-}
-
-function isZoomedNow(u: uPlot): boolean {
-  const [bottom, top] = yRange()
-  return !(
-    sameBound(u.scales.x.min, props.xFrom) &&
-    sameBound(u.scales.x.max, props.xTo) &&
-    sameBound(u.scales.y?.min, bottom) &&
-    sameBound(u.scales.y?.max, top)
-  )
-}
+const { zoomed, noteScale, resetZoom } = useZoomBounds(
+  () => plot,
+  () => {
+    const [yMin, yMax] = yRange()
+    return { xMin: props.xFrom, xMax: props.xTo, yMin, yMax }
+  },
+)
 
 /**
- * Back to the window the dropdowns name — not to the data extent, which is what uPlot's own
- * double-click handler (autoScaleX) does. While a zoom is on screen there is no difference between
- * the two for it to reset *to* on a chart whose scales are auto:false, so ours is bound on top of
- * uPlot's (added later on the same element, so it runs after) and puts both axes back explicitly.
+ * Whether any currently-checked trace/channel, live or on a visible overlay, has a plotted value
+ * within the current x window that sits above or below the y window — the cue that there is real
+ * data off the top or bottom of the chart.
  */
-function resetZoom() {
-  if (!plot) return
-  const [bottom, top] = yRange()
-  plot.setScale('x', { min: props.xFrom, max: props.xTo })
-  plot.setScale('y', { min: bottom, max: top })
-}
+const outOfRange = computed(() => {
+  let above = false
+  let below = false
+  const [yMin, yMax] = yRange()
+  const channels = activeChannels.value
+  const traces = activeTraces.value
+  if (channels.length === 0 || traces.length === 0) return { above, below }
+
+  function consider(pts: ThdSweepPoint[]) {
+    for (const p of pts) {
+      if (!channels.includes(p.channel)) continue
+      const x = xOf(p)
+      if (!(x > 0) || x < props.xFrom || x > props.xTo) continue
+      for (const trace of traces) {
+        const y = toY(valueOf(p, trace.key), trace.key)
+        if (y == null) continue
+        if (y > yMax) above = true
+        if (y < yMin) below = true
+      }
+      if (above && below) return
+    }
+  }
+  consider(points.value)
+  for (const overlay of activeOverlays.value) consider(overlay.sweepPoints ?? [])
+  return { above, below }
+})
 
 function buildOptions(width: number): uPlot.Options {
   const theme = currentTheme()
@@ -485,14 +496,9 @@ function buildOptions(width: number): uPlot.Options {
     hooks: {
       // Drives the Reset zoom button. Fires on setData too (the x scale is auto:false, so setData
       // re-applies the same min/max every point of a running sweep), hence the change-gate inside
-      // isZoomedNow's caller -- writing an unchanged `false` 50 times per sweep would be harmless
-      // but pointless.
-      setScale: [
-        (u: uPlot) => {
-          const next = isZoomedNow(u)
-          if (next !== zoomed.value) zoomed.value = next
-        },
-      ],
+      // noteScale -- writing an unchanged `false` 50 times per sweep would be harmless but
+      // pointless.
+      setScale: [(u: uPlot) => noteScale(u)],
       // u.cursor.idx indexes the shared x array from update() -- not a pixel-derived value, so it
       // always names a value something was actually plotted at. null once the pointer leaves the
       // plot area (uPlot clears idx on mouseleave), which is the "nothing hovered" state the small
@@ -863,7 +869,24 @@ onBeforeUnmount(() => {
       </button>
       <span v-else>Drag to zoom · double-click to reset</span>
     </div>
-    <div ref="containerRef" class="sweep-chart w-full"></div>
+    <div class="relative">
+      <div ref="containerRef" class="sweep-chart w-full"></div>
+      <!-- Off-scale cue: a checked trace has a value above/below the currently visible y window. -->
+      <div
+        v-if="outOfRange.above"
+        class="pointer-events-none absolute right-2 top-2 text-amber-500 dark:text-amber-400"
+        title="Data above the visible range"
+      >
+        ▲
+      </div>
+      <div
+        v-if="outOfRange.below"
+        class="pointer-events-none absolute bottom-2 right-2 text-amber-500 dark:text-amber-400"
+        title="Data below the visible range"
+      >
+        ▼
+      </div>
+    </div>
 
     <!-- Replaces uPlot's own legend, which could only draw a solid or dashed marker and so could
          never say which of the three history patterns a row belonged to. Every swatch is drawn

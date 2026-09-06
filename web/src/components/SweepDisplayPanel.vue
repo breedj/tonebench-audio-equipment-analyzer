@@ -12,7 +12,7 @@
  * the three DUT-referred choices and the user picks between them here.
  */
 
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useSweep } from '../composables/useSweep'
 import { useMeasurements } from '../composables/useMeasurements'
 import { percentToDb } from '../sweep/points'
@@ -33,6 +33,7 @@ const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
 const thickLines = defineModel<boolean>('thickLines', { required: true })
 const showDataPoints = defineModel<boolean>('showDataPoints', { required: true })
+const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 
 /**
  * Axis bounds. Fixed lists rather than free-text inputs, matching the previous app's graph
@@ -126,7 +127,7 @@ function onBottomDbChange(event: Event) {
  * encloses the data, not compute an arbitrary bound. The dB axis has no such list (a free-typed
  * field, step 10), so it rounds out to the nearest 10 dB instead, the same convention as Spectrum's.
  */
-const { points: sweepPoints } = useSweep()
+const { points: sweepPoints, running } = useSweep()
 const { overlays } = useMeasurements()
 
 /** The smallest option that is still >= value, or the largest option if value exceeds all of them. */
@@ -280,6 +281,15 @@ function requestAutofitX() {
   xTo.value = to > from ? to : from * 10
 }
 
+// "Autofit when measurement done": fires on the running->not-running transition, whether the sweep
+// finished, was cancelled, or was stopped manually -- same signal the RUN/STOP button itself uses.
+watch(running, (isRunning, wasRunning) => {
+  if (wasRunning && !isRunning && autofitOnDone.value) {
+    requestAutofitDistortion()
+    requestAutofitX()
+  }
+})
+
 /**
  * Typed x bounds, clamped on commit. Same `:value` + `@change` shape as the dB fields above, and for
  * the same two reasons — a defineModel write comes back as a prop next tick, so a clamp written
@@ -339,6 +349,10 @@ function onXToChange(event: Event) {
         </button>
       </div>
     </div>
+
+    <label class="flex items-center gap-1.5 text-xs">
+      <input v-model="autofitOnDone" type="checkbox" /> Autofit when measurement done
+    </label>
 
     <div class="flex flex-col gap-1.5 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Channels</span>
@@ -446,7 +460,7 @@ function onXToChange(event: Event) {
       </template>
       <button
         type="button"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         title="Fits to the highest and lowest value across every currently-checked trace. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
         @click="requestAutofitDistortion"
       >
@@ -516,7 +530,7 @@ function onXToChange(event: Event) {
       </template>
       <button
         type="button"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         title="Fits From/To to the lowest and highest measured value on this axis."
         @click="requestAutofitX"
       >

@@ -195,10 +195,36 @@ export interface FrequencyResponseParameters {
   /** Absent on a type saved before the phase axis was independently rangeable; the client falls back to ±180°. */
   chartPhaseTopDeg?: number | null
   chartPhaseBottomDeg?: number | null
+  /** The FR (dBV) view's own y window — chartYTopDb/chartYBottomDb (despite the name) is the Gain (dB) view's window only. Absent on a type saved before the two views had separate ranges. */
+  chartYTopDbv?: number | null
+  chartYBottomDbv?: number | null
+  /** Off unless the user opts in — see FrequencyResponseDisplayPanel.vue's "Autofit when measurement done" checkbox. */
+  chartAutofitOnDone?: boolean | null
+  /**
+   * Which projection of the response is on screen. Absent on a type saved before the polar views
+   * existed, where 'Bode' is the behaviour that build had.
+   */
+  chartProjection?: ResponseProjection | null
+  chartNyquistRadius?: NyquistRadiusName | null
+  chartNyquistRadiusFloorDb?: number | null
+  chartInvertLoopSign?: boolean | null
+  chartRestoreDelay?: boolean | null
 }
 
 /** Which y quantity the chart is showing — the old app's "FR (dBV)" / "Gain (dB)" buttons. */
 export type ResponseView = 'Dbv' | 'Gain'
+
+/**
+ * Which projection of the response the chart draws.
+ *
+ * Deliberately separate from `ResponseView` rather than added to it: that type means *which y
+ * quantity the Bode chart shows*, and everything branching on it carries that meaning. Widening it
+ * would add a silent third case to each of those.
+ */
+export type ResponseProjection = 'Bode' | 'Nyquist' | 'Nichols'
+
+/** How a Nyquist plot maps magnitude onto radius. Mirrors NyquistRadiusMode in response/projection.ts. */
+export type NyquistRadiusName = 'Linear' | 'Db'
 
 export interface FrequencyResponseStarted {
   sampleRateHz: number
@@ -284,6 +310,20 @@ export interface SteppedResponseParameters {
   chartXToHz?: number | null
   chartPhaseTopDeg?: number | null
   chartPhaseBottomDeg?: number | null
+  /** The FR (dBV) view's own y window — see FrequencyResponseParameters.chartYTopDbv. */
+  chartYTopDbv?: number | null
+  chartYBottomDbv?: number | null
+  /** Off unless the user opts in — see FrequencyResponseDisplayPanel.vue's "Autofit when measurement done" checkbox. */
+  chartAutofitOnDone?: boolean | null
+  /**
+   * Which projection of the response is on screen. Absent on a type saved before the polar views
+   * existed, where 'Bode' is the behaviour that build had.
+   */
+  chartProjection?: ResponseProjection | null
+  chartNyquistRadius?: NyquistRadiusName | null
+  chartNyquistRadiusFloorDb?: number | null
+  chartInvertLoopSign?: boolean | null
+  chartRestoreDelay?: boolean | null
 }
 
 /** A -1 dB or -3 dB reading. A clamped end means the curve never got there, not that the corner is at that frequency. */
@@ -498,6 +538,8 @@ export interface MeasurementTypeAppliedResponse {
   chartShowDataPoints?: boolean | null
   chartShowMinMax?: boolean | null
   chartShowPeakHold?: boolean | null
+  /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
+  chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means all four. */
   chartShowWaterfall?: boolean | null
   chartShowOscilloscope?: boolean | null
@@ -531,6 +573,8 @@ export interface StagedMeasurementConfig {
   chartShowDataPoints?: boolean | null
   chartShowMinMax?: boolean | null
   chartShowPeakHold?: boolean | null
+  /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
+  chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means all four. */
   chartShowWaterfall?: boolean | null
   chartShowOscilloscope?: boolean | null
@@ -731,6 +775,8 @@ export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
   chartXToHz?: number | null
   chartYTopDb?: number | null
   chartYBottomDb?: number | null
+  /** Off unless the user opts in — see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. */
+  chartAutofitOnDone?: boolean | null
 }
 
 /**
@@ -796,6 +842,8 @@ export interface ThdVsAmplitudeParameters {
   chartXTo?: number | null
   chartYTopDb?: number | null
   chartYBottomDb?: number | null
+  /** Off unless the user opts in — see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. */
+  chartAutofitOnDone?: boolean | null
 }
 
 /** The three x-axis choices a THD-vs-amplitude chart offers. Mirrors the old app's E_X_AxisType. */

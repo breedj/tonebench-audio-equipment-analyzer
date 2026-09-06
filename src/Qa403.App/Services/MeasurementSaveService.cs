@@ -595,6 +595,7 @@ public sealed class MeasurementSaveService(
             parameters.ChartShowDataPoints,
             parameters.ChartShowMinMax,
             parameters.ChartShowPeakHold,
+            parameters.ChartAutofitOnDone,
             parameters.ChartShowWaterfall,
             parameters.ChartShowOscilloscope,
             parameters.ChartShowHarmonics,
@@ -638,6 +639,7 @@ public sealed class MeasurementSaveService(
             generator, staged?.SelectedMetrics, staged?.ScopePeriods,
             staged?.ChartYTopDbv, staged?.ChartYBottomDbv, staged?.ChartXFromHz, staged?.ChartXToHz,
             staged?.ChartThickLines, staged?.ChartShowDataPoints, staged?.ChartShowMinMax, staged?.ChartShowPeakHold,
+            staged?.ChartAutofitOnDone,
             staged?.ChartShowWaterfall, staged?.ChartShowOscilloscope, staged?.ChartShowHarmonics, staged?.ChartShowOtherPeaks);
     }
 

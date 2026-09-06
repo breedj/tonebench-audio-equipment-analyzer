@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type MetersFrame, type SpectrumFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useChartDisplay } from '../composables/useChartDisplay'
+import { useZoomBounds } from '../composables/useZoomBounds'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useAppTheme } from '../composables/useAppTheme'
 import { freqAxis } from '../freqAxis'
@@ -274,7 +275,10 @@ function harmonicMarkersPlugin(): uPlot.Plugin {
       ],
       setScale: [
         (u, key) => {
-          if (key === 'x') reportViewport(u)
+          if (key === 'x') {
+            reportViewport(u)
+            noteScaleIfReady(u)
+          }
         },
       ],
       setCursor: [
@@ -517,9 +521,24 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   plotStyleKey = style
 }
 
+/**
+ * "Not zoomed" here means "showing the data's own full span" — resetZoom restores fullLoFreqHz/
+ * fullHiFreqHz, not the display panel's From/To (unlike the sweep and response charts). Y is never
+ * actually draggable (no `drag.y` below), so its half of the check is trivially always true; it's
+ * still supplied so useZoomBounds has one consistent shape across all three charts.
+ */
+const { zoomed, noteScale, resetZoom: resetZoomToFullSpan } = useZoomBounds(
+  () => plot,
+  () => ({ xMin: fullLoFreqHz, xMax: fullHiFreqHz, yMin: yBottom.value, yMax: yTop.value }),
+)
+
 function resetZoom() {
-  if (plot && fullHiFreqHz > 0)
-    plot.setScale('x', { min: fullLoFreqHz, max: fullHiFreqHz })
+  if (fullHiFreqHz > 0) resetZoomToFullSpan()
+}
+
+/** Guards noteScale the same way resetZoom guards its own reset -- before a real span is known, fullHiFreqHz is a placeholder and would read as a bogus zoom. */
+function noteScaleIfReady(u: uPlot) {
+  if (fullHiFreqHz > 0) noteScale(u)
 }
 
 function nullFill(n: number): (number | null)[] {
@@ -580,6 +599,42 @@ function computeYExtent(): { min: number; max: number } | null {
 
   return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
 }
+
+/**
+ * Whether a visible live channel or overlay has a plotted point, within the current frequency
+ * window, above or below the current dBV window — the cue that there is real data off the top or
+ * bottom of the chart. Unlike computeYExtent (which the Autofit button uses and deliberately reads
+ * the whole span), this is scoped to what's actually in view on the frequency axis.
+ */
+const outOfRange = computed(() => {
+  let above = false
+  let below = false
+
+  function consider(freqHz: number, min: number, max: number) {
+    if (freqHz < xFrom.value || freqHz > xTo.value) return
+    if (Number.isFinite(max) && max > yTop.value) above = true
+    if (Number.isFinite(min) && min < yBottom.value) below = true
+  }
+
+  for (let ch = 0; ch < 2; ch++) {
+    if (!channelVisible(ch)) continue
+    const frame = props.spectrum[ch]
+    if (!frame) continue
+    const { columns, header } = frame
+    for (let i = 0; i < header.nPoints; i++) consider(columns[i * 3], columns[i * 3 + 1], columns[i * 3 + 2])
+  }
+
+  for (const overlay of props.overlays) {
+    if (!overlay.visible) continue
+    for (const ch of [0, 1]) {
+      const channel = channelByIndex(overlay.detail, ch)
+      if (!channel) continue
+      for (const c of channel.columns) consider(c.freqHz, c.minDbv, c.maxDbv)
+    }
+  }
+
+  return { above, below }
+})
 
 /** The Frequency range "Autofit" target's upper edge — a fixed step above the current sample
  * rate's Nyquist frequency, not a true data-driven autofit (unlike the dBV range button): 48 kHz
@@ -778,11 +833,39 @@ onBeforeUnmount(() => {
       <span v-if="cursorReadout" class="font-mono">
         {{ cursorReadout.freqHz.toFixed(1) }} Hz · {{ cursorReadout.dbv.toFixed(1) }} dBV
       </span>
+      <!-- The only visible sign that the frequency axis is no longer showing the full data span —
+           double-clicking does the same thing, but nothing else on screen would say so. -->
+      <button
+        v-else-if="zoomed"
+        type="button"
+        class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        title="Back to the full frequency span."
+        @click="resetZoom"
+      >
+        Reset zoom
+      </button>
       <span v-else-if="!spectrum[0] && !spectrum[1]">Waiting for data…</span>
     </div>
     <!-- L/R/min-max/thick-lines/show-points/dBV-range/frequency-range controls now live in
          ChartDisplayPanel.vue, a sibling column next to the chart — see App.vue — all reading and
          writing the same useChartDisplay() state this component reacts to. -->
-    <div ref="containerRef" class="w-full"></div>
+    <div class="relative">
+      <div ref="containerRef" class="w-full"></div>
+      <!-- Off-scale cue: a visible channel or overlay has a value above/below the current dBV window. -->
+      <div
+        v-if="outOfRange.above"
+        class="pointer-events-none absolute right-2 top-2 text-amber-500 dark:text-amber-400"
+        title="Data above the visible range"
+      >
+        ▲
+      </div>
+      <div
+        v-if="outOfRange.below"
+        class="pointer-events-none absolute bottom-2 right-2 text-amber-500 dark:text-amber-400"
+        title="Data below the visible range"
+      >
+        ▼
+      </div>
+    </div>
   </section>
 </template>

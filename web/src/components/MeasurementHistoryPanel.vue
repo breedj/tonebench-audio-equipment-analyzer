@@ -36,8 +36,25 @@ function applyFilter() {
 // standalone project/type picker of its own.
 watch(currentTypeId, applyFilter, { immediate: true })
 
-async function onDelete(item: MeasurementSummary) {
-  if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return
+// Which row's Delete button is armed (turned into Confirm/Cancel), if any -- an inline
+// click-twice confirmation in place of a browser confirm() dialog.
+const pendingDeleteId = ref<number | null>(null)
+
+// A stale armed row would otherwise linger across a filter change or reload.
+watch(items, () => {
+  pendingDeleteId.value = null
+})
+
+function onDeleteClick(item: MeasurementSummary) {
+  pendingDeleteId.value = item.resultId
+}
+
+function onCancelDelete() {
+  pendingDeleteId.value = null
+}
+
+async function onConfirmDelete(item: MeasurementSummary) {
+  pendingDeleteId.value = null
   try {
     await remove(item.resultId)
   } catch (e) {
@@ -98,7 +115,7 @@ async function onDelete(item: MeasurementSummary) {
               <div class="flex justify-end gap-1.5 text-xs whitespace-nowrap">
                 <button
                   type="button"
-                  class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                  class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
                   @click="onEdit(item)"
                 >
                   Edit
@@ -106,14 +123,31 @@ async function onDelete(item: MeasurementSummary) {
                 <a
                   :href="api.measurementCsvExportUrl(item.resultId)"
                   download
-                  class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                  class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
                 >
                   CSV
                 </a>
+                <template v-if="pendingDeleteId === item.resultId">
+                  <button
+                    type="button"
+                    class="rounded border border-red-300 bg-red-50 px-2 py-1 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+                    @click="onConfirmDelete(item)"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                    @click="onCancelDelete"
+                  >
+                    Cancel
+                  </button>
+                </template>
                 <button
+                  v-else
                   type="button"
-                  class="rounded border border-neutral-300 px-2 py-1 text-neutral-600 hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-red-800 dark:hover:bg-red-950 dark:hover:text-red-400"
-                  @click="onDelete(item)"
+                  class="rounded border border-red-300 bg-red-50 px-2 py-1 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+                  @click="onDeleteClick(item)"
                 >
                   Delete
                 </button>

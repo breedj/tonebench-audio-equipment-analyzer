@@ -15,6 +15,7 @@ const {
   visibleR,
   showMinMax,
   showPeakHold,
+  autofitOnDone,
   showWaterfall,
   showOscilloscope,
   showHarmonics,
@@ -70,7 +71,7 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
       </label>
       <button
         type="button"
-        class="w-full rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         title="Fits to the highest and lowest currently-plotted point, with 10 dBV of headroom on each side."
         @click="requestAutofitY"
       >
@@ -99,7 +100,7 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
       </label>
       <button
         type="button"
-        class="w-full rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         title="Sets From to 10 Hz and To just above the current sample rate's Nyquist frequency."
         @click="requestAutofitX"
       >
@@ -116,6 +117,10 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
         <label class="flex items-center gap-1.5">
           <input v-model="showDataPoints" type="checkbox" />
           Show data points
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input v-model="autofitOnDone" type="checkbox" />
+          Autofit when measurement done
         </label>
       </section>
 

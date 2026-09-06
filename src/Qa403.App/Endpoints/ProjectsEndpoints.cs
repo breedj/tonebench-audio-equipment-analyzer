@@ -154,6 +154,7 @@ public sealed record StagedMeasurementConfig(
     IReadOnlyList<string>? SelectedMetrics = null, int? ScopePeriods = null,
     double? ChartYTopDbv = null, double? ChartYBottomDbv = null, double? ChartXFromHz = null, double? ChartXToHz = null,
     bool? ChartThickLines = null, bool? ChartShowDataPoints = null, bool? ChartShowMinMax = null, bool? ChartShowPeakHold = null,
+    bool? ChartAutofitOnDone = null,
     bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null);
 
 public sealed record MeasurementTypeResponse(
@@ -184,6 +185,7 @@ public sealed record MeasurementTypeAppliedResponse(
     bool? ChartShowDataPoints,
     bool? ChartShowMinMax,
     bool? ChartShowPeakHold,
+    bool? ChartAutofitOnDone,
     bool? ChartShowWaterfall,
     bool? ChartShowOscilloscope,
     bool? ChartShowHarmonics,

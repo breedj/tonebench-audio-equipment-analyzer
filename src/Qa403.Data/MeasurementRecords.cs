@@ -278,8 +278,9 @@ public sealed record MeasurementSaveRequest(
 
 public sealed record ProjectRow(long Id, string Name, string? Notes, DateTimeOffset CreatedUtc);
 
+/// <summary><c>SortOrder</c> is the user's own sidebar ordering (drag handle), not a name sort -- see ProjectRepository.ReorderTypesAsync.</summary>
 public sealed record MeasurementTypeRow(
-    long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, DateTimeOffset CreatedUtc);
+    long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
 
 public sealed record MeasurementFilter(
     long? ProjectId = null,

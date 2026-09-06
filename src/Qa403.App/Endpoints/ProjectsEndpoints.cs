@@ -77,6 +77,23 @@ public static class ProjectsEndpoints
             }
         });
 
+        // The sidebar's drag-drop reorder. Whole-list rewrite rather than a per-type "move to
+        // index": the client already holds the full ordered list it just rendered, and a partial
+        // update would leave two types sharing a sort_order -- see ProjectRepository.ReorderTypesAsync.
+        group.MapPut("/{id:long}/measurement-types/order", async (
+            long id, ReorderMeasurementTypesRequest request, ProjectRepository repo, CancellationToken ct) =>
+        {
+            try
+            {
+                bool reordered = await repo.ReorderTypesAsync(id, request.Ids, ct);
+                return reordered ? Results.Ok() : Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         var typeGroup = app.MapGroup("/api/measurement-types");
 
         // Same omitted-ParamsJson fallback as create, above: the "Save" button sends only
@@ -130,7 +147,7 @@ public static class ProjectsEndpoints
     private static ProjectResponse ToResponse(ProjectRow row) => new(row.Id, row.Name, row.Notes, row.CreatedUtc);
 
     private static MeasurementTypeResponse ToResponse(MeasurementTypeRow row) =>
-        new(row.Id, row.ProjectId, row.Kind, row.Name, row.Notes, row.ParamsJson, row.CreatedUtc);
+        new(row.Id, row.ProjectId, row.Kind, row.Name, row.Notes, row.ParamsJson, row.SortOrder, row.CreatedUtc);
 }
 
 public sealed record IdResponse(long Id);
@@ -158,7 +175,10 @@ public sealed record StagedMeasurementConfig(
     bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null);
 
 public sealed record MeasurementTypeResponse(
-    long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, DateTimeOffset CreatedUtc);
+    long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
+
+/// <summary>Every measurement-type id in the project, in the order the sidebar should list them.</summary>
+public sealed record ReorderMeasurementTypesRequest(IReadOnlyList<long> Ids);
 
 /// <summary>
 /// What a measurement type's stored generator/acquisition config actually is, for the UI to load

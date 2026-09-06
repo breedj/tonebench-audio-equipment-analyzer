@@ -189,6 +189,31 @@ export function useProjects() {
     }
   }
 
+  /**
+   * Rewrites the sidebar order from the given full list of type ids. Applied to `types` first and
+   * sent afterwards, because a drop that only takes effect a round-trip later reads as a dropped
+   * drag; a failed request reloads the server's order back over the optimistic one. The list must
+   * be every type in the project exactly once — the server rejects anything else (409) rather
+   * than half-applying it. See ProjectRepository.ReorderTypesAsync.
+   */
+  async function reorderTypes(projectId: number, orderedIds: number[]) {
+    const byId = new Map(types.value.map((t) => [t.id, t]))
+    const reordered = orderedIds.map((id) => byId.get(id)).filter((t): t is MeasurementType => t !== undefined)
+    if (reordered.length !== orderedIds.length) return
+
+    const previous = types.value
+    types.value = reordered
+    try {
+      await api.reorderMeasurementTypes(projectId, orderedIds)
+      error.value = null
+    } catch (e) {
+      types.value = previous
+      error.value = (e as Error).message
+      await loadTypes(projectId).catch(() => {})
+      throw e
+    }
+  }
+
   /** Pushes a type's stored spectrum/range parameters into the live app and returns its generator/acquisition settings — see api.applyMeasurementType. */
   async function applyMeasurementType(id: number): Promise<MeasurementTypeAppliedResponse> {
     try {
@@ -307,6 +332,7 @@ export function useProjects() {
     createMeasurementType,
     updateMeasurementType,
     deleteMeasurementType,
+    reorderTypes,
     applyMeasurementType,
     markDirty,
     saveMeasurementType,

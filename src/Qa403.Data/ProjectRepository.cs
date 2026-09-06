@@ -53,13 +53,11 @@ public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
         var rows = await connection.QueryAsync<MeasurementTypeRowRaw>(
             """
             SELECT id AS Id, project_id AS ProjectId, kind AS Kind, name AS Name, notes AS Notes,
-                   params_json AS ParamsJson, created_utc AS CreatedUtc
-            FROM measurement_type WHERE project_id = @projectId ORDER BY name;
+                   params_json AS ParamsJson, sort_order AS SortOrder, created_utc AS CreatedUtc
+            FROM measurement_type WHERE project_id = @projectId ORDER BY sort_order, id;
             """,
             new { projectId });
-        return rows
-            .Select(r => new MeasurementTypeRow(r.Id, r.ProjectId, r.Kind, r.Name, r.Notes, r.ParamsJson, Qa403Timestamp.Parse(r.CreatedUtc)))
-            .ToList();
+        return rows.Select(ToRow).ToList();
     }
 
     public async Task<MeasurementTypeRow?> GetTypeAsync(long id, CancellationToken ct)
@@ -68,26 +66,58 @@ public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
         var row = await connection.QuerySingleOrDefaultAsync<MeasurementTypeRowRaw>(
             """
             SELECT id AS Id, project_id AS ProjectId, kind AS Kind, name AS Name, notes AS Notes,
-                   params_json AS ParamsJson, created_utc AS CreatedUtc
+                   params_json AS ParamsJson, sort_order AS SortOrder, created_utc AS CreatedUtc
             FROM measurement_type WHERE id = @id;
             """,
             new { id });
 
-        return row is null
-            ? null
-            : new MeasurementTypeRow(row.Id, row.ProjectId, row.Kind, row.Name, row.Notes, row.ParamsJson, Qa403Timestamp.Parse(row.CreatedUtc));
+        return row is null ? null : ToRow(row);
     }
 
+    /// <summary>Appends to the end of the project's ordered list -- see ReorderTypesAsync.</summary>
     public async Task<long> CreateTypeAsync(long projectId, string kind, string name, string? notes, string paramsJson, CancellationToken ct)
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
         return await connection.ExecuteScalarAsync<long>(
             """
-            INSERT INTO measurement_type (project_id, kind, name, notes, params_json, created_utc)
-            VALUES (@projectId, @kind, @name, @notes, @paramsJson, @createdUtc)
+            INSERT INTO measurement_type (project_id, kind, name, notes, params_json, sort_order, created_utc)
+            VALUES (@projectId, @kind, @name, @notes, @paramsJson,
+                    (SELECT COALESCE(MAX(sort_order) + 1, 0) FROM measurement_type WHERE project_id = @projectId),
+                    @createdUtc)
             RETURNING id;
             """,
             new { projectId, kind, name, notes, paramsJson, createdUtc = Qa403Timestamp.Now() });
+    }
+
+    /// <summary>
+    /// Rewrites the project's list order from <paramref name="orderedIds"/> -- position in that
+    /// list becomes sort_order. Rejects a list that is not exactly the project's own type ids
+    /// (any missing, extra, foreign or duplicated id), because a partial rewrite would leave two
+    /// types sharing a sort_order and the list order then decided by the id tiebreak instead of
+    /// by the user's drag.
+    /// </summary>
+    public async Task<bool> ReorderTypesAsync(long projectId, IReadOnlyList<long> orderedIds, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        var existing = (await connection.QueryAsync<long>(
+            "SELECT id FROM measurement_type WHERE project_id = @projectId;", new { projectId })).ToHashSet();
+
+        if (existing.Count == 0) return false;
+        if (orderedIds.Count != existing.Count || !orderedIds.ToHashSet().SetEquals(existing))
+            throw new InvalidOperationException(
+                $"Reorder must list every measurement type in project {projectId} exactly once.");
+
+        await using var transaction = connection.BeginTransaction();
+        for (int i = 0; i < orderedIds.Count; i++)
+        {
+            await connection.ExecuteAsync(
+                "UPDATE measurement_type SET sort_order = @sortOrder WHERE id = @id AND project_id = @projectId;",
+                new { sortOrder = i, id = orderedIds[i], projectId }, transaction);
+        }
+
+        await transaction.CommitAsync(ct);
+        return true;
     }
 
     public async Task<bool> UpdateTypeAsync(long id, string name, string? notes, string paramsJson, CancellationToken ct)
@@ -135,8 +165,11 @@ public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
         return affected > 0;
     }
 
+    private static MeasurementTypeRow ToRow(MeasurementTypeRowRaw r) =>
+        new(r.Id, r.ProjectId, r.Kind, r.Name, r.Notes, r.ParamsJson, (int)r.SortOrder, Qa403Timestamp.Parse(r.CreatedUtc));
+
     private sealed record ProjectRowRaw(long Id, string Name, string? Notes, string CreatedUtc);
 
     private sealed record MeasurementTypeRowRaw(
-        long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, string CreatedUtc);
+        long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, long SortOrder, string CreatedUtc);
 }

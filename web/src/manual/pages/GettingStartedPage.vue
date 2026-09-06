@@ -44,6 +44,11 @@ const { showPage } = useManual()
       <li>Set it up, run it, and save the readings you want to keep.</li>
     </ol>
     <p>
+      New measurements are added to the bottom of the list. To reorder it, drag a measurement by
+      the <strong>⠿</strong> grip on the left of its row and drop it where you want it — a blue
+      line shows where it will land. The order is per project and is saved as soon as you drop.
+    </p>
+    <p>
       A red dot next to a measurement's name means its settings have been changed but not saved.
       <strong>Save</strong> stores the settings into that measurement, <strong>Save as…</strong>
       makes a new measurement from them, and <strong>Save project</strong> saves every changed

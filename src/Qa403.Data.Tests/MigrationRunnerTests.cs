@@ -60,7 +60,7 @@ public class MigrationRunnerTests
             await new MigrationRunner().RunAsync(connection, CancellationToken.None);
 
             long count = await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_version;");
-            Assert.Equal(7L, count);
+            Assert.Equal(8L, count);
         }
         finally
         {
@@ -87,7 +87,7 @@ public class MigrationRunnerTests
             Assert.Equal(
                 [(1L, "001_initial.sql"), (2L, "002_channels_and_indexes.sql"), (3L, "003_project_model.sql"),
                  (4L, "004_capture_preview.sql"), (5L, "005_orphan_cleanup.sql"), (6L, "006_response_trace.sql"),
-                 (7L, "007_response_trace_orphans.sql")],
+                 (7L, "007_response_trace_orphans.sql"), (8L, "008_measurement_type_sort_order.sql")],
                 rows);
         }
         finally
@@ -119,6 +119,7 @@ public class MigrationRunnerTests
                 command.CommandText = """
                     DELETE FROM schema_version WHERE version >= 5;
                     DROP TABLE response_trace;
+                    ALTER TABLE measurement_type DROP COLUMN sort_order;
                     INSERT INTO capture_preview (capture_id, channel, kind, x, min, max)
                     VALUES (4242, 0, 'fft', zeroblob(4), zeroblob(4), zeroblob(4));
                     INSERT INTO metric (capture_id, channel, name, value, unit)

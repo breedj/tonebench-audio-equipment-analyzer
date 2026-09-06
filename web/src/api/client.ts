@@ -511,6 +511,8 @@ export interface MeasurementType {
   notes: string | null
   /** The configured parameters (FFT size, window, band, generator, ...), JSON-encoded. Re-appliable via api.applyMeasurementType. */
   paramsJson: string
+  /** The user's own sidebar position, set by dragging — listMeasurementTypes already returns the list in this order. */
+  sortOrder: number
   createdUtc: string
 }
 
@@ -984,6 +986,14 @@ export const api = {
     request<void>(`/measurement-types/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
 
   deleteMeasurementType: (id: number) => request<void>(`/measurement-types/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Rewrites the project's sidebar order — `ids` must be every one of its measurement types
+   * exactly once, in the order they should be listed (409 otherwise; see
+   * ProjectRepository.ReorderTypesAsync for why a partial list is refused rather than applied).
+   */
+  reorderMeasurementTypes: (projectId: number, ids: number[]) =>
+    request<void>(`/projects/${projectId}/measurement-types/order`, { method: 'PUT', body: JSON.stringify({ ids }) }),
 
   /**
    * Pushes this type's stored spectrum/range parameters into the live app (silent, safe at select

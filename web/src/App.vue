@@ -34,6 +34,8 @@ import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
+import ManualDialog from './manual/ManualDialog.vue'
+import { useManual } from './manual/useManual'
 import UpdateBanner from './components/UpdateBanner.vue'
 import SweepConfigPanel from './components/SweepConfigPanel.vue'
 import AmplitudeSweepConfigPanel from './components/AmplitudeSweepConfigPanel.vue'
@@ -144,6 +146,9 @@ const saveTypeAsOpen = ref(false)
 const saveProjectAsOpen = ref(false)
 const metricPickerOpen = ref(false)
 const configDialogOpen = ref(false)
+// The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
+// because the header's button and the per-measurement help button have to drive one dialog.
+const { openManual, openManualForKind } = useManual()
 // Placeholder for the real "Projects" dialog — for now the button just expands the existing
 // project list/create/delete panel in place, until that gets its own proper dialog.
 const projectPanelOpen = ref(false)
@@ -1179,6 +1184,20 @@ function confirmSaveProjectAs(name: string) {
         Save project as…
       </button>
       <span class="flex-1"></span>
+      <!-- The whole manual, from its index. Each measurement screen has its own "?" further down
+           that jumps straight to that measurement's chapter. -->
+      <button
+        type="button"
+        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        aria-label="Manual"
+        title="Manual"
+        @click="openManual()"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+        </svg>
+      </button>
       <button
         type="button"
         class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
@@ -1211,6 +1230,18 @@ function confirmSaveProjectAs(name: string) {
               class="h-2 w-2 shrink-0 rounded-full bg-red-500"
               title="Unsaved changes"
             ></span>
+            <!-- Shortcut into the manual chapter for whichever kind is selected. It sits in this
+                 toolbar rather than in each screen's own template because the toolbar is the one
+                 row all three screens share, so the button is in the same place everywhere. -->
+            <button
+              type="button"
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              :aria-label="`Help for ${currentType?.kind ? currentType.name : 'this measurement'}`"
+              title="Open this measurement's chapter of the manual."
+              @click="openManualForKind(currentType?.kind)"
+            >
+              ?
+            </button>
             <button
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
@@ -1802,5 +1833,6 @@ function confirmSaveProjectAs(name: string) {
     />
     <MetricPickerDialog :open="metricPickerOpen" @close="metricPickerOpen = false" />
     <ConfigDialog :open="configDialogOpen" @close="configDialogOpen = false" />
+    <ManualDialog />
   </div>
 </template>

@@ -431,42 +431,41 @@ export function pickSurfacePoint(
   return null
 }
 
-/**
- * The strip of a curve's body that nothing drawn in front of it will ever cover — the side face —
- * or null when it exposes none.
- *
- * <p>Only a curve that reaches <em>further along the depth axis than every curve before it</em>
- * exposes anything, which is why this is measured against the furthest reached so far rather than
- * against the previous curve. Those are not the same whenever a curve is shorter than its
- * neighbours, and a decay surface is full of that: a slice deep enough to run out of record starts
- * later than the one behind it, so its leading end goes <em>backwards</em>.</p>
- *
- * <p>Measured against the previous curve instead, every one of those painted a full-height band
- * over ground already covered — eighty of them stacked inside a thirty-pixel strip, which drew as a
- * vertical rainbow bar down the edge of the chart and, on a light page, a wash of the palette's
- * navy floor across the middle of it.</p>
- *
- * @param reachedX The furthest any curve so far has reached, or null if this is the first.
- * @param recedesLeft Which way the stack recedes, i.e. the sign of the layout's depth run.
- */
-export function sideFaceBand(
-  leadingX: number,
-  reachedX: number | null,
-  recedesLeft: boolean,
-): { from: number; to: number } | null {
-  if (reachedX === null) return null
-
-  const advance = recedesLeft ? reachedX - leadingX : leadingX - reachedX
-  // A quarter of a pixel is not a face, and filling one costs a clip, a path and a gradient.
-  if (advance <= 0.25) return null
-
-  return { from: Math.min(leadingX, reachedX), to: Math.max(leadingX, reachedX) }
+/** One rib of the trailing wall: where a curve ends, and how far its own floor is below that. */
+export interface WallRib {
+  x: number
+  y: number
+  /** The curve's own baseline — the bottom of the wall at this depth, not the foot of the box. */
+  floorY: number
+  levelDb: number
 }
 
-/** The furthest along the depth axis any curve has reached, once this one is included. */
-export function furthestReached(leadingX: number, reachedX: number | null, recedesLeft: boolean): number {
-  if (reachedX === null) return leadingX
-  return recedesLeft ? Math.min(reachedX, leadingX) : Math.max(reachedX, leadingX)
+/**
+ * Whether a curve's trailing end reaches past every curve drawn before it, and so adds a rib to the
+ * wall rather than a fold back inside it.
+ *
+ * <p>The <em>trailing</em> end is the one away from the direction the stack recedes in: the right
+ * end when it recedes leftwards. That is the edge with a visible wall, and which edge that is
+ * follows from the occlusion rather than from taste. Take a leftward stack. The strip between two
+ * neighbouring right ends is one no nearer curve reaches into, because every nearer curve ends
+ * further left — so exactly one curve owns it, and the wall standing there is what the viewer sees.
+ * The strip between two neighbouring <em>left</em> ends is the opposite: every nearer curve extends
+ * at least that far, so it is painted over until only the front curve's body is left, and there is
+ * no wall to see. Drawing one there paints a face that is not exposed.</p>
+ *
+ * <p>Non-monotonic ends are the reason this is a test and not an assumption. A curve that runs out
+ * of record ends early, folding back inside the wall; ribbed at that point the wall would double
+ * back on itself and its quads would overlap.</p>
+ */
+export function advancesTrailingEdge(x: number, reachedX: number | null, recedesLeft: boolean): boolean {
+  if (reachedX === null) return true
+  return recedesLeft ? x < reachedX : x > reachedX
+}
+
+/** How far the trailing edge has reached, once this curve is included. */
+export function furthestReached(x: number, reachedX: number | null, recedesLeft: boolean): number {
+  if (reachedX === null) return x
+  return recedesLeft ? Math.min(reachedX, x) : Math.max(reachedX, x)
 }
 
 /**

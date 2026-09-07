@@ -17,10 +17,10 @@ import {
   logTicks,
   lutColor,
   orientSurface,
+  advancesTrailingEdge,
   furthestReached,
   paletteLut,
   pickSurfacePoint,
-  sideFaceBand,
   sliceOrigin,
   sliceStride,
 } from './decay'
@@ -504,35 +504,29 @@ describe('orientSurface', () => {
   })
 })
 
-describe('sideFaceBand', () => {
-  it('exposes the strip a curve reaches past everything before it', () => {
-    expect(sideFaceBand(90, 100, true)).toEqual({ from: 90, to: 100 })
-    expect(sideFaceBand(110, 100, false)).toEqual({ from: 100, to: 110 })
+describe('advancesTrailingEdge', () => {
+  it('advances when a curve ends past everything before it', () => {
+    expect(advancesTrailingEdge(90, 100, true)).toBe(true)
+    expect(advancesTrailingEdge(110, 100, false)).toBe(true)
   })
 
-  it('exposes nothing for the first curve, which has nothing behind it', () => {
-    expect(sideFaceBand(100, null, true)).toBeNull()
+  it('always takes the first curve, which has nothing before it', () => {
+    expect(advancesTrailingEdge(100, null, true)).toBe(true)
   })
 
   /**
-   * The case that made this a function. A curve shorter than the one behind it — a slice deep enough
-   * to have run out of record at the low end — has its leading end *backwards* of where the stack
-   * has already reached, and exposes no face at all. Measured against its immediate predecessor
-   * instead, each of those painted a full-height band over ground already covered: eighty of them
-   * stacked inside a thirty-pixel strip, drawn as a vertical rainbow bar down the edge of the chart.
+   * The case that made this a function. A curve that has run out of record ends early, folding back
+   * inside the wall rather than extending it — ribbed at that point, the wall doubles back on itself
+   * and its quads overlap. A burst decay is full of those, so it is not a corner case.
    */
-  it('exposes nothing for a curve that falls short of the furthest reached', () => {
-    expect(sideFaceBand(105, 100, true)).toBeNull()
-    expect(sideFaceBand(95, 100, false)).toBeNull()
-  })
-
-  it('ignores an advance too small to be a face', () => {
-    expect(sideFaceBand(99.9, 100, true)).toBeNull()
+  it('does not advance for a curve that ends short of the furthest reached', () => {
+    expect(advancesTrailingEdge(105, 100, true)).toBe(false)
+    expect(advancesTrailingEdge(95, 100, false)).toBe(false)
   })
 
   /**
-   * And the reach itself only ever moves outwards, so that a short curve does not let the next one
-   * repaint ground the stack had already covered.
+   * And the reach only ever moves outwards, so one short curve does not let the next one rib the
+   * wall over ground it already covers.
    */
   it('keeps the reach at the furthest, never at the latest', () => {
     expect(furthestReached(90, 100, true)).toBe(90)
@@ -540,5 +534,24 @@ describe('sideFaceBand', () => {
     expect(furthestReached(110, 100, false)).toBe(110)
     expect(furthestReached(95, 100, false)).toBe(100)
     expect(furthestReached(100, null, true)).toBe(100)
+  })
+
+  /**
+   * The two together are what keeps the wall a function of the depth axis: ribs come out strictly
+   * monotonic whatever the curves do, so no quad can ever overlap its neighbour.
+   */
+  it('builds a strictly monotonic wall out of ends that wander', () => {
+    const ends = [100, 96, 99, 92, 94, 88]
+    const ribs: number[] = []
+    let reached: number | null = null
+
+    for (const x of ends) {
+      if (advancesTrailingEdge(x, reached, true)) {
+        ribs.push(x)
+        reached = furthestReached(x, reached, true)
+      }
+    }
+
+    expect(ribs).toEqual([100, 96, 92, 88])
   })
 })

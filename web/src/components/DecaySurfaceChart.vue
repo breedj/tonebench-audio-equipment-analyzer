@@ -3,9 +3,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
 import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
 import { useAppTheme } from '../composables/useAppTheme'
-import type { DecayLayout, DecayPick, OrientedSurface } from '../measurements/decay'
+import type { DecayLayout, DecayPick, OrientedSurface, WallRib } from '../measurements/decay'
 import {
   acrossX,
+  advancesTrailingEdge,
   axisFraction,
   decayLayout,
   drawnSliceIndices,
@@ -21,7 +22,6 @@ import {
   orientSurface,
   paletteLut,
   pickSurfacePoint,
-  sideFaceBand,
   sliceOrigin,
 } from '../measurements/decay'
 
@@ -218,12 +218,13 @@ function drawWaterfall(
   const width = props.thickLines ? 1.6 : 1.0
 
   /**
-   * How far along the depth axis any curve has reached so far — the left end when the stack recedes
-   * leftwards, the right one when it recedes right. What a curve exposes is measured against this
-   * and not against its immediate predecessor; see `sideFaceBand` for why that distinction is the
-   * whole of it.
+   * The trailing wall, collected rib by rib and filled once at the end. It has to be filled after
+   * every curve because it stands in front of all of them: at the strip between two neighbouring
+   * trailing ends, the wall is nearer the viewer than any surface projecting there. See
+   * `advancesTrailingEdge`.
    */
   const recedesLeft = layout.depthX < 0
+  const wall: WallRib[] = []
   let reachedX: number | null = null
 
   for (const index of drawnSliceIndices(count, layout.depthY)) {
@@ -252,12 +253,11 @@ function drawWaterfall(
     ctx.fillStyle = body
     ctx.fill()
 
-    const leading = recedesLeft ? points[0] : points[points.length - 1]
-    if (props.coloredCurves) {
-      const band = sideFaceBand(leading.x, reachedX, recedesLeft)
-      if (band) paintSideFace(ctx, points, leading, band.from, band.to, plotHeight, lut, topDb, bottomDb)
+    const trailing = recedesLeft ? points[points.length - 1] : points[0]
+    if (advancesTrailingEdge(trailing.x, reachedX, recedesLeft)) {
+      wall.push({ x: trailing.x, y: trailing.y, floorY: origin.y + layout.levelHeight, levelDb: trailing.level })
+      reachedX = furthestReached(trailing.x, reachedX, recedesLeft)
     }
-    reachedX = furthestReached(leading.x, reachedX, recedesLeft)
 
     ctx.lineWidth = width
     ctx.lineJoin = 'round'
@@ -291,6 +291,8 @@ function drawWaterfall(
       runShade = current
     }
   }
+
+  if (props.coloredCurves) paintTrailingWall(ctx, wall, lut, topDb, bottomDb)
 }
 
 /** One curve's body: the curve itself, then straight down to the foot of the box and back. */
@@ -304,52 +306,61 @@ function bodyPath(ctx: CanvasRenderingContext2D, points: { x: number; y: number 
 }
 
 /**
- * The leading face of the solid, coloured by level.
+ * The wall at the far end of the surface, coloured by level — ARTA's rainbow down the right-hand
+ * edge, and the thing that makes the chart look like a solid rather than like a stack of ribbons
+ * with the page showing between their ends.
  *
- * <p>Every curve is drawn a little further along the depth axis than the one behind it, so a strip
- * of each one's body is never covered by anything in front — the sawtooth down the leading edge.
- * Filled in the body colour it reads as a ragged edge where the chart happens to stop. Filled from
- * the palette it reads as the cut face of a solid, which is what it is, and it is what gives the
- * reference waterfalls their depth.</p>
+ * <p>It is the face of the box at the last value of the across axis: every curve ends on it, and
+ * because the stack recedes sideways those ends land at different places, leaving a band one whole
+ * depth-run wide. Left in the body colour, that band is the white gaps between curve ends. Filled
+ * from the palette, it is a wall.</p>
  *
- * <p>The strip is only the couple of pixels between this curve's leading end and the previous one's,
- * so the gradient barely runs inside any single one of them — but it is a gradient rather than a
- * flat colour because the strips are not all thin, and one that stopped abruptly at its own level
- * would band. It fades to the palette's floor, not to the body colour, because the face is a cut
- * through the material and the material is the palette. On a light page that is the one part of the
- * surface that stays coloured, which is exactly the part that is meant to look solid.</p>
+ * <p>Drawn <em>after</em> every curve, which is the ordering the geometry asks for rather than a
+ * convenience: at any point inside the band, the wall is nearer the viewer than whatever surface
+ * projects there, so it covers the last pixel or two of the curves behind. One quad per rib, with a
+ * gradient along the top edge — perpendicular to that direction a linear gradient is constant, so
+ * each rib hangs its own level's colour straight down to its own baseline, which is what puts the
+ * palette's bands across the wall horizontally.</p>
  */
-function paintSideFace(
+function paintTrailingWall(
   ctx: CanvasRenderingContext2D,
-  points: { x: number; y: number; level: number }[],
-  leading: { x: number; y: number; level: number },
-  fromX: number,
-  toX: number,
-  plotHeight: number,
+  wall: WallRib[],
   lut: Uint8Array,
   topDb: number,
   bottomDb: number,
 ) {
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(fromX, 0, toX - fromX, plotHeight)
-  ctx.clip()
+  for (let i = 1; i < wall.length; i++) {
+    const back = wall[i - 1]
+    const front = wall[i]
 
-  bodyPath(ctx, points, plotHeight)
+    ctx.beginPath()
+    ctx.moveTo(back.x, back.y)
+    ctx.lineTo(front.x, front.y)
+    ctx.lineTo(front.x, front.floorY)
+    ctx.lineTo(back.x, back.floorY)
+    ctx.closePath()
 
-  // A zero-height gradient paints nothing at all rather than painting its last stop, which would
-  // leave a hole in the face wherever a curve reached the floor.
-  const floor = lutColor(lut, 0)
-  if (plotHeight - leading.y < 1) {
-    ctx.fillStyle = floor
-  } else {
-    const gradient = ctx.createLinearGradient(0, leading.y, 0, plotHeight)
-    gradient.addColorStop(0, lutColor(lut, levelIndex(leading.level, topDb, bottomDb)))
-    gradient.addColorStop(1, floor)
-    ctx.fillStyle = gradient
+    const backColor = lutColor(lut, levelIndex(back.levelDb, topDb, bottomDb))
+    const frontColor = lutColor(lut, levelIndex(front.levelDb, topDb, bottomDb))
+
+    // A zero-length gradient paints nothing at all rather than painting its last stop, which would
+    // punch a hole in the wall wherever two ribs land on the same pixel.
+    if (Math.abs(front.x - back.x) < 0.01 && Math.abs(front.y - back.y) < 0.01) {
+      ctx.fillStyle = backColor
+    } else {
+      const gradient = ctx.createLinearGradient(back.x, back.y, front.x, front.y)
+      gradient.addColorStop(0, backColor)
+      gradient.addColorStop(1, frontColor)
+      ctx.fillStyle = gradient
+    }
+
+    // Stroked as well as filled: neighbouring quads share an edge exactly, and antialiasing leaves a
+    // hairline of whatever is underneath along every one of them — a wall finely striped with the page.
+    ctx.fill()
+    ctx.strokeStyle = ctx.fillStyle
+    ctx.lineWidth = 1
+    ctx.stroke()
   }
-  ctx.fill()
-  ctx.restore()
 }
 
 /**

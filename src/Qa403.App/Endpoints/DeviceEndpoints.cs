@@ -1,5 +1,6 @@
 using Qa403.App.Services;
 using Qa403.Device;
+using Qa403.Device.Simulation;
 
 namespace Qa403.App.Endpoints;
 
@@ -91,12 +92,42 @@ public static class DeviceEndpoints
             return Results.Ok(session.GetStatus());
         });
 
+        // Switches between the real QA403 and the simulator without a restart. Its own endpoint
+        // rather than part of /connect: connect retries whatever is already selected, while this
+        // tears one analyzer down and stands another up in its place.
+        group.MapPost("/kind", async (
+            DeviceKindRequest request, DeviceSessionService session, CancellationToken ct) =>
+        {
+            if (!EnumParsing.TryParse(request.Kind, DeviceKind.Hardware, out DeviceKind kind, out var error))
+                return Results.BadRequest(error);
+
+            try
+            {
+                await session.SwitchDeviceAsync(kind, ct);
+                return Results.Ok(session.GetStatus());
+            }
+            catch (InvalidOperationException ex)
+            {
+                // A measurement is running, or the session is pinned — both states the UI can reach.
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         // Simulator-only: shapes the synthesized input signal, which real hardware cannot do.
         // Exposed so the noise floor and hum can be taken out of the way while reading a spectrum.
         // Patch-style — an omitted field leaves that setting alone.
         group.MapPost("/sim-profile", (SimulatedProfileRequest request, DeviceSessionService session) =>
         {
-            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled))
+            SimulatedDutModel? dut = null;
+            if (request.Dut is not null)
+            {
+                if (!EnumParsing.TryParse(request.Dut, SimulatedDutModel.StraightWire, out SimulatedDutModel parsed, out var dutError))
+                    return Results.BadRequest(dutError);
+
+                dut = parsed;
+            }
+
+            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled, dut))
                 return Results.BadRequest("The connected device is not the simulator, so it has no signal-profile switches.");
 
             return Results.Ok(session.GetStatus());
@@ -119,6 +150,18 @@ public sealed record DeviceStatusResponse(
     bool? SimulatedNoiseEnabled,
     /// <summary>Simulated DUT mains hum on/off, same null convention as <see cref="SimulatedNoiseEnabled"/>.</summary>
     bool? SimulatedHumEnabled,
+    /// <summary>
+    /// Which simulated device under test is patched in ("StraightWire", "TubeAmplifier",
+    /// "Loudspeaker", "BandpassFilter"), or null when the device isn't the simulator. Unlike the two
+    /// switches above this changes the DUT's <i>response</i> rather than what is added to it.
+    /// </summary>
+    string? SimulatedDut,
+    /// <summary>
+    /// Which analyzer the session is talking to — "Hardware" or "Simulated". Reported separately
+    /// from <see cref="IsSimulated"/>, which describes a <i>connected</i> device and so reads false
+    /// while the simulator is selected but not yet up.
+    /// </summary>
+    string DeviceKind,
     /// <summary>
     /// True once the transport has reported the physical device disconnected mid-session (see
     /// <see cref="Qa403.Device.IAnalyzerDevice.DeviceLost"/>). Always false for the simulator.
@@ -185,4 +228,11 @@ public sealed record AutoRangeRequest(bool Enabled);
 
 public sealed record AutoRangeStepDownDelayRequest(double DelayMs);
 
-public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled);
+/// <param name="Dut">
+/// Which simulated device under test to patch in. Omitted leaves it alone, same as the two
+/// switches — see <see cref="Qa403.Device.Simulation.SimulatedDutModel"/>.
+/// </param>
+public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled, string? Dut = null);
+
+/// <param name="Kind">"Hardware" or "Simulated" — see <see cref="Qa403.App.Services.DeviceKind"/>.</param>
+public sealed record DeviceKindRequest(string? Kind);

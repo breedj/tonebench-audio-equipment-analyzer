@@ -140,6 +140,12 @@ public sealed class SimulatedDevice : IAnalyzerDevice
         _stopRequested = false;
 
         var synthesizer = new SignalSynthesizer(_random, config.SampleRateHz);
+
+        // Built here rather than per block, and rebuilt below only when the model changes: the
+        // filters are stateful, and a chain rebuilt every block would restart from rest 40 times a
+        // second and never produce a decay at all.
+        var dut = SimulatedDut.For(_profile.Dut, config.SampleRateHz);
+
         var period = TimeSpan.FromSeconds(config.BlockFrameCount / config.SampleRateHz);
         using var timer = new PeriodicTimer(period);
 
@@ -154,6 +160,12 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                 yield break;
 
             var profile = _profile;
+
+            // A model changed mid-acquisition starts from rest, which is right: it is a different
+            // DUT, and carrying the previous one's state into it would ring for a moment with poles
+            // that no longer exist.
+            if (dut?.Model != profile.Dut)
+                dut = SimulatedDut.For(profile.Dut, config.SampleRateHz);
 
             // Two independent clip points, one per end of the signal chain: the generator's own
             // DAC full scale, and the analyzer's ADC full scale. See the per-sample loop below.
@@ -175,12 +187,20 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                 {
                     // Signal chain order matters: the generator's output is hard-clipped at the
                     // DAC's full scale first (asking for a level above the selected output range
-                    // truncates the waveform, exactly as real hardware does), then the DUT's hum
-                    // and noise are added downstream of it, and only then does the whole thing meet
-                    // the ADC's soft input saturation. Hum/noise are not products of the DAC, so
-                    // they deliberately sit outside the output clip.
+                    // truncates the waveform, exactly as real hardware does), then it passes
+                    // through the DUT, then the DUT's hum and noise are added downstream of it, and
+                    // only then does the whole thing meet the ADC's soft input saturation. Hum and
+                    // noise are not products of the DAC, so they deliberately sit outside the
+                    // output clip; nor are they products of the DUT's filters, so they sit after
+                    // those too — a DUT's own noise floor is not band-limited by its own response.
                     double generated = SignalSynthesizer.HardClip(
                         synthesizer.ComputeChannelSample(profile, absoluteFrame, ch), outputClipPeakV);
+
+                    // Left only. The right input is the bench's reference tap, and filtering it too
+                    // would let the impulse response's RightChannel reference divide the DUT
+                    // straight back out — see SimulatedDutModel.
+                    if (ch == 0 && dut is not null)
+                        generated = dut.Process(generated);
 
                     double sample = SignalSynthesizer.SoftClip(generated + sharedAdditive, inputClipPeakV);
                     buffer[(frame * config.ChannelCount) + ch] = (float)sample;

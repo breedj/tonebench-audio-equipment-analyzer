@@ -697,4 +697,21 @@ public sealed record ImpulseResponseParameters(
     double? ChartTimeFromMs = null,
     double? ChartTimeToMs = null,
     double? ChartFreqFromHz = null,
-    double? ChartFreqToHz = null);
+    double? ChartFreqToHz = null,
+    /// <summary>How the two decay surfaces are drawn — stacked curves or a sonogram — and in what colours.</summary>
+    string? ChartDecayMode = null,
+    string? ChartDecayPalette = null,
+    bool? ChartDecayColoredCurves = null,
+    double? ChartDecayRangeDb = null,
+    /// <summary>The cumulative spectral decay's analysis. Not run settings: they are questions put to
+    /// a record already captured, and changing one redraws rather than re-measures. Stored all the
+    /// same, because a surface is unreadable without knowing which analysis produced it.</summary>
+    int? ChartCsdFftLength = null,
+    int? ChartCsdBlockShiftSamples = null,
+    int? ChartCsdBlockCount = null,
+    string? ChartCsdWindowMode = null,
+    double? ChartCsdRiseTimeMs = null,
+    /// <summary>The burst decay's analysis, on the same footing.</summary>
+    int? ChartBurstMaxPeriods = null,
+    int? ChartBurstPointsPerPeriod = null,
+    string? ChartBurstResolution = null);

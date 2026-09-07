@@ -125,6 +125,77 @@ public sealed class ImpulseResponseRunner(
     public ImpulseResponseResult? LastImpulse => _lastLeftImpulse;
 
     /// <summary>
+    /// A cumulative spectral decay read off the impulse response currently on screen.
+    ///
+    /// <para><b>Computed on demand rather than with the measurement</b>, and that is what makes the
+    /// two decay views usable at all: every one of their settings is an analysis choice, not an
+    /// acquisition one, so changing a transform length or a block count has to redraw from the
+    /// record already captured instead of asking for another sweep. The same record answers as many
+    /// different questions as are put to it.</para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Nothing has been measured yet.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The settings do not describe a surface this record can support.</exception>
+    public Task<DecaySurface> ComputeCumulativeSpectralDecayAsync(CsdSettings settings, CancellationToken ct)
+    {
+        var (impulse, request) = RequireLastImpulse();
+
+        // Off the request thread: a long transform times a hundred blocks is not instant, and a
+        // status poll has to stay answerable while it runs. Its own FFT backend for the same reason
+        // — the backends cache one scratch array sized to the last call, so sharing `_fft` with a
+        // measurement running concurrently would have the two overwrite each other's.
+        return Task.Run(
+            () => CumulativeSpectralDecay.Compute(
+                impulse.Gated, impulse.PeakIndex, request.SampleRateHz,
+                AvailablePostSamples(request), settings, new MathNetBackend()),
+            ct);
+    }
+
+    /// <summary>
+    /// A burst decay read off the impulse response currently on screen. See
+    /// <see cref="ComputeCumulativeSpectralDecayAsync"/> for why this is computed on demand.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Nothing has been measured yet.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The settings do not describe a surface this record can support.</exception>
+    public Task<DecaySurface> ComputeBurstDecayAsync(BurstDecaySettings settings, CancellationToken ct)
+    {
+        var (impulse, request) = RequireLastImpulse();
+
+        // Rather more than not instant: a two-period wavelet at the bottom of the band is tens of
+        // thousands of taps, and there is one convolution per analysis frequency. It parallelises
+        // inside, which is the other reason it must not run on the request thread.
+        return Task.Run(
+            () => BurstDecay.Compute(
+                impulse.Gated, impulse.PeakIndex, request.SampleRateHz,
+                AvailablePostSamples(request), settings),
+            ct);
+    }
+
+    /// <summary>The measured impulse and the settings that produced it, or a message saying there is none.</summary>
+    private (ImpulseResponseResult Impulse, ImpulseResponseRequest Request) RequireLastImpulse()
+    {
+        ImpulseResponseResult? impulse;
+        lock (_stateLock)
+            impulse = _lastLeftImpulse;
+
+        var request = _lastRequest;
+        if (impulse is null || request is null)
+            throw new InvalidOperationException("Nothing has been measured yet — run an impulse response first.");
+
+        return (impulse, request);
+    }
+
+    /// <summary>
+    /// How far past the impulse the record is the DUT rather than the sweep gate's own edge. The
+    /// taper is excluded, not just the cut: a decay analysis reading across a raised-cosine edge
+    /// measures the edge.
+    /// </summary>
+    private static int AvailablePostSamples(ImpulseResponseRequest request)
+    {
+        var gate = request.SweepGate;
+        return Math.Max(0, gate.PostSamples - gate.TaperSamples);
+    }
+
+    /// <summary>
     /// Every phase in which this measurement is busy. <see cref="FrequencyResponsePhase.Analyzing"/>
     /// belongs here and in neither of the other runners' equivalents: the rule is that every phase a
     /// runner can <i>enter</i> must be in its own <c>Running</c>, or the run reads as finished the

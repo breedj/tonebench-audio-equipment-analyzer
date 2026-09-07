@@ -14,8 +14,29 @@ namespace Qa403.App.Services;
 /// getters for, and drains acquisition blocks into the <see cref="SpectrumPipeline"/> for the
 /// duration of each acquisition run.
 /// </summary>
-public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, ILogger<DeviceSessionService> logger)
+public sealed class DeviceSessionService(
+    AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, ILogger<DeviceSessionService> logger)
+    : IDisposable
 {
+    /// <summary>
+    /// The device this session is talking to. A <b>field</b> rather than a constructor parameter
+    /// because it is replaceable at runtime — see <see cref="SwitchDeviceAsync"/>, and
+    /// <see cref="AnalyzerDeviceFactory"/> for why the container no longer owns its lifetime.
+    /// </summary>
+    private IAnalyzerDevice _device = deviceFactory.Create(deviceFactory.InitialKind);
+
+    private DeviceKind _kind = deviceFactory.InitialKind;
+
+    /// <summary>
+    /// A session pinned to one already-constructed device, with nothing to switch to. Every test in
+    /// the app builds a session this way, and the shape of that call is what this overload exists to
+    /// keep — the real app goes through the factory.
+    /// </summary>
+    public DeviceSessionService(IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, ILogger<DeviceSessionService> logger)
+        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, logger)
+    {
+    }
+
     /// <summary>Real QA403 hardware queue depth (docs/qa403-app-stack-spec.md §2.1) — also the floor enforced on <see cref="StartAcquisitionAsync"/>'s <c>BlockFrameCount</c>.</summary>
     public const int MinBlockFrameCount = 1024;
 
@@ -96,7 +117,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// <summary>Floor on the gap between liveness pings, just under the UI's own 2 s status poll so a single poller still gets one per poll.</summary>
     private const int LivenessPingIntervalMs = 1500;
 
-    public DeviceCapabilities Capabilities => device.Capabilities;
+    public DeviceCapabilities Capabilities => _device.Capabilities;
 
     public bool Acquiring => _isAcquiring;
 
@@ -106,7 +127,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// <summary>Null until <see cref="ConnectAsync"/> completes.</summary>
     public DeviceInfo? Info => _info;
 
-    public double InputRangeDbv => device.InputRangeDbv;
+    public double InputRangeDbv => _device.InputRangeDbv;
 
     /// <summary>
     /// RX chunks the device has dropped since connect. Exposed so a caller that owns a measurement
@@ -114,7 +135,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// a hole in the sample stream can be attributed to the frequency it actually contaminated
     /// instead of to the run as a whole.
     /// </summary>
-    public long DroppedRxChunks => device.DroppedRxChunks;
+    public long DroppedRxChunks => _device.DroppedRxChunks;
 
     /// <summary>
     /// Assembled blocks dropped after calibration because this service's own drain loop fell behind
@@ -122,7 +143,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// <see cref="DroppedRxChunks"/> rather than folded into it, because the two name different
     /// halves of the pipeline and only reporting one of them is what hid this for weeks.
     /// </summary>
-    public long DroppedBlocks => device.DroppedBlocks;
+    public long DroppedBlocks => _device.DroppedBlocks;
 
     public double OutputRangeDbv => _outputRangeDbv;
 
@@ -135,12 +156,12 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// pipeline's DSP thread and must not take <see cref="_sessionLock"/>.
     /// </summary>
     public DiagnosticContext CaptureDiagnosticContext() => new(
-        InputRangeDbv: device.InputRangeDbv,
+        InputRangeDbv: _device.InputRangeDbv,
         OutputRangeDbv: _outputRangeDbv,
         AutoRangeEnabled: AutoRangeEnabled ?? false,
         Generator: _generatorConfig,
-        DroppedRxChunks: device.DroppedRxChunks,
-        DroppedBlocks: device.DroppedBlocks);
+        DroppedRxChunks: _device.DroppedRxChunks,
+        DroppedBlocks: _device.DroppedBlocks);
 
     /// <summary>The effective (already bin-snapped, if snapping is on) generator config — what the device is actually playing.</summary>
     public GeneratorConfig EffectiveGeneratorConfig => _generatorConfig;
@@ -154,7 +175,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// type test rather than through <see cref="IAnalyzerDevice"/>: real hardware has no such knob,
     /// so putting it on the interface would be a lie. See <see cref="SimulatedSignalProfile"/>.
     /// </summary>
-    public bool? SimulatedNoiseEnabled => (device as SimulatedDevice)?.SignalProfile.NoiseEnabled;
+    public bool? SimulatedNoiseEnabled => (_device as SimulatedDevice)?.SignalProfile.NoiseEnabled;
 
     /// <summary>
     /// Whether the simulated DUT adds mains hum (a 50 Hz fundamental plus two harmonics 6 dB apart),
@@ -162,16 +183,23 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// <see cref="SimulatedNoiseEnabled"/> — hum is a deterministic tone stack, not part of the
     /// noise path.
     /// </summary>
-    public bool? SimulatedHumEnabled => (device as SimulatedDevice)?.SignalProfile.HumEnabled;
+    public bool? SimulatedHumEnabled => (_device as SimulatedDevice)?.SignalProfile.HumEnabled;
+
+    /// <summary>
+    /// Which simulated device under test is patched in, or <c>null</c> when the device isn't the
+    /// simulator. Unlike the noise and hum switches this one changes the DUT's <i>response</i>
+    /// rather than what is added to it — see <see cref="SimulatedDutModel"/>.
+    /// </summary>
+    public SimulatedDutModel? SimulatedDut => (_device as SimulatedDevice)?.SignalProfile.Dut;
 
     /// <summary>
     /// Patches the simulated DUT's signal profile; <c>null</c> leaves a setting alone. Returns
     /// false when the device isn't the simulator, so the caller can answer with a 400 rather than
     /// silently accepting a setting that does nothing.
     /// </summary>
-    public bool TrySetSimulatedProfile(bool? noiseEnabled, bool? humEnabled)
+    public bool TrySetSimulatedProfile(bool? noiseEnabled, bool? humEnabled, SimulatedDutModel? dut = null)
     {
-        if (device is not SimulatedDevice simulated)
+        if (_device is not SimulatedDevice simulated)
             return false;
 
         // Snapshot once: the property returns an immutable record, and re-reading it per field
@@ -181,6 +209,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         {
             NoiseEnabled = noiseEnabled ?? profile.NoiseEnabled,
             HumEnabled = humEnabled ?? profile.HumEnabled,
+            Dut = dut ?? profile.Dut,
         };
 
         return true;
@@ -205,43 +234,153 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_info is not null)
-                return;
-
-            // Once per process, not once per attempt: every failed attempt would otherwise leave
-            // another subscription behind, and a later disconnect would then log once per attempt.
-            if (!_deviceLostHooked)
-            {
-                device.DeviceLost += OnDeviceLost;
-                _deviceLostHooked = true;
-            }
-
-            _info = await device.ConnectAsync(ct);
-
-            // Most sensitive input range (best resolution for a fresh measurement), and the *largest*
-            // output range — maximum generator headroom, so a default tone level can't sit above DAC
-            // full scale and arrive pre-clipped before the user has touched anything.
-            _inputRangeDbv = Capabilities.InputRangesDbv[0];
-            _outputRangeDbv = Capabilities.OutputRangesDbv[^1];
-
-            // Push both to the device rather than only caching them here. The device has its own field
-            // defaults, and leaving the two unsynced means status reports one full scale while the
-            // device actually clips at another — invisible until the ranges started doing something.
-            await device.SetInputRangeAsync(_inputRangeDbv, ct);
-            await device.SetOutputRangeAsync(_outputRangeDbv, ct);
-
-            // A fresh handle: whatever was lost before belonged to the previous connection.
-            _deviceLost = false;
-            _connectionGeneration++;
-            logger.LogInformation(
-                "Connected to {Product} (serial {Serial}, fw {Firmware}, simulated={Simulated})",
-                _info.ProductName, _info.SerialNumber, _info.FirmwareVersion, _info.IsSimulated);
+            await ConnectCoreAsync(ct);
         }
         finally
         {
             _sessionLock.Release();
         }
     }
+
+    /// <summary>
+    /// <see cref="ConnectAsync"/> without the lock, for callers that already hold it — the same
+    /// public-entry-point/Core split every other operation on this class uses, because
+    /// <see cref="SemaphoreSlim"/> is not reentrant and <see cref="SwitchDeviceAsync"/> has to
+    /// connect the device it just built while still holding the session.
+    /// </summary>
+    private async Task ConnectCoreAsync(CancellationToken ct)
+    {
+        if (_info is not null)
+            return;
+
+        // Once per device, not once per attempt: every failed attempt would otherwise leave
+        // another subscription behind, and a later disconnect would then log once per attempt.
+        if (!_deviceLostHooked)
+        {
+            _device.DeviceLost += OnDeviceLost;
+            _deviceLostHooked = true;
+        }
+
+        _info = await _device.ConnectAsync(ct);
+
+        // Most sensitive input range (best resolution for a fresh measurement), and the *largest*
+        // output range — maximum generator headroom, so a default tone level can't sit above DAC
+        // full scale and arrive pre-clipped before the user has touched anything.
+        _inputRangeDbv = Capabilities.InputRangesDbv[0];
+        _outputRangeDbv = Capabilities.OutputRangesDbv[^1];
+
+        // Push both to the device rather than only caching them here. The device has its own field
+        // defaults, and leaving the two unsynced means status reports one full scale while the
+        // device actually clips at another — invisible until the ranges started doing something.
+        await _device.SetInputRangeAsync(_inputRangeDbv, ct);
+        await _device.SetOutputRangeAsync(_outputRangeDbv, ct);
+
+        // A fresh handle: whatever was lost before belonged to the previous connection.
+        _deviceLost = false;
+        _connectionGeneration++;
+        logger.LogInformation(
+            "Connected to {Product} (serial {Serial}, fw {Firmware}, simulated={Simulated})",
+            _info.ProductName, _info.SerialNumber, _info.FirmwareVersion, _info.IsSimulated);
+    }
+
+    /// <summary>Which analyzer the session is talking to, connected or not.</summary>
+    public DeviceKind Kind => _kind;
+
+    /// <summary>
+    /// Replaces the analyzer with one of the requested kind: real QA403 or simulator, chosen at
+    /// runtime rather than by a command-line flag.
+    ///
+    /// <para><b>The old device is torn down exactly as it is at host shutdown</b>, and for exactly
+    /// the same reasons — pipeline stopped, stream stopped, transfer pump <i>joined</i>, and only
+    /// then the handle released. Skipping any of that leaves the QA403 streaming with nobody reading
+    /// it, which is the state that makes it unreachable to every app until it is power-cycled. See
+    /// <see cref="ShutdownAsync"/>, whose remarks are the long version.</para>
+    ///
+    /// <para>Refused while a measurement is running rather than interrupting one: every runner in the
+    /// app holds the session across its whole sweep, and pulling the device out from under one would
+    /// surface as an unexplained mid-run failure rather than as the deliberate act it was.</para>
+    ///
+    /// <para>The new device is connected on the spot, and a connect failure is <b>not</b> an error
+    /// here: switching to Hardware with no QA403 attached leaves the session disconnected and the
+    /// Connect button live, which is the same state the app starts in when nothing is plugged in.</para>
+    /// </summary>
+    public async Task SwitchDeviceAsync(DeviceKind kind, CancellationToken ct)
+    {
+        if (!deviceFactory.CanSwitch)
+            throw new InvalidOperationException("This session is pinned to one device and cannot switch.");
+
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (kind == _kind)
+                return;
+
+            if (_isAcquiring)
+                throw new InvalidOperationException("Stop the running measurement before switching devices.");
+
+            logger.LogInformation("Switching analyzer: {From} -> {To}", _kind, kind);
+
+            await TearDownDeviceAsync();
+
+            _kind = kind;
+            _device = deviceFactory.Create(kind);
+
+            try
+            {
+                await ConnectCoreAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Same posture as startup: no device is an ordinary state, not a failed request.
+                logger.LogWarning(
+                    "Switched to {Kind} but could not connect ({Reason}) — press Connect once it is available.",
+                    kind, ex.Message);
+            }
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Brings the current device all the way down and releases it: the teardown
+    /// <see cref="ShutdownAsync"/> performs, plus the handle release the DI container used to do,
+    /// plus the session state that belonged to that device rather than to this app.
+    /// </summary>
+    private async Task TearDownDeviceAsync()
+    {
+        _isAcquiring = false;
+        await spectrumPipeline.StopAsync();
+        await StopStreamIfRunningAsync();
+
+        if (_deviceLostHooked)
+        {
+            _device.DeviceLost -= OnDeviceLost;
+            _deviceLostHooked = false;
+        }
+
+        (_device as IDisposable)?.Dispose();
+
+        _info = null;
+        _deviceLost = false;
+        _generatorConfig = GeneratorConfig.Off;
+        _requestedGeneratorConfig = GeneratorConfig.Off;
+    }
+
+    /// <summary>
+    /// Releases the device. Runs when the container disposes this singleton — which is
+    /// <b>after</b> <see cref="DeviceLifecycleHostedService"/> has stopped and therefore after
+    /// <see cref="ShutdownAsync"/> has joined the pump, i.e. the exact point at which the container
+    /// used to dispose <c>IAnalyzerDevice</c> itself. Moving the ownership here did not move that
+    /// ordering, and it must not: releasing the handle with transfers still in flight is what leaves
+    /// a QA403 needing a power cycle.
+    /// </summary>
+    public void Dispose() => (_device as IDisposable)?.Dispose();
 
     /// <summary>
     /// Guards every operation that has to reach the hardware. The app runs perfectly well with no
@@ -311,7 +450,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
             // The return value needs no handling: a false answer means the device already raised
             // DeviceLost, and OnDeviceLost has cleared _info by the time this returns — so the
             // GetStatus() that follows reports the disconnect on this very poll.
-            await device.PingAsync(ct).ConfigureAwait(false);
+            await _device.PingAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -333,12 +472,14 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         if (_info is not { } info)
             return new DeviceStatusResponse(
                 false, "", "", "", false, 0, 0, false, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
-                _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks, device.DroppedBlocks);
+                SimulatedDut?.ToString(), _kind.ToString(),
+                _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
-            device.InputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
-            _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, device.DroppedRxChunks, device.DroppedBlocks);
+            _device.InputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
+            SimulatedDut?.ToString(), _kind.ToString(),
+            _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks);
     }
 
     /// <summary>
@@ -422,18 +563,18 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// own (the simulator), so the UI can hide the checkbox — same null convention as
     /// <see cref="SimulatedNoiseEnabled"/>.
     /// </summary>
-    public bool? AutoRangeEnabled => device is SimulatedDevice ? null : device.AutoRangeEnabled;
+    public bool? AutoRangeEnabled => _device is SimulatedDevice ? null : _device.AutoRangeEnabled;
 
-    public void SetAutoRangeEnabled(bool enabled) => device.AutoRangeEnabled = enabled;
+    public void SetAutoRangeEnabled(bool enabled) => _device.AutoRangeEnabled = enabled;
 
     /// <summary>
     /// How long a peak must stay under-range before hardware autoranging steps to a more sensitive
     /// range, in milliseconds. Null with the same convention as <see cref="AutoRangeEnabled"/> — the
     /// simulator has no hardware ranger to configure.
     /// </summary>
-    public double? AutoRangeStepDownDelayMs => device is SimulatedDevice ? null : device.AutoRangeStepDownDelayMs;
+    public double? AutoRangeStepDownDelayMs => _device is SimulatedDevice ? null : _device.AutoRangeStepDownDelayMs;
 
-    public void SetAutoRangeStepDownDelayMs(double delayMs) => device.AutoRangeStepDownDelayMs = delayMs;
+    public void SetAutoRangeStepDownDelayMs(double delayMs) => _device.AutoRangeStepDownDelayMs = delayMs;
 
     /// <summary>
     /// Whether hardware autoranging may step to a *more sensitive* range on its own. Null with the
@@ -444,9 +585,9 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// of a sweep, restoring whatever it found. A checkbox for it would be a second, slower way to
     /// express what the Auto checkbox already covers, and one a sweep would then have to fight.</para>
     /// </summary>
-    public bool? AutoRangeStepDownEnabled => device is SimulatedDevice ? null : device.AutoRangeStepDownEnabled;
+    public bool? AutoRangeStepDownEnabled => _device is SimulatedDevice ? null : _device.AutoRangeStepDownEnabled;
 
-    public void SetAutoRangeStepDownEnabled(bool enabled) => device.AutoRangeStepDownEnabled = enabled;
+    public void SetAutoRangeStepDownEnabled(bool enabled) => _device.AutoRangeStepDownEnabled = enabled;
 
     public async Task SetInputRangeAsync(double dbv, CancellationToken ct)
     {
@@ -469,7 +610,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     {
         EnsureConnected();
 
-        await device.SetInputRangeAsync(dbv, ct);
+        await _device.SetInputRangeAsync(dbv, ct);
         _inputRangeDbv = dbv;
 
         // A range change is a gain step in the analog path — same reasoning as the generator
@@ -487,7 +628,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     /// matters for a flush that is about to be followed by a restart anyway.
     /// </summary>
     private int StimulusLatencyFrames =>
-        device.StimulusLatencyFrames(_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
+        _device.StimulusLatencyFrames(_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
 
     /// <summary>
     /// Re-applies the last generator request. Needed after an FFT-size or sample-rate change, because
@@ -565,7 +706,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     {
         EnsureConnected();
 
-        await device.SetOutputRangeAsync(dbv, ct);
+        await _device.SetOutputRangeAsync(dbv, ct);
         _outputRangeDbv = dbv;
     }
 
@@ -626,7 +767,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
         if (widening && nextOutputRangeDbv != _outputRangeDbv)
             await SetOutputRangeCoreAsync(nextOutputRangeDbv, ct);
 
-        await device.ConfigureGeneratorAsync(config, ct);
+        await _device.ConfigureGeneratorAsync(config, ct);
         _generatorConfig = config;
 
         if (!widening && nextOutputRangeDbv != _outputRangeDbv)
@@ -740,7 +881,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
     {
         try
         {
-            await foreach (var block in device.StreamAsync(config, ct).WithCancellation(ct))
+            await foreach (var block in _device.StreamAsync(config, ct).WithCancellation(ct))
             {
                 if (_isAcquiring)
                 {
@@ -763,7 +904,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
                         logger.LogInformation(
                             "Input range stepped to {RangeDbv} dBV by autoranging — flushing the "
                                 + "analysis window, since the step discarded the RX transfers in flight",
-                            device.InputRangeDbv);
+                            _device.InputRangeDbv);
 
                         spectrumPipeline.Flush();
                     }
@@ -803,7 +944,7 @@ public sealed class DeviceSessionService(IAnalyzerDevice device, SpectrumPipelin
             return;
 
         cts.Cancel();
-        await device.StopAsync();
+        await _device.StopAsync();
         if (task is not null)
             await task;
         cts.Dispose();

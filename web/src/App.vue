@@ -51,6 +51,7 @@ import ImpulseResponseConfigPanel from './components/ImpulseResponseConfigPanel.
 import ImpulseResponseDisplayPanel from './components/ImpulseResponseDisplayPanel.vue'
 import ImpulseResponseChart from './components/ImpulseResponseChart.vue'
 import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
+import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
 import LoopbackReferenceDialog from './components/LoopbackReferenceDialog.vue'
 import ResponsePolarChart from './components/ResponsePolarChart.vue'
 import ResponseStabilityPanel from './components/ResponseStabilityPanel.vue'
@@ -58,6 +59,11 @@ import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import { useFrequencyResponse } from './composables/useFrequencyResponse'
 import { useImpulseResponse } from './composables/useImpulseResponse'
+import {
+  BURST_FREQUENCY_COLUMNS,
+  DECAY_DISPLAY_COLUMNS,
+  defaultCsdAnalysis,
+} from './measurements/decay'
 import { useSweep } from './composables/useSweep'
 import { nearestSweepPoint } from './sweep/points'
 import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
@@ -211,6 +217,12 @@ const {
   cancel: cancelImpulse,
   clear: clearImpulse,
   refreshReferences: refreshLoopbackReferences,
+  csdSurface: impulseCsdSurface,
+  burstSurface: impulseBurstSurface,
+  decayError: impulseDecayError,
+  decayComputing: impulseDecayComputing,
+  computeCsd: computeImpulseCsd,
+  computeBurstDecay: computeImpulseBurstDecay,
 } = useImpulseResponse()
 
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
@@ -780,6 +792,17 @@ function setSimulatedProfile(patch: SimulatedProfileRequest) {
   })
 }
 
+/**
+ * Swaps the analyzer between the real QA403 and the simulator. The server tears the old one down
+ * and stands the new one up, so a failure here is a refusal (a measurement is running) rather than
+ * a half-switched session — the error line is the whole response.
+ */
+function setDeviceKind(kind: import('./api/client').DeviceKindName) {
+  return withErrorReporting(async () => {
+    status.value = await api.setDeviceKind(kind)
+  })
+}
+
 // The status bar's Connect button: the app starts with no device rather than refusing to start, so
 // this is how a QA403 plugged in afterwards gets picked up. Failure is just an error line in the
 // status bar — nothing else about the session changes, and pressing it again is safe.
@@ -1100,21 +1123,32 @@ const impulseShowDataPoints = ref(false)
  * defaults to -120 dB because that is where a response's noise floor lives, and the harmonics to the
  * same, because on a clean DUT every curve sits below -80 dBc and a -60 dB floor shows an empty plot.
  */
-const impulseYWindows = reactive<Record<import('./api/client').ImpulseView, { top: number; bottom: number }>>({
+type ImpulseLevelView = 'Impulse' | 'Response' | 'Harmonics'
+
+const impulseYWindows = reactive<Record<ImpulseLevelView, { top: number; bottom: number }>>({
   Impulse: { top: 0, bottom: -60 },
   Response: { top: 0, bottom: -120 },
   Harmonics: { top: 0, bottom: -120 },
 })
+
+/**
+ * Which window the level fields edit. The two decay views have none — 0 dB there is fixed by the
+ * surface's own normalisation and the only setting is how far below it to reach — so they fall back
+ * to the impulse view's rather than indexing a record that has no key for them.
+ */
+const impulseLevelView = computed<ImpulseLevelView>(() =>
+  impulseView.value === 'Csd' || impulseView.value === 'BurstDecay' ? 'Impulse' : impulseView.value,
+)
 const impulseYTopDb = computed({
-  get: () => impulseYWindows[impulseView.value].top,
+  get: () => impulseYWindows[impulseLevelView.value].top,
   set: (value: number) => {
-    impulseYWindows[impulseView.value].top = value
+    impulseYWindows[impulseLevelView.value].top = value
   },
 })
 const impulseYBottomDb = computed({
-  get: () => impulseYWindows[impulseView.value].bottom,
+  get: () => impulseYWindows[impulseLevelView.value].bottom,
   set: (value: number) => {
-    impulseYWindows[impulseView.value].bottom = value
+    impulseYWindows[impulseLevelView.value].bottom = value
   },
 })
 const impulsePhaseTopDeg = ref(180)
@@ -1123,6 +1157,71 @@ const impulseTimeFromMs = ref(-1)
 const impulseTimeToMs = ref(20)
 const impulseFreqFromHz = ref(20)
 const impulseFreqToHz = ref(20000)
+
+// The two decay surfaces. How they are drawn is shared between them; what is analysed is not.
+const impulseDecayMode = ref<import('./api/client').DecayChartMode>('Waterfall')
+const impulseDecayPalette = ref<import('./api/client').DecayPalette>('Jet')
+const impulseDecayColoredCurves = ref(true)
+const impulseDecayRangeDb = ref(30)
+
+const initialCsd = defaultCsdAnalysis(48000)
+const impulseCsdFftLength = ref(initialCsd.fftLength)
+const impulseCsdBlockShiftSamples = ref(initialCsd.blockShiftSamples)
+const impulseCsdBlockCount = ref(initialCsd.blockCount)
+const impulseCsdWindowMode = ref<import('./api/client').CsdWindowModeName>(initialCsd.windowMode)
+const impulseCsdRiseTimeMs = ref(initialCsd.riseTimeMs)
+
+const impulseBurstMaxPeriods = ref(30)
+const impulseBurstPointsPerPeriod = ref(8)
+
+/**
+ * The lowest frequency the deepest slice can still answer for — where the burst decay's curves stop
+ * short at the left. It is not a setting and not a defect: thirty periods of 50 Hz is 600 ms, and the
+ * sweep gate does not hold that much. Stated under the chart the way the CSD's transform limit is,
+ * because a curve that stops in mid-air with nothing said about it reads as a drawing fault. Zero
+ * when every curve reaches the bottom of the band, in which case there is nothing to say.
+ */
+const impulseBurstFullDepthHz = computed(() => {
+  const surface = impulseBurstSurface.value
+  if (!surface || surface.slices.length === 0) return 0
+
+  const deepest = surface.slices[surface.slices.length - 1]
+  return deepest.firstValidColumn > 0 ? surface.freqHz[deepest.firstValidColumn] : 0
+})
+const impulseBurstResolution = ref<import('./api/client').BurstDecayResolutionName>('PreferFrequency')
+
+/** The sample rate the CSD defaults above were derived for. See the watcher below. */
+const impulseCsdDefaultsRate = ref(48000)
+
+/**
+ * Untouched CSD defaults follow the measurement's sample rate.
+ *
+ * Every one of those settings is in **samples**, and a sample is four times shorter at 192 kHz than
+ * at 48 — a 256-point transform resolves 188 Hz at one rate and 750 Hz at the other. Leaving the
+ * defaults fixed would mean the chart is right at one sample rate and empty at another, for no
+ * reason the user could see. Settings the user has actually changed are left alone, which is what
+ * comparing against the previous rate's defaults establishes.
+ */
+watch(
+  () => impulseStatus.value?.sampleRateHz ?? 0,
+  (rate) => {
+    if (!(rate > 0) || rate === impulseCsdDefaultsRate.value) return
+
+    const previous = defaultCsdAnalysis(impulseCsdDefaultsRate.value)
+    const untouched =
+      impulseCsdFftLength.value === previous.fftLength &&
+      impulseCsdBlockShiftSamples.value === previous.blockShiftSamples &&
+      impulseCsdBlockCount.value === previous.blockCount
+
+    impulseCsdDefaultsRate.value = rate
+    if (!untouched) return
+
+    const next = defaultCsdAnalysis(rate)
+    impulseCsdFftLength.value = next.fftLength
+    impulseCsdBlockShiftSamples.value = next.blockShiftSamples
+    impulseCsdBlockCount.value = next.blockCount
+  },
+)
 
 let impulseDisplayRestoring = false
 
@@ -1157,6 +1256,24 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   if (typeof stored.chartFreqFromHz === 'number' && stored.chartFreqFromHz > 0)
     impulseFreqFromHz.value = stored.chartFreqFromHz
   if (typeof stored.chartFreqToHz === 'number' && stored.chartFreqToHz > 0) impulseFreqToHz.value = stored.chartFreqToHz
+  if (stored.chartDecayMode) impulseDecayMode.value = stored.chartDecayMode
+  if (stored.chartDecayPalette) impulseDecayPalette.value = stored.chartDecayPalette
+  if (typeof stored.chartDecayColoredCurves === 'boolean')
+    impulseDecayColoredCurves.value = stored.chartDecayColoredCurves
+  if (typeof stored.chartDecayRangeDb === 'number' && stored.chartDecayRangeDb > 0)
+    impulseDecayRangeDb.value = stored.chartDecayRangeDb
+  // A stored analysis is a deliberate choice, so it also stops the sample-rate watcher above from
+  // replacing it: the values no longer match the previous rate's defaults.
+  if (typeof stored.chartCsdFftLength === 'number') impulseCsdFftLength.value = stored.chartCsdFftLength
+  if (typeof stored.chartCsdBlockShiftSamples === 'number')
+    impulseCsdBlockShiftSamples.value = stored.chartCsdBlockShiftSamples
+  if (typeof stored.chartCsdBlockCount === 'number') impulseCsdBlockCount.value = stored.chartCsdBlockCount
+  if (stored.chartCsdWindowMode) impulseCsdWindowMode.value = stored.chartCsdWindowMode
+  if (typeof stored.chartCsdRiseTimeMs === 'number') impulseCsdRiseTimeMs.value = stored.chartCsdRiseTimeMs
+  if (typeof stored.chartBurstMaxPeriods === 'number') impulseBurstMaxPeriods.value = stored.chartBurstMaxPeriods
+  if (typeof stored.chartBurstPointsPerPeriod === 'number')
+    impulseBurstPointsPerPeriod.value = stored.chartBurstPointsPerPeriod
+  if (stored.chartBurstResolution) impulseBurstResolution.value = stored.chartBurstResolution
 
   void nextTick(() => {
     impulseDisplayRestoring = false
@@ -1178,11 +1295,81 @@ watch(
     impulseView, impulseNormalised, impulseShowPhase, impulseShowCoherence, impulseThickLines,
     impulseShowDataPoints, impulseYWindows, impulseTimeFromMs, impulseTimeToMs,
     impulseFreqFromHz, impulseFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
+    impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayRangeDb,
+    impulseCsdFftLength, impulseCsdBlockShiftSamples, impulseCsdBlockCount, impulseCsdWindowMode,
+    impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
   ],
   () => {
     if (!impulseDisplayRestoring && isImpulseResponse.value) markDirty()
   },
   { deep: true },
+)
+
+/**
+ * Recomputes whichever decay surface is on screen, debounced.
+ *
+ * <p>Debounced because every setting is a number field: typing "40" into Max periods passes through
+ * 4, and a burst decay is tens of thousands of taps per analysis frequency. The composable also
+ * keeps a request token, so what ends up on screen is whichever analysis was asked for last rather
+ * than whichever finished last.</p>
+ *
+ * <p>Nothing here re-measures. That is the point of the two views: the record is already captured
+ * and every one of these settings is a different question put to it.</p>
+ */
+let impulseDecayTimer: ReturnType<typeof setTimeout> | null = null
+
+function requestImpulseDecay() {
+  if (impulseDecayTimer) clearTimeout(impulseDecayTimer)
+  if (!isImpulseResponse.value) return
+  if (impulseView.value !== 'Csd' && impulseView.value !== 'BurstDecay') return
+  if (!impulseStatus.value || impulseStatus.value.passesCompleted === 0) return
+
+  const isCsd = impulseView.value === 'Csd'
+  impulseDecayTimer = setTimeout(() => {
+    impulseDecayTimer = null
+    if (isCsd) {
+      void computeImpulseCsd({
+        fftLength: impulseCsdFftLength.value,
+        blockShiftSamples: impulseCsdBlockShiftSamples.value,
+        blockCount: impulseCsdBlockCount.value,
+        windowMode: impulseCsdWindowMode.value,
+        riseTimeMs: impulseCsdRiseTimeMs.value,
+        lowHz: impulseFreqFromHz.value,
+        highHz: impulseFreqToHz.value,
+        displayColumns: DECAY_DISPLAY_COLUMNS,
+      })
+    } else {
+      void computeImpulseBurstDecay({
+        lowHz: impulseFreqFromHz.value,
+        highHz: impulseFreqToHz.value,
+        maxPeriods: impulseBurstMaxPeriods.value,
+        pointsPerPeriod: impulseBurstPointsPerPeriod.value,
+        resolution: impulseBurstResolution.value,
+        frequencyColumns: BURST_FREQUENCY_COLUMNS,
+      })
+    }
+  }, 250)
+}
+
+// Only the settings that change the *analysis*. The palette, the chart mode and the dB range are
+// redraws of a surface already computed, and asking the server again for them would put a
+// half-second pause on a colour change.
+watch(
+  () => [
+    impulseView.value,
+    impulseFreqFromHz.value,
+    impulseFreqToHz.value,
+    impulseCsdFftLength.value,
+    impulseCsdBlockShiftSamples.value,
+    impulseCsdBlockCount.value,
+    impulseCsdWindowMode.value,
+    impulseCsdRiseTimeMs.value,
+    impulseBurstMaxPeriods.value,
+    impulseBurstPointsPerPeriod.value,
+    impulseBurstResolution.value,
+    impulseStatus.value?.passesCompleted ?? 0,
+  ],
+  () => requestImpulseDecay(),
 )
 
 function runImpulseResponse(continuous: boolean) {
@@ -1249,6 +1436,18 @@ function buildTypeParamsJson(): string | undefined {
       chartTimeToMs: impulseTimeToMs.value,
       chartFreqFromHz: impulseFreqFromHz.value,
       chartFreqToHz: impulseFreqToHz.value,
+      chartDecayMode: impulseDecayMode.value,
+      chartDecayPalette: impulseDecayPalette.value,
+      chartDecayColoredCurves: impulseDecayColoredCurves.value,
+      chartDecayRangeDb: impulseDecayRangeDb.value,
+      chartCsdFftLength: impulseCsdFftLength.value,
+      chartCsdBlockShiftSamples: impulseCsdBlockShiftSamples.value,
+      chartCsdBlockCount: impulseCsdBlockCount.value,
+      chartCsdWindowMode: impulseCsdWindowMode.value,
+      chartCsdRiseTimeMs: impulseCsdRiseTimeMs.value,
+      chartBurstMaxPeriods: impulseBurstMaxPeriods.value,
+      chartBurstPointsPerPeriod: impulseBurstPointsPerPeriod.value,
+      chartBurstResolution: impulseBurstResolution.value,
     })
   }
 
@@ -1640,7 +1839,7 @@ function confirmSaveProjectAs(name: string) {
                   phase-kind="PerTrace"
                 />
                 <ImpulseHarmonicsChart
-                  v-else
+                  v-else-if="impulseView === 'Harmonics'"
                   :harmonics="impulseHarmonics"
                   :thick-lines="impulseThickLines"
                   :show-data-points="impulseShowDataPoints"
@@ -1649,6 +1848,45 @@ function confirmSaveProjectAs(name: string) {
                   :y-top-db="impulseYTopDb"
                   :y-bottom-db="impulseYBottomDb"
                 />
+                <!-- Both decay surfaces, drawn by one chart: they differ in what the depth axis
+                     counts and in nothing about how it is drawn. -->
+                <DecaySurfaceChart
+                  v-else
+                  :surface="impulseView === 'Csd' ? impulseCsdSurface : impulseBurstSurface"
+                  :mode="impulseDecayMode"
+                  :palette="impulseDecayPalette"
+                  :colored-curves="impulseDecayColoredCurves"
+                  :range-db="impulseDecayRangeDb"
+                  :thick-lines="impulseThickLines"
+                  :computing="impulseDecayComputing"
+                  :error="impulseDecayError"
+                  empty-message="Measure an impulse response, and this draws its decay."
+                />
+
+                <!-- What 0 dB means here, restated under the chart, because it is not the same
+                     thing in the two measurements and the difference decides how the picture is
+                     read. -->
+                <p
+                  v-if="impulseView === 'Csd' && impulseCsdSurface"
+                  class="text-[11px] text-neutral-500 dark:text-neutral-400"
+                >
+                  0 dB is the loudest point of the whole surface, so the front slice still carries the DUT's
+                  frequency response. Nothing below ≈{{ impulseCsdSurface.resolutionLimitHz.toFixed(0) }} Hz is
+                  resolved by a {{ impulseCsdFftLength }}-point transform.
+                </p>
+                <p
+                  v-else-if="impulseView === 'BurstDecay' && impulseBurstSurface"
+                  class="text-[11px] text-neutral-500 dark:text-neutral-400"
+                >
+                  Every frequency is normalised to its own maximum, so this says how long each one rings and
+                  nothing about how loud it is. The first period or two is the analysis opening up, not the DUT.
+                  <template v-if="impulseBurstFullDepthHz > 0">
+                    Curves stop short at the left because the record does: only above
+                    ≈{{ impulseBurstFullDepthHz.toFixed(0) }} Hz does it hold
+                    {{ impulseBurstMaxPeriods }} whole periods plus the analysis window, so the lower ones end
+                    early. A finer resolution lengthens the record.
+                  </template>
+                </p>
 
                 <!-- The gate's resolution limit, restated under the chart it applies to. It is the
                      one number that decides whether the left-hand end of a gated response means
@@ -1680,6 +1918,18 @@ function confirmSaveProjectAs(name: string) {
                   v-model:freq-to-hz="impulseFreqToHz"
                   v-model:phase-top-deg="impulsePhaseTopDeg"
                   v-model:phase-bottom-deg="impulsePhaseBottomDeg"
+                  v-model:decay-mode="impulseDecayMode"
+                  v-model:decay-palette="impulseDecayPalette"
+                  v-model:decay-colored-curves="impulseDecayColoredCurves"
+                  v-model:decay-range-db="impulseDecayRangeDb"
+                  v-model:csd-fft-length="impulseCsdFftLength"
+                  v-model:csd-block-shift-samples="impulseCsdBlockShiftSamples"
+                  v-model:csd-block-count="impulseCsdBlockCount"
+                  v-model:csd-window-mode="impulseCsdWindowMode"
+                  v-model:csd-rise-time-ms="impulseCsdRiseTimeMs"
+                  v-model:burst-max-periods="impulseBurstMaxPeriods"
+                  v-model:burst-points-per-period="impulseBurstPointsPerPeriod"
+                  v-model:burst-resolution="impulseBurstResolution"
                 />
 
                 <MeasurementChecklist @error="reportError" />
@@ -2172,6 +2422,7 @@ function confirmSaveProjectAs(name: string) {
       :status="status"
       :error="error"
       :connecting="connecting"
+      @set-device-kind="setDeviceKind"
       @set-simulated-profile="setSimulatedProfile"
       @connect="connectDevice"
     />

@@ -1,7 +1,52 @@
 <script setup lang="ts">
-import type { DeviceStatus, SimulatedProfileRequest } from '../api/client'
+import { computed } from 'vue'
+import type { DeviceKindName, DeviceStatus, SimulatedDutModel, SimulatedProfileRequest } from '../api/client'
 
-defineProps<{
+const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
+  { value: 'Hardware', label: 'QA403' },
+  { value: 'Simulated', label: 'Simulator' },
+]
+
+/**
+ * What the simulator can pretend is patched in. A straight wire has no response and no memory,
+ * which is enough for a spectrum and shows nothing at all on the measurements whose subject is
+ * what a DUT does over time.
+ */
+const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string }[] = [
+  { value: 'StraightWire', label: 'Straight wire', title: 'No DUT: the generator reaches the input unaltered.' },
+  {
+    value: 'TubeAmplifier',
+    label: 'Tube amp',
+    title:
+      'A push-pull valve amplifier: rolled off at both ends, with the output transformer’s resonance just above the audio band. Most of that sits above 24 kHz, so set the span to 96 kHz to see it.',
+  },
+  {
+    value: 'Loudspeaker',
+    label: 'Loudspeaker',
+    title:
+      'A two-way loudspeaker in a room: a cabinet panel resonance, a cone breakup peak, and a wall reflection 3 ms behind the direct sound. The model to use when demonstrating the impulse-response screen.',
+  },
+  {
+    value: 'BandpassFilter',
+    label: 'Bandpass',
+    title:
+      'A single second-order bandpass at 1 kHz, Q 20 — 50 Hz wide, and nothing else in the path. The one model whose decay you can work out on paper: 27.29/Q = 1.36 dB per period, which is the slope a burst decay must draw. Use it to check the analysis rather than to demonstrate a device.',
+  },
+  {
+    value: 'MarginallyStable',
+    label: 'Marginally stable',
+    title:
+      'An amplifier almost out of phase margin: flat, with one Q-500 resonance at 1 kHz that rings for a third of a second. Stable — but on a burst decay it falls only 1.6 dB over thirty periods, so the ridge refuses to die. On a magnitude plot it is just a peak, which is the argument for having decay charts.',
+  },
+  {
+    value: 'Oscillating',
+    label: 'Oscillating',
+    title:
+      'An amplifier that has gone the rest of the way: poles outside the unit circle, clipping against its own ±0.5 V rail at about 1010 Hz. The only DUT whose output is not a response to its input — it wrecks coherence, the level probe and the deconvolution, which is exactly what it is for.',
+  },
+]
+
+const props = defineProps<{
   status: DeviceStatus | null
   error: string | null
   /** True while a connect attempt is in flight — the emit is fire-and-forget, so the button can't tell on its own. */
@@ -10,8 +55,24 @@ defineProps<{
 
 const emit = defineEmits<{
   setSimulatedProfile: [patch: SimulatedProfileRequest]
+  setDeviceKind: [kind: DeviceKindName]
   connect: []
 }>()
+
+function onDeviceKindChange(e: Event) {
+  emit('setDeviceKind', (e.target as HTMLSelectElement).value as DeviceKindName)
+}
+
+/**
+ * Disabled while measuring rather than left live to be refused. The server enforces the rule either
+ * way (409), but a control that answers with an error line is a worse way to state it than one that
+ * is visibly unavailable and says why.
+ */
+const analyzerSwitchTitle = computed(() =>
+  props.status?.acquiring
+    ? 'Stop the measurement first — the analyzer cannot be switched while one is running.'
+    : 'Which analyzer to use. Switching tears the current one down — pump joined and streaming stopped — before standing the other up.',
+)
 
 function onSimulatedNoiseChange(e: Event) {
   emit('setSimulatedProfile', { noiseEnabled: (e.target as HTMLInputElement).checked })
@@ -19,6 +80,10 @@ function onSimulatedNoiseChange(e: Event) {
 
 function onSimulatedHumChange(e: Event) {
   emit('setSimulatedProfile', { humEnabled: (e.target as HTMLInputElement).checked })
+}
+
+function onSimulatedDutChange(e: Event) {
+  emit('setSimulatedProfile', { dut: (e.target as HTMLSelectElement).value as SimulatedDutModel })
 }
 </script>
 
@@ -45,8 +110,28 @@ function onSimulatedHumChange(e: Event) {
       >
         Simulated
       </span>
-      <!-- Simulator-only: what the synthesized DUT adds on top of the generator's stimulus. -->
-      <template v-if="status?.isSimulated">
+      <!-- Which analyzer the session is talking to. Always offered, and independent of whether it is
+           connected: switching to the QA403 with none attached is how you arm the Connect button. -->
+      <label
+        v-if="status"
+        class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
+        :title="analyzerSwitchTitle"
+      >
+        Analyzer
+        <select
+          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
+          :value="status.deviceKind"
+          :disabled="status.acquiring"
+          @change="onDeviceKindChange"
+        >
+          <option v-for="kind in DEVICE_KINDS" :key="kind.value" :value="kind.value">{{ kind.label }}</option>
+        </select>
+      </label>
+
+      <!-- Simulator-only: what the synthesized DUT adds on top of the generator's stimulus. Keyed on
+           the *selected* analyzer rather than on isSimulated, so the DUT can be chosen while the
+           simulator is still coming up. -->
+      <template v-if="status?.deviceKind === 'Simulated'">
         <label
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="Simulated DUT noise floor (white + 1/f). Turn off for a clean spectrum."
@@ -60,6 +145,21 @@ function onSimulatedHumChange(e: Event) {
         >
           <input type="checkbox" :checked="status.simulatedHumEnabled ?? false" @change="onSimulatedHumChange" />
           Hum
+        </label>
+        <label
+          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
+          title="What the simulator pretends is patched between its generator and its input. A straight wire has no response and no memory, so the impulse response is a single spike and both decay surfaces show nothing."
+        >
+          DUT
+          <select
+            class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
+            :value="status.simulatedDut ?? 'StraightWire'"
+            @change="onSimulatedDutChange"
+          >
+            <option v-for="model in DUT_MODELS" :key="model.value" :value="model.value" :title="model.title">
+              {{ model.label }}
+            </option>
+          </select>
         </label>
       </template>
       <!--

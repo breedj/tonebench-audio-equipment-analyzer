@@ -16,6 +16,16 @@ export interface DeviceStatus {
   simulatedNoiseEnabled: boolean | null
   /** Simulated DUT mains hum on/off; same null convention. */
   simulatedHumEnabled: boolean | null
+  /**
+   * Which simulated device under test is patched in; null when the device isn't the simulator.
+   * Unlike the two switches above this changes the DUT's response rather than what is added to it.
+   */
+  simulatedDut: SimulatedDutModel | null
+  /**
+   * Which analyzer the session is talking to. Separate from `isSimulated`, which describes a
+   * *connected* device and so reads false while the simulator is selected but not yet up.
+   */
+  deviceKind: DeviceKindName
   /** Input autoranging on/off; null when the device has no autoranging (the simulator). */
   autoRangeEnabled: boolean | null
   /**
@@ -40,10 +50,27 @@ export interface DeviceStatus {
   droppedBlocks: number
 }
 
+/**
+ * What the simulator pretends is patched between its generator and its input. A straight wire has
+ * no response and no memory, which is enough for a spectrum and useless for anything whose subject
+ * is what a DUT does over time — an impulse response, a gated magnitude, either decay surface.
+ */
+export type SimulatedDutModel =
+  | 'StraightWire'
+  | 'TubeAmplifier'
+  | 'Loudspeaker'
+  | 'BandpassFilter'
+  | 'MarginallyStable'
+  | 'Oscillating'
+
+/** Real QA403 over USB, or the synthetic device. Switchable at runtime — no restart, no flag. */
+export type DeviceKindName = 'Hardware' | 'Simulated'
+
 /** Patch for the simulated DUT's signal profile — omitted fields are left alone. */
 export interface SimulatedProfileRequest {
   noiseEnabled?: boolean
   humEnabled?: boolean
+  dut?: SimulatedDutModel
 }
 
 /** Mirrors Qa403.Device.GeneratorKind — exactly one stimulus is active per channel. */
@@ -541,10 +568,86 @@ export interface ImpulseResponseParameters {
   chartTimeToMs?: number | null
   chartFreqFromHz?: number | null
   chartFreqToHz?: number | null
+  /** How the two decay surfaces are drawn, and in what colours. Shared by both of them. */
+  chartDecayMode?: DecayChartMode | null
+  chartDecayPalette?: DecayPalette | null
+  chartDecayColoredCurves?: boolean | null
+  chartDecayRangeDb?: number | null
+  /** The cumulative spectral decay's analysis. Display settings, but a surface is unreadable without them. */
+  chartCsdFftLength?: number | null
+  chartCsdBlockShiftSamples?: number | null
+  chartCsdBlockCount?: number | null
+  chartCsdWindowMode?: CsdWindowModeName | null
+  chartCsdRiseTimeMs?: number | null
+  /** The burst decay's, on the same footing. */
+  chartBurstMaxPeriods?: number | null
+  chartBurstPointsPerPeriod?: number | null
+  chartBurstResolution?: BurstDecayResolutionName | null
 }
 
-/** Which of the three things an impulse-response measurement produces is on screen. */
-export type ImpulseView = 'Impulse' | 'Response' | 'Harmonics'
+/** Stacked curves in oblique projection, or the same surface as a flat colour map. */
+/**
+ * `Waterfall` is ARTA's Waterfall_F — frequency across the curves, the stack receding in time.
+ * `WaterfallPeriods` is its Waterfall_P — time across, the stack receding in frequency. The wire
+ * value of the first stays `Waterfall` so that stored measurements keep opening as they were saved.
+ */
+export type DecayChartMode = 'Waterfall' | 'WaterfallPeriods' | 'Sonogram'
+
+export type DecayPalette = 'Jet' | 'Hot' | 'Grey'
+
+/** Which of the things an impulse-response measurement can be read as is on screen. */
+export type ImpulseView = 'Impulse' | 'Response' | 'Harmonics' | 'Csd' | 'BurstDecay'
+
+export type DecayAxisName = 'Milliseconds' | 'Periods'
+export type CsdWindowModeName = 'Apodizing' | 'Hann'
+export type BurstDecayResolutionName = 'PreferTime' | 'PreferFrequency'
+
+/**
+ * One row of a decay surface. `levelDb` starts at `firstValidColumn`, not at column 0 — a burst
+ * decay's deep slices run off the end of the record at the low-frequency end, and the alternative
+ * to saying so is drawing the zeros the gate left behind as a perfect decay.
+ */
+export interface DecaySlice {
+  /** Milliseconds or periods, per the surface's `sliceAxis`. */
+  value: number
+  firstValidColumn: number
+  levelDb: number[]
+}
+
+/**
+ * A time-frequency decay surface. 0 dB means different things in the two measurements: a
+ * cumulative spectral decay is normalised once for the whole surface (so the front slice keeps the
+ * DUT's frequency response), a burst decay per frequency (so it does not).
+ */
+export interface DecaySurface {
+  sliceAxis: DecayAxisName
+  freqHz: number[]
+  slices: DecaySlice[]
+  /** Below this the surface describes the analysis rather than the DUT. Zero when there is no single such limit. */
+  resolutionLimitHz: number
+}
+
+/** The cumulative spectral decay's analysis settings — all display, never a reason to re-measure. */
+export interface ImpulseCsdRequest {
+  fftLength: number
+  blockShiftSamples: number
+  blockCount: number
+  windowMode: CsdWindowModeName
+  riseTimeMs: number
+  lowHz: number
+  highHz: number
+  displayColumns: number
+}
+
+/** The burst decay's, likewise. */
+export interface ImpulseBurstDecayRequest {
+  lowHz: number
+  highHz: number
+  maxPeriods: number
+  pointsPerPeriod: number
+  resolution: BurstDecayResolutionName
+  frequencyColumns: number
+}
 
 /** One stored impulse response, as `GET /api/measurements/{id}/impulse` returns it. */
 export interface StoredImpulseTrace {
@@ -1165,6 +1268,9 @@ export const api = {
   setAutoRangeStepDownDelay: (delayMs: number) =>
     request<DeviceStatus>('/device/auto-range-step-down-delay', { method: 'POST', body: JSON.stringify({ delayMs }) }),
 
+  setDeviceKind: (kind: DeviceKindName) =>
+    request<DeviceStatus>('/device/kind', { method: 'POST', body: JSON.stringify({ kind }) }),
+
   setSimulatedProfile: (patch: SimulatedProfileRequest) =>
     request<DeviceStatus>('/device/sim-profile', { method: 'POST', body: JSON.stringify(patch) }),
 
@@ -1319,6 +1425,15 @@ export const api = {
 
   deleteLoopbackReference: (id: number) =>
     request<void>(`/impulse-response/reference/${id}`, { method: 'DELETE' }),
+
+  // The two decay surfaces. POSTs because they carry an analysis, and separate from the status
+  // because they are questions put to the record already captured — changing one redraws rather
+  // than re-measures.
+  computeImpulseCsd: (req: ImpulseCsdRequest) =>
+    request<DecaySurface>('/impulse-response/decay/csd', { method: 'POST', body: JSON.stringify(req) }),
+
+  computeImpulseBurstDecay: (req: ImpulseBurstDecayRequest) =>
+    request<DecaySurface>('/impulse-response/decay/burst', { method: 'POST', body: JSON.stringify(req) }),
 
   getStoredImpulse: (measurementId: number) =>
     request<StoredImpulseResult>(`/measurements/${measurementId}/impulse`),

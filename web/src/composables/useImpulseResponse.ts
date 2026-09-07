@@ -1,10 +1,13 @@
 import { computed, ref, shallowRef } from 'vue'
 import {
   api,
+  type DecaySurface,
   type FrequencyResponseTraceJson,
   type HarmonicCurveJson,
   type ImpulseReferenceCaptureRequest,
   type ImpulseResponseStartRequest,
+  type ImpulseBurstDecayRequest,
+  type ImpulseCsdRequest,
   type ImpulseResponseStatus,
   type ImpulseTraceJson,
   type LoopbackReferenceInfo,
@@ -30,6 +33,23 @@ const references = ref<LoopbackReferenceInfo[]>([])
 const capturingReference = ref(false)
 const error = ref<string | null>(null)
 
+/**
+ * The two decay surfaces. Not part of the status: they are analyses of the record rather than parts
+ * of it, they are recomputed whenever a setting changes without a measurement happening, and each
+ * one is far larger than everything else the poll carries.
+ */
+const csdSurface = shallowRef<DecaySurface | null>(null)
+const burstSurface = shallowRef<DecaySurface | null>(null)
+const decayError = ref<string | null>(null)
+const decayComputing = ref(false)
+
+/**
+ * Which decay request is the current one. A burst decay takes a noticeable fraction of a second, so
+ * dragging a slider queues several — and without this the surface on screen is whichever *finished*
+ * last rather than whichever was *asked for* last.
+ */
+let decayToken = 0
+
 let pollHandle: ReturnType<typeof setInterval> | null = null
 
 function stopPolling() {
@@ -45,6 +65,14 @@ async function refresh(): Promise<void> {
   if (!next.running) stopPolling()
 }
 
+/** Throws away surfaces computed from an impulse response that is no longer the one on screen. */
+function invalidateDecay() {
+  decayToken++
+  csdSurface.value = null
+  burstSurface.value = null
+  decayError.value = null
+}
+
 function startPolling() {
   if (pollHandle !== null) return
   pollHandle = setInterval(() => {
@@ -58,6 +86,7 @@ function startPolling() {
 export function useImpulseResponse() {
   async function start(request: ImpulseResponseStartRequest): Promise<void> {
     error.value = null
+    invalidateDecay()
     await api.startImpulseResponse(request)
     // Poll immediately so the phase label changes on the click rather than a quarter second later.
     await refresh()
@@ -70,7 +99,47 @@ export function useImpulseResponse() {
   }
 
   async function clear(): Promise<void> {
+    invalidateDecay()
     status.value = await api.clearImpulseResponse()
+  }
+
+  /**
+   * Recomputes one decay surface from the impulse response already measured. Both of these share
+   * one in-flight slot and one error line: only one is on screen at a time, and a failed request is
+   * almost always a settings problem whose message is the useful part of the response.
+   */
+  async function computeCsd(request: ImpulseCsdRequest): Promise<void> {
+    const token = ++decayToken
+    decayComputing.value = true
+    try {
+      const surface = await api.computeImpulseCsd(request)
+      if (token !== decayToken) return
+      csdSurface.value = surface
+      decayError.value = null
+    } catch (e) {
+      if (token !== decayToken) return
+      csdSurface.value = null
+      decayError.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (token === decayToken) decayComputing.value = false
+    }
+  }
+
+  async function computeBurstDecay(request: ImpulseBurstDecayRequest): Promise<void> {
+    const token = ++decayToken
+    decayComputing.value = true
+    try {
+      const surface = await api.computeImpulseBurstDecay(request)
+      if (token !== decayToken) return
+      burstSurface.value = surface
+      decayError.value = null
+    } catch (e) {
+      if (token !== decayToken) return
+      burstSurface.value = null
+      decayError.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (token === decayToken) decayComputing.value = false
+    }
   }
 
   async function refreshReferences(): Promise<void> {
@@ -123,6 +192,13 @@ export function useImpulseResponse() {
     status,
     running,
     phase,
+    csdSurface,
+    burstSurface,
+    decayError,
+    decayComputing,
+    computeCsd,
+    computeBurstDecay,
+    invalidateDecay,
     traces,
     impulses,
     impulse,

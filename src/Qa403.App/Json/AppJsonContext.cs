@@ -4,6 +4,7 @@ using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Data;
 using Qa403.Device;
+using Qa403.Dsp;
 
 namespace Qa403.App.Json;
 
@@ -34,6 +35,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(SpectrumPipelineOptions))]
 [JsonSerializable(typeof(DeviceStatusResponse))]
 [JsonSerializable(typeof(DeviceRangesResponse))]
+[JsonSerializable(typeof(DeviceKindRequest))]
 [JsonSerializable(typeof(InputRangeRequest))]
 [JsonSerializable(typeof(OutputRangeRequest))]
 [JsonSerializable(typeof(AutoRangeRequest))]
@@ -88,6 +90,9 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(LoopbackReferenceInfo))]
 [JsonSerializable(typeof(LoopbackReferencesResponse))]
 [JsonSerializable(typeof(StoredImpulseResult))]
+[JsonSerializable(typeof(ImpulseCsdRequest))]
+[JsonSerializable(typeof(ImpulseBurstDecayRequest))]
+[JsonSerializable(typeof(DecaySurface))]
 [JsonSerializable(typeof(ImpulseResponseParameters))]
 // Serialized directly to params_json/gen_json by MeasurementSaveService, not returned from an
 // endpoint — same trim-metadata requirement applies.

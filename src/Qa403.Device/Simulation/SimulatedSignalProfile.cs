@@ -34,6 +34,14 @@ public sealed record SimulatedSignalProfile
     public bool HarmonicsEnabled { get; init; } = true;
 
     /// <summary>
+    /// Which device under test sits between the generator and the input — a frequency response with
+    /// poles that ring, rather than the additive harmonics/hum/noise the rest of this record
+    /// describes. See <see cref="SimulatedDutModel"/>, including why it is applied to the left
+    /// channel only.
+    /// </summary>
+    public SimulatedDutModel Dut { get; init; } = SimulatedDutModel.StraightWire;
+
+    /// <summary>
     /// dBc for H2..H9, index 0 = H2. Defaults to a single-ended triode profile: H2 dominant at
     /// -46 dBc, H3 at -60 dBc, each subsequent harmonic ~12 dB down.
     /// </summary>

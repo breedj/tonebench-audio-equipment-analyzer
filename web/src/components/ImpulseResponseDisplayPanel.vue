@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ImpulseView } from '../api/client'
+import type {
+  BurstDecayResolutionName,
+  CsdWindowModeName,
+  DecayChartMode,
+  DecayPalette,
+  ImpulseView,
+} from '../api/client'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
+import { CSD_FFT_LENGTHS, csdSpanMs, describeCsdFftLength, PALETTE_NAMES } from '../measurements/decay'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const view = defineModel<ImpulseView>('view', { required: true })
@@ -20,13 +27,58 @@ const freqToHz = defineModel<number>('freqToHz', { required: true })
 const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
 const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
 
+// The two decay surfaces. How they are drawn is shared; what is analysed is per measurement.
+const decayMode = defineModel<DecayChartMode>('decayMode', { required: true })
+const decayPalette = defineModel<DecayPalette>('decayPalette', { required: true })
+const decayColoredCurves = defineModel<boolean>('decayColoredCurves', { required: true })
+const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
+const csdFftLength = defineModel<number>('csdFftLength', { required: true })
+const csdBlockShiftSamples = defineModel<number>('csdBlockShiftSamples', { required: true })
+const csdBlockCount = defineModel<number>('csdBlockCount', { required: true })
+const csdWindowMode = defineModel<CsdWindowModeName>('csdWindowMode', { required: true })
+const csdRiseTimeMs = defineModel<number>('csdRiseTimeMs', { required: true })
+const burstMaxPeriods = defineModel<number>('burstMaxPeriods', { required: true })
+const burstPointsPerPeriod = defineModel<number>('burstPointsPerPeriod', { required: true })
+const burstResolution = defineModel<BurstDecayResolutionName>('burstResolution', { required: true })
+
 const { impulse, traces, harmonics, status, gateResolutionHz, running } = useImpulseResponse()
 
 const VIEWS: { value: ImpulseView; label: string }[] = [
   { value: 'Impulse', label: 'Impulse response' },
   { value: 'Response', label: 'Gated response' },
   { value: 'Harmonics', label: 'Harmonics' },
+  { value: 'Csd', label: 'Cumulative spectral decay' },
+  { value: 'BurstDecay', label: 'Burst decay' },
 ]
+
+/** The two views that are analyses of the impulse rather than readings off it. */
+const isDecayView = computed(() => view.value === 'Csd' || view.value === 'BurstDecay')
+
+const CSD_WINDOW_MODES: { value: CsdWindowModeName; label: string }[] = [
+  { value: 'Apodizing', label: 'CSD, apodizing window' },
+  { value: 'Hann', label: 'STF, Hann window' },
+]
+
+const BURST_RESOLUTIONS: { value: BurstDecayResolutionName; label: string }[] = [
+  { value: 'PreferTime', label: 'Prefer time resolution' },
+  { value: 'PreferFrequency', label: 'Prefer frequency resolution' },
+]
+
+const CHART_MODES: { value: DecayChartMode; label: string }[] = [
+  { value: 'Waterfall', label: 'Waterfall (f)' },
+  { value: 'WaterfallPeriods', label: 'Waterfall (p)' },
+  { value: 'Sonogram', label: 'Sonogram' },
+]
+
+const sampleRateHz = computed(() => status.value?.sampleRateHz ?? 0)
+
+/** What the transform length means here — the two numbers the setting is actually about. */
+const csdWindowLabel = computed(() => describeCsdFftLength(csdFftLength.value, sampleRateHz.value))
+
+/** How far past the impulse the slices reach. The one number that decides whether the run is refused. */
+const csdSpanLabel = computed(() =>
+  `${csdSpanMs(csdBlockShiftSamples.value, csdBlockCount.value, sampleRateHz.value).toFixed(2)} ms of decay`,
+)
 
 /**
  * Fits the time axis to the gate that was actually measured, not to the panel's current form — the
@@ -57,6 +109,9 @@ function fitToHarmonics() {
  * offering one.
  */
 const canAutofit = computed(() => {
+  // The decay views have a range rather than a window: 0 dB is fixed by the surface's own
+  // normalisation, so there is nothing for an autofit to find.
+  if (isDecayView.value) return false
   if (view.value === 'Impulse') return normalisedImpulse.value && impulse.value !== null
   if (view.value === 'Response') return traces.value.length > 0
   return harmonics.value.length > 0
@@ -242,7 +297,7 @@ const referenceLabel = computed(() => {
       </div>
     </template>
 
-    <template v-else>
+    <template v-else-if="view === 'Harmonics'">
       <label class="flex items-center gap-1.5 text-xs">
         <input v-model="showDataPoints" type="checkbox" />
         Data points
@@ -279,7 +334,182 @@ const referenceLabel = computed(() => {
       </button>
     </template>
 
+    <!-- The decay surfaces. Everything here is an analysis of the impulse response already
+         measured, so changing any of it redraws rather than re-measures — which is why it lives on
+         the display panel and not beside the sweep settings. -->
+    <template v-else>
+      <label class="flex flex-col gap-1 text-xs">
+        Chart
+        <select
+          v-model="decayMode"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          title="Stacked curves in oblique projection, or the same surface as a flat colour map. Waterfall (f) puts frequency across the curves and recedes in time, which shows where in the band something rings; Waterfall (p) puts time across and recedes in frequency, so each curve is one frequency's decay envelope. The sonogram shows exactly where in frequency it is, flat."
+        >
+          <option v-for="option in CHART_MODES" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+
+      <label class="flex flex-col gap-1 text-xs">
+        Palette
+        <select
+          v-model="decayPalette"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </label>
+
+      <label
+        v-if="decayMode !== 'Sonogram'"
+        class="flex items-center gap-1.5 text-xs"
+        title="Colour each curve by level. Off draws them all in one colour, which reads the shape rather than the level."
+      >
+        <input v-model="decayColoredCurves" type="checkbox" />
+        Coloured curves
+      </label>
+
+      <label class="flex flex-col gap-1 text-xs">
+        Range (dB)
+        <input
+          v-model.number="decayRangeDb"
+          type="number"
+          min="10"
+          max="70"
+          step="5"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          title="How far below 0 dB the chart reaches. 0 dB is whatever this surface normalised to — the loudest point of the whole surface for a cumulative spectral decay, each frequency's own maximum for a burst decay."
+        />
+      </label>
+
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        <label class="flex flex-col gap-1">
+          From (Hz)
+          <input
+            v-model.number="freqFromHz"
+            type="number"
+            step="1"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          />
+        </label>
+        <label class="flex flex-col gap-1">
+          To (Hz)
+          <input
+            v-model.number="freqToHz"
+            type="number"
+            step="100"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          />
+        </label>
+      </div>
+
+      <template v-if="view === 'Csd'">
+        <label class="flex flex-col gap-1 text-xs">
+          Analysis
+          <select
+            v-model="csdWindowMode"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            title="The classical cumulative-spectral-decay window has a short rise and a long fall, so the front slice reads the impulse at full weight. A Hann window is an ordinary short-time transform, centred on its own slice time — it reads a resonance building up as well as dying away, and smears the impulse across half a window."
+          >
+            <option v-for="option in CSD_WINDOW_MODES" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+
+        <label class="flex flex-col gap-1 text-xs">
+          FFT length (samples)
+          <select
+            v-model.number="csdFftLength"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          >
+            <option v-for="length in CSD_FFT_LENGTHS" :key="length" :value="length">{{ length }}</option>
+          </select>
+          <span class="text-[10px] text-neutral-500 dark:text-neutral-400">{{ csdWindowLabel }}</span>
+        </label>
+
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <label class="flex flex-col gap-1">
+            Block shift
+            <input
+              v-model.number="csdBlockShiftSamples"
+              type="number"
+              min="1"
+              step="1"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              title="Samples between one slice and the next — the surface's time step."
+            />
+          </label>
+          <label class="flex flex-col gap-1">
+            Max blocks
+            <input
+              v-model.number="csdBlockCount"
+              type="number"
+              min="2"
+              max="200"
+              step="1"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+        </div>
+        <span class="text-[10px] text-neutral-500 dark:text-neutral-400">{{ csdSpanLabel }}</span>
+
+        <label v-if="csdWindowMode === 'Apodizing'" class="flex flex-col gap-1 text-xs">
+          Rise time (ms)
+          <input
+            v-model.number="csdRiseTimeMs"
+            type="number"
+            min="0.02"
+            max="1"
+            step="0.02"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            title="How long the window takes to open. Short keeps the leading edge sharp; too short and the edge itself is a step, whose leakage buries the decay being looked for."
+          />
+        </label>
+      </template>
+
+      <template v-else>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <label class="flex flex-col gap-1">
+            Max periods
+            <input
+              v-model.number="burstMaxPeriods"
+              type="number"
+              min="2"
+              max="100"
+              step="1"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+          <label class="flex flex-col gap-1">
+            Points per period
+            <input
+              v-model.number="burstPointsPerPeriod"
+              type="number"
+              min="1"
+              max="8"
+              step="1"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+        </div>
+
+        <label class="flex flex-col gap-1 text-xs">
+          Time-frequency resolution
+          <select
+            v-model="burstResolution"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            title="How wide the analysis wavelet is. Preferring frequency separates resonances that sit close together, at the cost of taking twice as many periods to open up — so the first cycles of every decay are the analysis rather than the DUT."
+          >
+            <option v-for="option in BURST_RESOLUTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+      </template>
+    </template>
+
     <button
+      v-if="!isDecayView"
       type="button"
       :disabled="!canAutofit"
       :title="autofitTitle"
@@ -289,7 +519,7 @@ const referenceLabel = computed(() => {
       Autofit
     </button>
 
-    <div v-if="view !== 'Impulse' || normalisedImpulse" class="grid grid-cols-2 gap-2 text-xs">
+    <div v-if="!isDecayView && (view !== 'Impulse' || normalisedImpulse)" class="grid grid-cols-2 gap-2 text-xs">
       <label class="flex flex-col gap-1">
         Top (dB)
         <input

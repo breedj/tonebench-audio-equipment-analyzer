@@ -12,8 +12,9 @@ const { showPage } = useManual()
       Plays the same exponential chirp the
       <a href="#" @click.prevent="showPage('frequency-response')">frequency response</a> uses, and
       deconvolves it into the DUT's impulse response — its output for an infinitely short input.
-      From that one capture come three things: the impulse itself, a <em>gated</em> magnitude and
-      phase read off it, and the DUT's harmonic distortion against frequency.
+      From that one capture come five things: the impulse itself, a <em>gated</em> magnitude and
+      phase read off it, the DUT's harmonic distortion against frequency, and two views of how it
+      stops — a cumulative spectral decay and a burst decay.
     </p>
 
     <h2>Why gate an impulse response</h2>
@@ -90,6 +91,144 @@ const { showPage } = useManual()
     </p>
     <p><strong>Gated response</strong> is the magnitude and phase computed from the window, drawn by the same chart the frequency response uses.</p>
     <p><strong>Harmonics</strong> is the distortion curves described above.</p>
+    <p>
+      <strong>Cumulative spectral decay</strong> and <strong>Burst decay</strong> are the two decay
+      surfaces, described below. Both are computed from the impulse response already on screen, so
+      every one of their settings redraws rather than re-measures — which is why they sit on the
+      Display panel and not with the sweep settings.
+    </p>
+
+    <h2>How a DUT stops</h2>
+    <p>
+      A frequency response says how loud each frequency comes out. It says nothing about how long it
+      keeps coming out for — and a cabinet panel, a driver breakup mode or a badly damped transformer
+      is a thing that rings after the signal has gone. The two decay views are two ways of showing
+      that, from the same impulse response, and they answer different questions.
+    </p>
+
+    <h3>Cumulative spectral decay</h3>
+    <p>
+      A window is slid along the impulse response and its spectrum taken at each step. Slice 0 is the
+      impulse itself; every slice behind it is what is still there that many milliseconds later. A
+      resonance shows up as a ridge that outlives the band around it.
+    </p>
+    <p>
+      <strong>0 dB is the loudest point of the whole surface</strong>, once, so the front slice still
+      carries the DUT's frequency response: a resonance reads as a ridge that is both tall and slow.
+    </p>
+    <p>
+      <strong>FFT length</strong> is the whole frequency resolution — the panel prints what it means
+      in milliseconds and hertz at the current sample rate, because a length in samples means
+      different things at 48 and 192 kHz. It is the one real trade here: a longer transform reaches
+      lower and blurs the decay it is being used to look at over its own length. <strong>Block
+      shift</strong> and <strong>Max blocks</strong> set the time step and how far back the surface
+      goes; the panel prints the total. Ask for more decay than the record holds and the run is
+      refused rather than answered — past the record there is nothing but the gate, and the gate
+      decays perfectly.
+    </p>
+    <p>
+      <strong>Analysis</strong> picks the window. The classical CSD window has a short rise and a
+      long fall, so the front slice reads the impulse at full weight; the rise stops the leading edge
+      being a step, whose leakage would bury the decay being looked for. <strong>Rise time</strong>
+      sets how long it takes to open. A plain Hann window is an ordinary short-time transform,
+      centred on its own slice time — it reads a resonance building up as well as dying away, at the
+      cost of smearing the impulse across half a window.
+    </p>
+
+    <h3>Burst decay</h3>
+    <p>
+      The same decay, measured in <strong>periods of each frequency</strong> rather than in
+      milliseconds. That is the entire difference, and it is not a presentation choice: a 40 Hz
+      resonance and a 4 kHz one that both ring for ten cycles are the same defect, and on a
+      millisecond axis one of them is 250 ms long and the other 2.5 ms. Read off a common time axis
+      every low-frequency ridge looks alarming and every high-frequency one looks clean, whatever
+      the DUT is actually doing.
+    </p>
+    <p>
+      <strong>Every frequency is normalised to its own maximum</strong>, which deletes the frequency
+      response from the picture on purpose. This view answers "how long", and leaving "how loud" in
+      would let a bass hump bury the ringing three octaves up. It is the opposite of what the
+      cumulative spectral decay does, and neither picture can be converted into the other.
+    </p>
+    <p>
+      <strong>Time-frequency resolution</strong> is how wide the analysis filter is, and there is no
+      setting that avoids the trade: a filter narrow enough to separate two close resonances rings
+      for longer than either of them. Preferring frequency gives about a third of an octave —
+      filter-bank resolution — and takes twice as many periods to open up, so the first cycles of
+      every decay are the analysis rather than the DUT. Preferring time follows a fast decay honestly
+      and merges resonances that sit close together. Either way the <em>rate</em> of decay is
+      reported correctly; what changes is how much of the start is the measurement.
+    </p>
+    <p>
+      The deep slices stop short at the low-frequency end, and that is deliberate: thirty periods of
+      40 Hz is three quarters of a second, which a shorter record simply does not contain. What sits
+      there instead is the zeros the gate left, and drawing them would report a perfect decay at
+      exactly the frequencies least likely to have one. Measure at a finer resolution — which
+      lengthens the record — to reach further down.
+    </p>
+
+    <h3>Reading either one</h3>
+    <p>
+      <strong>Waterfall (f)</strong> stacks the slices in a receding projection, time zero at the
+      back. Each one is a solid surface, not a line: everything under a curve is filled, so a nearer
+      slice hides what is behind it, which is what makes the shape readable. It shows where in the
+      band something rings, and how far it falls.
+    </p>
+    <p>
+      <strong>Waterfall (p)</strong> is the same surface read the other way round — time runs across
+      the curves and the stack recedes in frequency, so every curve is one frequency's decay
+      envelope. It answers the other question: not where the ringing is, but how long it lasts and
+      whether it dies smoothly. A curve that stops partway has run out of record at that frequency,
+      the low ones first.
+    </p>
+    <p>
+      <strong>Sonogram</strong> draws the same surface flat, frequency across and time down, and
+      shows exactly where in frequency something is.
+    </p>
+    <p>
+      Both report the point under the cursor — frequency, time and level — with a ring marking it. In
+      the waterfall the whole solid reports, not just the curves: point anywhere inside the body and
+      you get the level of the slice that owns that pixel, which is the nearest one drawn over it.
+    </p>
+    <p>
+      The colour key runs up the left-hand edge of the waterfall's box, and it is the box's own dB
+      axis — a level is drawn at the height its number is printed at, so a colour on the surface can
+      be carried across to a figure by eye. The back wall is ruled at the same steps, which is what
+      the empty part of it above the surface is for. Time runs down the right-hand edge, labelled in
+      milliseconds for a cumulative spectral decay and in periods for a burst decay. In
+      <strong>Waterfall (p)</strong> the two swap over: time is along the curves and the receding
+      axis is frequency.
+    </p>
+    <p>
+      The band running down the right-hand edge is the cut face of the solid, not decoration. Each
+      slice is drawn a little further right than the one behind it, so a strip of every one of them
+      is never covered; coloured by level, those strips read as a ramp down through the palette and
+      are the quickest way to see how far the whole surface has fallen by the time it reaches the
+      front. <strong>Coloured curves</strong> turns it off along with the curve colouring.
+    </p>
+    <p>
+      <strong>Points per period</strong> is how finely the burst decay is sampled in time, and so how
+      many curves the waterfall has to draw. Eight is the default, and at any ordinary chart size every
+      one of them is drawn — what separates adjacent curves is the level between them, not the depth
+      offset, so a dense stack stays legible.
+    </p>
+    <p>
+      Where a slice's curve begins part-way across, the analysis has no answer for the frequencies to
+      its left: a cumulative spectral decay cannot resolve below what its transform length allows,
+      and a burst decay runs out of record at the low end first, sooner the deeper the slice. The
+      staircase that leaves along the left of the surface is that limit receding, not a measurement.
+    </p>
+    <p>
+      <strong>Range</strong> is how far below 0 dB the chart reaches — 30 dB is a good place to
+      start. <strong>Coloured curves</strong> colours each curve by level; off draws them in one
+      colour, which reads the shape rather than the level. The <strong>From</strong> and
+      <strong>To</strong> frequencies are shared with the Harmonics view.
+    </p>
+    <p>
+      Neither view uses the display gate. A gate tapers the impulse response to nothing over a few
+      milliseconds, and a decay analysis run on that would measure the window — decaying on schedule,
+      at every frequency at once, however good or bad the DUT is.
+    </p>
 
     <h2>Settings that behave as they do elsewhere</h2>
     <p>

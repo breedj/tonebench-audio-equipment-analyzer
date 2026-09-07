@@ -78,6 +78,54 @@ public static class ImpulseResponseEndpoints
             }
         });
 
+        // The two decay surfaces. POSTs rather than GETs, and separate from /status, because they
+        // are analyses of the record already captured rather than parts of it: every setting they
+        // take is a question put to that record, and asking a different question must not need
+        // another sweep. Their own endpoint each rather than one with two optional bodies, so each
+        // validates only what it actually uses.
+        group.MapPost("/decay/csd", async (
+            ImpulseCsdRequest request, ImpulseResponseRunner runner, CancellationToken ct) =>
+        {
+            if (!EnumParsing.TryParse(request.WindowMode, CsdWindowMode.Apodizing, out CsdWindowMode windowMode, out var windowError))
+                return Results.BadRequest(windowError);
+
+            try
+            {
+                return Results.Ok(await runner.ComputeCumulativeSpectralDecayAsync(request.ToSettings(windowMode), ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                // Every one of these is a settings problem the user can act on — a transform too
+                // long for the record, a band the transform cannot resolve — so the message is the
+                // whole point of the response.
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
+        group.MapPost("/decay/burst", async (
+            ImpulseBurstDecayRequest request, ImpulseResponseRunner runner, CancellationToken ct) =>
+        {
+            if (!EnumParsing.TryParse(request.Resolution, BurstDecayResolution.PreferTime, out BurstDecayResolution resolution, out var resolutionError))
+                return Results.BadRequest(resolutionError);
+
+            try
+            {
+                return Results.Ok(await runner.ComputeBurstDecayAsync(request.ToSettings(resolution), ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         // Loopback calibrations. Their own sub-resource rather than a mode of /start: capturing one
         // has a physical precondition (patch the generator output straight to the analyzer input),
         // it must not replace the traces on screen, and what it produces is a calibration rather than
@@ -186,6 +234,41 @@ public sealed record ImpulseResponseStartRequest(
             Continuous,
             ChirpStartHz,
             LoadOhms);
+}
+
+/// <summary>
+/// Wire shape for a cumulative spectral decay. Every field is an analysis setting, so a run is
+/// never needed to change one — but the same warning applies as to
+/// <see cref="ImpulseResponseStartRequest.ToMeasurement"/>: <see cref="ToSettings"/> maps field by
+/// field, and a field left out of it is a default rather than an error. The surface then comes back
+/// looking perfectly reasonable and answering a question nobody asked. Guarded by
+/// <c>ImpulseDecayRequestTests</c>.
+/// </summary>
+public sealed record ImpulseCsdRequest(
+    int FftLength,
+    int BlockShiftSamples,
+    int BlockCount,
+    string? WindowMode,
+    double RiseTimeMs,
+    double LowHz,
+    double HighHz,
+    int DisplayColumns)
+{
+    public CsdSettings ToSettings(CsdWindowMode windowMode) =>
+        new(FftLength, BlockShiftSamples, BlockCount, windowMode, RiseTimeMs, LowHz, HighHz, DisplayColumns);
+}
+
+/// <summary>Wire shape for a burst decay. See <see cref="ImpulseCsdRequest"/> on the mapping.</summary>
+public sealed record ImpulseBurstDecayRequest(
+    double LowHz,
+    double HighHz,
+    int MaxPeriods,
+    int PointsPerPeriod,
+    string? Resolution,
+    int FrequencyColumns)
+{
+    public BurstDecaySettings ToSettings(BurstDecayResolution resolution) =>
+        new(LowHz, HighHz, MaxPeriods, PointsPerPeriod, resolution, FrequencyColumns);
 }
 
 public sealed record SaveImpulseResponseRequest(long MeasurementTypeId, string Name, string? Notes);

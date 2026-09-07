@@ -67,10 +67,14 @@ try
     var port = FindAvailablePort(8399, 8409);
     builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
 
-    if (simulate)
-        builder.Services.AddSingleton<IAnalyzerDevice, SimulatedDevice>();
-    else
-        builder.Services.AddSingleton<IAnalyzerDevice, Qa40xUsbDevice>();
+    // --simulate picks which analyzer the app *starts* on; it is no longer which one it is stuck
+    // with. The device is built by AnalyzerDeviceFactory and owned by DeviceSessionService, which
+    // can replace it at runtime — see POST /api/device/kind. Registering IAnalyzerDevice as a
+    // singleton here would give the container a handle it cannot replace and must not dispose out
+    // from under a swap.
+    builder.Services.AddSingleton(sp => new AnalyzerDeviceFactory(
+        sp.GetRequiredService<ILoggerFactory>(),
+        simulate ? DeviceKind.Simulated : DeviceKind.Hardware));
 
     // WindowType/AveragingMode read back as "Hann"/"Linear" etc, matching what /spectrum-config
     // already accepts on the way in — one representation, not int-in/string-out. Enum-as-string

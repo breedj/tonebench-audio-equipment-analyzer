@@ -118,10 +118,10 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// </summary>
     private volatile BlockAssembler? _activeAssembler;
 
-    /// <summary>Drops from streams that have already ended. Live drops come off <see cref="_activePump"/> — see <see cref="DroppedRxChunks"/>.</summary>
+    /// <summary>Drops from an ended stream, kept until the next one starts and zeroes them. Live drops come off <see cref="_activePump"/> — see <see cref="DroppedRxChunks"/>.</summary>
     private long _droppedRxChunks;
 
-    /// <summary>Block drops from streams that have already ended. Live drops come off <see cref="_activeAssembler"/> — see <see cref="DroppedBlocks"/>.</summary>
+    /// <summary>Block drops from an ended stream, kept until the next one starts and zeroes them. Live drops come off <see cref="_activeAssembler"/> — see <see cref="DroppedBlocks"/>.</summary>
     private long _droppedBlocks;
 
     public event EventHandler? DeviceLost;
@@ -462,6 +462,18 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         // why the hang was intermittent rather than constant.
         try
         {
+            // Both counters start again with the stream, so what they report is always "drops in the
+            // acquisition you are looking at" rather than a total since the device was plugged in.
+            //
+            // That distinction is the whole use of them. A drop is a hole in the sample stream, which
+            // splices the next FFT record — so the only question anyone asks of these numbers is
+            // whether *this* measurement can be trusted, and a running total cannot answer it. It
+            // actively misleads: a stale 8 from an earlier run reads exactly like 8 that just
+            // happened, and the only way to tell was to note the number, run again, and subtract.
+            // Every runner starts its own acquisition, so a measurement gets a clean count for free.
+            Interlocked.Exchange(ref _droppedRxChunks, 0);
+            Interlocked.Exchange(ref _droppedBlocks, 0);
+
             _activePump = pump;
             _activeAssembler = assembler;
             pump.Start(ct);

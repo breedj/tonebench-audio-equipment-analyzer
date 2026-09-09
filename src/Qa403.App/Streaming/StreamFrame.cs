@@ -27,6 +27,22 @@ public enum StreamMsgType : byte
 
     /// <summary>How many records a running frequency-response measurement has taken — see <see cref="StreamFrame.EncodeFrequencyResponseProgress"/>.</summary>
     FrequencyResponseProgress = 7,
+
+    /// <summary>
+    /// One finished impedance curve. The header's channel byte carries an
+    /// <see cref="ImpedanceTraceKind"/> (0 the DUT, 1 the open standard, 2 the short).
+    ///
+    /// <para><b>Its own message type rather than a flag on <see cref="FrequencyResponse"/></b>, which
+    /// is how the stepped-sine response was distinguished. That worked because a stepped response's
+    /// payload is byte-for-byte a chirp response's; an impedance frame's is not -- it carries no
+    /// bandwidth blocks, because -1 dB and -3 dB corners mean nothing on an impedance curve. A flag
+    /// that silently changed the payload length would be a decoder bug waiting to happen, so the
+    /// discriminator is the byte a decoder reads first. See <see cref="StreamFrame.EncodeImpedance"/>.</para>
+    /// </summary>
+    Impedance = 8,
+
+    /// <summary>How far a running impedance measurement has got — see <see cref="StreamFrame.EncodeImpedanceProgress"/>.</summary>
+    ImpedanceProgress = 9,
 }
 
 public enum StreamChannel : byte
@@ -431,6 +447,63 @@ public static class StreamFrame
         WriteHeader(
             buffer, StreamMsgType.FrequencyResponseProgress, (byte)StreamChannel.Left,
             stepped ? StreamFlags.SteppedResponse : StreamFlags.None,
+            (uint)phase, (float)generatorAmpDbv, total, (uint)Math.Max(0, taken));
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// One impedance curve: five floats per column, then the peak and the frequency it sits at.
+    ///
+    /// <para>The same column layout a frequency-response frame uses, minus its two bandwidth blocks.
+    /// The magnitude pair is <b>dB relative to 1 ohm</b> for a DUT curve and a plain dB ratio for a
+    /// calibration standard, which the channel byte's <see cref="ImpedanceTraceKind"/> distinguishes.
+    /// The trailing peak is the largest |Z| in the analysed band -- a driver's resonance -- rather
+    /// than a response maximum.</para>
+    /// </summary>
+    public static byte[] EncodeImpedance(ImpedanceTrace trace)
+    {
+        int columns = trace.FreqHz.Length;
+        if (trace.MagnitudeMinDbOhms.Length != columns || trace.MagnitudeMaxDbOhms.Length != columns
+            || trace.PhaseDeg.Length != columns || trace.Coherence.Length != columns)
+        {
+            throw new ArgumentException("Every trace array must be the same length.", nameof(trace));
+        }
+
+        const int perColumn = 5 * sizeof(float);
+        const int trailer = 2 * sizeof(float);
+
+        byte[] buffer = new byte[HeaderLength + (columns * perColumn) + trailer];
+        WriteHeader(
+            buffer, StreamMsgType.Impedance, (byte)trace.Kind,
+            StreamFlags.Decimated | StreamFlags.LogSpaced,
+            seq: 0,
+            (float)trace.StartFreqHz, (float)trace.EndFreqHz, (uint)columns);
+
+        int offset = HeaderLength;
+        for (int i = 0; i < columns; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), trace.FreqHz[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 4, 4), trace.MagnitudeMinDbOhms[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 8, 4), trace.MagnitudeMaxDbOhms[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 12, 4), trace.PhaseDeg[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 16, 4), trace.Coherence[i]);
+            offset += perColumn;
+        }
+
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)trace.PeakDbOhms);
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 4, 4), (float)trace.PeakFreqHz);
+
+        return buffer;
+    }
+
+    /// <summary>Where a running impedance measurement has got. Header only, laid out exactly as the frequency response's.</summary>
+    public static byte[] EncodeImpedanceProgress(
+        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv)
+    {
+        byte[] buffer = new byte[HeaderLength];
+        WriteHeader(
+            buffer, StreamMsgType.ImpedanceProgress, (byte)StreamChannel.Left, StreamFlags.None,
             (uint)phase, (float)generatorAmpDbv, total, (uint)Math.Max(0, taken));
 
         return buffer;

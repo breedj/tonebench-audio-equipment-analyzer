@@ -21,6 +21,7 @@ public sealed class MeasurementSaveService(
     FrequencyResponseRunner responseRunner,
     SteppedResponseRunner steppedResponseRunner,
     ImpulseResponseRunner impulseRunner,
+    ImpedanceRunner impedanceRunner,
     ProjectRepository projectRepository,
     MeasurementRepository measurementRepository,
     IOptions<JsonOptions> jsonOptions)
@@ -81,9 +82,23 @@ public sealed class MeasurementSaveService(
     /// </summary>
     public static bool IsImpulseResponseKind(string kind) => kind is ImpulseResponseKind;
 
+    /// <summary>The <c>measurement_type.kind</c> value for an impedance measurement. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string ImpedanceKind = "Impedance";
+
+    /// <summary>
+    /// Whether a kind's result is an impedance curve.
+    ///
+    /// <para>Its own predicate rather than a third arm of <see cref="IsFrequencyResponseKind"/>, for
+    /// the same reason <see cref="IsImpulseResponseKind"/> is: impedance does store its curves in the
+    /// <c>response_trace</c> rows, but that predicate also decides which start endpoint the UI drives,
+    /// which settings record <see cref="ResolveTypeParamsJson"/> writes and how a result is exported —
+    /// and impedance differs in all three. What it shares is the storage, nothing else.</para>
+    /// </summary>
+    public static bool IsImpedanceKind(string kind) => kind is ImpedanceKind;
+
     /// <summary>Whether a kind's configuration lives only in its panel, with nothing live to snapshot — see <see cref="ResolveTypeParamsJson"/>.</summary>
     public static bool HasNoLiveConfiguration(string kind) =>
-        IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind);
+        IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind) || IsImpedanceKind(kind);
 
     /// <summary>
     /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
@@ -211,6 +226,36 @@ public sealed class MeasurementSaveService(
             RightChannelIsReference: true), SerializerOptions);
 
     /// <summary>
+    /// A brand-new impedance type's <c>params_json</c>, kept in step with
+    /// <c>ImpedanceConfigPanel.vue</c>'s own defaults.
+    ///
+    /// <para>100 ohms is what a typical bench fixture is built with, and the left channel as
+    /// reference is how one is normally wired — note that <c>--simulate</c> needs the opposite, since
+    /// its fixture models sit on the left channel. The sweep starts at 10 Hz rather than the
+    /// frequency response's 2 Hz: a driver's resonance is the point of this measurement and 10 Hz is
+    /// below any of them, while a decade lower costs signal-to-noise for nothing. Smoothing is light
+    /// (1/48 octave) so a high-Q resonance peak is not blunted, and no calibration is stored until
+    /// the user captures one.</para>
+    /// </summary>
+    public string DefaultImpedanceParametersJson() =>
+        JsonSerializer.Serialize(new ImpedanceParameters(
+            Method: nameof(ImpedanceMethod.ReferenceResistor),
+            Stimulus: nameof(ImpedanceStimulus.Chirp),
+            ReferenceOhms: 100.0,
+            RightChannelIsReference: false,
+            FrequencySpanHz: 24000.0,
+            ResolutionMultiplier: 1,
+            ChirpStartHz: 10.0,
+            LevelValue: -20.0,
+            LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
+            SmoothingDenominator: 48,
+            AverageCount: 2,
+            CalibrationLevelValue: ImpedanceRequest.DefaultCalibrationLevelDbv,
+            CableMode: nameof(ImpedanceCableMode.None),
+            FixedCableOhms: 0.0,
+            FixedCableMillihenry: 0.0), SerializerOptions);
+
+    /// <summary>
     /// What a create-or-update of a measurement type should write to <c>params_json</c>.
     ///
     /// The interesting case is an omitted <paramref name="requestedJson"/>, which means "snapshot
@@ -232,6 +277,9 @@ public sealed class MeasurementSaveService(
         // cannot run.
         if (kind == SteppedResponseKind)
             return existingParamsJson ?? DefaultSteppedResponseParametersJson();
+
+        if (IsImpedanceKind(kind))
+            return existingParamsJson ?? DefaultImpedanceParametersJson();
 
         if (IsImpulseResponseKind(kind))
             return existingParamsJson ?? DefaultImpulseResponseParametersJson();
@@ -569,6 +617,93 @@ public sealed class MeasurementSaveService(
 
     private static HarmonicCurveInput ToHarmonicInput(HarmonicCurve curve) =>
         new(curve.Order, curve.UpperValidHz, curve.FundamentalHz, curve.LevelDbc);
+
+    /// <summary>
+    /// Saves the impedance curves currently on screen. Reads the runner's own status rather than
+    /// taking the data as an argument, so what is stored is exactly what is displayed.
+    /// </summary>
+    public async Task<long> SaveImpedanceAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = impedanceRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before saving.");
+        if (status.Traces.Count == 0)
+            throw new InvalidOperationException("No impedance has been measured yet.");
+
+        var request = impedanceRunner.LastRequest
+            ?? throw new InvalidOperationException("No impedance has been measured yet.");
+
+        // The calibrations are stored with the result too, not just on the type: a saved measurement
+        // that cannot say which fixture calibration produced it is not reproducible.
+        string paramsJson = JsonSerializer.Serialize(
+            new ImpedanceParameters(
+                request.Method.ToString(),
+                request.Stimulus.ToString(),
+                request.ReferenceOhms,
+                request.RightChannelIsReference,
+                request.FrequencySpanHz,
+                request.ResolutionMultiplier,
+                request.ChirpStartHz,
+                request.LevelValue,
+                request.LevelUnit.ToString(),
+                request.SmoothingDenominator,
+                request.AverageCount,
+                request.CableMode.ToString(),
+                request.FixedCableOhms,
+                request.FixedCableMillihenry,
+                // Named from here on: this record has a run of defaulted parameters, and a positional
+                // call silently shifts every one of them the next time a field is inserted.
+                CalibrationLevelValue: request.CalibrationLevelValue,
+                AnalyzerInputOhms: request.AnalyzerInputOhms,
+                ApplySweepGate: request.ApplySweepGate,
+                OpenCal: request.OpenCal,
+                ShortCal: request.ShortCal,
+                GeneratorAmpDbv: status.GeneratorAmpDbv),
+            SerializerOptions);
+
+        var info = session.Info;
+        var saveRequest = new ResponseSaveRequest(
+            measurementTypeId, name, notes,
+            paramsJson,
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            request.SampleRateHz, request.FftSize,
+            Channels: 2,
+            session.InputRangeDbv, session.OutputRangeDbv,
+            [.. status.Traces.Select(ToImpedanceTraceInput)]);
+
+        return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
+    /// An impedance curve as a <c>response_trace</c> row.
+    ///
+    /// <para>The two bandwidth blocks are written as zeros: -1 dB and -3 dB corners are a response
+    /// concept and mean nothing on an impedance curve, but the columns are NOT NULL. Nothing reads
+    /// them back for these rows — the reader branches on <c>kind</c> — and the peak, which for an
+    /// impedance <i>is</i> meaningful, is the resonance.</para>
+    /// </summary>
+    private static ResponseTraceInput ToImpedanceTraceInput(ImpedanceTrace trace) =>
+        new(
+            ImpedanceTraceKindName(trace.Kind),
+            trace.StartFreqHz,
+            trace.EndFreqHz,
+            trace.PeakDbOhms,
+            trace.PeakFreqHz,
+            new ResponseBandwidth(0.0, 0.0, false, false),
+            new ResponseBandwidth(0.0, 0.0, false, false),
+            trace.FreqHz,
+            trace.MagnitudeMinDbOhms,
+            trace.MagnitudeMaxDbOhms,
+            trace.PhaseDeg,
+            trace.Coherence);
+
+    private static string ImpedanceTraceKindName(ImpedanceTraceKind kind) => kind switch
+    {
+        ImpedanceTraceKind.Impedance => ResponseTraceKind.Impedance,
+        ImpedanceTraceKind.OpenCal => ResponseTraceKind.ImpedanceOpen,
+        ImpedanceTraceKind.ShortCal => ResponseTraceKind.ImpedanceShort,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown impedance trace kind."),
+    };
 
     private static ResponseTraceInput ToTraceInput(FrequencyResponseTrace trace) =>
         new(

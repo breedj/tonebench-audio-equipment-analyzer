@@ -54,6 +54,8 @@ public class MeasurementSaveServiceTests
                 new ImpulseResponseRunner(
                     session, pipeline, new SqliteLoopbackReferenceStore(new MeasurementRepository(factory)),
                     NullLogger<ImpulseResponseRunner>.Instance),
+                new ImpedanceRunner(
+                    session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),
                 new ProjectRepository(factory), new MeasurementRepository(factory),
                 Options.Create(new JsonOptions()));
 
@@ -103,6 +105,8 @@ public class MeasurementSaveServiceTests
                 new ImpulseResponseRunner(
                     session, pipeline, new SqliteLoopbackReferenceStore(new MeasurementRepository(factory)),
                     NullLogger<ImpulseResponseRunner>.Instance),
+                new ImpedanceRunner(
+                    session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),
                 new ProjectRepository(factory), new MeasurementRepository(factory),
                 Options.Create(new JsonOptions()));
 

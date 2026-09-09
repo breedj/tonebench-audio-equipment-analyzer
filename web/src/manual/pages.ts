@@ -9,6 +9,7 @@ import { defineAsyncComponent, h } from 'vue'
 import {
   FFT_SPECTRUM_KIND,
   FREQUENCY_RESPONSE_KIND,
+  IMPEDANCE_KIND,
   IMPULSE_RESPONSE_KIND,
   STEPPED_RESPONSE_KIND,
   THD_VS_AMPLITUDE_KIND,
@@ -114,6 +115,14 @@ export const MANUAL_PAGES: ManualPage[] = [
     kind: FREQUENCY_RESPONSE_KIND,
     group: 'Measurements',
     component: manualPage(() => import('./pages/FrequencyResponsePage.vue')),
+  },
+  {
+    id: 'impedance',
+    title: 'Impedance',
+    summary: 'Impedance in ohms and phase, through a series reference resistor, with an open/short fixture calibration.',
+    kind: IMPEDANCE_KIND,
+    group: 'Measurements',
+    component: manualPage(() => import('./pages/ImpedancePage.vue')),
   },
   {
     id: 'stepped-response',

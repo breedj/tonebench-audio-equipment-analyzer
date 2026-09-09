@@ -365,7 +365,86 @@ public static class ResponseTraceKind
     public const string Left = "left";
     public const string Right = "right";
     public const string Gain = "gain";
+
+    /// <summary>
+    /// An impedance curve: magnitude in <b>dB relative to 1 ohm</b> rather than a gain, phase in
+    /// degrees.
+    ///
+    /// <para>Impedance reuses this table rather than taking one of its own, and that is deliberate:
+    /// the columns already are a decimated magnitude/phase/coherence curve, and <c>kind</c> is a
+    /// TEXT column, so new values need no migration. It also sidesteps the trap this project has hit
+    /// twice — a new child table of <c>capture</c> that nobody added to
+    /// <c>MeasurementRepository.DeleteResultAsync</c> and <c>ProjectRepository.DeleteTypeAsync</c>,
+    /// orphaning rows silently until SQLite recycled a capture rowid onto them.</para>
+    /// </summary>
+    public const string Impedance = "z";
+
+    /// <summary>The open standard behind an impedance measurement, stored as the measured ratio in plain dB.</summary>
+    public const string ImpedanceOpen = "z_open";
+
+    /// <summary>The short standard, likewise.</summary>
+    public const string ImpedanceShort = "z_short";
 }
+
+/// <summary>
+/// An impedance measurement type's <c>params_json</c>.
+///
+/// <para>Run settings are required and must round-trip exactly. Every <c>Chart*</c> field is
+/// nullable so a type stored before one existed keeps the app's defaults rather than failing to
+/// load.</para>
+///
+/// <para><b>The two calibrations live here</b>, which is what makes a fixture calibration outlast the
+/// app. They are the decimated curves — a few hundred log-spaced points each, not a bin per analysis
+/// bin — so the JSON stays a sane size; see <see cref="ImpedanceCalibration"/>.</para>
+/// </summary>
+/// <summary>
+/// Defaults for <see cref="ImpedanceParameters"/> that a record's own primary constructor cannot
+/// express — a default may not reference a member of the type being declared, and this project
+/// cannot see <c>Qa403.App</c>'s copy. Pinned to it by
+/// <c>ImpedanceCalibrationLevelTests.TheStoredDefaultMatchesTheRequestsOwn</c>.
+/// </summary>
+public static class ImpedanceParametersDefaults
+{
+    public const double CalibrationLevelDbv = 0.0;
+}
+
+public sealed record ImpedanceParameters(
+    string Method,
+    string Stimulus,
+    double ReferenceOhms,
+    bool RightChannelIsReference,
+    double FrequencySpanHz,
+    int ResolutionMultiplier,
+    double ChirpStartHz,
+    double LevelValue,
+    string LevelUnit,
+    int SmoothingDenominator,
+    int AverageCount,
+    string CableMode,
+    double FixedCableOhms,
+    double FixedCableMillihenry,
+    /// <summary>The drive level calibration runs use, in the same unit as <c>LevelValue</c>.</summary>
+    double CalibrationLevelValue = ImpedanceParametersDefaults.CalibrationLevelDbv,
+    double? AnalyzerInputOhms = null,
+    bool ApplySweepGate = false,
+    ImpedanceCalibration? OpenCal = null,
+    ImpedanceCalibration? ShortCal = null,
+    /// <summary>Whether this measurement adopts the globally configured fixture instead of its own standards.</summary>
+    bool UseGlobalFixture = false,
+    double? GeneratorAmpDbv = null,
+    string? ChartView = null,
+    bool? ChartShowPhase = null,
+    bool? ChartShowCoherence = null,
+    bool? ChartShowShortCal = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    double? ChartZTopOhms = null,
+    double? ChartZBottomOhms = null,
+    double? ChartXFromHz = null,
+    double? ChartXToHz = null,
+    double? ChartPhaseTopDeg = null,
+    double? ChartPhaseBottomDeg = null,
+    bool? ChartAutofitOnDone = null);
 
 /// <summary>One save of a frequency-response measurement: a result row, its single capture, and the curves.</summary>
 public sealed record ResponseSaveRequest(

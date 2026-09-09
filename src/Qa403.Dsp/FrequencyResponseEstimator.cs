@@ -169,6 +169,9 @@ public sealed class FrequencyResponseEstimator
     /// <summary>The gate as a per-sample multiplier centred on index 0, or null when ungated.</summary>
     private readonly double[]? _gateWindow;
 
+    /// <summary>See the constructor's <c>removeLatency</c> parameter.</summary>
+    private readonly bool _removeLatency;
+
     private double _latencySum;
     private int _records;
 
@@ -178,7 +181,25 @@ public sealed class FrequencyResponseEstimator
     /// meaningful when the stimulus was a sweep, since it is sweep deconvolution that puts the
     /// distortion packets there in the first place.
     /// </param>
-    public FrequencyResponseEstimator(int fftSize, IFftBackend fft, ImpulseGate? gate = null)
+    /// <param name="removeLatency">
+    /// Whether to find and remove each record's bulk rotation before accumulating it. True -- the
+    /// default -- is what every sweep measurement needs, for the reason set out on <see cref="Add"/>:
+    /// against a synthesised periodic stimulus each record starts at an arbitrary point in the sweep,
+    /// and averaging those rotations without removing them makes the records cancel.
+    ///
+    /// <para><b>Pass false when both spectra are measured channels of the <i>same</i> capture</b>, as
+    /// the impedance measurement does. There the rotation is common to the two and has already
+    /// cancelled in the ratio, so there is nothing left to remove and the peak search is fitting
+    /// noise: <see cref="EstimateLatencySamples"/> refines the impulse's position with a parabola
+    /// through its neighbours, so it returns a <i>fraction</i> of a sample even for a fixture with no
+    /// delay at all. Half a sample is <b>75 degrees</b> of phase at 20 kHz on a 48 kHz record, and it
+    /// is reported as DUT phase with nothing there to complain about it.</para>
+    ///
+    /// <para>Gating is unaffected either way: <see cref="ApplyGate"/> locates itself on the impulse
+    /// rather than assuming removal has parked it at the origin.</para>
+    /// </param>
+    public FrequencyResponseEstimator(
+        int fftSize, IFftBackend fft, ImpulseGate? gate = null, bool removeLatency = true)
     {
         if (fftSize < 4 || (fftSize & (fftSize - 1)) != 0)
             throw new ArgumentException("FFT size must be a power of two of at least 4.", nameof(fftSize));
@@ -204,6 +225,7 @@ public sealed class FrequencyResponseEstimator
         _h = new Complex[_binCount];
         _impulse = new double[fftSize];
         _gateWindow = gate is { } window ? BuildGateWindow(fftSize, window) : null;
+        _removeLatency = removeLatency;
     }
 
     /// <summary>Records accumulated so far. <see cref="FrequencyResponseResult.Coherence"/> is only informative from 2 up.</summary>
@@ -224,6 +246,10 @@ public sealed class FrequencyResponseEstimator
     /// position was taken as evidence the peak search had locked onto that packet. When the
     /// reference is a second channel of the <i>same</i> capture the rotation is common to both and
     /// cancels, and only then is this the DUT's own propagation delay.</para>
+    ///
+    /// <para>Returns 0 and removes nothing when the estimator was built with
+    /// <c>removeLatency: false</c> -- see that parameter for when a same-capture ratio needs it
+    /// off.</para>
     /// </summary>
     public double Add(ReadOnlySpan<Complex> reference, ReadOnlySpan<Complex> response)
     {
@@ -240,7 +266,7 @@ public sealed class FrequencyResponseEstimator
             _h[k] = response[k] * Complex.Conjugate(reference[k]) / (xx + lambda);
         }
 
-        double latencySamples = EstimateLatencySamples();
+        double latencySamples = _removeLatency ? EstimateLatencySamples() : 0.0;
 
         for (int k = 0; k < _binCount; k++)
         {

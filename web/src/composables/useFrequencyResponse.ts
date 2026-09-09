@@ -166,6 +166,8 @@ const phaseLabel: Record<ResponsePhase, string> = {
   [ResponsePhase.Failed]: 'Failed',
   [ResponsePhase.DeterminingRange]: 'Determining input range',
   [ResponsePhase.Sweeping]: 'Sweeping',
+  [ResponsePhase.Analyzing]: 'Analyzing',
+  [ResponsePhase.Calibrating]: 'Calibrating',
 }
 
 const phaseNames: Record<string, ResponsePhase> = {
@@ -177,6 +179,8 @@ const phaseNames: Record<string, ResponsePhase> = {
   Failed: ResponsePhase.Failed,
   DeterminingRange: ResponsePhase.DeterminingRange,
   Sweeping: ResponsePhase.Sweeping,
+  Analyzing: ResponsePhase.Analyzing,
+  Calibrating: ResponsePhase.Calibrating,
 }
 
 const traceKindNames: Record<ResponseTraceKind, ResponseTraceKindName> = {

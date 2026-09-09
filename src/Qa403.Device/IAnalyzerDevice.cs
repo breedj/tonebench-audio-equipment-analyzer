@@ -69,17 +69,23 @@ public interface IAnalyzerDevice
     bool AutoRangeStepDownEnabled { get; set; }
 
     /// <summary>
-    /// RX chunks discarded since connect because the consumer could not keep up, cumulative across
-    /// streams. Not a cosmetic statistic: a dropped chunk is a hole in the sample stream, so the next
-    /// FFT record is spliced — which smears tones into skirts and lifts the broadband noise floor.
-    /// Any non-zero value means measured noise numbers are suspect. Always 0 for the simulator.
+    /// RX chunks discarded because the consumer could not keep up, <b>for the current acquisition</b>
+    /// — the count starts again with every stream. Not a cosmetic statistic: a dropped chunk is a
+    /// hole in the sample stream, so the next FFT record is spliced — which smears tones into skirts
+    /// and lifts the broadband noise floor. Any non-zero value means measured noise numbers are
+    /// suspect. Always 0 for the simulator.
+    ///
+    /// <para>Per-acquisition rather than cumulative because that is the only question these numbers
+    /// are ever asked: whether the measurement on screen can be trusted. A running total cannot say —
+    /// a stale count from an earlier run is indistinguishable from one that just happened, and the
+    /// only way to tell was to note the number, run again, and subtract.</para>
     /// </summary>
     long DroppedRxChunks { get; }
 
     /// <summary>
-    /// Assembled PCM blocks discarded since connect because whoever consumes
-    /// <see cref="StreamAsync"/> could not keep up with calibration, cumulative across streams.
-    /// Always 0 for the simulator.
+    /// Assembled PCM blocks discarded because whoever consumes <see cref="StreamAsync"/> could not
+    /// keep up with calibration, <b>for the current acquisition</b> — reset with every stream, on the
+    /// same terms as <see cref="DroppedRxChunks"/>. Always 0 for the simulator.
     ///
     /// <para>Deliberately separate from <see cref="DroppedRxChunks"/> rather than summed into it:
     /// the two name different halves of the pipeline. RX chunks drop when the *assembler* fell

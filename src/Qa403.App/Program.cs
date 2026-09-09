@@ -107,6 +107,7 @@ try
     builder.Services.AddSingleton<SteppedResponseRunner>();
     builder.Services.AddSingleton<ILoopbackReferenceStore, SqliteLoopbackReferenceStore>();
     builder.Services.AddSingleton<ImpulseResponseRunner>();
+    builder.Services.AddSingleton<ImpedanceRunner>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
 
     // Update-check (docs/qa403-app-stack-spec.md §8): a short timeout and silent-on-failure
@@ -129,6 +130,18 @@ try
         : new Qa403DatabaseOptions { Path = databasePath };
     builder.Services.AddSingleton(databaseOptions);
     builder.Services.AddSingleton<SqliteConnectionFactory>();
+
+    // The configuration lives in its own database file, overridable with the "Config:Path" key the
+    // same way. Separate from the measurement history on purpose — see Qa403ConfigDatabaseOptions:
+    // the impedance fixture calibration describes this machine's QA403 and this bench's leads, and
+    // it must not travel inside a measurement database copied to another machine.
+    var configPath = builder.Configuration["Config:Path"];
+    var configOptions = string.IsNullOrWhiteSpace(configPath)
+        ? Qa403ConfigDatabaseOptions.Default
+        : new Qa403ConfigDatabaseOptions { Path = configPath };
+    builder.Services.AddSingleton(configOptions);
+    builder.Services.AddSingleton<ConfigConnectionFactory>();
+    builder.Services.AddSingleton<ConfigRepository>();
     builder.Services.AddSingleton<ProjectRepository>();
     builder.Services.AddSingleton<MeasurementRepository>();
     builder.Services.AddSingleton<MeasurementSaveService>();
@@ -142,6 +155,13 @@ try
         var connectionFactory = scope.ServiceProvider.GetRequiredService<SqliteConnectionFactory>();
         await using var migrationConnection = await connectionFactory.OpenAsync(CancellationToken.None);
         await new MigrationRunner().RunAsync(migrationConnection, CancellationToken.None);
+
+        // The configuration database has its own migration set and its own schema_version inside
+        // its own file, so the two version histories advance independently.
+        var configFactory = scope.ServiceProvider.GetRequiredService<ConfigConnectionFactory>();
+        await using var configConnection = await configFactory.OpenAsync(CancellationToken.None);
+        await new MigrationRunner(MigrationRunner.ConfigResourcePrefix)
+            .RunAsync(configConnection, CancellationToken.None);
     }
 
     app.UseWebSockets();
@@ -165,6 +185,8 @@ try
     app.MapFrequencyResponseEndpoints();
     app.MapImpulseResponseEndpoints();
     app.MapSteppedResponseEndpoints();
+    app.MapImpedanceEndpoints();
+    app.MapConfigEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapMeasurementsEndpoints();

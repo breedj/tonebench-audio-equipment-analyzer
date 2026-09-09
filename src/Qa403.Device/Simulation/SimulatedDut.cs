@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Qa403.Device.Simulation;
 
 /// <summary>
@@ -75,6 +77,55 @@ internal readonly record struct Biquad(double B0, double B1, double B2, double A
         double poleRadius = 1.0 + (excess * w0 * w0);
         double gain = (1.0 - poleRadius) / 2.0;
         return new Biquad(gain, 0.0, -gain, -2.0 * poleRadius * Math.Cos(w0), poleRadius * poleRadius);
+    }
+
+    /// <summary>
+    /// A frequency-independent gain, as a section with no memory. The impedance fixtures need one
+    /// because a purely resistive load is a plain voltage divider -- a real response with no filter
+    /// in it at all -- and expressing that as a section keeps <see cref="SimulatedDut.Process"/> a
+    /// single uniform loop rather than growing a special case.
+    /// </summary>
+    public static Biquad Gain(double gain) => new(gain, 0.0, 0.0, 0.0, 0.0);
+
+    /// <summary>
+    /// One analog section <c>(b2 s^2 + b1 s + b0) / (a2 s^2 + a1 s + a0)</c> mapped to the z plane by
+    /// the bilinear transform. The one design here written in terms of a circuit rather than a corner
+    /// frequency, because that is how an impedance divider is stated.
+    ///
+    /// <para><b>Deliberately not prewarped.</b> Prewarping pins one chosen frequency and moves every
+    /// other one, which is right for a filter specified by its corner and wrong here: what these
+    /// models have to be is <i>exactly</i> analysable, not exactly 45 Hz. The sampled system's true
+    /// impedance is whatever <see cref="ResponseAt"/> says at each bin, and that is what the tests
+    /// assert against. At audio frequencies against a 48 kHz clock the warping is invisible anyway --
+    /// <c>tan(x) ~ x</c> to seven figures at 45 Hz.</para>
+    /// </summary>
+    public static Biquad FromAnalog(
+        double b2, double b1, double b0, double a2, double a1, double a0, double sampleRateHz)
+    {
+        // s -> k(1 - z^-1)/(1 + z^-1). Multiplying through by (1 + z^-1)^2 turns each analog
+        // coefficient into three z-plane ones.
+        double k = 2.0 * sampleRateHz;
+        double kk = k * k;
+
+        return Normalise(
+            (b2 * kk) + (b1 * k) + b0,
+            2.0 * (b0 - (b2 * kk)),
+            (b2 * kk) - (b1 * k) + b0,
+            (a2 * kk) + (a1 * k) + a0,
+            2.0 * (a0 - (a2 * kk)),
+            (a2 * kk) - (a1 * k) + a0);
+    }
+
+    /// <summary>
+    /// This section's exact response at a normalised angular frequency, i.e. <c>H(e^(j w))</c>. What
+    /// the impedance fixture tests compare against: the discrete filter that actually produced the
+    /// samples, not the analog prototype it was mapped from.
+    /// </summary>
+    public Complex ResponseAt(double omega)
+    {
+        var z1 = Complex.FromPolarCoordinates(1.0, -omega);
+        var z2 = z1 * z1;
+        return (B0 + (B1 * z1) + (B2 * z2)) / (1.0 + (A1 * z1) + (A2 * z2));
     }
 
     /// <summary>A resonance: <paramref name="gainDb"/> of lift (or cut) at <paramref name="freqHz"/>, unity well away from it.</summary>
@@ -232,8 +283,55 @@ internal sealed class SimulatedDut
                 railVolts: OscillationRailVolts,
                 seed: OscillationSeed),
 
+            SimulatedDutModel.ImpedanceResistive => new SimulatedDut(
+                model, sampleRateHz,
+                // A resistive divider has no memory: one gain section, and nothing else.
+                [Biquad.Gain(SimulatedImpedanceFixture.ResistiveOhms / (SimulatedImpedanceFixture.ReferenceOhms + SimulatedImpedanceFixture.ResistiveOhms))],
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.ImpedanceReactive => new SimulatedDut(
+                model, sampleRateHz,
+                // H(s) = (Rs + sL) / ((R + Rs) + sL): first order, so the s^2 terms are zero.
+                [Biquad.FromAnalog(
+                    0.0, SimulatedImpedanceFixture.ReactiveHenry, SimulatedImpedanceFixture.ReactiveOhms,
+                    0.0, SimulatedImpedanceFixture.ReactiveHenry, SimulatedImpedanceFixture.ReferenceOhms + SimulatedImpedanceFixture.ReactiveOhms,
+                    sampleRateHz)],
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.ImpedanceLoudspeaker => new SimulatedDut(
+                model, sampleRateHz,
+                [LoudspeakerDivider(sampleRateHz)],
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// The divider for <see cref="SimulatedDutModel.ImpedanceLoudspeaker"/>: a voice-coil resistance
+    /// in series with a parallel RLC, seen across the reference resistor.
+    ///
+    /// <para>Writing the resonance as <c>Rres * (s w0/Q) / (s^2 + s w0/Q + w0^2)</c> and adding
+    /// <c>Re</c> makes Z a ratio of two quadratics, so <c>Z/(R + Z)</c> is a ratio of two quadratics
+    /// as well -- one biquad, exactly. That is the whole reason the voice-coil inductance is left
+    /// out: <c>Re + sLe</c> plus the resonance is a ratio of cubics, which needs a factorisation and
+    /// stops the peak being a number anyone can check.</para>
+    ///
+    /// <para>Two values fall straight out and are what the tests assert: <c>Z(0) = Re</c>, and at
+    /// <c>s = j w0</c> everything but the resonance cancels to leave <c>Z = Re + Rres</c> exactly.</para>
+    /// </summary>
+    private static Biquad LoudspeakerDivider(double sampleRateHz)
+    {
+        double w0 = 2.0 * Math.PI * SimulatedImpedanceFixture.SpeakerResonanceHz;
+        double damping = w0 / SimulatedImpedanceFixture.SpeakerQ;
+        double re = SimulatedImpedanceFixture.SpeakerReOhms;
+        double peak = SimulatedImpedanceFixture.SpeakerPeakOhms;
+        double r = SimulatedImpedanceFixture.ReferenceOhms;
+
+        return Biquad.FromAnalog(
+            re, peak * damping, re * w0 * w0,
+            r + re, (r + peak) * damping, (r + re) * w0 * w0,
+            sampleRateHz);
     }
 
     /// <summary>Where <see cref="SimulatedDutModel.MarginallyStable"/> rings, and how sharply.</summary>
@@ -290,6 +388,27 @@ internal sealed class SimulatedDut
     /// can check.</para>
     /// </summary>
     public const double BandpassDbPerPeriod = 27.2875 / BandpassQ;
+
+    /// <summary>
+    /// The filter cascade's exact response at one frequency -- the discrete transfer function that
+    /// actually produced the samples, which is what an impedance fixture's expected impedance has to
+    /// be derived from rather than the analog circuit it was mapped from.
+    ///
+    /// <para><b>The cascade only.</b> The reflection and the oscillator are not included: one is a
+    /// delay line and the other is not a response to the input at all, so neither belongs in a
+    /// transfer function. Only the <c>Impedance*</c> fixtures, which are pure cascades, get a
+    /// meaningful answer out of this.</para>
+    /// </summary>
+    public Complex ResponseAt(double freqHz)
+    {
+        double omega = 2.0 * Math.PI * freqHz / SampleRateHz;
+
+        var response = Complex.One;
+        foreach (var section in _sections)
+            response *= section.ResponseAt(omega);
+
+        return response;
+    }
 
     /// <summary>One sample through the DUT. Stateful, so it must be called once per frame in frame order.</summary>
     public double Process(double x)

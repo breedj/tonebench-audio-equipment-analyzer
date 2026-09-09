@@ -3,7 +3,8 @@ import { computed, reactive, watch } from 'vue'
 import Modal from './Modal.vue'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
-import { isFrequencyResponseKind, isImpulseResponseKind, isSweepKind } from '../measurements/kinds'
+import { isFrequencyResponseKind, isImpedanceKind,
+  isImpulseResponseKind, isSweepKind } from '../measurements/kinds'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -13,7 +14,8 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 // selected (see App.vue), so currentTypeId is never null here. Same currentType/currentProject
 // lookup App.vue itself does — useProjects doesn't keep a derived "current" object of its own.
 const { projects, types, currentTypeId } = useProjects()
-const { save, saveSweep, saveResponse, saveImpulse, error } = useMeasurements()
+const { save, saveSweep, saveResponse, saveImpulse,
+    saveImpedance, error } = useMeasurements()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 const currentProject = computed(() => projects.value.find((p) => p.id === currentType.value?.projectId) ?? null)
@@ -50,7 +52,8 @@ async function onSave() {
   // points, a response's is its runner's curves, an FFT's is the pipeline's single retained
   // spectrum. Same dialog either way — the name/notes it collects are all the difference the user
   // cares about.
-  if (isImpulseResponseKind(currentType.value.kind)) await saveImpulse(req)
+  if (isImpedanceKind(currentType.value.kind)) await saveImpedance(req)
+  else if (isImpulseResponseKind(currentType.value.kind)) await saveImpulse(req)
   else if (isFrequencyResponseKind(currentType.value.kind)) await saveResponse(req, currentType.value.kind)
   else if (isSweepKind(currentType.value.kind)) await saveSweep(req)
   else await save(req)

@@ -186,6 +186,8 @@ public class SweepTypeParamsTests
                 new ImpulseResponseRunner(
                     session, pipeline, new SqliteLoopbackReferenceStore(new MeasurementRepository(factory)),
                     NullLogger<ImpulseResponseRunner>.Instance),
+                new ImpedanceRunner(
+                    session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),
                 new ProjectRepository(factory), new MeasurementRepository(factory),
                 Options.Create(jsonOptions));
 

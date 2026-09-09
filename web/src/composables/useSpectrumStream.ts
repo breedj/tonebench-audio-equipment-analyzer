@@ -8,6 +8,8 @@ import {
   decodeSweepProgressFrame,
   decodeFrequencyResponseFrame,
   decodeFrequencyResponseProgressFrame,
+  decodeImpedanceFrame,
+  decodeImpedanceProgressFrame,
   encodeSetViewport,
   StreamMsgType,
   type MetersFrame,
@@ -15,6 +17,7 @@ import {
   type SpectrumFrame,
 } from '../streaming/protocol'
 import { useFrequencyResponse } from './useFrequencyResponse'
+import { useImpedance } from './useImpedance'
 import { useSweep } from './useSweep'
 
 const RECONNECT_DELAY_MS = 1000
@@ -31,6 +34,7 @@ export function useSpectrumStream() {
   const connected = ref(false)
   const sweep = useSweep()
   const response = useFrequencyResponse()
+const impedance = useImpedance()
 
   let socket: WebSocket | null = null
   let reconnectHandle: ReturnType<typeof setTimeout> | undefined
@@ -132,6 +136,12 @@ export function useSpectrumStream() {
         response.ingestTrace(decodeFrequencyResponseFrame(event.data))
       } else if (header.msgType === StreamMsgType.FrequencyResponseProgress) {
         response.ingestProgress(decodeFrequencyResponseProgressFrame(event.data))
+      } else if (header.msgType === StreamMsgType.Impedance) {
+        // Its own message type rather than a flagged frequency-response frame: the payload really is
+        // different, since an impedance curve has no bandwidth blocks. See StreamMsgType.Impedance.
+        impedance.ingestTrace(decodeImpedanceFrame(event.data))
+      } else if (header.msgType === StreamMsgType.ImpedanceProgress) {
+        impedance.ingestProgress(decodeImpedanceProgressFrame(event.data))
       }
     }
 

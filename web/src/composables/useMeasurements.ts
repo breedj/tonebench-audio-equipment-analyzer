@@ -10,8 +10,15 @@ import {
   type ThdSweepPoint,
   type UpdateMeasurementRequest,
 } from '../api/client'
-import { isFrequencyResponseKind, isImpulseResponseKind, isSteppedResponseKind, isSweepKind } from '../measurements/kinds'
+import {
+  isFrequencyResponseKind,
+  isImpedanceKind,
+  isImpulseResponseKind,
+  isSteppedResponseKind,
+  isSweepKind,
+} from '../measurements/kinds'
 import type { ResponseTrace } from './useFrequencyResponse'
+import type { ImpedanceTrace } from './useImpedance'
 
 /**
  * How many overlays of one kind may be *shown* at once — the THD-vs-frequency and FFT-analysis
@@ -42,6 +49,14 @@ export interface OverlayEntry {
    * running one with. Undefined for every other kind.
    */
   responseTraces?: ResponseTrace[]
+
+  /**
+   * An impedance result's stored curve. Read through the same endpoint as a response — impedance
+   * lives in the same `response_trace` rows — but kept in its own field because the units differ:
+   * these magnitudes are dB relative to 1 ohm, not a gain, and putting them on a dB axis would draw
+   * a plausible curve that means nothing.
+   */
+  impedanceTraces?: ImpedanceTrace[]
 }
 
 /**
@@ -160,6 +175,34 @@ function requireOverlaySlot(kind: string): void {
     throw new Error(`At most ${MAX_VISIBLE_OVERLAYS} history items can be shown at once — uncheck one first.`)
 }
 
+/**
+ * Stored impedance rows as the UI's own curve shape. The `kind` strings are the storage layer's
+ * ('z', 'z_open', 'z_short'); anything else in the result belongs to another measurement and is
+ * dropped rather than drawn on an ohms axis.
+ */
+function toImpedanceTraces(traces: StoredResponseTrace[]): ImpedanceTrace[] {
+  const kinds: Record<string, ImpedanceTrace['kind']> = {
+    z: 'Impedance',
+    z_open: 'OpenCal',
+    z_short: 'ShortCal',
+  }
+
+  return traces
+    .filter((t) => kinds[t.kind] !== undefined)
+    .map((t) => ({
+      kind: kinds[t.kind],
+      startFreqHz: t.startHz,
+      endFreqHz: t.endHz,
+      freqHz: t.freqHz,
+      magnitudeMinDbOhms: t.magnitudeMinDb,
+      magnitudeMaxDbOhms: t.magnitudeMaxDb,
+      phaseDeg: t.phaseDeg,
+      coherence: t.coherence,
+      peakDbOhms: t.peakDb,
+      peakFreqHz: t.peakHz,
+    }))
+}
+
 export function useMeasurements() {
   async function load() {
     try {
@@ -233,6 +276,18 @@ export function useMeasurements() {
    * `saveResponse`: an impulse result writes the same `response_trace` rows plus two tables of its
    * own, so it goes through its own endpoint even though the curves are identical.
    */
+  async function saveImpedance(req: { measurementTypeId: number; name: string; notes: string | null }) {
+    try {
+      const result = await api.saveImpedance(req)
+      await load()
+      error.value = null
+      return result
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   async function saveImpulse(req: { measurementTypeId: number; name: string; notes: string | null }) {
     try {
       const result = await api.saveImpulseResponse(req)
@@ -302,9 +357,14 @@ export function useMeasurements() {
         isFrequencyResponseKind(detail.kind) || isImpulseResponseKind(detail.kind)
           ? toResponseTraces((await api.getStoredResponse(resultId)).traces)
           : undefined
+      // Impedance comes back through the same reader, since it shares the rows — but into its own
+      // field, because its magnitudes are ohms in dB rather than a gain.
+      const impedanceTraces = isImpedanceKind(detail.kind)
+        ? toImpedanceTraces((await api.getStoredResponse(resultId)).traces)
+        : undefined
       overlays.value = [
         ...overlays.value,
-        { id: resultId, detail, visible: true, sweepPoints, responseTraces },
+        { id: resultId, detail, visible: true, sweepPoints, responseTraces, impedanceTraces },
       ]
       error.value = null
     } catch (e) {
@@ -333,6 +393,7 @@ export function useMeasurements() {
 
   if (items.value.length === 0) load()
 
-  return { items, filter, overlays, error, load, save, saveSweep, saveResponse, saveImpulse, update, remove,
+  return { items, filter, overlays, error, load, save, saveSweep, saveResponse, saveImpulse, saveImpedance,
+    update, remove,
     addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
 }

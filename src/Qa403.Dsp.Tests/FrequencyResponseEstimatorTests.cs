@@ -446,11 +446,20 @@ public class FrequencyResponseEstimatorTests
             yield return bin;
     }
 
-    private static FrequencyResponseResult Estimate(double[] stimulus, double[] response, ImpulseGate? gate = null)
+    private static FrequencyResponseResult Estimate(
+        double[] stimulus, double[] response, ImpulseGate? gate = null, bool removeLatency = true)
     {
-        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), gate);
+        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), gate, removeLatency);
         estimator.Add(Spectrum(stimulus), Spectrum(response));
         return estimator.Complete();
+    }
+
+    /// <summary>H of <see cref="OnePoleLowPass"/>'s difference equation, exactly, as a complex number.</summary>
+    private static Complex OnePoleResponse(double freqHz, double cornerHz)
+    {
+        double alpha = 1.0 - Math.Exp(-2.0 * Math.PI * cornerHz / SampleRateHz);
+        double omega = 2.0 * Math.PI * freqHz / SampleRateHz;
+        return alpha / (1.0 - ((1.0 - alpha) * Complex.FromPolarCoordinates(1.0, -omega)));
     }
 
     /// <summary>A sweep whose third harmonic still fits below Nyquist, so nothing aliases back into the record.</summary>
@@ -544,4 +553,56 @@ public class FrequencyResponseEstimatorTests
             noisy[i] = samples[i] + (sigma * ((random.NextDouble() * 2.0) - 1.0));
         return noisy;
     }
+
+    /// <summary>
+    /// The impedance measurement's contract: with removal off the phase that comes back is the DUT's
+    /// own, not the DUT's minus whatever the peak search happened to fit.
+    /// </summary>
+    [Fact]
+    public void Estimate_WithLatencyRemovalOff_ReportsTheFiltersOwnPhase()
+    {
+        const double cornerHz = 1000.0;
+        var stimulus = Chirp();
+        var response = OnePoleLowPass(stimulus, cornerHz);
+
+        var result = Estimate(stimulus, response, gate: null, removeLatency: false);
+
+        Assert.Equal(0.0, result.LatencySamples);
+
+        foreach (int bin in BandBins())
+        {
+            double expectedDeg = OnePoleResponse(bin * BinHz, cornerHz).Phase * 180.0 / Math.PI;
+            Assert.Equal(expectedDeg, result.PhaseDeg[bin], 6);
+        }
+    }
+
+    /// <summary>
+    /// Why the opt-out has to exist. A one-pole low pass has no delay whatever, yet the peak search
+    /// and its parabolic refinement in <c>EstimateLatencySamples</c> fit <b>0.663 samples</b> to its
+    /// asymmetric impulse response -- at 20 kHz on a 48 kHz record, very nearly <b>100 degrees</b>.
+    /// Left on for a same-capture ratio, that lands in the trace as DUT phase.
+    ///
+    /// <para>The two estimates are pinned against each other rather than the removal merely being
+    /// asserted non-zero: the difference must be exactly the linear ramp the removed rotation
+    /// implies, which is what says the opt-out changes only this and nothing else.</para>
+    /// </summary>
+    [Fact]
+    public void Estimate_LatencyRemoval_DisplacesPhaseByExactlyTheRotationItRemoved()
+    {
+        const double cornerHz = 1000.0;
+        var stimulus = Chirp();
+        var response = OnePoleLowPass(stimulus, cornerHz);
+
+        var removed = Estimate(stimulus, response);
+        var kept = Estimate(stimulus, response, gate: null, removeLatency: false);
+
+        Assert.InRange(Math.Abs(removed.LatencySamples), 0.6, 0.7);
+
+        foreach (int bin in BandBins())
+        {
+            double rampDeg = 360.0 * bin * removed.LatencySamples / FftSize;
+            Assert.Equal(kept.PhaseDeg[bin] + rampDeg, removed.PhaseDeg[bin], 6);
+        }
+    }
+
 }

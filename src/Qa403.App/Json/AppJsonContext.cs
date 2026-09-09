@@ -68,6 +68,14 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(FrequencyResponseStarted))]
 [JsonSerializable(typeof(FrequencyResponseStatus))]
 [JsonSerializable(typeof(SaveFrequencyResponseRequest))]
+
+// The impedance measurement. ImpedanceCalibration rides inside both the start request and the
+// status, so it is reachable through them rather than registered on its own.
+[JsonSerializable(typeof(ImpedanceStartRequest))]
+[JsonSerializable(typeof(ImpedanceStarted))]
+[JsonSerializable(typeof(ImpedanceStatus))]
+[JsonSerializable(typeof(SaveImpedanceRequest))]
+[JsonSerializable(typeof(ImpedanceFixtureConfig))]
 [JsonSerializable(typeof(StoredResponseTracesResponse))]
 [JsonSerializable(typeof(FrequencyResponseParameters))]
 // The stepped-sine response's own DTOs. Missing until now, which is exactly the failure this file's

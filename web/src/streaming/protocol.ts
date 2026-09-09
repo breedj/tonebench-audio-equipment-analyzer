@@ -37,6 +37,17 @@ export const StreamMsgType = {
   FrequencyResponse: 6,
   /** How many records a running frequency-response measurement has taken — see decodeFrequencyResponseProgressFrame. */
   FrequencyResponseProgress: 7,
+  /**
+   * One finished impedance curve. The header's channel byte carries an ImpedanceTraceKind.
+   *
+   * Its own message type rather than a flag on FrequencyResponse, which is how the stepped-sine
+   * response was distinguished: a stepped response's payload is byte-for-byte a chirp response's,
+   * and an impedance frame's is not — it carries no bandwidth blocks, because -1 dB and -3 dB
+   * corners mean nothing on an impedance curve. See decodeImpedanceFrame.
+   */
+  Impedance: 8,
+  /** How far a running impedance measurement has got — see decodeImpedanceProgressFrame. */
+  ImpedanceProgress: 9,
 } as const
 export type StreamMsgType = (typeof StreamMsgType)[keyof typeof StreamMsgType]
 
@@ -441,8 +452,26 @@ export const ResponsePhase = {
   DeterminingRange: 6,
   /** Stepping a tone across the band — the stepped-sine Bode plot's counterpart of Measuring. */
   Sweeping: 7,
+  /** Turning a captured impulse response into curves. */
+  Analyzing: 8,
+  /** Capturing an impedance fixture's open or short standard. */
+  Calibrating: 9,
 } as const
 export type ResponsePhase = (typeof ResponsePhase)[keyof typeof ResponsePhase]
+
+/**
+ * Mirrors Qa403.App.Services.ImpedanceTraceKind. These are the header's channel byte on an
+ * Impedance frame, so a client must not read that byte as a StreamChannel there.
+ */
+export const ImpedanceTraceKind = {
+  /** The DUT's impedance: magnitude in dB relative to 1 ohm, phase in degrees. */
+  Impedance: 0,
+  /** The open standard as measured — a plain dB ratio, not ohms. */
+  OpenCal: 1,
+  /** The short standard, likewise. */
+  ShortCal: 2,
+} as const
+export type ImpedanceTraceKind = (typeof ImpedanceTraceKind)[keyof typeof ImpedanceTraceKind]
 
 /**
  * One -1 dB or -3 dB reading. `lowerClamped`/`upperClamped` mean the curve never fell to the
@@ -538,6 +567,81 @@ function readBandwidth(view: DataView, offset: number): ResponseBandwidth {
     bandwidthHz: view.getFloat32(offset + 12, true),
     lowerClamped: view.getUint8(offset + 16) !== 0,
     upperClamped: view.getUint8(offset + 17) !== 0,
+  }
+}
+
+export interface ImpedanceFrame {
+  header: StreamFrameHeader
+  kind: ImpedanceTraceKind
+  startFreqHz: number
+  endFreqHz: number
+  freqHz: Float32Array
+  /**
+   * dB relative to 1 ohm for an Impedance curve, a plain dB ratio for a calibration standard.
+   * Both bounds are sent and both must be drawn — max as the line, min as the band beneath it.
+   */
+  magnitudeMinDbOhms: Float32Array
+  magnitudeMaxDbOhms: Float32Array
+  phaseDeg: Float32Array
+  coherence: Float32Array
+  /** The largest |Z| in the analysed band and where it sits — a driver's resonance. */
+  peakDbOhms: number
+  peakFreqHz: number
+}
+
+export interface ImpedanceProgressFrame {
+  header: StreamFrameHeader
+  taken: number
+  total: number
+  phase: ResponsePhase
+  generatorAmpDbv: number
+}
+
+/** Hand-mirrors StreamFrame.EncodeImpedance. See that method for the byte layout. */
+export function decodeImpedanceFrame(buffer: ArrayBuffer): ImpedanceFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  const columns = header.nPoints
+
+  const freqHz = new Float32Array(columns)
+  const magnitudeMinDbOhms = new Float32Array(columns)
+  const magnitudeMaxDbOhms = new Float32Array(columns)
+  const phaseDeg = new Float32Array(columns)
+  const coherence = new Float32Array(columns)
+
+  let offset = HEADER_LENGTH
+  for (let i = 0; i < columns; i++) {
+    freqHz[i] = view.getFloat32(offset, true)
+    magnitudeMinDbOhms[i] = view.getFloat32(offset + 4, true)
+    magnitudeMaxDbOhms[i] = view.getFloat32(offset + 8, true)
+    phaseDeg[i] = view.getFloat32(offset + 12, true)
+    coherence[i] = view.getFloat32(offset + 16, true)
+    offset += 20
+  }
+
+  return {
+    header,
+    kind: header.channel as number as ImpedanceTraceKind,
+    startFreqHz: header.x0,
+    endFreqHz: header.dx,
+    freqHz,
+    magnitudeMinDbOhms,
+    magnitudeMaxDbOhms,
+    phaseDeg,
+    coherence,
+    peakDbOhms: view.getFloat32(offset, true),
+    peakFreqHz: view.getFloat32(offset + 4, true),
+  }
+}
+
+export function decodeImpedanceProgressFrame(buffer: ArrayBuffer): ImpedanceProgressFrame {
+  const header = decodeHeader(buffer)
+  return {
+    header,
+    taken: header.nPoints,
+    total: Math.round(header.dx),
+    phase: header.seq as ResponsePhase,
+    generatorAmpDbv: header.x0,
   }
 }
 

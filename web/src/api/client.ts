@@ -166,6 +166,196 @@ export const RESPONSE_SMOOTHING: { denominator: number; label: string }[] = [
   { denominator: 3, label: '1/3 (max)' },
 ]
 
+// ---------------------------------------------------------------------------------------------
+// Impedance
+// ---------------------------------------------------------------------------------------------
+
+/** Mirrors Qa403.App.Services.ImpedanceMethod. Only ReferenceResistor is implemented. */
+export type ImpedanceMethodName = 'ReferenceResistor' | 'TwoLoad'
+
+/** Mirrors Qa403.App.Services.ImpedanceStimulus. Only Chirp is implemented. */
+export type ImpedanceStimulusName = 'Chirp' | 'SteppedSine' | 'PinkNoise'
+
+/** Mirrors Qa403.App.Services.ImpedanceCableMode. */
+export type ImpedanceCableModeName = 'None' | 'Measured' | 'Fixed'
+
+/** Mirrors Qa403.App.Services.ImpedanceCalTarget. */
+export type ImpedanceCalTargetName = 'None' | 'Open' | 'Short'
+
+/** Mirrors Qa403.App.Services.ImpedanceTraceKind. */
+export type ImpedanceTraceKindName = 'Impedance' | 'OpenCal' | 'ShortCal'
+
+/**
+ * One stored fixture calibration standard: the measured channel ratio, decimated to a few hundred
+ * log-spaced points so it fits in a measurement type's params_json.
+ *
+ * Mirrors Qa403.Dsp.ImpedanceCalibration. The browser is the only place these live — the server
+ * keeps none of its own, so they travel back with every start request.
+ */
+export interface ImpedanceCalibrationJson {
+  freqHz: number[]
+  real: number[]
+  imag: number[]
+}
+
+/**
+ * The impedance fixture as the application remembers it, stored in the <b>configuration database</b>
+ * — a separate file from the measurement history, because it describes this machine's QA403 and this
+ * bench's leads and must not travel inside a measurement database copied elsewhere.
+ */
+export interface ImpedanceFixtureConfig {
+  /**
+   * The series resistor the standards were captured through, and the default a new measurement
+   * starts from. The calibration is only valid at this resistance: both standards are stored as the
+   * measured channel ratio, and both depend on R.
+   */
+  referenceOhms: number
+  calibrationLevelValue: number
+  levelUnit: SweepLevelUnit
+  openCal: ImpedanceCalibrationJson | null
+  shortCal: ImpedanceCalibrationJson | null
+  /** The band the standards actually cover; outside it a calibration curve is held flat. */
+  capturedLowHz: number
+  capturedHighHz: number
+  capturedUtc: string | null
+  /** True when there is something worth applying — an open alone is useful, a short alone is not. */
+  hasCalibration: boolean
+}
+
+export interface ImpedanceStartRequest {
+  method: ImpedanceMethodName
+  stimulus: ImpedanceStimulusName
+  /** The series reference resistor. Sensitivity is best when this is near the impedance being measured. */
+  referenceOhms: number
+  /**
+   * Which channel taps the generator side of the reference resistor. False — left as reference — is
+   * how a bench fixture is normally wired; the simulator needs true, because its fixture models sit
+   * on the left channel.
+   */
+  rightChannelIsReference: boolean
+  frequencySpanHz: number
+  resolutionMultiplier: number
+  levelValue: number
+  /** No `Watt`: a one-port has no output power to aim at, and the server rejects it. */
+  levelUnit: SweepLevelUnit
+  smoothingDenominator: number
+  averageCount: number
+  /** RUN sets this and keeps measuring until stopped; SINGLE leaves it false. Rejected for a calibration run. */
+  continuous: boolean
+  /**
+   * The drive level a calibration run uses, in the same unit as `levelValue`. Louder than the
+   * measurement's by default: a shorted fixture puts the DUT channel ~60 dB below the reference one,
+   * and the fixture is linear, so measuring the standards loudly costs nothing.
+   */
+  calibrationLevelValue: number
+  chirpStartHz: number
+  /** None to measure a DUT, or Open/Short to capture that standard. */
+  calTarget: ImpedanceCalTargetName
+  cableMode: ImpedanceCableModeName
+  fixedCableOhms: number
+  fixedCableMillihenry: number
+  /** For de-embedding the analyzer's own input impedance from a high-impedance measurement. No default — see the server's remarks. */
+  analyzerInputOhms: number | null
+  applySweepGate: boolean
+  openCal: ImpedanceCalibrationJson | null
+  shortCal: ImpedanceCalibrationJson | null
+}
+
+/**
+ * An impedance measurement type's stored settings. The `chart*` fields are display state and all
+ * optional, so a type saved before one of them existed still loads.
+ */
+export interface ImpedanceParameters {
+  method: ImpedanceMethodName
+  stimulus: ImpedanceStimulusName
+  referenceOhms: number
+  rightChannelIsReference: boolean
+  frequencySpanHz: number
+  resolutionMultiplier: number
+  chirpStartHz: number
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  smoothingDenominator: number
+  averageCount: number
+  /** The drive level calibration runs use, in the same unit as `levelValue`. */
+  calibrationLevelValue?: number | null
+  cableMode: ImpedanceCableModeName
+  fixedCableOhms: number
+  fixedCableMillihenry: number
+  analyzerInputOhms?: number | null
+  applySweepGate?: boolean | null
+  /** The fixture calibration, which is what makes it outlast the app. */
+  openCal?: ImpedanceCalibrationJson | null
+  shortCal?: ImpedanceCalibrationJson | null
+  /** Take the resistor and both standards from the globally configured fixture instead of these. */
+  useGlobalFixture?: boolean | null
+  generatorAmpDbv?: number | null
+  chartView?: ImpedanceView | null
+  chartShowPhase?: boolean | null
+  chartShowCoherence?: boolean | null
+  chartShowShortCal?: boolean | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartZTopOhms?: number | null
+  chartZBottomOhms?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartPhaseTopDeg?: number | null
+  chartPhaseBottomDeg?: number | null
+  chartAutofitOnDone?: boolean | null
+}
+
+/** Which chart the impedance screen is showing. */
+export type ImpedanceView = 'Bode' | 'Nyquist'
+
+export interface ImpedanceTraceJson {
+  kind: ImpedanceTraceKindName
+  startFreqHz: number
+  endFreqHz: number
+  freqHz: number[]
+  /** dB relative to 1 ohm for an Impedance curve; a plain dB ratio for a calibration standard. */
+  magnitudeMinDbOhms: number[]
+  magnitudeMaxDbOhms: number[]
+  phaseDeg: number[]
+  coherence: number[]
+  peakDbOhms: number
+  peakFreqHz: number
+}
+
+export interface ImpedanceStatus {
+  running: boolean
+  phase: ResponsePhaseName
+  continuous: boolean
+  passesCompleted: number
+  averagesTaken: number
+  averageCount: number
+  generatorAmpDbv: number
+  binHz: number
+  sampleRateHz: number
+  fftSize: number
+  referenceOhms: number
+  rightChannelIsReference: boolean
+  calTarget: ImpedanceCalTargetName
+  error: string | null
+  traces: ImpedanceTraceJson[]
+  /** The standard a calibration run just captured, for the browser to store. Null on a DUT measurement. */
+  capturedCalibration: ImpedanceCalibrationJson | null
+  /** Median |Z| across the analysed band, as a one-number summary. NaN arrives as null over JSON. */
+  medianOhms: number | null
+  /** Roughly what the DUT was driven with, in amps. Approximate — a sweep's current varies with Z. */
+  driveCurrentAmps: number | null
+}
+
+export interface ImpedanceStarted {
+  sampleRateHz: number
+  fftSize: number
+  binHz: number
+  averageCount: number
+  recordSeconds: number
+  continuous: boolean
+  calTarget: ImpedanceCalTargetName
+}
+
 export interface FrequencyResponseStartRequest {
   frequencySpanHz: number
   resolutionMultiplier: number
@@ -1364,6 +1554,34 @@ export const api = {
     request<{ id: number }>('/sweep/save', { method: 'POST', body: JSON.stringify(req) }),
 
   getStoredSweep: (measurementId: number) => request<StoredSweepResponse>(`/measurements/${measurementId}/sweep-points`),
+
+  // The impedance measurement. The same five verbs as every other runner; a stored result is read
+  // back through getResponseTraces, because impedance stores its curves in the same response_trace
+  // rows (with different `kind` strings and dB-relative-to-1-ohm magnitudes).
+  // The application configuration, which lives in its own database. GET returns defaults rather
+  // than 404 on a machine that has never calibrated, so no caller needs a special case.
+  getImpedanceFixture: () => request<ImpedanceFixtureConfig>('/config/impedance-fixture'),
+
+  setImpedanceFixture: (fixture: ImpedanceFixtureConfig) =>
+    request<ImpedanceFixtureConfig>('/config/impedance-fixture', {
+      method: 'PUT',
+      body: JSON.stringify(fixture),
+    }),
+
+  clearImpedanceFixture: () =>
+    request<ImpedanceFixtureConfig>('/config/impedance-fixture', { method: 'DELETE' }),
+
+  startImpedance: (req: ImpedanceStartRequest) =>
+    request<ImpedanceStarted>('/impedance/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelImpedance: () => request<ImpedanceStatus>('/impedance/cancel', { method: 'POST' }),
+
+  clearImpedance: () => request<ImpedanceStatus>('/impedance/clear', { method: 'POST' }),
+
+  getImpedanceStatus: () => request<ImpedanceStatus>('/impedance/status'),
+
+  saveImpedance: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/impedance/save', { method: 'POST', body: JSON.stringify(req) }),
 
   startFrequencyResponse: (req: FrequencyResponseStartRequest) =>
     request<FrequencyResponseStarted>('/frequency-response/start', { method: 'POST', body: JSON.stringify(req) }),

@@ -152,6 +152,127 @@ public static class CsvExporter
     }
 
     /// <summary>
+    /// An impedance result as CSV: one row per display column, in <b>ohms</b>.
+    ///
+    /// <para>Its own renderer rather than a branch inside <see cref="ExportResponse"/> because the
+    /// units are different all the way down. Impedance rides in the same <c>response_trace</c> rows,
+    /// but its magnitude columns hold dB relative to 1 ohm rather than a gain, and its bandwidth
+    /// columns hold nothing at all -- a -3 dB corner is a response concept. Writing dB into a column
+    /// headed <c>_db</c> would be true and useless: nobody wants a loudspeaker's impedance in
+    /// decibels.</para>
+    ///
+    /// <para><b>Resistance and reactance are written out alongside</b>, from the same magnitude and
+    /// phase. They are not extra information -- <c>R = |Z| cos(phi)</c>, <c>X = |Z| sin(phi)</c> --
+    /// but they are the form the numbers are actually used in, and recomputing them in a spreadsheet
+    /// is where a degrees/radians mistake gets made.</para>
+    ///
+    /// <para>A calibration standard's curve is a ratio rather than an impedance, so its columns are
+    /// headed <c>_db</c> and it gets no R and X. The kind prefix on every column is what keeps the
+    /// two readable in one table.</para>
+    /// </summary>
+    public static string ExportImpedance(MeasurementDetail detail, IReadOnlyList<StoredResponseTrace> traces)
+    {
+        if (traces.Count == 0)
+            throw new ArgumentException("An impedance result with at least one trace is required.", nameof(traces));
+
+        var sb = new StringBuilder();
+        WriteComment(sb, "project", detail.ProjectName);
+        WriteComment(sb, "measurement_type", detail.MeasurementTypeName);
+        WriteComment(sb, "kind", detail.Kind);
+        WriteComment(sb, "name", detail.Name);
+        WriteComment(sb, "notes", detail.Notes ?? "");
+        WriteComment(sb, "timestamp_utc", Qa403Timestamp.FormatUtc(detail.TimestampUtc));
+        WriteComment(sb, "sample_rate_hz", detail.SampleRateHz.ToString(CultureInfo.InvariantCulture));
+        WriteComment(sb, "fft_size", detail.FftSize.ToString(CultureInfo.InvariantCulture));
+
+        // Carries the reference resistor and both calibrations, without which none of these numbers
+        // can be reproduced.
+        WriteComment(sb, "params_json", detail.ParamsJson);
+
+        foreach (var trace in traces)
+        {
+            if (IsImpedanceCurve(trace.Kind))
+            {
+                WriteComment(sb, $"{trace.Kind}_peak_ohms", ToOhms(trace.PeakDb).ToString("F6", CultureInfo.InvariantCulture));
+                WriteComment(sb, $"{trace.Kind}_peak_hz", trace.PeakHz.ToString("F4", CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                WriteComment(sb, $"{trace.Kind}_peak_db", trace.PeakDb.ToString("F4", CultureInfo.InvariantCulture));
+                WriteComment(sb, $"{trace.Kind}_peak_hz", trace.PeakHz.ToString("F4", CultureInfo.InvariantCulture));
+            }
+        }
+
+        sb.Append("freq_hz");
+        foreach (var trace in traces)
+        {
+            if (IsImpedanceCurve(trace.Kind))
+            {
+                sb.Append(',').Append(trace.Kind).Append("_min_ohms");
+                sb.Append(',').Append(trace.Kind).Append("_max_ohms");
+                sb.Append(',').Append(trace.Kind).Append("_phase_deg");
+                sb.Append(',').Append(trace.Kind).Append("_resistance_ohms");
+                sb.Append(',').Append(trace.Kind).Append("_reactance_ohms");
+                sb.Append(',').Append(trace.Kind).Append("_coherence");
+            }
+            else
+            {
+                sb.Append(',').Append(trace.Kind).Append("_min_db");
+                sb.Append(',').Append(trace.Kind).Append("_max_db");
+                sb.Append(',').Append(trace.Kind).Append("_phase_deg");
+                sb.Append(',').Append(trace.Kind).Append("_coherence");
+            }
+        }
+
+        sb.Append('\n');
+
+        // Every curve comes from one measurement and so shares a column grid; the shortest is used
+        // defensively rather than assumed, since a ragged row would silently shift columns.
+        int rows = traces.Min(t => t.FreqHz.Length);
+        for (int i = 0; i < rows; i++)
+        {
+            sb.Append(traces[0].FreqHz[i].ToString("F6", CultureInfo.InvariantCulture));
+            foreach (var trace in traces)
+            {
+                if (IsImpedanceCurve(trace.Kind))
+                {
+                    double min = ToOhms(trace.MagnitudeMinDb[i]);
+                    double max = ToOhms(trace.MagnitudeMaxDb[i]);
+                    double phaseDeg = trace.PhaseDeg[i];
+
+                    // R and X from the column's midpoint, which is what a reader takes off the chart:
+                    // the max alone carries the aggregation bias of a max over several bins.
+                    double magnitude = 0.5 * (min + max);
+                    double radians = phaseDeg * Math.PI / 180.0;
+
+                    sb.Append(',').Append(min.ToString("F6", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append(max.ToString("F6", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append(phaseDeg.ToString("F4", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append((magnitude * Math.Cos(radians)).ToString("F6", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append((magnitude * Math.Sin(radians)).ToString("F6", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append(trace.Coherence[i].ToString("F6", CultureInfo.InvariantCulture));
+                }
+                else
+                {
+                    sb.Append(',').Append(trace.MagnitudeMinDb[i].ToString("F4", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append(trace.MagnitudeMaxDb[i].ToString("F4", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append(trace.PhaseDeg[i].ToString("F4", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append(trace.Coherence[i].ToString("F6", CultureInfo.InvariantCulture));
+                }
+            }
+
+            sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>Whether a stored trace holds ohms rather than a plain ratio.</summary>
+    private static bool IsImpedanceCurve(string kind) => kind == ResponseTraceKind.Impedance;
+
+    private static double ToOhms(double dbOhms) => Math.Pow(10.0, dbOhms / 20.0);
+
+    /// <summary>
     /// One corner reading. A clamped end is written as an empty field rather than the frequency the
     /// search stopped at: the curve never reached the threshold there, so there is no corner, and a
     /// number would read as a measured one.

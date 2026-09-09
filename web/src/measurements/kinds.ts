@@ -22,6 +22,9 @@ export const STEPPED_RESPONSE_KIND = 'SteppedResponse'
 /** Mirrors MeasurementSaveService.ImpulseResponseKind — a chirp-driven impulse response. */
 export const IMPULSE_RESPONSE_KIND = 'ImpulseResponse'
 
+/** Mirrors MeasurementSaveService.ImpedanceKind — impedance against frequency through a reference resistor. */
+export const IMPEDANCE_KIND = 'Impedance'
+
 /** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
 export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
 
@@ -68,6 +71,17 @@ export function isImpulseResponseKind(kind: string | null | undefined): boolean 
   return kind === IMPULSE_RESPONSE_KIND
 }
 
+/**
+ * Whether a kind's result is an impedance curve. Mirrors `MeasurementSaveService.IsImpedanceKind`,
+ * and its own predicate rather than a third arm of `isFrequencyResponseKind` for the same reason
+ * `isImpulseResponseKind` is: impedance does store its curves in the same rows, but that predicate
+ * also decides which start endpoint the UI drives, which settings record is written and how a result
+ * is exported — and impedance differs in all three. What it shares is the storage, nothing else.
+ */
+export function isImpedanceKind(kind: string | null | undefined): boolean {
+  return kind === IMPEDANCE_KIND
+}
+
 export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
   {
     kind: 'FFTSpectrum',
@@ -96,6 +110,12 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     label: 'Impulse response',
     description:
       'Sweeps a chirp and deconvolves it to the impulse response, then reads a gated (reflection-free) magnitude and phase off it, plus harmonic distortion against frequency.',
+  },
+  {
+    kind: IMPEDANCE_KIND,
+    label: 'Impedance',
+    description:
+      'Measures impedance against frequency through a series reference resistor, and plots magnitude in ohms with phase — for loudspeakers, crossovers, transformers and an amplifier\u2019s input impedance.',
   },
   {
     kind: STEPPED_RESPONSE_KIND,

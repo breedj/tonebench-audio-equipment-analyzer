@@ -89,6 +89,15 @@ public enum FrequencyResponsePhase
     /// <c>RunnerPhaseCoverageTests</c> now checks mechanically for all three.</para>
     /// </summary>
     Analyzing = 8,
+
+    /// <summary>
+    /// Capturing an impedance fixture's open or short standard — <c>ImpedanceRunner</c> only. A
+    /// calibration run is a measurement in every mechanical sense (it drives the generator, holds the
+    /// session and takes records), so it must appear in that runner's <c>Running</c> or the run would
+    /// read as finished the moment it began. Appended with an explicit ordinal for the same reason
+    /// <see cref="DeterminingRange"/> is.
+    /// </summary>
+    Calibrating = 9,
 }
 
 /// <summary>

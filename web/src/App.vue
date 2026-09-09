@@ -44,6 +44,11 @@ import ThdSweepChart from './components/ThdSweepChart.vue'
 import SweepFftPreviewChart from './components/SweepFftPreviewChart.vue'
 import SweepScopePreviewChart from './components/SweepScopePreviewChart.vue'
 import FrequencyResponseConfigPanel from './components/FrequencyResponseConfigPanel.vue'
+import ImpedanceConfigPanel from './components/ImpedanceConfigPanel.vue'
+import ImpedanceDisplayPanel from './components/ImpedanceDisplayPanel.vue'
+import ImpedanceChart from './components/ImpedanceChart.vue'
+import ImpedancePlaneChart from './components/ImpedancePlaneChart.vue'
+import ImpedanceReadoutPanel from './components/ImpedanceReadoutPanel.vue'
 import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.vue'
 import FrequencyResponseDisplayPanel from './components/FrequencyResponseDisplayPanel.vue'
 import FrequencyResponseChart from './components/FrequencyResponseChart.vue'
@@ -58,6 +63,7 @@ import ResponseStabilityPanel from './components/ResponseStabilityPanel.vue'
 import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import { useFrequencyResponse } from './composables/useFrequencyResponse'
+import { useImpedance } from './composables/useImpedance'
 import { useImpulseResponse } from './composables/useImpulseResponse'
 import {
   BURST_FREQUENCY_COLUMNS,
@@ -73,6 +79,7 @@ import {
   isSteppedResponseKind,
   isImpulseResponseKind,
   isSweepKind as isSweepKindName,
+  isImpedanceKind,
 } from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
@@ -206,6 +213,22 @@ const {
 } = useFrequencyResponse()
 
 const {
+  running: impedanceRunning,
+  traces: impedanceTraces,
+  error: impedanceError,
+  progressLabel: impedanceProgressLabel,
+  generatorAmpDbv: impedanceGeneratorAmpDbv,
+  binHz: impedanceBinHz,
+  referenceOhms: impedanceReferenceOhms,
+  medianOhms: impedanceMedianOhms,
+  driveCurrentAmps: impedanceDriveCurrentAmps,
+  start: startImpedance,
+  cancel: cancelImpedanceRun,
+  clear: clearImpedanceRun,
+  refresh: refreshImpedance,
+} = useImpedance()
+
+const {
   status: impulseStatus,
   running: impulseRunning,
   traces: impulseTraces,
@@ -249,6 +272,11 @@ const isChirpResponse = computed(() => isFrequencyResponse.value && !isSteppedRe
 // there, and the two run through different endpoints — so it keys off its own flag rather than
 // becoming a third arm of isFrequencyResponse.
 const isImpulseResponse = computed(() => isImpulseResponseKind(currentType.value?.kind))
+
+// A fifth screen. It shares the chirp and the storage rows with the response screen, but it reports
+// ohms rather than a gain and it has a fixture calibration of its own, so like the impulse screen it
+// keys off its own flag rather than becoming a third arm of isFrequencyResponse.
+const isImpedance = computed(() => isImpedanceKind(currentType.value?.kind))
 
 // One runner holds one set of points, and the two screens cannot read each other's: see useSweep's
 // own `viewAxis`. Kept in step with the selected type rather than set on navigation, so a reload
@@ -306,6 +334,10 @@ const visibleSweepOverlays = computed(() => overlays.value.filter((o) => o.visib
  */
 const visibleResponseOverlays = computed(() =>
   overlays.value.filter((o) => o.visible && o.responseTraces?.length),
+)
+
+const visibleImpedanceOverlays = computed(() =>
+  overlays.value.filter((o) => o.visible && o.impedanceTraces?.length),
 )
 
 /**
@@ -507,6 +539,7 @@ watch(
 // button and the save path actually read, and both panels expose the same { run, invalid,
 // buildParamsJson } contract.
 const responseConfigPanel = ref<InstanceType<typeof FrequencyResponseConfigPanel> | null>(null)
+const impedanceConfigPanel = ref<InstanceType<typeof ImpedanceConfigPanel> | null>(null)
 const steppedResponseConfigPanel = ref<InstanceType<typeof SteppedResponseConfigPanel> | null>(null)
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
 const amplitudeSweepConfigPanel = ref<InstanceType<typeof AmplitudeSweepConfigPanel> | null>(null)
@@ -661,6 +694,124 @@ watch(
     if (!responseDisplayRestoring && isFrequencyResponse.value) markDirty()
   },
 )
+
+// ---------------------------------------------------------------------------
+// Impedance
+// ---------------------------------------------------------------------------
+
+const impedanceView = ref<import('./api/client').ImpedanceView>('Bode')
+const impedanceShowPhase = ref(true)
+const impedanceShowCoherence = ref(false)
+const impedanceShowShortCal = ref(false)
+const impedanceThickLines = ref(false)
+const impedanceShowDataPoints = ref(false)
+const impedanceZTopOhms = ref(100)
+const impedanceZBottomOhms = ref(1)
+const impedanceXFromHz = ref(10)
+const impedanceXToHz = ref(20000)
+const impedancePhaseTopDeg = ref(90)
+const impedancePhaseBottomDeg = ref(-90)
+const impedanceAutofitOnDone = ref(true)
+
+let impedanceDisplayRestoring = false
+
+/**
+ * Restores an impedance type's stored chart state. Every field is optional and guarded, so a type
+ * saved before one of them existed simply keeps whatever is showing.
+ */
+function applyStoredImpedanceDisplay(paramsJson: string) {
+  type StoredDisplay = Partial<import('./api/client').ImpedanceParameters>
+
+  let stored: StoredDisplay
+  try {
+    stored = JSON.parse(paramsJson) as StoredDisplay
+  } catch {
+    return
+  }
+
+  impedanceDisplayRestoring = true
+  if (stored.chartView) impedanceView.value = stored.chartView
+  if (typeof stored.chartShowPhase === 'boolean') impedanceShowPhase.value = stored.chartShowPhase
+  if (typeof stored.chartShowCoherence === 'boolean') impedanceShowCoherence.value = stored.chartShowCoherence
+  if (typeof stored.chartShowShortCal === 'boolean') impedanceShowShortCal.value = stored.chartShowShortCal
+  if (typeof stored.chartThickLines === 'boolean') impedanceThickLines.value = stored.chartThickLines
+  if (typeof stored.chartShowDataPoints === 'boolean') impedanceShowDataPoints.value = stored.chartShowDataPoints
+  // Both bounds must stay above zero: the impedance axis is logarithmic.
+  if (typeof stored.chartZTopOhms === 'number' && stored.chartZTopOhms > 0) impedanceZTopOhms.value = stored.chartZTopOhms
+  if (typeof stored.chartZBottomOhms === 'number' && stored.chartZBottomOhms > 0)
+    impedanceZBottomOhms.value = stored.chartZBottomOhms
+  if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) impedanceXFromHz.value = stored.chartXFromHz
+  if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) impedanceXToHz.value = stored.chartXToHz
+  if (typeof stored.chartPhaseTopDeg === 'number') impedancePhaseTopDeg.value = stored.chartPhaseTopDeg
+  if (typeof stored.chartPhaseBottomDeg === 'number') impedancePhaseBottomDeg.value = stored.chartPhaseBottomDeg
+  if (typeof stored.chartAutofitOnDone === 'boolean') impedanceAutofitOnDone.value = stored.chartAutofitOnDone
+
+  void nextTick(() => {
+    impedanceDisplayRestoring = false
+  })
+}
+
+// Kind-gated for the same reason the response watcher is: another kind's params_json parses fine,
+// and reading chart fields out of it would apply that screen's state to this one.
+watch(
+  () => (isImpedance.value ? currentType.value?.paramsJson : undefined),
+  (paramsJson) => {
+    if (paramsJson) applyStoredImpedanceDisplay(paramsJson)
+  },
+  { immediate: true },
+)
+
+watch(
+  [
+    impedanceView, impedanceShowPhase, impedanceShowCoherence, impedanceShowShortCal, impedanceThickLines,
+    impedanceShowDataPoints, impedanceZTopOhms, impedanceZBottomOhms, impedanceXFromHz,
+    impedanceXToHz, impedancePhaseTopDeg, impedancePhaseBottomDeg, impedanceAutofitOnDone,
+  ],
+  () => {
+    if (!impedanceDisplayRestoring && isImpedance.value) markDirty()
+  },
+)
+
+// A measurement runs server-side, so a reload (or a second tab) mid-run has to re-attach rather than
+// start from an empty chart.
+watch(isImpedance, (selected) => {
+  if (selected) void refreshImpedance().catch(() => undefined)
+}, { immediate: true })
+
+function runImpedance(continuous: boolean) {
+  const request = impedanceConfigPanel.value?.buildRequest(continuous)
+  if (!request) return
+
+  return withErrorReporting(async () => {
+    await startImpedance(request)
+  })
+}
+
+/**
+ * Captures one calibration standard. The same runner and the same request shape as a measurement —
+ * only `calTarget` differs — so this goes through the panel's own builder rather than assembling a
+ * second request here.
+ */
+function calibrateImpedance(target: import('./api/client').ImpedanceCalTargetName) {
+  const request = impedanceConfigPanel.value?.buildRequest(false, target)
+  if (!request) return
+
+  return withErrorReporting(async () => {
+    await startImpedance(request)
+  })
+}
+
+function cancelImpedance() {
+  return withErrorReporting(async () => {
+    await cancelImpedanceRun()
+  })
+}
+
+function clearImpedance() {
+  return withErrorReporting(async () => {
+    await clearImpedanceRun()
+  })
+}
 
 /**
  * RUN keeps measuring until stopped; SINGLE measures once. The panel builds the request and this
@@ -1451,6 +1602,27 @@ function buildTypeParamsJson(): string | undefined {
     })
   }
 
+  if (isImpedance.value) {
+    const base = impedanceConfigPanel.value?.buildParamsJson()
+    if (!base) return undefined
+    return JSON.stringify({
+      ...JSON.parse(base),
+      chartView: impedanceView.value,
+      chartShowPhase: impedanceShowPhase.value,
+      chartShowCoherence: impedanceShowCoherence.value,
+      chartShowShortCal: impedanceShowShortCal.value,
+      chartThickLines: impedanceThickLines.value,
+      chartShowDataPoints: impedanceShowDataPoints.value,
+      chartZTopOhms: impedanceZTopOhms.value,
+      chartZBottomOhms: impedanceZBottomOhms.value,
+      chartXFromHz: impedanceXFromHz.value,
+      chartXToHz: impedanceXToHz.value,
+      chartPhaseTopDeg: impedancePhaseTopDeg.value,
+      chartPhaseBottomDeg: impedancePhaseBottomDeg.value,
+      chartAutofitOnDone: impedanceAutofitOnDone.value,
+    })
+  }
+
   if (isFrequencyResponse.value) {
     const base = activeResponsePanel.value?.buildParamsJson()
     if (!base) return undefined
@@ -1657,7 +1829,7 @@ function confirmSaveProjectAs(name: string) {
               Save as…
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -1667,7 +1839,7 @@ function confirmSaveProjectAs(name: string) {
               Save measurement result
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance"
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -1695,6 +1867,26 @@ function confirmSaveProjectAs(name: string) {
               @click="openSaveDialog"
             >
               Save response result
+            </button>
+            <button
+              v-if="isImpedance"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="impedanceRunning || impedanceTraces.length === 0"
+              title="Saves the impedance curve on screen as a new measurement result, together with the fixture calibration that produced it."
+              @click="openSaveDialog"
+            >
+              Save impedance result
+            </button>
+            <button
+              v-if="isImpedance"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="impedanceRunning || impedanceTraces.length === 0"
+              title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings and the calibration alone."
+              @click="clearImpedance"
+            >
+              Clear
             </button>
             <button
               v-if="isImpulseResponse"
@@ -2139,6 +2331,122 @@ function confirmSaveProjectAs(name: string) {
                   v-model:phase-top-deg="responsePhaseTopDeg"
                   v-model:phase-bottom-deg="responsePhaseBottomDeg"
                   v-model:autofit-on-done="responseAutofitOnDone"
+                />
+
+                <MeasurementChecklist @error="reportError" />
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="isImpedance">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+                <!-- RUN / SINGLE / STOP, the same trio and the same slot as every other screen. -->
+                <div class="flex gap-3">
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    :disabled="impedanceRunning || !!impedanceConfigPanel?.invalid"
+                    :title="
+                      impedanceConfigPanel?.invalid ??
+                      'Sweeps a chirp through the reference resistor and re-measures until you press Stop.'
+                    "
+                    @click="runImpedance(true)"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    RUN
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-300 py-4 text-sm font-bold tracking-wide transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    :disabled="impedanceRunning || !!impedanceConfigPanel?.invalid"
+                    :title="impedanceConfigPanel?.invalid ?? 'Measures the impedance once and stops.'"
+                    @click="runImpedance(false)"
+                  >
+                    SINGLE
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
+                    :class="impedanceRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    :disabled="!impedanceRunning"
+                    title="Stops the measurement and silences the generator. The curve from the last completed pass stays on screen."
+                    @click="cancelImpedance"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
+                    STOP
+                  </button>
+                </div>
+
+                <ImpedanceConfigPanel
+                  ref="impedanceConfigPanel"
+                  :running="impedanceRunning"
+                  @calibrate="calibrateImpedance"
+                />
+
+                <ImpedanceReadoutPanel
+                  :traces="impedanceTraces"
+                  :median-ohms="impedanceMedianOhms"
+                  :drive-current-amps="impedanceDriveCurrentAmps"
+                  :reference-ohms="impedanceReferenceOhms"
+                />
+              </div>
+
+              <div class="flex min-w-0 flex-1 flex-col gap-3">
+                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  <span>{{ impedanceProgressLabel || 'Idle' }}</span>
+                  <!-- Number.isFinite, not truthiness: 0 dBV is an ordinary drive level. -->
+                  <span v-if="Number.isFinite(impedanceGeneratorAmpDbv) && impedanceTraces.length">
+                    · gen {{ impedanceGeneratorAmpDbv.toFixed(2) }} dBV
+                  </span>
+                  <span v-if="impedanceBinHz">· {{ impedanceBinHz.toFixed(2) }} Hz/bin</span>
+                </div>
+                <p v-if="impedanceError" class="text-xs text-red-600 dark:text-red-400">{{ impedanceError }}</p>
+
+                <ImpedanceChart
+                  v-if="impedanceView === 'Bode'"
+                  :traces="impedanceTraces"
+                  :overlays="visibleImpedanceOverlays"
+                  :show-phase="impedanceShowPhase"
+                  :show-coherence="impedanceShowCoherence"
+                  :show-short-cal="impedanceShowShortCal"
+                  :thick-lines="impedanceThickLines"
+                  :show-data-points="impedanceShowDataPoints"
+                  :z-top-ohms="impedanceZTopOhms"
+                  :z-bottom-ohms="impedanceZBottomOhms"
+                  :x-from-hz="impedanceXFromHz"
+                  :x-to-hz="impedanceXToHz"
+                  :phase-top-deg="impedancePhaseTopDeg"
+                  :phase-bottom-deg="impedancePhaseBottomDeg"
+                />
+                <ImpedancePlaneChart
+                  v-else
+                  :traces="impedanceTraces"
+                  :x-from-hz="impedanceXFromHz"
+                  :x-to-hz="impedanceXToHz"
+                  :thick-lines="impedanceThickLines"
+                />
+
+                <MeasurementHistoryPanel @error="reportError" />
+              </div>
+
+              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+                <ImpedanceDisplayPanel
+                  :traces="impedanceTraces"
+                  :running="impedanceRunning"
+                  v-model:view="impedanceView"
+                  v-model:show-phase="impedanceShowPhase"
+                  v-model:show-coherence="impedanceShowCoherence"
+                  v-model:show-short-cal="impedanceShowShortCal"
+                  v-model:thick-lines="impedanceThickLines"
+                  v-model:show-data-points="impedanceShowDataPoints"
+                  v-model:z-top-ohms="impedanceZTopOhms"
+                  v-model:z-bottom-ohms="impedanceZBottomOhms"
+                  v-model:x-from-hz="impedanceXFromHz"
+                  v-model:x-to-hz="impedanceXToHz"
+                  v-model:phase-top-deg="impedancePhaseTopDeg"
+                  v-model:phase-bottom-deg="impedancePhaseBottomDeg"
+                  v-model:autofit-on-done="impedanceAutofitOnDone"
                 />
 
                 <MeasurementChecklist @error="reportError" />

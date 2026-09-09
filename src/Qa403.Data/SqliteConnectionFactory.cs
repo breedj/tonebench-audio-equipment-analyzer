@@ -10,9 +10,18 @@ namespace Qa403.Data;
 /// </summary>
 public sealed class SqliteConnectionFactory(Qa403DatabaseOptions options)
 {
-    public async Task<SqliteConnection> OpenAsync(CancellationToken ct)
+    public Task<SqliteConnection> OpenAsync(CancellationToken ct) => OpenAtAsync(options.Path, ct);
+
+    /// <summary>
+    /// Opens any of this app's SQLite files with the pragmas above applied.
+    ///
+    /// <para>Shared with <see cref="ConfigConnectionFactory"/> rather than duplicated: the
+    /// configuration database wants the identical treatment, and two copies of this list is how one
+    /// database quietly ends up in rollback-journal mode while the other is in WAL.</para>
+    /// </summary>
+    internal static async Task<SqliteConnection> OpenAtAsync(string path, CancellationToken ct)
     {
-        var connection = new SqliteConnection($"Data Source={options.Path}");
+        var connection = new SqliteConnection($"Data Source={path}");
         try
         {
             await connection.OpenAsync(ct);

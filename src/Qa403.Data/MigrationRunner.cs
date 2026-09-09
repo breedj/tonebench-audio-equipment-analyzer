@@ -11,9 +11,18 @@ namespace Qa403.Data;
 /// app already publishes with an embedded wwwroot, and loose .sql files copied to the output
 /// directory are exactly the kind of thing a published layout drops.
 /// </summary>
-public sealed class MigrationRunner
+/// <param name="resourcePrefix">
+/// Which embedded set to apply. Defaults to the measurement database's. The configuration database
+/// passes its own, and gets its own independent <c>schema_version</c> — the table is created in
+/// whichever connection it is handed, so the two version histories cannot collide.
+/// </param>
+public sealed class MigrationRunner(string resourcePrefix = MigrationRunner.MeasurementResourcePrefix)
 {
-    private const string ResourcePrefix = "Qa403.Data.Migrations.";
+    public const string MeasurementResourcePrefix = "Qa403.Data.Migrations.";
+
+    /// <summary>The configuration database's own migrations — see <see cref="Qa403ConfigDatabaseOptions"/> for why it is a separate file.</summary>
+    public const string ConfigResourcePrefix = "Qa403.Data.ConfigMigrations.";
+
     private static readonly Regex VersionPattern = new(@"^(\d+)_", RegexOptions.Compiled);
 
     public async Task RunAsync(SqliteConnection connection, CancellationToken ct)
@@ -68,15 +77,16 @@ public sealed class MigrationRunner
         await transaction.CommitAsync(ct);
     }
 
-    private static IEnumerable<Migration> DiscoverMigrations()
+    /// <summary>Instance rather than static: which set to discover is the constructor parameter above.</summary>
+    private IEnumerable<Migration> DiscoverMigrations()
     {
         var assembly = typeof(MigrationRunner).Assembly;
 
         return assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(ResourcePrefix, StringComparison.Ordinal) && name.EndsWith(".sql", StringComparison.Ordinal))
+            .Where(name => name.StartsWith(resourcePrefix, StringComparison.Ordinal) && name.EndsWith(".sql", StringComparison.Ordinal))
             .Select(name =>
             {
-                string fileName = name[ResourcePrefix.Length..];
+                string fileName = name[resourcePrefix.Length..];
                 var match = VersionPattern.Match(fileName);
                 if (!match.Success)
                     throw new InvalidOperationException($"Migration resource '{name}' does not start with a numeric version.");

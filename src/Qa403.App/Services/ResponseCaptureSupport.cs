@@ -165,17 +165,26 @@ internal static class ResponseCaptureSupport
     /// same stimulus fed straight back to it, and without it the right channel is a trace of its own.
     /// </summary>
     public static GeneratorConfig BuildGenerator(
-        FrequencyResponseRequest request, double amplitudeDbv, int? repeatFrames = null)
+        FrequencyResponseRequest request, double amplitudeDbv, int? repeatFrames = null) =>
+        BuildChirpGenerator(
+            amplitudeDbv, request.ChirpStartHz, request.ChirpEndHz, repeatFrames ?? request.FftSize);
+
+    /// <summary>
+    /// The same chirp stated in its own terms rather than a frequency-response request's, so the
+    /// impedance measurement can build the identical stimulus without borrowing that request type.
+    /// </summary>
+    public static GeneratorConfig BuildChirpGenerator(
+        double amplitudeDbv, double startFreqHz, double endFreqHz, int repeatFrames)
     {
         var chirp = new EchoChirpSettings
         {
             AmplitudeDbv = amplitudeDbv,
-            StartFrequencyHz = request.ChirpStartHz,
-            EndFrequencyHz = request.ChirpEndHz,
+            StartFrequencyHz = startFreqHz,
+            EndFrequencyHz = endFreqHz,
             Smoothing = SmoothingOctaves.None,
 
             // The whole measurement rests on this matching the analysis size exactly.
-            RepeatFrames = repeatFrames ?? request.FftSize,
+            RepeatFrames = repeatFrames,
         };
 
         var channel = new ChannelGeneratorConfig(Enabled: true, Tones: [])

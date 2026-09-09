@@ -17,10 +17,22 @@ namespace Qa403.Device.Simulation;
 /// would make the impulse response's <c>RightChannel</c> reference mode divide the DUT straight
 /// back out and report a flat line.</para>
 ///
-/// <para><b>Every model is normalised to unity in its passband</b>, so switching one on changes the
-/// shape of what comes back and not its level. A DUT with gain would be more realistic and would
+/// <para><b>Every DUT model is normalised to unity in its passband</b>, so switching one on changes
+/// the shape of what comes back and not its level. A DUT with gain would be more realistic and would
 /// silently clip the simulated ADC on every screen that is not expecting it — the simulator has no
 /// autoranging to save it (see <see cref="SimulatedDevice.AutoRangeEnabled"/>).</para>
+///
+/// <para><b>The three <c>Impedance*</c> entries are the documented exception, because they are not
+/// DUTs at all — they are <i>fixtures</i>.</b> Each one stands for a reference resistor with a load
+/// hanging off it, and what the left channel carries is the junction between the two. A voltage
+/// divider is never unity by construction, so these attenuate: the 8 ohm load reads 22.6 dB down on
+/// the generator. That is safe in the one direction that matters here — a divider only ever
+/// attenuates, so no amount of it can clip an input the way a model with gain would. Note that they
+/// invert the usual channel convention as a side effect: the left channel is the <i>measured</i> node
+/// and the right is the clean reference, so an impedance measurement run against the simulator wants
+/// its reference channel set to Right, the mirror image of a bench fixture wired left-as-reference.
+/// The resistor they assume is <see cref="SimulatedImpedanceFixture.ReferenceOhms"/>, and entering a
+/// different one on the impedance screen scales every reading by the ratio.</para>
 /// </summary>
 public enum SimulatedDutModel
 {
@@ -113,4 +125,44 @@ public enum SimulatedDutModel
     /// sample rate.</para>
     /// </summary>
     Oscillating = 5,
+
+    /// <summary>
+    /// An impedance fixture with a plain <b>8 ohm resistor</b> across its terminals: a
+    /// <see cref="SimulatedImpedanceFixture.ReferenceOhms"/> reference resistor in series, and the left
+    /// channel on the junction.
+    ///
+    /// <para><b>The impedance measurement's calibration target</b>, and here for the same reason
+    /// <see cref="BandpassFilter"/> is: it is the one whose answer needs no modelling to predict. A
+    /// resistor has the same impedance at every frequency and no reactance whatever, so a correct
+    /// measurement reads <b>8.000 ohms at 0.00 degrees</b> from end to end of the sweep — a flat line
+    /// through a chain that involves a chirp, a two-channel ratio, an open calibration and a divider
+    /// inversion. Anything that bends it is a bug in one of those, not a property of the load.</para>
+    ///
+    /// <para>There is no filter in the path at all: a resistive divider is a frequency-independent
+    /// gain, so this model is a single <see cref="Biquad.Gain"/> section with no memory.</para>
+    /// </summary>
+    ImpedanceResistive = 6,
+
+    /// <summary>
+    /// The same fixture with a <b>6 ohm resistor in series with 1 mH</b> — the simplest load that has
+    /// a phase angle, so it is what says the measurement recovers reactance and not just magnitude.
+    ///
+    /// <para>Its impedance rises from 6.0 ohms at DC through 45 degrees at about 955 Hz and on up at
+    /// 6 dB per octave, which is a straight line on a log-log |Z| plot and a monotonic climb on the
+    /// phase axis. Reading a rising magnitude with a <i>flat</i> phase is the classic symptom of the
+    /// two channels being taken from different records, so this model catches that too.</para>
+    /// </summary>
+    ImpedanceReactive = 7,
+
+    /// <summary>
+    /// The same fixture with a loudspeaker on it: <b>6.4 ohms</b> of voice-coil resistance with a
+    /// motional resonance at <b>45 Hz</b> peaking at <b>60 ohms</b>.
+    ///
+    /// <para>The shape an impedance sweep is normally run to see, and still exactly predictable: the
+    /// voice coil in series with a parallel RLC makes the divider a single second-order section, so
+    /// the peak really is <c>Re + Rres</c> at the resonance and <c>Re</c> at DC, with nothing else in
+    /// the path to comb it. Deliberately without the voice coil's own inductance, which would make
+    /// the impedance a ratio of cubics and cost exactly the property that makes this checkable.</para>
+    /// </summary>
+    ImpedanceLoudspeaker = 8,
 }

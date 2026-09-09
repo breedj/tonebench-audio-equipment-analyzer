@@ -194,6 +194,23 @@ export function responseOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
  * The dash pattern one stored response draws in, by its position among the currently-visible ones —
  * exactly `sweepOverlayDash`'s rule, over the response-shaped list.
  */
+export function impedanceOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
+  return overlays.filter((o) => o.visible && o.impedanceTraces?.length)
+}
+
+/**
+ * The dash pattern one stored impedance curve draws in — the same rule again, over the
+ * impedance-shaped list. Its own list rather than the response one because the two are filtered by
+ * which field an overlay carries, and an impedance result populates neither `sweepPoints` nor
+ * `responseTraces`: sharing a helper would hand every impedance overlay a null dash and draw it
+ * solid, indistinguishable from the live curve.
+ */
+export function impedanceOverlayDash(overlays: OverlayEntry[], id: number): number[] | null {
+  const idx = impedanceOverlays(overlays).findIndex((o) => o.id === id)
+  if (idx < 0) return null
+  return SWEEP_OVERLAY_DASH[idx % SWEEP_OVERLAY_DASH.length] ?? null
+}
+
 export function responseOverlayDash(overlays: OverlayEntry[], id: number): number[] | null {
   const idx = responseOverlays(overlays).findIndex((o) => o.id === id)
   if (idx < 0) return null

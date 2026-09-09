@@ -185,7 +185,10 @@ function buildOptions(width: number): uPlot.Options {
     height: RESULT_CHART_HEIGHT_PX,
     scales: {
       // Arguments passed through rather than ignored, so a drag-zoom survives setScale — the same
-      // idiom the other charts use.
+      // idiom the other charts use. Note that what actually puts the panel's window on the x axis is
+      // refresh()'s explicit setScale, not the `??` here: on an x scale that fallback is dead code,
+      // because uPlot only ever passes null for x when there is no data yet. Drop those setScale
+      // calls and this axis silently reverts to the data's own span. See CLAUDE.md.
       x: { time: false, auto: false, range: (_u, min, max) => [min ?? props.timeFromMs, max ?? props.timeToMs] },
       y: { auto: false, range: (_u, min, max) => [min ?? yWindow.value.min, max ?? yWindow.value.max] },
     },

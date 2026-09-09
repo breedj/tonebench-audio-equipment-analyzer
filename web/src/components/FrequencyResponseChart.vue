@@ -6,7 +6,6 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import type { ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
-import { useZoomBounds } from '../composables/useZoomBounds'
 import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
@@ -494,14 +493,34 @@ function formatReading(value: number, series: ReadoutSeries): string {
 }
 
 /**
- * True while either axis shows something other than the window the display panel asks for — i.e.
- * the user has dragged a zoom. Drives the Reset zoom button, which is the only visible cue that the
- * axes are no longer the ones the panel's From/To and dB boxes name.
+ * Whether the user has dragged a zoom. Drives the Reset zoom button, which is the only visible cue
+ * that the axes are no longer the ones the panel's From/To and dB boxes name.
+ *
+ * <p><b>Recorded when the gesture happens</b>, rather than inferred by comparing the live scales
+ * against the panel's window the way the shared `useZoomBounds` helper does. That comparison cannot
+ * work on this chart, because its x axis was never at the panel's window to begin with — see the
+ * range callbacks in `buildOptions`. It read "zoomed" from the first frame instead, which is what
+ * put a Reset zoom button on an untouched chart.</p>
+ *
+ * <p>The x range callback consults it, so it has to be settled <i>before</i> the scale it guards is
+ * computed. uPlot obliges: `mouseUp` fires `setSelect` before it calls `setScale` for the drag.</p>
  */
-const { zoomed, noteScale, resetZoom } = useZoomBounds(
-  () => plot.value,
-  () => ({ xMin: props.xFromHz, xMax: props.xToHz, yMin: activeYBottom.value, yMax: activeYTop.value }),
-)
+const zoomed = ref(false)
+
+/**
+ * Back to the window the display panel asks for — the Reset zoom button, and a double-click.
+ *
+ * <p>Clearing the flag first is not tidying: the range callback reads it, so a `setScale` made while
+ * it was still true would be handed straight back out again.</p>
+ */
+function resetZoom() {
+  const u = plot.value
+  if (!u) return
+
+  zoomed.value = false
+  u.setScale('x', { min: props.xFromHz, max: props.xToHz })
+  u.setScale('y', { min: activeYBottom.value, max: activeYTop.value })
+}
 
 /**
  * A signature of everything uPlot cannot be told about without rebuilding — the series list and
@@ -567,18 +586,31 @@ function buildOptions(width: number, height: number): uPlot.Options {
       // otherwise every setData refits the axes to the data, and the response would crawl as the
       // averages came in.
       //
-      // The range callbacks pass their arguments through rather than always handing back the props,
-      // and that is the whole of what makes a drag-zoom survive. uPlot re-derives a scale through
-      // this very callback on every setScale — including the exact window a drag just asked for —
-      // so a version that ignored the arguments fed the zoom request back in and got the full span
-      // out again, undoing every zoom the instant it was made. The arguments are null only when
-      // nothing is pending, which is where the panel's bounds seed the axis.
+      // The x axis is the panel's window unless a drag is live, and the `zoomed` guard is the whole
+      // of what makes both halves of that true.
+      //
+      // A pass-through — `min ?? props.xFromHz` — was what stood here, and on the *x* scale it is
+      // dead code: uPlot never passes null for x once there is data. This chart hands real data
+      // straight to the constructor, so the one call this callback gets carries the **data's own
+      // span** (measured: 10..96000 on a 10 Hz-96 kHz sweep), which it then passed through. The
+      // panel's From/To were discarded on every rebuild and the dropdowns did nothing at all.
+      // Charts that seed an empty plot first, or push the window with an explicit setScale
+      // afterwards, get nulls here and never showed it — see the note in CLAUDE.md.
+      //
+      // Ignoring the arguments outright is the opposite bug, and was what stood here before that:
+      // uPlot re-derives x through this callback on *every* commit, including the one carrying the
+      // window a drag just asked for, so it fed the props back in and undid the zoom as it was
+      // made. Hence a flag rather than a `??` — it separates "uPlot is handing me a zoom" from
+      // "uPlot is handing me whatever the axis happened to hold".
       x: {
         time: false,
         distr: 3,
         log: 10,
         auto: false,
-        range: (_u, min, max) => [min ?? props.xFromHz, max ?? props.xToHz],
+        range: (_u, min, max) =>
+          zoomed.value && min != null && max != null
+            ? [min, max]
+            : [props.xFromHz, props.xToHz],
       },
       y: {
         auto: false,
@@ -646,9 +678,14 @@ function buildOptions(width: number, height: number): uPlot.Options {
     // would desync from the display panel's checkboxes — those are the single source of visibility.
     legend: { show: false },
     hooks: {
-      // Drives the Reset zoom button. Fires on setData too (both scales are auto:false, so setData
-      // re-applies the same window), hence the change gate inside noteScale.
-      setScale: [(u: uPlot) => noteScale(u)],
+      // Drives the Reset zoom button. Fires on a completed drag and nothing else — uPlot suppresses
+      // it for the selection it hides afterwards — so it is the one unambiguous "the user zoomed"
+      // signal. setScale is not: it fires on every setData as well.
+      setSelect: [
+        (u: uPlot) => {
+          if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
+        },
+      ],
       // u.cursor.idx indexes the shared x array buildData produced — not a pixel-derived value, so
       // it always names a column something was actually plotted at, and the readout can index every
       // series at it. null once the pointer leaves the plot (uPlot clears idx on mouseleave).
@@ -680,18 +717,19 @@ function rebuild() {
   if (!el) return
 
   // A rebuild that is not itself an axis-window change hands the zoom back afterwards — a theme
-  // flip or an overlay checkbox must not throw away the window the user is reading. A window key
-  // that *has* changed drops it instead: the panel is the user saying which window they want.
+  // flip or an overlay checkbox must not throw away the window the user is reading. A changed window
+  // drops it instead, on *both* axes together: the panel is the user saying which window they want,
+  // and restoring half a zoom would leave the plot zoomed with no button offering to undo it.
   const nextX = xWindowKey()
   const nextY = yWindowKey()
-  const restore = plot.value
-    ? {
-        x: plotXWindowKey === nextX ? windowOf(plot.value.scales.x) : null,
-        y: plotYWindowKey === nextY ? windowOf(plot.value.scales.y) : null,
-      }
-    : null
+  const windowChanged = plotXWindowKey !== nextX || plotYWindowKey !== nextY
+  const restore =
+    plot.value && !windowChanged
+      ? { x: windowOf(plot.value.scales.x), y: windowOf(plot.value.scales.y) }
+      : null
   plotXWindowKey = nextX
   plotYWindowKey = nextY
+  if (windowChanged) zoomed.value = false
 
   plot.value?.destroy()
   cursorReadout.value = null
@@ -710,8 +748,6 @@ function rebuild() {
   // no setData follows to clobber the scales.
   if (restore?.x) u.setScale('x', restore.x)
   if (restore?.y) u.setScale('y', restore.y)
-
-  noteScale(u)
 }
 
 function refresh() {

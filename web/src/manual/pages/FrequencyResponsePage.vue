@@ -244,8 +244,9 @@ const { showPage } = useManual()
 
     <h2>Zooming</h2>
     <p>
-      Drag a box across the Bode plot to zoom both axes; double-click, or press
-      <strong>Reset zoom</strong>, to return to the display panel's window. On Nyquist and Nichols,
+      Drag a box across the Bode plot to zoom both axes; double-click, press
+      <strong>Reset zoom</strong>, or change any of the display panel's own axis bounds, to return to
+      the window the panel names — those bounds are the window, not a starting suggestion. On Nyquist and Nichols,
       drag a box to zoom and use the same Reset zoom button. Zooming the Bode plot also narrows the
       band the pole–zero fit is taken over, which is the intended way to fit one region of a
       response rather than all of it.

@@ -423,7 +423,12 @@ function buildOptions(width: number): uPlot.Options {
       // requested -- so the original version, which ignored the arguments, fed the zoom request
       // back in and got the full span out again, undoing every zoom the instant it was made. The
       // arguments are null only when nothing is pending (notably on the empty construction data),
-      // which is where the dropdown bounds seed the axis. y in practice never sees a non-null pair
+      // which is where the dropdown bounds seed the axis — and that empty construction is
+      // load-bearing, not incidental. This chart builds the plot with empty arrays and only then
+      // calls setData, so x is still dataless when the callback first runs and does receive nulls.
+      // A chart that hands real data straight to the constructor gets the data's own span here
+      // instead and its x bounds are silently discarded, which is exactly what happened to the
+      // frequency-response and impedance charts. See the uPlot range-callback rule in CLAUDE.md. y in practice never sees a non-null pair
       // -- uPlot assigns a pending y window directly and skips the callback -- but it is written
       // the same way so neither axis depends on which branch uPlot takes.
       x: {

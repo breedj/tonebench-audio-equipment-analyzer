@@ -100,6 +100,11 @@ function buildOptions(width: number): uPlot.Options {
     width,
     height: RESULT_CHART_HEIGHT_PX,
     scales: {
+      // What puts the panel's window on the x axis is applyScales()'s explicit setScale, not the
+      // `??` here: on an x scale that fallback is dead code, because uPlot only ever passes null for
+      // x when there is no data yet. The pass-through still matters — it is what lets a drag-zoom
+      // survive — but drop applyScales and this axis silently reverts to the data's own span, which
+      // is the bug the frequency-response and impedance charts had. See CLAUDE.md.
       x: {
         time: false,
         distr: 3,

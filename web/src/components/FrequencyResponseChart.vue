@@ -69,11 +69,14 @@ const TRACE_COLORS = {
 const PHASE_COLOR = ['#7c3aed', '#a78bfa'] as const
 const COHERENCE_COLOR = ['#059669', '#34d399'] as const
 
-/** The dashed verticals and the double-headed arrow the −1 dB / −3 dB readings are drawn with. */
+/** The dashed verticals and the double-headed arrow the ±1 dB / −3 dB readings are drawn with. */
 const BANDWIDTH_COLORS = {
   oneDb: ['#d97706', '#fbbf24'],
   threeDb: ['#2563eb', '#60a5fa'],
 } as const
+
+/** The horizontal line at the level both readings were measured down from. Deliberately quiet — it is context, not a curve. */
+const REFERENCE_COLOR = ['#9ca3af', '#6b7280'] as const
 
 function color(pair: readonly string[]): string {
   return isDark.value ? pair[1] : pair[0]
@@ -243,6 +246,49 @@ function bandwidthPlugin(): uPlot.Plugin {
           const readings: { label: string; reading: ResponseTrace['oneDb']; palette: readonly string[]; row: number }[] = []
           if (props.showOneDb) readings.push({ label: 'B1', reading: trace.oneDb, palette: BANDWIDTH_COLORS.oneDb, row: 0 })
           if (props.showThreeDb) readings.push({ label: 'B3', reading: trace.threeDb, palette: BANDWIDTH_COLORS.threeDb, row: 1 })
+
+          // The reference and the thresholds the corners were found against, drawn first so the
+          // arrows sit on top of them. Without these the corners are unexplainable by eye: a
+          // passband-referenced reading's level is a median that appears nowhere in the readouts, so
+          // a reader looking at a peak 4 dB above the trace has no way to see what the numbers were
+          // measured from. Skipped entirely when referenceDb is null — a stored result from a build
+          // that did not record it, where drawing a line would be inventing one.
+          if (trace.referenceDb !== null && readings.length > 0) {
+            const yRef = u.valToPos(trace.referenceDb, 'y', true)
+
+            ctx.strokeStyle = color(REFERENCE_COLOR)
+            ctx.fillStyle = color(REFERENCE_COLOR)
+            ctx.lineWidth = 1
+            ctx.setLineDash([])
+            ctx.beginPath()
+            ctx.moveTo(u.bbox.left, yRef)
+            ctx.lineTo(u.bbox.left + u.bbox.width, yRef)
+            ctx.stroke()
+
+            ctx.font = '10px ui-sans-serif, system-ui, sans-serif'
+            ctx.textAlign = 'left'
+            ctx.textBaseline = 'bottom'
+            ctx.fillText('ref', u.bbox.left + 3, yRef - 1)
+
+            ctx.setLineDash([2, 3])
+            for (const { reading, palette } of readings) {
+              // Both sides for a symmetric reading, the lower one only for a one-sided one — which
+              // is the difference between the two rows made visible rather than left in a tooltip.
+              const levels = reading.symmetric
+                ? [trace.referenceDb - reading.dropDb, trace.referenceDb + reading.dropDb]
+                : [trace.referenceDb - reading.dropDb]
+
+              ctx.strokeStyle = color(palette)
+              for (const level of levels) {
+                const y = u.valToPos(level, 'y', true)
+                ctx.beginPath()
+                ctx.moveTo(u.bbox.left, y)
+                ctx.lineTo(u.bbox.left + u.bbox.width, y)
+                ctx.stroke()
+              }
+            }
+            ctx.setLineDash([])
+          }
 
           for (const { label, reading, palette, row } of readings) {
             const stroke = color(palette)

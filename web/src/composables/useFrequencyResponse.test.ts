@@ -3,6 +3,7 @@ import { api, type FrequencyResponseStatus } from '../api/client'
 import { useFrequencyResponse } from './useFrequencyResponse'
 import {
   ResponsePhase,
+  ResponseReferenceMode,
   ResponseTraceKind,
   STREAM_FLAG_STEPPED_RESPONSE,
   StreamChannel,
@@ -93,10 +94,13 @@ function traceFrame(kind: ResponseTraceKind, peakDb: number, stepped = false): F
     magnitudeMaxDb: Float32Array.from([0, 0]),
     phaseDeg: Float32Array.from([0, 0]),
     coherence: Float32Array.from([1, 1]),
-    oneDb: { ...bandwidth, dropDb: 1 },
-    threeDb: bandwidth,
+    oneDb: { ...bandwidth, dropDb: 1, symmetric: true },
+    threeDb: { ...bandwidth, symmetric: false },
     peakDb,
     peakFreqHz: 1000,
+    referenceDb: peakDb,
+    referenceMode: ResponseReferenceMode.BandMedian,
+    referenceFellBackToPeak: false,
   }
 }
 
@@ -304,6 +308,9 @@ describe('useFrequencyResponse', () => {
       generateLeft: true,
       averageCount: 1,
       adaptiveResolution: true,
+      bandwidthReference: 'BandMedian' as const,
+      bandwidthReferenceLowHz: 200,
+      bandwidthReferenceHighHz: 2000,
     }
 
     await response.startStepped({ ...base, generateRight: true, rightChannelIsReference: true })
@@ -343,6 +350,9 @@ describe('useFrequencyResponse', () => {
       smoothingDenominator: 24,
       averageCount: 1,
       chirpStartHz: 2,
+      bandwidthReference: 'BandMedian',
+      bandwidthReferenceLowHz: 200,
+      bandwidthReferenceHighHz: 2000,
       continuous: false,
     })
 

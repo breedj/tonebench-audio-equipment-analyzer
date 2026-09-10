@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { formatBandwidth, formatCorner, formatDb, formatHz, formatRatio } from './format'
 
 const reading = (over: Partial<Parameters<typeof formatBandwidth>[0]> = {}) => ({
+  dropDb: 3,
+  symmetric: false,
   lowerHz: 8.8,
   upperHz: 63200,
   bandwidthHz: 63191.2,

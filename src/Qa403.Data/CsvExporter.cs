@@ -116,6 +116,18 @@ public static class CsvExporter
         {
             WriteComment(sb, $"{trace.Kind}_peak_db", trace.PeakDb.ToString("F4", CultureInfo.InvariantCulture));
             WriteComment(sb, $"{trace.Kind}_peak_hz", trace.PeakHz.ToString("F4", CultureInfo.InvariantCulture));
+
+            // The level the two corner readings were measured down from, and the rule that produced
+            // it. Not derivable from the columns below — a passband-referenced trace's reference is
+            // the median of a band, which appears nowhere else in the file — so without these the
+            // corners cannot be checked against the curve they came from. Omitted, rather than
+            // written empty, for a result saved before it was recorded.
+            if (trace.ReferenceDb is { } referenceDb)
+                WriteComment(sb, $"{trace.Kind}_reference_db", referenceDb.ToString("F4", CultureInfo.InvariantCulture));
+            if (!string.IsNullOrEmpty(trace.ReferenceMode))
+                WriteComment(sb, $"{trace.Kind}_reference_mode", trace.ReferenceMode);
+
+            // 1db is a ±1 dB flatness band and 3db a −3 dB roll-off one — see ResponseBandwidth.
             WriteBandwidthComment(sb, trace.Kind, "1db", trace.OneDb);
             WriteBandwidthComment(sb, trace.Kind, "3db", trace.ThreeDb);
         }

@@ -93,7 +93,8 @@ public class MigrationRunnerTests
                 [(1L, "001_initial.sql"), (2L, "002_channels_and_indexes.sql"), (3L, "003_project_model.sql"),
                  (4L, "004_capture_preview.sql"), (5L, "005_orphan_cleanup.sql"), (6L, "006_response_trace.sql"),
                  (7L, "007_response_trace_orphans.sql"), (8L, "008_measurement_type_sort_order.sql"),
-                 (9L, "009_impulse_response.sql"), (10L, "010_impulse_orphans.sql")],
+                 (9L, "009_impulse_response.sql"), (10L, "010_impulse_orphans.sql"),
+                 (11L, "011_response_trace_reference.sql")],
                 rows);
         }
         finally

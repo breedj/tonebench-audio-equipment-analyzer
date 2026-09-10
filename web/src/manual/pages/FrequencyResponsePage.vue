@@ -142,6 +142,25 @@ const { showPage } = useManual()
             record always reads 1.
           </td>
         </tr>
+        <tr>
+          <td>Bandwidth reference</td>
+          <td>
+            What the ±1 dB and −3 dB corners are measured down from.
+            <strong>Passband median</strong> (the default) takes the median level over the reference
+            band below. <strong>Peak</strong> uses the highest point of the curve — right only when
+            the DUT's response <em>is</em> a peak, such as a bandpass filter or a tweeter. See
+            <em>Choosing the reference</em> below.
+          </td>
+        </tr>
+        <tr>
+          <td>Reference from / to (Hz)</td>
+          <td>
+            The band the passband median is taken over, 200 Hz – 2 kHz by default. It must lie
+            somewhere the DUT is flat: a band that straddles a corner is already part-way down the
+            roll-off, and every figure referenced to it shifts with it. Shown only for the passband
+            median.
+          </td>
+        </tr>
       </tbody>
     </table>
     <p>
@@ -179,17 +198,56 @@ const { showPage } = useManual()
         typically the extreme bottom of the sweep. Read the response only where coherence is high.
       </li>
       <li>
-        <strong>−1 dB</strong> and <strong>−3 dB</strong> bandwidth markers: dashed lines and a
-        labelled arrow at each corner.
+        <strong>±1 dB</strong> and <strong>−3 dB</strong> bandwidth markers: a labelled arrow at each
+        corner with dashed lines down to the axis, plus a grey horizontal line at the reference level
+        (marked <em>ref</em>) and dotted lines at the thresholds each reading was found against. The
+        corners are where the curve crosses those dotted lines.
       </li>
     </ul>
 
     <h3>Measurements panel</h3>
     <p>
-      Under the settings: the lower corner, upper corner and bandwidth at −1 dB and −3 dB, plus the
-      peak level and the frequency it occurs at. A corner shown with <strong>&lt;</strong> or
-      <strong>&gt;</strong> was never reached inside the measured band — that is where the search
-      stopped, not where the response rolls off. Widen the sweep before quoting it.
+      Under the settings: the lower corner, upper corner and width of each band, plus the peak level,
+      the frequency it occurs at, and the reference the corners were measured from. A corner shown
+      with <strong>&lt;</strong> or <strong>&gt;</strong> was never reached inside the measured band —
+      that is where the search stopped, not where the response rolls off. Widen the sweep before
+      quoting it.
+    </p>
+    <p>
+      The two rows answer different questions, which is why one is symmetric and the other is not:
+    </p>
+    <ul>
+      <li>
+        <strong>±1 dB</strong> is a <em>flatness</em> figure — the band over which the response stays
+        within 1 dB of the reference, above it as well as below. This is the band a datasheet means
+        by "20 Hz – 20 kHz ±1 dB".
+      </li>
+      <li>
+        <strong>−3 dB</strong> is a <em>roll-off</em> figure — where the response has fallen 3 dB
+        below the reference, and one-sided by convention. On a DUT with a peak inside the sweep it
+        can therefore lie beyond that peak, which is correct: the response has not fallen 3 dB
+        anywhere before it.
+      </li>
+    </ul>
+
+    <h3>Choosing the reference</h3>
+    <p>
+      An output transformer's leakage inductance resonates against its winding capacitance somewhere
+      above the audio band, and on a real amplifier that peak is often several dB
+      <em>above</em> the passband. Referenced to the peak, the −1 dB threshold is then above the
+      whole passband: the search steps off the resonance immediately and both corners land on its
+      own skirts, reporting a "bandwidth" a couple of kHz wide centred on the resonance. That is a
+      correct measurement of the resonance and says nothing about the amplifier — so the default
+      reference is the passband median.
+    </p>
+    <p>
+      Use <strong>Peak</strong> when the DUT's response is itself a single hump and there is no
+      passband to reference: a bandpass filter, a tweeter, a driver's impedance rise.
+    </p>
+    <p>
+      If the reference band lies entirely outside the measured range — a 20 kHz – 24 kHz sweep with
+      the default 200 Hz – 2 kHz band, say — the panel says so and falls back to the peak, rather
+      than quoting figures against a band it never measured.
     </p>
 
     <h3>Nyquist and Nichols</h3>

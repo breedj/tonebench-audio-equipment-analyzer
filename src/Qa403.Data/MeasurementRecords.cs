@@ -356,12 +356,26 @@ public sealed record ResponseTraceInput(
     float[] MagnitudeMinDb,
     float[] MagnitudeMaxDb,
     float[] PhaseDeg,
-    float[] Coherence);
+    float[] Coherence,
+    /// <summary>
+    /// The level both readings were measured down from, and which rule produced it ("Peak" or
+    /// "BandMedian"). Null for a curve that has no bandwidth readings worth referencing — an
+    /// impedance trace, whose corners mean nothing — and never written by an older build, whose
+    /// rows read back as null and draw no reference line.
+    /// </summary>
+    double? ReferenceDb = null,
+    string? ReferenceMode = null);
 
 /// <summary>
-/// A stored −1 dB or −3 dB reading. The clamped flags say the curve never reached the threshold on
+/// A stored ±1 dB or −3 dB reading. The clamped flags say the curve never left the tolerance on
 /// that side within the measured band, so the frequency is where the search stopped rather than a
 /// corner — a distinction a bare number cannot carry, and one the old app lost.
+///
+/// <para>Which of the two a row is (a symmetric flatness band or a one-sided roll-off one) is not
+/// stored, because it follows from the column pair: <c>bw1_*</c> is always the ±1 dB reading and
+/// <c>bw3_*</c> the −3 dB one. Rows written before symmetric searching existed are unaffected —
+/// they were referenced to the peak, and nothing exceeds a trace's own peak, so the two searches
+/// return the same corners there.</para>
 /// </summary>
 public sealed record ResponseBandwidth(double LowerHz, double UpperHz, bool LowerClamped, bool UpperClamped);
 
@@ -500,7 +514,10 @@ public sealed record StoredResponseTrace(
     float[] MagnitudeMinDb,
     float[] MagnitudeMaxDb,
     float[] PhaseDeg,
-    float[] Coherence);
+    float[] Coherence,
+    /// <summary>Null on a row written before the reference was recorded — see <see cref="ResponseTraceInput.ReferenceDb"/>.</summary>
+    double? ReferenceDb = null,
+    string? ReferenceMode = null);
 
 /// <summary>
 /// A frequency-response measurement type's <c>params_json</c>: the run settings, then the chart's
@@ -572,7 +589,20 @@ public sealed record FrequencyResponseParameters(
     /// <summary>Adds 180 degrees to the measured phase: the summing-junction inversion a loop-gain injection may or may not include, which the analyzer cannot see.</summary>
     bool? ChartInvertLoopSign = null,
     /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
-    bool? ChartRestoreDelay = null);
+    bool? ChartRestoreDelay = null,
+    /// <summary>
+    /// What the ±1 dB and −3 dB corners were measured down from: "BandMedian" or "Peak". Null on a
+    /// type saved before the reference was configurable, where the peak is what that build did.
+    /// </summary>
+    string? BandwidthReference = null,
+    /// <summary>
+    /// The reference band's edges, in Hz. Null on a type saved before it existed. A run setting
+    /// rather than a <c>Chart*</c> one: it changes the numbers in the Measurements table, not how
+    /// they are drawn, so a stored result that cannot name its reference band cannot say what its
+    /// corners mean.
+    /// </summary>
+    double? BandwidthReferenceLowHz = null,
+    double? BandwidthReferenceHighHz = null);
 
 /// <summary>
 /// A stepped-sine response measurement type's <c>params_json</c>: the run settings, then the chart's
@@ -641,7 +671,20 @@ public sealed record SteppedResponseParameters(
     /// <summary>Adds 180 degrees to the measured phase: the summing-junction inversion a loop-gain injection may or may not include, which the analyzer cannot see.</summary>
     bool? ChartInvertLoopSign = null,
     /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
-    bool? ChartRestoreDelay = null);
+    bool? ChartRestoreDelay = null,
+    /// <summary>
+    /// What the ±1 dB and −3 dB corners were measured down from: "BandMedian" or "Peak". Null on a
+    /// type saved before the reference was configurable, where the peak is what that build did.
+    /// </summary>
+    string? BandwidthReference = null,
+    /// <summary>
+    /// The reference band's edges, in Hz. Null on a type saved before it existed. A run setting
+    /// rather than a <c>Chart*</c> one: it changes the numbers in the Measurements table, not how
+    /// they are drawn, so a stored result that cannot name its reference band cannot say what its
+    /// corners mean.
+    /// </summary>
+    double? BandwidthReferenceLowHz = null,
+    double? BandwidthReferenceHighHz = null);
 
 /// <summary>The <c>impulse_result.kind</c> values — mirrors the subset of FrequencyResponseTraceKind an impulse response has.</summary>
 public static class ImpulseTraceKind

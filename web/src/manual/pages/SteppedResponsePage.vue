@@ -108,13 +108,24 @@ const { showPage } = useManual()
             reference comparable with a THD sweep. The line underneath states what will be used.
           </td>
         </tr>
+        <tr>
+          <td>Bandwidth reference</td>
+          <td>
+            What the ±1 dB and −3 dB corners are measured down from, with the reference band
+            underneath it. The same control, the same default and the same reasoning as the chirp
+            measurement's — see
+            <button type="button" class="manual-link" @click="showPage('frequency-response')">
+              Frequency response
+            </button>.
+          </td>
+        </tr>
       </tbody>
     </table>
 
     <h2>What the views show</h2>
     <p>
       Exactly the chirp measurement's views, since both produce the same curves: the Bode chart with
-      its FR (dBV) and Gain (dB) views, phase, the −1 dB and −3 dB bandwidth markers, the
+      its FR (dBV) and Gain (dB) views, phase, the ±1 dB and −3 dB bandwidth markers, the
       Measurements panel with the corners and bandwidth, and — when the right channel is the
       reference — the Nyquist and Nichols projections with their Stability and Poles-and-zeros
       panels. See

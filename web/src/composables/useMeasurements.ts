@@ -79,7 +79,12 @@ export function toResponseTraces(stored: StoredResponseTrace[]): ResponseTrace[]
     // The stored rows keep the two corner frequencies and their clamped flags but not the width,
     // which is exactly their difference — recomputed here rather than stored twice and able to
     // disagree.
+    // The drop and its symmetry are the row's own convention rather than stored columns: bw1_* is
+    // always the ±1 dB reading and bw3_* the −3 dB one. See ResponseBandwidth server-side, which
+    // explains why that is safe for rows written before symmetric searching existed.
     oneDb: {
+      dropDb: 1,
+      symmetric: true,
       lowerHz: trace.oneDb.lowerHz,
       upperHz: trace.oneDb.upperHz,
       bandwidthHz: Math.max(0, trace.oneDb.upperHz - trace.oneDb.lowerHz),
@@ -87,6 +92,8 @@ export function toResponseTraces(stored: StoredResponseTrace[]): ResponseTrace[]
       upperClamped: trace.oneDb.upperClamped,
     },
     threeDb: {
+      dropDb: 3,
+      symmetric: false,
       lowerHz: trace.threeDb.lowerHz,
       upperHz: trace.threeDb.upperHz,
       bandwidthHz: Math.max(0, trace.threeDb.upperHz - trace.threeDb.lowerHz),
@@ -95,6 +102,15 @@ export function toResponseTraces(stored: StoredResponseTrace[]): ResponseTrace[]
     },
     peakDb: trace.peakDb,
     peakFreqHz: trace.peakHz,
+    // Null on a result saved before the reference was recorded. It is left null rather than
+    // back-filled with peakDb: those rows were peak-referenced, but a build that did not record it
+    // may also have searched differently, and drawing a reference line on that claim would be
+    // asserting something the row does not say.
+    referenceDb: trace.referenceDb,
+    referenceMode: trace.referenceMode,
+    // A stored trace has no fallback flag: what it was actually referenced to is in referenceMode,
+    // which is the only thing the reader can act on afterwards.
+    referenceFellBackToPeak: false,
   }))
 }
 

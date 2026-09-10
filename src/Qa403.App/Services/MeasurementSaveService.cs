@@ -167,7 +167,10 @@ public sealed class MeasurementSaveService(
             RightChannelIsReference: true,
             SmoothingDenominator: 24,
             AverageCount: 1,
-            LoadOhms: 8.0), SerializerOptions);
+            LoadOhms: 8.0,
+            BandwidthReference: nameof(BandwidthReferenceMode.BandMedian),
+            BandwidthReferenceLowHz: BandwidthReferenceSpec.DefaultLowHz,
+            BandwidthReferenceHighHz: BandwidthReferenceSpec.DefaultHighHz), SerializerOptions);
 
     /// <summary>
     /// A brand-new impulse-response type's <c>params_json</c>, on the same terms as
@@ -223,7 +226,10 @@ public sealed class MeasurementSaveService(
             AverageCount: 1,
             SampleRateHz: SteppedResponseRequest.DefaultSampleRateHz,
             AdaptiveResolution: true,
-            RightChannelIsReference: true), SerializerOptions);
+            RightChannelIsReference: true,
+            BandwidthReference: nameof(BandwidthReferenceMode.BandMedian),
+            BandwidthReferenceLowHz: BandwidthReferenceSpec.DefaultLowHz,
+            BandwidthReferenceHighHz: BandwidthReferenceSpec.DefaultHighHz), SerializerOptions);
 
     /// <summary>
     /// A brand-new impedance type's <c>params_json</c>, kept in step with
@@ -486,7 +492,10 @@ public sealed class MeasurementSaveService(
                 request.RightChannelIsReference, request.SmoothingDenominator, request.AverageCount,
                 status.GeneratorAmpDbv,
                 ChirpStartHz: request.ChirpStartHz,
-                LoadOhms: request.LoadOhms),
+                LoadOhms: request.LoadOhms,
+                BandwidthReference: request.BandwidthReference.ToString(),
+                BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
+                BandwidthReferenceHighHz: request.BandwidthReferenceHighHz),
             SerializerOptions);
 
         var info = session.Info;
@@ -532,7 +541,10 @@ public sealed class MeasurementSaveService(
                 request.LoadOhms, request.GenerateLeft, request.GenerateRight,
                 request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
                 request.AdaptiveResolution, request.RightChannelIsReference,
-                status.GeneratorAmpDbv),
+                status.GeneratorAmpDbv,
+                BandwidthReference: request.BandwidthReference.ToString(),
+                BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
+                BandwidthReferenceHighHz: request.BandwidthReferenceHighHz),
             SerializerOptions);
 
         var info = session.Info;
@@ -752,7 +764,9 @@ public sealed class MeasurementSaveService(
             trace.MagnitudeMinDb,
             trace.MagnitudeMaxDb,
             trace.PhaseDeg,
-            trace.Coherence);
+            trace.Coherence,
+            trace.ReferenceDb,
+            trace.ReferenceMode.ToString());
 
     private static string TraceKindName(FrequencyResponseTraceKind kind) => kind switch
     {

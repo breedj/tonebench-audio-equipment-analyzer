@@ -216,6 +216,8 @@ public class ProjectRepositoryTests
                         DROP TABLE impulse_result;
                         DROP TABLE impulse_harmonic;
                         DROP TABLE impulse_reference;
+                        ALTER TABLE response_trace DROP COLUMN reference_db;
+                        ALTER TABLE response_trace DROP COLUMN reference_mode;
                         DELETE FROM schema_version WHERE version >= 8;
                         """;
                     await command.ExecuteNonQueryAsync();

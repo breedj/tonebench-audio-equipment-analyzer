@@ -13,7 +13,7 @@ export function makeTrace(over: {
   phaseDeg: number[]
   coherence?: number[]
 }): ResponseTrace {
-  const bandwidth = { lowerHz: 0, upperHz: 0, bandwidthHz: 0, lowerClamped: false, upperClamped: false }
+  const bandwidth = { dropDb: 3, symmetric: false, lowerHz: 0, upperHz: 0, bandwidthHz: 0, lowerClamped: false, upperClamped: false }
   return {
     kind: 'Gain',
     startFreqHz: over.freqHz[0] ?? 0,
@@ -28,6 +28,9 @@ export function makeTrace(over: {
     threeDb: bandwidth,
     peakDb: 0,
     peakFreqHz: 0,
+    referenceDb: 0,
+    referenceMode: 'BandMedian',
+    referenceFellBackToPeak: false,
   }
 }
 

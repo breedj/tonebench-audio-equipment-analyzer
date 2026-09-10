@@ -213,6 +213,65 @@ public class ResponseRepositoryTests
         }
     }
 
+    [Fact]
+    public async Task SaveResponse_RoundTripsTheBandwidthReference()
+    {
+        // The level the corners were measured down from is no longer derivable from peak_db — a
+        // passband-referenced trace's reference is a median that is nowhere in the stored scalars —
+        // so it has to survive the round trip or a reloaded result cannot say what its corners mean,
+        // and the chart cannot draw the line they were found against.
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+
+            var repo = new MeasurementRepository(factory);
+            long resultId = await repo.SaveResponseResultAsync(BuildRequest(typeId), CancellationToken.None);
+
+            var traces = await repo.GetResponseTracesAsync(resultId, CancellationToken.None);
+
+            Assert.All(traces, t => Assert.Equal(33.75, t.ReferenceDb!.Value, 6));
+            Assert.All(traces, t => Assert.Equal("BandMedian", t.ReferenceMode));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task SaveResponse_WithNoReferenceRecorded_ReadsBackAsNull()
+    {
+        // What a row written by an older build reads as. Null rather than a substituted peak: the
+        // reader draws no reference line for it, which is honest, where inventing one would assert
+        // something the row does not say.
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+
+            var request = BuildRequest(typeId);
+            var withoutReference = request with
+            {
+                Traces = [.. request.Traces.Select(t => t with { ReferenceDb = null, ReferenceMode = null })],
+            };
+
+            var repo = new MeasurementRepository(factory);
+            long resultId = await repo.SaveResponseResultAsync(withoutReference, CancellationToken.None);
+
+            var traces = await repo.GetResponseTracesAsync(resultId, CancellationToken.None);
+
+            Assert.All(traces, t => Assert.Null(t.ReferenceDb));
+            Assert.All(traces, t => Assert.Null(t.ReferenceMode));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
     private static async Task<long> CreateResponseTypeAsync(SqliteConnectionFactory factory)
     {
         var projectRepo = new ProjectRepository(factory);
@@ -245,7 +304,9 @@ public class ResponseRepositoryTests
             PeakHz: 461.4,
             OneDb: new ResponseBandwidth(8.8, 63200.0, false, false),
             ThreeDb: new ResponseBandwidth(4.4, 90800.0, false, true),
-            freqHz, magMin, magMax, phase, coherence);
+            freqHz, magMin, magMax, phase, coherence,
+            ReferenceDb: 33.75,
+            ReferenceMode: "BandMedian");
 
         return new ResponseSaveRequest(
             typeId, "loopback", "notes", "{}",

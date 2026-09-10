@@ -228,10 +228,13 @@ public class StreamFrameTests
             MagnitudeMaxDb: [-3.0f, 0.1f, 0.2f],
             PhaseDeg: [-12.0f, -1.0f, 0.5f],
             Coherence: [0.4f, 0.99f, 1.0f],
-            OneDb: new BandwidthReading(1.0, 8.8, 63200.0, 63191.2, false, false),
-            ThreeDb: new BandwidthReading(3.0, 4.4, 90800.0, 90795.6, false, true),
+            OneDb: new BandwidthReading(1.0, true, 8.8, 63200.0, 63191.2, false, false),
+            ThreeDb: new BandwidthReading(3.0, false, 4.4, 90800.0, 90795.6, false, true),
             PeakDb: 34.49,
-            PeakFreqHz: 461.4);
+            PeakFreqHz: 461.4,
+            ReferenceDb: 33.75,
+            ReferenceMode: BandwidthReferenceMode.BandMedian,
+            ReferenceFellBackToPeak: false);
 
     [Fact]
     public void FrequencyResponse_RoundTrips()

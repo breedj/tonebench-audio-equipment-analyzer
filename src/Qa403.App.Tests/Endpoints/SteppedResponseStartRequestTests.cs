@@ -34,9 +34,13 @@ public class SteppedResponseStartRequestTests
             AdaptiveResolution: false,
             FftSize: 65_536,
             Window: "FlatTop",
-            SampleRateHz: 96_000.0);
+            SampleRateHz: 96_000.0,
+            BandwidthReference: "Peak",
+            BandwidthReferenceLowHz: 300.0,
+            BandwidthReferenceHighHz: 3_000.0);
 
-        var measurement = wire.ToMeasurement(ThdSweepLevelMode.OutputPower, ThdSweepLevelUnit.Watt, WindowType.FlatTop);
+        var measurement = wire.ToMeasurement(
+            ThdSweepLevelMode.OutputPower, ThdSweepLevelUnit.Watt, WindowType.FlatTop, BandwidthReferenceMode.Peak);
 
         Assert.Equal(15.0, measurement.StartFreqHz);
         Assert.Equal(33_000.0, measurement.EndFreqHz);
@@ -53,6 +57,9 @@ public class SteppedResponseStartRequestTests
         Assert.Equal(96_000.0, measurement.SampleRateHz);
         Assert.False(measurement.AdaptiveResolution);
         Assert.True(measurement.RightChannelIsReference);
+        Assert.Equal(BandwidthReferenceMode.Peak, measurement.BandwidthReference);
+        Assert.Equal(300.0, measurement.BandwidthReferenceLowHz);
+        Assert.Equal(3_000.0, measurement.BandwidthReferenceHighHz);
     }
 
     /// <summary>
@@ -63,8 +70,8 @@ public class SteppedResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(15, ConstructorParameterCount(typeof(SteppedResponseStartRequest)));
-        Assert.Equal(15, ConstructorParameterCount(typeof(SteppedResponseRequest)));
+        Assert.Equal(18, ConstructorParameterCount(typeof(SteppedResponseStartRequest)));
+        Assert.Equal(18, ConstructorParameterCount(typeof(SteppedResponseRequest)));
     }
 
     /// <summary>

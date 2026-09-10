@@ -398,8 +398,15 @@ internal static class ResponseCaptureSupport
             lastBin = Math.Min(binCount - 1, firstBin + 1);
 
         var peak = BandwidthAnalyzer.FindPeak(traceDb, binHz, firstBin, lastBin);
-        var oneDb = BandwidthAnalyzer.Find(traceDb, binHz, dropDb: 1.0, firstBin, lastBin);
-        var threeDb = BandwidthAnalyzer.Find(traceDb, binHz, dropDb: 3.0, firstBin, lastBin);
+
+        // One reference for both readings — see BandwidthAnalyzer.FindReference. The ±1 dB row is a
+        // flatness figure and the −3 dB row a roll-off one, which is the whole reason they are not
+        // the same search at two thresholds: against a passband reference a downward-only 1 dB
+        // search walks straight up through an output transformer's leakage resonance without
+        // stopping.
+        var reference = BandwidthAnalyzer.FindReference(traceDb, binHz, request.BandwidthReferenceSpec, firstBin, lastBin);
+        var oneDb = BandwidthAnalyzer.Find(traceDb, binHz, dropDb: 1.0, reference, symmetric: true, firstBin, lastBin);
+        var threeDb = BandwidthAnalyzer.Find(traceDb, binHz, dropDb: 3.0, reference, symmetric: false, firstBin, lastBin);
 
         int columns = Math.Min(displayColumns, lastBin - firstBin + 1);
         var minMax = new MinMax[columns];
@@ -439,6 +446,9 @@ internal static class ResponseCaptureSupport
             BandwidthReading.From(oneDb),
             BandwidthReading.From(threeDb),
             peak.LevelDb,
-            peak.FreqHz);
+            peak.FreqHz,
+            reference.LevelDb,
+            reference.Mode,
+            reference.FellBackToPeak);
     }
 }

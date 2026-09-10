@@ -1018,9 +1018,9 @@ public sealed class SteppedResponseRunner(
 
         return
         [
-            BuildTrace(FrequencyResponseTraceKind.Left, freqHz, leftDb, noPhase),
-            BuildTrace(FrequencyResponseTraceKind.Right, freqHz, rightDb, noPhase),
-            BuildTrace(FrequencyResponseTraceKind.Gain, freqHz, gainDb, phaseDeg),
+            BuildTrace(request, FrequencyResponseTraceKind.Left, freqHz, leftDb, noPhase),
+            BuildTrace(request, FrequencyResponseTraceKind.Right, freqHz, rightDb, noPhase),
+            BuildTrace(request, FrequencyResponseTraceKind.Gain, freqHz, gainDb, phaseDeg),
         ];
     }
 
@@ -1033,14 +1033,20 @@ public sealed class SteppedResponseRunner(
     /// reporting none.
     /// </summary>
     private static FrequencyResponseTrace BuildTrace(
+        SteppedResponseRequest request,
         FrequencyResponseTraceKind kind,
         double[] freqHz,
         double[] magnitudeDb,
         double[] phaseDeg)
     {
         var peak = BandwidthAnalyzer.FindPeak(magnitudeDb, freqHz);
-        var oneDb = BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 1.0);
-        var threeDb = BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 3.0);
+
+        // Same reference and the same two questions as the chirp path -- see
+        // ResponseCaptureSupport.BuildTrace. A stepped sweep is the measurement most likely to be
+        // pointed at an amplifier's low end, where a peak reference is at its most misleading.
+        var reference = BandwidthAnalyzer.FindReference(magnitudeDb, freqHz, request.BandwidthReferenceSpec);
+        var oneDb = BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 1.0, reference, symmetric: true);
+        var threeDb = BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 3.0, reference, symmetric: false);
 
         int n = freqHz.Length;
         var freq = new float[n];
@@ -1070,7 +1076,10 @@ public sealed class SteppedResponseRunner(
             BandwidthReading.From(oneDb),
             BandwidthReading.From(threeDb),
             peak.LevelDb,
-            peak.FreqHz);
+            peak.FreqHz,
+            reference.LevelDb,
+            reference.Mode,
+            reference.FellBackToPeak);
     }
 
     private void SetPhase(FrequencyResponsePhase phase, string? error = null)

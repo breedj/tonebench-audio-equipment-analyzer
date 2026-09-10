@@ -415,6 +415,16 @@ export interface FrequencyResponseStartRequest {
    * free — raising this is how you find out whether it is disturbing the measurement above it.
    */
   chirpStartHz: number
+  /**
+   * What the +-1 dB and -3 dB corners are measured down from. 'BandMedian' takes the median level
+   * over [bandwidthReferenceLowHz, bandwidthReferenceHighHz] — the right answer for anything with a
+   * passband, because an output transformer's leakage resonance sits above the audio band and is
+   * routinely taller than it, which makes a peak reference measure the resonance instead. 'Peak' is
+   * for a DUT whose response *is* a peak: a bandpass, a tweeter.
+   */
+  bandwidthReference: ResponseReferenceModeName
+  bandwidthReferenceLowHz: number
+  bandwidthReferenceHighHz: number
   /** RUN sets this and keeps measuring until stopped; SINGLE leaves it false. */
   continuous: boolean
 }
@@ -467,6 +477,15 @@ export interface FrequencyResponseParameters {
   chartNyquistRadiusFloorDb?: number | null
   chartInvertLoopSign?: boolean | null
   chartRestoreDelay?: boolean | null
+  /**
+   * A *run* setting, not a chart one: it changes the numbers in the Measurements table rather than
+   * how they are drawn. Absent on a type saved before the reference was configurable — those runs
+   * were peak-referenced, but the panel still falls back to its own default rather than restoring a
+   * reference that was wrong for the DUT.
+   */
+  bandwidthReference?: ResponseReferenceModeName | null
+  bandwidthReferenceLowHz?: number | null
+  bandwidthReferenceHighHz?: number | null
 }
 
 /** Which y quantity the chart is showing — the old app's "FR (dBV)" / "Gain (dB)" buttons. */
@@ -518,6 +537,16 @@ export interface SteppedResponseStartRequest {
   averageCount: number
   rightChannelIsReference: boolean
   adaptiveResolution: boolean
+  /**
+   * What the +-1 dB and -3 dB corners are measured down from. 'BandMedian' takes the median level
+   * over [bandwidthReferenceLowHz, bandwidthReferenceHighHz] — the right answer for anything with a
+   * passband, because an output transformer's leakage resonance sits above the audio band and is
+   * routinely taller than it, which makes a peak reference measure the resonance instead. 'Peak' is
+   * for a DUT whose response *is* a peak: a bandpass, a tweeter.
+   */
+  bandwidthReference: ResponseReferenceModeName
+  bandwidthReferenceLowHz: number
+  bandwidthReferenceHighHz: number
 }
 
 export interface SteppedResponseStarted {
@@ -582,6 +611,15 @@ export interface SteppedResponseParameters {
   chartNyquistRadiusFloorDb?: number | null
   chartInvertLoopSign?: boolean | null
   chartRestoreDelay?: boolean | null
+  /**
+   * A *run* setting, not a chart one: it changes the numbers in the Measurements table rather than
+   * how they are drawn. Absent on a type saved before the reference was configurable — those runs
+   * were peak-referenced, but the panel still falls back to its own default rather than restoring a
+   * reference that was wrong for the DUT.
+   */
+  bandwidthReference?: ResponseReferenceModeName | null
+  bandwidthReferenceLowHz?: number | null
+  bandwidthReferenceHighHz?: number | null
 }
 
 /** A -1 dB or -3 dB reading. A clamped end means the curve never got there, not that the corner is at that frequency. */
@@ -592,7 +630,12 @@ export interface ResponseBandwidthJson {
   bandwidthHz: number
   lowerClamped: boolean
   upperClamped: boolean
+  /** The band is +-dropDb of the reference rather than a one-sided fall to reference - dropDb. */
+  symmetric: boolean
 }
+
+/** What a trace's bandwidth corners were measured down from. Mirrors BandwidthReferenceMode. */
+export type ResponseReferenceModeName = 'Peak' | 'BandMedian'
 
 export interface FrequencyResponseTraceJson {
   kind: ResponseTraceKindName
@@ -607,6 +650,9 @@ export interface FrequencyResponseTraceJson {
   threeDb: ResponseBandwidthJson
   peakDb: number
   peakFreqHz: number
+  referenceDb: number
+  referenceMode: ResponseReferenceModeName
+  referenceFellBackToPeak: boolean
 }
 
 export interface FrequencyResponseStatus {
@@ -918,6 +964,9 @@ export interface StoredResponseTrace {
   peakHz: number
   oneDb: { lowerHz: number; upperHz: number; lowerClamped: boolean; upperClamped: boolean }
   threeDb: { lowerHz: number; upperHz: number; lowerClamped: boolean; upperClamped: boolean }
+  /** Null on a result saved before the reference was recorded — the chart then draws no reference line. */
+  referenceDb: number | null
+  referenceMode: ResponseReferenceModeName | null
   freqHz: number[]
   magnitudeMinDb: number[]
   magnitudeMaxDb: number[]

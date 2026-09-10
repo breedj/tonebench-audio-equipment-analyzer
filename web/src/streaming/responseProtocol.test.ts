@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   HEADER_LENGTH,
   ResponsePhase,
+  ResponseReferenceMode,
   ResponseTraceKind,
   StreamMsgType,
   decodeFrequencyResponseFrame,
@@ -18,6 +19,7 @@ interface Column {
 
 interface Bandwidth {
   dropDb: number
+  symmetric: boolean
   lowerHz: number
   upperHz: number
   bandwidthHz: number
@@ -40,8 +42,11 @@ function buildFrame(opts: {
   threeDb: Bandwidth
   peakDb: number
   peakFreqHz: number
+  referenceDb: number
+  referenceMode: number
+  referenceFellBackToPeak: boolean
 }): ArrayBuffer {
-  const length = HEADER_LENGTH + opts.columns.length * 20 + 40 + 8
+  const length = HEADER_LENGTH + opts.columns.length * 20 + 40 + 16
   const buffer = new ArrayBuffer(length)
   const view = new DataView(buffer)
 
@@ -70,11 +75,15 @@ function buildFrame(opts: {
     view.setFloat32(offset + 12, bandwidth.bandwidthHz, true)
     view.setUint8(offset + 16, bandwidth.lowerClamped ? 1 : 0)
     view.setUint8(offset + 17, bandwidth.upperClamped ? 1 : 0)
+    view.setUint8(offset + 18, bandwidth.symmetric ? 1 : 0)
     offset += 20
   }
 
   view.setFloat32(offset, opts.peakDb, true)
   view.setFloat32(offset + 4, opts.peakFreqHz, true)
+  view.setFloat32(offset + 8, opts.referenceDb, true)
+  view.setUint8(offset + 12, opts.referenceMode)
+  view.setUint8(offset + 13, opts.referenceFellBackToPeak ? 1 : 0)
 
   return buffer
 }
@@ -87,6 +96,7 @@ const columns: Column[] = [
 
 const oneDb: Bandwidth = {
   dropDb: 1,
+  symmetric: true,
   lowerHz: 8.8,
   upperHz: 63200,
   bandwidthHz: 63191.2,
@@ -96,6 +106,7 @@ const oneDb: Bandwidth = {
 
 const threeDb: Bandwidth = {
   dropDb: 3,
+  symmetric: false,
   lowerHz: 4.4,
   upperHz: 90800,
   bandwidthHz: 90795.6,
@@ -105,7 +116,19 @@ const threeDb: Bandwidth = {
 
 function decode(kind: ResponseTraceKind = ResponseTraceKind.Gain) {
   return decodeFrequencyResponseFrame(
-    buildFrame({ kind, startFreqHz: 4, endFreqHz: 22800, columns, oneDb, threeDb, peakDb: 34.49, peakFreqHz: 461.4 }),
+    buildFrame({
+      kind,
+      startFreqHz: 4,
+      endFreqHz: 22800,
+      columns,
+      oneDb,
+      threeDb,
+      peakDb: 34.49,
+      peakFreqHz: 461.4,
+      referenceDb: 33.75,
+      referenceMode: ResponseReferenceMode.BandMedian,
+      referenceFellBackToPeak: false,
+    }),
   )
 }
 
@@ -171,6 +194,27 @@ describe('decodeFrequencyResponseFrame', () => {
 
     expect(frame.peakDb).toBeCloseTo(34.49, 3)
     expect(frame.peakFreqHz).toBeCloseTo(461.4, 2)
+  })
+
+  it('reads the reference the corners were measured from, which is not the peak', () => {
+    // The two are deliberately different here: a passband-referenced trace's reference is the median
+    // of a band and appears nowhere else in the frame, so a decoder that reused peakDb for it would
+    // draw the threshold lines in the wrong place on exactly the traces this reference exists for.
+    const frame = decode()
+
+    expect(frame.referenceDb).toBeCloseTo(33.75, 3)
+    expect(frame.referenceDb).not.toBeCloseTo(frame.peakDb, 3)
+    expect(frame.referenceMode).toBe(ResponseReferenceMode.BandMedian)
+    expect(frame.referenceFellBackToPeak).toBe(false)
+  })
+
+  it('reads each reading’s symmetry, because the two rows ask different questions', () => {
+    // 1 dB is a flatness band (+-), 3 dB a roll-off one (down only). Losing this would draw the
+    // 1 dB row's upper threshold as though nothing above the reference could end the band.
+    const frame = decode()
+
+    expect(frame.oneDb.symmetric).toBe(true)
+    expect(frame.threeDb.symmetric).toBe(false)
   })
 })
 

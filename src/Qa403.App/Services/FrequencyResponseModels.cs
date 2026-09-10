@@ -101,13 +101,20 @@ public enum FrequencyResponsePhase
 }
 
 /// <summary>
-/// One −1 dB or −3 dB reading, as the UI's Measurements table shows it. <see cref="LowerClamped"/>
+/// One ±1 dB or −3 dB reading, as the UI's Measurements table shows it. <see cref="LowerClamped"/>
 /// / <see cref="UpperClamped"/> say the trace never reached the threshold on that side inside the
 /// measured band, so the frequency is where the search stopped, not a corner — the old app printed
 /// a bare number there and read "&gt; 96 kHz" as if it were measured.
 /// </summary>
+/// <param name="Symmetric">
+/// The reading is a flatness band (±<see cref="DropDb"/> of the reference) rather than a roll-off
+/// one (down to reference − <see cref="DropDb"/>). Carried rather than inferred from
+/// <see cref="DropDb"/>: which row is which is a convention this app happens to hold, and a reading
+/// that cannot say what it measured is what makes a stored result unreadable a year later.
+/// </param>
 public sealed record BandwidthReading(
     double DropDb,
+    bool Symmetric,
     double LowerHz,
     double UpperHz,
     double BandwidthHz,
@@ -115,7 +122,8 @@ public sealed record BandwidthReading(
     bool UpperClamped)
 {
     public static BandwidthReading From(BandwidthResult result) =>
-        new(result.DropDb, result.LowerHz, result.UpperHz, result.BandwidthHz, result.LowerClamped, result.UpperClamped);
+        new(result.DropDb, result.Symmetric, result.LowerHz, result.UpperHz, result.BandwidthHz,
+            result.LowerClamped, result.UpperClamped);
 }
 
 /// <summary>
@@ -142,7 +150,20 @@ public sealed record FrequencyResponseTrace(
     BandwidthReading OneDb,
     BandwidthReading ThreeDb,
     double PeakDb,
-    double PeakFreqHz);
+    double PeakFreqHz,
+    /// <summary>
+    /// The level both readings were measured from. A property of the trace rather than of each
+    /// reading because they share one by construction — see
+    /// <c>BandwidthAnalyzer.FindReference</c>, which is called once per trace for that reason.
+    /// The chart draws it, and its thresholds, from this.
+    /// </summary>
+    double ReferenceDb = 0.0,
+    BandwidthReferenceMode ReferenceMode = BandwidthReferenceMode.Peak,
+    /// <summary>
+    /// The requested reference band held no bins inside the analysed range, so the peak was used
+    /// instead. The UI says so rather than quoting a figure against a band it never measured.
+    /// </summary>
+    bool ReferenceFellBackToPeak = false);
 
 /// <summary>
 /// A frequency-response run's configuration, flat and immutable, mirroring
@@ -173,7 +194,16 @@ public sealed record FrequencyResponseRequest(
     /// <see cref="ThdSweepLevelMode.OutputPower"/> — the other two modes name a voltage, which needs
     /// no load. Defaulted so every existing caller keeps compiling and measuring the same thing.
     /// </summary>
-    double LoadOhms = 8.0)
+    double LoadOhms = 8.0,
+    /// <summary>
+    /// What the ±1 dB and −3 dB corners are measured down from — see
+    /// <see cref="BandwidthReferenceSpec"/> for why this is a setting and not simply the peak.
+    /// Defaults to the passband median because the thing this app is pointed at is usually an
+    /// amplifier; a DUT whose response <i>is</i> a peak wants <see cref="BandwidthReferenceMode.Peak"/>.
+    /// </summary>
+    BandwidthReferenceMode BandwidthReference = BandwidthReferenceMode.BandMedian,
+    double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
+    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz)
 {
     /// <summary>
     /// Spans the UI offers, in Hz. These are <b>Nyquist</b> values — the label the old app showed —
@@ -240,6 +270,10 @@ public sealed record FrequencyResponseRequest(
     public double ChirpEndHz => ChirpEndNyquistFraction * SampleRateHz / 2.0;
 
     public double AnalysisHighHz => AnalysisHighNyquistFraction * SampleRateHz / 2.0;
+
+    /// <summary>The three bandwidth-reference fields as the analyzer wants them.</summary>
+    public BandwidthReferenceSpec BandwidthReferenceSpec =>
+        new(BandwidthReference, BandwidthReferenceLowHz, BandwidthReferenceHighHz);
 
     /// <summary>The requested drive level in dBV, whatever unit it was entered in.</summary>
     public double LevelDbv => LevelUnit switch
@@ -332,6 +366,8 @@ public sealed record FrequencyResponseRequest(
                 nameof(AverageCount), AverageCount,
                 $"Averages must be between {MinAverageCount} and {MaxAverageCount}.");
         }
+
+        BandwidthReferenceSpec.Validate();
 
         if (double.IsNaN(ChirpStartHz) || ChirpStartHz < MinChirpStartHz || ChirpStartHz > MaxChirpStartHz)
         {

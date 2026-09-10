@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, watch } from 'vue'
 import type {
+  ResponseReferenceModeName,
   SteppedResponseParameters,
   SteppedResponseStartRequest,
   SweepLevelMode,
@@ -100,6 +101,17 @@ const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
   { value: 'MilliVolt', label: 'mV' },
 ]
 
+/**
+ * What the ±1 dB and −3 dB corners are measured down from. The same control, the same default and
+ * the same reasoning as the chirp panel's — see FrequencyResponseConfigPanel.vue. The two
+ * measurements are read off one Measurements table, so a reference that meant different things on
+ * each would make them disagree about a DUT neither measured differently.
+ */
+const BANDWIDTH_REFERENCES: { value: ResponseReferenceModeName; label: string }[] = [
+  { value: 'BandMedian', label: 'Passband median' },
+  { value: 'Peak', label: 'Peak' },
+]
+
 const form = reactive({
   startFreqHz: 20,
   endFreqHz: 20000,
@@ -117,6 +129,9 @@ const form = reactive({
    * sample rate falls out with it: a 20 kHz run costs a quarter as much at 48 kHz as at 192 kHz.
    */
   adaptiveResolution: true,
+  bandwidthReference: 'BandMedian' as ResponseReferenceModeName,
+  bandwidthReferenceLowHz: 200,
+  bandwidthReferenceHighHz: 2000,
 })
 
 /**
@@ -158,6 +173,14 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (typeof stored.rightChannelIsReference === 'boolean') form.rightChannelIsReference = stored.rightChannelIsReference
   if (typeof stored.adaptiveResolution === 'boolean') form.adaptiveResolution = stored.adaptiveResolution
+  // Absent on a type saved before the reference was configurable, which then keeps the default.
+  if (stored.bandwidthReference) form.bandwidthReference = stored.bandwidthReference
+  if (typeof stored.bandwidthReferenceLowHz === 'number') {
+    form.bandwidthReferenceLowHz = stored.bandwidthReferenceLowHz
+  }
+  if (typeof stored.bandwidthReferenceHighHz === 'number') {
+    form.bandwidthReferenceHighHz = stored.bandwidthReferenceHighHz
+  }
 
   // The form writes land in this tick; the watcher runs on the next one, so the flag has to survive
   // until then.
@@ -288,8 +311,21 @@ const invalid = computed(() => {
     return 'The right input is the reference, so the tone has to be played on the right channel too.'
   if (form.levelMode !== 'GeneratorVoltage' && !(loadOhms.value > 0)) return 'An output-referred level needs a load above 0 Ω.'
   if (isPowerMode.value && !(form.levelValue > 0)) return 'Output power must be above 0 W.'
+  // Checked only when a run would read it — an untouched default must never block a measurement that
+  // never looks at it.
+  if (usesReferenceBand.value) {
+    if (!Number.isFinite(form.bandwidthReferenceLowHz) || !Number.isFinite(form.bandwidthReferenceHighHz))
+      return 'The reference band must be two numbers.'
+    if (form.bandwidthReferenceLowHz < 1 || form.bandwidthReferenceHighHz > 96000)
+      return 'The reference band must lie between 1 Hz and 96 kHz.'
+    if (form.bandwidthReferenceHighHz <= form.bandwidthReferenceLowHz)
+      return 'The reference band must end above where it starts.'
+  }
   return null
 })
+
+/** The band boxes are only read — and so only validated and only shown — by the median reference. */
+const usesReferenceBand = computed(() => form.bandwidthReference === 'BandMedian')
 
 defineExpose({ run, invalid, buildParamsJson, rightChannelIsReference: computed(() => form.rightChannelIsReference) })
 
@@ -318,6 +354,9 @@ function buildParamsJson(): string {
     sampleRateHz: FIXED_SAMPLE_RATE_HZ,
     adaptiveResolution: form.adaptiveResolution,
     rightChannelIsReference: form.rightChannelIsReference,
+    bandwidthReference: form.bandwidthReference,
+    bandwidthReferenceLowHz: form.bandwidthReferenceLowHz,
+    bandwidthReferenceHighHz: form.bandwidthReferenceHighHz,
   }
   return JSON.stringify(parameters)
 }
@@ -339,6 +378,9 @@ function run() {
     averageCount: form.averageCount,
     rightChannelIsReference: form.rightChannelIsReference,
     adaptiveResolution: form.adaptiveResolution,
+    bandwidthReference: form.bandwidthReference,
+    bandwidthReferenceLowHz: form.bandwidthReferenceLowHz,
+    bandwidthReferenceHighHz: form.bandwidthReferenceHighHz,
   })
 }
 </script>
@@ -514,6 +556,47 @@ function run() {
       Analysis: {{ FIXED_SAMPLE_RATE_HZ / 1000 }} kHz · {{ FIXED_FFT_SIZE }} points ·
       {{ FIXED_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
     </p>
+
+    <label
+      class="flex flex-col gap-1 text-xs"
+      title="What the bandwidth corners are measured down from. Passband median is right for an amplifier: its output transformer's HF resonance is often taller than the passband, and referencing the peak then measures the resonance instead. Pick Peak for a DUT whose response is itself a peak."
+    >
+      Bandwidth reference
+      <select
+        v-model="form.bandwidthReference"
+        :disabled="running"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="option in BANDWIDTH_REFERENCES" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
+
+    <div v-if="usesReferenceBand" class="grid grid-cols-2 gap-2 text-xs">
+      <label class="flex flex-col gap-1" title="Bottom of the band the reference level is the median of.">
+        Reference from (Hz)
+        <input
+          v-model.number="form.bandwidthReferenceLowHz"
+          type="number"
+          min="1"
+          max="96000"
+          :disabled="running"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        />
+      </label>
+      <label class="flex flex-col gap-1" title="Top of the band the reference level is the median of.">
+        Reference to (Hz)
+        <input
+          v-model.number="form.bandwidthReferenceHighHz"
+          type="number"
+          min="1"
+          max="96000"
+          :disabled="running"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        />
+      </label>
+    </div>
 
     <p class="text-xs text-neutral-500 dark:text-neutral-400">
       ≈{{ pointCount }} points · ≈{{ durationLabel }}

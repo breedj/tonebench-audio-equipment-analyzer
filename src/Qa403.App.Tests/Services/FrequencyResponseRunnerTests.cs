@@ -26,8 +26,10 @@ public class FrequencyResponseRunnerTests
         int averages = 1,
         bool continuous = false,
         double chirpStartHz = FrequencyResponseRequest.DefaultChirpStartHz,
-        double loadOhms = 8.0) =>
-        new(spanHz, resolutionMultiplier, levelMode, levelValue, levelUnit, rightIsReference, smoothing, averages, continuous, chirpStartHz, loadOhms);
+        double loadOhms = 8.0,
+        BandwidthReferenceMode bandwidthReference = BandwidthReferenceMode.BandMedian) =>
+        new(spanHz, resolutionMultiplier, levelMode, levelValue, levelUnit, rightIsReference, smoothing, averages,
+            continuous, chirpStartHz, loadOhms, bandwidthReference);
 
     private sealed record Harness(FrequencyResponseRunner Runner, DeviceSessionService Session, SpectrumPipeline Pipeline);
 
@@ -889,7 +891,35 @@ public class FrequencyResponseRunnerTests
     [Fact]
     public async Task Measurement_DrivingAOnePoleDut_FindsItsCorner()
     {
+        // Peak-referenced on purpose. This DUT's corner sits at 2 kHz, i.e. *inside* the default
+        // 200 Hz - 2 kHz reference band, so a passband median taken there is already a decibel or two
+        // down and the -3 dB corner it yields is honestly somewhere else. A reference band has to lie
+        // where the DUT is flat; when it cannot, the peak is the reference — which is exactly what
+        // the setting is for. See Measurement_WithAPassbandReference_FindsACornerAboveTheBand for the
+        // default's own case.
         const double cornerHz = 2_000.0;
+        var harness = await CreateAsync(new OnePoleLowPassDevice(CleanDevice(), cornerHz));
+
+        await harness.Runner.StartAsync(
+            Request(smoothing: 24, bandwidthReference: BandwidthReferenceMode.Peak),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        var left = Trace(status, FrequencyResponseTraceKind.Left);
+
+        Assert.False(left.ThreeDb.UpperClamped);
+        Assert.InRange(left.ThreeDb.UpperHz, cornerHz * 0.9, cornerHz * 1.1);
+    }
+
+    [Fact]
+    public async Task Measurement_WithAPassbandReference_FindsACornerAboveTheBand()
+    {
+        // The default reference, on a DUT whose passband actually contains the reference band: the
+        // corner is well above it, so the median is taken on the flat part and the -3 dB point is
+        // the pole's own.
+        const double cornerHz = 12_000.0;
+        double expectedHz = OnePoleMinusThreeDbHz(cornerHz);
         var harness = await CreateAsync(new OnePoleLowPassDevice(CleanDevice(), cornerHz));
 
         await harness.Runner.StartAsync(Request(smoothing: 24), CancellationToken.None);
@@ -898,8 +928,67 @@ public class FrequencyResponseRunnerTests
         AssertFinished(status);
         var left = Trace(status, FrequencyResponseTraceKind.Left);
 
+        Assert.Equal(BandwidthReferenceMode.BandMedian, left.ReferenceMode);
+        Assert.False(left.ReferenceFellBackToPeak);
         Assert.False(left.ThreeDb.UpperClamped);
-        Assert.InRange(left.ThreeDb.UpperHz, cornerHz * 0.9, cornerHz * 1.1);
+        Assert.InRange(left.ThreeDb.UpperHz, expectedHz * 0.9, expectedHz * 1.1);
+    }
+
+    /// <summary>
+    /// The −3 dB frequency <see cref="OnePoleLowPassDevice"/> actually has, which is not the corner
+    /// it was constructed with.
+    ///
+    /// <para>Its coefficient is the impulse-invariant <c>1 − exp(−2π·fc/fs)</c>, and that filter's
+    /// −3 dB point drifts above the nominal corner as the corner approaches Nyquist: 0.5 % at 2 kHz,
+    /// but 34 % at 12 kHz, and at 20 kHz on a 48 kHz rate it never reaches −3 dB at all before
+    /// Nyquist. A test asserting the nominal figure at those frequencies would be asserting the
+    /// fixture's warping rather than the analyzer's answer — which is exactly how this helper came
+    /// to exist.</para>
+    /// </summary>
+    private static double OnePoleMinusThreeDbHz(double cornerHz, double sampleRateHz = 48_000.0)
+    {
+        double alpha = 1.0 - Math.Exp(-2.0 * Math.PI * cornerHz / sampleRateHz);
+        double pole = 1.0 - alpha;
+
+        // |H(w)|² = alpha² / (1 + pole² − 2·pole·cos w), set to ½ and solved for cos w.
+        double cosW = (1.0 + (pole * pole) - (2.0 * alpha * alpha)) / (2.0 * pole);
+        return Math.Acos(Math.Clamp(cosW, -1.0, 1.0)) * sampleRateHz / (2.0 * Math.PI);
+    }
+
+    [Fact]
+    public async Task Measurement_WithAResonanceAboveThePassband_StillReportsThePassbandsCorner()
+    {
+        // The measurement this whole reference mode exists for, end to end. A DUT with a peak above
+        // its passband -- an output transformer's leakage resonance -- referenced to the peak reports
+        // a "bandwidth" that is the resonance's own width, a couple of kHz wide and nowhere near the
+        // amplifier's low end. The passband median reports the amplifier.
+        // 10 kHz corner with a 9 kHz resonance on its shoulder: the same geometry as a transformer's
+        // 38 kHz peak above a 46 kHz corner, scaled to fit the harness's 24 kHz span.
+        var harness = await CreateAsync(new ResonantDevice(CleanDevice(), cornerHz: 10_000.0, resonanceHz: 9_000.0));
+
+        await harness.Runner.StartAsync(
+            Request(smoothing: 24, bandwidthReference: BandwidthReferenceMode.Peak),
+            CancellationToken.None);
+        var peakReferenced = Trace(await AwaitCompletionAsync(harness.Runner), FrequencyResponseTraceKind.Left);
+
+        await harness.Runner.StartAsync(Request(smoothing: 24), CancellationToken.None);
+        var bandReferenced = Trace(await AwaitCompletionAsync(harness.Runner), FrequencyResponseTraceKind.Left);
+
+        // Peak-referenced: both corners sit on the resonance's skirts, so the band does not even
+        // begin until well above the passband it is supposed to describe.
+        Assert.True(
+            peakReferenced.OneDb.LowerHz > 3_000.0,
+            $"expected the peak reference to report the resonance, lower corner was {peakReferenced.OneDb.LowerHz:0} Hz");
+
+        // Passband-referenced: the whole ±1 dB band lies below where the peak-referenced one starts,
+        // because it is describing the amplifier rather than the peak sitting above it.
+        Assert.True(
+            bandReferenced.OneDb.UpperHz < peakReferenced.OneDb.LowerHz,
+            $"expected the passband reference to report the amplifier: ±1 dB to {bandReferenced.OneDb.UpperHz:0} Hz "
+            + $"against a peak-referenced band starting at {peakReferenced.OneDb.LowerHz:0} Hz");
+        Assert.True(
+            bandReferenced.OneDb.LowerHz < 200.0,
+            $"expected the passband reference to reach down the band, lower corner was {bandReferenced.OneDb.LowerHz:0} Hz");
     }
 
     /// <summary>

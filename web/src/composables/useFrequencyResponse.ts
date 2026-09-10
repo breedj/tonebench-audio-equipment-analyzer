@@ -5,11 +5,13 @@ import {
   type FrequencyResponseStatus,
   type FrequencyResponseTraceJson,
   type ResponsePhaseKindName,
+  type ResponseReferenceModeName,
   type ResponseTraceKindName,
   type SteppedResponseStartRequest,
 } from '../api/client'
 import {
   ResponsePhase,
+  ResponseReferenceMode,
   ResponseTraceKind,
   STREAM_FLAG_STEPPED_RESPONSE,
   type FrequencyResponseFrame,
@@ -51,9 +53,23 @@ export interface ResponseTrace {
   threeDb: ResponseBandwidthView
   peakDb: number
   peakFreqHz: number
+  /**
+   * The level both readings were measured down from, or null for a stored result saved before the
+   * reference was recorded. The chart draws the reference line and its thresholds from it; null
+   * draws none rather than inventing one from the decimated columns, which are not the trace the
+   * corners were found on.
+   */
+  referenceDb: number | null
+  referenceMode: ResponseReferenceModeName | null
+  /** The reference band held no bins in the analysed range, so the peak was used instead. */
+  referenceFellBackToPeak: boolean
 }
 
 export interface ResponseBandwidthView {
+  /** 1 or 3 — how far from the reference this reading's thresholds sit. */
+  dropDb: number
+  /** ±dropDb (a flatness band) rather than a one-sided fall to reference − dropDb (a roll-off one). */
+  symmetric: boolean
   lowerHz: number
   upperHz: number
   bandwidthHz: number
@@ -241,6 +257,9 @@ function fromJson(trace: FrequencyResponseTraceJson): ResponseTrace {
     threeDb: { ...trace.threeDb },
     peakDb: trace.peakDb,
     peakFreqHz: trace.peakFreqHz,
+    referenceDb: trace.referenceDb,
+    referenceMode: trace.referenceMode,
+    referenceFellBackToPeak: trace.referenceFellBackToPeak,
   }
 }
 
@@ -258,6 +277,9 @@ function fromFrame(frame: FrequencyResponseFrame): ResponseTrace {
     threeDb: { ...frame.threeDb },
     peakDb: frame.peakDb,
     peakFreqHz: frame.peakFreqHz,
+    referenceDb: frame.referenceDb,
+    referenceMode: frame.referenceMode === ResponseReferenceMode.BandMedian ? 'BandMedian' : 'Peak',
+    referenceFellBackToPeak: frame.referenceFellBackToPeak,
   }
 }
 

@@ -28,7 +28,14 @@ public static class SteppedResponseEndpoints
             if (!EnumParsing.TryParse(request.Window, WindowType.Hann, out WindowType window, out var windowError))
                 return Results.BadRequest(windowError);
 
-            var measurement = request.ToMeasurement(levelMode, levelUnit, window);
+            if (!EnumParsing.TryParse(
+                    request.BandwidthReference, BandwidthReferenceMode.BandMedian,
+                    out BandwidthReferenceMode bandwidthReference, out var referenceError))
+            {
+                return Results.BadRequest(referenceError);
+            }
+
+            var measurement = request.ToMeasurement(levelMode, levelUnit, window, bandwidthReference);
 
             try
             {
@@ -106,7 +113,14 @@ public sealed record SteppedResponseStartRequest(
     bool AdaptiveResolution = true,
     int FftSize = SteppedResponseRequest.DefaultFftSize,
     string? Window = null,
-    double SampleRateHz = SteppedResponseRequest.DefaultSampleRateHz)
+    double SampleRateHz = SteppedResponseRequest.DefaultSampleRateHz,
+    /// <summary>
+    /// "BandMedian" (the default) or "Peak" — what the corners are measured down from. See
+    /// <see cref="BandwidthReferenceSpec"/>.
+    /// </summary>
+    string? BandwidthReference = null,
+    double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
+    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz)
 {
     /// <summary>
     /// The measurement this request asks for. A method rather than inline in the endpoint so it can
@@ -115,7 +129,11 @@ public sealed record SteppedResponseStartRequest(
     /// something else. That is exactly what happened when <c>ChirpStartHz</c> was added to the chirp
     /// measurement: three runs at 2, 5 and 8 Hz came back identical to 0.05 dB.
     /// </summary>
-    public SteppedResponseRequest ToMeasurement(ThdSweepLevelMode levelMode, ThdSweepLevelUnit levelUnit, WindowType window) =>
+    public SteppedResponseRequest ToMeasurement(
+        ThdSweepLevelMode levelMode,
+        ThdSweepLevelUnit levelUnit,
+        WindowType window,
+        BandwidthReferenceMode bandwidthReference) =>
         new(StartFreqHz,
             EndFreqHz,
             StepsPerOctave,
@@ -130,5 +148,8 @@ public sealed record SteppedResponseStartRequest(
             AverageCount,
             SampleRateHz,
             AdaptiveResolution,
-            RightChannelIsReference);
+            RightChannelIsReference,
+            bandwidthReference,
+            BandwidthReferenceLowHz,
+            BandwidthReferenceHighHz);
 }

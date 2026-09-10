@@ -45,8 +45,22 @@ public sealed record SteppedResponseRequest(
     int AverageCount,
     double SampleRateHz,
     bool AdaptiveResolution,
-    bool RightChannelIsReference)
+    bool RightChannelIsReference,
+    /// <summary>
+    /// What the ±1 dB and −3 dB corners are measured down from — see
+    /// <see cref="BandwidthReferenceSpec"/>. Same setting, same default and same three fields as
+    /// <see cref="FrequencyResponseRequest.BandwidthReference"/>: the two measurements produce the
+    /// same three curves and are read off the same table, so a reference that meant different
+    /// things on each would make the two disagree about a DUT neither of them measured differently.
+    /// </summary>
+    BandwidthReferenceMode BandwidthReference = BandwidthReferenceMode.BandMedian,
+    double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
+    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz)
 {
+    /// <summary>The three bandwidth-reference fields as the analyzer wants them.</summary>
+    public BandwidthReferenceSpec BandwidthReferenceSpec =>
+        new(BandwidthReference, BandwidthReferenceLowHz, BandwidthReferenceHighHz);
+
     /// <summary>The analysis size a fixed-resolution run uses, and the panel's default. The same figure both sweeps fix.</summary>
     public const int DefaultFftSize = 131072;
 
@@ -194,6 +208,8 @@ public sealed record SteppedResponseRequest(
     /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> for anything the runner cannot act on.</summary>
     public void Validate()
     {
+        BandwidthReferenceSpec.Validate();
+
         if (StartFreqHz <= 0.0)
             throw new ArgumentOutOfRangeException(nameof(StartFreqHz), StartFreqHz, "Start frequency must be greater than 0 Hz.");
         if (EndFreqHz <= StartFreqHz)

@@ -370,18 +370,29 @@ public static class StreamFrame
     ///   f32  magnitudeMaxDb
     ///   f32  phaseDeg
     ///   f32  coherence
-    /// then two bandwidth readings (-1 dB, then -3 dB), 20 bytes each:
+    /// then two bandwidth readings (+-1 dB, then -3 dB), 20 bytes each:
     ///   f32  dropDb
     ///   f32  lowerHz
     ///   f32  upperHz
     ///   f32  bandwidthHz
     ///   u8   lowerClamped
     ///   u8   upperClamped
-    ///   u16  (padding)
+    ///   u8   symmetric
+    ///   u8   (padding)
     /// then:
     ///   f32  peakDb
     ///   f32  peakFreqHz
+    ///   f32  referenceDb
+    ///   u8   referenceMode (BandwidthReferenceMode)
+    ///   u8   referenceFellBackToPeak
+    ///   u16  (padding)
     /// </code>
+    ///
+    /// <para>The reference rides on the trace rather than on each reading because both readings
+    /// share one by construction -- see <c>BandwidthAnalyzer.FindReference</c>. The client needs it
+    /// to draw the reference line and its thresholds, which it cannot re-derive from the columns:
+    /// these are decimated and the corners were deliberately searched on the full-resolution
+    /// trace.</para>
     ///
     /// Both magnitude values are sent, and a client must draw both: the max as the line and the min
     /// as a band under it. Plotting the max alone redraws a rippled response as a curve riding along
@@ -399,7 +410,7 @@ public static class StreamFrame
 
         const int perColumn = 5 * sizeof(float);
         const int perBandwidth = (4 * sizeof(float)) + 4;
-        const int trailer = 2 * sizeof(float);
+        const int trailer = (3 * sizeof(float)) + 4;
 
         byte[] buffer = new byte[HeaderLength + (columns * perColumn) + (2 * perBandwidth) + trailer];
         WriteHeader(
@@ -424,6 +435,9 @@ public static class StreamFrame
 
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)trace.PeakDb);
         BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 4, 4), (float)trace.PeakFreqHz);
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 8, 4), (float)trace.ReferenceDb);
+        buffer[offset + 12] = (byte)trace.ReferenceMode;
+        buffer[offset + 13] = trace.ReferenceFellBackToPeak ? (byte)1 : (byte)0;
 
         return buffer;
     }
@@ -517,7 +531,7 @@ public static class StreamFrame
         BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(offset + 12, 4), (float)reading.BandwidthHz);
         buffer[offset + 16] = reading.LowerClamped ? (byte)1 : (byte)0;
         buffer[offset + 17] = reading.UpperClamped ? (byte)1 : (byte)0;
-        buffer[offset + 18] = 0;
+        buffer[offset + 18] = reading.Symmetric ? (byte)1 : (byte)0;
         buffer[offset + 19] = 0;
         return offset + 20;
     }
@@ -724,12 +738,16 @@ public static class StreamFrame
 
         float peakDb = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4));
         float peakFreqHz = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 4, 4));
+        float referenceDb = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 8, 4));
+        var referenceMode = (BandwidthReferenceMode)frame[offset + 12];
+        bool fellBackToPeak = frame[offset + 13] != 0;
 
         return new FrequencyResponseTrace(
             (FrequencyResponseTraceKind)(byte)header.Channel,
             header.X0, header.Dx,
             freqHz, magMin, magMax, phaseDeg, coherence,
-            oneDb, threeDb, peakDb, peakFreqHz);
+            oneDb, threeDb, peakDb, peakFreqHz,
+            referenceDb, referenceMode, fellBackToPeak);
     }
 
     /// <summary>Decodes a <see cref="StreamMsgType.FrequencyResponseProgress"/> frame — see <see cref="EncodeFrequencyResponseProgress"/>.</summary>
@@ -747,6 +765,7 @@ public static class StreamFrame
     {
         var reading = new BandwidthReading(
             BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)),
+            frame[offset + 18] != 0,
             BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 4, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 8, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 12, 4)),

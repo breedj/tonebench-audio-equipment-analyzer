@@ -480,12 +480,25 @@ export type ImpedanceTraceKind = (typeof ImpedanceTraceKind)[keyof typeof Impeda
  */
 export interface ResponseBandwidth {
   dropDb: number
+  /**
+   * The band is where the trace stayed within +-dropDb of the reference, not merely above
+   * reference - dropDb. True for the 1 dB row (a flatness figure) and false for the 3 dB one
+   * (a roll-off figure) — see BandwidthAnalyzer server-side for why they ask different questions.
+   */
+  symmetric: boolean
   lowerHz: number
   upperHz: number
   bandwidthHz: number
   lowerClamped: boolean
   upperClamped: boolean
 }
+
+/** Mirrors BandwidthReferenceMode. What the corners were measured down from. */
+export const ResponseReferenceMode = {
+  Peak: 0,
+  BandMedian: 1,
+} as const
+export type ResponseReferenceMode = (typeof ResponseReferenceMode)[keyof typeof ResponseReferenceMode]
 
 export interface FrequencyResponseFrame {
   header: StreamFrameHeader
@@ -502,6 +515,16 @@ export interface FrequencyResponseFrame {
   threeDb: ResponseBandwidth
   peakDb: number
   peakFreqHz: number
+  /**
+   * The level both readings were measured from. On the trace rather than on each reading because
+   * they share one by construction; the chart draws this line and its thresholds from it, and
+   * cannot re-derive it — these columns are decimated and the corners were searched on the
+   * full-resolution trace.
+   */
+  referenceDb: number
+  referenceMode: ResponseReferenceMode
+  /** The requested reference band held no bins in the analysed range, so the peak was used instead. */
+  referenceFellBackToPeak: boolean
 }
 
 export interface FrequencyResponseProgressFrame {
@@ -556,6 +579,9 @@ export function decodeFrequencyResponseFrame(buffer: ArrayBuffer): FrequencyResp
     threeDb,
     peakDb: view.getFloat32(offset, true),
     peakFreqHz: view.getFloat32(offset + 4, true),
+    referenceDb: view.getFloat32(offset + 8, true),
+    referenceMode: view.getUint8(offset + 12) as ResponseReferenceMode,
+    referenceFellBackToPeak: view.getUint8(offset + 13) !== 0,
   }
 }
 
@@ -567,6 +593,7 @@ function readBandwidth(view: DataView, offset: number): ResponseBandwidth {
     bandwidthHz: view.getFloat32(offset + 12, true),
     lowerClamped: view.getUint8(offset + 16) !== 0,
     upperClamped: view.getUint8(offset + 17) !== 0,
+    symmetric: view.getUint8(offset + 18) !== 0,
   }
 }
 

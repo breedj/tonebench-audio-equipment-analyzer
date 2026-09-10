@@ -1,6 +1,7 @@
 using System.Reflection;
 using Qa403.App.Endpoints;
 using Qa403.App.Services;
+using Qa403.Dsp;
 
 namespace Qa403.App.Tests.Endpoints;
 
@@ -27,9 +28,13 @@ public class FrequencyResponseStartRequestTests
             AverageCount: 7,
             Continuous: true,
             ChirpStartHz: 8.0,
-            LoadOhms: 4.0);
+            LoadOhms: 4.0,
+            BandwidthReference: "Peak",
+            BandwidthReferenceLowHz: 300.0,
+            BandwidthReferenceHighHz: 3_000.0);
 
-        var measurement = wire.ToMeasurement(ThdSweepLevelMode.GeneratorVoltage, ThdSweepLevelUnit.Dbv);
+        var measurement = wire.ToMeasurement(
+            ThdSweepLevelMode.GeneratorVoltage, ThdSweepLevelUnit.Dbv, BandwidthReferenceMode.Peak);
 
         Assert.Equal(48_000.0, measurement.FrequencySpanHz);
         Assert.Equal(4, measurement.ResolutionMultiplier);
@@ -42,6 +47,9 @@ public class FrequencyResponseStartRequestTests
         Assert.True(measurement.Continuous);
         Assert.Equal(8.0, measurement.ChirpStartHz);
         Assert.Equal(4.0, measurement.LoadOhms);
+        Assert.Equal(BandwidthReferenceMode.Peak, measurement.BandwidthReference);
+        Assert.Equal(300.0, measurement.BandwidthReferenceLowHz);
+        Assert.Equal(3_000.0, measurement.BandwidthReferenceHighHz);
     }
 
     /// <summary>
@@ -52,8 +60,8 @@ public class FrequencyResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(11, ConstructorParameterCount(typeof(FrequencyResponseStartRequest)));
-        Assert.Equal(11, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
+        Assert.Equal(14, ConstructorParameterCount(typeof(FrequencyResponseStartRequest)));
+        Assert.Equal(14, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
     }
 
     private static int ConstructorParameterCount(Type type) =>

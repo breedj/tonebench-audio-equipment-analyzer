@@ -1,5 +1,6 @@
 using Qa403.App.Services;
 using Qa403.Data;
+using Qa403.Dsp;
 
 namespace Qa403.App.Endpoints;
 
@@ -18,7 +19,14 @@ public static class FrequencyResponseEndpoints
             if (!EnumParsing.TryParse(request.LevelUnit, ThdSweepLevelUnit.Dbv, out ThdSweepLevelUnit levelUnit, out var unitError))
                 return Results.BadRequest(unitError);
 
-            var measurement = request.ToMeasurement(levelMode, levelUnit);
+            if (!EnumParsing.TryParse(
+                    request.BandwidthReference, BandwidthReferenceMode.BandMedian,
+                    out BandwidthReferenceMode bandwidthReference, out var referenceError))
+            {
+                return Results.BadRequest(referenceError);
+            }
+
+            var measurement = request.ToMeasurement(levelMode, levelUnit, bandwidthReference);
 
             try
             {
@@ -113,7 +121,15 @@ public sealed record FrequencyResponseStartRequest(
     /// The load a watts target is defined against, in ohms. Only read by the OutputPower mode;
     /// defaulted so a client that never sends it keeps working.
     /// </summary>
-    double LoadOhms = 8.0)
+    double LoadOhms = 8.0,
+    /// <summary>
+    /// "BandMedian" (the default) or "Peak" — what the corners are measured down from. See
+    /// <see cref="BandwidthReferenceSpec"/>; the peak is right only for a DUT whose response is
+    /// itself a peak.
+    /// </summary>
+    string? BandwidthReference = null,
+    double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
+    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz)
 {
     /// <summary>
     /// The measurement this request asks for. A method rather than inline in the endpoint so it can
@@ -123,7 +139,8 @@ public sealed record FrequencyResponseStartRequest(
     /// three runs at 2, 5 and 8 Hz came back identical to 0.05 dB, and only the right channel still
     /// reading the generator below the supposed start frequency gave it away.
     /// </summary>
-    public FrequencyResponseRequest ToMeasurement(ThdSweepLevelMode levelMode, ThdSweepLevelUnit levelUnit) =>
+    public FrequencyResponseRequest ToMeasurement(
+        ThdSweepLevelMode levelMode, ThdSweepLevelUnit levelUnit, BandwidthReferenceMode bandwidthReference) =>
         new(FrequencySpanHz,
             ResolutionMultiplier,
             levelMode,
@@ -134,7 +151,10 @@ public sealed record FrequencyResponseStartRequest(
             AverageCount,
             Continuous,
             ChirpStartHz,
-            LoadOhms);
+            LoadOhms,
+            bandwidthReference,
+            BandwidthReferenceLowHz,
+            BandwidthReferenceHighHz);
 }
 
 public sealed record SaveFrequencyResponseRequest(long MeasurementTypeId, string Name, string? Notes);

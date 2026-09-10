@@ -29,6 +29,19 @@ const trace = computed<ResponseTrace | null>(() => {
  */
 const peakLabel = computed(() => (props.view === 'Gain' ? 'Max. gain' : 'Max. amplitude'))
 const peakFreqLabel = computed(() => (props.view === 'Gain' ? 'Highest gain freq.' : 'Highest amplitude freq.'))
+
+/**
+ * What the two rows were measured down from, spelled out — because the same table reads completely
+ * differently depending on it, and a reader comparing two saved runs has no other way to tell.
+ *
+ * Absent (null) on a result saved before the reference was recorded. Those were peak-referenced, but
+ * the row is left blank rather than back-filled: it says what the stored result says and no more.
+ */
+const referenceLabel = computed(() => {
+  if (!trace.value || trace.value.referenceMode === null) return null
+  if (trace.value.referenceMode === 'Peak') return 'Peak'
+  return trace.value.referenceFellBackToPeak ? 'Peak (band not measured)' : 'Passband median'
+})
 </script>
 
 <template>
@@ -45,14 +58,18 @@ const peakFreqLabel = computed(() => (props.view === 'Gain' ? 'Highest gain freq
       </thead>
       <tbody class="font-mono">
         <tr>
-          <td class="pr-2 font-sans whitespace-nowrap">1 dB</td>
+          <td class="pr-2 font-sans whitespace-nowrap" title="Where the response stays within 1 dB of the reference, above it as well as below — a flatness figure. A downward-only search would walk straight up through a resonance without stopping.">
+            ±1 dB
+          </td>
           <td class="pr-2">{{ formatCorner(trace.oneDb.lowerHz, trace.oneDb.lowerClamped, 'lower') }}</td>
           <td class="pr-2">{{ formatCorner(trace.oneDb.upperHz, trace.oneDb.upperClamped, 'upper') }}</td>
           <td class="pr-2">{{ formatBandwidth(trace.oneDb) }}</td>
           <td><input v-model="showOneDb" type="checkbox" /></td>
         </tr>
         <tr>
-          <td class="pr-2 font-sans whitespace-nowrap">3 dB</td>
+          <td class="pr-2 font-sans whitespace-nowrap" title="Where the response has fallen 3 dB below the reference — a roll-off figure, so it is one-sided by convention and can lie beyond a resonance in the band.">
+            −3 dB
+          </td>
           <td class="pr-2">{{ formatCorner(trace.threeDb.lowerHz, trace.threeDb.lowerClamped, 'lower') }}</td>
           <td class="pr-2">{{ formatCorner(trace.threeDb.upperHz, trace.threeDb.upperClamped, 'upper') }}</td>
           <td class="pr-2">{{ formatBandwidth(trace.threeDb) }}</td>
@@ -69,7 +86,21 @@ const peakFreqLabel = computed(() => (props.view === 'Gain' ? 'Highest gain freq
       <dt class="text-neutral-500 dark:text-neutral-400">{{ peakFreqLabel }}</dt>
       <dd class="font-mono">{{ formatHz(trace.peakFreqHz) }}</dd>
       <dd></dd>
+
+      <template v-if="referenceLabel">
+        <dt class="text-neutral-500 dark:text-neutral-400">Reference</dt>
+        <dd class="font-mono">{{ trace.referenceDb === null ? '—' : formatDb(trace.referenceDb) }}</dd>
+        <dd class="text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</dd>
+      </template>
     </dl>
+
+    <p
+      v-if="trace && trace.referenceFellBackToPeak"
+      class="mt-2 text-[11px] text-amber-600 dark:text-amber-500"
+    >
+      The reference band lies outside the measured range, so these corners are referenced to the
+      peak instead. Move the band inside the sweep, or set the reference to Peak deliberately.
+    </p>
 
     <p
       v-if="trace && (trace.threeDb.lowerClamped || trace.threeDb.upperClamped)"

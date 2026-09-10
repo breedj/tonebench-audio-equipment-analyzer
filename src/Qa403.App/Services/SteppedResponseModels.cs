@@ -144,16 +144,22 @@ public sealed record SteppedResponseRequest(
     /// <para>2.73 s is the chirp's own longest record (524288 at 192 kHz), so it is a record length
     /// this pipeline is already known to run and a bound this app already lives with.</para>
     /// </summary>
-    public const double ExtendedMaxRecordSeconds = 524288.0 / 192000.0;
+    /// <summary>
+    /// The FFT ceiling a run reaching below <see cref="StandardLowestHz"/> is allowed to use, in
+    /// place of the sweep's own. See <see cref="SweepResolution.ExtendedMaxRecordSeconds"/>, which
+    /// carries the reasoning and is shared with the stepped-sine impedance run.
+    /// </summary>
+    public const double ExtendedMaxRecordSeconds = SweepResolution.ExtendedMaxRecordSeconds;
 
     /// <summary>Absolute cap, so a future lower sample rate cannot ask for an unbounded size.</summary>
-    public const int ExtendedMaxFftSize = 524288;
+    public const int ExtendedMaxFftSize = SweepResolution.ExtendedMaxFftSize;
 
     /// <summary>The FFT ceiling the sweeps use at this run's sample rate — a record-time bound, so 1.465 Hz bins at every rate.</summary>
     public int StandardFftCeiling => SweepResolution.BoundsFor(EffectiveSampleRateHz).Ceiling;
 
     /// <summary>The lowest tone the sweeps' own ceiling can read a level at — 4.4 Hz at every supported rate.</summary>
-    public double StandardLowestHz => MinFundamentalBins * EffectiveSampleRateHz / StandardFftCeiling;
+    public double StandardLowestHz =>
+        SweepResolution.LowestToneHz(EffectiveSampleRateHz, StandardFftCeiling, MinFundamentalBins);
 
     /// <summary>
     /// The FFT ceiling this run may reach. Raised automatically, and only, when the run asks to start
@@ -163,59 +169,24 @@ public sealed record SteppedResponseRequest(
     public int FftCeiling => StartFreqHz < StandardLowestHz ? ExtendedFftCeiling : StandardFftCeiling;
 
     /// <summary>The raised ceiling itself: the longest power-of-two record inside <see cref="ExtendedMaxRecordSeconds"/>.</summary>
-    public int ExtendedFftCeiling => Math.Max(
-        StandardFftCeiling,
-        Math.Min(PowerOfTwoAtMost(ExtendedMaxRecordSeconds * EffectiveSampleRateHz), ExtendedMaxFftSize));
+    public int ExtendedFftCeiling => SweepResolution.ExtendedCeilingFor(EffectiveSampleRateHz);
 
     /// <summary>
     /// The lowest tone this run can read a level at, given everything above. 4.4 Hz normally; 1.1 Hz
     /// at 192 kHz (and lower still at the lower rates) once the raised ceiling is in play.
     /// </summary>
-    public double LowestMeasurableHz =>
-        MinFundamentalBins * EffectiveSampleRateHz / (AdaptiveResolution ? FftCeiling : FftSize);
+    public double LowestMeasurableHz => SweepResolution.LowestToneHz(
+        EffectiveSampleRateHz, AdaptiveResolution ? FftCeiling : FftSize, MinFundamentalBins);
 
     /// <summary>
     /// The FFT size a given point is analyzed at — constant unless <see cref="AdaptiveResolution"/> is
-    /// on. Deliberately not <see cref="SweepResolution.FftSizeFor"/> directly: that clamps to the
-    /// sweeps' record-time ceiling, which is the thing <see cref="FftCeiling"/> exists to lift.
-    /// Everything else about the ladder — the target of
-    /// <see cref="SweepResolution.TargetFundamentalBins"/> bins and the bin-width floor — is the
-    /// sweeps' own and is deliberately shared.
+    /// on. Deliberately not <see cref="SweepResolution.FftSizeFor"/>: that clamps to the sweeps'
+    /// record-time ceiling, which is the thing <see cref="FftCeiling"/> exists to lift. Everything
+    /// else about the ladder is the sweeps' own and is deliberately shared.
     /// </summary>
-    public int FftSizeAt(double freqHz)
-    {
-        if (!AdaptiveResolution)
-            return FftSize;
-
-        (int floor, int standardCeiling) = SweepResolution.BoundsFor(EffectiveSampleRateHz);
-        int ceiling = Math.Max(standardCeiling, FftCeiling);
-
-        // A non-positive frequency has no bin to sit on; the longest record is the safest answer
-        // rather than an exception, since the grid is filtered elsewhere.
-        if (!(freqHz > 0.0))
-            return ceiling;
-
-        int wanted = PowerOfTwoAtLeast(SweepResolution.TargetFundamentalBins * EffectiveSampleRateHz / freqHz, ceiling);
-        return Math.Clamp(wanted, floor, ceiling);
-    }
-
-    private static int PowerOfTwoAtLeast(double value, int cap)
-    {
-        int n = 1;
-        while (n < value && n < cap)
-            n *= 2;
-
-        return n;
-    }
-
-    private static int PowerOfTwoAtMost(double value)
-    {
-        int n = 1;
-        while (n * 2 <= value && n < ExtendedMaxFftSize)
-            n *= 2;
-
-        return n;
-    }
+    public int FftSizeAt(double freqHz) => AdaptiveResolution
+        ? SweepResolution.FftSizeAt(freqHz, EffectiveSampleRateHz, FftCeiling)
+        : FftSize;
 
     /// <summary>Analysis resolution at a given point, Hz per bin.</summary>
     public double BinSizeHzAt(double freqHz) => EffectiveSampleRateHz / FftSizeAt(freqHz);

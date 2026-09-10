@@ -345,13 +345,298 @@ public class ImpedanceRunnerTests
         Assert.Equal(FrequencyResponsePhase.Idle, cleared.Phase);
     }
 
+    // ---------------------------------------------------------------- stepped sine
+
+    /// <summary>
+    /// A stepped grid small enough to run in a test and wide enough to catch a frequency-dependent
+    /// error: 100 Hz to 10 kHz at one point per octave is seven tones.
+    /// </summary>
+    private static ImpedanceRequest SteppedRequest(
+        int averages = 1,
+        ImpedanceCalTarget calTarget = ImpedanceCalTarget.None,
+        ImpedanceStimulus calibrationStimulus = ImpedanceStimulus.SteppedSine,
+        ImpedanceCalibration? openCal = null) =>
+        Request(averages: averages, calTarget: calTarget, openCal: openCal) with
+        {
+            Stimulus = ImpedanceStimulus.SteppedSine,
+            CalibrationStimulus = calibrationStimulus,
+            StartFreqHz = 100.0,
+            EndFreqHz = 10_000.0,
+            StepsPerOctave = 1,
+            AdaptiveResolution = true,
+        };
+
+    /// <summary>
+    /// The calibration target, measured one tone at a time. An 8 ohm resistor has the same impedance
+    /// at every frequency and no reactance at all, so this is the same arithmetic check the chirp
+    /// path gets — through a completely different acquisition loop.
+    ///
+    /// <para>Asserted at <b>every</b> point rather than at a few chosen ones, because a stepped run's
+    /// characteristic failure is one bad point rather than a tilted curve: a record that still holds
+    /// part of the previous tone reads that one bin low and leaves its neighbours untouched.</para>
+    /// </summary>
+    [Fact]
+    public async Task SteppedSine_AgainstTheResistiveFixture_ReadsItsResistorAtEveryPoint()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(SteppedRequest(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 120);
+
+        AssertFinished(status);
+        var trace = Assert.Single(status.Traces);
+        Assert.Equal(ImpedanceTraceKind.Impedance, trace.Kind);
+        Assert.Equal(status.PointCount, trace.FreqHz.Length);
+        Assert.InRange(trace.FreqHz.Length, 6, 8);
+
+        for (int i = 0; i < trace.FreqHz.Length; i++)
+        {
+            double ohms = ImpedanceMath.FromDbOhms(trace.MagnitudeMaxDbOhms[i]);
+            double errorDb = ImpedanceMath.ToDbOhms(ohms)
+                - ImpedanceMath.ToDbOhms(SimulatedImpedanceFixture.ResistiveOhms);
+
+            Assert.True(
+                Math.Abs(errorDb) < 0.01,
+                $"{trace.FreqHz[i]:0.##} Hz read {ohms:0.0000} ohms ({errorDb:+0.0000;-0.0000} dB)");
+            Assert.Equal(0.0, trace.PhaseDeg[i], 2);
+        }
+    }
+
+    /// <summary>
+    /// Nothing is decimated and nothing is smoothed, so the min and max of a "column" are the same
+    /// number — every sample here <i>is</i> a measurement. The chart draws the max as the line and
+    /// the min as a band beneath it, and a min that had drifted away from the max would draw a band
+    /// around a curve that has no spread.
+    /// </summary>
+    [Fact]
+    public async Task SteppedSine_ProducesOnePointPerTone_WithNoBandBetweenMinAndMax()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        var started = await harness.Runner.StartAsync(SteppedRequest(), CancellationToken.None);
+
+        Assert.Equal(ImpedanceStimulus.SteppedSine, started.Stimulus);
+        Assert.NotNull(started.PointCount);
+        Assert.NotNull(started.FrequenciesHz);
+        Assert.Equal(started.PointCount, started.FrequenciesHz!.Count);
+        Assert.True(started.EstimatedSeconds > 0.0);
+
+        var status = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 120);
+        AssertFinished(status);
+
+        var trace = Assert.Single(status.Traces);
+        Assert.Equal(trace.MagnitudeMinDbOhms, trace.MagnitudeMaxDbOhms);
+        Assert.Equal(started.FrequenciesHz.Count, trace.FreqHz.Length);
+        Assert.Equal(started.PointCount, status.PointsMeasured);
+    }
+
+    /// <summary>
+    /// Every point against the closed form of a series R and L. Magnitude alone would pass with the
+    /// two channels taken from different records; the phase is what does not.
+    ///
+    /// <para><b>The closed form is the digital one, and that is the whole reason this asserts to
+    /// 0.02 dB rather than to a decimal place.</b> The fixture is a bilinear-transformed biquad, so
+    /// its reactance follows <c>(2/T)tan(pi f / fs)</c> rather than <c>2 pi f</c> — the two agree at
+    /// the bottom of the band and part company as the tone climbs toward Nyquist. Measured here, the
+    /// gap is 0.001 dB at 100 Hz and <b>0.047 dB at 2.13 kHz</b>, which is larger than anything the
+    /// measurement itself contributes and would read as a rising magnitude error. It is not one: the
+    /// analog formula is simply not what this DUT is. The chirp's own test never met it because it
+    /// asserts at 100 Hz and 955 Hz only.</para>
+    /// </summary>
+    [Fact]
+    public async Task SteppedSine_AgainstTheReactiveFixture_FollowsTheAnalyticImpedance()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceReactive);
+        await harness.Runner.StartAsync(SteppedRequest(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 120);
+
+        AssertFinished(status);
+        var trace = Assert.Single(status.Traces);
+
+        for (int i = 0; i < trace.FreqHz.Length; i++)
+        {
+            // The bilinear transform maps analog frequency onto the tangent of the digital one, so
+            // this is the analog network's reactance evaluated where the digital filter actually
+            // sits.
+            double warpedRadians = 2.0 * status.SampleRateHz
+                * Math.Tan(Math.PI * trace.FreqHz[i] / status.SampleRateHz);
+            double reactance = warpedRadians * SimulatedImpedanceFixture.ReactiveHenry;
+
+            double expectedOhms = Math.Sqrt((SimulatedImpedanceFixture.ReactiveOhms * SimulatedImpedanceFixture.ReactiveOhms)
+                + (reactance * reactance));
+            double expectedDeg = Math.Atan2(reactance, SimulatedImpedanceFixture.ReactiveOhms) * 180.0 / Math.PI;
+
+            double ohms = ImpedanceMath.FromDbOhms(trace.MagnitudeMaxDbOhms[i]);
+
+            Assert.True(
+                Math.Abs(ImpedanceMath.ToDbOhms(ohms) - ImpedanceMath.ToDbOhms(expectedOhms)) < 0.02,
+                $"{trace.FreqHz[i]:0.##} Hz read {ohms:0.000} ohms, expected {expectedOhms:0.000}");
+            Assert.True(
+                Math.Abs(trace.PhaseDeg[i] - expectedDeg) < 0.5,
+                $"{trace.FreqHz[i]:0.##} Hz read {trace.PhaseDeg[i]:0.00} degrees, expected {expectedDeg:0.00}");
+        }
+    }
+
+    /// <summary>
+    /// Coherence is measured here rather than written as 1.0, which is the one place the stepped path
+    /// is better informed than the chirp's. On a noiseless simulator it has to come back at 1 —
+    /// anything less would mean the runner is comparing records that are not the same measurement.
+    /// </summary>
+    [Fact]
+    public async Task SteppedSine_WithAveraging_ReportsMeasuredCoherence()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(SteppedRequest(averages: 3), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 180);
+
+        AssertFinished(status);
+        var trace = Assert.Single(status.Traces);
+
+        foreach (float coherence in trace.Coherence)
+            Assert.InRange(coherence, 0.999f, 1.0f);
+    }
+
+    /// <summary>
+    /// A stepped calibration stores the points it measured, and stores them uncorrected: an open
+    /// standard normalised against a previous open would report the difference between two
+    /// calibrations as an impedance.
+    /// </summary>
+    [Fact]
+    public async Task SteppedSine_CapturingAnOpenStandard_StoresItsOwnPoints()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            SteppedRequest(calTarget: ImpedanceCalTarget.Open), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 120);
+
+        AssertFinished(status);
+        Assert.Equal(ImpedanceTraceKind.OpenCal, Assert.Single(status.Traces).Kind);
+
+        var calibration = Assert.IsType<ImpedanceCalibration>(status.CapturedCalibration);
+        Assert.True(calibration.IsUsable);
+        Assert.Equal(status.PointCount, calibration.FreqHz.Length);
+
+        // A calibration run measures a standard rather than an impedance, so it has no median to
+        // report -- and it must say so with null, never NaN, which truncates the whole HTTP response.
+        Assert.Null(status.MedianOhms);
+        Assert.Null(status.DriveCurrentAmps);
+    }
+
+    /// <summary>
+    /// The pairing the separate calibration selector exists for: a standard captured by the fast
+    /// chirp corrects a measurement taken one tone at a time.
+    ///
+    /// <para>It works because a standard is a curve in <i>frequency</i> —
+    /// <see cref="ImpedanceCalibration.At"/> interpolates in log f — and because a fixture standard
+    /// is a property of a linear, passive network, which does not depend on how it was excited.</para>
+    ///
+    /// <para><b>The short standard rather than the open, and the reactive fixture rather than the
+    /// resistive one</b>, because those two choices are what make the test discriminating. The
+    /// simulator cannot present an open circuit — its fixture models are always some load — so a
+    /// captured "open" would be a divider reading, and dividing a later measurement by it drives
+    /// <c>H</c> to 1, where <c>Z = R·H/(1−H)</c> runs to megohms and any error is amplified beyond
+    /// meaning (measured: 15.5 Mohm). A short standard is subtracted rather than divided by, so the
+    /// arithmetic stays well conditioned and the right answer is <b>zero</b>. And it has to be a
+    /// <i>frequency-dependent</i> standard: subtracting a flat 8 ohms would cancel even if the curve
+    /// had been resampled at entirely the wrong frequencies, which is exactly the failure this is
+    /// here to catch.</para>
+    /// </summary>
+    [Fact]
+    public async Task AChirpCapturedShortStandard_CorrectsASteppedMeasurementAtItsOwnFrequencies()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceReactive);
+
+        // The chirp calibration, run through the same runner with only the calibration selector
+        // pointing at it -- exactly what the panel's Measure short button sends.
+        await harness.Runner.StartAsync(
+            SteppedRequest(calTarget: ImpedanceCalTarget.Short, calibrationStimulus: ImpedanceStimulus.Chirp),
+            CancellationToken.None);
+        var calStatus = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 120);
+
+        AssertFinished(calStatus);
+        Assert.Equal(ImpedanceStimulus.Chirp, calStatus.Stimulus);
+        Assert.Null(calStatus.PointCount);
+        Assert.Equal(ImpedanceTraceKind.ShortCal, Assert.Single(calStatus.Traces).Kind);
+        var shortCal = Assert.IsType<ImpedanceCalibration>(calStatus.CapturedCalibration);
+
+        var request = SteppedRequest(calibrationStimulus: ImpedanceStimulus.Chirp) with
+        {
+            CableMode = ImpedanceCableMode.Measured,
+            ShortCal = shortCal,
+        };
+
+        await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 120);
+
+        AssertFinished(status);
+        Assert.Equal(ImpedanceStimulus.SteppedSine, status.Stimulus);
+
+        var trace = Assert.Single(status.Traces);
+        for (int i = 0; i < trace.FreqHz.Length; i++)
+        {
+            double ohms = ImpedanceMath.FromDbOhms(trace.MagnitudeMaxDbOhms[i]);
+
+            // The fixture measured through itself is nothing at all. The residual is the estimator's
+            // own regularisation bias plus the interpolation of a 256-point stored curve onto these
+            // seven frequencies -- both small, and neither growing with frequency, which is what a
+            // misaligned resample would do.
+            Assert.True(
+                ohms < 0.1,
+                $"{trace.FreqHz[i]:0.##} Hz read {ohms:0.0000} ohms after subtracting its own standard");
+        }
+    }
+
+    /// <summary>
+    /// And the same run without the standard, so the assertion above is known to bite. A test whose
+    /// "corrected to nothing" would also pass uncorrected proves nothing.
+    /// </summary>
+    [Fact]
+    public async Task WithoutTheShortStandard_TheSameSteppedRunReadsTheFixture()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceReactive);
+        await harness.Runner.StartAsync(SteppedRequest(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner, timeoutSeconds: 120);
+
+        AssertFinished(status);
+        var trace = Assert.Single(status.Traces);
+
+        foreach (float dbOhms in trace.MagnitudeMaxDbOhms)
+            Assert.True(ImpedanceMath.FromDbOhms(dbOhms) > SimulatedImpedanceFixture.ReactiveOhms - 0.1);
+    }
+
+    /// <summary>
+    /// A stepped run reports points; a chirp run reports none. The browser tells the two progress
+    /// lines apart by the field's presence rather than by the phase, so a chirp that quietly reported
+    /// zero points would read as a sweep that had not started.
+    /// </summary>
+    [Fact]
+    public async Task AChirpRun_ReportsNoPointCountAtAll()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        var started = await harness.Runner.StartAsync(Request(), CancellationToken.None);
+
+        Assert.Null(started.PointCount);
+        Assert.Null(started.FrequenciesHz);
+        Assert.Null(started.EstimatedSeconds);
+
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        Assert.Null(status.PointCount);
+        Assert.Null(status.PointsMeasured);
+        Assert.Equal(ImpedanceStimulus.Chirp, status.Stimulus);
+    }
+
     [Theory]
     [InlineData(ImpedanceMethod.TwoLoad, ImpedanceStimulus.Chirp)]
-    [InlineData(ImpedanceMethod.ReferenceResistor, ImpedanceStimulus.SteppedSine)]
     [InlineData(ImpedanceMethod.ReferenceResistor, ImpedanceStimulus.PinkNoise)]
     public void Validate_RejectsWhatIsNotImplementedYet(ImpedanceMethod method, ImpedanceStimulus stimulus) =>
         Assert.Throws<ArgumentOutOfRangeException>(
             () => (Request() with { Method = method, Stimulus = stimulus }).Validate());
+
+    /// <summary>Pink noise is unavailable from either selector, not just the measurement's.</summary>
+    [Fact]
+    public void Validate_RejectsPinkNoiseAsACalibrationStimulusToo() =>
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => (Request() with { CalibrationStimulus = ImpedanceStimulus.PinkNoise }).Validate());
 
     [Fact]
     public void Validate_RejectsARepeatingCalibration() =>

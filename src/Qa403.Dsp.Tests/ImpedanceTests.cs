@@ -298,6 +298,82 @@ public class ImpedanceTests
     }
 
     /// <summary>Builds the measured ratio for a branch and solves it back, which is the round trip every test here makes.</summary>
+    /// <summary>
+    /// A stepped run's curve is not on a uniform bin grid, so the solver is handed the frequency of
+    /// every point instead. Fed the uniform grid it already assumes, the two paths must be the same
+    /// arithmetic -- which is what makes the new field an <i>axis</i> rather than a second mode.
+    /// </summary>
+    [Fact]
+    public void Solve_WithAnExplicitFrequencyAxis_MatchesTheUniformBinPath()
+    {
+        var h = Curve(f => DividerH(new Complex(6.0, 2.0 * Math.PI * f * 1.0e-3), ReferenceOhms, null, Complex.One));
+
+        var uniform = new ImpedanceSolveOptions
+        {
+            ReferenceOhms = ReferenceOhms,
+            BinHz = BinHz,
+            CableOhms = 0.12,
+            CableHenry = 0.6e-6,
+        };
+
+        var frequencies = new double[h.Length];
+        for (int k = 0; k < frequencies.Length; k++)
+            frequencies[k] = k * BinHz;
+
+        var explicitAxis = uniform with { FrequenciesHz = frequencies };
+
+        var a = ImpedanceMath.Solve(h, uniform);
+        var b = ImpedanceMath.Solve(h, explicitAxis);
+
+        foreach (int bin in Bins)
+        {
+            Assert.Equal(a[bin].Real, b[bin].Real, 12);
+            Assert.Equal(a[bin].Imaginary, b[bin].Imaginary, 12);
+        }
+    }
+
+    /// <summary>
+    /// And the axis is actually read: the fixed cable inductance is the one term that depends on
+    /// frequency, so a solver still counting bins would put the wrong reactance on every point.
+    /// </summary>
+    [Fact]
+    public void Solve_SubtractsTheCableInductanceAtTheStatedFrequencies()
+    {
+        // A pure 8 ohm load at three arbitrary log-spaced frequencies, as a stepped run would produce.
+        double[] frequencies = [37.0, 1017.0, 12_345.0];
+        var h = new Complex[frequencies.Length];
+        for (int i = 0; i < h.Length; i++)
+            h[i] = DividerH(new Complex(8.0, 0.0), ReferenceOhms, null, Complex.One);
+
+        const double CableHenry = 1.0e-6;
+        var z = ImpedanceMath.Solve(h, new ImpedanceSolveOptions
+        {
+            ReferenceOhms = ReferenceOhms,
+            BinHz = BinHz,
+            FrequenciesHz = frequencies,
+            CableHenry = CableHenry,
+        });
+
+        for (int i = 0; i < frequencies.Length; i++)
+        {
+            Assert.Equal(8.0, z[i].Real, 9);
+            Assert.Equal(-2.0 * Math.PI * frequencies[i] * CableHenry, z[i].Imaginary, 9);
+        }
+    }
+
+    [Fact]
+    public void Solve_WithAFrequencyAxisOfTheWrongLength_IsRejected()
+    {
+        var h = Curve(_ => DividerH(new Complex(8.0, 0.0), ReferenceOhms, null, Complex.One));
+
+        Assert.Throws<ArgumentException>(() => ImpedanceMath.Solve(h, new ImpedanceSolveOptions
+        {
+            ReferenceOhms = ReferenceOhms,
+            BinHz = BinHz,
+            FrequenciesHz = [1.0, 2.0, 3.0],
+        }));
+    }
+
     private static Complex[] Solve(Func<double, Complex> branch, ImpedanceSolveOptions options, Complex? mismatch = null)
     {
         var m = mismatch ?? Complex.One;

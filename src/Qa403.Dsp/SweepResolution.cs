@@ -129,22 +129,103 @@ public static class SweepResolution
         return (floor, ceiling);
     }
 
-    /// <summary>Smallest power of two greater than or equal to <paramref name="value"/>, floored at 1.</summary>
-    private static int PowerOfTwoAtLeast(double value)
+    /// <summary>Smallest power of two greater than or equal to <paramref name="value"/>, floored at 1 and capped at <paramref name="cap"/>.</summary>
+    private static int PowerOfTwoAtLeast(double value, int cap = MaxFftSize)
     {
         int n = 1;
-        while (n < value && n < MaxFftSize)
+        while (n < value && n < cap)
             n *= 2;
         return n;
     }
 
-    /// <summary>Largest power of two less than or equal to <paramref name="value"/>, floored at 1.</summary>
-    private static int PowerOfTwoAtMost(double value)
+    /// <summary>Largest power of two less than or equal to <paramref name="value"/>, floored at 1 and capped at <paramref name="cap"/>.</summary>
+    private static int PowerOfTwoAtMost(double value, int cap = MaxFftSize)
     {
         int n = 1;
-        while (n * 2 <= value && n < MaxFftSize)
+        while (n * 2 <= value && n < cap)
             n *= 2;
         return n;
+    }
+
+    /// <summary>
+    /// Longest record the <i>raised</i> ceiling will ask for, for a measurement whose whole point is
+    /// the bottom of the band.
+    ///
+    /// <para><see cref="MaxRecordSeconds"/> bounds every sweep FFT to 0.6827 s, which is 1.465 Hz
+    /// bins at <em>every</em> supported rate and so a 4.4 Hz floor at three bins. That ceiling exists
+    /// so adaptive resolution can never make a THD sweep slower than fixed mode -- a trade that makes
+    /// sense across fifty points whose bottom end is 20 Hz, and no sense at all for a measurement
+    /// that exists to look below it. The chirp reaches 0.5 Hz; this is what lets a tone-at-a-time run
+    /// follow it, to 1.1 Hz.</para>
+    ///
+    /// <para>Expressed as a <b>record time</b> for exactly the reason <see cref="MaxRecordSeconds"/>
+    /// is: a time bound means the same thing at every sample rate, so the floor it produces is 1.1 Hz
+    /// at 48, 96 and 192 kHz alike. A sample-count bound would not -- 524288 points is 2.73 s at
+    /// 192 kHz but 10.9 s at 48 kHz, which would make the lower rates ruinously slow for no extra
+    /// resolution. 2.73 s is also the chirp's own longest record, so it is a length this pipeline is
+    /// already known to run.</para>
+    /// </summary>
+    public const double ExtendedMaxRecordSeconds = 524288.0 / 192000.0;
+
+    /// <summary>Absolute cap on the raised ceiling, so a future lower sample rate cannot ask for an unbounded size.</summary>
+    public const int ExtendedMaxFftSize = 524288;
+
+    /// <summary>
+    /// The raised FFT ceiling at a given sample rate: the longest power-of-two record inside
+    /// <see cref="ExtendedMaxRecordSeconds"/>, never below the standard one.
+    ///
+    /// <para>Shared by every measurement that reaches below <see cref="LowestToneHz"/> -- the
+    /// stepped-sine response and the stepped-sine impedance run. Three copies of this arithmetic
+    /// would be one too many, and a drift between them would show up as two measurements disagreeing
+    /// about which frequencies they can read at all.</para>
+    /// </summary>
+    public static int ExtendedCeilingFor(double sampleRateHz)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sampleRateHz);
+
+        int standard = BoundsFor(sampleRateHz).Ceiling;
+        int extended = Math.Min(
+            PowerOfTwoAtMost(ExtendedMaxRecordSeconds * sampleRateHz, ExtendedMaxFftSize),
+            ExtendedMaxFftSize);
+
+        return Math.Max(standard, extended);
+    }
+
+    /// <summary>
+    /// The lowest tone a record of <paramref name="fftSize"/> can read a level at, given a
+    /// measurement's own minimum-bins rule.
+    /// </summary>
+    public static double LowestToneHz(double sampleRateHz, int fftSize, int minBins)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sampleRateHz);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fftSize);
+
+        return minBins * sampleRateHz / fftSize;
+    }
+
+    /// <summary>
+    /// The adaptive size for one point against an explicit ceiling.
+    ///
+    /// <para>Deliberately not <see cref="FftSizeFor"/>, which clamps to the sweeps' own record-time
+    /// ceiling -- that is the thing <see cref="ExtendedCeilingFor"/> exists to lift. Everything else
+    /// about the ladder, the <see cref="TargetFundamentalBins"/> target and the bin-width floor, is
+    /// the sweeps' own and is shared on purpose.</para>
+    /// </summary>
+    public static int FftSizeAt(double freqHz, double sampleRateHz, int ceiling)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sampleRateHz);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ceiling);
+
+        (int floor, int standardCeiling) = BoundsFor(sampleRateHz);
+        int top = Math.Max(standardCeiling, ceiling);
+
+        // A non-positive frequency has no bin to sit on; the longest record is the safest answer
+        // rather than an exception, since the caller's grid is filtered elsewhere.
+        if (!(freqHz > 0.0))
+            return top;
+
+        int wanted = PowerOfTwoAtLeast(TargetFundamentalBins * sampleRateHz / freqHz, top);
+        return Math.Clamp(wanted, floor, top);
     }
 
     /// <summary>

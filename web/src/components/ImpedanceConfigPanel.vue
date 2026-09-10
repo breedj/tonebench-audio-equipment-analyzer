@@ -9,8 +9,17 @@ import {
   type ImpedanceCalTargetName,
   type ImpedanceParameters,
   type ImpedanceStartRequest,
+  type ImpedanceStimulusName,
   type SweepLevelUnit,
 } from '../api/client'
+import {
+  adaptiveFftBounds,
+  adaptiveFftSize,
+  adaptiveSampleRateHz,
+  estimateAdaptiveDurationSeconds,
+  formatDuration,
+  logPerOctave,
+} from '../sweep/points'
 import { useProjects } from '../composables/useProjects'
 import { useImpedance } from '../composables/useImpedance'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
@@ -24,7 +33,7 @@ defineProps<{ running: boolean }>()
 const emit = defineEmits<{ (e: 'calibrate', target: ImpedanceCalTargetName): void }>()
 
 const { types, currentTypeId, markDirty } = useProjects()
-const { capturedCalibration, calTarget, storedOpenCal, storedShortCal } = useImpedance()
+const { capturedCalibration, calTarget, storedOpenCal, storedShortCal, selectedStimulus } = useImpedance()
 const {
   fixture,
   hasCalibration: fixtureHasCalibration,
@@ -41,6 +50,31 @@ const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
   { value: 'Dbv', label: 'dBV' },
 ]
 
+const STIMULI: { value: ImpedanceStimulusName; label: string }[] = [
+  { value: 'Chirp', label: 'Chirp sweep' },
+  { value: 'SteppedSine', label: 'Stepped sine' },
+]
+
+/**
+ * Mirrors ImpedanceRequest.MinFundamentalBins — deliberately below the THD sweep's 5. That figure
+ * exists so a harmonic can be separated from its own fundamental; nothing here reads a harmonic, so
+ * the only requirement is that the tone's mainlobe clears DC.
+ */
+const MIN_FUNDAMENTAL_BINS = 3
+
+/** One harmonic, not five: only the tone itself is read, which drops a 20 kHz run from 192 kHz to 48 kHz. */
+const HARMONIC_ORDER = 1
+
+/** The raised ceiling a run reaching below the sweeps' own 4.4 Hz floor may ask for — SweepResolution.ExtendedMaxRecordSeconds. */
+const EXTENDED_MAX_RECORD_SECONDS = 524288 / 192000
+const EXTENDED_MAX_FFT_SIZE = 524288
+
+function powerOfTwoAtMost(value: number): number {
+  let n = 1
+  while (n * 2 <= value && n < EXTENDED_MAX_FFT_SIZE) n *= 2
+  return n
+}
+
 const CABLE_MODES: { value: ImpedanceCableModeName; label: string }[] = [
   { value: 'None', label: 'Nothing' },
   { value: 'Measured', label: 'Measured short' },
@@ -55,6 +89,21 @@ const CABLE_MODES: { value: ImpedanceCableModeName; label: string }[] = [
  * signal-to-noise for nothing. Smoothing is light so a high-Q resonance peak is not blunted.
  */
 const form = reactive({
+  /**
+   * What the DUT is measured with, and — separately — what the open/short captures play.
+   *
+   * <p>Two controls rather than one because a standard is a curve in <i>frequency</i>: it is
+   * interpolated in log f, and a fixture is linear and passive, so what it presents does not depend
+   * on how it was excited. A chirp therefore calibrates in seconds a fixture whose DUT is then
+   * measured one tone at a time, which is the usual pairing. The literal-minded combination is still
+   * available; it just is not forced.</p>
+   */
+  stimulus: 'Chirp' as ImpedanceStimulusName,
+  calibrationStimulus: 'Chirp' as ImpedanceStimulusName,
+  startFreqHz: 20,
+  endFreqHz: 20000,
+  stepsPerOctave: 5,
+  adaptiveResolution: true,
   referenceOhms: 100,
   rightChannelIsReference: false,
   frequencySpanHz: 24000 as number,
@@ -119,6 +168,17 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.smoothingDenominator === 'number') form.smoothingDenominator = stored.smoothingDenominator
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (typeof stored.chirpStartHz === 'number') form.chirpStartHz = stored.chirpStartHz
+  // Pink noise is not implemented, so it is never restored into a control that cannot run it.
+  if (stored.stimulus === 'Chirp' || stored.stimulus === 'SteppedSine') form.stimulus = stored.stimulus
+  if (stored.calibrationStimulus === 'Chirp' || stored.calibrationStimulus === 'SteppedSine') {
+    form.calibrationStimulus = stored.calibrationStimulus
+  }
+  if (typeof stored.startFreqHz === 'number' && stored.startFreqHz > 0) form.startFreqHz = stored.startFreqHz
+  if (typeof stored.endFreqHz === 'number' && stored.endFreqHz > 0) form.endFreqHz = stored.endFreqHz
+  if (typeof stored.stepsPerOctave === 'number' && stored.stepsPerOctave > 0) {
+    form.stepsPerOctave = stored.stepsPerOctave
+  }
+  if (typeof stored.adaptiveResolution === 'boolean') form.adaptiveResolution = stored.adaptiveResolution
   if (stored.cableMode) form.cableMode = stored.cableMode
   if (typeof stored.fixedCableOhms === 'number') form.fixedCableOhms = stored.fixedCableOhms
   if (typeof stored.fixedCableMillihenry === 'number') form.fixedCableMillihenry = stored.fixedCableMillihenry
@@ -211,6 +271,95 @@ const fixtureBandWarning = computed(() => {
   return `This calibration was captured to ${formatHz(top)}; above that it is held flat rather than measured. Recapture it at this span, or lower the span.`
 })
 
+/**
+ * Which settings groups are live. Both are always sent — the panel does not know which button will
+ * be pressed next — so each is shown, and validated, only when some run would actually read it.
+ */
+const usesChirp = computed(() => form.stimulus === 'Chirp' || form.calibrationStimulus === 'Chirp')
+const usesStepped = computed(
+  () => form.stimulus === 'SteppedSine' || form.calibrationStimulus === 'SteppedSine',
+)
+
+/** A stepped measurement is single-shot; App.vue reads this to hide the continuous-run button. */
+watch(
+  () => form.stimulus,
+  (value) => {
+    selectedStimulus.value = value
+  },
+  { immediate: true },
+)
+
+// ---- the stepped grid, mirroring ImpedanceRequest's derived members ----
+
+const steppedSampleRateHz = computed(() =>
+  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz, HARMONIC_ORDER) : 192000,
+)
+
+/** The pre-snap log grid, shared by the point count and the duration estimate. */
+const steppedGridHz = computed(() =>
+  logPerOctave(form.startFreqHz, form.endFreqHz, form.stepsPerOctave).filter(
+    (hz) => hz > 0 && hz <= 0.98 * (steppedSampleRateHz.value / 2),
+  ),
+)
+
+const steppedPointCount = computed(() => steppedGridHz.value.length)
+
+const steppedStandardCeiling = computed(() => adaptiveFftBounds(steppedSampleRateHz.value).ceiling)
+
+const steppedStandardLowestHz = computed(
+  () => (MIN_FUNDAMENTAL_BINS * steppedSampleRateHz.value) / steppedStandardCeiling.value,
+)
+
+/** Raised automatically, and only, when the start asks to go below what the standard ceiling can measure. */
+const steppedFftCeiling = computed(() =>
+  form.startFreqHz < steppedStandardLowestHz.value
+    ? Math.max(
+        steppedStandardCeiling.value,
+        Math.min(powerOfTwoAtMost(EXTENDED_MAX_RECORD_SECONDS * steppedSampleRateHz.value), EXTENDED_MAX_FFT_SIZE),
+      )
+    : steppedStandardCeiling.value,
+)
+
+const steppedMinFreqHz = computed(
+  () => (MIN_FUNDAMENTAL_BINS * steppedSampleRateHz.value) / steppedFftCeiling.value,
+)
+
+const steppedMaxFreqHz = computed(() => Math.round(0.98 * (steppedSampleRateHz.value / 2)))
+
+const steppedFftRange = computed(() => {
+  if (steppedGridHz.value.length === 0) return null
+  const sizes = steppedGridHz.value.map((hz) =>
+    adaptiveFftSize(hz, steppedSampleRateHz.value, steppedFftCeiling.value),
+  )
+  return { max: Math.max(...sizes), min: Math.min(...sizes) }
+})
+
+/**
+ * One throwaway record after each stimulus change, then one whole record per average.
+ *
+ * <p>A hop fraction of 1 rather than the sweeps' 0.5, and that is not a copying slip: every average
+ * here sits behind its own `Flush(0)`, so the records are independent — which is the only thing that
+ * makes the measured coherence mean anything. See ImpedanceRunner.CaptureStepAsync.</p>
+ */
+const steppedDurationLabel = computed(() =>
+  formatDuration(
+    estimateAdaptiveDurationSeconds(
+      steppedGridHz.value,
+      steppedSampleRateHz.value,
+      form.averageCount,
+      1.0,
+      0.1,
+      { maxFftSize: steppedFftCeiling.value, recordsBeforeAverages: 1 },
+    ),
+  ),
+)
+
+const steppedNyquistWarning = computed(() =>
+  form.endFreqHz > steppedMaxFreqHz.value
+    ? `Points above ${formatHz(steppedMaxFreqHz.value)} are dropped at ${steppedSampleRateHz.value / 1000} kHz.`
+    : null,
+)
+
 const sampleRateHz = computed(() => form.frequencySpanHz * 2)
 
 /** Mirrors `ImpedanceRequest.FftSize`. */
@@ -254,10 +403,24 @@ const invalid = computed<string | null>(() => {
   if (form.levelUnit !== 'Dbv' && form.calibrationLevelValue <= 0)
     return 'A calibration voltage must be positive.'
   if (form.averageCount < 1 || form.averageCount > 10) return 'Averages must be between 1 and 10.'
-  if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
-    return 'Chirp start must be between 0.5 and 1000 Hz.'
-  if (form.chirpStartHz >= (form.frequencySpanHz * 0.98) / 10)
-    return 'Chirp start must be at least a decade below the span.'
+  if (usesChirp.value) {
+    if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
+      return 'Chirp start must be between 0.5 and 1000 Hz.'
+    if (form.chirpStartHz >= (form.frequencySpanHz * 0.98) / 10)
+      return 'Chirp start must be at least a decade below the span.'
+  }
+  if (usesStepped.value) {
+    if (!Number.isFinite(form.startFreqHz) || form.startFreqHz <= 0)
+      return 'The sweep must start above 0 Hz.'
+    if (!Number.isFinite(form.endFreqHz) || form.endFreqHz <= form.startFreqHz)
+      return 'The sweep must end above where it starts.'
+    if (form.stepsPerOctave < 1 || form.stepsPerOctave > 48)
+      return 'Steps per octave must be between 1 and 48.'
+    if (form.startFreqHz < steppedMinFreqHz.value)
+      return `A stepped sweep cannot read a level below ${steppedMinFreqHz.value.toFixed(2)} Hz.`
+    if (steppedPointCount.value < 2)
+      return `This grid produces ${steppedPointCount.value} point(s) below ${formatHz(steppedMaxFreqHz.value)}; a sweep needs two.`
+  }
   if (form.cableMode === 'Measured' && !effectiveShortCal.value)
     return 'Subtracting a measured short needs one captured first.'
   if (form.useGlobalFixture && !fixtureHasCalibration.value)
@@ -279,7 +442,12 @@ const invalid = computed<string | null>(() => {
 function buildParamsJson(): string {
   const parameters: ImpedanceParameters = {
     method: 'ReferenceResistor',
-    stimulus: 'Chirp',
+    stimulus: form.stimulus,
+    calibrationStimulus: form.calibrationStimulus,
+    startFreqHz: form.startFreqHz,
+    endFreqHz: form.endFreqHz,
+    stepsPerOctave: form.stepsPerOctave,
+    adaptiveResolution: form.adaptiveResolution,
     referenceOhms: form.referenceOhms,
     rightChannelIsReference: form.rightChannelIsReference,
     frequencySpanHz: form.frequencySpanHz,
@@ -316,7 +484,12 @@ function buildRequest(continuous: boolean, calTarget: ImpedanceCalTargetName = '
 
   return {
     method: 'ReferenceResistor',
-    stimulus: 'Chirp',
+    stimulus: form.stimulus,
+    calibrationStimulus: form.calibrationStimulus,
+    startFreqHz: form.startFreqHz,
+    endFreqHz: form.endFreqHz,
+    stepsPerOctave: form.stepsPerOctave,
+    adaptiveResolution: form.adaptiveResolution,
     // Resolved here rather than on the server: the fixture is a browser-side convenience, and the
     // request that reaches the runner names exactly what it measured with, so a saved result records
     // the real numbers rather than a reference to settings that may since have changed.
@@ -328,7 +501,9 @@ function buildRequest(continuous: boolean, calTarget: ImpedanceCalTargetName = '
     levelUnit: form.levelUnit,
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
-    continuous: calibrating ? false : continuous,
+    // A stepped sweep is measured once: the server rejects a continuous one, and a run that is
+    // minutes long has nothing to gain from repeating.
+    continuous: calibrating || form.stimulus === 'SteppedSine' ? false : continuous,
     calibrationLevelValue: form.calibrationLevelValue,
     chirpStartHz: form.chirpStartHz,
     calTarget,
@@ -484,6 +659,21 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 
   <CollapsibleSection title="Calibration">
     <label
+      v-if="!usingFixture"
+      class="flex flex-col gap-1 text-xs"
+      title="What the two Measure buttons play. A standard is a curve in frequency and a fixture is linear, so a chirp-captured open or short corrects a stepped measurement unchanged — in seconds rather than minutes."
+    >
+      Calibration stimulus
+      <select
+        v-model="form.calibrationStimulus"
+        :disabled="running"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="option in STIMULI" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+    </label>
+
+    <label
       class="flex items-center gap-2 text-xs"
       :title="
         fixtureHasCalibration
@@ -491,7 +681,16 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
           : 'Nothing stored yet. Capture an open below, then press Store as global calibration.'
       "
     >
-      <input v-model="form.useGlobalFixture" type="checkbox" :disabled="running || !fixtureHasCalibration" />
+      <!--
+        Disabled only while a run is going. Deliberately NOT disabled when there is no global
+        calibration: a measurement type stored with this ticked, opened on a machine (or after a
+        config reset) where the fixture is empty, made `invalid` permanently true — "There is no
+        global fixture calibration stored yet" — while the one control that could clear it was
+        greyed out. RUN, SINGLE and both Measure buttons were dead with no way back. Ticking it on
+        with nothing stored is harmless: it is caught by `invalid` with that same message, which is
+        now advice rather than a trap.
+      -->
+      <input v-model="form.useGlobalFixture" type="checkbox" :disabled="running" />
       Use the global calibration
     </label>
 
@@ -657,6 +856,20 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
   </CollapsibleSection>
 
   <CollapsibleSection title="Measurement settings">
+    <label
+      class="flex flex-col gap-1 text-xs"
+      title="A chirp excites the whole band at once and takes seconds. A stepped sine plays one tone at a time: minutes, but it puts the whole drive on the frequency being read, which is what a high-impedance DUT and the bottom of the band need."
+    >
+      Stimulus
+      <select
+        v-model="form.stimulus"
+        :disabled="running"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="option in STIMULI" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+    </label>
+
     <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
       <label class="flex flex-col gap-1" title="The generator level. Lower is gentler on a driver; higher buys signal-to-noise.">
         Drive level
@@ -680,8 +893,10 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       </label>
     </div>
 
-    <label class="flex flex-col gap-1 text-xs">
-      Frequency span
+    <!-- Shown whenever *either* selector asks for a chirp, so a stepped measurement calibrated by
+         chirp can still say what that chirp does. -->
+    <label v-if="usesChirp" class="flex flex-col gap-1 text-xs">
+      <span>Frequency span<span v-if="form.stimulus !== 'Chirp'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
       <select
         v-model.number="form.frequencySpanHz"
         :disabled="running"
@@ -691,7 +906,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       </select>
     </label>
 
-    <label class="flex flex-col gap-1 text-xs">
+    <label v-if="usesChirp" class="flex flex-col gap-1 text-xs">
       Resolution
       <select
         v-model.number="form.resolutionMultiplier"
@@ -705,10 +920,11 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
     </label>
 
     <label
+      v-if="usesChirp"
       class="flex flex-col gap-1 text-xs"
-      title="Where the sweep starts. 10 Hz is below any driver resonance; going lower costs signal-to-noise for nothing unless you are measuring a transformer."
+      title="Where the chirp starts. 10 Hz is below any driver resonance; going lower costs signal-to-noise for nothing unless you are measuring a transformer."
     >
-      Sweep start (Hz)
+      Chirp start (Hz)
       <input
         v-model.number="form.chirpStartHz"
         type="number"
@@ -720,7 +936,20 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       />
     </label>
 
-    <label class="flex flex-col gap-1 text-xs" title="Light smoothing keeps a high-Q resonance peak its real height.">
+    <!--
+      Gated on the *measurement's* stimulus, not `usesChirp`, unlike the sweep controls above it.
+      Those genuinely configure a chirp calibration; smoothing does not. It is applied by
+      ImpedanceTraceBuilder.Build when a curve is drawn, and a calibration's stored standard comes
+      from ImpedanceCalibration.Capture, which samples the raw ratio -- so with a stepped measurement
+      and a chirp calibration this control could only restyle the open/short curve while it was on
+      screen, and never touch a measurement. A control that implies more than it does is worse than
+      no control.
+    -->
+    <label
+      v-if="form.stimulus === 'Chirp'"
+      class="flex flex-col gap-1 text-xs"
+      title="Light smoothing keeps a high-Q resonance peak its real height."
+    >
       Smoothing
       <select
         v-model.number="form.smoothingDenominator"
@@ -731,6 +960,50 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
           {{ option.label }}
         </option>
       </select>
+    </label>
+
+    <div v-if="usesStepped" class="grid grid-cols-2 gap-2 text-xs">
+      <label class="flex flex-col gap-1">
+        <span>Sweep from (Hz)<span v-if="form.stimulus !== 'SteppedSine'" class="text-neutral-500 dark:text-neutral-400"> (cal)</span></span>
+        <input
+          v-model.number="form.startFreqHz"
+          type="number"
+          step="any"
+          :disabled="running"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        />
+      </label>
+      <label class="flex flex-col gap-1">
+        To (Hz)
+        <input
+          v-model.number="form.endFreqHz"
+          type="number"
+          step="any"
+          :disabled="running"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        />
+      </label>
+    </div>
+
+    <label v-if="usesStepped" class="flex flex-col gap-1 text-xs" title="How densely the band is sampled. Every point is a separate capture, so this is what a run's length is made of.">
+      Steps per octave
+      <input
+        v-model.number="form.stepsPerOctave"
+        type="number"
+        min="1"
+        max="48"
+        :disabled="running"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      />
+    </label>
+
+    <label
+      v-if="usesStepped"
+      class="flex items-center gap-2 text-xs"
+      title="Sizes each point's record for its own frequency rather than for the bottom of the band, which is most of what makes the top of a sweep fast."
+    >
+      <input v-model="form.adaptiveResolution" type="checkbox" :disabled="running" />
+      Adaptive resolution
     </label>
 
     <label class="flex flex-col gap-1 text-xs">
@@ -745,9 +1018,19 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       />
     </label>
 
-    <p class="text-xs text-neutral-500 dark:text-neutral-400">
+    <p v-if="form.stimulus === 'Chirp'" class="text-xs text-neutral-500 dark:text-neutral-400">
       {{ binHz.toFixed(2) }} Hz per bin · {{ recordSeconds.toFixed(2) }} s per record · about
       {{ estimatedSeconds.toFixed(1) }} s per run
+    </p>
+    <p v-else class="text-xs text-neutral-500 dark:text-neutral-400">
+      ≈{{ steppedPointCount }} points · {{ steppedSampleRateHz / 1000 }} kHz ·
+      <span v-if="steppedFftRange">
+        {{ steppedFftRange.max }}–{{ steppedFftRange.min }} point records ·
+      </span>
+      about {{ steppedDurationLabel }}
+    </p>
+    <p v-if="form.stimulus === 'SteppedSine' && steppedNyquistWarning" class="text-xs text-amber-600 dark:text-amber-400">
+      {{ steppedNyquistWarning }}
     </p>
   </CollapsibleSection>
 

@@ -33,6 +33,67 @@ internal static class ImpedanceTraceBuilder
     }
 
     /// <summary>
+    /// One trace from a stepped-sine run, whose curve is a handful of measured points rather than a
+    /// spectrum.
+    ///
+    /// <para>Nothing is smoothed and nothing is decimated, so this shares almost none of
+    /// <see cref="Build"/>'s body: every sample here <i>is</i> a measurement, the grid is already
+    /// coarser than the narrowest fractional-octave smoothing on offer, and the min and max of a
+    /// "column" are therefore the same number. The chart draws the max as the line and the min as a
+    /// band beneath it, and here there is nothing between them to draw.</para>
+    ///
+    /// <para>Coherence is measured rather than assumed — see
+    /// <see cref="CrossSpectrumAccumulator.Coherence"/>. That is the one place this is <i>better</i>
+    /// informed than the chirp path rather than merely coarser: a shorted standard whose low end is
+    /// noise says so here, instead of drawing a confident line at a fabricated impedance.</para>
+    /// </summary>
+    public static ImpedanceTrace BuildPoints(
+        ImpedanceTraceKind kind,
+        double[] freqHz,
+        Complex[] values,
+        double[] coherence)
+    {
+        int n = freqHz.Length;
+
+        var traceDb = new double[n];
+        for (int i = 0; i < n; i++)
+            traceDb[i] = ImpedanceMath.ToDbOhms(values[i].Magnitude);
+
+        // The explicit-frequency-axis overload, added for the stepped-sine response: this grid is log
+        // spaced, so the uniform-binHz one would place the peak at the wrong frequency.
+        var peak = BandwidthAnalyzer.FindPeak(traceDb, freqHz);
+
+        var freq = new float[n];
+        var mag = new float[n];
+        var phaseDeg = new float[n];
+        var columnCoherence = new float[n];
+
+        for (int i = 0; i < n; i++)
+        {
+            freq[i] = (float)freqHz[i];
+            mag[i] = (float)traceDb[i];
+
+            // Not unwrapped, exactly as Build explains: a passive one-port's angle is bounded to
+            // +/-90 degrees, so there are no turns to accumulate, and a curve that runs past that is
+            // a broken fixture rather than a wrap -- which unwrapping would hide.
+            phaseDeg[i] = (float)(values[i].Phase * 180.0 / Math.PI);
+            columnCoherence[i] = (float)coherence[i];
+        }
+
+        return new ImpedanceTrace(
+            kind,
+            freqHz[0],
+            freqHz[^1],
+            freq,
+            mag,
+            (float[])mag.Clone(),
+            phaseDeg,
+            columnCoherence,
+            peak.LevelDb,
+            peak.FreqHz);
+    }
+
+    /// <summary>
     /// One trace from a complex curve.
     ///
     /// <para>The magnitude columns are <c>20 log10</c> of <paramref name="values"/>'s magnitude,

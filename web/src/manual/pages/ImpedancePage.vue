@@ -45,10 +45,55 @@ const { showPage } = useManual()
       range — and see <em>Analyzer input impedance</em> below.
     </p>
 
+    <h2>Stimulus</h2>
+    <p>
+      <strong>Chirp sweep</strong> plays one exponential sweep that excites the whole band at once,
+      and a measurement takes seconds. It is the right choice for almost everything.
+    </p>
+    <p>
+      <strong>Stepped sine</strong> plays one tone at a time and measures each on its own. It takes
+      minutes instead of seconds, and it buys one thing: level. A chirp spreads its energy over
+      thousands of frequency bins, so any single bin sits far below the sweep's own amplitude. A tone
+      puts the whole drive on the one frequency being read. That matters wherever the two channels
+      get close together and their difference gets small — a high-impedance DUT such as a valve grid
+      input, the bottom of the band, and a shorted fixture. It is also a second opinion: chirp and
+      stepped sine disagreeing on the same DUT is the tell that something in the calibration chain
+      is wrong.
+    </p>
+    <p>
+      A stepped sweep is measured <strong>once</strong>. The RUN button is replaced by a single
+      <strong>RUN SWEEP</strong>, because repeating a run that is minutes long until you press Stop
+      is not useful.
+    </p>
+    <p>
+      Its settings are a start and end frequency, how many points per octave, and
+      <em>adaptive resolution</em>, which sizes each point's record for its own frequency rather than
+      for the bottom of the band — that is most of what keeps the top of a sweep quick. The panel
+      shows the point count and an estimate of how long the run will take before you start it. Every
+      point is a measurement rather than a bin, so there is no smoothing to apply and the chart draws
+      the points as they are.
+    </p>
+    <p>
+      Coherence means something here that it does not on a stepped Bode plot: each point takes
+      <em>Averages</em> independent records and reports how much of the measured channel the stimulus
+      actually explains. With one average there is nothing to compare and it reads 1. With two or
+      more, a coherence that sags is the honest signal that a reading is noise — which is exactly
+      what a shorted fixture's bottom end looks like when the drive is too low.
+    </p>
+
     <h2>Calibration</h2>
     <p>
       Two standards, measured in this order, and both stored with the measurement so they survive a
       restart.
+    </p>
+    <p>
+      The <strong>calibration stimulus</strong> is chosen separately from the measurement's, and the
+      chirp is normally the right answer for it whichever way the DUT is measured. A standard is
+      stored as a curve in <em>frequency</em>, and a fixture is a linear passive network, so what it
+      presents does not depend on how it was excited — a chirp-captured open corrects a stepped-sine
+      measurement unchanged, and does it in seconds rather than minutes. Capture the standards over
+      at least the band you intend to measure: outside the band a standard was captured over, its
+      curve is held flat rather than measured.
     </p>
 
     <h3>Open</h3>
@@ -146,6 +191,79 @@ const { showPage } = useManual()
       making stays the one you read first, and the pattern is what tells them apart.
     </p>
 
+    <h2>Device under test</h2>
+    <p>
+      The readout's <strong>Device under test</strong> selector decides which component metrics it
+      offers. It defaults to <strong>None</strong>, which shows only what is true of any impedance —
+      peak, minimum, median. <strong>Minimum |Z|</strong> is worth a look on its own: it is the
+      worst-case load, where the DUT asks the most current of whatever is driving it, and a nominal
+      8 Ω driver routinely dips below 6.
+    </p>
+    <p>
+      It asks rather than guesses because nothing in the curve can answer it. A choke's
+      self-resonance and a driver's motional resonance are the same shape — a peak in |Z| with the
+      phase swinging through zero — and only you know which is on the terminals.
+    </p>
+
+    <h3>Loudspeaker</h3>
+    <p>
+      Reports <strong>fs</strong>, <strong>Zmax</strong>, <strong>Re</strong> (the minimum |Z| above
+      resonance, close to but not the same as a DC ohmmeter's answer), the skirt frequencies
+      <strong>f₁/f₂</strong> where |Z| falls to √(Re·Zmax), and <strong>Qms</strong>,
+      <strong>Qes</strong> and <strong>Qts</strong> from the width between them.
+    </p>
+    <p>
+      Vas, Bl and Mms are deliberately absent: they need a second run with a known added mass or a
+      sealed box, so no single sweep can give them. If the sweep does not reach far enough past
+      resonance to find a skirt, the Qs are shown as dashes rather than computed from a clamped
+      width — a Q from a truncated skirt is a lower bound dressed up as a measurement. And note
+      <em>smoothing blunts Zmax and widens the skirts</em>, so measure with none if these numbers
+      matter.
+    </p>
+
+    <h3>Capacitor</h3>
+    <p>
+      Reports <strong>C</strong>, fitted across every sample that is clearly capacitive and below
+      self-resonance — with the band it used, because a fitted value quoted without one is not a
+      measurement. Above self-resonance it also reports <strong>SRF</strong>, <strong>ESR</strong>
+      and <strong>ESL</strong>.
+    </p>
+    <p>
+      <strong>ESR is only honest at self-resonance</strong>, which is where it is taken from. Away
+      from it, ESR is |Z|·cos φ with φ within a hair of −90°: for a 100 nF film capacitor at 1 kHz,
+      |Z| is 1.6 kΩ and the ESR might be 20 mΩ, which is cos φ = 1.2 × 10⁻⁵. A tenth of a degree of
+      residual channel phase — about the best a two-channel fixture holds after an open calibration —
+      invents 2.8 Ω of ESR there, more than a hundred times the real value. The dissipation factor
+      <strong>D</strong> carries a warning marker whenever it falls below what the fixture can
+      resolve, and you should believe the warning.
+    </p>
+    <p>
+      What this does measure well: <strong>capacitance itself</strong>, which is the dominant term;
+      and ESR when it is <em>already large</em>, which is the useful case — deciding whether an old
+      electrolytic has gone high-ESR. Note also that the leads are the floor for small impedances: a
+      typical lead set is over 100 mΩ, so measuring a 50 mΩ ESR means the short calibration is doing
+      all the work.
+    </p>
+
+    <h3>Inductor</h3>
+    <p>
+      Reports <strong>L</strong> and its band, <strong>DCR</strong> (the real part where |Z| is
+      lowest), <strong>SRF</strong>, the impedance at self-resonance — a <em>peak</em> for an
+      inductor, where the winding's own capacitance parallels it — and <strong>Q</strong>. DCR is
+      marked with a warning when the sweep never gets down to where the resistance dominates, since
+      the real part of a large reactance is where any residual phase lands.
+    </p>
+    <p>
+      For an output transformer the two readings worth taking are the primary inductance with the
+      secondary open, and the leakage inductance with the secondary shorted — both are just L at a
+      chosen band, measured twice.
+    </p>
+    <p>
+      Whatever the part, pick a reference resistor near the impedance you expect. A reactive part's
+      |Z| sweeps over decades, so one resistor covers about one or two: measure a band around the
+      frequency you care about rather than the whole span at once.
+    </p>
+
     <h2>Fitting the axes</h2>
     <p>
       <strong>Autofit</strong> beside the impedance bounds sets the ohms window from everything the
@@ -157,7 +275,7 @@ const { showPage } = useManual()
       bounds does the same for the phase axis, from the measured curve.
     </p>
     <p>
-      <strong>Autofit when a measurement finishes</strong> runs both automatically at the end of a
+      <strong>Autofit each measurement</strong> runs both automatically at the end of a
       run rather than during it, since refitting mid-average makes the trace crawl.
     </p>
 
@@ -189,7 +307,14 @@ const { showPage } = useManual()
       <strong>Set the reference channel to Right for these.</strong> The simulator applies its DUT to
       the left channel only, so its divider output is on the left and the untouched generator is on
       the right — the mirror image of a bench fixture wired left-as-reference. That is a property of
-      the simulator, not a bug in the measurement.
+      the simulator, not a bug in the measurement, and it applies to both stimuli.
+    </p>
+    <p>
+      The 8 Ω resistor is the one number in this screen that can be checked against arithmetic rather
+      than against itself: a flat load has the same impedance at every frequency and no reactance at
+      all, so a correct run reads <strong>8.000 Ω at 0.00°</strong> from end to end — through the
+      stimulus, the two-channel ratio, the open calibration and the divider inversion. Either
+      stimulus should give it.
     </p>
 
     <h2>Advanced</h2>
@@ -220,8 +345,8 @@ const { showPage } = useManual()
       different method — measuring the same amplifier into two different load resistances and
       solving for the source impedance behind them — because you cannot drive a generator through a
       resistor into a live amplifier output. That method, and the damping factor it yields, are not
-      implemented yet. The stimulus selector likewise offers only the chirp for now; stepped sine and
-      pink noise are planned.
+      implemented yet. The stimulus selector offers the chirp and the stepped sine; pink noise is
+      planned.
     </p>
   </div>
 </template>

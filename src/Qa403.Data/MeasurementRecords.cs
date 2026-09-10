@@ -116,7 +116,13 @@ public sealed record ThdVsFrequencyParameters(
     double? ChartYTopDb = null,
     double? ChartYBottomDb = null,
     /// <summary>Off unless the user opts in -- see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. Null on a type saved before this existed, treated as false.</summary>
-    bool? ChartAutofitOnDone = null);
+    bool? ChartAutofitOnDone = null,
+    /// <summary>
+    /// Which component the readout interprets the curve as — None, Capacitor, Inductor or
+    /// Loudspeaker. A display choice, so it sits with the other <c>Chart*</c> fields and is null on
+    /// a type stored before it existed.
+    /// </summary>
+    string? ChartDutType = null);
 
 /// <summary>
 /// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a
@@ -429,9 +435,27 @@ public sealed record ImpedanceParameters(
     bool ApplySweepGate = false,
     ImpedanceCalibration? OpenCal = null,
     ImpedanceCalibration? ShortCal = null,
-    /// <summary>Whether this measurement adopts the globally configured fixture instead of its own standards.</summary>
+    /// <summary>
+    /// Whether this measurement adopts the globally configured fixture instead of its own standards.
+    /// A new type is created with this already true when a global calibration exists — see
+    /// <c>MeasurementSaveService.DefaultImpedanceParametersJson</c>.
+    /// </summary>
     bool UseGlobalFixture = false,
     double? GeneratorAmpDbv = null,
+    /// <summary>
+    /// What the open/short captures play, independently of <c>Stimulus</c>. Null on a type stored
+    /// before the second stimulus existed, where the chirp was the only thing either could be.
+    /// </summary>
+    string? CalibrationStimulus = null,
+    /// <summary>
+    /// The stepped-sine grid. All nullable, so a type stored before the stepped stimulus existed
+    /// opens on the app's defaults rather than failing to load — the same rule the <c>Chart*</c>
+    /// fields follow, and for the same reason.
+    /// </summary>
+    double? StartFreqHz = null,
+    double? EndFreqHz = null,
+    int? StepsPerOctave = null,
+    bool? AdaptiveResolution = null,
     string? ChartView = null,
     bool? ChartShowPhase = null,
     bool? ChartShowCoherence = null,

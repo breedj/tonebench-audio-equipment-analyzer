@@ -5,6 +5,7 @@ import {
   type ImpedanceCalTargetName,
   type ImpedanceStartRequest,
   type ImpedanceStatus,
+  type ImpedanceStimulusName,
   type ImpedanceTraceJson,
   type ImpedanceTraceKindName,
 } from '../api/client'
@@ -64,6 +65,28 @@ const error = ref<string | null>(null)
 const medianOhms = ref<number | null>(null)
 const driveCurrentAmps = ref<number | null>(null)
 
+/** What the run on screen played. The effective one, so a chirp calibration inside a stepped measurement says Chirp. */
+const stimulus = ref<ImpedanceStimulusName>('Chirp')
+
+/**
+ * Points finished and points in total, for a stepped run.
+ *
+ * <p>Null — not zero — on a chirp run, and the progress line branches on that rather than on the
+ * phase. A stepped <i>calibration</i> reports Calibrating and still counts points, so a
+ * phase-driven label would call it records.</p>
+ */
+const pointsMeasured = ref<number | null>(null)
+const pointCount = ref<number | null>(null)
+
+/**
+ * Which stimulus the config panel currently has selected, published here for App.vue.
+ *
+ * <p>Separate from {@link stimulus}, which describes the run that produced what is on screen. This
+ * one describes what the next RUN would do, and is what hides the continuous-run button: a stepped
+ * sweep is single-shot, and the server rejects a continuous one.</p>
+ */
+const selectedStimulus = ref<ImpedanceStimulusName>('Chirp')
+
 /**
  * The standard the most recent calibration run captured. The config panel watches this and writes it
  * into the measurement type's settings — the server keeps no calibration, so this is the only route
@@ -121,11 +144,32 @@ const traceKindNames: Record<ImpedanceTraceKind, ImpedanceTraceKindName> = {
 const progressLabel = computed(() => {
   if (phase.value === ResponsePhase.DeterminingRange) return 'Determining input range'
 
+  // A stepped run counts points, whatever phase it is in — a stepped calibration reports
+  // Calibrating and still walks a grid, so this cannot branch on the phase.
+  const points = pointCount.value
+  const stepped = points !== null && points > 0
+
   if (phase.value === ResponsePhase.Calibrating) {
+    const what = calTarget.value === 'Short' ? 'short' : 'open'
+    if (stepped) return `Capturing the ${what} standard · point ${(pointsMeasured.value ?? 0) + 1} of ${points}`
+
     const record =
       averageCount.value > 1 ? ` · record ${averagesTaken.value} of ${averageCount.value}` : ''
-    const what = calTarget.value === 'Short' ? 'short' : 'open'
     return `Capturing the ${what} standard${record}`
+  }
+
+  if (phase.value === ResponsePhase.Sweeping) {
+    const averages = averageCount.value > 1 ? ` · ${averageCount.value} averages` : ''
+    return `Point ${(pointsMeasured.value ?? 0) + 1} of ${points ?? '?'}${averages}`
+  }
+
+  if (phase.value === ResponsePhase.Finished && stepped) {
+    const measured = pointsMeasured.value ?? 0
+    return measured < (points ?? 0) ? `Stopped after ${measured} of ${points} points` : `Finished · ${points} points`
+  }
+
+  if (phase.value === ResponsePhase.Cancelled && stepped) {
+    return `Stopped after ${pointsMeasured.value ?? 0} of ${points} points`
   }
 
   if (phase.value === ResponsePhase.Measuring) {
@@ -195,6 +239,9 @@ function applyStatus(status: ImpedanceStatus) {
   capturedCalibration.value = status.capturedCalibration
   medianOhms.value = status.medianOhms
   driveCurrentAmps.value = status.driveCurrentAmps
+  stimulus.value = status.stimulus ?? 'Chirp'
+  pointsMeasured.value = status.pointsMeasured ?? null
+  pointCount.value = status.pointCount ?? null
   traces.value = status.traces.map(fromJson)
 }
 
@@ -223,6 +270,7 @@ function ingestProgress(frame: ImpedanceProgressFrame) {
   generatorAmpDbv.value = frame.generatorAmpDbv
   running.value =
     frame.phase === ResponsePhase.Measuring ||
+    frame.phase === ResponsePhase.Sweeping ||
     frame.phase === ResponsePhase.Calibrating ||
     frame.phase === ResponsePhase.DeterminingRange
 
@@ -241,6 +289,14 @@ function ingestProgress(frame: ImpedanceProgressFrame) {
   // The range probe reuses this frame with a pass count of its own, which is not a record count —
   // taking its total would rewrite the readout and leave it wrong for the rest of the run.
   if (frame.phase === ResponsePhase.DeterminingRange) return
+
+  // One frame, two meanings: points for a stepped run, records for a chirp. Which it is was settled
+  // by the start reply, so this reads the mode rather than trying to infer it from the numbers.
+  if (pointCount.value !== null) {
+    pointsMeasured.value = frame.taken
+    pointCount.value = frame.total
+    return
+  }
 
   averagesTaken.value = frame.taken
   averageCount.value = frame.total
@@ -269,6 +325,10 @@ export function useImpedance() {
     storedShortCal,
     medianOhms,
     driveCurrentAmps,
+    stimulus,
+    pointsMeasured,
+    pointCount,
+    selectedStimulus,
     progressLabel,
 
     ingestTrace,
@@ -291,6 +351,12 @@ export function useImpedance() {
       driveCurrentAmps.value = null
       running.value = true
       calTarget.value = req.calTarget
+      stimulus.value = req.calTarget === 'None' ? req.stimulus : req.calibrationStimulus
+
+      // Cleared rather than left over: the previous run's point count decides how the progress line
+      // reads, so a stale one would make a chirp run count points it does not have.
+      pointsMeasured.value = null
+      pointCount.value = null
       referenceOhms.value = req.referenceOhms
       rightChannelIsReference.value = req.rightChannelIsReference
       phase.value =
@@ -302,6 +368,14 @@ export function useImpedance() {
         fftSize.value = started.fftSize
         binHz.value = started.binHz
         averageCount.value = started.averageCount
+        stimulus.value = started.stimulus ?? stimulus.value
+        pointCount.value = started.pointCount ?? null
+        pointsMeasured.value = started.pointCount === null ? null : 0
+
+        // A stepped run reports Sweeping, not Measuring — set here so the progress line is right
+        // before the first frame arrives rather than a record later.
+        if (started.pointCount !== null && req.calTarget === 'None') phase.value = ResponsePhase.Sweeping
+
         return started
       } catch (e) {
         running.value = false

@@ -114,4 +114,66 @@ public class ImpedanceCalibrationTests
             values[k] = at(k * BinHz);
         return values;
     }
+
+    /// <summary>
+    /// A stepped run's points already are a sparse log-spaced grid, so they are stored as measured.
+    /// Pushing them through <see cref="ImpedanceCalibration.Capture"/>'s intermediate curve would
+    /// only interpolate an interpolation.
+    /// </summary>
+    [Fact]
+    public void FromPoints_StoresTheMeasuredPointsExactly()
+    {
+        double[] freqHz = [20.0, 200.0, 2000.0, 20000.0];
+        Complex[] h = [new(1.0, 0.0), new(0.99, 0.01), new(0.98, 0.03), new(0.95, 0.08)];
+
+        var calibration = ImpedanceCalibration.FromPoints(freqHz, h);
+
+        Assert.True(calibration.IsUsable);
+        Assert.Equal(freqHz, calibration.FreqHz);
+
+        for (int i = 0; i < freqHz.Length; i++)
+        {
+            Assert.Equal(h[i].Real, calibration.At(freqHz[i]).Real, 12);
+            Assert.Equal(h[i].Imaginary, calibration.At(freqHz[i]).Imaginary, 12);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ImpedanceCalibration.At"/> binary-searches an ascending array, so an unsorted grid
+    /// would interpolate silently wrong values rather than fail.
+    /// </summary>
+    [Theory]
+    [InlineData(new double[] { 200.0, 20.0 })]
+    [InlineData(new double[] { 20.0, 20.0 })]
+    [InlineData(new double[] { 0.0, 20.0 })]
+    public void FromPoints_RejectsAGridThatIsNotStrictlyAscending(double[] freqHz)
+    {
+        var h = new Complex[freqHz.Length];
+        Array.Fill(h, Complex.One);
+
+        Assert.Throws<ArgumentException>(() => ImpedanceCalibration.FromPoints(freqHz, h));
+    }
+
+    /// <summary>
+    /// The whole reason the calibration stimulus is a control of its own: a standard captured by a
+    /// chirp is a curve in frequency, so a stepped measurement asks it for its own points and gets
+    /// the same answers a chirp would have got at those frequencies.
+    /// </summary>
+    [Fact]
+    public void ResampleAt_AnArbitraryGrid_AgreesWithTheUniformResample()
+    {
+        var captured = ImpedanceCalibration.FromPoints(
+            [10.0, 100.0, 1000.0, 10000.0],
+            [new(1.0, 0.0), new(0.99, 0.01), new(0.97, 0.04), new(0.93, 0.10)]);
+
+        const double BinHz = 48000.0 / 32768.0;
+        var uniform = captured.Resample(BinHz, 4096);
+
+        double[] arbitrary = [50.0 * BinHz, 517.0 * BinHz, 4000.0 * BinHz];
+        var sampled = captured.ResampleAt(arbitrary);
+
+        Assert.Equal(uniform[50].Real, sampled[0].Real, 12);
+        Assert.Equal(uniform[517].Imaginary, sampled[1].Imaginary, 12);
+        Assert.Equal(uniform[4000].Real, sampled[2].Real, 12);
+    }
 }

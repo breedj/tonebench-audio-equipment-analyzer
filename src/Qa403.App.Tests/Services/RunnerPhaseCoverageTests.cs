@@ -50,6 +50,10 @@ public class RunnerPhaseCoverageTests
             // one, since a one-port has no output level to aim at.
             FrequencyResponsePhase.DeterminingRange,
             FrequencyResponsePhase.Measuring,
+
+            // The stepped-sine stimulus, which walks a grid of points rather than folding records
+            // into one estimate.
+            FrequencyResponsePhase.Sweeping,
             FrequencyResponsePhase.Calibrating,
         ],
     };

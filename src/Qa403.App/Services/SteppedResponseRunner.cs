@@ -637,7 +637,7 @@ public sealed class SteppedResponseRunner(
             peakDbv = MeasuredPeakDbv(snapshots);
             peakAtGenDbv = genDbv;
 
-            double measuredDbv = LevelAt(snapshots, StreamChannel.Left, probeTone.Bin);
+            double measuredDbv = ResponseCaptureSupport.LevelAt(snapshots, StreamChannel.Left, probeTone.Bin);
             if (double.IsNaN(measuredDbv) || measuredDbv < ProbeSilenceDbv)
             {
                 throw new InvalidOperationException(
@@ -912,8 +912,8 @@ public sealed class SteppedResponseRunner(
         SteppedResponseRequest request,
         PhaseUnwrapper unwrapper)
     {
-        double leftDbv = LevelAt(snapshots, StreamChannel.Left, step.Bin);
-        double rightDbv = LevelAt(snapshots, StreamChannel.Right, step.Bin);
+        double leftDbv = ResponseCaptureSupport.LevelAt(snapshots, StreamChannel.Left, step.Bin);
+        double rightDbv = ResponseCaptureSupport.LevelAt(snapshots, StreamChannel.Right, step.Bin);
 
         if (double.IsNaN(leftDbv) || double.IsNaN(rightDbv))
         {
@@ -940,41 +940,13 @@ public sealed class SteppedResponseRunner(
         double phaseDeg = 0.0;
         if (request.GenerateRight)
         {
-            var left = ComplexAt(snapshots, StreamChannel.Left, step.Bin);
-            var right = ComplexAt(snapshots, StreamChannel.Right, step.Bin);
+            var left = ResponseCaptureSupport.ComplexAt(snapshots, StreamChannel.Left, step.Bin);
+            var right = ResponseCaptureSupport.ComplexAt(snapshots, StreamChannel.Right, step.Bin);
             if (left is { } l && right is { } r && r != Complex.Zero)
                 phaseDeg = unwrapper.NextFromRadians((l / r).Phase);
         }
 
         return new SteppedPoint(step.FrequencyHz, leftDbv, rightDbv, gainDb, phaseDeg);
-    }
-
-    /// <summary>One channel's averaged level at one bin, in dBV, or NaN when that channel produced no spectrum.</summary>
-    private static double LevelAt(SpectrumSnapshot[] snapshots, StreamChannel channel, int bin)
-    {
-        foreach (var snapshot in snapshots)
-        {
-            if (snapshot.Channel != channel)
-                continue;
-
-            return bin >= 0 && bin < snapshot.Dbv.Length ? snapshot.Dbv[bin] : double.NaN;
-        }
-
-        return double.NaN;
-    }
-
-    /// <summary>One channel's raw complex coefficient at one bin, or null when the spectrum was not retained.</summary>
-    private static Complex? ComplexAt(SpectrumSnapshot[] snapshots, StreamChannel channel, int bin)
-    {
-        foreach (var snapshot in snapshots)
-        {
-            if (snapshot.Channel != channel || snapshot.Complex is not { } complex)
-                continue;
-
-            return bin >= 0 && bin < complex.Length ? complex[bin] : null;
-        }
-
-        return null;
     }
 
     /// <summary>

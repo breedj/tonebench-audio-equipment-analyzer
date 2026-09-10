@@ -78,11 +78,57 @@ const { storedShortCal, referenceOhms } = useImpedance()
 /** The x grid: the DUT's when there is one, otherwise a standard's own so it can be seen alone. */
 const gridHz = computed<Float64Array>(() => {
   const t = trace.value
-  if (t) return new Float64Array(t.freqHz)
-
   const cal = props.showShortCal ? storedShortCal.value : null
-  return cal ? new Float64Array(cal.freqHz) : new Float64Array()
+  const base = t ? t.freqHz : (cal?.freqHz ?? [])
+
+  return extendOverBands(
+    base,
+    overlayCurves.value.map((overlay) => overlay.trace.freqHz),
+  )
 })
+
+/**
+ * The measured grid, widened to cover every overlay's band.
+ *
+ * <p><b>Why the live grid alone will not do.</b> uPlot's AlignedData gives every series one shared x
+ * array, so anything the x array does not reach simply is not drawn. A stepped sweep publishes after
+ * every point, so its grid <i>grows</i> — and an overlay resampled onto it was therefore clipped to
+ * however far the sweep had got. A stored result put on the chart for comparison vanished the moment
+ * a new run started and then crept back in from the left over the next few minutes, which reads as
+ * the overlay being consumed by the measurement.</p>
+ *
+ * <p>Only points <b>outside</b> the measured span are added, never between measured ones. That is
+ * what keeps everything else honest: inside the span the x array is still exactly the measured
+ * frequencies, so the live series lands on real samples, the Data points markers mark real
+ * measurements, and the cursor reads a measured value rather than an interpolated one. Beyond the
+ * span the live series is null, so the trace ends where the measurement ends and the cursor says
+ * "—" — which is the truth.</p>
+ */
+function extendOverBands(base: ArrayLike<number>, extras: ArrayLike<number>[]): Float64Array {
+  if (base.length === 0) {
+    const first = extras.find((e) => e.length > 0)
+    return first ? Float64Array.from(first as ArrayLike<number>) : new Float64Array()
+  }
+
+  const low = base[0]
+  const high = base[base.length - 1]
+
+  const outside: number[] = []
+  for (const extra of extras) {
+    for (let i = 0; i < extra.length; i++) {
+      const f = extra[i]
+      if (f < low || f > high) outside.push(f)
+    }
+  }
+
+  if (outside.length === 0) return Float64Array.from(base as ArrayLike<number>)
+
+  // De-duplicated: two overlays covering the same band contribute the same frequencies, and a
+  // repeated x is a zero-width segment uPlot has to draw for nothing.
+  const merged = [...new Set([...(Array.from(base as ArrayLike<number>) as number[]), ...outside])]
+  merged.sort((a, b) => a - b)
+  return Float64Array.from(merged)
+}
 
 /** The short standard resolved onto the chart's grid — magnitude and angle from one inversion. */
 const shortCal = computed(() =>
@@ -179,26 +225,55 @@ function resampleOnto(source: ImpedanceTrace, grid: Float64Array): (number | nul
   return out
 }
 
+/**
+ * A per-measured-point array placed onto `grid`, null wherever the grid reaches past the measurement.
+ *
+ * <p>Not interpolated, unlike `resampleOnto`: phase and coherence are read at the point
+ * rather than derived from a curve, and inventing values between them would be inventing
+ * measurements. The measured frequencies are a prefix-aligned subset of the grid, so a single walk
+ * placing each sample at its own frequency is enough.</p>
+ */
+function padToGrid(
+  values: number[] | undefined,
+  freqHz: number[] | undefined,
+  grid: Float64Array,
+): (number | null)[] {
+  const out = new Array<number | null>(grid.length).fill(null)
+  if (!values || !freqHz || values.length === 0) return out
+
+  let j = 0
+  for (let i = 0; i < grid.length && j < freqHz.length; i++) {
+    if (grid[i] === freqHz[j]) out[i] = values[j++]
+  }
+
+  return out
+}
+
 function buildData(): uPlot.AlignedData {
   const t = trace.value
   const x = gridHz.value
   const series: (Float64Array | (number | null)[])[] = []
 
   if (t) {
-    const ohms = new Float64Array(t.freqHz.length)
-    for (let i = 0; i < ohms.length; i++) ohms[i] = dbOhmsToOhms(t.magnitudeMaxDbOhms[i])
-    series.push(ohms)
+    // Through the same resampler the overlays use, because `x` may now be wider than the measured
+    // grid. Inside the measured span every x value *is* a measured frequency, so this returns the
+    // measured number exactly (the interpolation lands on t = 0); outside it, null, which is what
+    // stops the trace being drawn across frequencies nobody has measured yet.
+    series.push(resampleOnto(t, x))
   } else {
-    series.push(new Float64Array(x.length))
+    series.push(new Array<number | null>(x.length).fill(null))
   }
 
   for (const overlay of overlayCurves.value) series.push(resampleOnto(overlay.trace, x))
 
   if (shortCalOhms.value) series.push(shortCalOhms.value)
 
-  if (props.showPhase) series.push(new Float64Array(t ? t.phaseDeg : []))
+  // Padded to `x` for the same reason the magnitude is: these arrays are indexed by the measured
+  // grid, and uPlot pairs series with x by position, so a short array would shift every phase and
+  // coherence sample onto a lower frequency than it was measured at.
+  if (props.showPhase) series.push(padToGrid(t?.phaseDeg, t?.freqHz, x))
   if (shortCalPhase.value) series.push(shortCalPhase.value)
-  if (props.showCoherence) series.push(new Float64Array(t ? t.coherence : []))
+  if (props.showCoherence) series.push(padToGrid(t?.coherence, t?.freqHz, x))
 
   return [x, ...series] as uPlot.AlignedData
 }
@@ -219,6 +294,11 @@ type PlottedSeries = {
   /** uPlot's dash pattern, reused verbatim for the legend swatch so the two cannot disagree. */
   dash?: number[]
   /** The right-hand scales; absent means the shared ohms axis. */
+  /**
+   * Which uPlot scale the series is drawn against. Omitted for everything on the ohms axis, which
+   * `buildSeries` resolves to <b>'y'</b> — see the note there. Never leave this to uPlot's own
+   * default by passing it through undefined.
+   */
   scale?: string
   points: boolean
 }
@@ -321,9 +401,21 @@ function buildSeries(): uPlot.Series[] {
   return [
     // Slot 0 is the x series, which is never drawn.
     {},
+    // `s.scale ?? 'y'`, and the fallback is load-bearing rather than defensive. Everything on the
+    // ohms axis -- |Z|, the history overlays and the short standard -- leaves `scale` unset, and
+    // handing uPlot an explicit `scale: undefined` is not the same as omitting the key: it creates a
+    // scale literally named "undefined", auto-ranging (`auto: true`, `distr: 1`) to whatever that
+    // series happens to contain. The curve then fills the plot height whatever the numbers are,
+    // while the visible axis labels belong to the 'y' scale that now has nothing drawn against it.
+    //
+    // It presents as a measurement that is "all over the place": a 7.9 ohm resistor reading
+    // 7.8555-7.8703 -- flat to 0.02 ohm -- was drawn as a wild +/-30% swing, because 0.02 ohm of
+    // noise was being stretched to full scale. The cursor readout stayed correct throughout, since
+    // it reads the trace rather than the plot, which is what makes this so hard to see: every
+    // number on the screen agrees except the one line you are looking at.
     ...plottedSeries.value.map((s) => ({
       label: s.label,
-      scale: s.scale,
+      scale: s.scale ?? 'y',
       stroke: s.color,
       width: s.width,
       dash: s.dash,

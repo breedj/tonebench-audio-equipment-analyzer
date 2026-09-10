@@ -27,7 +27,12 @@ public static class ImpedanceEndpoints
             if (!EnumParsing.TryParse(request.CableMode, ImpedanceCableMode.None, out ImpedanceCableMode cableMode, out var cableError))
                 return Results.BadRequest(cableError);
 
-            var measurement = request.ToMeasurement(method, stimulus, levelUnit, calTarget, cableMode);
+            if (!EnumParsing.TryParse(
+                    request.CalibrationStimulus, ImpedanceStimulus.Chirp,
+                    out ImpedanceStimulus calibrationStimulus, out var calStimulusError))
+                return Results.BadRequest(calStimulusError);
+
+            var measurement = request.ToMeasurement(method, stimulus, levelUnit, calTarget, cableMode, calibrationStimulus);
 
             try
             {
@@ -130,7 +135,19 @@ public sealed record ImpedanceStartRequest(
     /// The drive level a calibration run uses, in the same unit as <paramref name="LevelValue"/>.
     /// Louder than the measurement's by default — see <see cref="ImpedanceRequest.DefaultCalibrationLevelDbv"/>.
     /// </summary>
-    double CalibrationLevelValue = ImpedanceRequest.DefaultCalibrationLevelDbv)
+    double CalibrationLevelValue = ImpedanceRequest.DefaultCalibrationLevelDbv,
+    /// <summary>
+    /// What the Open/Short captures play, independently of <paramref name="Stimulus"/>. Null keeps
+    /// the chirp, which is what a fixture usually wants: a standard is a curve in frequency, so a
+    /// chirp-captured one corrects a stepped measurement unchanged and in a fraction of the time.
+    /// </summary>
+    string? CalibrationStimulus = null,
+    double StartFreqHz = 20.0,
+    double EndFreqHz = 20000.0,
+    int StepsPerOctave = 5,
+    bool AdaptiveResolution = true,
+    int SteppedFftSize = SteppedResponseRequest.DefaultFftSize,
+    double SteppedSampleRateHz = SteppedResponseRequest.DefaultSampleRateHz)
 {
     /// <summary>
     /// The measurement this request asks for.
@@ -150,7 +167,8 @@ public sealed record ImpedanceStartRequest(
         ImpedanceStimulus stimulus,
         ThdSweepLevelUnit levelUnit,
         ImpedanceCalTarget calTarget,
-        ImpedanceCableMode cableMode) =>
+        ImpedanceCableMode cableMode,
+        ImpedanceStimulus calibrationStimulus) =>
         new(method,
             stimulus,
             ReferenceOhms,
@@ -171,6 +189,13 @@ public sealed record ImpedanceStartRequest(
             ApplySweepGate,
             OpenCal,
             ShortCal,
+            calibrationStimulus,
+            StartFreqHz,
+            EndFreqHz,
+            StepsPerOctave,
+            AdaptiveResolution,
+            SteppedFftSize,
+            SteppedSampleRateHz,
             CalibrationLevelValue);
 }
 

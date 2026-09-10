@@ -62,6 +62,11 @@ export type SimulatedDutModel =
   | 'BandpassFilter'
   | 'MarginallyStable'
   | 'Oscillating'
+  // Fixtures rather than DUTs: each is a reference resistor with a load hanging off it, so unlike
+  // every model above they are deliberately not unity gain — a divider never is.
+  | 'ImpedanceResistive'
+  | 'ImpedanceReactive'
+  | 'ImpedanceLoudspeaker'
 
 /** Real QA403 over USB, or the synthetic device. Switchable at runtime — no restart, no flag. */
 export type DeviceKindName = 'Hardware' | 'Simulated'
@@ -173,7 +178,7 @@ export const RESPONSE_SMOOTHING: { denominator: number; label: string }[] = [
 /** Mirrors Qa403.App.Services.ImpedanceMethod. Only ReferenceResistor is implemented. */
 export type ImpedanceMethodName = 'ReferenceResistor' | 'TwoLoad'
 
-/** Mirrors Qa403.App.Services.ImpedanceStimulus. Only Chirp is implemented. */
+/** Mirrors Qa403.App.Services.ImpedanceStimulus. Pink noise is not implemented yet. */
 export type ImpedanceStimulusName = 'Chirp' | 'SteppedSine' | 'PinkNoise'
 
 /** Mirrors Qa403.App.Services.ImpedanceCableMode. */
@@ -259,6 +264,17 @@ export interface ImpedanceStartRequest {
   applySweepGate: boolean
   openCal: ImpedanceCalibrationJson | null
   shortCal: ImpedanceCalibrationJson | null
+  /**
+   * What the Open/Short captures play, chosen independently of `stimulus`. A standard is a curve in
+   * frequency and a fixture is linear, so a chirp-captured one corrects a stepped measurement
+   * unchanged — and in seconds rather than minutes, which is why the two are separate controls.
+   */
+  calibrationStimulus: ImpedanceStimulusName
+  /** The stepped-sine grid. Always sent; the server reads it only when some run will play tones. */
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  adaptiveResolution: boolean
 }
 
 /**
@@ -290,6 +306,12 @@ export interface ImpedanceParameters {
   /** Take the resistor and both standards from the globally configured fixture instead of these. */
   useGlobalFixture?: boolean | null
   generatorAmpDbv?: number | null
+  /** Optional: a type stored before the second stimulus existed has neither of these. */
+  calibrationStimulus?: ImpedanceStimulusName | null
+  startFreqHz?: number | null
+  endFreqHz?: number | null
+  stepsPerOctave?: number | null
+  adaptiveResolution?: boolean | null
   chartView?: ImpedanceView | null
   chartShowPhase?: boolean | null
   chartShowCoherence?: boolean | null
@@ -303,6 +325,12 @@ export interface ImpedanceParameters {
   chartPhaseTopDeg?: number | null
   chartPhaseBottomDeg?: number | null
   chartAutofitOnDone?: boolean | null
+  /**
+   * What the user says is on the fixture, which decides which component metrics the readout offers.
+   * Analysis rather than acquisition — it changes nothing about the run — so it lives with the
+   * `chart*` display fields and is null on a type stored before it existed.
+   */
+  chartDutType?: string | null
 }
 
 /** Which chart the impedance screen is showing. */
@@ -344,6 +372,14 @@ export interface ImpedanceStatus {
   medianOhms: number | null
   /** Roughly what the DUT was driven with, in amps. Approximate — a sweep's current varies with Z. */
   driveCurrentAmps: number | null
+  /** What this run played — the effective one, so a chirp calibration inside a stepped measurement says Chirp. */
+  stimulus: ImpedanceStimulusName
+  /**
+   * Points finished and points in total, for a stepped run. Null — not zero — on a chirp run, which
+   * has records rather than points; the progress line tells the two apart by whether these are set.
+   */
+  pointsMeasured: number | null
+  pointCount: number | null
 }
 
 export interface ImpedanceStarted {
@@ -354,6 +390,11 @@ export interface ImpedanceStarted {
   recordSeconds: number
   continuous: boolean
   calTarget: ImpedanceCalTargetName
+  stimulus: ImpedanceStimulusName
+  /** The measured grid, for a stepped run. All null for a chirp. */
+  pointCount: number | null
+  frequenciesHz: number[] | null
+  estimatedSeconds: number | null
 }
 
 export interface FrequencyResponseStartRequest {

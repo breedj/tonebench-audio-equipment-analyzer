@@ -236,8 +236,20 @@ public sealed class MeasurementSaveService(
     /// below any of them, while a decade lower costs signal-to-noise for nothing. Smoothing is light
     /// (1/48 octave) so a high-Q resonance peak is not blunted, and no calibration is stored until
     /// the user captures one.</para>
+    ///
+    /// <para>The chirp is the default for both the measurement and the calibration. The stepped
+    /// grid's defaults are there so switching the dropdown lands on something sensible rather than on
+    /// zeros — 20 Hz to 20 kHz at 5 points per octave, the same shape the stepped-sine response
+    /// starts from.</para>
     /// </summary>
-    public string DefaultImpedanceParametersJson() =>
+    /// <param name="useGlobalFixture">
+    /// Whether to start the new measurement on the globally stored fixture calibration. True
+    /// whenever one exists, because that is nearly always what is wanted: the alternative is a
+    /// measurement with no calibration at all, which reads a plausible impedance that is wrong by
+    /// the two ADC channels' mismatch and by the test leads. A user who wants this measurement's own
+    /// standards unticks it and captures them, and that choice is then stored on the type.
+    /// </param>
+    public string DefaultImpedanceParametersJson(bool useGlobalFixture = false) =>
         JsonSerializer.Serialize(new ImpedanceParameters(
             Method: nameof(ImpedanceMethod.ReferenceResistor),
             Stimulus: nameof(ImpedanceStimulus.Chirp),
@@ -253,7 +265,13 @@ public sealed class MeasurementSaveService(
             CalibrationLevelValue: ImpedanceRequest.DefaultCalibrationLevelDbv,
             CableMode: nameof(ImpedanceCableMode.None),
             FixedCableOhms: 0.0,
-            FixedCableMillihenry: 0.0), SerializerOptions);
+            FixedCableMillihenry: 0.0,
+            CalibrationStimulus: nameof(ImpedanceStimulus.Chirp),
+            StartFreqHz: 20.0,
+            EndFreqHz: 20000.0,
+            StepsPerOctave: 5,
+            AdaptiveResolution: true,
+            UseGlobalFixture: useGlobalFixture), SerializerOptions);
 
     /// <summary>
     /// What a create-or-update of a measurement type should write to <c>params_json</c>.
@@ -267,7 +285,18 @@ public sealed class MeasurementSaveService(
     /// instead, or starts from the panel's defaults when there is none.
     /// </summary>
     /// <param name="existingParamsJson">The type's current stored params, or null when creating one.</param>
-    public string ResolveTypeParamsJson(string? requestedJson, string kind, string? existingParamsJson, StagedMeasurementConfig? staged)
+    /// <param name="globalCalibrationAvailable">
+    /// Whether a global impedance fixture calibration is stored, which is what a brand-new impedance
+    /// type starts on. Passed in rather than read here because this method is synchronous and the
+    /// configuration database is not; both callers are already in async handlers. Defaults to false,
+    /// so every other kind and every existing test call site is unaffected.
+    /// </param>
+    public string ResolveTypeParamsJson(
+        string? requestedJson,
+        string kind,
+        string? existingParamsJson,
+        StagedMeasurementConfig? staged,
+        bool globalCalibrationAvailable = false)
     {
         if (!string.IsNullOrWhiteSpace(requestedJson))
             return requestedJson;
@@ -279,7 +308,7 @@ public sealed class MeasurementSaveService(
             return existingParamsJson ?? DefaultSteppedResponseParametersJson();
 
         if (IsImpedanceKind(kind))
-            return existingParamsJson ?? DefaultImpedanceParametersJson();
+            return existingParamsJson ?? DefaultImpedanceParametersJson(globalCalibrationAvailable);
 
         if (IsImpulseResponseKind(kind))
             return existingParamsJson ?? DefaultImpulseResponseParametersJson();
@@ -658,7 +687,12 @@ public sealed class MeasurementSaveService(
                 ApplySweepGate: request.ApplySweepGate,
                 OpenCal: request.OpenCal,
                 ShortCal: request.ShortCal,
-                GeneratorAmpDbv: status.GeneratorAmpDbv),
+                GeneratorAmpDbv: status.GeneratorAmpDbv,
+                CalibrationStimulus: request.CalibrationStimulus.ToString(),
+                StartFreqHz: request.StartFreqHz,
+                EndFreqHz: request.EndFreqHz,
+                StepsPerOctave: request.StepsPerOctave,
+                AdaptiveResolution: request.AdaptiveResolution),
             SerializerOptions);
 
         var info = session.Info;

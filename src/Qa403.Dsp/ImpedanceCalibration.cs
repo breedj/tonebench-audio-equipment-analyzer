@@ -84,6 +84,40 @@ public sealed record ImpedanceCalibration(double[] FreqHz, double[] Real, double
     }
 
     /// <summary>
+    /// A standard captured one tone at a time, stored exactly as measured.
+    ///
+    /// <para>No resampling, unlike <see cref="Capture"/>: a stepped run's points already <i>are</i> a
+    /// sparse log-spaced grid, so pushing them through an intermediate 256-point curve would only
+    /// interpolate an interpolation. The record shape is the same either way, so nothing downstream
+    /// can tell which route a standard took.</para>
+    /// </summary>
+    public static ImpedanceCalibration FromPoints(ReadOnlySpan<double> freqHz, ReadOnlySpan<Complex> h)
+    {
+        if (freqHz.Length < 2)
+            throw new ArgumentException("A calibration needs at least two points.", nameof(freqHz));
+        if (h.Length != freqHz.Length)
+            throw new ArgumentException($"There are {freqHz.Length} frequencies and {h.Length} values.", nameof(h));
+
+        var frequencies = new double[freqHz.Length];
+        var real = new double[freqHz.Length];
+        var imag = new double[freqHz.Length];
+
+        for (int i = 0; i < freqHz.Length; i++)
+        {
+            // Ascending is what At's binary search assumes; a caller that hands over an unsorted grid
+            // would otherwise get silently wrong interpolation rather than an error.
+            if (freqHz[i] <= 0.0 || (i > 0 && freqHz[i] <= freqHz[i - 1]))
+                throw new ArgumentException("Calibration frequencies must be positive and strictly ascending.", nameof(freqHz));
+
+            frequencies[i] = freqHz[i];
+            real[i] = h[i].Real;
+            imag[i] = h[i].Imaginary;
+        }
+
+        return new ImpedanceCalibration(frequencies, real, imag);
+    }
+
+    /// <summary>
     /// The stored curve put back on an analysis grid of <paramref name="binCount"/> bins spaced
     /// <paramref name="binHz"/> apart, interpolated linearly in log frequency.
     ///
@@ -96,12 +130,32 @@ public sealed record ImpedanceCalibration(double[] FreqHz, double[] Real, double
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binHz);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binCount);
+
+        var freqHz = new double[binCount];
+        for (int k = 0; k < binCount; k++)
+            freqHz[k] = k * binHz;
+
+        return ResampleAt(freqHz);
+    }
+
+    /// <summary>
+    /// The stored curve at an arbitrary set of frequencies -- a stepped run's own log-spaced grid,
+    /// where <see cref="Resample"/>'s uniform bins mean nothing.
+    ///
+    /// <para>One interpolation path, deliberately: <see cref="Resample"/> is a wrapper over this, so a
+    /// standard cannot mean one thing on a chirp's grid and a slightly different thing on a stepped
+    /// one. That matters because the two share a stored calibration -- a chirp-captured open is the
+    /// ADC channels' mismatch however it was excited, and applying it to a stepped run is the
+    /// recommended pairing rather than an edge case.</para>
+    /// </summary>
+    public Complex[] ResampleAt(ReadOnlySpan<double> freqHz)
+    {
         if (!IsUsable)
             throw new InvalidOperationException("This calibration has no usable curve.");
 
-        var values = new Complex[binCount];
-        for (int k = 0; k < binCount; k++)
-            values[k] = At(k * binHz);
+        var values = new Complex[freqHz.Length];
+        for (int i = 0; i < freqHz.Length; i++)
+            values[i] = At(freqHz[i]);
 
         return values;
     }

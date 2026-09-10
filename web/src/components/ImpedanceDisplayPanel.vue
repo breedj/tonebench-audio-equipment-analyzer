@@ -184,15 +184,51 @@ function roundUp125(v: number): number {
   return (m > 5 ? 10 : m > 2 ? 5 : m > 1 ? 2 : 1) * magnitude
 }
 
-// Fires when a run finishes rather than while it is going: refitting the axes mid-average makes the
-// trace crawl.
+/**
+ * Whether this run has already had its opening fit. Reset when a run starts, so every run gets one
+ * and only one.
+ */
+let fittedThisRun = false
+
 watch(
   () => props.running,
   (isRunning, wasRunning) => {
+    if (isRunning && !wasRunning) {
+      fittedThisRun = false
+      return
+    }
+
+    // Again at the end, because the opening fit was taken from the first point or two and a sweep
+    // that later climbs into a resonance would otherwise stay clipped.
     if (wasRunning && !isRunning && autofitOnDone.value) {
       autofitZ()
       autofitPhase()
     }
+  },
+)
+
+/**
+ * Fit once as soon as a run produces something, as well as when it ends.
+ *
+ * <p><b>Why the opening fit is needed at all.</b> The window otherwise stays wherever the stored
+ * display settings left it, and a window left over from a different DUT puts the whole live sweep
+ * off the chart — a 7.9 Ω resistor measured against a 2 kΩ–10 MΩ window from an earlier run shows
+ * nothing at all until the run finishes. Minutes of a stepped sweep with an empty chart is
+ * indistinguishable from a run that has hung.</p>
+ *
+ * <p>Once per run rather than on every trace, which is the reason this needs a flag rather than
+ * just watching the trace: a stepped sweep republishes after every point, and refitting fifty times
+ * makes the axis crawl and the curve squirm — the thing the end-of-run-only rule was avoiding.</p>
+ */
+watch(
+  () => trace.value,
+  (t) => {
+    if (!props.running || fittedThisRun || !autofitOnDone.value) return
+    if (!t || t.freqHz.length === 0) return
+
+    fittedThisRun = true
+    autofitZ()
+    autofitPhase()
   },
 )
 </script>
@@ -328,8 +364,13 @@ watch(
     </div>
 
     <label class="flex items-center gap-2 text-xs">
+      <!--
+        The model is still named autofitOnDone, and stored as chartAutofitOnDone, because renaming it
+        would orphan the setting on every measurement type already saved. It now fits twice: once
+        when a run first produces a curve, once when it ends.
+      -->
       <input v-model="autofitOnDone" type="checkbox" />
-      Autofit when a measurement finishes
+      Autofit each measurement
     </label>
   </CollapsibleSection>
 </template>

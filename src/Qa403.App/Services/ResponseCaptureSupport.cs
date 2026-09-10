@@ -148,6 +148,47 @@ internal static class ResponseCaptureSupport
     }
 
     /// <summary>
+    /// One channel's averaged level at one bin, in dBV, or NaN when that channel produced no
+    /// spectrum. <c>Dbv</c> is the amplitude spectrum in the peak/root-two convention every dBV in
+    /// this app uses, so for a tone that is coherent in the record the centre bin carries the whole
+    /// amplitude and reading it is exact rather than approximate.
+    /// </summary>
+    public static double LevelAt(SpectrumSnapshot[] snapshots, StreamChannel channel, int bin)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (snapshot.Channel != channel)
+                continue;
+
+            return bin >= 0 && bin < snapshot.Dbv.Length ? snapshot.Dbv[bin] : double.NaN;
+        }
+
+        return double.NaN;
+    }
+
+    /// <summary>
+    /// One channel's raw complex coefficient at one bin, or null when the spectrum was not retained
+    /// (<see cref="SpectrumPipelineOptions.RetainComplexSpectrum"/>).
+    ///
+    /// <para>The last record's rather than an average: the pipeline's averager works on magnitudes
+    /// and would discard the phase entirely. Both channels of one call come from the same tick, which
+    /// <see cref="SpectrumPipeline"/> guarantees by snapshotting every channel under one lock, so a
+    /// ratio between them is a real relationship and the analysis window cancels.</para>
+    /// </summary>
+    public static Complex? ComplexAt(SpectrumSnapshot[] snapshots, StreamChannel channel, int bin)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (snapshot.Channel != channel || snapshot.Complex is not { } complex)
+                continue;
+
+            return bin >= 0 && bin < complex.Length ? complex[bin] : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// How long one record may take: the time to refill the window after the flush, plus the
     /// in-flight audio the flush discards, times three for slack. Loose on purpose — this exists to
     /// notice a wedged device, not to police timing.

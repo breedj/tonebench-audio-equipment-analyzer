@@ -19,6 +19,16 @@ public sealed record ImpedanceSolveOptions
     /// <summary>Analysis bin spacing. Needed only to turn a bin index into the frequency a fixed cable inductance depends on.</summary>
     public required double BinHz { get; init; }
 
+    /// <summary>
+    /// The frequency of each element, when the curve is <b>not</b> on a uniform bin grid -- which is
+    /// what a stepped-sine run produces, a log-spaced point per measured tone.
+    ///
+    /// <para>Null for a chirp, where <see cref="BinHz"/> says everything and element <c>k</c> is at
+    /// <c>k*BinHz</c>. The only place either is read is the fixed-cable inductance term, but reading
+    /// the wrong one there would put a plausible reactance on every point of a stepped run.</para>
+    /// </summary>
+    public double[]? FrequenciesHz { get; init; }
+
     /// <summary>H measured with the DUT terminals open, on the analysis grid, or null for no open correction.</summary>
     public Complex[]? OpenCal { get; init; }
 
@@ -116,6 +126,11 @@ public static class ImpedanceMath
             throw new ArgumentException(
                 $"The short calibration has {shortCal.Length} bins, the measurement {h.Length}.", nameof(options));
 
+        var frequencies = options.FrequenciesHz;
+        if (frequencies is not null && frequencies.Length != h.Length)
+            throw new ArgumentException(
+                $"The frequency axis has {frequencies.Length} points, the measurement {h.Length}.", nameof(options));
+
         double r = options.ReferenceOhms;
         double? zin = options.AnalyzerInputOhms;
         var result = new Complex[h.Length];
@@ -125,9 +140,11 @@ public static class ImpedanceMath
             Complex mismatch = open is null ? Complex.One : MismatchFrom(open[k], r, zin);
             Complex branch = Branch(h[k], mismatch, r, zin);
 
+            double freqHz = frequencies is null ? k * options.BinHz : frequencies[k];
+
             Complex fixture = shortCal is not null
                 ? Branch(shortCal[k], mismatch, r, zin)
-                : new Complex(options.CableOhms, 2.0 * Math.PI * k * options.BinHz * options.CableHenry);
+                : new Complex(options.CableOhms, 2.0 * Math.PI * freqHz * options.CableHenry);
 
             result[k] = Clamp(branch - fixture);
         }

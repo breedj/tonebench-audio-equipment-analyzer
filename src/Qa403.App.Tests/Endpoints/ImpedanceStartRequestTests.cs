@@ -41,14 +41,22 @@ public class ImpedanceStartRequestTests
             ApplySweepGate: true,
             OpenCal: open,
             ShortCal: shortCal,
-            CalibrationLevelValue: 3.5);
+            CalibrationLevelValue: 3.5,
+            CalibrationStimulus: "SteppedSine",
+            StartFreqHz: 31.5,
+            EndFreqHz: 6300.0,
+            StepsPerOctave: 9,
+            AdaptiveResolution: false,
+            SteppedFftSize: 32768,
+            SteppedSampleRateHz: 96_000.0);
 
         var measurement = wire.ToMeasurement(
             ImpedanceMethod.ReferenceResistor,
             ImpedanceStimulus.Chirp,
             ThdSweepLevelUnit.Dbv,
             ImpedanceCalTarget.Open,
-            ImpedanceCableMode.Fixed);
+            ImpedanceCableMode.Fixed,
+            ImpedanceStimulus.SteppedSine);
 
         Assert.Equal(ImpedanceMethod.ReferenceResistor, measurement.Method);
         Assert.Equal(ImpedanceStimulus.Chirp, measurement.Stimulus);
@@ -71,6 +79,13 @@ public class ImpedanceStartRequestTests
         Assert.Same(open, measurement.OpenCal);
         Assert.Same(shortCal, measurement.ShortCal);
         Assert.Equal(3.5, measurement.CalibrationLevelValue);
+        Assert.Equal(ImpedanceStimulus.SteppedSine, measurement.CalibrationStimulus);
+        Assert.Equal(31.5, measurement.StartFreqHz);
+        Assert.Equal(6300.0, measurement.EndFreqHz);
+        Assert.Equal(9, measurement.StepsPerOctave);
+        Assert.False(measurement.AdaptiveResolution);
+        Assert.Equal(32768, measurement.SteppedFftSize);
+        Assert.Equal(96_000.0, measurement.SteppedSampleRateHz);
     }
 
     /// <summary>
@@ -81,8 +96,8 @@ public class ImpedanceStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(21, ConstructorParameterCount(typeof(ImpedanceStartRequest)));
-        Assert.Equal(21, ConstructorParameterCount(typeof(ImpedanceRequest)));
+        Assert.Equal(28, ConstructorParameterCount(typeof(ImpedanceStartRequest)));
+        Assert.Equal(28, ConstructorParameterCount(typeof(ImpedanceRequest)));
     }
 
     /// <summary>
@@ -136,6 +151,80 @@ public class ImpedanceStartRequestTests
 
         Assert.Equal(0.15, options.CableOhms);
         Assert.Equal(0.00042, options.CableHenry, 12);
+    }
+
+    /// <summary>
+    /// A calibration may play a different stimulus from the measurement it will correct, so every
+    /// derived property has to read <see cref="ImpedanceRequest.EffectiveStimulus"/> rather than
+    /// <c>Stimulus</c>. Reading the wrong one would configure a chirp calibration with the stepped
+    /// grid's sample rate, silently.
+    /// </summary>
+    [Fact]
+    public void EffectiveStimulus_IsTheCalibrationsWhileCalibrating()
+    {
+        var request = Measurement() with
+        {
+            Stimulus = ImpedanceStimulus.SteppedSine,
+            CalibrationStimulus = ImpedanceStimulus.Chirp,
+            StartFreqHz = 20.0,
+            EndFreqHz = 40_000.0,
+        };
+
+        Assert.Equal(ImpedanceStimulus.SteppedSine, request.EffectiveStimulus);
+        Assert.True(request.IsStepped);
+
+        var calibrating = request with { CalTarget = ImpedanceCalTarget.Open };
+        Assert.Equal(ImpedanceStimulus.Chirp, calibrating.EffectiveStimulus);
+        Assert.False(calibrating.IsStepped);
+
+        // And the derived grid follows it: the chirp's span, not the stepped run's chosen rate.
+        Assert.Equal(48_000.0, calibrating.SampleRateHz);
+        Assert.Equal(96_000.0, request.SampleRateHz);
+    }
+
+    /// <summary>
+    /// A stepped run is measured once. Repeating a minutes-long sweep until stopped is not a mode
+    /// anyone wants, and it is the same call the stepped-sine response makes.
+    /// </summary>
+    [Fact]
+    public void Validate_RejectsAContinuousSteppedRun()
+    {
+        var request = Measurement() with
+        {
+            Stimulus = ImpedanceStimulus.SteppedSine,
+            Continuous = true,
+        };
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+        Assert.Equal(nameof(ImpedanceRequest.Continuous), ex.ParamName);
+
+        // The chirp keeps it.
+        (request with { Stimulus = ImpedanceStimulus.Chirp }).Validate();
+    }
+
+    /// <summary>
+    /// Both settings groups always ride on the request, so a group no run will read must not be able
+    /// to block one. A stepped measurement with a stepped calibration never plays a chirp, and a
+    /// nonsense span left on the type from an earlier chirp run is therefore none of its business.
+    /// </summary>
+    [Fact]
+    public void Validate_OnlyChecksTheSettingsSomeRunWillActuallyRead()
+    {
+        var stepped = Measurement() with
+        {
+            Stimulus = ImpedanceStimulus.SteppedSine,
+            CalibrationStimulus = ImpedanceStimulus.SteppedSine,
+            StartFreqHz = 20.0,
+            EndFreqHz = 20_000.0,
+            FrequencySpanHz = 12_345.0,
+            SmoothingDenominator = 7,
+        };
+
+        stepped.Validate();
+
+        // Point the calibration back at the chirp and that same span is now a 400.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            (stepped with { CalibrationStimulus = ImpedanceStimulus.Chirp }).Validate);
     }
 
     private static ImpedanceRequest Measurement() =>

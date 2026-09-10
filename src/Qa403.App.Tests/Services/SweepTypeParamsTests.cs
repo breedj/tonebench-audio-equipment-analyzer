@@ -212,4 +212,53 @@ public class SweepTypeParamsTests
             body(saveService);
             return Task.CompletedTask;
         });
+
+    /// <summary>
+    /// A brand-new impedance measurement starts on the global fixture calibration when one exists.
+    ///
+    /// <para>The alternative is a measurement with no calibration at all, which reads a plausible
+    /// impedance that is wrong by the two ADC channels' mismatch and by the test leads — 8.000 ohms
+    /// reading 8.303 at 4.3 degrees for a mismatch well inside what two channels can differ by. The
+    /// flag is passed in rather than read inside <c>ResolveTypeParamsJson</c>, which is synchronous
+    /// while the configuration database is not.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ANewImpedanceType_AdoptsTheGlobalCalibrationOnlyWhenThereIsOne(bool available) =>
+        await WithSaveServiceAsync(saveService =>
+        {
+            string resolved = saveService.ResolveTypeParamsJson(
+                requestedJson: null,
+                kind: MeasurementSaveService.ImpedanceKind,
+                existingParamsJson: null,
+                staged: null,
+                globalCalibrationAvailable: available);
+
+            var parameters = JsonSerializer.Deserialize<ImpedanceParameters>(
+                resolved, JsonSerializerOptions.Web);
+
+            Assert.NotNull(parameters);
+            Assert.Equal(available, parameters!.UseGlobalFixture);
+        });
+
+    /// <summary>
+    /// And an existing type keeps whatever it was saved with — the default only ever applies to a
+    /// type being created, or the user's own choice would be overwritten every time the settings
+    /// were re-resolved.
+    /// </summary>
+    [Fact]
+    public async Task AnExistingImpedanceType_KeepsItsOwnChoice() =>
+        await WithSaveServiceAsync(saveService =>
+        {
+            string existing = saveService.DefaultImpedanceParametersJson(useGlobalFixture: false);
+            string resolved = saveService.ResolveTypeParamsJson(
+                requestedJson: null,
+                kind: MeasurementSaveService.ImpedanceKind,
+                existingParamsJson: existing,
+                staged: null,
+                globalCalibrationAvailable: true);
+
+            Assert.Equal(existing, resolved);
+        });
 }

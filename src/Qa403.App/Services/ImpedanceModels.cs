@@ -1,4 +1,5 @@
-﻿using Qa403.Dsp;
+﻿using System.Numerics;
+using Qa403.Dsp;
 
 namespace Qa403.App.Services;
 
@@ -32,7 +33,13 @@ public enum ImpedanceStimulus
     /// </summary>
     Chirp = 0,
 
-    /// <summary>One coherent tone per point. Slower, and better wherever the divider output gets small. Not implemented yet.</summary>
+    /// <summary>
+    /// One coherent tone per point. Minutes rather than seconds, and better wherever the divider
+    /// output gets small: a chirp spreads its energy over thousands of bins, so each bin sits far
+    /// below the sweep's own amplitude, while a tone puts the whole drive on the one bin being read.
+    /// That is the difference between a usable and an unusable reading for a high-impedance DUT, for
+    /// the bottom of the band, and for a shorted standard.
+    /// </summary>
     SteppedSine = 1,
 
     /// <summary>Continuous noise, averaged as a Welch cross-spectrum. Not implemented yet.</summary>
@@ -107,6 +114,17 @@ public enum ImpedanceTraceKind
 /// null to treat it as infinite. See <see cref="ImpedanceSolveOptions.AnalyzerInputOhms"/> — there is
 /// deliberately no default.
 /// </param>
+/// <param name="CalibrationStimulus">
+/// What the <see cref="CalTarget"/> runs play, chosen independently of <paramref name="Stimulus"/>.
+/// <b>A standard is a curve in frequency, not in stimulus</b>: <see cref="ImpedanceCalibration.At"/>
+/// interpolates in log f, and the open standard is the two ADC channels' gain and phase mismatch,
+/// which does not depend on how it was excited. So the fast chirp can calibrate a fixture whose DUT
+/// is then measured one tone at a time, which is the recommended pairing rather than a shortcut.
+/// </param>
+/// <param name="StartFreqHz">Lowest tone a stepped run plays. Unused by the chirp, which spans from <paramref name="ChirpStartHz"/>.</param>
+/// <param name="EndFreqHz">Highest tone a stepped run plays, before the Nyquist clamp.</param>
+/// <param name="StepsPerOctave">Density of the stepped log grid.</param>
+/// <param name="AdaptiveResolution">Size each stepped point's record for its own frequency rather than for the bottom of the band.</param>
 /// <param name="ApplySweepGate">
 /// Whether to gate the deconvolved impulse response before reading Z off it, which removes the
 /// harmonic packets a swept measurement of a distorting DUT picks up. Costs a factor of two in
@@ -133,6 +151,13 @@ public sealed record ImpedanceRequest(
     bool ApplySweepGate = false,
     ImpedanceCalibration? OpenCal = null,
     ImpedanceCalibration? ShortCal = null,
+    ImpedanceStimulus CalibrationStimulus = ImpedanceStimulus.Chirp,
+    double StartFreqHz = 20.0,
+    double EndFreqHz = 20000.0,
+    int StepsPerOctave = 5,
+    bool AdaptiveResolution = true,
+    int SteppedFftSize = SteppedResponseRequest.DefaultFftSize,
+    double SteppedSampleRateHz = SteppedResponseRequest.DefaultSampleRateHz,
     // The literal, not the const: a primary constructor's default cannot reference a member of the
     // type it is declaring. Kept equal to DefaultCalibrationLevelDbv by a test.
     double CalibrationLevelValue = 0.0)
@@ -167,11 +192,50 @@ public sealed record ImpedanceRequest(
     /// <summary>And the largest that still puts a measurable signal on the node against the analyzer's own input.</summary>
     public const double MaxReferenceOhms = 10_000_000.0;
 
-    /// <summary>Spans, resolution steps and averaging all follow the frequency response exactly — same hardware, same records.</summary>
-    public double SampleRateHz => FrequencySpanHz * 2.0;
+    /// <summary>
+    /// The stimulus this particular run plays.
+    ///
+    /// <para><b>Everything derived branches on this, never on <see cref="Stimulus"/>.</b> A
+    /// calibration capture may use a different stimulus from the measurement it will be applied to —
+    /// that is what <see cref="CalibrationStimulus"/> is for — so reading the measurement's selector
+    /// inside a calibration run would configure the wrong grid, the wrong sample rate and the wrong
+    /// analysis band, and would do it silently.</para>
+    /// </summary>
+    public ImpedanceStimulus EffectiveStimulus => IsCalibration ? CalibrationStimulus : Stimulus;
 
-    public int FftSize =>
-        (int)Math.Round(SampleRateHz / FrequencyResponseRequest.BaseBinHz) * ResolutionMultiplier;
+    /// <summary>True when this run plays one tone at a time rather than a chirp.</summary>
+    public bool IsStepped => EffectiveStimulus == ImpedanceStimulus.SteppedSine;
+
+    /// <summary>
+    /// Bins a stepped tone must be up before its level can be read at all — the stepped-sine
+    /// response's figure, and for its reason: only the tone itself is read, so the requirement is
+    /// that its mainlobe clears DC, not the harmonic analyzer's wider one.
+    /// </summary>
+    public const int MinFundamentalBins = SteppedResponseRequest.MinFundamentalBins;
+
+    /// <summary>Fraction of Nyquist the highest stepped point may reach.</summary>
+    public const double MaxFrequencyNyquistFraction = SteppedResponseRequest.MaxFrequencyNyquistFraction;
+
+    /// <summary>
+    /// Spans, resolution steps and averaging all follow the frequency response exactly — same
+    /// hardware, same records. A stepped run instead picks the lowest rate that keeps its top tone in
+    /// band (<b>one</b> harmonic, not the sweeps' five: nothing here reads a harmonic), which drops a
+    /// 20 kHz run from 192 kHz to 48 kHz.
+    /// </summary>
+    public double SampleRateHz => IsStepped
+        ? (AdaptiveResolution
+            ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
+            : SteppedSampleRateHz)
+        : FrequencySpanHz * 2.0;
+
+    /// <summary>
+    /// The analysis size. For a stepped run this is the <b>first point's</b> — every point carries its
+    /// own under adaptive resolution — which is the same thing the stepped-sine response reports on
+    /// its status, and it exists so the status line has a bin width to quote at all.
+    /// </summary>
+    public int FftSize => IsStepped
+        ? FftSizeAt(SteppedGridLowHz)
+        : (int)Math.Round(SampleRateHz / FrequencyResponseRequest.BaseBinHz) * ResolutionMultiplier;
 
     public double BinHz => SampleRateHz / FftSize;
 
@@ -179,9 +243,44 @@ public sealed record ImpedanceRequest(
 
     public double ChirpEndHz => FrequencyResponseRequest.ChirpEndNyquistFraction * SampleRateHz / 2.0;
 
-    public double AnalysisLowHz => Math.Max(4.0, ChirpStartHz * 1.25);
+    /// <summary>The highest tone a stepped run will play, given the rate it settles on.</summary>
+    public double MaxFrequencyHz => MaxFrequencyNyquistFraction * SampleRateHz / 2.0;
 
-    public double AnalysisHighHz => FrequencyResponseRequest.AnalysisHighNyquistFraction * SampleRateHz / 2.0;
+    /// <summary>The bottom of the stepped grid, which is simply where the user asked it to start.</summary>
+    private double SteppedGridLowHz => StartFreqHz;
+
+    public double AnalysisLowHz => IsStepped
+        ? StartFreqHz
+        : Math.Max(4.0, ChirpStartHz * 1.25);
+
+    public double AnalysisHighHz => IsStepped
+        ? Math.Min(EndFreqHz, MaxFrequencyHz)
+        : FrequencyResponseRequest.AnalysisHighNyquistFraction * SampleRateHz / 2.0;
+
+    /// <summary>The FFT ceiling the sweeps use at this run's rate — a record-time bound, so 1.465 Hz bins at every rate.</summary>
+    public int StandardFftCeiling => SweepResolution.BoundsFor(SampleRateHz).Ceiling;
+
+    /// <summary>The lowest tone that ceiling can read a level at — 4.4 Hz at every supported rate.</summary>
+    public double StandardLowestHz =>
+        SweepResolution.LowestToneHz(SampleRateHz, StandardFftCeiling, MinFundamentalBins);
+
+    /// <summary>
+    /// The FFT ceiling a stepped run may reach, raised automatically — and only — when it asks to
+    /// start below what the standard ceiling can measure. An ordinary 20 Hz sweep pays nothing for
+    /// this. See <see cref="SweepResolution.ExtendedMaxRecordSeconds"/>.
+    /// </summary>
+    public int FftCeiling => StartFreqHz < StandardLowestHz
+        ? SweepResolution.ExtendedCeilingFor(SampleRateHz)
+        : StandardFftCeiling;
+
+    /// <summary>The lowest tone a stepped run can read a level at, given everything above.</summary>
+    public double LowestMeasurableHz => SweepResolution.LowestToneHz(
+        SampleRateHz, AdaptiveResolution ? FftCeiling : SteppedFftSize, MinFundamentalBins);
+
+    /// <summary>The analysis size one stepped point uses — constant unless <see cref="AdaptiveResolution"/> is on.</summary>
+    public int FftSizeAt(double freqHz) => AdaptiveResolution
+        ? SweepResolution.FftSizeAt(freqHz, SampleRateHz, FftCeiling)
+        : SteppedFftSize;
 
     /// <summary>
     /// The generator level in dBV, whatever unit it was entered in — and <b>whichever of the two
@@ -211,24 +310,45 @@ public sealed record ImpedanceRequest(
     /// calibrations as an impedance; the short likewise has to be measured through the same
     /// uncorrected path the open was.</para>
     /// </summary>
-    public ImpedanceSolveOptions SolveOptions()
+    /// <param name="frequenciesHz">
+    /// The measured frequencies, for a stepped run whose curve is not on a uniform bin grid. Null for
+    /// a chirp, where <see cref="BinHz"/> says everything. The stored standards are resolved at these
+    /// frequencies either way, which is what lets a chirp-captured calibration correct a stepped
+    /// measurement.
+    /// </param>
+    public ImpedanceSolveOptions SolveOptions(double[]? frequenciesHz = null)
     {
         if (IsCalibration)
-            return new ImpedanceSolveOptions { ReferenceOhms = ReferenceOhms, BinHz = BinHz };
+        {
+            return new ImpedanceSolveOptions
+            {
+                ReferenceOhms = ReferenceOhms,
+                BinHz = BinHz,
+                FrequenciesHz = frequenciesHz,
+            };
+        }
+
+        var grid = frequenciesHz;
 
         return new ImpedanceSolveOptions
         {
             ReferenceOhms = ReferenceOhms,
             BinHz = BinHz,
-            OpenCal = OpenCal is { IsUsable: true } open ? open.Resample(BinHz, BinCount) : null,
+            FrequenciesHz = grid,
+            OpenCal = OpenCal is { IsUsable: true } open ? ResolveCal(open, grid) : null,
             ShortCal = CableMode == ImpedanceCableMode.Measured && ShortCal is { IsUsable: true } shortCal
-                ? shortCal.Resample(BinHz, BinCount)
+                ? ResolveCal(shortCal, grid)
                 : null,
             CableOhms = CableMode == ImpedanceCableMode.Fixed ? FixedCableOhms : 0.0,
             CableHenry = CableMode == ImpedanceCableMode.Fixed ? FixedCableMillihenry / 1000.0 : 0.0,
             AnalyzerInputOhms = AnalyzerInputOhms,
         };
     }
+
+    private Complex[] ResolveCal(ImpedanceCalibration calibration, double[]? frequenciesHz) =>
+        frequenciesHz is null
+            ? calibration.Resample(BinHz, BinCount)
+            : calibration.ResampleAt(frequenciesHz);
 
     public void Validate()
     {
@@ -239,26 +359,35 @@ public sealed record ImpedanceRequest(
                 "Only the reference-resistor method is implemented. The two-load method is not available yet.");
         }
 
-        if (Stimulus != ImpedanceStimulus.Chirp)
+        if (Stimulus == ImpedanceStimulus.PinkNoise)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(Stimulus), Stimulus,
-                $"Only the chirp stimulus is implemented. {Stimulus} is not available yet.");
+                nameof(Stimulus), Stimulus, "The pink-noise stimulus is not available yet.");
         }
 
-        if (!FrequencyResponseRequest.SupportedSpansHz.Contains(FrequencySpanHz))
+        if (CalibrationStimulus == ImpedanceStimulus.PinkNoise)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(FrequencySpanHz), FrequencySpanHz,
-                $"Frequency span must be one of {string.Join(", ", FrequencyResponseRequest.SupportedSpansHz)} Hz.");
+                nameof(CalibrationStimulus), CalibrationStimulus, "The pink-noise stimulus is not available yet.");
         }
 
-        if (!FrequencyResponseRequest.SupportedResolutionMultipliers.Contains(ResolutionMultiplier))
+        // A stepped measurement is single-shot, the same call the stepped-sine response makes: a
+        // hundred-point run is minutes, and repeating it until stopped is not a mode anyone wants.
+        if (Stimulus == ImpedanceStimulus.SteppedSine && Continuous)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(ResolutionMultiplier), ResolutionMultiplier,
-                $"Resolution multiplier must be one of {string.Join(", ", FrequencyResponseRequest.SupportedResolutionMultipliers)}.");
+                nameof(Continuous), Continuous,
+                "A stepped-sine impedance run is measured once, not repeatedly.");
         }
+
+        // Both settings groups always ride on the request -- the panel does not know which run comes
+        // next -- so each is validated only when a run would actually read it. Rejecting an unused
+        // group would let an untouched default block a measurement that never looks at it.
+        if (Stimulus == ImpedanceStimulus.Chirp || CalibrationStimulus == ImpedanceStimulus.Chirp)
+            ValidateChirpSettings();
+
+        if (Stimulus == ImpedanceStimulus.SteppedSine || CalibrationStimulus == ImpedanceStimulus.SteppedSine)
+            ValidateSteppedSettings();
 
         if (double.IsNaN(ReferenceOhms) || ReferenceOhms < MinReferenceOhms || ReferenceOhms > MaxReferenceOhms)
         {
@@ -295,35 +424,11 @@ public sealed record ImpedanceRequest(
                 nameof(CalibrationLevelValue), CalibrationLevelValue, "A calibration voltage must be positive.");
         }
 
-        if (!FractionalOctaveSmoother.SupportedDenominators.Contains(SmoothingDenominator))
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(SmoothingDenominator), SmoothingDenominator,
-                $"Smoothing must be one of {string.Join(", ", FractionalOctaveSmoother.SupportedDenominators)} (0 = none).");
-        }
-
         if (AverageCount is < FrequencyResponseRequest.MinAverageCount or > FrequencyResponseRequest.MaxAverageCount)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(AverageCount), AverageCount,
                 $"Averages must be between {FrequencyResponseRequest.MinAverageCount} and {FrequencyResponseRequest.MaxAverageCount}.");
-        }
-
-        if (double.IsNaN(ChirpStartHz)
-            || ChirpStartHz < FrequencyResponseRequest.MinChirpStartHz
-            || ChirpStartHz > FrequencyResponseRequest.MaxChirpStartHz)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(ChirpStartHz), ChirpStartHz,
-                $"The chirp start must be between {FrequencyResponseRequest.MinChirpStartHz} and "
-                    + $"{FrequencyResponseRequest.MaxChirpStartHz} Hz.");
-        }
-
-        if (ChirpStartHz >= ChirpEndHz / 10.0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(ChirpStartHz), ChirpStartHz,
-                $"The chirp start must be at least a decade below its end ({ChirpEndHz:0} Hz).");
         }
 
         if (CableMode == ImpedanceCableMode.Fixed)
@@ -348,6 +453,114 @@ public sealed record ImpedanceRequest(
             throw new ArgumentOutOfRangeException(
                 nameof(AnalyzerInputOhms), zin, "The analyzer input impedance must be above 0 ohms, or left unset.");
         }
+    }
+
+    /// <summary>The span, resolution, smoothing and sweep-start rules, checked only when some run will play a chirp.</summary>
+    private void ValidateChirpSettings()
+    {
+        if (!FrequencyResponseRequest.SupportedSpansHz.Contains(FrequencySpanHz))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(FrequencySpanHz), FrequencySpanHz,
+                $"Frequency span must be one of {string.Join(", ", FrequencyResponseRequest.SupportedSpansHz)} Hz.");
+        }
+
+        if (!FrequencyResponseRequest.SupportedResolutionMultipliers.Contains(ResolutionMultiplier))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ResolutionMultiplier), ResolutionMultiplier,
+                $"Resolution multiplier must be one of {string.Join(", ", FrequencyResponseRequest.SupportedResolutionMultipliers)}.");
+        }
+
+        if (!FractionalOctaveSmoother.SupportedDenominators.Contains(SmoothingDenominator))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(SmoothingDenominator), SmoothingDenominator,
+                $"Smoothing must be one of {string.Join(", ", FractionalOctaveSmoother.SupportedDenominators)} (0 = none).");
+        }
+
+        if (double.IsNaN(ChirpStartHz)
+            || ChirpStartHz < FrequencyResponseRequest.MinChirpStartHz
+            || ChirpStartHz > FrequencyResponseRequest.MaxChirpStartHz)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ChirpStartHz), ChirpStartHz,
+                $"The chirp start must be between {FrequencyResponseRequest.MinChirpStartHz} and "
+                    + $"{FrequencyResponseRequest.MaxChirpStartHz} Hz.");
+        }
+
+        // Quoted against the chirp's own sample rate rather than the run's: with a stepped
+        // measurement paired to a chirp calibration, ChirpEndHz would follow the stepped rate and
+        // reject a perfectly good sweep start.
+        double chirpEndHz = FrequencyResponseRequest.ChirpEndNyquistFraction * FrequencySpanHz;
+        if (ChirpStartHz >= chirpEndHz / 10.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ChirpStartHz), ChirpStartHz,
+                $"The chirp start must be at least a decade below its end ({chirpEndHz:0} Hz).");
+        }
+    }
+
+    /// <summary>The stepped grid's rules, mirroring <see cref="SteppedResponseRequest.Validate"/>.</summary>
+    private void ValidateSteppedSettings()
+    {
+        if (!(StartFreqHz > 0.0))
+            throw new ArgumentOutOfRangeException(nameof(StartFreqHz), StartFreqHz, "Start frequency must be greater than 0 Hz.");
+
+        if (EndFreqHz <= StartFreqHz)
+            throw new ArgumentOutOfRangeException(nameof(EndFreqHz), EndFreqHz, "End frequency must be above the start frequency.");
+
+        if (StepsPerOctave is < 1 or > 48)
+            throw new ArgumentOutOfRangeException(nameof(StepsPerOctave), StepsPerOctave, "Steps per octave must be between 1 and 48.");
+
+        if (SteppedFftSize <= 0 || (SteppedFftSize & (SteppedFftSize - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(SteppedFftSize), SteppedFftSize, "FFT size must be a power of two.");
+
+        if (!(SteppedSampleRateHz > 0.0))
+            throw new ArgumentOutOfRangeException(nameof(SteppedSampleRateHz), SteppedSampleRateHz, "Sample rate must be positive.");
+
+        RequireResolvableTone();
+    }
+
+    /// <summary>
+    /// Rejects a start frequency whose tone would sit on top of DC at the size a stepped run would
+    /// use. The message names what would work, because the panel offers no FFT-size control and the
+    /// start frequency is the only thing the caller can actually change.
+    /// </summary>
+    private void RequireResolvableTone()
+    {
+        // Asked of the stepped configuration whether or not this run is the stepped one: an
+        // unmeasurable start stored on the type would otherwise lie dormant until the next time the
+        // stepped stimulus was selected.
+        double sampleRateHz = AdaptiveResolution
+            ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
+            : SteppedSampleRateHz;
+
+        int standardCeiling = SweepResolution.BoundsFor(sampleRateHz).Ceiling;
+        double standardLowestHz = SweepResolution.LowestToneHz(sampleRateHz, standardCeiling, MinFundamentalBins);
+
+        int ceiling = StartFreqHz < standardLowestHz
+            ? SweepResolution.ExtendedCeilingFor(sampleRateHz)
+            : standardCeiling;
+
+        int fftSize = AdaptiveResolution
+            ? SweepResolution.FftSizeAt(StartFreqHz, sampleRateHz, ceiling)
+            : SteppedFftSize;
+
+        double binSizeHz = sampleRateHz / fftSize;
+        if (StartFreqHz >= MinFundamentalBins * binSizeHz)
+            return;
+
+        string advice = AdaptiveResolution
+            ? $"Start above {MinFundamentalBins * sampleRateHz / ceiling:0.##} Hz."
+            : "Turn on adaptive resolution, which sizes the low points for the frequency asked for, or "
+                + $"start above {MinFundamentalBins * binSizeHz:0.##} Hz.";
+
+        throw new ArgumentOutOfRangeException(
+            nameof(StartFreqHz),
+            StartFreqHz,
+            $"{StartFreqHz:0.##} Hz is only {StartFreqHz / binSizeHz:0.#} bins up at {sampleRateHz / 1000:0.##} kHz / {fftSize} "
+                + $"({binSizeHz:0.###} Hz per bin); reading a level needs at least {MinFundamentalBins}. {advice}");
     }
 }
 
@@ -375,6 +588,13 @@ public sealed record ImpedanceTrace(
 /// put it in the measurement type's <c>params_json</c> — the server keeps no calibration of its own,
 /// so the saved settings are the single place a fixture calibration lives.
 /// </param>
+/// <param name="Stimulus">What this run played — the <i>effective</i> one, so a chirp calibration inside a stepped measurement reports Chirp.</param>
+/// <param name="PointsMeasured">
+/// Points finished, for a stepped run. Null for a chirp, which has passes and averages rather than
+/// points — and null rather than 0, so the browser can tell "no points because this is not a stepped
+/// run" from "a stepped run that has not finished its first point".
+/// </param>
+/// <param name="PointCount">Points a stepped run will measure in total. Null for a chirp.</param>
 /// <param name="MedianOhms">
 /// The median |Z| across the analysed band, as a one-number summary of the measurement, or null when
 /// there is none — a calibration run measures a standard rather than an impedance.
@@ -412,7 +632,10 @@ public sealed record ImpedanceStatus(
     IReadOnlyList<ImpedanceTrace> Traces,
     ImpedanceCalibration? CapturedCalibration = null,
     double? MedianOhms = null,
-    double? DriveCurrentAmps = null);
+    double? DriveCurrentAmps = null,
+    ImpedanceStimulus Stimulus = ImpedanceStimulus.Chirp,
+    int? PointsMeasured = null,
+    int? PointCount = null);
 
 /// <summary>The shape of a run, returned as soon as it has been accepted.</summary>
 public sealed record ImpedanceStarted(
@@ -422,4 +645,8 @@ public sealed record ImpedanceStarted(
     int AverageCount,
     double RecordSeconds,
     bool Continuous,
-    ImpedanceCalTarget CalTarget);
+    ImpedanceCalTarget CalTarget,
+    ImpedanceStimulus Stimulus = ImpedanceStimulus.Chirp,
+    int? PointCount = null,
+    IReadOnlyList<double>? FrequenciesHz = null,
+    double? EstimatedSeconds = null);

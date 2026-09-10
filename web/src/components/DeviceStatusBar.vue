@@ -44,6 +44,24 @@ const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string }[] =
     title:
       'An amplifier that has gone the rest of the way: poles outside the unit circle, clipping against its own ±0.5 V rail at about 1010 Hz. The only DUT whose output is not a response to its input — it wrecks coherence, the level probe and the deconvolution, which is exactly what it is for.',
   },
+  {
+    value: 'ImpedanceResistive',
+    label: 'Fixture: 8 Ω',
+    title:
+      'An impedance fixture rather than a DUT: a 100 Ω reference resistor with a flat 8 Ω load. The one model in this list whose answer is arithmetic — a correct impedance run reads 8.000 Ω at 0.00° at every frequency, through either stimulus. Set the impedance screen’s reference channel to Right, because the simulator puts its DUT on the left.',
+  },
+  {
+    value: 'ImpedanceReactive',
+    label: 'Fixture: 6 Ω + 1 mH',
+    title:
+      'The same 100 Ω fixture with a series 6 Ω and 1 mH, which puts the 45° point near 955 Hz. The model to use when checking that phase is measured rather than assumed.',
+  },
+  {
+    value: 'ImpedanceLoudspeaker',
+    label: 'Fixture: loudspeaker',
+    title:
+      'The same fixture with a driver on it: 6.4 Ω voice coil and a 45 Hz resonance peaking at 60 Ω, Q 2.5. The shape an impedance sweep is normally run to see.',
+  },
 ]
 
 const props = defineProps<{

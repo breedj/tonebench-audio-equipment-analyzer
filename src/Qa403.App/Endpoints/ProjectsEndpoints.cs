@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Qa403.App.Services;
 using Qa403.Data;
@@ -62,12 +63,19 @@ public static class ProjectsEndpoints
         // AcquisitionPanel's "stage until Run" panel) — without it, saving before ever pressing Run
         // would silently persist stale defaults instead of what's actually showing on screen.
         group.MapPost("/{id:long}/measurement-types", async (
-            long id, SaveMeasurementTypeRequest request, ProjectRepository repo, MeasurementSaveService saveService, CancellationToken ct) =>
+            long id, SaveMeasurementTypeRequest request, ProjectRepository repo, MeasurementSaveService saveService,
+            ConfigRepository config, CancellationToken ct) =>
         {
             try
             {
+                // A new impedance measurement starts on the global fixture calibration when there is
+                // one. Only read for that kind: it is a second database round trip, and every other
+                // kind ignores the answer.
+                bool globalCalibration = MeasurementSaveService.IsImpedanceKind(request.Kind)
+                    && await HasGlobalCalibrationAsync(config, ct);
+
                 string paramsJson = saveService.ResolveTypeParamsJson(
-                    request.ParamsJson, request.Kind, existingParamsJson: null, request.Staged);
+                    request.ParamsJson, request.Kind, existingParamsJson: null, request.Staged, globalCalibration);
                 long typeId = await repo.CreateTypeAsync(id, request.Kind, request.Name, request.Notes, paramsJson, ct);
                 return Results.Ok(new IdResponse(typeId));
             }
@@ -148,6 +156,31 @@ public static class ProjectsEndpoints
 
     private static MeasurementTypeResponse ToResponse(MeasurementTypeRow row) =>
         new(row.Id, row.ProjectId, row.Kind, row.Name, row.Notes, row.ParamsJson, row.SortOrder, row.CreatedUtc);
+
+    /// <summary>
+    /// Whether a usable global impedance fixture calibration is stored.
+    ///
+    /// <para>Tolerant of a configuration database that cannot be read or holds something that is not
+    /// a fixture: the answer only decides a checkbox's starting position on a new measurement, so
+    /// failing closed (no calibration, panel starts on its own standards) is right and throwing a 500
+    /// out of "create a measurement" because of it would not be.</para>
+    /// </summary>
+    private static async Task<bool> HasGlobalCalibrationAsync(ConfigRepository config, CancellationToken ct)
+    {
+        try
+        {
+            string? json = await config.GetAsync(ConfigRepository.ImpedanceFixtureKey, ct);
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            return JsonSerializer.Deserialize<ImpedanceFixtureConfig>(json, JsonSerializerOptions.Web)
+                is { HasCalibration: true };
+        }
+        catch (Exception ex) when (ex is JsonException or SqliteException)
+        {
+            return false;
+        }
+    }
 }
 
 public sealed record IdResponse(long Id);

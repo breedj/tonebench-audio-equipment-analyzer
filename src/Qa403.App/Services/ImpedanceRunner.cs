@@ -18,10 +18,23 @@ namespace Qa403.App.Services;
 /// and it refines to a <i>fraction</i> of a sample. Half a sample is 75 degrees at 20 kHz on a 48 kHz
 /// record, reported as DUT phase. See <see cref="FrequencyResponseEstimator"/>'s constructor.</para>
 ///
+/// <para><b>The stepped-sine stimulus plays one coherent tone per point instead</b>, and everything
+/// above still holds: the two channels come from one record, so the tone's arbitrary phase is
+/// common-mode and cancels. What it buys is level. A chirp spreads its energy over thousands of bins,
+/// so each bin sits far below the sweep's own amplitude; a tone puts the whole drive on the one bin
+/// being read, which is the difference between a usable and an unusable reading wherever
+/// <c>V_ref - V_dut</c> gets small -- a high-impedance DUT, the bottom of the band, and a shorted
+/// standard.</para>
+///
 /// <para><b>Calibration runs go through this same runner</b> with a
 /// <see cref="ImpedanceCalTarget"/> set. A standard is captured exactly like a measurement and then
 /// <i>not</i> corrected: the open standard is the channel mismatch, so normalising it against a
 /// previous open would report the difference between two calibrations as an impedance.</para>
+///
+/// <para>A calibration may use a <i>different</i> stimulus from the measurement it will correct --
+/// see <see cref="ImpedanceRequest.CalibrationStimulus"/>. Nothing here needs to care, because
+/// <see cref="ImpedanceRequest.EffectiveStimulus"/> is what every derived property and every branch
+/// below reads.</para>
 ///
 /// <para>The runner holds no calibration of its own. A captured standard is returned on the status
 /// and stored by the browser in the measurement type's <c>params_json</c>, so a fixture calibration
@@ -38,6 +51,9 @@ public sealed class ImpedanceRunner(
 
     /// <summary>FFT size the input-range probe runs at. Short on purpose: it needs one level, not resolution.</summary>
     private const int ProbeFftSize = 16384;
+
+    /// <summary>Where the stepped run's range probe plays its tone, clamped into the swept band.</summary>
+    private const double ProbeToneHz = 1000.0;
 
     /// <summary>Ranges closer than this count as the same one — the ladder is 6 dB apart, so this only absorbs float noise.</summary>
     private const double RangeEpsilonDb = 0.01;
@@ -63,6 +79,9 @@ public sealed class ImpedanceRunner(
     private double _referenceOhms;
     private bool _rightChannelIsReference;
     private ImpedanceCalTarget _calTarget;
+    private ImpedanceStimulus _stimulus;
+    private int? _pointsMeasured;
+    private int? _pointCount;
     private ImpedanceCalibration? _capturedCalibration;
     private double? _medianOhms;
     private double? _driveCurrentAmps;
@@ -82,6 +101,7 @@ public sealed class ImpedanceRunner(
     public bool Running => _phase
         is FrequencyResponsePhase.DeterminingRange
         or FrequencyResponsePhase.Measuring
+        or FrequencyResponsePhase.Sweeping
         or FrequencyResponsePhase.Calibrating;
 
     public ImpedanceStatus Status
@@ -94,7 +114,8 @@ public sealed class ImpedanceRunner(
                     Running, _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _referenceOhms,
                     _rightChannelIsReference, _calTarget, _error, [.. _traces],
-                    _capturedCalibration, _medianOhms, _driveCurrentAmps);
+                    _capturedCalibration, _medianOhms, _driveCurrentAmps,
+                    _stimulus, _pointsMeasured, _pointCount);
             }
         }
     }
@@ -118,6 +139,11 @@ public sealed class ImpedanceRunner(
             if (Running)
                 throw new InvalidOperationException("An impedance measurement is already running.");
 
+            // Built here rather than in the background task so the reply can say how many points
+            // there are and how long they will take, and so an unmeasurable grid is a 400 rather than
+            // a run that fails a moment later.
+            var steps = request.IsStepped ? BuildSteps(request) : null;
+
             lock (_stateLock)
             {
                 _phase = FrequencyResponsePhase.DeterminingRange;
@@ -132,6 +158,9 @@ public sealed class ImpedanceRunner(
                 _referenceOhms = request.ReferenceOhms;
                 _rightChannelIsReference = request.RightChannelIsReference;
                 _calTarget = request.CalTarget;
+                _stimulus = request.EffectiveStimulus;
+                _pointsMeasured = steps is null ? null : 0;
+                _pointCount = steps?.Length;
                 _capturedCalibration = null;
                 _medianOhms = null;
                 _driveCurrentAmps = null;
@@ -143,11 +172,15 @@ public sealed class ImpedanceRunner(
 
             var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _cts = cts;
-            _runTask = Task.Run(() => RunAsync(request, cts.Token), CancellationToken.None);
+            _runTask = Task.Run(() => RunAsync(request, steps, cts.Token), CancellationToken.None);
 
             return new ImpedanceStarted(
                 request.SampleRateHz, request.FftSize, request.BinHz, request.AverageCount,
-                request.FftSize / request.SampleRateHz, request.Continuous, request.CalTarget);
+                request.FftSize / request.SampleRateHz, request.Continuous, request.CalTarget,
+                request.EffectiveStimulus,
+                steps?.Length,
+                steps is null ? null : [.. steps.Select(step => step.FrequencyHz)],
+                steps is null ? null : EstimateSeconds(request, steps));
         }
         finally
         {
@@ -196,6 +229,8 @@ public sealed class ImpedanceRunner(
             _averagesTaken = 0;
             _averageCount = 0;
             _generatorAmpDbv = 0.0;
+            _pointsMeasured = null;
+            _pointCount = null;
             _capturedCalibration = null;
             _medianOhms = null;
             _driveCurrentAmps = null;
@@ -205,7 +240,7 @@ public sealed class ImpedanceRunner(
         }
     }
 
-    private async Task RunAsync(ImpedanceRequest request, CancellationToken ct)
+    private async Task RunAsync(ImpedanceRequest request, ImpedanceStepPlan[]? steps, CancellationToken ct)
     {
         var savedOptions = pipeline.Options;
         bool startedAcquisition = false;
@@ -229,7 +264,9 @@ public sealed class ImpedanceRunner(
                 request.SmoothingDenominator == 0 ? "none" : $"1/{request.SmoothingDenominator} octave",
                 request.CableMode);
 
-            pipeline.Options = BuildOptions(savedOptions, request);
+            pipeline.Options = steps is null
+                ? BuildOptions(savedOptions, request)
+                : BuildSteppedOptions(savedOptions, steps[0].FftSize);
 
             if (!session.Acquiring)
             {
@@ -247,6 +284,14 @@ public sealed class ImpedanceRunner(
             }
 
             double generatorAmpDbv = request.GeneratorDbv;
+
+            if (steps is not null)
+            {
+                passes = 1;
+                await MeasureSteppedAsync(request, steps, generatorAmpDbv, ownsInputRange, ct);
+                terminalPhase = FrequencyResponsePhase.Finished;
+                return;
+            }
 
             // Always measured, never predicted. The generator level is given, but what reaches the
             // input depends on the divider -- which is the unknown this measurement exists to find,
@@ -494,6 +539,365 @@ public sealed class ImpedanceRunner(
     }
 
     /// <summary>
+    /// One stepped-sine pass: every point measured in turn, published as it goes, then solved.
+    ///
+    /// <para><b>Published per point rather than once at the end</b>, and that is not a nicety -- a
+    /// hundred-point run is minutes long, and a chart that stays empty until it finishes is
+    /// indistinguishable from a run that has hung.</para>
+    /// </summary>
+    private async Task MeasureSteppedAsync(
+        ImpedanceRequest request,
+        ImpedanceStepPlan[] steps,
+        double generatorAmpDbv,
+        bool ownsInputRange,
+        CancellationToken ct)
+    {
+        // Probed once and then left alone, unlike the stepped-sine *response*, whose range is
+        // predicted per point. The difference is the circuit: V_ref is the generator's own output
+        // across the reference resistor, so the loud channel's level barely moves across the sweep
+        // and there is nothing to track. Step-up stays live as the clip backstop.
+        if (ownsInputRange)
+            await ApplyInputRangeAsync(await ProbeSteppedInputRangeAsync(request, steps, generatorAmpDbv, ct), ct);
+
+        var phase = request.IsCalibration
+            ? FrequencyResponsePhase.Calibrating
+            : FrequencyResponsePhase.Sweeping;
+        SetPhase(phase);
+
+        var freqHz = new double[steps.Length];
+        var h = new Complex[steps.Length];
+        var coherence = new double[steps.Length];
+        int measured = 0;
+
+        // The loudest sample any point saw, against the one range the probe settled on. A run whose
+        // worst peak sits far under that range was measured with headroom nobody used; one that
+        // reaches it is the run whose points the clip backstop will have been moving.
+        double worstPeakDbv = double.NegativeInfinity;
+
+        for (int i = 0; i < steps.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            BroadcastProgress(i, steps.Length, phase);
+
+            var step = steps[i];
+            double rangeBefore = session.InputRangeDbv;
+
+            var (accumulator, pointPeakDbv) = await CaptureStepAsync(request, step, generatorAmpDbv, ct);
+
+            freqHz[measured] = step.FrequencyHz;
+            h[measured] = accumulator.H;
+            coherence[measured] = accumulator.Coherence;
+            measured++;
+            if (!double.IsNaN(pointPeakDbv))
+                worstPeakDbv = Math.Max(worstPeakDbv, pointPeakDbv);
+
+            lock (_stateLock)
+                _pointsMeasured = measured;
+
+            // The hardware's own clip backstop moving the range is handled -- the step announces
+            // itself in band and the affected record is re-captured -- but a run full of these lines
+            // means the probe ranged for a level the sweep does not actually see.
+            if (Math.Abs(session.InputRangeDbv - rangeBefore) > RangeEpsilonDb)
+            {
+                logger.LogInformation(
+                    "Input range moved {From:0.#} -> {To:0.#} dBV during the {FreqHz:0.##} Hz point",
+                    rangeBefore, session.InputRangeDbv, step.FrequencyHz);
+            }
+
+            // BandwidthAnalyzer needs two samples before there is a curve at all.
+            if (measured >= 2)
+            {
+                var (partial, _) = BuildSteppedTrace(request, freqHz, h, coherence, measured);
+
+                lock (_stateLock)
+                    _traces = [partial];
+
+                hub.Broadcast(StreamFrame.EncodeImpedance(partial));
+            }
+        }
+
+        var (trace, values) = BuildSteppedTrace(request, freqHz, h, coherence, measured);
+
+        ImpedanceCalibration? calibration = null;
+        double? medianOhms = null;
+        double? driveCurrentAmps = null;
+
+        if (request.IsCalibration)
+        {
+            // Only at the end: a partial standard stored halfway through would be a calibration
+            // covering part of the band, and the browser would keep it.
+            calibration = ImpedanceCalibration.FromPoints(freqHz.AsSpan(0, measured), values);
+        }
+        else
+        {
+            double median = ImpedanceMath.MedianOhms(values, 0, values.Length - 1);
+            medianOhms = double.IsNaN(median) ? null : median;
+            driveCurrentAmps = medianOhms is { } m
+                ? Math.Pow(10.0, request.GeneratorDbv / 20.0) / (request.ReferenceOhms + m)
+                : null;
+        }
+
+        lock (_stateLock)
+        {
+            _traces = [trace];
+            _passesCompleted = 1;
+            _capturedCalibration = calibration;
+            _medianOhms = medianOhms;
+            _driveCurrentAmps = driveCurrentAmps;
+        }
+
+        hub.Broadcast(StreamFrame.EncodeImpedance(trace));
+        BroadcastProgress(measured, steps.Length, phase);
+
+        if (request.IsCalibration)
+        {
+            logger.LogInformation(
+                "Impedance {Target} standard captured by stepped sine: {Points} points over {LowHz:0.0}-{HighHz:0} Hz, "
+                    + "worst input peak {PeakDbv:0.##} dBV against a {RangeDbv:0.#} dBV range",
+                request.CalTarget, measured, freqHz[0], freqHz[measured - 1],
+                worstPeakDbv, session.InputRangeDbv);
+        }
+        else
+        {
+            logger.LogInformation(
+                "Impedance measured by stepped sine: {Points} points, median {MedianOhms:0.###} ohms, "
+                    + "peak {PeakOhms:0.###} ohms at {PeakHz:0.0} Hz, drive current about {CurrentMa:0.##} mA, "
+                    + "worst input peak {PeakDbv:0.##} dBV against a {RangeDbv:0.#} dBV range",
+                measured, medianOhms ?? double.NaN,
+                ImpedanceMath.FromDbOhms(trace.PeakDbOhms), trace.PeakFreqHz,
+                (driveCurrentAmps ?? double.NaN) * 1000.0,
+                worstPeakDbv, session.InputRangeDbv);
+        }
+    }
+
+    /// <summary>
+    /// One point: the throwaway record the stimulus change arms, then
+    /// <see cref="ImpedanceRequest.AverageCount"/> independent records folded into a cross-spectrum.
+    ///
+    /// <para><b>The throwaway is not optional</b>, and it is the same rule the chirp path applies.
+    /// <see cref="DeviceSessionService.ConfigureGeneratorAsync"/> discards the audio already queued
+    /// for the DAC, but that is the <i>play</i> latency, not the round trip back through the fixture
+    /// and the ADC -- so some of the previous tone still reaches the front of the next record, and a
+    /// record that is part old tone and part new one reads the new tone's bin low. The residue is a
+    /// fixed number of frames, so the damage scales as 1/N, which is exactly why it shows up as
+    /// "spikes only with adaptive resolution on": adaptive sizing takes the top of the band to where
+    /// the residue is most of the record.</para>
+    ///
+    /// <para>Every average is a <i>whole</i> record behind its own <c>Flush(0)</c> rather than an
+    /// overlapped hop. That costs more time than the stepped-sine response's averaging and buys the
+    /// thing this measurement wants: independent records, without which
+    /// <see cref="CrossSpectrumAccumulator.Coherence"/> would report the same record's agreement with
+    /// itself.</para>
+    /// </summary>
+    private async Task<(CrossSpectrumAccumulator Accumulator, double PeakDbv)> CaptureStepAsync(
+        ImpedanceRequest request, ImpedanceStepPlan step, double generatorAmpDbv, CancellationToken ct)
+    {
+        // Strictly before ConfigureGeneratorAsync, which is what flushes: changing FftSize makes the
+        // acquisition thread allocate replacement ring buffers, and doing that afterwards would
+        // discard the flush's own state.
+        if (pipeline.Options.FftSize != step.FftSize)
+            pipeline.Options = pipeline.Options with { FftSize = step.FftSize };
+
+        // Arms the throwaway. Do NOT add a pipeline.Flush(0) straight after this call:
+        // SampleRingBuffer.Reset(0) clears the pending in-flight discard counter, and the step lands
+        // back inside the very record the discard existed to protect.
+        await session.ConfigureGeneratorAsync(ToneConfig(step.FrequencyHz, generatorAmpDbv), ct);
+        await WaitForCaptureAsync(request, step.FftSize, ct);
+
+        var accumulator = new CrossSpectrumAccumulator();
+        double peakDbv = double.NaN;
+
+        for (int record = 0; record < request.AverageCount; record++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            pipeline.Flush(0);
+            await WaitForCaptureAsync(request, step.FftSize, ct);
+
+            var snapshots = pipeline.LatestSnapshots();
+            peakDbv = ResponseCaptureSupport.PeakDbv(snapshots);
+
+            var left = ResponseCaptureSupport.ComplexAt(snapshots, StreamChannel.Left, step.Bin);
+            var right = ResponseCaptureSupport.ComplexAt(snapshots, StreamChannel.Right, step.Bin);
+
+            if (left is not { } l || right is not { } r)
+            {
+                throw new InvalidOperationException(
+                    $"An impedance point at {step.FrequencyHz:0.##} Hz needs both channels' spectra, and the pipeline "
+                        + $"returned {(left is null ? "no left" : "left")} and {(right is null ? "no right" : "right")}.");
+            }
+
+            // Both from the one capture, so the tone's arbitrary phase is common-mode and cancels.
+            var (reference, dut) = request.RightChannelIsReference ? (r, l) : (l, r);
+            accumulator.Add(reference, dut);
+
+            lock (_stateLock)
+                _averagesTaken = record + 1;
+        }
+
+        return (accumulator, peakDbv);
+    }
+
+    /// <summary>
+    /// The curve so far: the raw measured ratio for a calibration standard, the solved impedance for
+    /// a measurement.
+    /// </summary>
+    private static (ImpedanceTrace Trace, Complex[] Values) BuildSteppedTrace(
+        ImpedanceRequest request, double[] freqHz, Complex[] h, double[] coherence, int count)
+    {
+        var freq = freqHz[..count];
+        var ratio = h[..count];
+        var coh = coherence[..count];
+
+        if (request.IsCalibration)
+        {
+            // Stored and shown as measured, uncorrected: the open standard *is* the channel mismatch,
+            // so normalising it against a previous open would report the difference between two
+            // calibrations as an impedance.
+            var kind = request.CalTarget == ImpedanceCalTarget.Open
+                ? ImpedanceTraceKind.OpenCal
+                : ImpedanceTraceKind.ShortCal;
+
+            return (ImpedanceTraceBuilder.BuildPoints(kind, freq, ratio, coh), ratio);
+        }
+
+        var z = ImpedanceMath.Solve(ratio, request.SolveOptions(freq));
+        return (ImpedanceTraceBuilder.BuildPoints(ImpedanceTraceKind.Impedance, freq, z, coh), z);
+    }
+
+    /// <summary>
+    /// The stepped counterpart of <see cref="ProbeInputRangeAsync"/>: park on the least sensitive
+    /// range, play one tone at the real generator level, capture, and pick the range from the peak.
+    ///
+    /// <para>The tone is 1 kHz clamped into the swept band. Ranging at a frequency the sweep never
+    /// visits ranges for a level the run never sees.</para>
+    /// </summary>
+    private async Task<double> ProbeSteppedInputRangeAsync(
+        ImpedanceRequest request, ImpedanceStepPlan[] steps, double generatorAmpDbv, CancellationToken ct)
+    {
+        var ranges = session.Capabilities.InputRangesDbv;
+
+        SetPhase(FrequencyResponsePhase.DeterminingRange);
+        BroadcastProgress(0, 1, FrequencyResponsePhase.DeterminingRange);
+
+        double probeHz = Math.Clamp(ProbeToneHz, steps[0].FrequencyHz, steps[^1].FrequencyHz);
+        int probeFftSize = Math.Min(ProbeFftSize, request.FftSizeAt(probeHz));
+        var probeTone = CoherentFrequency.Nearest(probeHz, request.SampleRateHz, probeFftSize);
+
+        await ApplyInputRangeAsync(ranges.Max(), ct);
+
+        pipeline.Options = pipeline.Options with { FftSize = probeFftSize };
+        await session.ConfigureGeneratorAsync(ToneConfig(probeTone.FrequencyHz, generatorAmpDbv), ct);
+        await WaitForCaptureAsync(request, probeFftSize, ct);
+
+        double peakDbv = ResponseCaptureSupport.PeakDbv(pipeline.LatestSnapshots());
+
+        double selected = InputRangeSelector.For(ranges, peakDbv);
+        logger.LogInformation(
+            "Impedance input-range probe measured a peak of {PeakDbv:0.##} dBV at {GenDbv:0.##} dBV generator "
+                + "({ProbeHz:0.##} Hz tone); input range {RangeDbv:0.#} dBV",
+            peakDbv, generatorAmpDbv, probeTone.FrequencyHz, selected);
+
+        return selected;
+    }
+
+    /// <summary>
+    /// The tone, on both generator channels. Both always: the reference channel taps the generator
+    /// side of the resistor, and the fixture is driven from the same output either way.
+    /// </summary>
+    private static GeneratorConfig ToneConfig(double freqHz, double ampDbv)
+    {
+        var tone = new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(freqHz, ampDbv)])
+        {
+            Kind = GeneratorKind.Tones,
+        };
+
+        // Already coherent; snapping again is idempotent and keeps the device's reported tone
+        // identical to the one this run recorded.
+        return new GeneratorConfig(tone, tone) { SnapToBin = true };
+    }
+
+    /// <summary>The measured grid: log-spaced, snapped onto coherent bins, de-duplicated.</summary>
+    private static ImpedanceStepPlan[] BuildSteps(ImpedanceRequest request)
+    {
+        double sampleRateHz = request.SampleRateHz;
+        double maxHz = request.MaxFrequencyHz;
+        var desired = SweepPoints.LogPerOctave(request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave);
+
+        ImpedanceStepPlan[] steps = request.AdaptiveResolution
+            ? [.. SweepPoints.SnapAndDedupeAdaptive(desired, sampleRateHz, request.FftSizeAt, maxHz)
+                .Select(step => new ImpedanceStepPlan(
+                    step.FrequencyHz, BinOf(step.FrequencyHz, step.FftSize, sampleRateHz), step.FftSize))]
+            : [.. SweepPoints.SnapAndDedupe(desired, sampleRateHz, request.SteppedFftSize, maxHz)
+                .Select(tone => new ImpedanceStepPlan(tone.FrequencyHz, tone.Bin, request.SteppedFftSize))];
+
+        if (steps.Length < 2)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                $"An impedance sweep needs at least two distinct points below {maxHz:0} Hz; this grid produced {steps.Length}.");
+        }
+
+        return steps;
+    }
+
+    /// <summary>
+    /// The bin a snapped tone sits on. Exact by construction, and deliberately this rather than the
+    /// peak the analyzer located: a peak search can lock onto mains hum, and reading the level off
+    /// the wrong bin is invisible in the result.
+    /// </summary>
+    private static int BinOf(double freqHz, int fftSize, double sampleRateHz) =>
+        (int)Math.Round(freqHz * fftSize / sampleRateHz);
+
+    /// <summary>
+    /// How long one point is expected to take: the in-flight audio the flush discards, the throwaway
+    /// record after the stimulus change, then one whole record per average.
+    /// </summary>
+    private static double PointSeconds(ImpedanceRequest request, int fftSize)
+    {
+        // ~65 ms at every sample rate (Qa40xUsbDevice.StimulusLatencyFrames); 100 ms is a deliberately
+        // loose stand-in rather than widening DeviceSessionService's surface for it.
+        const double StimulusLatencySeconds = 0.1;
+
+        double recordSeconds = fftSize / request.SampleRateHz;
+        return ((1 + Math.Max(1, request.AverageCount)) * recordSeconds) + StimulusLatencySeconds;
+    }
+
+    /// <summary>What the whole sweep should take, for the UI's estimate. The range probe is one short capture and is not counted.</summary>
+    private static double EstimateSeconds(ImpedanceRequest request, ImpedanceStepPlan[] steps) =>
+        steps.Sum(step => PointSeconds(request, step.FftSize));
+
+    /// <summary>
+    /// Pipeline settings for a stepped-sine capture. Two differ from the chirp's
+    /// <see cref="BuildOptions"/> and both are load-bearing: the window is <b>Hann</b>, because a
+    /// stepped tone is coherent by bin snapping rather than by being periodic in the record and a
+    /// rectangular window would leak every tone that is a hair off its bin; and the size is one
+    /// point's rather than the run's, since adaptive resolution gives every point its own.
+    ///
+    /// <para>The window cancels in the ratio anyway -- both channels get the same one -- but it
+    /// decides how much of the neighbouring noise lands in the bin being read, which is what the
+    /// coherence figure is measuring.</para>
+    /// </summary>
+    private static SpectrumPipelineOptions BuildSteppedOptions(SpectrumPipelineOptions current, int fftSize) =>
+        current with
+        {
+            FftSize = fftSize,
+            Window = WindowType.Hann,
+
+            // The runner averages in the complex domain itself. The pipeline's averager works on
+            // magnitudes, which would throw away the phase this measurement is entirely about.
+            Averaging = AveragingMode.Off,
+            AverageCount = 1,
+            AverageHopFraction = 0.0,
+
+            ProcessLeft = true,
+            ProcessRight = true,
+            SingleShot = true,
+            RetainComplexSpectrum = true,
+            CapturePreview = false,
+        };
+
+    /// <summary>
     /// Measures the input range the fixture needs: park on the least sensitive range, play the chirp
     /// at the real generator level, capture once, and pick the range from the peak.
     ///
@@ -602,4 +1006,7 @@ public sealed class ImpedanceRunner(
             _error = error;
         }
     }
+
+    /// <summary>One planned point: the coherent tone to play, the bin it lands on, and the size it is coherent for.</summary>
+    private readonly record struct ImpedanceStepPlan(double FrequencyHz, int Bin, int FftSize);
 }

@@ -63,6 +63,7 @@ import ResponseStabilityPanel from './components/ResponseStabilityPanel.vue'
 import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import { useFrequencyResponse } from './composables/useFrequencyResponse'
+import { isDutType, type DutType } from './impedance/component'
 import { useImpedance } from './composables/useImpedance'
 import { useImpulseResponse } from './composables/useImpulseResponse'
 import {
@@ -222,6 +223,7 @@ const {
   referenceOhms: impedanceReferenceOhms,
   medianOhms: impedanceMedianOhms,
   driveCurrentAmps: impedanceDriveCurrentAmps,
+  selectedStimulus: impedanceStimulus,
   start: startImpedance,
   cancel: cancelImpedanceRun,
   clear: clearImpedanceRun,
@@ -277,6 +279,15 @@ const isImpulseResponse = computed(() => isImpulseResponseKind(currentType.value
 // ohms rather than a gain and it has a fixture calibration of its own, so like the impulse screen it
 // keys off its own flag rather than becoming a third arm of isFrequencyResponse.
 const isImpedance = computed(() => isImpedanceKind(currentType.value?.kind))
+
+/**
+ * A stepped-sine impedance run is single-shot, so the continuous RUN button goes away and the
+ * remaining one carries the whole width — the stepped-sine response screen's model, and for its
+ * reason: a run that walks a grid of tones is minutes long, and repeating it until stopped is not a
+ * mode anyone wants. The server rejects it too, so leaving the button visible would only offer a
+ * 400.
+ */
+const impedanceIsStepped = computed(() => isImpedance.value && impedanceStimulus.value === 'SteppedSine')
 
 // One runner holds one set of points, and the two screens cannot read each other's: see useSweep's
 // own `viewAxis`. Kept in step with the selected type rather than set on navigation, so a reload
@@ -713,6 +724,13 @@ const impedancePhaseTopDeg = ref(90)
 const impedancePhaseBottomDeg = ref(-90)
 const impedanceAutofitOnDone = ref(true)
 
+/**
+ * What the readout interprets the impedance curve as. None by default: an impedance sweep is a
+ * general measurement, and volunteering Thiele-Small parameters for whatever happens to be on the
+ * fixture is how a choke's self-resonance gets reported as a driver's fs.
+ */
+const impedanceDutType = ref<DutType>('None')
+
 let impedanceDisplayRestoring = false
 
 /**
@@ -745,6 +763,7 @@ function applyStoredImpedanceDisplay(paramsJson: string) {
   if (typeof stored.chartPhaseTopDeg === 'number') impedancePhaseTopDeg.value = stored.chartPhaseTopDeg
   if (typeof stored.chartPhaseBottomDeg === 'number') impedancePhaseBottomDeg.value = stored.chartPhaseBottomDeg
   if (typeof stored.chartAutofitOnDone === 'boolean') impedanceAutofitOnDone.value = stored.chartAutofitOnDone
+  impedanceDutType.value = isDutType(stored.chartDutType) ? stored.chartDutType : 'None'
 
   void nextTick(() => {
     impedanceDisplayRestoring = false
@@ -766,6 +785,7 @@ watch(
     impedanceView, impedanceShowPhase, impedanceShowCoherence, impedanceShowShortCal, impedanceThickLines,
     impedanceShowDataPoints, impedanceZTopOhms, impedanceZBottomOhms, impedanceXFromHz,
     impedanceXToHz, impedancePhaseTopDeg, impedancePhaseBottomDeg, impedanceAutofitOnDone,
+    impedanceDutType,
   ],
   () => {
     if (!impedanceDisplayRestoring && isImpedance.value) markDirty()
@@ -1620,6 +1640,7 @@ function buildTypeParamsJson(): string | undefined {
       chartPhaseTopDeg: impedancePhaseTopDeg.value,
       chartPhaseBottomDeg: impedancePhaseBottomDeg.value,
       chartAutofitOnDone: impedanceAutofitOnDone.value,
+      chartDutType: impedanceDutType.value,
     })
   }
 
@@ -2344,6 +2365,7 @@ function confirmSaveProjectAs(name: string) {
                 <!-- RUN / SINGLE / STOP, the same trio and the same slot as every other screen. -->
                 <div class="flex gap-3">
                   <button
+                    v-if="!impedanceIsStepped"
                     type="button"
                     class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
                     :disabled="impedanceRunning || !!impedanceConfigPanel?.invalid"
@@ -2358,12 +2380,27 @@ function confirmSaveProjectAs(name: string) {
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-300 py-4 text-sm font-bold tracking-wide transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-sm font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40"
+                    :class="
+                      impedanceIsStepped
+                        ? 'bg-green-600 text-base text-white ring-2 ring-green-400 ring-offset-2 hover:bg-green-500 disabled:bg-neutral-400 disabled:ring-0 dark:ring-offset-neutral-950'
+                        : 'border border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
+                    "
                     :disabled="impedanceRunning || !!impedanceConfigPanel?.invalid"
                     :title="impedanceConfigPanel?.invalid ?? 'Measures the impedance once and stops.'"
                     @click="runImpedance(false)"
                   >
-                    SINGLE
+                    <svg
+                      v-if="impedanceIsStepped"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path d="M7 4l14 8-14 8V4z" />
+                    </svg>
+                    {{ impedanceIsStepped ? 'RUN SWEEP' : 'SINGLE' }}
                   </button>
                   <button
                     type="button"
@@ -2385,6 +2422,7 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <ImpedanceReadoutPanel
+                  v-model:dut-type="impedanceDutType"
                   :traces="impedanceTraces"
                   :median-ohms="impedanceMedianOhms"
                   :drive-current-amps="impedanceDriveCurrentAmps"

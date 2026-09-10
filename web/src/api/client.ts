@@ -178,7 +178,7 @@ export const RESPONSE_SMOOTHING: { denominator: number; label: string }[] = [
 /** Mirrors Qa403.App.Services.ImpedanceMethod. Only ReferenceResistor is implemented. */
 export type ImpedanceMethodName = 'ReferenceResistor' | 'TwoLoad'
 
-/** Mirrors Qa403.App.Services.ImpedanceStimulus. Pink noise is not implemented yet. */
+/** Mirrors Qa403.App.Services.ImpedanceStimulus. */
 export type ImpedanceStimulusName = 'Chirp' | 'SteppedSine' | 'PinkNoise'
 
 /** Mirrors Qa403.App.Services.ImpedanceCableMode. */

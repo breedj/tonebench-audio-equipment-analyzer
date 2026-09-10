@@ -1578,8 +1578,11 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             for (int frame = 0; frame < TransferChunkFrames; frame++)
             {
                 long frameIndex = startFrameIndex + frame;
-                double slot0Volts = waveform.ComputeSample(generatorConfig.Right, frameIndex);
-                double slot1Volts = waveform.ComputeSample(generatorConfig.Left, frameIndex);
+                // The channel index names the *generator* channel, not the wire slot: the L/R swap
+                // here is the DAC's, and a stateful kind has to keep its stream tied to the channel
+                // whose settings it is playing.
+                double slot0Volts = waveform.ComputeSample(generatorConfig.Right, frameIndex, channelIndex: 1);
+                double slot1Volts = waveform.ComputeSample(generatorConfig.Left, frameIndex, channelIndex: 0);
                 int slot0Raw = calibration.VoltsToRaw(slot0Volts, outputRangeDbv, channel: 0);
                 int slot1Raw = calibration.VoltsToRaw(slot1Volts, outputRangeDbv, channel: 1);
 

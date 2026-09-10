@@ -2,13 +2,16 @@ namespace Qa403.Device.Simulation;
 
 /// <summary>
 /// Per-sample synthesis of a simulated DUT signal: the channel's generator stimulus (tones,
-/// multitone comb, white noise or an exponential sweep) plus mains hum and white + 1/f noise.
-/// Every deterministic part (tones, chirp, hum) is a pure function of elapsed time <c>t</c>, so it
-/// is exactly reproducible regardless of block boundaries or timer jitter — only the noise draws
-/// are stateful (RNG position, pink filter state), and that state lives here rather than in
+/// multitone comb, white or pink noise, or an exponential sweep) plus mains hum and white + 1/f
+/// noise. Every deterministic part (tones, chirp, hum) is a pure function of elapsed time <c>t</c>,
+/// so it is exactly reproducible regardless of block boundaries or timer jitter — only the noise
+/// draws are stateful (RNG position, pink filter state), and that state lives here rather than in
 /// <see cref="SimulatedDevice"/> so a stream restart gets a fresh synthesizer and a fresh noise
 /// sequence. Note that since <see cref="GeneratorKind.WhiteNoise"/> exists, that statefulness now
-/// reaches <see cref="ComputeChannelSample"/> too, not just the shared noise floor.
+/// reaches <see cref="ComputeChannelSample"/> too, not just the shared noise floor. The pink
+/// stimulus is the one kind that is stateful and reproducible at once: its filter carries state, but
+/// its input is a function of the frame index (<see cref="PinkNoiseShaper.WhiteAt"/>), which is what
+/// makes the two channels carry the same noise.
 /// </summary>
 internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
 {
@@ -17,7 +20,19 @@ internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
     /// <summary>Raised-cosine fade at each end of a sweep, so the wrap back to the start frequency isn't a step.</summary>
     private const double EchoChirpFadeSeconds = 0.005;
 
-    private double _pinkB0, _pinkB1, _pinkB2;
+    /// <summary>
+    /// The DUT noise floor's own 1/f shaper. Uncalibrated by design — see <see cref="NextPinkSample"/>
+    /// — and quite separate from the generator's, which is per channel and RMS-normalised.
+    /// </summary>
+    private readonly PinkNoiseShaper _floorPink = new(sampleRateHz);
+
+    /// <summary>
+    /// One shaper per generator channel for <see cref="GeneratorKind.PinkNoise"/>, for the reason
+    /// <c>Hardware.Qa40xGeneratorWaveform</c> sets out at its own copy: one filter fed alternately
+    /// from two channels produces two half-rate streams rather than two pink ones.
+    /// </summary>
+    private readonly PinkNoiseShaper[] _generatorPink =
+        [new PinkNoiseShaper(sampleRateHz), new PinkNoiseShaper(sampleRateHz)];
 
     /// <summary>
     /// This channel's generator content for <paramref name="channelIndex"/> (0 = left, 1 = right):
@@ -44,6 +59,7 @@ internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
             GeneratorKind.Tones => ComputeTones(profile, t, channel.Tones),
             GeneratorKind.Multitone => ComputeMultitone(channel.Tones, t),
             GeneratorKind.WhiteNoise => ComputeWhiteNoise(channel.Noise),
+            GeneratorKind.PinkNoise => ComputePinkNoise(channel.Noise, channelIndex, frameIndex),
             GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, frameIndex),
             _ => 0.0,
         };
@@ -191,6 +207,29 @@ internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
     }
 
     /// <summary>
+    /// The generator's pink noise: the same draw as <see cref="ComputeWhiteNoise"/>, shaped to 1/f
+    /// and renormalised so <c>LevelDbv</c> still means the same broadband RMS. Shares its
+    /// coefficients — and its frame-indexed white input — with the real device's TX synthesis
+    /// through <see cref="PinkNoiseShaper"/>, so a stimulus verified against <c>--simulate</c> is the
+    /// stimulus hardware plays. That input is what makes left and right identical, which this
+    /// simulator needs and the impedance measurement rests on: the right channel stands in for the
+    /// reference tap of a fixture that a bench drives with the very same signal.
+    ///
+    /// <para>Note this is <i>not</i> the filter behind <see cref="NextPinkSample"/>: that one shapes
+    /// the simulated DUT's own noise floor, is deliberately uncalibrated, and must keep its state
+    /// apart from a stimulus that comes and goes with the generator.</para>
+    /// </summary>
+    private double ComputePinkNoise(WhiteNoiseSettings? settings, int channelIndex, long frameIndex)
+    {
+        if (settings is null)
+            return 0.0;
+
+        double sigma = Math.Pow(10.0, settings.LevelDbv / 20.0);
+        var shaper = _generatorPink[Math.Clamp(channelIndex, 0, _generatorPink.Length - 1)];
+        return sigma * shaper.NextStimulus(PinkNoiseShaper.WhiteAt(frameIndex));
+    }
+
+    /// <summary>
     /// Exponential ("Farina") sine sweep from <c>StartFrequencyHz</c> to <c>EndFrequencyHz</c>,
     /// restarting every <see cref="EchoChirpSettings.RepeatFrames"/> frames. Instantaneous frequency
     /// is <c>f(tau) = f1 (f2/f1)^(tau/T)</c>, so the phase integrates to
@@ -301,12 +340,9 @@ internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
 
     // Paul Kellet's "economy" pink filter: rolls a white input off towards 1/f. No exact
     // absolute calibration (see SimulatedSignalProfile.PinkNoiseEnabled) — driven directly by
-    // the already-calibrated white sample so its magnitude tracks the configured density.
-    private double NextPinkSample(double white)
-    {
-        _pinkB0 = 0.99765 * _pinkB0 + white * 0.0990460;
-        _pinkB1 = 0.96300 * _pinkB1 + white * 0.2965164;
-        _pinkB2 = 0.57000 * _pinkB2 + white * 1.0526913;
-        return (_pinkB0 + _pinkB1 + _pinkB2) * 0.25;
-    }
+    // the already-calibrated white sample so its magnitude tracks the configured density. The
+    // raw (un-normalised) shaper output times 0.25, which is what this has always been: the
+    // coefficients moved into PinkNoiseShaper so the generator can share them, and the arithmetic
+    // is unchanged, floor level included.
+    private double NextPinkSample(double white) => _floorPink.Next(white) * 0.25;
 }

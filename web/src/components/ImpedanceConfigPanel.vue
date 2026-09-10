@@ -53,7 +53,11 @@ const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
 const STIMULI: { value: ImpedanceStimulusName; label: string }[] = [
   { value: 'Chirp', label: 'Chirp sweep' },
   { value: 'SteppedSine', label: 'Stepped sine' },
+  { value: 'PinkNoise', label: 'Pink noise' },
 ]
+
+/** The stimuli analysed as whole spectra, which share the span, resolution and smoothing controls. */
+const BROADBAND_STIMULI: ImpedanceStimulusName[] = ['Chirp', 'PinkNoise']
 
 /**
  * Mirrors ImpedanceRequest.MinFundamentalBins — deliberately below the THD sweep's 5. That figure
@@ -168,11 +172,10 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.smoothingDenominator === 'number') form.smoothingDenominator = stored.smoothingDenominator
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (typeof stored.chirpStartHz === 'number') form.chirpStartHz = stored.chirpStartHz
-  // Pink noise is not implemented, so it is never restored into a control that cannot run it.
-  if (stored.stimulus === 'Chirp' || stored.stimulus === 'SteppedSine') form.stimulus = stored.stimulus
-  if (stored.calibrationStimulus === 'Chirp' || stored.calibrationStimulus === 'SteppedSine') {
-    form.calibrationStimulus = stored.calibrationStimulus
-  }
+  const known = (value: unknown): value is ImpedanceStimulusName =>
+    STIMULI.some((option) => option.value === value)
+  if (known(stored.stimulus)) form.stimulus = stored.stimulus
+  if (known(stored.calibrationStimulus)) form.calibrationStimulus = stored.calibrationStimulus
   if (typeof stored.startFreqHz === 'number' && stored.startFreqHz > 0) form.startFreqHz = stored.startFreqHz
   if (typeof stored.endFreqHz === 'number' && stored.endFreqHz > 0) form.endFreqHz = stored.endFreqHz
   if (typeof stored.stepsPerOctave === 'number' && stored.stepsPerOctave > 0) {
@@ -280,6 +283,19 @@ const usesStepped = computed(
   () => form.stimulus === 'SteppedSine' || form.calibrationStimulus === 'SteppedSine',
 )
 
+/**
+ * The record's own settings — span, resolution, smoothing — belong to the chirp and the noise
+ * stimulus alike, which is why these are separate from `usesChirp`. Only the sweep's start frequency
+ * is the chirp's alone.
+ */
+const usesBroadband = computed(
+  () =>
+    BROADBAND_STIMULI.includes(form.stimulus) || BROADBAND_STIMULI.includes(form.calibrationStimulus),
+)
+
+/** Whether the *measurement* (rather than its calibration) analyses a whole spectrum. */
+const measuresBroadband = computed(() => BROADBAND_STIMULI.includes(form.stimulus))
+
 /** A stepped measurement is single-shot; App.vue reads this to hide the continuous-run button. */
 watch(
   () => form.stimulus,
@@ -371,7 +387,8 @@ const recordSeconds = computed(() => fftSize.value / sampleRateHz.value)
 
 /**
  * One record per average, plus one thrown away after the stimulus change, plus a short capture for
- * the input-range probe.
+ * the input-range probe. The same for a chirp and for noise: they differ in what is played, not in
+ * how many records it takes.
  */
 const estimatedSeconds = computed(() => {
   const perRecord = recordSeconds.value + 0.15
@@ -858,7 +875,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
   <CollapsibleSection title="Measurement settings">
     <label
       class="flex flex-col gap-1 text-xs"
-      title="A chirp excites the whole band at once and takes seconds. A stepped sine plays one tone at a time: minutes, but it puts the whole drive on the frequency being read, which is what a high-impedance DUT and the bottom of the band need."
+      title="A chirp excites the whole band at once and takes seconds. A stepped sine plays one tone at a time: minutes, but it puts the whole drive on the frequency being read, which is what a high-impedance DUT and the bottom of the band need. Pink noise is as quick as the chirp and keeps improving with every average, and it carries no harmonic packets to gate."
     >
       Stimulus
       <select
@@ -893,10 +910,10 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       </label>
     </div>
 
-    <!-- Shown whenever *either* selector asks for a chirp, so a stepped measurement calibrated by
-         chirp can still say what that chirp does. -->
-    <label v-if="usesChirp" class="flex flex-col gap-1 text-xs">
-      <span>Frequency span<span v-if="form.stimulus !== 'Chirp'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
+    <!-- Shown whenever *either* selector asks for a whole-spectrum stimulus, so a stepped
+         measurement calibrated by chirp can still say what that chirp does. -->
+    <label v-if="usesBroadband" class="flex flex-col gap-1 text-xs">
+      <span>Frequency span<span v-if="!measuresBroadband" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
       <select
         v-model.number="form.frequencySpanHz"
         :disabled="running"
@@ -906,7 +923,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       </select>
     </label>
 
-    <label v-if="usesChirp" class="flex flex-col gap-1 text-xs">
+    <label v-if="usesBroadband" class="flex flex-col gap-1 text-xs">
       Resolution
       <select
         v-model.number="form.resolutionMultiplier"
@@ -924,7 +941,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       class="flex flex-col gap-1 text-xs"
       title="Where the chirp starts. 10 Hz is below any driver resonance; going lower costs signal-to-noise for nothing unless you are measuring a transformer."
     >
-      Chirp start (Hz)
+      <span>Chirp start (Hz)<span v-if="form.stimulus !== 'Chirp'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
       <input
         v-model.number="form.chirpStartHz"
         type="number"
@@ -943,10 +960,10 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       from ImpedanceCalibration.Capture, which samples the raw ratio -- so with a stepped measurement
       and a chirp calibration this control could only restyle the open/short curve while it was on
       screen, and never touch a measurement. A control that implies more than it does is worse than
-      no control.
+      no control. Noise is smoothed on exactly the same path, so it reads the same control.
     -->
     <label
-      v-if="form.stimulus === 'Chirp'"
+      v-if="measuresBroadband"
       class="flex flex-col gap-1 text-xs"
       title="Light smoothing keeps a high-Q resonance peak its real height."
     >
@@ -1018,7 +1035,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       />
     </label>
 
-    <p v-if="form.stimulus === 'Chirp'" class="text-xs text-neutral-500 dark:text-neutral-400">
+    <p v-if="measuresBroadband" class="text-xs text-neutral-500 dark:text-neutral-400">
       {{ binHz.toFixed(2) }} Hz per bin · {{ recordSeconds.toFixed(2) }} s per record · about
       {{ estimatedSeconds.toFixed(1) }} s per run
     </p>
@@ -1035,7 +1052,11 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
   </CollapsibleSection>
 
   <CollapsibleSection title="Advanced" :default-open="false">
+    <!-- The chirp's alone: those packets are a product of sweep deconvolution, so there is nothing
+         for a gate to delete in a noise or stepped estimate and the server ignores the flag there.
+         Hidden rather than disabled, since a control that cannot apply is not a setting. -->
     <label
+      v-if="form.stimulus === 'Chirp'"
       class="flex items-center gap-2 text-xs"
       title="Removes the harmonic packets a swept measurement of a distorting DUT picks up, at a factor of two in frequency resolution. Rarely needed for a passive load."
     >

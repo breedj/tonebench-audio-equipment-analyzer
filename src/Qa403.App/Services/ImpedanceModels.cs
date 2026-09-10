@@ -42,7 +42,19 @@ public enum ImpedanceStimulus
     /// </summary>
     SteppedSine = 1,
 
-    /// <summary>Continuous noise, averaged as a Welch cross-spectrum. Not implemented yet.</summary>
+    /// <summary>
+    /// Continuous 1/f noise, accumulated as a Welch cross-spectrum over whole records.
+    ///
+    /// <para>Between the other two in every respect. It excites the whole band at once like the
+    /// chirp, so a pass costs the same handful of records — but nothing about it is periodic in the
+    /// record, so the analysis window is <b>Hann</b> rather than Rectangular and there is no
+    /// impulse response to gate. What it buys over the chirp is that averaging keeps improving the
+    /// estimate: successive records are independent draws rather than repeats of one deterministic
+    /// sweep, so the noise in H falls with the count while a chirp's harmonic comb does not.</para>
+    ///
+    /// <para>Pink rather than white because a divider measurement is noise-limited at the bottom of
+    /// the band, which is exactly where a white stimulus puts the least energy per octave.</para>
+    /// </summary>
     PinkNoise = 2,
 }
 
@@ -128,7 +140,9 @@ public enum ImpedanceTraceKind
 /// <param name="ApplySweepGate">
 /// Whether to gate the deconvolved impulse response before reading Z off it, which removes the
 /// harmonic packets a swept measurement of a distorting DUT picks up. Costs a factor of two in
-/// resolution, so it is a choice rather than always-on.
+/// resolution, so it is a choice rather than always-on. <b>Read only by a chirp run</b>: those
+/// packets are a property of sweep deconvolution, and there is nothing for a gate to delete in a
+/// noise or stepped estimate.
 /// </param>
 public sealed record ImpedanceRequest(
     ImpedanceMethod Method,
@@ -206,6 +220,9 @@ public sealed record ImpedanceRequest(
     /// <summary>True when this run plays one tone at a time rather than a chirp.</summary>
     public bool IsStepped => EffectiveStimulus == ImpedanceStimulus.SteppedSine;
 
+    /// <summary>True when this run plays continuous noise.</summary>
+    public bool IsNoise => EffectiveStimulus == ImpedanceStimulus.PinkNoise;
+
     /// <summary>
     /// Bins a stepped tone must be up before its level can be read at all — the stepped-sine
     /// response's figure, and for its reason: only the tone itself is read, so the requirement is
@@ -249,9 +266,15 @@ public sealed record ImpedanceRequest(
     /// <summary>The bottom of the stepped grid, which is simply where the user asked it to start.</summary>
     private double SteppedGridLowHz => StartFreqHz;
 
+    /// <summary>
+    /// Where the analysed band starts. The chirp's is set by where the sweep starts — below that
+    /// there is no stimulus at all — while noise excites every bin, so its floor is simply the
+    /// lowest bin whose estimate means anything: three bins up, the same figure
+    /// <see cref="MinFundamentalBins"/> uses and for the same reason.
+    /// </summary>
     public double AnalysisLowHz => IsStepped
         ? StartFreqHz
-        : Math.Max(4.0, ChirpStartHz * 1.25);
+        : Math.Max(4.0, IsNoise ? MinFundamentalBins * BinHz : ChirpStartHz * 1.25);
 
     public double AnalysisHighHz => IsStepped
         ? Math.Min(EndFreqHz, MaxFrequencyHz)
@@ -359,18 +382,6 @@ public sealed record ImpedanceRequest(
                 "Only the reference-resistor method is implemented. The two-load method is not available yet.");
         }
 
-        if (Stimulus == ImpedanceStimulus.PinkNoise)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(Stimulus), Stimulus, "The pink-noise stimulus is not available yet.");
-        }
-
-        if (CalibrationStimulus == ImpedanceStimulus.PinkNoise)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(CalibrationStimulus), CalibrationStimulus, "The pink-noise stimulus is not available yet.");
-        }
-
         // A stepped measurement is single-shot, the same call the stepped-sine response makes: a
         // hundred-point run is minutes, and repeating it until stopped is not a mode anyone wants.
         if (Stimulus == ImpedanceStimulus.SteppedSine && Continuous)
@@ -383,8 +394,14 @@ public sealed record ImpedanceRequest(
         // Both settings groups always ride on the request -- the panel does not know which run comes
         // next -- so each is validated only when a run would actually read it. Rejecting an unused
         // group would let an untouched default block a measurement that never looks at it.
+        if (IsBroadband(Stimulus) || IsBroadband(CalibrationStimulus))
+            ValidateBroadbandSettings();
+
+        // The sweep's own start frequency, which only a chirp reads: noise has no start, and
+        // rejecting a value it never looks at would let a stored default block a run that is
+        // perfectly measurable.
         if (Stimulus == ImpedanceStimulus.Chirp || CalibrationStimulus == ImpedanceStimulus.Chirp)
-            ValidateChirpSettings();
+            ValidateChirpStart();
 
         if (Stimulus == ImpedanceStimulus.SteppedSine || CalibrationStimulus == ImpedanceStimulus.SteppedSine)
             ValidateSteppedSettings();
@@ -455,8 +472,20 @@ public sealed record ImpedanceRequest(
         }
     }
 
-    /// <summary>The span, resolution, smoothing and sweep-start rules, checked only when some run will play a chirp.</summary>
-    private void ValidateChirpSettings()
+    /// <summary>
+    /// Whether a stimulus is analysed as a whole spectrum — the chirp and noise, but not the stepped
+    /// sine, which reads one bin per point and takes its size from its own grid. Mirrored by
+    /// <c>BROADBAND_STIMULI</c> in <c>ImpedanceConfigPanel.vue</c>, which decides the same thing about
+    /// which controls to show.
+    /// </summary>
+    private static bool IsBroadband(ImpedanceStimulus stimulus) =>
+        stimulus is ImpedanceStimulus.Chirp or ImpedanceStimulus.PinkNoise;
+
+    /// <summary>
+    /// The record's own settings — span, resolution and smoothing — checked whenever some run
+    /// analyses a whole spectrum, which the chirp and the noise stimulus both do.
+    /// </summary>
+    private void ValidateBroadbandSettings()
     {
         if (!FrequencyResponseRequest.SupportedSpansHz.Contains(FrequencySpanHz))
         {
@@ -479,6 +508,11 @@ public sealed record ImpedanceRequest(
                 $"Smoothing must be one of {string.Join(", ", FractionalOctaveSmoother.SupportedDenominators)} (0 = none).");
         }
 
+    }
+
+    /// <summary>Where the sweep starts, and that it leaves a decade to sweep over.</summary>
+    private void ValidateChirpStart()
+    {
         if (double.IsNaN(ChirpStartHz)
             || ChirpStartHz < FrequencyResponseRequest.MinChirpStartHz
             || ChirpStartHz > FrequencyResponseRequest.MaxChirpStartHz)

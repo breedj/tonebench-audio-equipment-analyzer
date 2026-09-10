@@ -22,6 +22,17 @@ public enum GeneratorKind
     /// <summary>Gaussian white noise at <see cref="WhiteNoiseSettings.LevelDbv"/>.</summary>
     WhiteNoise,
 
+    /// <summary>
+    /// The same noise shaped to 1/f (see <see cref="PinkNoiseShaper"/>), at the same broadband RMS —
+    /// <see cref="WhiteNoiseSettings.LevelDbv"/> serves both kinds, since they differ in spectral
+    /// shape and in nothing else.
+    ///
+    /// <para>The stimulus a noise-driven impedance measurement plays. Pink rather than white because
+    /// the divider it measures is noise-limited at the bottom of the band, which is where a white
+    /// stimulus has the least energy per octave.</para>
+    /// </summary>
+    PinkNoise,
+
     /// <summary>Exponential ("Farina") sine sweep, the stimulus a frequency-response measurement uses.</summary>
     EchoChirp,
 }
@@ -59,7 +70,15 @@ public sealed record MultitoneSettings
     public double RolloffDbPerOctave { get; init; }
 }
 
-/// <summary>Parameters for <see cref="GeneratorKind.WhiteNoise"/>.</summary>
+/// <summary>
+/// Parameters for <see cref="GeneratorKind.WhiteNoise"/> and <see cref="GeneratorKind.PinkNoise"/>.
+///
+/// <para>One record for both kinds, and not merely to save a type: a level is the only thing a noise
+/// generator is configured with, and both kinds mean exactly the same thing by it — the shaping is
+/// RMS-normalised (<see cref="PinkNoiseShaper.RmsGain"/>) so that switching between them changes the
+/// spectrum and not the loudness. A second record would have to be kept in step with this one field
+/// for field, through the request DTO and the range selector, to say nothing new.</para>
+/// </summary>
 public sealed record WhiteNoiseSettings
 {
     /// <summary>
@@ -126,6 +145,7 @@ public sealed record ChannelGeneratorConfig(bool Enabled, IReadOnlyList<Generato
 
     public MultitoneSettings? Multitone { get; init; }
 
+    /// <summary>Level for <see cref="GeneratorKind.WhiteNoise"/> and <see cref="GeneratorKind.PinkNoise"/> alike — see <see cref="WhiteNoiseSettings"/>.</summary>
     public WhiteNoiseSettings? Noise { get; init; }
 
     public EchoChirpSettings? Chirp { get; init; }

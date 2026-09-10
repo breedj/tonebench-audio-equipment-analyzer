@@ -35,6 +35,35 @@ public class FrequencyResponseEstimatorTests
         }
     }
 
+    /// <summary>
+    /// The broadband fraction is the same bias formula with a smaller number in it — a thousandth of
+    /// the default, and the estimate is a thousandth as biased, bin for bin.
+    ///
+    /// <para>Pinned against the formula rather than against a tolerance for the reason the test above
+    /// gives, and pinned at all because the two constants are not interchangeable: a sweep has
+    /// decades with no stimulus in them and needs the default to bound those, while a stimulus that
+    /// reaches every bin is only harmed by it. Reading this as "the smaller one is simply better"
+    /// gets the sweeps wrong.</para>
+    /// </summary>
+    [Fact]
+    public void Estimate_WithTheBroadbandFraction_IsBiasedByThatFractionInstead()
+    {
+        var stimulus = Chirp();
+        var result = Estimate(
+            stimulus, stimulus,
+            regularisationFraction: FrequencyResponseEstimator.BroadbandRegularisationFraction);
+
+        foreach (int bin in BandBins())
+        {
+            double expectedDb = 20.0 * Math.Log10(1.0 / (1.0
+                + (FrequencyResponseEstimator.BroadbandRegularisationFraction
+                    / (result.Confidence[bin] * result.Confidence[bin]))));
+
+            Assert.Equal(expectedDb, FrequencyResponseEstimator.ToDb(result.Magnitude[bin]), 9);
+            Assert.InRange(expectedDb, -0.000005, 0.0);
+        }
+    }
+
     [Fact]
     public void Estimate_OfAOnePoleLowPass_MatchesTheFiltersOwnTransferFunction()
     {
@@ -447,9 +476,14 @@ public class FrequencyResponseEstimatorTests
     }
 
     private static FrequencyResponseResult Estimate(
-        double[] stimulus, double[] response, ImpulseGate? gate = null, bool removeLatency = true)
+        double[] stimulus,
+        double[] response,
+        ImpulseGate? gate = null,
+        bool removeLatency = true,
+        double regularisationFraction = FrequencyResponseEstimator.RegularisationFraction)
     {
-        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), gate, removeLatency);
+        var estimator = new FrequencyResponseEstimator(
+            FftSize, new MathNetBackend(), gate, removeLatency, regularisationFraction);
         estimator.Add(Spectrum(stimulus), Spectrum(response));
         return estimator.Complete();
     }

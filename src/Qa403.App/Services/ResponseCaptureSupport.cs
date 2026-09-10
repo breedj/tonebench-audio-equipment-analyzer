@@ -240,6 +240,27 @@ internal static class ResponseCaptureSupport
     }
 
     /// <summary>
+    /// Pink noise at a broadband RMS, on both channels — the impedance measurement's third stimulus.
+    ///
+    /// <para>Nothing here is periodic in the record and nothing needs to be: this stimulus is only
+    /// ever analysed against a <i>measured</i> reference channel, so what matters is that every bin
+    /// gets energy, not that the record holds a whole period of anything. That is also why the
+    /// analysis window is Hann rather than the chirp's Rectangular — see
+    /// <c>ImpedanceRunner.BuildOptions</c>.</para>
+    /// </summary>
+    public static GeneratorConfig BuildPinkNoiseGenerator(double levelDbv)
+    {
+        var channel = new ChannelGeneratorConfig(Enabled: true, Tones: [])
+        {
+            Kind = GeneratorKind.PinkNoise,
+            Noise = new WhiteNoiseSettings { LevelDbv = levelDbv },
+        };
+
+        // Nothing to snap: bin snapping moves a tone onto a coherent bin, and noise has no tone.
+        return new GeneratorConfig(channel, channel) { SnapToBin = false };
+    }
+
+    /// <summary>
     /// The stimulus spectrum the response is divided by: one period of the same sweep the DAC is
     /// playing, transformed the same way the capture is.
     ///

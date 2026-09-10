@@ -188,6 +188,146 @@ public class ImpedanceRunnerTests
     }
 
     /// <summary>
+    /// The same calibration target through the noise stimulus, which shares nothing with the chirp
+    /// path but the divider inversion: a different generator, a Hann window instead of a rectangular
+    /// one, no gate, and an estimate that is a Welch cross-spectrum rather than a deconvolution.
+    ///
+    /// <para>The resistive fixture is a memoryless gain, so the two channels of any one record are
+    /// exactly proportional and H is the divider ratio in every bin whatever the stimulus was. What
+    /// is left to be wrong is everything around that, which is the point of running it.</para>
+    ///
+    /// <para><b>Asserted tighter than the chirp's own version of this test</b>, and that is not
+    /// bravado: this path passes <c>BroadbandRegularisationFraction</c>, so the H1 bias that costs
+    /// the chirp 0.006 dB at 10 kHz costs this 0.001 dB, and nothing else here is inexact. Measured
+    /// within <b>0.002 dB</b> at all three frequencies. The default fraction, which this used before
+    /// the noise path was allowed to choose, read 0.11 dB low at 10 kHz -- so a tolerance loose
+    /// enough to be comfortable would be loose enough to pass against that.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(50.0)]
+    [InlineData(1000.0)]
+    [InlineData(10000.0)]
+    public async Task ByPinkNoise_AgainstTheResistiveFixture_ReadsItsResistor(double freqHz)
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(averages: 2) with { Stimulus = ImpedanceStimulus.PinkNoise }, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(ImpedanceStimulus.PinkNoise, status.Stimulus);
+
+        var trace = Assert.Single(status.Traces);
+        var (ohms, phaseDeg) = At(trace, freqHz);
+
+        double errorDb = ImpedanceMath.ToDbOhms(ohms) - ImpedanceMath.ToDbOhms(SimulatedImpedanceFixture.ResistiveOhms);
+        Assert.InRange(errorDb, -0.01, 0.01);
+        Assert.Equal(0.0, phaseDeg, 2);
+    }
+
+    /// <summary>
+    /// The property the stimulus itself has to have: the reference channel must carry the same noise
+    /// that drove the DUT.
+    ///
+    /// <para>This is the one thing a noise stimulus can get wrong that a chirp cannot. A chirp is
+    /// deterministic, so two channels synthesising it separately produce the same waveform by
+    /// construction; two channels drawing successive samples from one RNG do not, and the resulting
+    /// H is the ratio of two unrelated noises — a plausible-looking curve with coherence near zero.
+    /// See <c>PinkNoiseShaper.WhiteAt</c>. Averaging is what makes the number meaningful: coherence
+    /// is identically 1 for a single record however unrelated the channels are.</para>
+    /// </summary>
+    [Fact]
+    public async Task ByPinkNoise_ReportsFullCoherence()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(averages: 3) with { Stimulus = ImpedanceStimulus.PinkNoise }, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        var trace = Assert.Single(status.Traces);
+
+        // Across the middle of the band, away from the analysis edges.
+        int from = trace.FreqHz.Length / 8;
+        int to = trace.FreqHz.Length - (trace.FreqHz.Length / 8);
+        for (int i = from; i < to; i++)
+        {
+            Assert.True(
+                trace.Coherence[i] > 0.99,
+                $"Coherence at {trace.FreqHz[i]:0} Hz was {trace.Coherence[i]:0.000}, which means the reference channel is not carrying the stimulus.");
+        }
+    }
+
+    /// <summary>
+    /// A noise pass publishes its curve after every record, not only when the pass ends.
+    ///
+    /// <para>Worth a test rather than a comment because it is the one place the two whole-band
+    /// stimuli deliberately behave differently, and because the reason is a property of the
+    /// stimulus: every noise record is an independent draw, so the estimate visibly improves as they
+    /// accumulate, while a chirp's records repeat one deterministic sweep and a partial average of
+    /// those is the same curve at more expense. Four averages of a 0.68 s record is nearly three
+    /// seconds of a chart that would otherwise sit empty.</para>
+    /// </summary>
+    [Fact]
+    public async Task ByPinkNoise_PublishesACurveBeforeTheAveragesAreDone()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(averages: 4) with { Stimulus = ImpedanceStimulus.PinkNoise }, CancellationToken.None);
+
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        ImpedanceStatus? midPass = null;
+
+        while (harness.Runner.Running && DateTime.UtcNow < deadline)
+        {
+            var status = harness.Runner.Status;
+            if (status.Phase == FrequencyResponsePhase.Measuring
+                && status.PassesCompleted == 0
+                && status.AveragesTaken is > 0 and < 4
+                && status.Traces.Count > 0)
+            {
+                midPass = status;
+                break;
+            }
+
+            await Task.Delay(10);
+        }
+
+        Assert.NotNull(midPass);
+        Assert.Equal(ImpedanceTraceKind.Impedance, midPass.Traces[0].Kind);
+
+        // And the partial curve is a real measurement rather than a placeholder.
+        var (ohms, _) = At(midPass.Traces[0], 1000.0);
+        Assert.InRange(
+            ImpedanceMath.ToDbOhms(ohms) - ImpedanceMath.ToDbOhms(SimulatedImpedanceFixture.ResistiveOhms),
+            -0.01, 0.01);
+
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+    }
+
+    /// <summary>
+    /// A gate is a sweep's business, and asking for one on a noise run must be ignored rather than
+    /// obeyed: those harmonic packets exist because sweep deconvolution folds each harmonic into its
+    /// own impulse, and a noise estimate has no such structure to delete.
+    /// </summary>
+    [Fact]
+    public async Task ByPinkNoise_IgnoresTheSweepGate()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(averages: 2) with { Stimulus = ImpedanceStimulus.PinkNoise, ApplySweepGate = true },
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        var trace = Assert.Single(status.Traces);
+        var (ohms, _) = At(trace, 1000.0);
+
+        double errorDb = ImpedanceMath.ToDbOhms(ohms) - ImpedanceMath.ToDbOhms(SimulatedImpedanceFixture.ResistiveOhms);
+        Assert.InRange(errorDb, -0.01, 0.01);
+    }
+
+    /// <summary>
     /// A series R and L: the magnitude has to rise and the phase go positive with it. Reading a
     /// rising magnitude with a flat phase is the classic symptom of the two channels coming from
     /// different records, which this measurement cannot tolerate.
@@ -625,18 +765,18 @@ public class ImpedanceRunnerTests
         Assert.Equal(ImpedanceStimulus.Chirp, status.Stimulus);
     }
 
-    [Theory]
-    [InlineData(ImpedanceMethod.TwoLoad, ImpedanceStimulus.Chirp)]
-    [InlineData(ImpedanceMethod.ReferenceResistor, ImpedanceStimulus.PinkNoise)]
-    public void Validate_RejectsWhatIsNotImplementedYet(ImpedanceMethod method, ImpedanceStimulus stimulus) =>
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => (Request() with { Method = method, Stimulus = stimulus }).Validate());
-
-    /// <summary>Pink noise is unavailable from either selector, not just the measurement's.</summary>
     [Fact]
-    public void Validate_RejectsPinkNoiseAsACalibrationStimulusToo() =>
+    public void Validate_RejectsTheTwoLoadMethod() =>
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => (Request() with { CalibrationStimulus = ImpedanceStimulus.PinkNoise }).Validate());
+            () => (Request() with { Method = ImpedanceMethod.TwoLoad }).Validate());
+
+    /// <summary>
+    /// Noise repeats happily, unlike a stepped sweep: a pass is a handful of records, and each new
+    /// one genuinely improves the estimate.
+    /// </summary>
+    [Fact]
+    public void Validate_AcceptsAContinuousNoiseRun() =>
+        (Request(continuous: true) with { Stimulus = ImpedanceStimulus.PinkNoise }).Validate();
 
     [Fact]
     public void Validate_RejectsARepeatingCalibration() =>

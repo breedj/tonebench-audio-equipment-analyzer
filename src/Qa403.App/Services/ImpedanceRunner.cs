@@ -26,6 +26,14 @@ namespace Qa403.App.Services;
 /// <c>V_ref - V_dut</c> gets small -- a high-impedance DUT, the bottom of the band, and a shorted
 /// standard.</para>
 ///
+/// <para><b>The pink-noise stimulus excites the whole band at once like the chirp</b>, and the same
+/// two-channels-from-one-record argument carries it: a noise record has no phase reference of its
+/// own, and does not need one. What it changes is the analysis. Nothing about noise is periodic in
+/// the record, so the window is <b>Hann</b> and there is no deconvolved impulse response to gate;
+/// and because successive records are independent draws rather than repeats of one deterministic
+/// sweep, averaging keeps improving the estimate instead of merely confirming it -- which is why a
+/// noise pass publishes a curve after <i>every</i> record rather than only at the end.</para>
+///
 /// <para><b>Calibration runs go through this same runner</b> with a
 /// <see cref="ImpedanceCalTarget"/> set. A standard is captured exactly like a measurement and then
 /// <i>not</i> corrected: the open standard is the channel mismatch, so normalising it against a
@@ -254,10 +262,11 @@ public sealed class ImpedanceRunner(
         try
         {
             logger.LogInformation(
-                "Impedance starting: {What}, {ReferenceOhms:0.###} ohm reference, reference channel {RefChannel}, "
+                "Impedance starting: {What} by {Stimulus}, {ReferenceOhms:0.###} ohm reference, reference channel {RefChannel}, "
                     + "span {SpanHz:0} Hz ({SampleRateHz:0} Hz sample rate), {FftSize} points ({BinHz:0.00} Hz per bin), "
                     + "{Averages} averages, generator {GenDbv:0.##} dBV, smoothing {Smoothing}, cable {CableMode}",
                 request.CalTarget == ImpedanceCalTarget.None ? "measuring a DUT" : $"capturing the {request.CalTarget} standard",
+                request.EffectiveStimulus,
                 request.ReferenceOhms, request.RightChannelIsReference ? "right" : "left",
                 request.FrequencySpanHz, request.SampleRateHz, request.FftSize, request.BinHz,
                 request.AverageCount, request.GeneratorDbv,
@@ -305,8 +314,7 @@ public sealed class ImpedanceRunner(
                 ? FrequencyResponsePhase.Calibrating
                 : FrequencyResponsePhase.Measuring);
 
-            var generator = ResponseCaptureSupport.BuildChirpGenerator(
-                generatorAmpDbv, request.ChirpStartHz, request.ChirpEndHz, request.FftSize);
+            var generator = BuildStimulus(request, generatorAmpDbv, request.FftSize);
 
             // Configured once for the whole run: in continuous mode the stimulus never changes, so
             // re-applying it would flush a queue depth of good audio on every repeat for nothing.
@@ -323,17 +331,10 @@ public sealed class ImpedanceRunner(
                 if (request.Continuous && ownsInputRange)
                     await ApplyInputRangeAsync(InputRangeSelector.For(session.Capabilities.InputRangesDbv, pass.PeakDbv), ct);
 
-                lock (_stateLock)
-                {
-                    _traces = pass.Traces;
-                    _passesCompleted = passes;
-                    _capturedCalibration = pass.Calibration;
-                    _medianOhms = pass.MedianOhms;
-                    _driveCurrentAmps = pass.DriveCurrentAmps;
-                }
+                PublishPass(pass);
 
-                foreach (var trace in pass.Traces)
-                    hub.Broadcast(StreamFrame.EncodeImpedance(trace));
+                lock (_stateLock)
+                    _passesCompleted = passes;
 
                 if (passes == 1)
                 {
@@ -450,11 +451,23 @@ public sealed class ImpedanceRunner(
         // harmonic packets a swept measurement of a distorting DUT picks up, at a factor of two in
         // resolution -- and a passive impedance usually distorts far too little to be worth paying
         // that, which is why this is a choice.
-        ImpulseGate? gate = request.ApplySweepGate
+        //
+        // Never for noise, whatever the request says: those packets exist because *sweep*
+        // deconvolution folds each harmonic into its own impulse ahead of the linear one. A noise
+        // estimate has no such structure, so a gate there would delete part of a perfectly good
+        // impulse response and call it distortion.
+        ImpulseGate? gate = request.ApplySweepGate && !request.IsNoise
             ? ImpulseGate.ForSweep(request.FftSize, request.ChirpStartHz, request.ChirpEndHz)
             : null;
 
-        var estimator = new FrequencyResponseEstimator(request.FftSize, _fft, gate, removeLatency: false);
+        // The regulariser follows the stimulus. A chirp has decades with no energy in them and needs
+        // the default to bound those; noise reaches every bin, where the same lambda only biases the
+        // quiet top of the band low -- see FrequencyResponseEstimator.BroadbandRegularisationFraction.
+        var estimator = new FrequencyResponseEstimator(
+            request.FftSize, _fft, gate, removeLatency: false,
+            regularisationFraction: request.IsNoise
+                ? FrequencyResponseEstimator.BroadbandRegularisationFraction
+                : FrequencyResponseEstimator.RegularisationFraction);
 
         lock (_stateLock)
             _averagesTaken = 0;
@@ -497,6 +510,14 @@ public sealed class ImpedanceRunner(
                 _averagesTaken = record + 1;
 
             BroadcastProgress(record + 1, request.AverageCount, phase);
+
+            // Published as it goes, for the noise stimulus only. Every record genuinely improves a
+            // Welch estimate, so there is something new to look at each time -- where a chirp's
+            // records are repeats of one deterministic sweep, and a partial average of those would
+            // redraw the same curve at more expense. Complete() re-derives H from the accumulators
+            // on every call, so this costs a solve and nothing else.
+            if (request.IsNoise && !request.IsCalibration && record + 1 < request.AverageCount)
+                PublishPass(BuildPass(request, estimator.Complete(), peakDbv));
         }
 
         var result = estimator.Complete();
@@ -519,6 +540,17 @@ public sealed class ImpedanceRunner(
                 peakDbv, calibration, MedianOhms: null, DriveCurrentAmps: null);
         }
 
+        return BuildPass(request, result, peakDbv);
+    }
+
+    /// <summary>
+    /// The solved half of a pass: invert the divider, take the band median, and build the curve the
+    /// chart draws. Separate from the capture loop only so a noise run can call it after each record
+    /// as well as at the end.
+    /// </summary>
+    private static PassResult BuildPass(ImpedanceRequest request, FrequencyResponseResult result, double peakDbv)
+    {
+        var h = ImpedanceTraceBuilder.ToComplex(result);
         var z = ImpedanceMath.Solve(h, request.SolveOptions());
 
         int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / request.BinHz));
@@ -537,6 +569,32 @@ public sealed class ImpedanceRunner(
             [ImpedanceTraceBuilder.Build(request, ImpedanceTraceKind.Impedance, z, result.Coherence, DisplayColumns)],
             peakDbv, null, medianOhms, driveCurrentAmps);
     }
+
+    /// <summary>Puts a pass -- finished, or partway through a noise average -- on the status and on the wire.</summary>
+    private void PublishPass(PassResult pass)
+    {
+        lock (_stateLock)
+        {
+            _traces = pass.Traces;
+            _capturedCalibration = pass.Calibration;
+            _medianOhms = pass.MedianOhms;
+            _driveCurrentAmps = pass.DriveCurrentAmps;
+        }
+
+        foreach (var trace in pass.Traces)
+            hub.Broadcast(StreamFrame.EncodeImpedance(trace));
+    }
+
+    /// <summary>
+    /// The generator config this run's stimulus needs. <paramref name="repeatFrames"/> is the chirp's
+    /// period, which has to equal the size it will be analysed at -- so the input-range probe, which
+    /// analyses short, passes its own rather than the run's.
+    /// </summary>
+    private static GeneratorConfig BuildStimulus(ImpedanceRequest request, double amplitudeDbv, int repeatFrames) =>
+        request.IsNoise
+            ? ResponseCaptureSupport.BuildPinkNoiseGenerator(amplitudeDbv)
+            : ResponseCaptureSupport.BuildChirpGenerator(
+                amplitudeDbv, request.ChirpStartHz, request.ChirpEndHz, repeatFrames);
 
     /// <summary>
     /// One stepped-sine pass: every point measured in turn, published as it goes, then solved.
@@ -918,9 +976,7 @@ public sealed class ImpedanceRunner(
         await ApplyInputRangeAsync(ranges.Max(), ct);
 
         pipeline.Options = pipeline.Options with { FftSize = probeFftSize };
-        await session.ConfigureGeneratorAsync(
-            ResponseCaptureSupport.BuildChirpGenerator(
-                generatorAmpDbv, request.ChirpStartHz, request.ChirpEndHz, probeFftSize), ct);
+        await session.ConfigureGeneratorAsync(BuildStimulus(request, generatorAmpDbv, probeFftSize), ct);
         await WaitForCaptureAsync(request, probeFftSize, ct);
 
         double peakDbv = ResponseCaptureSupport.PeakDbv(pipeline.LatestSnapshots());
@@ -944,15 +1000,23 @@ public sealed class ImpedanceRunner(
     }
 
     /// <summary>
-    /// Pipeline settings for a chirp capture, identical to the frequency response's and load-bearing
-    /// for the same reasons: a rectangular window because the stimulus is periodic in the record, and
-    /// the retained complex spectrum because this measurement is built on phase.
+    /// Pipeline settings for a whole-spectrum capture -- chirp or noise. Identical to the frequency
+    /// response's and load-bearing for the same reasons, with one difference: the retained complex
+    /// spectrum because this measurement is built on phase, and a window that follows the stimulus.
+    ///
+    /// <para><b>Rectangular for the chirp, Hann for noise.</b> The chirp is periodic in the record by
+    /// construction, so a rectangular window transforms it exactly and a taper would destroy the
+    /// periodicity the whole measurement rests on. Noise is periodic in nothing: rectangular there
+    /// splices an arbitrary discontinuity into every record and smears its energy across the
+    /// spectrum. The window cancels in the ratio either way -- both channels get the same one -- but
+    /// it decides how much of the neighbouring floor lands in each bin, which is what the coherence
+    /// figure is measuring.</para>
     /// </summary>
     private static SpectrumPipelineOptions BuildOptions(SpectrumPipelineOptions current, ImpedanceRequest request) =>
         current with
         {
             FftSize = request.FftSize,
-            Window = WindowType.Rectangular,
+            Window = request.IsNoise ? WindowType.Hann : WindowType.Rectangular,
 
             // The runner averages in the complex domain itself. The pipeline's averager works on
             // magnitudes, which would throw away the phase this measurement is entirely about.

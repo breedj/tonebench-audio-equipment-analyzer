@@ -66,6 +66,24 @@ const { showPage } = useManual()
       is not useful.
     </p>
     <p>
+      <strong>Pink noise</strong> plays continuously and builds the answer up out of independent
+      records. It costs the same as the chirp &mdash; the same span, the same record length, the same
+      handful of averages &mdash; and shares its settings, but the two differ in what an extra average
+      buys. A chirp's records are repeats of one deterministic sweep, so averaging confirms a reading
+      rather than improving it; every noise record is a fresh draw, so the estimate keeps getting
+      quieter for as long as you let it run, and the curve is redrawn after each one rather than only
+      at the end. It also carries no harmonic packets, so the gate below is not offered for it: what
+      a distorting DUT does to noise lands in the coherence, where you can see it, instead of folding
+      into the answer as ripple.
+    </p>
+    <p>
+      Pink rather than white because the divider this measurement inverts is noise-limited at the
+      bottom of the band, which is exactly where a white stimulus puts the least energy per octave.
+      The stimulus is DC-blocked below 2 Hz: a 1/f filter integrates its input, and the offset that
+      produces is both wasted drive and DC through the DUT &mdash; which for a driver means a voice
+      coil sitting off centre.
+    </p>
+    <p>
       Its settings are a start and end frequency, how many points per octave, and
       <em>adaptive resolution</em>, which sizes each point's record for its own frequency rather than
       for the bottom of the band — that is most of what keeps the top of a sweep quick. The panel
@@ -335,7 +353,8 @@ const { showPage } = useManual()
       Deconvolving a chirp recovers the DUT's harmonic distortion alongside its linear response, and
       those packets add a fine ripple to the result. Gating removes them at the cost of halving the
       frequency resolution. A passive load distorts far too little for this to matter; it is here
-      for the cases where it does.
+      for the cases where it does. It appears only for the chirp: the packets are a product of sweep
+      deconvolution, so the other two stimuli have nothing for it to remove.
     </p>
 
     <h2>What is not here yet</h2>
@@ -345,8 +364,7 @@ const { showPage } = useManual()
       different method — measuring the same amplifier into two different load resistances and
       solving for the source impedance behind them — because you cannot drive a generator through a
       resistor into a live amplifier output. That method, and the damping factor it yields, are not
-      implemented yet. The stimulus selector offers the chirp and the stepped sine; pink noise is
-      planned.
+      implemented yet.
     </p>
   </div>
 </template>

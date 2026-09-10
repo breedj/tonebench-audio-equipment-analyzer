@@ -23,9 +23,13 @@ public static class OutputRangeSelector
     public const double HeadroomDb = 2.0;
 
     /// <summary>
-    /// Crest factor allowed for Gaussian white noise, whose peak is unbounded. 12 dB ≈ 4 sigma:
-    /// clipping is then rare enough not to show up as distortion in a spectrum, without wasting a
-    /// whole range step. Not a protocol fact — a tuning constant.
+    /// Crest factor allowed for Gaussian noise, whose peak is unbounded. 12 dB ≈ 4 sigma: clipping
+    /// is then rare enough not to show up as distortion in a spectrum, without wasting a whole range
+    /// step. Not a protocol fact — a tuning constant.
+    ///
+    /// <para>Serves the pink kind too, and at the same figure: shaping filters a Gaussian stream and
+    /// leaves it Gaussian, and <see cref="PinkNoiseShaper"/> renormalises the result to the same RMS,
+    /// so the peak-to-RMS ratio is the one white has.</para>
     /// </summary>
     public const double NoiseCrestFactorDb = 12.0;
 
@@ -82,7 +86,7 @@ public static class OutputRangeSelector
             // not an RMS combination. Covers Multitone too: Tones holds the derived comb.
             GeneratorKind.Tones or GeneratorKind.Multitone => channel.Tones.Sum(t => PeakVolts(t.AmplitudeDbv)),
 
-            GeneratorKind.WhiteNoise => channel.Noise is { } noise
+            GeneratorKind.WhiteNoise or GeneratorKind.PinkNoise => channel.Noise is { } noise
                 ? Math.Pow(10.0, (noise.LevelDbv + NoiseCrestFactorDb) / 20.0)
                 : 0.0,
 

@@ -386,6 +386,85 @@ public class SimulatedDeviceTests
     }
 
     [Fact]
+    public async Task ConfigureGeneratorAsync_PinkNoise_HasTheConfiguredBroadbandRms()
+    {
+        // The simulator has to present the same stimulus level the real device does, or an impedance
+        // run verified against --simulate would be a different run on hardware. A longer block than
+        // the white test's: 1/f noise puts most of its power at the low end, so a short one is a
+        // draw of a slow random walk rather than an average of it.
+        const double levelDbv = -20.0;
+        var device = await ConnectBareDeviceAsync(randomSeed: 7);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(
+                new ChannelGeneratorConfig(true, []) { Kind = GeneratorKind.PinkNoise, Noise = new WhiteNoiseSettings { LevelDbv = levelDbv } },
+                ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+
+        var samples = await FirstBlockSamplesAsync(device, channelCount: 1, blockFrameCount: 65_536);
+
+        double rms = Math.Sqrt(samples.Sum(s => (double)s * s) / samples.Length);
+        double measuredDbv = 20.0 * Math.Log10(rms);
+        Assert.True(Math.Abs(measuredDbv - levelDbv) < 1.0, $"Expected ~{levelDbv} dBV, measured {measuredDbv} dBV");
+    }
+
+    [Fact]
+    public async Task ConfigureGeneratorAsync_PinkNoise_PutsTheSameStimulusOnBothChannels()
+    {
+        // The mirror image of the white-noise test above, and deliberately so. White models two
+        // independent generator channels; pink is a measurement stimulus, and the simulator's right
+        // channel stands in for the reference tap of a fixture that a bench drives with the very
+        // same signal. An impedance run against --simulate reads coherence near zero without this.
+        var device = await ConnectBareDeviceAsync(randomSeed: 3);
+        var channel = new ChannelGeneratorConfig(true, []) { Kind = GeneratorKind.PinkNoise, Noise = new WhiteNoiseSettings { LevelDbv = -20.0 } };
+        await device.ConfigureGeneratorAsync(new GeneratorConfig(channel, channel), CancellationToken.None);
+
+        var samples = await FirstBlockSamplesAsync(device, channelCount: 2, blockFrameCount: 256);
+
+        for (int frame = 0; frame < 256; frame++)
+            Assert.Equal(samples[frame * 2], samples[(frame * 2) + 1]);
+    }
+
+    [Fact]
+    public async Task ConfigureGeneratorAsync_PinkNoise_HasMorePowerBelowAKilohertzThanWhiteDoes()
+    {
+        // The reason this stimulus is pink rather than white: a divider measurement is noise-limited
+        // at the bottom of the band. Measured as a ratio of the two kinds at the same level, so it
+        // cannot pass by both being wrong the same way.
+        var device = await ConnectBareDeviceAsync(randomSeed: 3);
+
+        async Task<double> LowBandFractionAsync(GeneratorKind kind)
+        {
+            await device.ConfigureGeneratorAsync(
+                new GeneratorConfig(
+                    new ChannelGeneratorConfig(true, []) { Kind = kind, Noise = new WhiteNoiseSettings { LevelDbv = -20.0 } },
+                    ChannelGeneratorConfig.Off),
+                CancellationToken.None);
+
+            var samples = await FirstBlockSamplesAsync(device, channelCount: 1, blockFrameCount: 32_768);
+
+            // A one-pole low pass at about 1 kHz for 48 kHz sampling, which is all this needs: the
+            // question is which kind puts more of its power below a kilohertz, not how much.
+            const double alpha = 0.12;
+            double state = 0.0;
+            double lowPower = 0.0;
+            double totalPower = 0.0;
+            foreach (float sample in samples)
+            {
+                state += alpha * (sample - state);
+                lowPower += state * state;
+                totalPower += (double)sample * sample;
+            }
+
+            return lowPower / totalPower;
+        }
+
+        double pink = await LowBandFractionAsync(GeneratorKind.PinkNoise);
+        double white = await LowBandFractionAsync(GeneratorKind.WhiteNoise);
+
+        Assert.True(pink > 2.0 * white, $"Pink put {pink:0.000} of its power in the low band against white's {white:0.000}.");
+    }
+
+    [Fact]
     public async Task ConfigureGeneratorAsync_EchoChirp_SweepsUpwardsWithinTheConfiguredBand()
     {
         const double sampleRateHz = 48_000.0;

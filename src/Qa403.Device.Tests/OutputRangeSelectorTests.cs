@@ -93,6 +93,21 @@ public class OutputRangeSelectorTests
     }
 
     [Fact]
+    public void RequiredPeakVolts_PinkNoise_AllowsTheSameCrestFactorAsWhite()
+    {
+        // Shaping filters a Gaussian stream and leaves it Gaussian, and PinkNoiseShaper renormalises
+        // it to the same RMS -- so the peak-to-RMS ratio is white's, and so is the range.
+        var channel = new ChannelGeneratorConfig(true, [])
+        {
+            Kind = GeneratorKind.PinkNoise,
+            Noise = new WhiteNoiseSettings { LevelDbv = -20.0 },
+        };
+
+        double expected = Math.Pow(10.0, (-20.0 + OutputRangeSelector.NoiseCrestFactorDb) / 20.0);
+        Assert.Equal(expected, OutputRangeSelector.RequiredPeakVolts(channel), precision: 10);
+    }
+
+    [Fact]
     public void RequiredPeakVolts_IgnoresTheToneListForNonToneKinds()
     {
         // Tones stays populated when the user switches kind, and sizing the range off a stimulus

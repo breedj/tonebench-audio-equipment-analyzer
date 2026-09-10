@@ -96,7 +96,7 @@ public static class ImpedanceEndpoints
 /// the API — see <see cref="EnumParsing"/>.
 /// </summary>
 /// <param name="Method">ReferenceResistor. TwoLoad is reserved and rejected for now.</param>
-/// <param name="Stimulus">Chirp. SteppedSine and PinkNoise are reserved and rejected for now.</param>
+/// <param name="Stimulus">Chirp, SteppedSine or PinkNoise.</param>
 /// <param name="ReferenceOhms">The series reference resistor.</param>
 /// <param name="RightChannelIsReference">True when the right channel taps the generator side. The simulator needs this; a bench fixture wired left-as-reference does not.</param>
 /// <param name="FrequencySpanHz">Nyquist, i.e. half the sample rate: 24000, 48000 or 96000.</param>

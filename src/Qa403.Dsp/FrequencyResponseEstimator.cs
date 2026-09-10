@@ -155,6 +155,21 @@ public sealed class FrequencyResponseEstimator
     /// </summary>
     public const double RegularisationFraction = 1e-6;
 
+    /// <summary>
+    /// The fraction for a stimulus that excites <b>every</b> bin — continuous noise, where nothing in
+    /// the analysed band is starved and the regulariser has nothing to bound.
+    ///
+    /// <para>A sweep needs the default because it genuinely has dead bins: below its start frequency
+    /// and above its end there is no stimulus at all, and a bare <c>Y/X</c> there divides noise by
+    /// nearly nothing. Noise has no such decades — but it does have a wide dynamic range within the
+    /// band (pink falls 3 dB an octave, so 30 dB across ten of them) <i>and</i> a per-bin magnitude
+    /// that is a random draw, so the weakest bins of a column sit far below <c>max(Sxx)</c> and take
+    /// the whole of the bias. Measured end to end against the resistive fixture at 24 kHz span: the
+    /// default reads <b>0.11 dB</b> low at 10 kHz, this reads 0.001 dB. It is still a thousandfold
+    /// guard against a bin that is exactly zero.</para>
+    /// </summary>
+    public const double BroadbandRegularisationFraction = 1e-9;
+
     private readonly IFftBackend _fft;
     private readonly int _fftSize;
     private readonly int _binCount;
@@ -171,6 +186,9 @@ public sealed class FrequencyResponseEstimator
 
     /// <summary>See the constructor's <c>removeLatency</c> parameter.</summary>
     private readonly bool _removeLatency;
+
+    /// <summary>See the constructor's <c>regularisationFraction</c> parameter.</summary>
+    private readonly double _regularisationFraction;
 
     private double _latencySum;
     private int _records;
@@ -198,9 +216,21 @@ public sealed class FrequencyResponseEstimator
     /// <para>Gating is unaffected either way: <see cref="ApplyGate"/> locates itself on the impulse
     /// rather than assuming removal has parked it at the origin.</para>
     /// </param>
+    /// <param name="regularisationFraction">
+    /// The <c>lambda</c> in <c>H = Sxy / (Sxx + lambda)</c>, as a fraction of the strongest bin's
+    /// reference power. Defaults to <see cref="RegularisationFraction"/>, which is what a swept
+    /// measurement needs; a stimulus that reaches every bin should pass
+    /// <see cref="BroadbandRegularisationFraction"/> instead, and that member says why.
+    /// </param>
     public FrequencyResponseEstimator(
-        int fftSize, IFftBackend fft, ImpulseGate? gate = null, bool removeLatency = true)
+        int fftSize,
+        IFftBackend fft,
+        ImpulseGate? gate = null,
+        bool removeLatency = true,
+        double regularisationFraction = RegularisationFraction)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(regularisationFraction);
+
         if (fftSize < 4 || (fftSize & (fftSize - 1)) != 0)
             throw new ArgumentException("FFT size must be a power of two of at least 4.", nameof(fftSize));
 
@@ -226,6 +256,7 @@ public sealed class FrequencyResponseEstimator
         _impulse = new double[fftSize];
         _gateWindow = gate is { } window ? BuildGateWindow(fftSize, window) : null;
         _removeLatency = removeLatency;
+        _regularisationFraction = regularisationFraction;
     }
 
     /// <summary>Records accumulated so far. <see cref="FrequencyResponseResult.Coherence"/> is only informative from 2 up.</summary>
@@ -258,7 +289,7 @@ public sealed class FrequencyResponseEstimator
         if (response.Length != _binCount)
             throw new ArgumentException($"Response must have {_binCount} bins, got {response.Length}.", nameof(response));
 
-        double lambda = RegularisationFraction * MaxPower(reference);
+        double lambda = _regularisationFraction * MaxPower(reference);
 
         for (int k = 0; k < _binCount; k++)
         {
@@ -291,7 +322,7 @@ public sealed class FrequencyResponseEstimator
         for (int k = 0; k < _binCount; k++)
             maxSxx = Math.Max(maxSxx, _sxx[k]);
 
-        double lambda = RegularisationFraction * maxSxx;
+        double lambda = _regularisationFraction * maxSxx;
         double referenceScale = maxSxx > 0.0 ? Math.Sqrt(maxSxx) : 1.0;
 
         double[] magnitude = new double[_binCount];
@@ -350,7 +381,7 @@ public sealed class FrequencyResponseEstimator
         for (int k = 0; k < _binCount; k++)
             maxSxx = Math.Max(maxSxx, _sxx[k]);
 
-        double lambda = RegularisationFraction * maxSxx;
+        double lambda = _regularisationFraction * maxSxx;
 
         var h = new Complex[_binCount];
         for (int k = 0; k < _binCount; k++)

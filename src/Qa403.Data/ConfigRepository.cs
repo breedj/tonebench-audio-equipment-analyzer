@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Qa403.Dsp;
 
 namespace Qa403.Data;
@@ -45,6 +45,24 @@ public sealed record ImpedanceFixtureConfig(
 }
 
 /// <summary>
+/// How the window is laid out: the preferences that describe this screen rather than any measurement.
+///
+/// <para>Stored server-side rather than in the browser's <c>localStorage</c>, so the layout reads the
+/// same in every tab and survives a browser cache clear. It sits in the configuration database
+/// and not the measurement history for the usual reason — a project file copied to another machine
+/// must not carry this screen's layout with it.</para>
+/// </summary>
+/// <param name="SidebarPinned">
+/// Whether the measurement sidebar stays open at its full width. Unpinned, it collapses to a rail of
+/// icons and floats open over the content while hovered, which is the extra chart width a small
+/// screen needs. Pinned is the default because it is what the app always did.
+/// </param>
+public sealed record UiLayoutConfig(bool SidebarPinned = true)
+{
+    public static UiLayoutConfig Default { get; } = new();
+}
+
+/// <summary>
 /// Reads and writes the configuration database's key/value documents.
 ///
 /// <para>Deliberately takes <see cref="ConfigConnectionFactory"/> and not
@@ -55,6 +73,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 {
     /// <summary>The impedance fixture's key. One document, see <see cref="ImpedanceFixtureConfig"/>.</summary>
     public const string ImpedanceFixtureKey = "impedance.fixture";
+
+    /// <summary>The window layout's key. One document, see <see cref="UiLayoutConfig"/>.</summary>
+    public const string UiLayoutKey = "ui.layout";
 
     public async Task<string?> GetAsync(string key, CancellationToken ct)
     {

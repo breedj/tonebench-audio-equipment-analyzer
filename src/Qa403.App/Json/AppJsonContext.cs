@@ -76,6 +76,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ImpedanceStatus))]
 [JsonSerializable(typeof(SaveImpedanceRequest))]
 [JsonSerializable(typeof(ImpedanceFixtureConfig))]
+[JsonSerializable(typeof(UiLayoutConfig))]
 [JsonSerializable(typeof(StoredResponseTracesResponse))]
 [JsonSerializable(typeof(FrequencyResponseParameters))]
 // The stepped-sine response's own DTOs. Missing until now, which is exactly the failure this file's

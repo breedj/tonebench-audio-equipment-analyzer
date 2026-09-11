@@ -246,6 +246,15 @@ export interface ImpedanceFixtureConfig {
   hasCalibration: boolean
 }
 
+/**
+ * How the window is laid out — preferences about this screen, not about any measurement. Stored
+ * in the configuration database like the fixture, so every tab agrees and a cache clear keeps it.
+ */
+export interface UiLayoutConfig {
+  /** Whether the measurement sidebar stays open at full width; unpinned it collapses to icons and floats open on hover. */
+  sidebarPinned: boolean
+}
+
 export interface ImpedanceStartRequest {
   method: ImpedanceMethodName
   stimulus: ImpedanceStimulusName
@@ -1693,6 +1702,11 @@ export const api = {
 
   clearImpedanceFixture: () =>
     request<ImpedanceFixtureConfig>('/config/impedance-fixture', { method: 'DELETE' }),
+
+  getUiLayout: () => request<UiLayoutConfig>('/config/ui-layout'),
+
+  setUiLayout: (layout: UiLayoutConfig) =>
+    request<UiLayoutConfig>('/config/ui-layout', { method: 'PUT', body: JSON.stringify(layout) }),
 
   startImpedance: (req: ImpedanceStartRequest) =>
     request<ImpedanceStarted>('/impedance/start', { method: 'POST', body: JSON.stringify(req) }),

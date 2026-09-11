@@ -49,6 +49,14 @@ const { showPage } = useManual()
       line shows where it will land. The order is per project and is saved as soon as you drop.
     </p>
     <p>
+      The sidebar can be <strong>unpinned</strong> with the pin button beside
+      <strong>+ New measurement</strong>. Unpinned, it collapses to a column of icons — one per
+      measurement, still selectable, with the name in a tooltip — and gives the chart the width it
+      was using; moving the pointer onto the column opens the full menu over the chart, and moving
+      off it closes it again. Pin it back with the same button. Whether it is pinned is remembered
+      on this machine, for every browser tab.
+    </p>
+    <p>
       A red dot next to a measurement's name means its settings have been changed but not saved.
       <strong>Save</strong> stores the settings into that measurement, <strong>Save as…</strong>
       makes a new measurement from them, and <strong>Save project</strong> saves every changed

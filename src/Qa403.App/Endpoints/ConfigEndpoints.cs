@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 using Qa403.App.Services;
@@ -75,6 +75,38 @@ public static class ConfigEndpoints
         {
             await repo.DeleteAsync(ConfigRepository.ImpedanceFixtureKey, ct);
             return Results.Ok(ImpedanceFixtureConfig.Default);
+        });
+
+        // The window layout — currently just whether the measurement sidebar is pinned. Same
+        // contract as the fixture: defaults rather than 404, and an unreadable document is replaced
+        // by them rather than surfaced, since nothing about a layout is worth an error.
+        group.MapGet("/ui-layout", async (
+            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            string? stored = await repo.GetAsync(ConfigRepository.UiLayoutKey, ct);
+            if (string.IsNullOrWhiteSpace(stored))
+                return Results.Ok(UiLayoutConfig.Default);
+
+            try
+            {
+                var layout = JsonSerializer.Deserialize<UiLayoutConfig>(stored, jsonOptions.Value.SerializerOptions);
+                return Results.Ok(layout ?? UiLayoutConfig.Default);
+            }
+            catch (JsonException)
+            {
+                return Results.Ok(UiLayoutConfig.Default);
+            }
+        });
+
+        group.MapPut("/ui-layout", async (
+            UiLayoutConfig layout, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            await repo.SetAsync(
+                ConfigRepository.UiLayoutKey,
+                JsonSerializer.Serialize(layout, jsonOptions.Value.SerializerOptions),
+                ct);
+
+            return Results.Ok(layout);
         });
     }
 }

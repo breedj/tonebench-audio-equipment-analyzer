@@ -11,4 +11,11 @@ namespace Qa403.Device;
 /// <c>SimulatedDevice</c>, the block emission cadence — smaller values exercise the streaming
 /// pipeline's backpressure behaviour more aggressively.
 /// </param>
-public readonly record struct AcquisitionConfig(double SampleRateHz, int ChannelCount, int BlockFrameCount = 4096);
+public readonly record struct AcquisitionConfig(double SampleRateHz, int ChannelCount, int BlockFrameCount = AcquisitionConfig.DefaultBlockFrameCount)
+{
+    /// <summary>
+    /// The block size a caller gets without asking. Named so that whatever else has to agree with it
+    /// (the simulator's idle-time <see cref="IAnalyzerDevice.StimulusLatencyFrames"/>) can say so.
+    /// </summary>
+    public const int DefaultBlockFrameCount = 4096;
+}

@@ -113,7 +113,10 @@ public interface IAnalyzerDevice
     /// frames, i.e. the DAC's committed-but-unplayed TX queue and nothing else (~65 ms at every rate,
     /// by design — see <c>Qa40xUsbDevice.TargetInFlightSeconds</c>).</para>
     ///
-    /// <para>Zero for the simulator, whose generator changes take effect on the next block.</para>
+    /// <para>One block for the simulator: it synthesizes each block from the configuration as it
+    /// stood when the block started, so the block in progress when a change returns is still the
+    /// old stimulus. It claimed zero until 2026-09-11, and a THD sweep whose records were one block
+    /// long read the previous point's tone about one time in five.</para>
     /// </summary>
     int StimulusLatencyFrames(double sampleRateHz);
 

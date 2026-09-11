@@ -32,6 +32,11 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     private double _inputRangeDbv = 12.0;
     private double _outputRangeDbv = 8.0;
     private GeneratorConfig _generatorConfig = GeneratorConfig.Off;
+
+    // The block size the running stream hands out, which is also this device's stimulus latency
+    // (see StimulusLatencyFrames). Written by StreamAsync on its own thread, read by the session
+    // on the caller's, hence volatile.
+    private volatile int _activeBlockFrameCount = AcquisitionConfig.DefaultBlockFrameCount;
     private volatile bool _stopRequested;
     private bool _connected;
 
@@ -73,12 +78,29 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     public long DroppedBlocks => 0;
 
     /// <summary>
-    /// Zero: each block is synthesized from the generator config as it is handed out, so a change is
-    /// audible in the very next block and nothing is ever committed ahead. This is precisely why the
-    /// post-change skirt that real hardware shows cannot be reproduced against the simulator — see
-    /// <see cref="IAnalyzerDevice.StimulusLatencyFrames"/>.
+    /// One block. <see cref="StreamAsync"/> reads the profile and both ranges <i>once</i>, at the
+    /// top of each block, and then synthesizes the whole block from that reading — so a change that
+    /// lands while a block is being built is not in that block, and the block is still handed out
+    /// after the change returned. That is a block of audio committed ahead of the change, which is
+    /// exactly what this property describes for the real device (its DAC queue), just one block
+    /// deep instead of a queue.
+    ///
+    /// <para>This used to return 0 on the argument that "a change is audible in the very next
+    /// block", which is true and beside the point: the block in progress is the one that matters,
+    /// and every stimulus-driven flush trusts this number to know how much of it to throw away.
+    /// Reproduced on a THD-vs-frequency sweep under adaptive resolution, where the 4096-point
+    /// records at the top of the sweep are one block long: roughly one point in five read the
+    /// <i>previous</i> point's tone — the whole record was the stale block — and with four averages
+    /// that diluted to a level 0.6–1.2 dB low with the SNR down 20–40 dB. Invisible at the fixed
+    /// 131072-point size, where the same block is 3 % of a record under a window that weights its
+    /// ends toward zero. Guarded by
+    /// <c>SimulatedDeviceTests.ConfigureGeneratorAsync_StaleAudioAfterItReturns_IsCoveredByStimulusLatencyFrames</c>.</para>
+    ///
+    /// <para>The sample rate is irrelevant here — the latency is a block whatever the rate — and the
+    /// block size is the running stream's, falling back to the default while idle, which only
+    /// matters for a flush that precedes a restart anyway.</para>
     /// </summary>
-    public int StimulusLatencyFrames(double sampleRateHz) => 0;
+    public int StimulusLatencyFrames(double sampleRateHz) => _activeBlockFrameCount;
 
     /// <summary>
     /// The simulator has no autoranging, so this stays false however it is set — the UI reads it to
@@ -138,6 +160,7 @@ public sealed class SimulatedDevice : IAnalyzerDevice
             throw new ArgumentOutOfRangeException(nameof(config), "BlockFrameCount must be positive.");
 
         _stopRequested = false;
+        _activeBlockFrameCount = config.BlockFrameCount;
 
         var synthesizer = new SignalSynthesizer(_random, config.SampleRateHz);
 
@@ -164,6 +187,12 @@ public sealed class SimulatedDevice : IAnalyzerDevice
             if (!await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
                 yield break;
 
+            // Read once per block, as are the two ranges below, and everything in this block follows
+            // from that reading. A change made from another thread part-way through therefore misses
+            // this block and lands in the next -- which is the one block of latency
+            // StimulusLatencyFrames reports. Do not "fix" this by re-reading per frame: a block
+            // whose tone changes mid-way is a step inside a record, which is the worse artefact, and
+            // one no flush can be told about.
             var profile = _profile;
 
             // A model changed mid-acquisition starts from rest, which is right: it is a different

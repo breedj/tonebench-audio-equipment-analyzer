@@ -167,7 +167,13 @@ public class SteppedResponseRunnerTests
         var status = await AwaitCompletionAsync(harness.Runner);
 
         AssertFinished(status);
-        Assert.All(Trace(status, FrequencyResponseTraceKind.Gain).PhaseDeg, deg => Assert.Equal(0.0f, deg));
+
+        // Not exactly zero: the runner reads arg(L/R), and Complex division is Smith's algorithm,
+        // which does not return exactly 1+0i for x/x -- the residue (~1e-30 degrees) depends on the
+        // operands, i.e. on where the record starts in the tone. A leaked absolute angle would be
+        // tens of degrees, so a tolerance a billion times below anything a chart can draw keeps the
+        // assertion's meaning.
+        Assert.All(Trace(status, FrequencyResponseTraceKind.Gain).PhaseDeg, deg => Assert.InRange(deg, -1e-6f, 1e-6f));
     }
 
     [Fact]

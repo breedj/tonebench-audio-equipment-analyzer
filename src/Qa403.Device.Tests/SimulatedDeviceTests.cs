@@ -613,6 +613,99 @@ public class SimulatedDeviceTests
         return device;
     }
 
+    /// <summary>
+    /// The contract every stimulus-driven flush relies on: once a generator change has returned, at
+    /// most <see cref="IAnalyzerDevice.StimulusLatencyFrames"/> frames of the <i>old</i> stimulus
+    /// may still arrive. The simulator broke it by claiming zero while handing out the block it was
+    /// in the middle of synthesizing — found as a THD sweep whose one-block records read the
+    /// previous point's tone.
+    ///
+    /// <para>The race is made certain rather than waited for: the old stimulus is a comb of
+    /// thousands of tones, expensive enough that a block takes far longer to synthesize than its
+    /// 21 ms of audio lasts, so the device is always inside a block and the change, sent a moment
+    /// after a block was received, lands inside the next one. The new stimulus is silence, so a
+    /// stale frame is simply a non-zero one — no analysis needed to tell the two apart.</para>
+    /// </summary>
+    [Fact]
+    public async Task ConfigureGeneratorAsync_StaleAudioAfterItReturns_IsCoveredByStimulusLatencyFrames()
+    {
+        const double sampleRateHz = 192_000.0;
+        const int blockFrameCount = 4096;
+
+        var device = new SimulatedDevice(randomSeed: 1);
+        device.SignalProfile = device.SignalProfile with { NoiseEnabled = false, HumEnabled = false };
+        await device.ConnectAsync(CancellationToken.None);
+
+        // Deliberately heavy: one cosine per tone per frame, so a block is hundreds of ms of work.
+        var comb = Enumerable.Range(0, 4000)
+            .Select(i => new GeneratorTone(20.0 + (i * 4.0), -70.0))
+            .ToArray();
+        var heavy = new GeneratorConfig(
+            new ChannelGeneratorConfig(Enabled: true, Tones: comb) { Kind = GeneratorKind.Multitone },
+            ChannelGeneratorConfig.Off);
+        await device.ConfigureGeneratorAsync(heavy, CancellationToken.None);
+
+        var config = new AcquisitionConfig(sampleRateHz, ChannelCount: 2, blockFrameCount);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        // (receivedAt, non-zero left frames) per block, in arrival order -- what the session's pump
+        // would have appended to the ring buffer, and when.
+        var received = new List<(long At, int StaleFrames)>();
+        var firstBlockSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var silenceSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var block in device.StreamAsync(config, cts.Token))
+            {
+                int stale;
+                using (block)
+                {
+                    stale = 0;
+                    for (int frame = 0; frame < block.FrameCount; frame++)
+                    {
+                        if (block.Samples[frame * block.ChannelCount] != 0.0f)
+                            stale++;
+                    }
+                }
+
+                lock (received)
+                    received.Add((Stopwatch.GetTimestamp(), stale));
+
+                firstBlockSeen.TrySetResult();
+                if (stale == 0)
+                {
+                    silenceSeen.TrySetResult();
+                    break;
+                }
+            }
+        });
+
+        await firstBlockSeen.Task.WaitAsync(cts.Token);
+
+        // The consumer has already asked for the next block, and the device -- behind schedule
+        // by now -- started building it at once, from the comb. Give that a moment to be under way.
+        await Task.Delay(TimeSpan.FromMilliseconds(30), cts.Token);
+
+        await device.ConfigureGeneratorAsync(GeneratorConfig.Off, CancellationToken.None);
+        long returnedAt = Stopwatch.GetTimestamp();
+
+        await silenceSeen.Task.WaitAsync(cts.Token);
+        cts.Cancel();
+        await consumer;
+
+        int staleAfterReturn;
+        lock (received)
+            staleAfterReturn = received.Where(r => r.At > returnedAt).Sum(r => r.StaleFrames);
+
+        int declared = device.StimulusLatencyFrames(sampleRateHz);
+        Assert.True(
+            staleAfterReturn <= declared,
+            $"{staleAfterReturn} frames of the old stimulus arrived after ConfigureGeneratorAsync returned, "
+                + $"but the device declares a stimulus latency of {declared} frames -- a flush trusting that "
+                + "figure refills with pre-change audio.");
+    }
+
     private static async Task<float[]> FirstBlockSamplesAsync(
         SimulatedDevice device, int channelCount, int blockFrameCount, double sampleRateHz = 48_000.0)
     {

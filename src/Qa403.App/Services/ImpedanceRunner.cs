@@ -323,11 +323,24 @@ public sealed class ImpedanceRunner(
             // re-applying it would flush a queue depth of good audio on every repeat for nothing.
             bool generatorConfigured = false;
 
+            // A continuous noise run keeps one estimator for its whole life, as a sliding window of
+            // AverageCount records: every record after the first pass replaces the oldest rather
+            // than starting the average over. Records of noise are independent draws, so the
+            // curve after record N+1 is as good as after record N -- and this path publishes after
+            // *every* record, so restarting per pass put the single-record curve, the worst of the
+            // run, on screen once every pass. A chirp's passes stay independent: its records are
+            // repeats of one sweep, nothing is published mid-pass, and a fresh estimator per pass
+            // is what keeps a continuous chirp run a sequence of like-for-like measurements.
+            FrequencyResponseEstimator? slidingEstimator = request.Continuous && request.IsNoise
+                ? CreateEstimator(request, windowRecords: request.AverageCount)
+                : null;
+
             do
             {
                 ct.ThrowIfCancellationRequested();
 
-                var pass = await MeasureOnceAsync(request, generator, generatorConfigured, ct);
+                var estimator = slidingEstimator ?? CreateEstimator(request, windowRecords: 0);
+                var pass = await MeasureOnceAsync(request, generator, estimator, generatorConfigured, ct);
                 generatorConfigured = true;
                 passes++;
 
@@ -439,17 +452,11 @@ public sealed class ImpedanceRunner(
         string? Warning = null);
 
     /// <summary>
-    /// One complete measurement: <see cref="ImpedanceRequest.AverageCount"/> records folded into a
-    /// fresh estimate, then solved and turned into a curve.
-    ///
-    /// <para>The estimator is created per pass rather than reused, which makes a continuous run a
-    /// sequence of independent measurements instead of an ever-lengthening average.</para>
+    /// The estimator for one whole-spectrum pass. Created per pass for a chirp -- which makes a
+    /// continuous run a sequence of independent measurements instead of an ever-lengthening
+    /// average -- and once per run, windowed, for continuous noise; see the caller for why.
     /// </summary>
-    private async Task<PassResult> MeasureOnceAsync(
-        ImpedanceRequest request,
-        GeneratorConfig generator,
-        bool generatorAlreadyConfigured,
-        CancellationToken ct)
+    private FrequencyResponseEstimator CreateEstimator(ImpedanceRequest request, int windowRecords)
     {
         // Optional here, unlike the frequency response, where it is always on. Gating removes the
         // harmonic packets a swept measurement of a distorting DUT picks up, at a factor of two in
@@ -467,14 +474,32 @@ public sealed class ImpedanceRunner(
         // The regulariser follows the stimulus. A chirp has decades with no energy in them and needs
         // the default to bound those; noise reaches every bin, where the same lambda only biases the
         // quiet top of the band low -- see FrequencyResponseEstimator.BroadbandRegularisationFraction.
-        var estimator = new FrequencyResponseEstimator(
+        return new FrequencyResponseEstimator(
             request.FftSize, _fft, gate, removeLatency: false,
             regularisationFraction: request.IsNoise
                 ? FrequencyResponseEstimator.BroadbandRegularisationFraction
-                : FrequencyResponseEstimator.RegularisationFraction);
+                : FrequencyResponseEstimator.RegularisationFraction,
+            windowRecords: windowRecords);
+    }
 
+    /// <summary>
+    /// One complete measurement: <see cref="ImpedanceRequest.AverageCount"/> records folded into
+    /// <paramref name="estimator"/>, then solved and turned into a curve. A fresh estimator gives
+    /// an independent measurement; a windowed one carried over from the previous pass gives a
+    /// sliding average that never restarts.
+    /// </summary>
+    private async Task<PassResult> MeasureOnceAsync(
+        ImpedanceRequest request,
+        GeneratorConfig generator,
+        FrequencyResponseEstimator estimator,
+        bool generatorAlreadyConfigured,
+        CancellationToken ct)
+    {
+        // What the average holds right now: nothing for a fresh estimator, a full window for one
+        // carried over -- and the latter stays full, so the status reads "N of N" from here on
+        // rather than counting up from one again.
         lock (_stateLock)
-            _averagesTaken = 0;
+            _averagesTaken = estimator.Records;
 
         double peakDbv = double.NaN;
         var phase = request.IsCalibration
@@ -511,9 +536,9 @@ public sealed class ImpedanceRunner(
             estimator.Add(reference, dut);
 
             lock (_stateLock)
-                _averagesTaken = record + 1;
+                _averagesTaken = estimator.Records;
 
-            BroadcastProgress(record + 1, request.AverageCount, phase);
+            BroadcastProgress(estimator.Records, request.AverageCount, phase);
 
             // Published as it goes, for the noise stimulus only. Every record genuinely improves a
             // Welch estimate, so there is something new to look at each time -- where a chirp's

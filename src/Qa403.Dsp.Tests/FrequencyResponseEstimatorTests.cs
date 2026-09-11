@@ -290,6 +290,93 @@ public class FrequencyResponseEstimatorTests
         Assert.Throws<InvalidOperationException>(() => estimator.Complete());
     }
 
+    /// <summary>
+    /// A windowed estimator holds exactly the last N records: after N + k adds it must agree, bin
+    /// for bin, with a fresh unbounded estimator fed only those last N. Each record carries its own
+    /// noise draw so an evicted record that was not really evicted would show up as a difference.
+    /// </summary>
+    [Fact]
+    public void Windowed_HoldsExactlyTheLastNRecords()
+    {
+        const int window = 3;
+        var stimulus = Chirp();
+        var random = new Random(11);
+        var records = Enumerable.Range(0, window + 4)
+            .Select(_ => AddNoise(stimulus, random, 0.5))
+            .ToArray();
+
+        var sliding = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), windowRecords: window);
+        foreach (var record in records)
+        {
+            sliding.Add(Spectrum(stimulus), Spectrum(record));
+            Assert.InRange(sliding.Records, 1, window);
+        }
+
+        Assert.Equal(window, sliding.Records);
+        Assert.Equal(window, sliding.WindowRecords);
+
+        var reference = new FrequencyResponseEstimator(FftSize, new MathNetBackend());
+        foreach (var record in records.Skip(records.Length - window))
+            reference.Add(Spectrum(stimulus), Spectrum(record));
+
+        var slid = sliding.Complete();
+        var expected = reference.Complete();
+
+        foreach (int bin in BandBins())
+        {
+            Assert.Equal(expected.Magnitude[bin], slid.Magnitude[bin], 9);
+            Assert.Equal(expected.PhaseDeg[bin], slid.PhaseDeg[bin], 6);
+            Assert.Equal(expected.Coherence[bin], slid.Coherence[bin], 9);
+        }
+    }
+
+    [Fact]
+    public void Windowed_BeforeTheWindowIsFull_IsTheOrdinaryAverage()
+    {
+        var stimulus = Chirp();
+        var random = new Random(13);
+        var records = Enumerable.Range(0, 2).Select(_ => AddNoise(stimulus, random, 0.5)).ToArray();
+
+        var sliding = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), windowRecords: 4);
+        var plain = new FrequencyResponseEstimator(FftSize, new MathNetBackend());
+        foreach (var record in records)
+        {
+            sliding.Add(Spectrum(stimulus), Spectrum(record));
+            plain.Add(Spectrum(stimulus), Spectrum(record));
+        }
+
+        Assert.Equal(2, sliding.Records);
+
+        var a = sliding.Complete();
+        var b = plain.Complete();
+        foreach (int bin in BandBins())
+            Assert.Equal(b.Magnitude[bin], a.Magnitude[bin], 9);
+    }
+
+    [Fact]
+    public void Windowed_Reset_EmptiesTheWindow()
+    {
+        var stimulus = Chirp();
+        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), windowRecords: 2);
+        estimator.Add(Spectrum(stimulus), Spectrum(stimulus));
+        estimator.Add(Spectrum(stimulus), Spectrum(stimulus));
+        estimator.Add(Spectrum(stimulus), Spectrum(stimulus));
+        Assert.Equal(2, estimator.Records);
+
+        estimator.Reset();
+
+        Assert.Equal(0, estimator.Records);
+        Assert.Throws<InvalidOperationException>(() => estimator.Complete());
+
+        estimator.Add(Spectrum(stimulus), Spectrum(stimulus));
+        Assert.Equal(1, estimator.Records);
+    }
+
+    [Fact]
+    public void Constructor_RejectsANegativeWindow() =>
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new FrequencyResponseEstimator(FftSize, new MathNetBackend(), windowRecords: -1));
+
     [Fact]
     public void Reset_DiscardsAccumulatedRecords()
     {

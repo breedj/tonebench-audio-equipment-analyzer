@@ -193,6 +193,14 @@ public sealed class FrequencyResponseEstimator
     private double _latencySum;
     private int _records;
 
+    /// <summary>
+    /// The sliding window, or null when the average is unbounded. Each slot holds one record's own
+    /// contribution to the three sums, so that evicting it is exact. See the constructor's
+    /// <c>windowRecords</c> parameter.
+    /// </summary>
+    private readonly WindowSlot[]? _window;
+    private int _windowNext;
+
     /// <param name="gate">
     /// Applied to the impulse response in <see cref="Complete"/>. Null — the default — leaves the
     /// estimate exactly as H1 produced it, which is what the golden tests pin; a gate is only
@@ -222,14 +230,32 @@ public sealed class FrequencyResponseEstimator
     /// measurement needs; a stimulus that reaches every bin should pass
     /// <see cref="BroadbandRegularisationFraction"/> instead, and that member says why.
     /// </param>
+    /// <param name="windowRecords">
+    /// Zero -- the default -- accumulates every record ever added. A positive count makes the
+    /// estimate a <b>sliding window</b> over the last that many records: once the window is full,
+    /// each new record evicts the oldest, so the average neither grows without bound nor has to be
+    /// restarted. That is what a continuous noise measurement wants -- its records are independent
+    /// draws, so the estimate after record N+1 is as good as the one after record N, where
+    /// restarting the average every N records throws a converged curve away and shows the
+    /// single-record one in its place, the worst curve of the run, once every pass.
+    ///
+    /// <para>Eviction is exact rather than incremental: every record's own contribution is kept and
+    /// the sums are rebuilt from the window on each add, so a window that has slid ten thousand
+    /// times holds exactly the sum of its last N records and not the residue of subtracting
+    /// nearly-equal floating-point numbers that many times. It costs N passes over the bins per
+    /// add, trivial against the FFT that produced the record, and N slots of memory -- three arrays
+    /// of bins each, about 8 MB per slot at the longest record -- which is why it is opt-in.</para>
+    /// </param>
     public FrequencyResponseEstimator(
         int fftSize,
         IFftBackend fft,
         ImpulseGate? gate = null,
         bool removeLatency = true,
-        double regularisationFraction = RegularisationFraction)
+        double regularisationFraction = RegularisationFraction,
+        int windowRecords = 0)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(regularisationFraction);
+        ArgumentOutOfRangeException.ThrowIfNegative(windowRecords);
 
         if (fftSize < 4 || (fftSize & (fftSize - 1)) != 0)
             throw new ArgumentException("FFT size must be a power of two of at least 4.", nameof(fftSize));
@@ -257,10 +283,30 @@ public sealed class FrequencyResponseEstimator
         _gateWindow = gate is { } window ? BuildGateWindow(fftSize, window) : null;
         _removeLatency = removeLatency;
         _regularisationFraction = regularisationFraction;
+
+        if (windowRecords > 0)
+        {
+            _window = new WindowSlot[windowRecords];
+            for (int i = 0; i < windowRecords; i++)
+                _window[i] = new WindowSlot(new Complex[_binCount], new double[_binCount], new double[_binCount]);
+        }
     }
 
-    /// <summary>Records accumulated so far. <see cref="FrequencyResponseResult.Coherence"/> is only informative from 2 up.</summary>
+    /// <summary>One record's own contribution to the sums, kept so the window can evict it exactly.</summary>
+    private sealed class WindowSlot(Complex[] sxy, double[] sxx, double[] syy)
+    {
+        public readonly Complex[] Sxy = sxy;
+        public readonly double[] Sxx = sxx;
+        public readonly double[] Syy = syy;
+        public double LatencySamples;
+        public bool Filled;
+    }
+
+    /// <summary>Records currently in the average: everything added, or the last <c>windowRecords</c> of them. <see cref="FrequencyResponseResult.Coherence"/> is only informative from 2 up.</summary>
     public int Records => _records;
+
+    /// <summary>The window length, or 0 for an unbounded average.</summary>
+    public int WindowRecords => _window?.Length ?? 0;
 
     public int BinCount => _binCount;
 
@@ -299,16 +345,59 @@ public sealed class FrequencyResponseEstimator
 
         double latencySamples = _removeLatency ? EstimateLatencySamples() : 0.0;
 
+        if (_window is null)
+        {
+            for (int k = 0; k < _binCount; k++)
+            {
+                Complex aligned = response[k] * Rotation(k, latencySamples);
+                _sxy[k] += aligned * Complex.Conjugate(reference[k]);
+                _sxx[k] += (reference[k] * Complex.Conjugate(reference[k])).Real;
+                _syy[k] += (aligned * Complex.Conjugate(aligned)).Real;
+            }
+
+            _latencySum += latencySamples;
+            _records++;
+            return latencySamples;
+        }
+
+        // Windowed: this record takes the oldest slot (or the next empty one), then the sums are
+        // rebuilt from whatever the window holds. See the constructor for why not subtract-and-add.
+        var slot = _window[_windowNext];
+        _windowNext = (_windowNext + 1) % _window.Length;
+
         for (int k = 0; k < _binCount; k++)
         {
             Complex aligned = response[k] * Rotation(k, latencySamples);
-            _sxy[k] += aligned * Complex.Conjugate(reference[k]);
-            _sxx[k] += (reference[k] * Complex.Conjugate(reference[k])).Real;
-            _syy[k] += (aligned * Complex.Conjugate(aligned)).Real;
+            slot.Sxy[k] = aligned * Complex.Conjugate(reference[k]);
+            slot.Sxx[k] = (reference[k] * Complex.Conjugate(reference[k])).Real;
+            slot.Syy[k] = (aligned * Complex.Conjugate(aligned)).Real;
         }
 
-        _latencySum += latencySamples;
-        _records++;
+        slot.LatencySamples = latencySamples;
+        slot.Filled = true;
+
+        Array.Clear(_sxy);
+        Array.Clear(_sxx);
+        Array.Clear(_syy);
+        _latencySum = 0.0;
+        _records = 0;
+
+        foreach (var filled in _window)
+        {
+            if (!filled.Filled)
+                continue;
+
+            for (int k = 0; k < _binCount; k++)
+            {
+                _sxy[k] += filled.Sxy[k];
+                _sxx[k] += filled.Sxx[k];
+                _syy[k] += filled.Syy[k];
+            }
+
+            _latencySum += filled.LatencySamples;
+            _records++;
+        }
+
         return latencySamples;
     }
 
@@ -413,6 +502,13 @@ public sealed class FrequencyResponseEstimator
         Array.Clear(_syy);
         _latencySum = 0.0;
         _records = 0;
+
+        if (_window is not null)
+        {
+            foreach (var slot in _window)
+                slot.Filled = false;
+            _windowNext = 0;
+        }
     }
 
     /// <summary>

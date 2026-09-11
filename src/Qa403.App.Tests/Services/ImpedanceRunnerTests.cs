@@ -304,6 +304,51 @@ public class ImpedanceRunnerTests
     }
 
     /// <summary>
+    /// In RUN mode a noise measurement is one sliding average, not a sequence of restarts. The
+    /// noise path publishes after every record, so an estimator recreated per pass put a
+    /// single-record curve on screen once every N records -- the worst curve of the run, on a
+    /// schedule. Once the first pass has filled the window, every later record replaces the
+    /// oldest and the status never reads fewer than N records again.
+    /// </summary>
+    [Fact]
+    public async Task ByPinkNoise_Continuous_SlidesTheAverageInsteadOfRestartingIt()
+    {
+        const int averages = 3;
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(averages: averages, continuous: true) with { Stimulus = ImpedanceStimulus.PinkNoise },
+            CancellationToken.None);
+
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        var afterFirstPass = new List<int>();
+
+        while (harness.Runner.Status.PassesCompleted < 3)
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException("no third pass within 60 s");
+
+            var status = harness.Runner.Status;
+            if (status.PassesCompleted >= 1 && status.Phase == FrequencyResponsePhase.Measuring)
+                afterFirstPass.Add(status.AveragesTaken);
+
+            await Task.Delay(5);
+        }
+
+        var final = harness.Runner.Status;
+        await harness.Runner.CancelAsync();
+
+        Assert.NotEmpty(afterFirstPass);
+        Assert.All(afterFirstPass, taken => Assert.Equal(averages, taken));
+        Assert.Equal(averages, final.AveragesTaken);
+
+        // And the sliding estimate is still the fixture's resistor.
+        var (ohms, _) = At(final.Traces[0], 1000.0);
+        Assert.InRange(
+            ImpedanceMath.ToDbOhms(ohms) - ImpedanceMath.ToDbOhms(SimulatedImpedanceFixture.ResistiveOhms),
+            -0.01, 0.01);
+    }
+
+    /// <summary>
     /// A gate is a sweep's business, and asking for one on a noise run must be ignored rather than
     /// obeyed: those harmonic packets exist because sweep deconvolution folds each harmonic into its
     /// own impulse, and a noise estimate has no such structure to delete.

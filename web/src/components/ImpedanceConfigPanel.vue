@@ -660,7 +660,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 
     <label
       class="flex flex-col gap-1 text-xs"
-      title="Which input taps the generator side of the reference resistor. A bench fixture is normally wired left-as-reference; the simulator needs Right, because its fixture models sit on the left channel."
+      title="Which input taps the generator side of the reference resistor. A bench fixture is normally wired left-as-reference, and the simulator's fixture models are wired the same way. Get it wrong and the run warns: the impedance comes out negative."
     >
       Reference channel
       <select

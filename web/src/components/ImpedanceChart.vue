@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
+import type { ImpedanceZScale } from '../api/client'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
 import { impedanceOverlayDash } from '../measurements/sweepOverlayStyles'
@@ -18,9 +19,11 @@ import { standardOnGrid } from '../impedance/standard'
  *
  * <p>Structurally the frequency-response Bode chart, and deliberately so — the phase scale, the
  * min/max band plugin, the zoom bookkeeping and the cursor readout are the same problems with the
- * same answers. What differs is the left axis: <b>ohms on a log scale</b> rather than dB. An
- * impedance runs from a fixture's milliohms to a valve grid's megohms, and a decade is a decade
- * either way, so a log axis is the one that shows a resonance peak and a voice coil in one view.</p>
+ * same answers. What differs is the left axis: <b>ohms</b> rather than dB, linear by default — the
+ * way an impedance curve is usually drawn — or logarithmic on request. An impedance runs from a
+ * fixture's milliohms to a valve grid's megohms, and a decade is a decade either way, so the log
+ * axis is the one that shows a resonance peak and a voice coil in one view; the linear one is the
+ * one that shows a 7.9 Ω resistor as the flat line it is.</p>
  *
  * <p>The wire and the stored rows carry dB relative to 1 ohm, because that is what the shared
  * decimator and <c>response_trace</c> columns hold. It is converted back to ohms here, at the last
@@ -44,9 +47,10 @@ const props = defineProps<{
   showShortCal: boolean
   thickLines: boolean
   showDataPoints: boolean
-  /** The |Z| window, in ohms. Both bounds must be above zero — the axis is logarithmic. */
+  /** The |Z| window, in ohms. On a logarithmic axis both bounds must be above zero; a linear one may start at zero. */
   zTopOhms: number
   zBottomOhms: number
+  zScale: ImpedanceZScale
   xFromHz: number
   xToHz: number
   /** The phase axis' own window, in degrees. A passive one-port stays inside ±90°, but a bad calibration will not. */
@@ -201,13 +205,32 @@ function minMaxBandPlugin(): uPlot.Plugin {
 
 /** Linear interpolation in log frequency, returning null outside the stored curve's own band so uPlot draws a gap. */
 function resampleOnto(source: ImpedanceTrace, grid: Float64Array): (number | null)[] {
+  return interpolateOnto(source.freqHz, source.magnitudeMaxDbOhms, grid, dbOhmsToOhms)
+}
+
+/**
+ * A stored curve's phase on the chart's grid, the same way its magnitude gets there. Interpolating a
+ * <i>stored</i> curve is fine where interpolating the live one is not (see `padToGrid`): the stored
+ * rows are already a decimated display trace rather than the measurement's own points, and the
+ * magnitude has always been drawn this way. A history overlay without its phase was half a curve —
+ * on an impedance plot the phase is the half that says inductive or capacitive.
+ */
+function resamplePhaseOnto(source: ImpedanceTrace, grid: Float64Array): (number | null)[] {
+  return interpolateOnto(source.freqHz, source.phaseDeg, grid, (v) => v)
+}
+
+function interpolateOnto(
+  freqs: number[],
+  values: number[],
+  grid: Float64Array,
+  convert: (v: number) => number,
+): (number | null)[] {
   const out: (number | null)[] = new Array(grid.length)
-  const freqs = source.freqHz
   let j = 0
 
   for (let i = 0; i < grid.length; i++) {
     const f = grid[i]
-    if (freqs.length === 0 || f < freqs[0] || f > freqs[freqs.length - 1]) {
+    if (freqs.length === 0 || values.length !== freqs.length || f < freqs[0] || f > freqs[freqs.length - 1]) {
       out[i] = null
       continue
     }
@@ -217,9 +240,7 @@ function resampleOnto(source: ImpedanceTrace, grid: Float64Array): (number | nul
     const f0 = freqs[j]
     const f1 = freqs[j + 1]
     const t = f1 > f0 ? (Math.log10(f) - Math.log10(f0)) / (Math.log10(f1) - Math.log10(f0)) : 0
-    const db =
-      source.magnitudeMaxDbOhms[j] + t * (source.magnitudeMaxDbOhms[j + 1] - source.magnitudeMaxDbOhms[j])
-    out[i] = dbOhmsToOhms(db)
+    out[i] = convert(values[j] + t * (values[j + 1] - values[j]))
   }
 
   return out
@@ -271,7 +292,10 @@ function buildData(): uPlot.AlignedData {
   // Padded to `x` for the same reason the magnitude is: these arrays are indexed by the measured
   // grid, and uPlot pairs series with x by position, so a short array would shift every phase and
   // coherence sample onto a lower frequency than it was measured at.
-  if (props.showPhase) series.push(padToGrid(t?.phaseDeg, t?.freqHz, x))
+  if (props.showPhase) {
+    series.push(padToGrid(t?.phaseDeg, t?.freqHz, x))
+    for (const overlay of overlayCurves.value) series.push(resamplePhaseOnto(overlay.trace, x))
+  }
   if (shortCalPhase.value) series.push(shortCalPhase.value)
   if (props.showCoherence) series.push(padToGrid(t?.coherence, t?.freqHz, x))
 
@@ -355,6 +379,22 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       scale: 'phase',
       points: false,
     })
+
+    // The same rule as the magnitude overlays, on the phase axis: the phase colour says which
+    // quantity, the overlay's dash says which stored run — so a history entry's two curves share a
+    // dash and can be matched by eye across the two axes.
+    for (const overlay of overlayCurves.value) {
+      entries.push({
+        key: `o${overlay.id}p`,
+        label: `${overlay.name} phase`,
+        color: color(PHASE_COLOR),
+        unit: 'deg',
+        width: 1,
+        dash: impedanceOverlayDash(props.overlays, overlay.id) ?? undefined,
+        scale: 'phase',
+        points: false,
+      })
+    }
   }
 
   if (shortCalPhase.value) {
@@ -426,9 +466,11 @@ function buildSeries(): uPlot.Series[] {
 
 const phaseRange = computed<[number, number]>(() => [props.phaseBottomDeg, props.phaseTopDeg])
 
-/** Guarded: a log axis cannot show zero or a negative, and a bound of 0 would blank the whole plot. */
-const yBottom = computed(() => Math.max(props.zBottomOhms, 1e-4))
-const yTop = computed(() => Math.max(props.zTopOhms, yBottom.value * 1.01))
+const logZ = computed(() => props.zScale === 'Log')
+
+/** Guarded: a log axis cannot show zero or a negative, and a bound of 0 would blank the whole plot. A linear one may sit on zero. */
+const yBottom = computed(() => (logZ.value ? Math.max(props.zBottomOhms, 1e-4) : Math.max(props.zBottomOhms, 0)))
+const yTop = computed(() => Math.max(props.zTopOhms, logZ.value ? yBottom.value * 1.01 : yBottom.value + 1e-3))
 
 // Carries the whole series description, so the readout draws the same swatch the legend does.
 const cursorReadout = ref<{ freqHz: number; entries: (PlottedSeries & { text: string })[] } | null>(null)
@@ -492,6 +534,8 @@ const signature = computed(() =>
     props.xToHz,
     yBottom.value,
     yTop.value,
+    // The distribution is fixed at construction, so a scale change is a rebuild.
+    props.zScale,
   ].join('|'),
 )
 
@@ -542,7 +586,7 @@ function buildOptions(width: number, height: number): uPlot.Options {
             : [props.xFromHz, props.xToHz],
       },
       y: {
-        distr: 3,
+        distr: logZ.value ? 3 : 1,
         log: 10,
         auto: false,
         range: (_u, min, max) => [min ?? yBottom.value, max ?? yTop.value],
@@ -561,7 +605,7 @@ function buildOptions(width: number, height: number): uPlot.Options {
         ticks: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
       },
       {
-        ...ohmAxis(),
+        ...ohmAxis(logZ.value),
         size: 54,
         stroke: isDark.value ? '#9ca3af' : '#4b5563',
         grid: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
@@ -690,7 +734,7 @@ watch(signature, () => rebuild())
 watch([() => props.traces, () => props.overlays], refresh)
 watch(phaseRange, () => refresh())
 
-/** Real data outside the visible ohms window, which a log axis otherwise hides without a word. */
+/** Real data outside the visible ohms window, which the axis otherwise hides without a word. */
 const outOfRange = computed(() => {
   const t = trace.value
   if (!t) return { above: false, below: false }

@@ -172,12 +172,83 @@
               Expect every measurement to be wrong — that is the demonstration.
             </p>
             <p>
+              <strong>Phono stage (RIAA)</strong> is a phono preamplifier: the RIAA playback curve,
+              0 dB at 1 kHz, +19.3 dB at 20 Hz and −19.6 dB at 20 kHz. It is the one DUT that is
+              <em>not</em> unity across the band — the curve is only recognisable referenced to
+              1 kHz — so a loud tone at the bottom of the band comes back nearly ten times larger
+              than it went in and can meet the input range's clip; the frequency-response and
+              stepped-sine screens range for it, the spectrum screen does not. It is the model for
+              the two Bode screens.
+            </p>
+            <p>
+              <strong>DSP processor (12 ms)</strong> is a digital processor: a fourth-order low-pass
+              at 20 kHz and 12 ms of latency, 576 samples at 48 kHz. It is the only model with a
+              real delay. Every other one answers within a sample, so the frequency-response
+              screen's <em>removed N sample delay</em> readout was never more than the chirp's
+              arbitrary rotation and the impulse response's peak was always at zero; this one puts
+              the impulse 12 ms in.
+            </p>
+            <p>
+              The next four are the <strong>nonlinear amplifiers</strong>, and they exist for the
+              two THD sweeps. Every model above is linear, and until these arrived the only
+              distortion in the simulator was a fixed harmonic stack added to the
+              <em>generator</em> — the same −46 dBc second harmonic at 1 mV and at 1 V, on both
+              channels — under which a THD-vs-amplitude sweep is a flat line whatever the DUT.
+              Selecting any nonlinear model switches that stack off: the left channel carries only
+              what the model does to the signal, and the right channel is the clean generator tap a
+              real bench has. (The stack comes back when you select a linear model again.) It also
+              gives the chirp's <em>gate the sweep's harmonic packets</em> option something to
+              remove, which no linear model can.
+            </p>
+            <p>
+              <strong>SE triode</strong> is a single-ended triode stage: a soft asymmetric transfer
+              curve whose second harmonic climbs exactly 1 dB per dB of drive — 0.5 % at 1 V peak.
+              On a THD-vs-amplitude sweep from 1 mV to 1 V that is a straight line, which is the
+              single-ended signature. It is also the nonlinear model whose answer is on paper:
+              H2 = k2·A/2 and H3 = k3·A²/4 with k2 = 0.01 and k3 = 0.002 and A the peak drive.
+            </p>
+            <p>
+              <strong>Class AB (crossover)</strong> is an output stage biased a little cold: a
+              20 mV-wide gain notch at zero that every half-cycle passes through twice. Its
+              signature is that distortion gets <em>worse</em> as the level falls — the notch is a
+              fixed width, so a smaller signal spends more of its cycle inside it — peaking at
+              a few percent near −33 dBV. Below that the whole signal fits inside the notch,
+              where the stage is merely linear at reduced gain, and THD falls again: the amplitude
+              sweep draws a hump. Odd harmonics only, and unity gain at any ordinary level.
+            </p>
+            <p>
+              <strong>Solid state (clips at −3 dBV)</strong> is nearly distortionless — a cubic
+              term at about −100 dBc at 1 V — until it meets a ±1 V supply rail and clips with a
+              short knee. That is the classic THD-versus-power plot: a flat floor and then a wall,
+              placed so the default 1 mV–1 V amplitude sweep reaches it exactly at its top.
+            </p>
+            <p>
+              <strong>Output transformer (saturating)</strong> has a flat response and a core that
+              saturates: the flux — the signal integrated below 30 Hz — is limited, so third-harmonic
+              distortion rises 18 dB per octave towards the bottom of the band, about 3 % at 20 Hz
+              for 1 V peak and gone by 200 Hz. It is the model for a THD-vs-<em>frequency</em>
+              sweep, and the curve every transformer-coupled amplifier draws in real life.
+            </p>
+            <p>
               The DUT is on the <strong>left input only</strong>, as you would wire the bench: left
               measures the device, right taps the generator as a reference. That is what keeps the
               impulse response's <em>right input channel</em> reference mode meaningful in
-              simulation. Every model is unity gain in its passband, so switching one on changes the
-              shape of what comes back and not its level.
+              simulation. Every model but the phono stage is unity gain in its passband, so
+              switching one on changes the shape of what comes back and not its level. The
+              <strong>Impedance fixtures</strong> group at the bottom of the list is described on the
+              impedance screen's own page.
             </p>
+          </td>
+        </tr>
+        <tr>
+          <td>Database damaged</td>
+          <td>
+            The measurement database failed its integrity check when the app started. The app keeps
+            running — every stored result outside the damaged pages still opens, and new saves usually
+            still work — but a result whose data sits on a damaged page fails to open, and the message
+            stays until the file is repaired. Close the app, keep a copy of <code>qa403.db</code>
+            (under <code>%LOCALAPPDATA%\Qa403</code>) before anything else, then rebuild it: every
+            readable row can be copied into a fresh database, and only the damaged rows are lost.
           </td>
         </tr>
         <tr>

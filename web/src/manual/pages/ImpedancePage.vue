@@ -157,9 +157,17 @@ const { showPage } = useManual()
 
     <h2>Reading the result</h2>
     <p>
-      <strong>|Z| and phase</strong> is the usual view: impedance in ohms on a logarithmic axis
-      against frequency, with phase in degrees on the right. A passive one-port stays between −90°
-      and +90°; positive is inductive, negative capacitive.
+      <strong>|Z| and phase</strong> is the usual view: impedance in ohms against frequency, with
+      phase in degrees on the right. A passive one-port stays between −90° and +90°; positive is
+      inductive, negative capacitive.
+    </p>
+    <p>
+      The ohms axis has a <strong>Scale</strong> selector under <strong>Impedance axis</strong>.
+      <strong>Linear</strong>, the default, is how an impedance curve is usually drawn: a flat load
+      reads as a flat line and a driver's rest impedance and resonance peak are one picture against
+      zero. <strong>Logarithmic</strong> is the one scale that fits a fixture's milliohms and a
+      60 Ω peak in a single window, and is the one to pick when the short calibration trace is
+      showing. The choice is saved with the measurement.
     </p>
     <p>
       <strong>Complex plane</strong> plots the same data as resistance across against reactance up —
@@ -206,7 +214,9 @@ const { showPage } = useManual()
       colour, thickness and dash pattern it is drawn in. Hover the plot and the same row gains each
       curve's value at that frequency. The dash pattern is what matters when history overlays are
       showing &mdash; they share the live curve's colour on purpose, so that the measurement you are
-      making stays the one you read first, and the pattern is what tells them apart.
+      making stays the one you read first, and the pattern is what tells them apart. A ticked history
+      entry brings both of its curves: its |Z| in the impedance colour and, while <strong>Phase</strong>
+      is on, its phase in the phase colour, both in that entry's own dash pattern.
     </p>
 
     <h2>Device under test</h2>
@@ -286,7 +296,9 @@ const { showPage } = useManual()
     <p>
       <strong>Autofit</strong> beside the impedance bounds sets the ohms window from everything the
       chart is currently drawing, rounded outward to a readable 1/2/5 step and taken only over the
-      frequencies in view. That includes the <strong>short calibration</strong> trace whenever it is
+      frequencies in view. On the linear scale the bottom is always zero — fitting it to the data's
+      own minimum would stretch a resistor's milliohms of noise to full height — while the
+      logarithmic scale fits both ends. That includes the <strong>short calibration</strong> trace whenever it is
       ticked, so switching it on and pressing Autofit brings both it and the DUT into one window —
       expect a much taller window than the DUT alone would give, since a short is a fraction of an
       ohm. Untick it and fit again for a window around the DUT by itself. Autofit beside the phase
@@ -317,15 +329,37 @@ const { showPage } = useManual()
 
     <h2>Against the simulator</h2>
     <p>
-      <code>--simulate</code> offers three impedance fixtures, all through a <strong>100 Ω</strong>
-      reference: a flat 8 Ω resistor, a 6 Ω + 1 mH series pair, and a loudspeaker with a 45 Hz
-      resonance peaking at 60 Ω.
+      <code>--simulate</code> offers six impedance fixtures, all through a <strong>100 Ω</strong>
+      reference, in the <strong>Impedance fixtures</strong> group of the status bar's DUT list:
+      a flat 8 Ω resistor, a 6 Ω + 1 mH series pair, a 47 µF capacitor with 0.3 Ω of ESR, a
+      loudspeaker with a 45 Hz resonance peaking at 60 Ω, and the two calibration standards — a
+      <strong>short</strong> (0.12 Ω and 0.6 µH, what a real lead set measured on the bench) and an
+      <strong>open</strong> (100 pF of stray capacitance). Enter <strong>100</strong> as the
+      reference resistor; a different value scales every reading by the ratio.
     </p>
     <p>
-      <strong>Set the reference channel to Right for these.</strong> The simulator applies its DUT to
-      the left channel only, so its divider output is on the left and the untouched generator is on
-      the right — the mirror image of a bench fixture wired left-as-reference. That is a property of
-      the simulator, not a bug in the measurement, and it applies to both stimuli.
+      The full calibration flow can be walked through: select <em>Fixture: open</em> and run the
+      open calibration, <em>Fixture: short</em> and run the short calibration, then pick a load and
+      measure with <strong>Subtract for the leads</strong> set to <em>Measured short</em>. Note that
+      the simulator's loads have no leads of their own, so a short calibration applied to the 8 Ω
+      fixture subtracts leads that are not there and reads 7.88 Ω — the arithmetic is right, the
+      fixture is idealised. A straight wire
+      also works as the open standard; the explicit open exists because a straight wire's ratio is
+      exactly one, and inverting exactly one is a division by zero on a noise-free measurement.
+    </p>
+    <p>
+      The fixtures are wired the way a bench fixture is: the <strong>left</strong> input taps the
+      generator side of the reference resistor and the <strong>right</strong> input the junction with
+      the load, so the default reference channel, <strong>Left</strong>, is correct for them. (The
+      simulator's <em>DUT</em> models sit on the left input instead, with the generator on the right
+      as the reference — that is the wiring the response and impulse screens assume.)
+    </p>
+    <p>
+      Get the reference channel wrong and the numbers say so: the "DUT" input is then the louder
+      one, the divider inverts to a <em>negative</em> impedance, and the chart shows a flat line at
+      the wrong value with the phase pinned at ±180° — the 8 Ω fixture reads 108 Ω that way. A
+      passive load cannot do that, so the run finishes with an amber <strong>warning</strong> under
+      the status line naming the other channel.
     </p>
     <p>
       The 8 Ω resistor is the one number in this screen that can be checked against arithmetic rather

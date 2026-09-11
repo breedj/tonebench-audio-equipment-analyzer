@@ -263,6 +263,23 @@ public class ImpedanceTests
         Assert.True(double.IsNaN(ImpedanceMath.MedianOhms(z, 4, 2)));
     }
 
+    /// <summary>
+    /// Swapped inputs, exactly as inverting the divider produces them: the 8 ohm fixture read with
+    /// the channels the wrong way round gives <c>H = 108/8</c> and <c>Z = 100 H/(1 - H) = -108</c> —
+    /// a negative real impedance at every bin. Read the right way round the same fixture has none.
+    /// </summary>
+    [Fact]
+    public void NegativeRealFraction_IsOneForSwappedChannels_AndZeroForAPassiveLoad()
+    {
+        var swapped = Solve(_ => new Complex(8.0, 0.0), new ImpedanceSolveOptions { ReferenceOhms = ReferenceOhms, BinHz = BinHz }, invert: true);
+        var correct = Solve(_ => new Complex(8.0, 0.0), new ImpedanceSolveOptions { ReferenceOhms = ReferenceOhms, BinHz = BinHz });
+
+        Assert.Equal(1.0, ImpedanceMath.NegativeRealFraction(swapped, 0, swapped.Length - 1), 9);
+        Assert.Equal(-108.0, swapped[Bins[0]].Real, 6);
+        Assert.Equal(0.0, ImpedanceMath.NegativeRealFraction(correct, 0, correct.Length - 1), 9);
+        Assert.True(double.IsNaN(ImpedanceMath.NegativeRealFraction(correct, 4, 2)));
+    }
+
     // --- synthesis of the measurements the solver is meant to invert ---
 
     /// <summary>A series R + L branch at one frequency.</summary>
@@ -374,10 +391,17 @@ public class ImpedanceTests
         }));
     }
 
-    private static Complex[] Solve(Func<double, Complex> branch, ImpedanceSolveOptions options, Complex? mismatch = null)
+    /// <param name="invert">Feed the solver <c>1/H</c> — the two input channels the wrong way round.</param>
+    private static Complex[] Solve(Func<double, Complex> branch, ImpedanceSolveOptions options, Complex? mismatch = null, bool invert = false)
     {
         var m = mismatch ?? Complex.One;
         var h = Curve(f => DividerH(branch(f), ReferenceOhms, null, m));
+        if (invert)
+        {
+            for (int k = 0; k < h.Length; k++)
+                h[k] = h[k] == Complex.Zero ? Complex.Zero : Complex.One / h[k];
+        }
+
         return ImpedanceMath.Solve(h, options);
     }
 }

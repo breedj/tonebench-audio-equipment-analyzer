@@ -7,62 +7,140 @@ const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
   { value: 'Simulated', label: 'Simulator' },
 ]
 
+type DutGroup = 'Linear DUTs' | 'Nonlinear amplifiers' | 'Impedance fixtures'
+
 /**
  * What the simulator can pretend is patched in. A straight wire has no response and no memory,
  * which is enough for a spectrum and shows nothing at all on the measurements whose subject is
- * what a DUT does over time.
+ * what a DUT does over time. Three groups, because eighteen flat entries are unreadable: the
+ * linear models (a shape and a memory, unity gain), the nonlinear ones (distortion that depends
+ * on level or frequency — the THD sweeps' models), and the impedance fixtures (dividers, so never
+ * unity, wired bench-style with the load junction on the right input).
  */
-const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string }[] = [
-  { value: 'StraightWire', label: 'Straight wire', title: 'No DUT: the generator reaches the input unaltered.' },
+const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string; group: DutGroup }[] = [
+  { value: 'StraightWire', label: 'Straight wire', title: 'No DUT: the generator reaches the input unaltered.', group: 'Linear DUTs' },
   {
     value: 'TubeAmplifier',
     label: 'Tube amp',
     title:
       'A push-pull valve amplifier: rolled off at both ends, with the output transformer’s resonance just above the audio band. Most of that sits above 24 kHz, so set the span to 96 kHz to see it.',
+    group: 'Linear DUTs',
   },
   {
     value: 'Loudspeaker',
     label: 'Loudspeaker',
     title:
       'A two-way loudspeaker in a room: a cabinet panel resonance, a cone breakup peak, and a wall reflection 3 ms behind the direct sound. The model to use when demonstrating the impulse-response screen.',
+    group: 'Linear DUTs',
   },
   {
     value: 'BandpassFilter',
     label: 'Bandpass',
     title:
       'A single second-order bandpass at 1 kHz, Q 20 — 50 Hz wide, and nothing else in the path. The one model whose decay you can work out on paper: 27.29/Q = 1.36 dB per period, which is the slope a burst decay must draw. Use it to check the analysis rather than to demonstrate a device.',
+    group: 'Linear DUTs',
   },
   {
     value: 'MarginallyStable',
     label: 'Marginally stable',
     title:
       'An amplifier almost out of phase margin: flat, with one Q-500 resonance at 1 kHz that rings for a third of a second. Stable — but on a burst decay it falls only 1.6 dB over thirty periods, so the ridge refuses to die. On a magnitude plot it is just a peak, which is the argument for having decay charts.',
+    group: 'Linear DUTs',
   },
   {
     value: 'Oscillating',
     label: 'Oscillating',
     title:
       'An amplifier that has gone the rest of the way: poles outside the unit circle, clipping against its own ±0.5 V rail at about 1010 Hz. The only DUT whose output is not a response to its input — it wrecks coherence, the level probe and the deconvolution, which is exactly what it is for.',
+    group: 'Linear DUTs',
+  },
+  {
+    value: 'PhonoRiaa',
+    label: 'Phono stage (RIAA)',
+    title:
+      'A phono preamplifier: the RIAA playback curve, 0 dB at 1 kHz, +19.3 dB at 20 Hz and −19.6 dB at 20 kHz. The one DUT that is not unity across the band, so a loud tone at the bottom of it comes back nearly ten times larger and can meet the input range’s clip. The model for the frequency-response and stepped-sine screens.',
+    group: 'Linear DUTs',
+  },
+  {
+    value: 'DigitalProcessor',
+    label: 'DSP processor (12 ms)',
+    title:
+      'A digital processor: a fourth-order low-pass at 20 kHz and 12 ms of latency — 576 samples at 48 kHz. The only model with a real delay, so the frequency response’s “removed N sample delay” readout and the impulse response’s position finally mean something.',
+    group: 'Linear DUTs',
+  },
+  {
+    value: 'TriodeSingleEnded',
+    label: 'SE triode',
+    title:
+      'A single-ended triode stage: soft, asymmetric, second-harmonic distortion that climbs exactly 1 dB per dB of drive — 0.5 % H2 at 1 V peak. The model for a THD-vs-amplitude sweep, and one whose answer is on paper: H2 = k2·A/2 with k2 = 0.01. Selecting any nonlinear model switches off the simulator’s fixed harmonic stack, so the right channel is a clean generator tap.',
+    group: 'Nonlinear amplifiers',
+  },
+  {
+    value: 'ClassAbCrossover',
+    label: 'Class AB (crossover)',
+    title:
+      'A class-AB output stage biased cold: a 20 mV-wide gain notch at zero, so distortion gets worse as the level falls, peaking at a few percent near −33 dBV before the whole signal fits inside the notch and it falls again. A THD-vs-amplitude sweep from 1 mV to 1 V draws the hump. Odd harmonics only; unity gain at ordinary levels.',
+    group: 'Nonlinear amplifiers',
+  },
+  {
+    value: 'SolidStateClipping',
+    label: 'Solid state (clips at −3 dBV)',
+    title:
+      'A solid-state amplifier: nearly distortionless (about −100 dBc at 1 V) until it meets a ±1 V rail and clips. The classic THD-versus-power knee, placed at the top of the default 1 mV–1 V amplitude sweep.',
+    group: 'Nonlinear amplifiers',
+  },
+  {
+    value: 'TransformerCoreSaturation',
+    label: 'Output transformer (saturating)',
+    title:
+      'An output transformer whose core saturates: flat, but third-harmonic distortion rises 18 dB per octave towards the bottom of the band — about 3 % at 20 Hz for 1 V peak, gone by 200 Hz. The model for a THD-vs-frequency sweep, and what every transformer-coupled amplifier draws in real life.',
+    group: 'Nonlinear amplifiers',
   },
   {
     value: 'ImpedanceResistive',
     label: 'Fixture: 8 Ω',
     title:
-      'An impedance fixture rather than a DUT: a 100 Ω reference resistor with a flat 8 Ω load. The one model in this list whose answer is arithmetic — a correct impedance run reads 8.000 Ω at 0.00° at every frequency, through either stimulus. Set the impedance screen’s reference channel to Right, because the simulator puts its DUT on the left.',
+      'An impedance fixture rather than a DUT: a 100 Ω reference resistor with a flat 8 Ω load. The one model in this list whose answer is arithmetic — a correct impedance run reads 8.000 Ω at 0.00° at every frequency, through either stimulus. Wired bench-style: generator side on the left input, load junction on the right, so the reference channel is Left.',
+    group: 'Impedance fixtures',
   },
   {
     value: 'ImpedanceReactive',
     label: 'Fixture: 6 Ω + 1 mH',
     title:
       'The same 100 Ω fixture with a series 6 Ω and 1 mH, which puts the 45° point near 955 Hz. The model to use when checking that phase is measured rather than assumed.',
+    group: 'Impedance fixtures',
+  },
+  {
+    value: 'ImpedanceCapacitive',
+    label: 'Fixture: 47 µF',
+    title:
+      'The same fixture with a 47 µF capacitor and 0.3 Ω of ESR: |Z| falling 6 dB per octave — 68 Ω at 50 Hz, 3.4 Ω at 1 kHz — at a phase heading for −90°. The mirror of the inductor, and the check that the phase axis has its sign right.',
+    group: 'Impedance fixtures',
   },
   {
     value: 'ImpedanceLoudspeaker',
     label: 'Fixture: loudspeaker',
     title:
       'The same fixture with a driver on it: 6.4 Ω voice coil and a 45 Hz resonance peaking at 60 Ω, Q 2.5. The shape an impedance sweep is normally run to see.',
+    group: 'Impedance fixtures',
+  },
+  {
+    value: 'ImpedanceShort',
+    label: 'Fixture: short (leads)',
+    title:
+      'The fixture with its leads shorted: 0.12 Ω and 0.6 µH, the figures a real lead set measured on the bench. Select it for the short calibration step.',
+    group: 'Impedance fixtures',
+  },
+  {
+    value: 'ImpedanceOpen',
+    label: 'Fixture: open',
+    title:
+      'The fixture with nothing across it but 100 pF of stray capacitance. Select it for the open calibration step — a straight wire works too, but its ratio is exactly one, and inverting exactly one is a division by zero on a noise-free measurement.',
+    group: 'Impedance fixtures',
   },
 ]
+
+const DUT_GROUPS: DutGroup[] = ['Linear DUTs', 'Nonlinear amplifiers', 'Impedance fixtures']
 
 const props = defineProps<{
   status: DeviceStatus | null
@@ -174,9 +252,16 @@ function onSimulatedDutChange(e: Event) {
             :value="status.simulatedDut ?? 'StraightWire'"
             @change="onSimulatedDutChange"
           >
-            <option v-for="model in DUT_MODELS" :key="model.value" :value="model.value" :title="model.title">
-              {{ model.label }}
-            </option>
+            <optgroup v-for="group in DUT_GROUPS" :key="group" :label="group">
+              <option
+                v-for="model in DUT_MODELS.filter((m) => m.group === group)"
+                :key="model.value"
+                :value="model.value"
+                :title="model.title"
+              >
+                {{ model.label }}
+              </option>
+            </optgroup>
           </select>
         </label>
       </template>
@@ -270,5 +355,14 @@ function onSimulatedDutChange(e: Event) {
     </div>
 
     <p v-if="error" class="w-full text-red-600 dark:text-red-400">{{ error }}</p>
+    <!-- Persistent, unlike the request error above: the startup check found the file damaged, and
+         nothing the user does in this session changes that. -->
+    <p
+      v-if="status?.databaseProblem"
+      class="w-full text-red-600 dark:text-red-400"
+      title="The measurement database failed its integrity check when the app started. Rows outside the damaged pages still work; a damaged result fails to open. Keep a copy of the file before repairing it."
+    >
+      Database damaged: {{ status.databaseProblem }}
+    </p>
   </footer>
 </template>

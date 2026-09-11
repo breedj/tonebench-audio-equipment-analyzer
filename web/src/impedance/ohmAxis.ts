@@ -1,7 +1,7 @@
 import uPlot from 'uplot'
 import { freqTickSplits } from '../freqAxis'
 
-// The impedance chart's y axis: log-scaled ohms.
+// The impedance chart's y axis: ohms, on a log or a linear scale.
 //
 // The tick *placement* is `freqTickSplits`, reused rather than reimplemented. Nothing in it is about
 // frequency — it walks a mantissa ladder (1..9, then 1/2/5, then decades) and takes the finest one
@@ -70,10 +70,22 @@ function trim(s: string): string {
 /**
  * The axis config, spread into the chart's own options so the colours and grid stay there.
  *
- * The splits callback measures the plot's own height rather than taking a prop: the chart is
+ * <p>Two shapes. On a <b>logarithmic</b> axis the tick placement is the mantissa ladder above and
+ * the labels refuse zero, which the axis cannot show. On a <b>linear</b> one uPlot's own even
+ * splits are right — a 0..100 Ω window wants 0, 20, 40, not 1, 2, 5, 10 — and zero is a label like
+ * any other, so the signed formatter does the labels.</p>
+ *
+ * The log splits callback measures the plot's own height rather than taking a prop: the chart is
  * responsive, and a ladder chosen against a stale height is what puts labels on top of each other.
  */
-export function ohmAxis(): Pick<uPlot.Axis, 'space' | 'splits' | 'values'> {
+export function ohmAxis(log: boolean = true): Pick<uPlot.Axis, 'space' | 'splits' | 'values'> {
+  if (!log) {
+    return {
+      space: OHM_AXIS_SPACE,
+      values: (_u: uPlot, splits: (number | null)[]) => splits.map(signedOhmTickLabel),
+    }
+  }
+
   return {
     space: OHM_AXIS_SPACE,
     splits: (u: uPlot, _axisIdx: number, min: number, max: number) => {

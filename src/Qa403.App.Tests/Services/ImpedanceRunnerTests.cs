@@ -11,10 +11,9 @@ namespace Qa403.App.Tests.Services;
 /// The impedance runner end to end against the simulator's fixture models, whose impedance is known
 /// by construction.
 ///
-/// <para><b>The reference channel is Right throughout</b>, which looks backwards against a bench
-/// fixture and is not a mistake: the simulator applies its DUT to the left channel only, so its
-/// divider output is on the left and the untouched generator is on the right. See
-/// <see cref="SimulatedImpedanceFixture"/>.</para>
+/// <para>The reference channel is Left throughout — the screen's default, and the bench convention
+/// the simulator's fixtures are wired to (generator side on the left input, load junction on the
+/// right). See <see cref="SimulatedImpedanceFixture"/>.</para>
 /// </summary>
 public class ImpedanceRunnerTests
 {
@@ -30,13 +29,12 @@ public class ImpedanceRunnerTests
         ImpedanceCalibration? openCal = null,
         ImpedanceCalibration? shortCal = null,
         int smoothing = 0,
-        double chirpStartHz = 10.0) =>
+        double chirpStartHz = 10.0,
+        bool rightChannelIsReference = false) =>
         new(ImpedanceMethod.ReferenceResistor,
             ImpedanceStimulus.Chirp,
             referenceOhms,
-
-            // Right, because the simulator's fixture is on the left channel.
-            RightChannelIsReference: true,
+            RightChannelIsReference: rightChannelIsReference,
             SpanHz,
             ResolutionMultiplier: 1,
             LevelValue: -20.0,
@@ -421,6 +419,66 @@ public class ImpedanceRunnerTests
 
         AssertFinished(status);
         Assert.Equal(SimulatedImpedanceFixture.ResistiveOhms, At(Assert.Single(status.Traces), 1000.0).Ohms, 3);
+    }
+
+    /// <summary>
+    /// The short standard, captured from the simulator's own shorted-leads fixture rather than a
+    /// synthetic curve: 0.12 ohm over a 100 ohm reference is a divider ratio of -58 dB, and the run
+    /// has to resolve that. Applied to the 8 ohm fixture it then subtracts leads that fixture does not
+    /// have, so the corrected reading is 7.88 ohms — which is exactly the arithmetic a tester will see
+    /// walking the open/short/measure flow against the simulator, and worth pinning as such.
+    /// </summary>
+    [Fact]
+    public async Task AShortCalibration_SubtractsTheLeadsItMeasured()
+    {
+        var calibrationHarness = await CreateAsync(SimulatedDutModel.ImpedanceShort);
+        await calibrationHarness.Runner.StartAsync(Request(calTarget: ImpedanceCalTarget.Short), CancellationToken.None);
+        var calibrationStatus = await AwaitCompletionAsync(calibrationHarness.Runner);
+
+        AssertFinished(calibrationStatus);
+        Assert.Equal(ImpedanceTraceKind.ShortCal, Assert.Single(calibrationStatus.Traces).Kind);
+        var shortCal = Assert.IsType<ImpedanceCalibration>(calibrationStatus.CapturedCalibration);
+
+        double leadRatio = SimulatedImpedanceFixture.ShortOhms
+            / (SimulatedImpedanceFixture.ReferenceOhms + SimulatedImpedanceFixture.ShortOhms);
+        Assert.Equal(leadRatio, shortCal.At(1000.0).Magnitude, leadRatio * 0.02);
+
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(cableMode: ImpedanceCableMode.Measured, shortCal: shortCal), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(
+            SimulatedImpedanceFixture.ResistiveOhms - SimulatedImpedanceFixture.ShortOhms,
+            At(Assert.Single(status.Traces), 1000.0).Ohms, 2);
+    }
+
+    /// <summary>
+    /// The wiring mistake the numbers can prove. The reference channel the wrong way round against
+    /// the 8 ohm fixture reads <c>Z = 100·13.5/(1 − 13.5) = −108 ohms</c> — drawn as a flat 108 ohm
+    /// line with the phase at ±180 degrees, which was reported as a wrong axis scale. A passive load
+    /// cannot go negative, so the run has to say what it is instead of drawing it straight-faced;
+    /// the correct wiring must stay silent.
+    /// </summary>
+    [Fact]
+    public async Task TheWrongReferenceChannel_IsCalledOutAsAWarning_AndTheRightOneIsNot()
+    {
+        var wrong = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await wrong.Runner.StartAsync(Request(rightChannelIsReference: true), CancellationToken.None);
+        var wrongStatus = await AwaitCompletionAsync(wrong.Runner);
+
+        AssertFinished(wrongStatus);
+        Assert.Equal(108.0, At(Assert.Single(wrongStatus.Traces), 1000.0).Ohms, 1);
+        Assert.NotNull(wrongStatus.Warning);
+        Assert.Contains("try Left", wrongStatus.Warning);
+
+        var right = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await right.Runner.StartAsync(Request(), CancellationToken.None);
+        var rightStatus = await AwaitCompletionAsync(right.Runner);
+
+        AssertFinished(rightStatus);
+        Assert.Null(rightStatus.Warning);
     }
 
     /// <summary>

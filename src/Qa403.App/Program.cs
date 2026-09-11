@@ -108,6 +108,12 @@ try
     builder.Services.AddSingleton<ILoopbackReferenceStore, SqliteLoopbackReferenceStore>();
     builder.Services.AddSingleton<ImpulseResponseRunner>();
     builder.Services.AddSingleton<ImpedanceRunner>();
+    // Before the device service on purpose: hosted services stop in reverse order, so the database
+    // is checkpointed and closed *after* Kestrel has drained and the device is down — the one moment
+    // nothing can still be writing. See DatabaseLifecycleHostedService for why the process otherwise
+    // never closes its database at all.
+    builder.Services.AddSingleton<DatabaseHealth>();
+    builder.Services.AddHostedService<DatabaseLifecycleHostedService>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
 
     // Update-check (docs/qa403-app-stack-spec.md §8): a short timeout and silent-on-failure
@@ -211,8 +217,13 @@ try
     using var consoleClose = RegisterConsoleCloseShutdown(lifetime, shutdownComplete);
 
     app.Run();
-    shutdownComplete.Set();
+
+    // Logged and flushed *before* the console-close handler is released: that handler returning is
+    // what lets Windows terminate the process, and it does so immediately — for ten days this line
+    // sat after the Set() and never once reached the log, which made every close look like a crash.
     Log.Information("Host stopped cleanly; process exiting");
+    Log.CloseAndFlush();
+    shutdownComplete.Set();
 }
 catch (Exception ex)
 {

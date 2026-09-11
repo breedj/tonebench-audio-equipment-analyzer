@@ -12,8 +12,8 @@ public static class DeviceEndpoints
 
         // Async because this poll is also the app's disconnect detector while nothing is streaming
         // — see DeviceSessionService.GetStatusAsync.
-        group.MapGet("", async (DeviceSessionService session, CancellationToken ct) =>
-            Results.Ok(await session.GetStatusAsync(ct)));
+        group.MapGet("", async (DeviceSessionService session, DatabaseHealth health, CancellationToken ct) =>
+            Results.Ok((await session.GetStatusAsync(ct)) with { DatabaseProblem = health.Problem }));
 
         // Retry hook for a device that wasn't attached when the app started — a missing QA403 no
         // longer aborts startup (see DeviceLifecycleHostedService), so this is how the session gets
@@ -189,7 +189,15 @@ public sealed record DeviceStatusResponse(
     /// <see cref="Qa403.Device.IAnalyzerDevice.DroppedBlocks"/> for why leaving it out of this
     /// response was a bug rather than an omission.
     /// </summary>
-    long DroppedBlocks);
+    long DroppedBlocks,
+    /// <summary>
+    /// What the startup <c>quick_check</c> found wrong with a database file, or null when both files
+    /// are sound. Carried on the status poll so a damaged file is announced from the first second
+    /// instead of as a 500 on whichever read first touches the bad page — see
+    /// <see cref="Qa403.App.Services.DatabaseHealth"/>. Set by the endpoint, not by the session, which
+    /// knows nothing about storage.
+    /// </summary>
+    string? DatabaseProblem = null);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);

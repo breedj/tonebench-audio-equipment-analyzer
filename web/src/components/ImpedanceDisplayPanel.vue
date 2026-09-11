@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import type { ImpedanceView } from '../api/client'
+import type { ImpedanceView, ImpedanceZScale } from '../api/client'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { dbOhmsToOhms } from '../impedance/equivalent'
@@ -19,6 +19,7 @@ const thickLines = defineModel<boolean>('thickLines', { required: true })
 const showDataPoints = defineModel<boolean>('showDataPoints', { required: true })
 const zTopOhms = defineModel<number>('zTopOhms', { required: true })
 const zBottomOhms = defineModel<number>('zBottomOhms', { required: true })
+const zScale = defineModel<ImpedanceZScale>('zScale', { required: true })
 const xFromHz = defineModel<number>('xFromHz', { required: true })
 const xToHz = defineModel<number>('xToHz', { required: true })
 const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
@@ -31,9 +32,18 @@ const PHASE_MAX = 1440
 const PHASE_TICK_DEG = 45
 const PHASE_MIN_SPAN = PHASE_TICK_DEG * 2
 
-/** The axis is logarithmic, so neither bound may reach zero. */
-const Z_MIN = 0.001
-const Z_MAX = 1e7
+/** A logarithmic axis cannot reach zero; a linear one may start there. */
+const Z_LOG_MIN = 0.001
+
+/**
+ * The same ceiling the server clamps an open circuit to (`ImpedanceMath.MaxOhms`, 1e9). It used to
+ * be 1e7, which is below what an open-ish DUT — a straight wire, an amplifier, anything that is not
+ * a fixture — actually reports, so Autofit could not contain the data and, on the log scale, an
+ * all-open trace fitted its bottom to 1e9 and its top to 1e7: an inverted window and a blank chart
+ * that read as "the button does nothing".
+ */
+const Z_MAX = 1e9
+const zMin = computed(() => (zScale.value === 'Log' ? Z_LOG_MIN : 0))
 
 const X_FROM_OPTIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500]
 const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
@@ -58,13 +68,24 @@ const trace = computed(() => props.traces.find((t) => t.kind === 'Impedance') ??
 // two cannot disagree about which standard or which reference resistor is in play.
 const { storedShortCal, referenceOhms } = useImpedance()
 
+// The window has to keep some height whichever scale it is on: a ratio on the log axis, where a
+// bottom of zero is not allowed, and a ratio or a milliohm on the linear one, where it is.
 function onTopZChange(event: Event) {
-  zTopOhms.value = commitBoundedNumber(event, zTopOhms.value, zBottomOhms.value * 1.1, Z_MAX)
+  zTopOhms.value = commitBoundedNumber(event, zTopOhms.value, Math.max(zBottomOhms.value * 1.1, zBottomOhms.value + 0.001), Z_MAX)
 }
 
 function onBottomZChange(event: Event) {
-  zBottomOhms.value = commitBoundedNumber(event, zBottomOhms.value, Z_MIN, zTopOhms.value / 1.1)
+  zBottomOhms.value = commitBoundedNumber(event, zBottomOhms.value, zMin.value, Math.min(zTopOhms.value / 1.1, zTopOhms.value - 0.001))
 }
+
+/**
+ * Switching to the log axis with the bottom parked at zero — the linear default — would blank the
+ * plot, so the bottom is lifted to the smallest thing the log axis can show and the next Autofit
+ * puts it somewhere sensible.
+ */
+watch(zScale, (scale) => {
+  if (scale === 'Log' && zBottomOhms.value < Z_LOG_MIN) zBottomOhms.value = Z_LOG_MIN
+})
 
 function onTopPhaseChange(event: Event) {
   phaseTopDeg.value = commitBoundedNumber(event, phaseTopDeg.value, phaseBottomDeg.value + PHASE_MIN_SPAN, PHASE_MAX)
@@ -77,6 +98,12 @@ function onBottomPhaseChange(event: Event) {
 /**
  * The impedance window from everything currently drawn, rounded outward to a 1/2/5 step so the axis
  * lands on readable decades rather than on the data's exact extremes.
+ *
+ * <p>On the <b>linear</b> axis the bottom is zero rather than the rounded-down minimum: an impedance
+ * curve is read against zero — a driver's 6 Ω rest and 60 Ω peak are one picture, and a resistor's
+ * flatness is only visible against it — and a window fitted to the data's own extremes stretches
+ * every milliohm of noise to full height instead. The log axis keeps the rounded minimum, since
+ * there zero does not exist and a decade is a decade wherever it sits.</p>
  *
  * <p><b>Everything drawn</b> means the short standard too, whenever its checkbox is ticked. A short
  * is a fraction of an ohm against a DUT of several, so a fit taken from the measured curve alone put
@@ -121,7 +148,7 @@ function autofitZ() {
 
   if (!Number.isFinite(min) || !Number.isFinite(max) || !(min > 0) || !(max > 0)) return
 
-  zBottomOhms.value = Math.max(Z_MIN, roundDown125(min))
+  zBottomOhms.value = zScale.value === 'Log' ? Math.max(Z_LOG_MIN, roundDown125(min)) : 0
   zTopOhms.value = Math.min(Z_MAX, roundUp125(max))
 }
 
@@ -278,6 +305,19 @@ watch(
   </CollapsibleSection>
 
   <CollapsibleSection v-if="view === 'Bode'" title="Impedance axis" size="xs">
+    <label
+      class="flex flex-col gap-1 text-xs"
+      title="Linear ohms is how an impedance curve is usually drawn and reads a flat load as flat. Logarithmic is the one scale that fits a fixture's milliohms and a driver's resonance peak in one window."
+    >
+      Scale
+      <select
+        v-model="zScale"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option value="Linear">Linear</option>
+        <option value="Log">Logarithmic</option>
+      </select>
+    </label>
     <div class="grid grid-cols-2 gap-2 text-xs">
       <label class="flex flex-col gap-1">
         Top (Ω)

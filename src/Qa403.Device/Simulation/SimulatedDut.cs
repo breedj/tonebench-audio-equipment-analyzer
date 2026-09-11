@@ -137,10 +137,99 @@ internal readonly record struct Biquad(double B0, double B1, double B2, double A
             1.0 + (alpha * a), -2.0 * cos, 1.0 - (alpha * a),
             1.0 + (alpha / a), -2.0 * cos, 1.0 - (alpha / a));
     }
+
+    /// <summary>This section with its numerator scaled by <paramref name="gain"/> — the same shape, a different level.</summary>
+    public Biquad Scaled(double gain) => new(B0 * gain, B1 * gain, B2 * gain, A1, A2);
+
+    /// <summary>
+    /// The RIAA playback curve — time constants 3180, 318 and 75 us — normalised to unity at 1 kHz.
+    ///
+    /// <para><b>Not the bilinear transform</b>, on purpose. The analog curve keeps falling 6 dB per
+    /// octave past its 75 us pole, out to well beyond the audio band; the bilinear transform pins a
+    /// zero at Nyquist instead, so at 48 kHz it reads about -28 dB at 20 kHz against the -19.6 dB
+    /// every phono stage is specified at. The poles and the zero are placed by the matched-z
+    /// transform (<c>z = e^(sT)</c>), which puts each one at its own frequency at every sample rate
+    /// and errs the other way, by about +2.6 dB at 20 kHz at 48 kHz, because a section with one
+    /// zero does not roll off as fast as the analog tail. The second zero a biquad has to offer is
+    /// then placed on the negative real axis at exactly the radius that makes 20 kHz read the analog
+    /// figure at this sample rate — solved in closed form below. Measured against the analog curve:
+    /// within 0.34 dB everywhere at 48 kHz (the worst point is 15 kHz), within 0.01 dB at 96 and
+    /// 192 kHz.</para>
+    /// </summary>
+    public static Biquad RiaaPlayback(double sampleRateHz)
+    {
+        const double t1 = 3180e-6, t2 = 318e-6, t3 = 75e-6;
+        double period = 1.0 / sampleRateHz;
+
+        // Matched z: each first-order factor (1 + s tau) becomes (1 - e^(-T/tau) z^-1).
+        double zero = Math.Exp(-period / t2);
+        double pole1 = Math.Exp(-period / t1);
+        double pole3 = Math.Exp(-period / t3);
+        var matched = new Biquad(1.0, -zero, 0.0, -(pole1 + pole3), pole1 * pole3);
+
+        // The analog curve's 20 kHz level relative to 1 kHz, and the matched-z section's own; the
+        // corrective zero (1 + a z^-1)/(1 + a) has to supply the ratio between them at 20 kHz.
+        static Complex Analog(double freqHz)
+        {
+            var s = new Complex(0.0, 2.0 * Math.PI * freqHz);
+            return (1.0 + (s * t2)) / ((1.0 + (s * t1)) * (1.0 + (s * t3)));
+        }
+
+        double omega1k = 2.0 * Math.PI * 1000.0 / sampleRateHz;
+        double omega20k = 2.0 * Math.PI * 20_000.0 / sampleRateHz;
+        double wanted = Analog(20_000.0).Magnitude / Analog(1000.0).Magnitude;
+        double have = matched.ResponseAt(omega20k).Magnitude / matched.ResponseAt(omega1k).Magnitude;
+
+        // |1 + a e^(-jw)| / (1 + a) = t  =>  a^2 (1 - t^2) + 2a (cos w - t^2) + (1 - t^2) = 0.
+        // The zero also touches 1 kHz, but by parts in ten thousand, so one pass is enough.
+        double t = wanted / have;
+        double c = Math.Cos(omega20k);
+        double a = 0.0;
+        if (t < 1.0)
+        {
+            double qa = 1.0 - (t * t);
+            double qb = 2.0 * (c - (t * t));
+            double disc = (qb * qb) - (4.0 * qa * qa);
+            if (disc >= 0.0)
+            {
+                double root = (-qb - Math.Sqrt(disc)) / (2.0 * qa);
+                if (root is > 0.0 and < 1.0)
+                    a = root;
+            }
+        }
+
+        var shaped = new Biquad(
+            matched.B0, matched.B1 + (a * matched.B0), a * matched.B1, matched.A1, matched.A2);
+
+        return shaped.Scaled(1.0 / shaped.ResponseAt(omega1k).Magnitude);
+    }
 }
 
 /// <summary>
-/// A simulated DUT's signal path: a cascade of biquads and, optionally, one delayed reflection.
+/// The memoryless (or nearly so) nonlinearity a <see cref="SimulatedDut"/> applies after its filter
+/// cascade. <see cref="None"/> for the linear models, which are the ones that existed before any of
+/// the others.
+/// </summary>
+internal enum Waveshaper
+{
+    None,
+
+    /// <summary>A soft asymmetric polynomial — H2 in proportion to level. See <see cref="SimulatedDutModel.TriodeSingleEnded"/>.</summary>
+    Triode,
+
+    /// <summary>A gain notch around zero — distortion that grows as the level falls. See <see cref="SimulatedDutModel.ClassAbCrossover"/>.</summary>
+    Crossover,
+
+    /// <summary>Clean, then a rail. See <see cref="SimulatedDutModel.SolidStateClipping"/>.</summary>
+    Clipper,
+
+    /// <summary>A flux limit behind a one-pole integrator — distortion that grows towards LF. See <see cref="SimulatedDutModel.TransformerCoreSaturation"/>.</summary>
+    CoreSaturation,
+}
+
+/// <summary>
+/// A simulated DUT's signal path: a cascade of biquads, then optionally a <see cref="Waveshaper"/>,
+/// a pure delay and one delayed reflection, in that order.
 ///
 /// <para>Stateful, and <b>single channel</b> — the DUT sits on the left input only, so there is one
 /// filter chain and no per-channel bookkeeping. See <see cref="SimulatedDutModel"/> for why the
@@ -167,6 +256,20 @@ internal sealed class SimulatedDut
     private int _reflectionCursor;
 
     /// <summary>
+    /// A pure delay on the through path, or null. Distinct from <see cref="_reflectionRing"/>, which
+    /// <i>adds</i> a late copy to the direct sound: this one replaces it, so the whole output arrives
+    /// late — which is what a processor's latency is.
+    /// </summary>
+    private readonly double[]? _delayRing;
+    private int _delayCursor;
+
+    private readonly Waveshaper _shaper;
+
+    /// <summary>The core-saturation model's flux integrator: a one-pole low-pass and its state.</summary>
+    private readonly double _fluxCoefficient;
+    private double _flux;
+
+    /// <summary>
     /// A self-oscillating pole pair added to the through path, or null for a DUT that does not sing.
     /// Only its denominator is used — see <see cref="NextOscillatorSample"/>.
     /// </summary>
@@ -189,7 +292,9 @@ internal sealed class SimulatedDut
         double reflectionGain,
         Biquad? oscillator = null,
         double railVolts = 0.0,
-        double seed = 0.0)
+        double seed = 0.0,
+        Waveshaper shaper = Waveshaper.None,
+        double throughDelayMs = 0.0)
     {
         Model = model;
         SampleRateHz = sampleRateHz;
@@ -197,6 +302,12 @@ internal sealed class SimulatedDut
         _state = new double[sections.Length * 2];
         _oscillator = oscillator;
         _railVolts = railVolts;
+        _shaper = shaper;
+        _fluxCoefficient = 1.0 - Math.Exp(-2.0 * Math.PI * CoreCornerHz / sampleRateHz);
+
+        int delaySamples = (int)Math.Round(throughDelayMs * sampleRateHz / 1000.0);
+        if (delaySamples > 0)
+            _delayRing = new double[delaySamples];
 
         // An unstable pole multiplies whatever it is given, and multiplying exactly zero leaves
         // exactly zero — with the generator off, an oscillator seeded from silence would stay silent
@@ -213,6 +324,13 @@ internal sealed class SimulatedDut
     public SimulatedDutModel Model { get; }
 
     public double SampleRateHz { get; }
+
+    /// <summary>
+    /// True for the models that distort on their own. <see cref="SimulatedDevice"/> reads it to
+    /// switch off the synthesizer's additive harmonic stack, which would otherwise sit under the
+    /// model at a fixed -46 dBc and turn every level-dependent curve back into a flat line.
+    /// </summary>
+    public bool SuppliesOwnDistortion => _shaper != Waveshaper.None;
 
     /// <summary>
     /// Builds the processor for a model, or <c>null</c> for <see cref="SimulatedDutModel.StraightWire"/>
@@ -303,9 +421,128 @@ internal sealed class SimulatedDut
                 [LoudspeakerDivider(sampleRateHz)],
                 reflectionMs: 0.0, reflectionGain: 0.0),
 
+            // The nonlinear models are flat: no sections, the shaper is the whole DUT. Any linear
+            // colour would sit on top of the one number each of them exists to make checkable.
+            SimulatedDutModel.TriodeSingleEnded => new SimulatedDut(
+                model, sampleRateHz, [], reflectionMs: 0.0, reflectionGain: 0.0,
+                shaper: Waveshaper.Triode),
+
+            SimulatedDutModel.ClassAbCrossover => new SimulatedDut(
+                model, sampleRateHz, [], reflectionMs: 0.0, reflectionGain: 0.0,
+                shaper: Waveshaper.Crossover),
+
+            SimulatedDutModel.SolidStateClipping => new SimulatedDut(
+                model, sampleRateHz, [], reflectionMs: 0.0, reflectionGain: 0.0,
+                shaper: Waveshaper.Clipper),
+
+            SimulatedDutModel.TransformerCoreSaturation => new SimulatedDut(
+                model, sampleRateHz, [], reflectionMs: 0.0, reflectionGain: 0.0,
+                shaper: Waveshaper.CoreSaturation),
+
+            SimulatedDutModel.PhonoRiaa => new SimulatedDut(
+                model, sampleRateHz,
+                [Biquad.RiaaPlayback(sampleRateHz)],
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.DigitalProcessor => new SimulatedDut(
+                model, sampleRateHz,
+                [
+                    // A fourth-order Butterworth: two second-order sections at the Qs whose product
+                    // is maximally flat, 1/(2 cos(pi/8)) and 1/(2 cos(3pi/8)).
+                    Biquad.LowPass(ProcessorCornerHz, 0.5412, sampleRateHz),
+                    Biquad.LowPass(ProcessorCornerHz, 1.3066, sampleRateHz),
+                ],
+                reflectionMs: 0.0, reflectionGain: 0.0,
+                throughDelayMs: ProcessorLatencyMs),
+
+            SimulatedDutModel.ImpedanceCapacitive => new SimulatedDut(
+                model, sampleRateHz,
+                // Z = ESR + 1/(sC), so H = Z/(R + Z) = (1 + s ESR C) / (1 + s (R + ESR) C).
+                [Biquad.FromAnalog(
+                    0.0, SimulatedImpedanceFixture.CapacitiveEsrOhms * SimulatedImpedanceFixture.CapacitiveFarad, 1.0,
+                    0.0, (SimulatedImpedanceFixture.ReferenceOhms + SimulatedImpedanceFixture.CapacitiveEsrOhms) * SimulatedImpedanceFixture.CapacitiveFarad, 1.0,
+                    sampleRateHz)],
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.ImpedanceShort => new SimulatedDut(
+                model, sampleRateHz,
+                // The same series R + sL form as the reactive fixture, at lead-sized values.
+                [Biquad.FromAnalog(
+                    0.0, SimulatedImpedanceFixture.ShortHenry, SimulatedImpedanceFixture.ShortOhms,
+                    0.0, SimulatedImpedanceFixture.ShortHenry, SimulatedImpedanceFixture.ReferenceOhms + SimulatedImpedanceFixture.ShortOhms,
+                    sampleRateHz)],
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.ImpedanceOpen => new SimulatedDut(
+                model, sampleRateHz,
+                // Z = 1/(sC) alone: H = 1 / (1 + s R C).
+                [Biquad.FromAnalog(
+                    0.0, 0.0, 1.0,
+                    0.0, SimulatedImpedanceFixture.ReferenceOhms * SimulatedImpedanceFixture.OpenStrayFarad, 1.0,
+                    sampleRateHz)],
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
             _ => null,
         };
     }
+
+    /// <summary>
+    /// The triode's second-order coefficient. <c>H2/H1 = k2 A / 2</c> for a peak drive <c>A</c>, so
+    /// 0.5% at 1 V peak, and 1 dB more for every dB of level — the single-ended signature.
+    /// </summary>
+    public const double TriodeK2 = 0.01;
+
+    /// <summary>Its compressive cubic: <c>H3/H1 = k3 A^2 / 4</c>, 0.05% at 1 V peak, and 2 dB per dB.</summary>
+    public const double TriodeK3 = 0.002;
+
+    /// <summary>
+    /// Where the stage runs out of swing, in volts peak. The polynomial is applied to the input
+    /// limited here, which keeps it monotonic (<c>3 k3 rail^2 &lt; 1</c>) — a cubic left to itself
+    /// folds over at high drive and reads as gain that falls with level, which is not a triode.
+    /// </summary>
+    public const double TriodeRailVolts = 4.0;
+
+    /// <summary>How deep the crossover notch is: the stage's gain at zero is <c>1 - CrossoverDepth</c>.</summary>
+    public const double CrossoverDepth = 0.2;
+
+    /// <summary>
+    /// How wide it is, in volts. THD peaks where the drive is a couple of widths — near 30 mV peak,
+    /// -33 dBV — and is negligible by the time an ordinary measurement level is reached, which is
+    /// what keeps the model unity gain everywhere but at whisper levels.
+    /// </summary>
+    public const double CrossoverWidthVolts = 0.02;
+
+    /// <summary>
+    /// The solid-state model's supply rail, in volts peak: 1 V, i.e. -3 dBV for a sine, so the
+    /// default 1 mV–1 V RMS amplitude sweep meets it exactly at its top.
+    /// </summary>
+    public const double ClipRailVolts = 1.0;
+
+    /// <summary>The knee ahead of the rail, as a fraction of it: short, since a transistor stage saturates abruptly.</summary>
+    public const double ClipKneeFraction = 0.97;
+
+    /// <summary>Its residual cubic below the rail — <c>k3 A^2 / 4</c> is -100 dBc at 1 V peak, so the floor is a number rather than nothing.</summary>
+    public const double ClipK3 = 4.0e-5;
+
+    /// <summary>
+    /// The corner of the flux integrator in <see cref="SimulatedDutModel.TransformerCoreSaturation"/>.
+    /// Below it the flux follows the signal; above it it falls 6 dB per octave, and the cubic
+    /// distortion falls three times as fast — 18 dB per octave.
+    /// </summary>
+    public const double CoreCornerHz = 30.0;
+
+    /// <summary>
+    /// The flux limit, in the same volts as the signal. Chosen so a 1 V peak tone at 20 Hz reads
+    /// about 3% third harmonic: the small-signal figure is <c>A_f^3 / (12 Phi^2)</c> relative to
+    /// <c>A</c>, with <c>A_f = A |LP(f)|</c> and |LP(20 Hz)| = 0.83.
+    /// </summary>
+    public const double CoreFluxLimitVolts = 1.26;
+
+    /// <summary>The digital processor's latency. 576 samples at 48 kHz, 2304 at 192 kHz.</summary>
+    public const double ProcessorLatencyMs = 12.0;
+
+    /// <summary>Its anti-alias low-pass corner: -3 dB here, fourth order, maximally flat below it.</summary>
+    public const double ProcessorCornerHz = 20_000.0;
 
     /// <summary>
     /// The divider for <see cref="SimulatedDutModel.ImpedanceLoudspeaker"/>: a voice-coil resistance
@@ -394,10 +631,10 @@ internal sealed class SimulatedDut
     /// actually produced the samples, which is what an impedance fixture's expected impedance has to
     /// be derived from rather than the analog circuit it was mapped from.
     ///
-    /// <para><b>The cascade only.</b> The reflection and the oscillator are not included: one is a
-    /// delay line and the other is not a response to the input at all, so neither belongs in a
-    /// transfer function. Only the <c>Impedance*</c> fixtures, which are pure cascades, get a
-    /// meaningful answer out of this.</para>
+    /// <para><b>The cascade only.</b> The waveshaper, the delay, the reflection and the oscillator
+    /// are not included: a nonlinearity has no transfer function, the delay and the reflection are
+    /// delay lines, and the oscillator is not a response to the input at all. Only the
+    /// <c>Impedance*</c> fixtures, which are pure cascades, get a meaningful answer out of this.</para>
     /// </summary>
     public Complex ResponseAt(double freqHz)
     {
@@ -424,6 +661,16 @@ internal sealed class SimulatedDut
             x = y;
         }
 
+        x = Shape(x);
+
+        if (_delayRing is not null)
+        {
+            double delayed = _delayRing[_delayCursor];
+            _delayRing[_delayCursor] = x;
+            _delayCursor = (_delayCursor + 1) % _delayRing.Length;
+            x = delayed;
+        }
+
         if (_reflectionRing is not null)
         {
             double delayed = _reflectionRing[_reflectionCursor];
@@ -433,6 +680,47 @@ internal sealed class SimulatedDut
         }
 
         return x + NextOscillatorSample();
+    }
+
+    /// <summary>
+    /// The nonlinearity, after the cascade and before the delay. Every curve here has unit slope
+    /// through the origin (or, for the crossover, deliberately not — see its remarks), so the
+    /// models stay unity gain at the levels the linear measurements run at, and every one is
+    /// bounded, so no drive the generator can produce turns into an infinity downstream.
+    /// </summary>
+    private double Shape(double x)
+    {
+        switch (_shaper)
+        {
+            case Waveshaper.Triode:
+            {
+                double v = Math.Clamp(x, -TriodeRailVolts, TriodeRailVolts);
+                return v + (TriodeK2 * v * v) - (TriodeK3 * v * v * v);
+            }
+
+            case Waveshaper.Crossover:
+            {
+                double w = CrossoverWidthVolts;
+                return x * (1.0 - (CrossoverDepth * Math.Exp(-(x * x) / (2.0 * w * w))));
+            }
+
+            case Waveshaper.Clipper:
+                return SignalSynthesizer.SoftClip(x - (ClipK3 * x * x * x), ClipRailVolts, ClipKneeFraction);
+
+            case Waveshaper.CoreSaturation:
+            {
+                // The flux is the signal integrated — a one-pole low-pass at the corner — and the
+                // core passes only Phi*tanh(flux/Phi) of it. What the output loses is the difference,
+                // which is ~flux^3 / (3 Phi^2) when small and never more than the flux itself.
+                _flux += _fluxCoefficient * (x - _flux);
+                double phi = CoreFluxLimitVolts;
+                double lost = _flux - (phi * Math.Tanh(_flux / phi));
+                return x - lost;
+            }
+
+            default:
+                return x;
+        }
     }
 
     /// <summary>

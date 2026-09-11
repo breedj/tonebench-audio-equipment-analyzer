@@ -48,6 +48,12 @@ export interface DeviceStatus {
    */
   droppedRxChunks: number
   droppedBlocks: number
+  /**
+   * What the startup integrity check found wrong with a database file, or null when both files are
+   * sound. Shown in the status bar from the first poll, so a damaged file is announced rather than
+   * discovered as a 500 on one history entry days later.
+   */
+  databaseProblem: string | null
 }
 
 /**
@@ -62,11 +68,24 @@ export type SimulatedDutModel =
   | 'BandpassFilter'
   | 'MarginallyStable'
   | 'Oscillating'
+  // Nonlinear amplifiers: the models whose distortion depends on level or frequency. Selecting one
+  // switches off the simulator's fixed additive harmonic stack, so the DUT's own curve is what shows.
+  | 'TriodeSingleEnded'
+  | 'ClassAbCrossover'
+  | 'SolidStateClipping'
+  | 'TransformerCoreSaturation'
+  // Linear DUTs with a shape of their own: the RIAA curve (the one DUT that is not unity across the
+  // band) and a processor with real latency.
+  | 'PhonoRiaa'
+  | 'DigitalProcessor'
   // Fixtures rather than DUTs: each is a reference resistor with a load hanging off it, so unlike
   // every model above they are deliberately not unity gain — a divider never is.
   | 'ImpedanceResistive'
   | 'ImpedanceReactive'
   | 'ImpedanceLoudspeaker'
+  | 'ImpedanceCapacitive'
+  | 'ImpedanceShort'
+  | 'ImpedanceOpen'
 
 /** Real QA403 over USB, or the synthetic device. Switchable at runtime — no restart, no flag. */
 export type DeviceKindName = 'Hardware' | 'Simulated'
@@ -320,6 +339,8 @@ export interface ImpedanceParameters {
   chartShowDataPoints?: boolean | null
   chartZTopOhms?: number | null
   chartZBottomOhms?: number | null
+  /** How the |Z| axis is scaled. Null on a type stored before the choice existed, which opens as Linear. */
+  chartZScale?: ImpedanceZScale | null
   chartXFromHz?: number | null
   chartXToHz?: number | null
   chartPhaseTopDeg?: number | null
@@ -335,6 +356,12 @@ export interface ImpedanceParameters {
 
 /** Which chart the impedance screen is showing. */
 export type ImpedanceView = 'Bode' | 'Nyquist'
+
+/**
+ * The |Z| axis: linear ohms, the way an impedance curve is usually drawn, or logarithmic, which is
+ * the only scale that shows a fixture's milliohms and a driver's resonance peak in one window.
+ */
+export type ImpedanceZScale = 'Linear' | 'Log'
 
 export interface ImpedanceTraceJson {
   kind: ImpedanceTraceKindName
@@ -380,6 +407,12 @@ export interface ImpedanceStatus {
    */
   pointsMeasured: number | null
   pointCount: number | null
+  /**
+   * A setup mistake the numbers prove, or null. The run finished and its curve is drawn; it should
+   * not be believed. Today: a negative real impedance over most of the band, which means the two
+   * inputs are the wrong way round for this fixture.
+   */
+  warning: string | null
 }
 
 export interface ImpedanceStarted {

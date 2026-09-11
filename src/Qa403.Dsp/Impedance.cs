@@ -221,4 +221,37 @@ public static class ImpedanceMath
         magnitudes.Sort();
         return magnitudes[magnitudes.Count / 2];
     }
+
+    /// <summary>
+    /// The fraction of bins in <c>[firstBin, lastBin]</c> whose impedance has a <b>negative real
+    /// part</b>, or NaN for an empty band.
+    ///
+    /// <para>A passive one-port cannot have one: its phase stays inside ±90 degrees at every frequency.
+    /// What does produce it, reliably, is the two inputs the wrong way round — the "DUT" channel is
+    /// then the generator side, <c>|H| &gt; 1</c>, and <c>R H / (1 - H)</c> comes out negative real
+    /// with a phase pinned at ±180 degrees. Measured against the simulator's 8 ohm fixture with the
+    /// reference channel set to Left instead of Right: a flat <b>−108 ohms</b>, drawn as a 108 ohm
+    /// line with the phase slamming between +180 and −180. It looked like a scale bug and was a wiring
+    /// one, which is why the runner turns this fraction into a warning instead of leaving it to the
+    /// reader of the chart.</para>
+    /// </summary>
+    public static double NegativeRealFraction(ReadOnlySpan<Complex> z, int firstBin, int lastBin)
+    {
+        if (z.Length == 0)
+            return double.NaN;
+
+        firstBin = Math.Max(0, firstBin);
+        lastBin = Math.Min(z.Length - 1, lastBin);
+        if (lastBin < firstBin)
+            return double.NaN;
+
+        int negative = 0;
+        for (int k = firstBin; k <= lastBin; k++)
+        {
+            if (z[k].Real < 0.0)
+                negative++;
+        }
+
+        return (double)negative / (lastBin - firstBin + 1);
+    }
 }

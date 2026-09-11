@@ -669,7 +669,14 @@ public sealed record ImpedanceStatus(
     double? DriveCurrentAmps = null,
     ImpedanceStimulus Stimulus = ImpedanceStimulus.Chirp,
     int? PointsMeasured = null,
-    int? PointCount = null);
+    int? PointCount = null,
+    /// <summary>
+    /// Something about the last measurement that is almost certainly a setup mistake rather than a
+    /// property of the DUT, or null. Distinct from <see cref="Error"/>: the run finished and its
+    /// curve is on screen, it just should not be believed. Today the one case is a negative real
+    /// impedance over most of the band — see <c>ImpedanceMath.NegativeRealFraction</c>.
+    /// </summary>
+    string? Warning = null);
 
 /// <summary>The shape of a run, returned as soon as it has been accepted.</summary>
 public sealed record ImpedanceStarted(

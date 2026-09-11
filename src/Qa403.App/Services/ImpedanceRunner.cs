@@ -92,6 +92,7 @@ public sealed class ImpedanceRunner(
     private int? _pointCount;
     private ImpedanceCalibration? _capturedCalibration;
     private double? _medianOhms;
+    private string? _warning;
     private double? _driveCurrentAmps;
     private string? _error;
     private List<ImpedanceTrace> _traces = [];
@@ -123,7 +124,7 @@ public sealed class ImpedanceRunner(
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _referenceOhms,
                     _rightChannelIsReference, _calTarget, _error, [.. _traces],
                     _capturedCalibration, _medianOhms, _driveCurrentAmps,
-                    _stimulus, _pointsMeasured, _pointCount);
+                    _stimulus, _pointsMeasured, _pointCount, _warning);
             }
         }
     }
@@ -172,6 +173,7 @@ public sealed class ImpedanceRunner(
                 _capturedCalibration = null;
                 _medianOhms = null;
                 _driveCurrentAmps = null;
+                _warning = null;
                 _error = null;
                 _traces = [];
             }
@@ -242,6 +244,7 @@ public sealed class ImpedanceRunner(
             _capturedCalibration = null;
             _medianOhms = null;
             _driveCurrentAmps = null;
+            _warning = null;
             _error = null;
 
             return Status;
@@ -432,7 +435,8 @@ public sealed class ImpedanceRunner(
         double PeakDbv,
         ImpedanceCalibration? Calibration,
         double? MedianOhms,
-        double? DriveCurrentAmps);
+        double? DriveCurrentAmps,
+        string? Warning = null);
 
     /// <summary>
     /// One complete measurement: <see cref="ImpedanceRequest.AverageCount"/> records folded into a
@@ -567,7 +571,27 @@ public sealed class ImpedanceRunner(
 
         return new PassResult(
             [ImpedanceTraceBuilder.Build(request, ImpedanceTraceKind.Impedance, z, result.Coherence, DisplayColumns)],
-            peakDbv, null, medianOhms, driveCurrentAmps);
+            peakDbv, null, medianOhms, driveCurrentAmps,
+            SwappedChannelWarning(request, ImpedanceMath.NegativeRealFraction(z, firstBin, lastBin)));
+    }
+
+    /// <summary>
+    /// The one setup mistake the numbers can prove: a negative real impedance over most of the band,
+    /// which a passive one-port cannot present and swapped inputs always do. Measured against the
+    /// simulator's 8 ohm fixture with the reference channel the wrong way round: a flat 108 ohm line
+    /// at ±180 degrees, reported as "the scale is wrong". The threshold is a majority of bins rather
+    /// than any, because a real measurement's phase does wander past ±90 in the noise at the edges
+    /// of the band.
+    /// </summary>
+    private static string? SwappedChannelWarning(ImpedanceRequest request, double negativeRealFraction)
+    {
+        if (!(negativeRealFraction > 0.5))
+            return null;
+
+        string other = request.RightChannelIsReference ? "Left" : "Right";
+        return $"The measured node is louder than the generator side over {negativeRealFraction:P0} of the band, "
+            + "which a series-resistor fixture cannot do: the impedance comes out negative and the phase sits at ±180°. "
+            + $"The reference channel is almost certainly the other input — try {other}.";
     }
 
     /// <summary>Puts a pass -- finished, or partway through a noise average -- on the status and on the wire.</summary>
@@ -579,6 +603,7 @@ public sealed class ImpedanceRunner(
             _capturedCalibration = pass.Calibration;
             _medianOhms = pass.MedianOhms;
             _driveCurrentAmps = pass.DriveCurrentAmps;
+            _warning = pass.Warning;
         }
 
         foreach (var trace in pass.Traces)
@@ -679,6 +704,7 @@ public sealed class ImpedanceRunner(
         ImpedanceCalibration? calibration = null;
         double? medianOhms = null;
         double? driveCurrentAmps = null;
+        string? warning = null;
 
         if (request.IsCalibration)
         {
@@ -693,6 +719,7 @@ public sealed class ImpedanceRunner(
             driveCurrentAmps = medianOhms is { } m
                 ? Math.Pow(10.0, request.GeneratorDbv / 20.0) / (request.ReferenceOhms + m)
                 : null;
+            warning = SwappedChannelWarning(request, ImpedanceMath.NegativeRealFraction(values, 0, values.Length - 1));
         }
 
         lock (_stateLock)
@@ -702,6 +729,7 @@ public sealed class ImpedanceRunner(
             _capturedCalibration = calibration;
             _medianOhms = medianOhms;
             _driveCurrentAmps = driveCurrentAmps;
+            _warning = warning;
         }
 
         hub.Broadcast(StreamFrame.EncodeImpedance(trace));

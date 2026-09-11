@@ -152,6 +152,11 @@ public sealed class SimulatedDevice : IAnalyzerDevice
         long frameIndex = 0;
         long sequenceNumber = 0;
 
+        // The profile as last seen and its harmonic-free twin, so the `with` below runs once per
+        // profile change rather than once per block.
+        SimulatedSignalProfile? distortingSource = null;
+        SimulatedSignalProfile? distortionFree = null;
+
         while (!ct.IsCancellationRequested && !_stopRequested)
         {
             // Real-time cadence, not "as fast as possible": the periodic timer is what makes
@@ -166,6 +171,21 @@ public sealed class SimulatedDevice : IAnalyzerDevice
             // that no longer exist.
             if (dut?.Model != profile.Dut)
                 dut = SimulatedDut.For(profile.Dut, config.SampleRateHz);
+
+            // A DUT that distorts on its own is measured on its own: the fixed harmonic stack the
+            // synthesizer otherwise adds to the generator is level-independent, and under it every
+            // level-dependent curve the nonlinear models exist to draw is a flat line at -46 dBc.
+            // Dropping it also makes the right channel the clean generator tap a real bench has.
+            if (dut is { SuppliesOwnDistortion: true } && profile.HarmonicsEnabled)
+            {
+                if (!ReferenceEquals(profile, distortingSource))
+                {
+                    distortingSource = profile;
+                    distortionFree = profile with { HarmonicsEnabled = false };
+                }
+
+                profile = distortionFree!;
+            }
 
             // Two independent clip points, one per end of the signal chain: the generator's own
             // DAC full scale, and the analyzer's ADC full scale. See the per-sample loop below.
@@ -196,10 +216,11 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                     double generated = SignalSynthesizer.HardClip(
                         synthesizer.ComputeChannelSample(profile, absoluteFrame, ch), outputClipPeakV);
 
-                    // Left only. The right input is the bench's reference tap, and filtering it too
-                    // would let the impulse response's RightChannel reference divide the DUT
-                    // straight back out — see SimulatedDutModel.
-                    if (ch == 0 && dut is not null)
+                    // One channel only — left for a DUT, right for an impedance fixture, the way a
+                    // bench is wired for each (see SimulatedDutModelExtensions.MeasuredChannel).
+                    // Filtering both would let any two-channel ratio divide the model straight
+                    // back out.
+                    if (dut is not null && ch == dut.Model.MeasuredChannel())
                         generated = dut.Process(generated);
 
                     double sample = SignalSynthesizer.SoftClip(generated + sharedAdditive, inputClipPeakV);

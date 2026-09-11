@@ -8,11 +8,11 @@
 /// impedance screen for a simulated run to read true, what its manual page quotes, and what the
 /// tests assert against. One copy, so those three cannot drift apart.</para>
 ///
-/// <para>The wiring is the one a bench fixture uses, mirrored: the generator drives
-/// <see cref="ReferenceOhms"/> in series with the load, and the <b>left</b> channel measures the
-/// junction while the right carries the generator untouched. That is the opposite of a fixture wired
-/// left-as-reference, and it follows from the simulator applying its DUT to the left channel only —
-/// so an impedance run against <c>--simulate</c> wants its reference channel set to Right.</para>
+/// <para>The wiring is the one a bench fixture uses: the generator drives <see cref="ReferenceOhms"/>
+/// in series with the load, the <b>left</b> channel carries the generator side untouched and the
+/// <b>right</b> channel measures the junction. So the impedance screen's default reference channel,
+/// Left, is correct against <c>--simulate</c> — unlike every DUT model, which sits on the left (see
+/// <see cref="SimulatedDutModelExtensions.MeasuredChannel"/>).</para>
 /// </summary>
 public static class SimulatedImpedanceFixture
 {
@@ -46,4 +46,27 @@ public static class SimulatedImpedanceFixture
 
     /// <summary>How sharp it is. A mechanical Q in the range a real driver in free air actually has.</summary>
     public const double SpeakerQ = 2.5;
+
+    /// <summary>The capacitor of <see cref="SimulatedDutModel.ImpedanceCapacitive"/>: 47 uF, so |Z| is 3.4 ohms at 1 kHz.</summary>
+    public const double CapacitiveFarad = 47.0e-6;
+
+    /// <summary>Its equivalent series resistance, which is where the phase stops short of -90 degrees at the top of the band.</summary>
+    public const double CapacitiveEsrOhms = 0.3;
+
+    /// <summary>
+    /// The resistance of the shorted leads in <see cref="SimulatedDutModel.ImpedanceShort"/>. With
+    /// <see cref="ShortHenry"/> these are the figures a real lead set measured on the bench at 0 dBV,
+    /// once the drive was high enough to lift them out of the noise.
+    /// </summary>
+    public const double ShortOhms = 0.12;
+
+    /// <summary>The leads' inductance, which is what lifts the short clear of the noise above a few kilohertz.</summary>
+    public const double ShortHenry = 0.6e-6;
+
+    /// <summary>
+    /// The stray capacitance across the open terminals in <see cref="SimulatedDutModel.ImpedanceOpen"/>.
+    /// Present so the divider ratio is <i>nearly</i> one rather than exactly one — see the model's own
+    /// remarks — and small enough to be invisible: 0.07 degrees at 20 kHz against the 100 ohm reference.
+    /// </summary>
+    public const double OpenStrayFarad = 100.0e-12;
 }

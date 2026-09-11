@@ -9,7 +9,8 @@ namespace Qa403.Device.Tests;
 ///
 /// <para>These are end-to-end through <see cref="SimulatedDevice"/> rather than unit tests of the
 /// coefficients, so they prove the fixture is actually in the signal path and on the channel the
-/// measurement expects to find it on.</para>
+/// measurement expects to find it on: the <b>right</b>, with the left carrying the generator side —
+/// bench wiring, so the impedance screen's default reference channel (Left) is the correct one.</para>
 ///
 /// <para><b>Expectations come from the discrete filter, not from the analog circuit.</b> The models
 /// are mapped to the z plane by an unprewarped bilinear transform, so the sampled fixture's impedance
@@ -107,31 +108,120 @@ public class SimulatedImpedanceFixtureTests
         Assert.Equal(-0.151, z.Phase * 180.0 / Math.PI, 3);
     }
 
+    [Theory]
+    [InlineData(50.0)]
+    [InlineData(1000.0)]
+    [InlineData(10000.0)]
+    public async Task CapacitiveFixture_MatchesItsOwnDiscreteImpedance(double freqHz)
+    {
+        var expected = ExpectedOhms(SimulatedDutModel.ImpedanceCapacitive, freqHz);
+        var z = await MeasureAsync(SimulatedDutModel.ImpedanceCapacitive, freqHz);
+
+        Assert.Equal(expected.Magnitude, z.Magnitude, expected.Magnitude * 1e-6);
+        Assert.Equal(expected.Phase, z.Phase, 6);
+    }
+
     /// <summary>
-    /// The invariant the whole measurement rests on: the fixture is on the left channel only, so the
-    /// right one still carries the generator untouched. If a model ever filtered both, the ratio
+    /// The capacitor is the mirror of the inductor: the same 6 dB per octave on a log plot, in the
+    /// other direction, and the phase is what tells them apart. Well below Nyquist it is the
+    /// <c>ESR - j/(wC)</c> it was written as — 169 ohms at -89.9 degrees at 20 Hz.
+    /// </summary>
+    [Theory]
+    [InlineData(20.0)]
+    [InlineData(100.0)]
+    public async Task CapacitiveFixture_WellBelowNyquist_IsTheSeriesCircuitItWasWrittenAs(double freqHz)
+    {
+        var analog = new Complex(
+            SimulatedImpedanceFixture.CapacitiveEsrOhms,
+            -1.0 / (2.0 * Math.PI * freqHz * SimulatedImpedanceFixture.CapacitiveFarad));
+
+        var z = await MeasureAsync(SimulatedDutModel.ImpedanceCapacitive, freqHz);
+
+        Assert.Equal(analog.Magnitude, z.Magnitude, analog.Magnitude * 1e-4);
+        Assert.Equal(analog.Phase * 180.0 / Math.PI, z.Phase * 180.0 / Math.PI, 2);
+        Assert.True(z.Phase < -1.5, $"a capacitor's phase must be near -90 degrees, not {z.Phase * 180.0 / Math.PI:F1}");
+    }
+
+    /// <summary>
+    /// The short reads what a real lead set read on the bench: 0.12 ohms, with 0.6 uH lifting it to
+    /// 17 degrees by 10 kHz. That is a divider ratio of about -58 dB, so this is also the fixture
+    /// that says the measurement still resolves a load sixty decibels under the reference. Below a
+    /// kilohertz it is the circuit it was written as; at 10 kHz the inductance has warped like the
+    /// reactive fixture's (see the class remarks) and the discrete filter is the reference.
+    /// </summary>
+    [Theory]
+    [InlineData(100.0)]
+    [InlineData(1000.0)]
+    public async Task ShortFixture_ReadsItsLeads(double freqHz)
+    {
+        var analog = new Complex(
+            SimulatedImpedanceFixture.ShortOhms,
+            2.0 * Math.PI * freqHz * SimulatedImpedanceFixture.ShortHenry);
+
+        var z = await MeasureAsync(SimulatedDutModel.ImpedanceShort, freqHz);
+
+        Assert.Equal(analog.Magnitude, z.Magnitude, analog.Magnitude * 1e-3);
+        Assert.Equal(analog.Phase * 180.0 / Math.PI, z.Phase * 180.0 / Math.PI, 1);
+    }
+
+    [Fact]
+    public async Task ShortFixture_AtTheTopOfTheBand_MatchesItsOwnDiscreteImpedance()
+    {
+        var expected = ExpectedOhms(SimulatedDutModel.ImpedanceShort, 10_000.0);
+        var z = await MeasureAsync(SimulatedDutModel.ImpedanceShort, 10_000.0);
+
+        Assert.Equal(expected.Magnitude, z.Magnitude, expected.Magnitude * 1e-4);
+        Assert.Equal(expected.Phase * 180.0 / Math.PI, z.Phase * 180.0 / Math.PI, 2);
+        Assert.InRange(z.Phase * 180.0 / Math.PI, 15.0, 25.0);
+    }
+
+    /// <summary>
+    /// The open is open — 1.6 megohms at 1 kHz, from a 100 pF stray — and, unlike a straight wire,
+    /// its divider ratio is not exactly one, so inverting it is a large finite number rather than a
+    /// division by zero.
+    /// </summary>
+    [Fact]
+    public async Task OpenFixture_ReadsAsAnOpenWithoutDividingByZero()
+    {
+        var (left, right) = await CaptureAsync(SimulatedDutModel.ImpedanceOpen, 1000.0);
+        Complex h = left / right;
+        Assert.NotEqual(Complex.One, h);
+
+        var z = await MeasureAsync(SimulatedDutModel.ImpedanceOpen, 1000.0);
+        double expectedOhms = 1.0 / (2.0 * Math.PI * 1000.0 * SimulatedImpedanceFixture.OpenStrayFarad);
+
+        Assert.True(double.IsFinite(z.Magnitude));
+        Assert.Equal(expectedOhms, z.Magnitude, expectedOhms * 0.05);
+    }
+
+    /// <summary>
+    /// The invariant the whole measurement rests on: the fixture is on the right channel only, so the
+    /// left one still carries the generator untouched. If a model ever filtered both, the ratio
     /// would divide the fixture out and every impedance would read as an open circuit.
     /// </summary>
     [Theory]
     [InlineData(SimulatedDutModel.ImpedanceResistive)]
     [InlineData(SimulatedDutModel.ImpedanceReactive)]
     [InlineData(SimulatedDutModel.ImpedanceLoudspeaker)]
-    public async Task EveryFixture_LeavesTheRightChannelAsAStraightWire(SimulatedDutModel model)
+    [InlineData(SimulatedDutModel.ImpedanceCapacitive)]
+    [InlineData(SimulatedDutModel.ImpedanceShort)]
+    [InlineData(SimulatedDutModel.ImpedanceOpen)]
+    public async Task EveryFixture_LeavesTheLeftChannelAsAStraightWire(SimulatedDutModel model)
     {
         const double freqHz = 1000.0;
 
-        var (_, fixtureRight) = await CaptureAsync(model, freqHz);
-        var (_, wireRight) = await CaptureAsync(SimulatedDutModel.StraightWire, freqHz);
+        var (fixtureLeft, _) = await CaptureAsync(model, freqHz);
+        var (wireLeft, _) = await CaptureAsync(SimulatedDutModel.StraightWire, freqHz);
 
-        Assert.Equal(1.0, (fixtureRight / wireRight).Magnitude, 9);
-        Assert.Equal(0.0, (fixtureRight / wireRight).Phase, 9);
+        Assert.Equal(1.0, (fixtureLeft / wireLeft).Magnitude, 9);
+        Assert.Equal(0.0, (fixtureLeft / wireLeft).Phase, 9);
     }
 
-    /// <summary>Inverting the divider, exactly as the impedance measurement does.</summary>
+    /// <summary>Inverting the divider, exactly as the impedance measurement does with the reference on the left.</summary>
     private static async Task<Complex> MeasureAsync(SimulatedDutModel model, double freqHz)
     {
         var (left, right) = await CaptureAsync(model, freqHz);
-        Complex h = left / right;
+        Complex h = right / left;
         return SimulatedImpedanceFixture.ReferenceOhms * h / (Complex.One - h);
     }
 

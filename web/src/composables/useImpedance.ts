@@ -62,6 +62,7 @@ const referenceOhms = ref(100)
 const rightChannelIsReference = ref(false)
 const calTarget = ref<ImpedanceCalTargetName>('None')
 const error = ref<string | null>(null)
+const warning = ref<string | null>(null)
 const medianOhms = ref<number | null>(null)
 const driveCurrentAmps = ref<number | null>(null)
 
@@ -236,6 +237,7 @@ function applyStatus(status: ImpedanceStatus) {
   rightChannelIsReference.value = status.rightChannelIsReference === true
   calTarget.value = status.calTarget ?? 'None'
   error.value = status.error
+  warning.value = status.warning ?? null
   capturedCalibration.value = status.capturedCalibration
   medianOhms.value = status.medianOhms
   driveCurrentAmps.value = status.driveCurrentAmps
@@ -318,6 +320,7 @@ export function useImpedance() {
     rightChannelIsReference,
     calTarget,
     error,
+    warning,
     traces,
     impedanceTrace,
     capturedCalibration,

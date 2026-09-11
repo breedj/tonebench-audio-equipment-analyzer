@@ -217,6 +217,7 @@ const {
   running: impedanceRunning,
   traces: impedanceTraces,
   error: impedanceError,
+  warning: impedanceWarning,
   progressLabel: impedanceProgressLabel,
   generatorAmpDbv: impedanceGeneratorAmpDbv,
   binHz: impedanceBinHz,
@@ -718,6 +719,8 @@ const impedanceThickLines = ref(false)
 const impedanceShowDataPoints = ref(false)
 const impedanceZTopOhms = ref(100)
 const impedanceZBottomOhms = ref(1)
+// Linear by default: it is how an impedance curve is usually drawn, and it reads a flat load as flat.
+const impedanceZScale = ref<import('./api/client').ImpedanceZScale>('Linear')
 const impedanceXFromHz = ref(10)
 const impedanceXToHz = ref(20000)
 const impedancePhaseTopDeg = ref(90)
@@ -754,9 +757,10 @@ function applyStoredImpedanceDisplay(paramsJson: string) {
   if (typeof stored.chartShowShortCal === 'boolean') impedanceShowShortCal.value = stored.chartShowShortCal
   if (typeof stored.chartThickLines === 'boolean') impedanceThickLines.value = stored.chartThickLines
   if (typeof stored.chartShowDataPoints === 'boolean') impedanceShowDataPoints.value = stored.chartShowDataPoints
-  // Both bounds must stay above zero: the impedance axis is logarithmic.
+  impedanceZScale.value = stored.chartZScale === 'Log' ? 'Log' : 'Linear'
+  // The top must stay above zero on either scale; the bottom may sit on zero only on the linear one.
   if (typeof stored.chartZTopOhms === 'number' && stored.chartZTopOhms > 0) impedanceZTopOhms.value = stored.chartZTopOhms
-  if (typeof stored.chartZBottomOhms === 'number' && stored.chartZBottomOhms > 0)
+  if (typeof stored.chartZBottomOhms === 'number' && (impedanceZScale.value === 'Linear' ? stored.chartZBottomOhms >= 0 : stored.chartZBottomOhms > 0))
     impedanceZBottomOhms.value = stored.chartZBottomOhms
   if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) impedanceXFromHz.value = stored.chartXFromHz
   if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) impedanceXToHz.value = stored.chartXToHz
@@ -783,7 +787,7 @@ watch(
 watch(
   [
     impedanceView, impedanceShowPhase, impedanceShowCoherence, impedanceShowShortCal, impedanceThickLines,
-    impedanceShowDataPoints, impedanceZTopOhms, impedanceZBottomOhms, impedanceXFromHz,
+    impedanceShowDataPoints, impedanceZTopOhms, impedanceZBottomOhms, impedanceZScale, impedanceXFromHz,
     impedanceXToHz, impedancePhaseTopDeg, impedancePhaseBottomDeg, impedanceAutofitOnDone,
     impedanceDutType,
   ],
@@ -1635,6 +1639,7 @@ function buildTypeParamsJson(): string | undefined {
       chartShowDataPoints: impedanceShowDataPoints.value,
       chartZTopOhms: impedanceZTopOhms.value,
       chartZBottomOhms: impedanceZBottomOhms.value,
+      chartZScale: impedanceZScale.value,
       chartXFromHz: impedanceXFromHz.value,
       chartXToHz: impedanceXToHz.value,
       chartPhaseTopDeg: impedancePhaseTopDeg.value,
@@ -2440,6 +2445,8 @@ function confirmSaveProjectAs(name: string) {
                   <span v-if="impedanceBinHz">· {{ impedanceBinHz.toFixed(2) }} Hz/bin</span>
                 </div>
                 <p v-if="impedanceError" class="text-xs text-red-600 dark:text-red-400">{{ impedanceError }}</p>
+                <!-- Amber, not red: the run succeeded, the curve is drawn — it is the setup that is wrong. -->
+                <p v-if="impedanceWarning" class="text-xs text-amber-700 dark:text-amber-400">{{ impedanceWarning }}</p>
 
                 <ImpedanceChart
                   v-if="impedanceView === 'Bode'"
@@ -2452,6 +2459,7 @@ function confirmSaveProjectAs(name: string) {
                   :show-data-points="impedanceShowDataPoints"
                   :z-top-ohms="impedanceZTopOhms"
                   :z-bottom-ohms="impedanceZBottomOhms"
+                  :z-scale="impedanceZScale"
                   :x-from-hz="impedanceXFromHz"
                   :x-to-hz="impedanceXToHz"
                   :phase-top-deg="impedancePhaseTopDeg"
@@ -2480,6 +2488,7 @@ function confirmSaveProjectAs(name: string) {
                   v-model:show-data-points="impedanceShowDataPoints"
                   v-model:z-top-ohms="impedanceZTopOhms"
                   v-model:z-bottom-ohms="impedanceZBottomOhms"
+                  v-model:z-scale="impedanceZScale"
                   v-model:x-from-hz="impedanceXFromHz"
                   v-model:x-to-hz="impedanceXToHz"
                   v-model:phase-top-deg="impedancePhaseTopDeg"

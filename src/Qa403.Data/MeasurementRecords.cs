@@ -478,6 +478,7 @@ public sealed record ImpedanceParameters(
     bool? ChartShowDataPoints = null,
     double? ChartZTopOhms = null,
     double? ChartZBottomOhms = null,
+    string? ChartZScale = null,
     double? ChartXFromHz = null,
     double? ChartXToHz = null,
     double? ChartPhaseTopDeg = null,

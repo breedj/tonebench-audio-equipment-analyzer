@@ -1,0 +1,161 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import ManualChart, { type ManualSeries } from '../../components/ManualChart.vue'
+import SettingsTable from '../../components/SettingsTable.vue'
+import { noiseFloorDbvPerBin, toneStems } from '../../sim/curves'
+import { GENERATOR_HARMONIC_DBC, HUM_HARMONICS, straightWire } from '../../sim/models'
+import { useManual } from '../../useManual'
+
+const { showPage } = useManual()
+
+const wire = straightWire(192_000)
+const FFT_RATE = 192_000
+const FFT_SIZE = 65536
+const floorDbv = noiseFloorDbvPerBin(FFT_RATE, FFT_SIZE)
+
+const fftSeries = computed<ManualSeries[]>(() => [
+  { name: 'Tone and its harmonics', points: toneStems(wire, 1000, -6, FFT_RATE / 2), color: 'left', kind: 'stem' },
+  { name: 'Hum', points: HUM_HARMONICS.map((h) => [h.freqHz, h.dbv] as const), color: 'amber', kind: 'stem' },
+  {
+    name: 'Noise floor (per bin)',
+    points: [
+      [5, floorDbv + 6],
+      [30, floorDbv + 2],
+      [300, floorDbv],
+      [FFT_RATE / 2, floorDbv],
+    ],
+    color: 'grey',
+  },
+])
+
+const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.pow(10, dbc / 10), 0))
+</script>
+
+<template>
+  <div>
+    <h1>Straight wire</h1>
+
+    <p>
+      No device at all: both generator channels reach both inputs unaltered, plus whatever the
+      simulator's own <strong>Noise</strong> and <strong>Hum</strong> checkboxes add. It is the
+      default, and it is the simulated equivalent of a loopback cable — the measurement of the
+      analyzer rather than of anything patched to it.
+    </p>
+    <p>
+      What it carries is therefore the simulated <em>generator</em>: every tone with its fixed
+      harmonic stack (H2 −46 dBc, H3 −60 dBc, each order above 12 dB lower), the −150 dBV/√Hz noise
+      floor, and mains hum at 50 Hz. Every linear model on the pages that follow reads this same
+      distortion, because none of them adds any of its own.
+    </p>
+
+    <h2>What to expect, in numbers</h2>
+    <SettingsTable
+      :headings="['Reading', 'Value']"
+      :rows="[
+        ['Gain', '0.00 dB at every frequency, both channels'],
+        ['Phase', '0° everywhere; the recovered delay reads 0 samples'],
+        ['THD', `${thd.toFixed(3)} % at any level and any frequency — the generator’s stack`],
+        ['Noise floor', `about ${floorDbv.toFixed(0)} dBV per bin at 192 kHz / 65536 / Hann, with a little 1/f rise below 300 Hz`],
+        ['Hum', '−90 dBV at 50 Hz, −96 at 100 Hz, −102 at 150 Hz'],
+        ['Impedance', 'an open circuit — a straight wire is also the open calibration standard'],
+      ]"
+    />
+
+    <h2>Measurements</h2>
+    <ul>
+      <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> — the one to learn the screen on.</li>
+      <li>
+        <a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a>,
+        <a href="#" @click.prevent="showPage('stepped-response')">stepped sine</a> and
+        <a href="#" @click.prevent="showPage('impulse-response')">impulse response</a> — a flat
+        line at 0 dB, 0°, and a single spike; the reading that says the analysis itself is right.
+      </li>
+      <li>
+        <a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> and
+        <a href="#" @click.prevent="showPage('thd-vs-amplitude')">THD vs amplitude</a> — flat at
+        {{ thd.toFixed(2) }} %, for the reason the <button type="button" class="manual-link" @click="showPage('sim-tube-amp')">Tube amp</button> page draws out.
+      </li>
+      <li>
+        <a href="#" @click.prevent="showPage('impedance')">Impedance</a> — reads as an open, and
+        works as the <em>open</em> calibration standard; see the
+        <button type="button" class="manual-link" @click="showPage('sim-fixture-standards')">calibration standards</button> page for why a dedicated open also exists.
+      </li>
+    </ul>
+
+    <h2>FFT analysis</h2>
+    <SettingsTable
+      :rows="[
+        ['Stimulus', 'Sine tones, one row: 1000 Hz, −6 dBV, Snap to bin on'],
+        ['Left / Right', 'Both'],
+        ['Sample rate', '192000'],
+        ['FFT size', '65536'],
+        ['Window', 'Hann'],
+        ['Averaging', 'Linear, 8 spectra'],
+        ['Simulator', 'Noise and Hum on'],
+      ]"
+    />
+    <ManualChart
+      :series="fftSeries"
+      :x-min="5"
+      :x-max="96000"
+      :y-min="-160"
+      :y-max="10"
+      x-label="Hz"
+      y-label="dBV"
+      :height="260"
+      caption="Expected spectrum on both channels: the tone at −6 dBV with the generator's stack, hum at 50/100/150 Hz, and the noise floor near −144 dBV per bin. The real chart draws the floor as a band a few dB tall — the min/max spread of each decimated column."
+    />
+    <SettingsTable
+      :headings="['Tile', 'Both channels read']"
+      :rows="[
+        ['Level', '−6.00 dBV at 999.0 Hz — the bin Snap to bin moved the tone to'],
+        ['THD', `${thd.toFixed(3)} % (−45.8 dB)`],
+        ['THD+N', `${thd.toFixed(3)} % — the floor integrates to −107 dBV over 20 Hz – 20 kHz, 100 dB under the tone`],
+        ['SNR', 'about 101 dB'],
+        ['Harmonics table', 'H2 −46.0 dBc, H3 −60.0, H4 −72.0, H5 −84.0 … each 12 dB lower until they meet the floor near H9'],
+      ]"
+    />
+    <p>Things worth doing on this screen with the wire in place, because each shows one part of the analysis rather than a DUT:</p>
+    <ul>
+      <li>
+        <strong>Untick Noise.</strong> The floor drops away to whatever the arithmetic leaves, far
+        below anything a converter could do, and the harmonic stack stands alone down to H9 at
+        −138 dBV. This is the only way to see the whole stack.
+      </li>
+      <li>
+        <strong>Change the FFT size</strong> from 65536 to 8192 and watch the noise floor rise by
+        9 dB while the tone and its harmonics stay put: a coherent tone lands in one bin at full
+        level whatever the bin width, and noise is spread per hertz. THD does not move; THD+N and SNR
+        barely do, since they integrate the band and the bin width cancels.
+      </li>
+      <li>
+        <strong>Switch Snap to bin off</strong> and type 1000 Hz: the tone straddles two bins, its
+        skirts spread under the Hann window, and the Level tile reads a fraction low. Flat Top brings
+        the level back at the cost of resolution; Rectangular makes the skirts worse. This is what
+        the snap is for.
+      </li>
+      <li>
+        <strong>Raise the amplitude across −14, −4 and +6 dBV</strong> and watch the status bar's
+        output range step. On real hardware each step moves the noise floor, since the output
+        attenuator sets it; the simulator's floor does not follow, which is the one thing about
+        ranges it cannot demonstrate.
+      </li>
+      <li>
+        <strong>Add a second tone row</strong> — 19 and 20 kHz at −12 dBV each — for an
+        intermodulation test. The generator's stack is per tone, so besides each tone's harmonics
+        nothing appears at 1 kHz or 39 kHz: the simulated generator does not intermodulate, and a
+        real DUT that shows products there is producing them itself.
+      </li>
+    </ul>
+
+    <h2>The other screens</h2>
+    <p>
+      The chirp measures 0.00 dB and 0.0° from one end of the band to the other, coherence 1.000,
+      and the bandwidth rows report both corners clamped (<strong>&lt;</strong> the start,
+      <strong>&gt;</strong> the end) because nothing ever falls. The impulse response is one sample
+      at t = 0 and nothing else; both decay surfaces are empty. That is the correct picture of
+      nothing, and worth seeing once so that a spike with a tail reads as a DUT rather than as the
+      analyzer.
+    </p>
+  </div>
+</template>

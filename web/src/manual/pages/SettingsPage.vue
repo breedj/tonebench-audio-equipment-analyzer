@@ -136,9 +136,10 @@
             <p>
               <strong>Tube amp</strong> is a push-pull valve amplifier with an output transformer:
               flat through the audio band, rolled off at both ends, with the transformer's own
-              resonance about 4 dB up at 38 kHz. That sits above 24 kHz, so it only appears with the
-              frequency span set to 96 kHz — which is the argument for measuring an amplifier at
-              192 kHz, in one picture.
+              resonance about 4 dB up at 38 kHz. That sits above 24 kHz, so it only appears in its
+              true place with the frequency span set to 96 kHz — which is the argument for measuring
+              an amplifier at 192 kHz, in one picture. Its own page under <em>Simulator</em> gives
+              the settings and expected result of every measurement against it.
             </p>
             <p>
               <strong>Loudspeaker</strong> is a two-way speaker in a room: a sealed-box roll-off, a

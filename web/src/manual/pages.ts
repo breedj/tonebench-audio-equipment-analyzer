@@ -24,7 +24,7 @@ export interface ManualPage {
   /** Which measurement kind's help button lands here, if any. */
   kind?: string
   /** Grouping header in the index sidebar. */
-  group: 'Basics' | 'Measurements' | 'Reference'
+  group: 'Basics' | 'Measurements' | 'Simulator' | 'Reference'
   component: Component
 }
 
@@ -141,6 +141,132 @@ export const MANUAL_PAGES: ManualPage[] = [
     component: manualPage(() => import('./pages/ImpulseResponsePage.vue')),
   },
   {
+    id: 'simulator',
+    title: 'Using the simulator',
+    summary: 'Measuring without hardware: how the simulator is wired, and what each DUT model is for.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/SimulatorPage.vue')),
+  },
+  {
+    id: 'sim-straight-wire',
+    title: 'Straight wire',
+    summary: 'No DUT: the generator, its harmonic stack, hum and noise, and what the analysis reads with nothing in the path.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/StraightWirePage.vue')),
+  },
+  {
+    id: 'sim-tube-amp',
+    title: 'Tube amp',
+    summary: 'A transformer-coupled valve amplifier, with the settings and expected result of every measurement against it.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/TubeAmpPage.vue')),
+  },
+  {
+    id: 'sim-loudspeaker',
+    title: 'Loudspeaker',
+    summary: 'A two-way speaker in a room: the impulse gate, the gated response and both decay surfaces.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/LoudspeakerPage.vue')),
+  },
+  {
+    id: 'sim-bandpass',
+    title: 'Bandpass',
+    summary: 'A Q-20 resonance whose decay is 1.36 dB per period on paper — the calibration target for the decay charts.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/BandpassPage.vue')),
+  },
+  {
+    id: 'sim-marginally-stable',
+    title: 'Marginally stable',
+    summary: 'A Q-500 resonance that a smoothed Bode plot hides and a burst decay cannot.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/MarginallyStablePage.vue')),
+  },
+  {
+    id: 'sim-oscillating',
+    title: 'Oscillating',
+    summary: 'An amplifier singing on its own: what every measurement does when the DUT is not answering the stimulus.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/OscillatingPage.vue')),
+  },
+  {
+    id: 'sim-phono-riaa',
+    title: 'Phono stage (RIAA)',
+    summary: 'The RIAA curve: the one DUT with gain, and what a 40 dB tilt does to the bandwidth rows and the THD sweep.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/PhonoRiaaPage.vue')),
+  },
+  {
+    id: 'sim-dsp-processor',
+    title: 'DSP processor (12 ms)',
+    summary: 'A 20 kHz brick wall with 12 ms of latency: the delay readout and the impulse that is not at zero.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/DspProcessorPage.vue')),
+  },
+  {
+    id: 'sim-triode',
+    title: 'SE triode',
+    summary: 'H2 rising 1 dB per dB: the straight line on a THD-vs-amplitude sweep.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/TriodePage.vue')),
+  },
+  {
+    id: 'sim-class-ab',
+    title: 'Class AB (crossover)',
+    summary: 'Distortion that gets worse as the level falls: the hump.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/ClassAbPage.vue')),
+  },
+  {
+    id: 'sim-solid-state',
+    title: 'Solid state (clips at −3 dBV)',
+    summary: 'A floor and then a wall: clipping on the amplitude sweep.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/SolidStatePage.vue')),
+  },
+  {
+    id: 'sim-output-transformer',
+    title: 'Output transformer (saturating)',
+    summary: 'Third harmonic rising 18 dB per octave towards the bass: the THD-vs-frequency curve of a real output stage.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/OutputTransformerPage.vue')),
+  },
+  {
+    id: 'sim-fixture-8-ohm',
+    title: 'Fixture: 8 Ω',
+    summary: 'The impedance calibration target: 8.000 Ω at 0.00° from end to end, or something is wrong.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/FixtureResistivePage.vue')),
+  },
+  {
+    id: 'sim-fixture-rl',
+    title: 'Fixture: 6 Ω + 1 mH',
+    summary: 'A series RL: reactance, phase, and the simulator’s bilinear warping at the top of the band.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/FixtureReactivePage.vue')),
+  },
+  {
+    id: 'sim-fixture-capacitor',
+    title: 'Fixture: 47 µF',
+    summary: 'A capacitor with ESR: the mirror of the RL, and the sign of the phase axis.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/FixtureCapacitorPage.vue')),
+  },
+  {
+    id: 'sim-fixture-loudspeaker',
+    title: 'Fixture: loudspeaker',
+    summary: 'A driver’s impedance: 6.4 Ω of voice coil and a 60 Ω resonance at 45 Hz.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/FixtureLoudspeakerPage.vue')),
+  },
+  {
+    id: 'sim-fixture-standards',
+    title: 'Fixture: short and open',
+    summary: 'The two calibration standards, the drive level they need, and the calibration flow end to end.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/FixtureStandardsPage.vue')),
+  },
+  {
     id: 'saving',
     title: 'Projects, saving and history',
     summary: 'What gets stored where, overlays, CSV export and deleting.',
@@ -156,7 +282,7 @@ export const MANUAL_PAGES: ManualPage[] = [
   },
 ]
 
-export const MANUAL_GROUPS: ManualPage['group'][] = ['Basics', 'Measurements', 'Reference']
+export const MANUAL_GROUPS: ManualPage['group'][] = ['Basics', 'Measurements', 'Simulator', 'Reference']
 
 export function manualPageById(id: string | null): ManualPage | null {
   if (id === null) return null

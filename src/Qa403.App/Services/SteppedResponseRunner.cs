@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Qa403.App.Streaming;
 using Qa403.Device;
 using Qa403.Dsp;

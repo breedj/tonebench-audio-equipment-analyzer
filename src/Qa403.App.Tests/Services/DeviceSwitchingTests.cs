@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Device;

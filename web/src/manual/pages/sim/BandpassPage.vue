@@ -76,7 +76,7 @@ const csdSeries = computed<ManualSeries[]>(() =>
         ['Phase', '+90° well below, 0° at the centre, −90° well above'],
         ['Burst decay', `${BANDPASS_DB_PER_PERIOD.toFixed(2)} dB per period at 1 kHz; the app reads 1.369`],
         ['CSD', `${BANDPASS_DB_PER_PERIOD.toFixed(2)} dB per millisecond along the 1 kHz ridge`],
-        ['THD', 'the generator’s 0.51 % at 1 kHz; elsewhere the fundamental is attenuated and the harmonics are not, so THD climbs steeply either side'],
+        ['THD', '0.000 %; with Harmonics ticked, the generator’s 0.51 % at 1 kHz — elsewhere the fundamental is attenuated and the harmonics are not, so THD climbs steeply either side'],
       ]"
     />
 
@@ -85,11 +85,12 @@ const csdSeries = computed<ManualSeries[]>(() =>
       <li><a href="#" @click.prevent="showPage('impulse-response')">Impulse response</a> — the burst decay and CSD, checked against arithmetic.</li>
       <li><a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a> — a peak, and the case for the <em>Peak</em> bandwidth reference.</li>
       <li><a href="#" @click.prevent="showPage('stepped-response')">Stepped sine response</a> — the same peak, and a reason to raise steps per octave.</li>
-      <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> — a 1 kHz tone passes untouched; move it to 500 Hz and it comes back 29.6 dB down with its harmonics 6 dB per octave less attenuated.</li>
+      <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> — a 1 kHz tone passes untouched; move it to 500 Hz and it comes back 29.6 dB down (with Harmonics ticked, its harmonics 6 dB per octave less attenuated).</li>
       <li>
-        <a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — a deep V
-        with its floor at 1 kHz: away from the centre the fundamental is attenuated far more than
-        its harmonics, so the ratio grows. Not distortion; the response acting on the ratio.
+        <a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — zero, the
+        filter being linear; with Harmonics ticked, a deep V with its floor at 1 kHz: away from the
+        centre the fundamental is attenuated far more than its harmonics, so the ratio grows. Not
+        distortion; the response acting on the ratio.
       </li>
       <li><a href="#" @click.prevent="showPage('impedance')">Impedance</a> — not applicable.</li>
     </ul>

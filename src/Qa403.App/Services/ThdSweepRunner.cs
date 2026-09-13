@@ -1,4 +1,4 @@
-using Qa403.App.Streaming;
+﻿using Qa403.App.Streaming;
 using Qa403.Device;
 using Qa403.Dsp;
 
@@ -59,12 +59,6 @@ public sealed class ThdSweepRunner(
     /// <summary>Headroom left above the expected level when picking an input range, in dB — see <see cref="InputRangeSelector.HeadroomDb"/>, which owns the ladder this and the device's own ranger share.</summary>
     private const double InputRangeHeadroomDb = InputRangeSelector.HeadroomDb;
 
-    /// <summary>
-    /// Fraction of Nyquist the highest sweep point may reach. A tone at Nyquist itself has no
-    /// harmonics at all and lands in the one bin <see cref="PsdSpectrum"/> gives half weight.
-    /// </summary>
-    private const double MaxFrequencyNyquistFraction = 0.98;
-
     /// <summary>How often <see cref="WaitForCaptureAsync"/> re-checks. Short against the 20 Hz pipeline tick, so it costs a poll or two per average.</summary>
     private static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(20);
 
@@ -83,7 +77,17 @@ public sealed class ThdSweepRunner(
     private double _generatorAmpDbv;
     private string? _error;
     private List<ThdSweepPoint> _points = [];
+    private ThdMethod _thdMethod = ThdMethod.Conventional;
     private ThdSweepRequest? _lastRequest;
+
+    /// <summary>
+    /// The frequency-normalized method's working state: every point's located harmonics, kept
+    /// past <see cref="BuildPoints"/>, and each channel's fundamental response as measured so far.
+    /// Only the sweep task touches these — they are not under <see cref="_stateLock"/>, since
+    /// nothing else reads them and <see cref="_points"/> is what carries the result out.
+    /// </summary>
+    private readonly List<RawPoint> _rawPoints = [];
+    private readonly FundamentalResponse[] _fundamentalResponse = [new(), new()];
 
     /// <summary>
     /// The request the most recent sweep ran with, or null if none has run. Saving a result needs
@@ -102,7 +106,7 @@ public sealed class ThdSweepRunner(
             {
                 return new ThdSweepStatus(
                     Running, _phase, _index, _total, _currentFreqHz, _generatorAmpDbv, _error, [.. _points],
-                    _axis, _currentAmplitudeVolt);
+                    _axis, _currentAmplitudeVolt, _thdMethod);
             }
         }
     }
@@ -142,7 +146,12 @@ public sealed class ThdSweepRunner(
                     : request.LevelMode == ThdSweepLevelMode.GeneratorVoltage ? request.LevelDbv : ProbeStartDbv;
                 _error = null;
                 _points = [];
+                _thdMethod = request.ThdMethod;
             }
+
+            _rawPoints.Clear();
+            foreach (var response in _fundamentalResponse)
+                response.Clear();
 
             _lastRequest = request;
 
@@ -218,6 +227,7 @@ public sealed class ThdSweepRunner(
             _currentAmplitudeVolt = 0;
             _generatorAmpDbv = 0;
             _error = null;
+            _thdMethod = ThdMethod.Conventional;
 
             return Status;
         }
@@ -425,6 +435,9 @@ public sealed class ThdSweepRunner(
                     AddPoint(point);
                     hub.Broadcast(StreamFrame.EncodeSweepPoint(point, (uint)i));
                 }
+
+                if (request.ThdMethod == ThdMethod.FrequencyNormalized)
+                    NormalizeNewlyReferencedPoints(step.FrequencyHz, snapshots, i);
             }
 
             SetProgress(steps.Length, 0.0, 0.0);
@@ -504,9 +517,19 @@ public sealed class ThdSweepRunner(
     private static SweepStepPlan[] BuildFrequencySteps(ThdSweepRequest request)
     {
         double sampleRateHz = request.EffectiveSampleRateHz;
-        double maxHz = MaxFrequencyNyquistFraction * sampleRateHz / 2.0;
-        var desired = SweepPoints.LogPerOctave(request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave);
+        double maxHz = request.MaxSweepFreqHz;
         double levelDbv = request.LevelDbv;
+
+        // The requested grid, then -- for the frequency-normalized method -- the same per-octave
+        // step continued past the end, so that the fundamental exists at 2f..5f of every requested
+        // point. Continued, not re-spaced: LogPerOctave over the widened span would move every
+        // requested point (see SweepPoints.ExtendPerOctave). The extension points are measured
+        // like any other and reported like any other; only their own normalized figures stay null,
+        // since nothing above them was measured.
+        double[] requested = SweepPoints.LogPerOctave(request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave);
+        double[] desired = request.ReferenceEndFreqHz > request.EndFreqHz
+            ? [.. requested, .. SweepPoints.ExtendPerOctave(request.EndFreqHz, request.ReferenceEndFreqHz, request.StepsPerOctave)]
+            : requested;
 
         SweepStepPlan[] steps = request.AdaptiveResolution
             ? [.. SweepPoints.SnapAndDedupeAdaptive(desired, sampleRateHz, request.FftSizeAt, maxHz)
@@ -1000,6 +1023,87 @@ public sealed class ThdSweepRunner(
             _points.Add(point);
     }
 
+    /// <summary>
+    /// The frequency-normalized method's second half, run after every point. Records the point's
+    /// own harmonics and fundamental, then fills in the normalized figures of every point that
+    /// <em>this</em> point completed the references for.
+    ///
+    /// <para>The normalization of a point at f needs the fundamental at 2f..Nf, which the sweep only
+    /// reaches later, so the figures cannot be computed when the point is measured. They are
+    /// filled in progressively instead: after the point at F is added, every earlier point whose
+    /// n·f now lies inside the measured response gets its order-n figure — and never revised again,
+    /// because interpolation reads the two neighbours of n·f, which are already there once the
+    /// grid has passed it. So each order of each point is broadcast at most once more, with the
+    /// point's <em>original</em> index, and the client replaces it in place (useSweep.ingestPoint
+    /// keys on channel, frequency and level). A point is left alone until something about it
+    /// changed, which bounds the re-broadcasts to a handful per new point rather than the whole
+    /// list.</para>
+    /// </summary>
+    private void NormalizeNewlyReferencedPoints(double freqHz, SpectrumSnapshot[] snapshots, int pointIndex)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (snapshot.Meters is not { } meters)
+                continue;
+
+            int channel = snapshot.Channel == StreamChannel.Left ? 0 : 1;
+            _rawPoints.Add(new RawPoint(pointIndex, channel, freqHz, meters.Harmonics));
+            _fundamentalResponse[channel].Add(freqHz, Math.Pow(10.0, meters.FundamentalDbv / 20.0));
+        }
+
+        foreach (var raw in _rawPoints)
+        {
+            var normalized = FrequencyNormalizedDistortion.Compute(raw.FreqHz, raw.Harmonics, _fundamentalResponse[raw.Channel]);
+
+            ThdSweepPoint updated;
+            lock (_stateLock)
+            {
+                int slot = _points.FindIndex(p => p.Channel == raw.Channel && p.FreqHz == raw.FreqHz);
+                if (slot < 0)
+                    continue;
+
+                var current = _points[slot];
+                var candidate = current with
+                {
+                    NormalizedThdPercent = Percent(normalized.Thd),
+                    NormalizedHarmonicPercent = [.. normalized.HarmonicRatio.Select(Percent)],
+                    NormalizedD6PlusPercent = Percent(normalized.D6Plus),
+                };
+
+                if (SameNormalizedFigures(current, candidate))
+                    continue;
+
+                _points[slot] = candidate;
+                updated = candidate;
+            }
+
+            hub.Broadcast(StreamFrame.EncodeSweepPoint(updated, (uint)raw.Index));
+        }
+    }
+
+    private static double? Percent(double? ratio) => ratio is { } r ? 100.0 * r : null;
+
+    private static bool SameNormalizedFigures(ThdSweepPoint a, ThdSweepPoint b)
+    {
+        if (a.NormalizedThdPercent != b.NormalizedThdPercent || a.NormalizedD6PlusPercent != b.NormalizedD6PlusPercent)
+            return false;
+
+        var ha = a.NormalizedHarmonicPercent;
+        var hb = b.NormalizedHarmonicPercent;
+        if (ha is null || hb is null)
+            return ha is null && hb is null;
+        if (ha.Count != hb.Count)
+            return false;
+
+        for (int i = 0; i < ha.Count; i++)
+        {
+            if (ha[i] != hb[i])
+                return false;
+        }
+
+        return true;
+    }
+
     private void SetPhase(ThdSweepPhase phase, string? error = null)
     {
         lock (_stateLock)
@@ -1047,4 +1151,11 @@ public sealed class ThdSweepRunner(
     /// combined plan is the runner's own type.
     /// </summary>
     private readonly record struct SweepStepPlan(double FrequencyHz, int FftSize, double GeneratorDbv);
+
+    /// <summary>
+    /// One measured point's located harmonics, kept for the frequency-normalized method — the
+    /// <see cref="ThdSweepPoint"/> only carries them relative to the fundamental at f, and the
+    /// normalization needs their absolute amplitudes against a fundamental measured later.
+    /// </summary>
+    private readonly record struct RawPoint(int Index, int Channel, double FreqHz, Harmonic[] Harmonics);
 }

@@ -6,7 +6,7 @@ import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useSweep } from '../composables/useSweep'
-import { percentToDb } from '../sweep/points'
+import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceKey } from '../sweep/points'
 import {
   decadeOrFallbackSplits,
   formatSweepX,
@@ -20,7 +20,7 @@ import { interpolateOnGrid } from '../sweep/align'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { dashAttr, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
 import { useZoomBounds } from '../composables/useZoomBounds'
-import type { ThdSweepPoint } from '../api/client'
+import type { ThdMethodName, ThdSweepPoint } from '../api/client'
 
 /**
  * The sweep result chart, for both sweep axes.
@@ -110,7 +110,7 @@ const props = defineProps<{
  */
 const emit = defineEmits<{ cursorX: [x: number | null] }>()
 
-const { points } = useSweep()
+const { points, thdMethod } = useSweep()
 const { isDark } = useAppTheme()
 const { loadOhms } = useLoadOhms()
 
@@ -149,8 +149,16 @@ const TRACES = [
   { key: 'noise', label: 'Noise', width: 0.8, color: ['#0d7d84', '#2dd4bf'], show: 'showNoiseFloor' },
 ] as const
 
-type TraceKey = (typeof TRACES)[number]['key']
+type TraceKey = (typeof TRACES)[number]['key'] & SweepTraceKey
 type TraceToggle = (typeof TRACES)[number]['show']
+
+/**
+ * The method a stored run's figures are read under — see sweepTraceValue. Conventional for a row
+ * saved before the method existed, which is what useMeasurements.addOverlay resolves it to.
+ */
+function methodOf(overlay: OverlayEntry): ThdMethodName {
+  return overlay.sweepMethod ?? 'Conventional'
+}
 
 const CHANNEL_LABELS = ['L', 'R']
 
@@ -271,24 +279,13 @@ const gridIndexByX = computed(() => {
  */
 let measuredIdxBySeries: (number[] | null)[] = []
 
-function valueOf(point: ThdSweepPoint, key: TraceKey): number {
-  switch (key) {
-    case 'magnitude':
-      return point.gainDb
-    case 'thd':
-      return point.thdPercent
-    case 'd2':
-    case 'd3':
-    case 'd4':
-    case 'd5': {
-      const order = Number(key.slice(1)) - 2
-      return point.harmonicPercent[order] ?? Number.NaN
-    }
-    case 'd6plus':
-      return point.d6PlusPercent
-    case 'noise':
-      return point.noisePercent
-  }
+/**
+ * One point's value for a trace, under the method its run used. Delegated to sweep/points.ts so
+ * the display panel's Autofit reads the very same figure — a frequency-normalized run shows its
+ * normalized figures, and never falls back to the conventional ones where those are absent.
+ */
+function valueOf(point: ThdSweepPoint, key: TraceKey, method: ThdMethodName): number {
+  return sweepTraceValue(point, key, method)
 }
 
 /**
@@ -338,13 +335,13 @@ const outOfRange = computed(() => {
   const traces = activeTraces.value
   if (channels.length === 0 || traces.length === 0) return { above, below }
 
-  function consider(pts: ThdSweepPoint[]) {
+  function consider(pts: ThdSweepPoint[], method: ThdMethodName) {
     for (const p of pts) {
       if (!channels.includes(p.channel)) continue
       const x = xOf(p)
       if (!(x > 0) || x < props.xFrom || x > props.xTo) continue
       for (const trace of traces) {
-        const y = toY(valueOf(p, trace.key), trace.key)
+        const y = toY(valueOf(p, trace.key, method), trace.key)
         if (y == null) continue
         if (y > yMax) above = true
         if (y < yMin) below = true
@@ -352,8 +349,8 @@ const outOfRange = computed(() => {
       if (above && below) return
     }
   }
-  consider(points.value)
-  for (const overlay of activeOverlays.value) consider(overlay.sweepPoints ?? [])
+  consider(points.value, thdMethod.value)
+  for (const overlay of activeOverlays.value) consider(overlay.sweepPoints ?? [], methodOf(overlay))
   return { above, below }
 })
 
@@ -379,7 +376,7 @@ function buildOptions(width: number): uPlot.Options {
   for (const ch of activeChannels.value) {
     for (const trace of activeTraces.value) {
       series.push({
-        label: `${CHANNEL_LABELS[ch]} ${trace.label}`,
+        label: `${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, thdMethod.value)}`,
         ...styleOf(0, ch, trace),
         points,
         scale: 'y',
@@ -400,7 +397,7 @@ function buildOptions(width: number): uPlot.Options {
     for (const ch of activeChannels.value) {
       for (const trace of activeTraces.value) {
         series.push({
-          label: `${overlay.detail.name} ${CHANNEL_LABELS[ch]} ${trace.label}`,
+          label: `${overlay.detail.name} ${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, methodOf(overlay))}`,
           ...styleOf(overlayIdx + 1, ch, trace),
           points,
           scale: 'y',
@@ -563,29 +560,34 @@ function formatPower(watt: number): string {
 }
 
 /**
- * The metrics table's columns, in order. One list rather than a label carried alongside every
- * value: the header is written once per block and the rows underneath it are bare values, so the
- * two only line up if they come from the same order — see metricsFor, which returns exactly this
- * many strings.
+ * The metrics table's columns, in order, for one run's method. One list rather than a label
+ * carried alongside every value: the header is written once per block and the rows underneath it
+ * are bare values, so the two only line up if they come from the same order — see metricsFor,
+ * which returns exactly this many strings. Per run rather than one global list because a
+ * frequency-normalized run reads nTHD/nD2… while a conventional one overlaid on it reads THD/D2…,
+ * and the header is the only place that difference is stated.
  */
-const METRIC_COLUMNS = computed(() => [
-  sweepXLabel(props.xAxis), 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
-])
+function metricColumns(method: ThdMethodName): string[] {
+  const t = (key: SweepTraceKey) => sweepTraceLabel(key, method)
+  return [
+    sweepXLabel(props.xAxis), t('thd'), 'Magnitude', t('d2'), t('d3'), t('d4'), t('d5'), t('d6plus'), 'Power', 'Noise floor',
+  ]
+}
 
-/** One channel's row of values for the metrics table, in METRIC_COLUMNS order. */
-function metricsFor(point: ThdSweepPoint): string[] {
-  const [d2, d3, d4, d5] = point.harmonicPercent
+/** One channel's row of values for the metrics table, in metricColumns order, under its run's method. */
+function metricsFor(point: ThdSweepPoint, method: ThdMethodName): string[] {
+  const v = (key: SweepTraceKey) => valueOf(point, key, method)
   return [
     formatSweepX(xOf(point), props.xAxis),
-    formatDistortion(point.thdPercent),
+    formatDistortion(v('thd')),
     formatMagnitude(point.gainDb),
-    formatDistortion(d2 ?? Number.NaN),
-    formatDistortion(d3 ?? Number.NaN),
-    formatDistortion(d4 ?? Number.NaN),
-    formatDistortion(d5 ?? Number.NaN),
-    formatDistortion(point.d6PlusPercent),
+    formatDistortion(v('d2')),
+    formatDistortion(v('d3')),
+    formatDistortion(v('d4')),
+    formatDistortion(v('d5')),
+    formatDistortion(v('d6plus')),
     formatPower(point.powerWatt),
-    formatDistortion(point.noisePercent),
+    formatDistortion(v('noise')),
   ]
 }
 
@@ -599,21 +601,25 @@ const metricGroups = computed(() => {
   const groups: {
     key: string
     name: string | null
+    columns: string[]
     rows: { key: string; label: string; colorClass: string; values: string[] }[]
   }[] = []
 
-  function add(key: string, name: string | null, left: ThdSweepPoint | null, right: ThdSweepPoint | null) {
+  function add(key: string, name: string | null, method: ThdMethodName, left: ThdSweepPoint | null, right: ThdSweepPoint | null) {
     const rows = [
       { key: `${key}-L`, label: 'Left channel', colorClass: 'text-blue-600 dark:text-blue-400', point: left },
       { key: `${key}-R`, label: 'Right channel', colorClass: 'text-red-600 dark:text-red-400', point: right },
     ]
       .filter((r) => r.point !== null)
-      .map((r) => ({ key: r.key, label: r.label, colorClass: r.colorClass, values: metricsFor(r.point!) }))
-    if (rows.length > 0) groups.push({ key, name, rows })
+      .map((r) => ({ key: r.key, label: r.label, colorClass: r.colorClass, values: metricsFor(r.point!, method) }))
+    if (rows.length > 0) groups.push({ key, name, columns: metricColumns(method), rows })
   }
 
-  add('live', null, props.selectedLeft, props.selectedRight)
-  for (const sel of props.overlaySelections) add(`o${sel.id}`, sel.name, sel.left, sel.right)
+  add('live', null, thdMethod.value, props.selectedLeft, props.selectedRight)
+  for (const sel of props.overlaySelections) {
+    const overlay = activeOverlays.value.find((o) => o.id === sel.id)
+    add(`o${sel.id}`, sel.name, overlay ? methodOf(overlay) : 'Conventional', sel.left, sel.right)
+  }
   return groups
 })
 
@@ -624,9 +630,9 @@ const metricGroups = computed(() => {
  * heading names it.
  */
 const legendGroups = computed(() => {
-  const groups = [{ key: 'live', name: 'Live sweep', runIdx: 0 }]
+  const groups = [{ key: 'live', name: 'Live sweep', runIdx: 0, method: thdMethod.value }]
   activeOverlays.value.forEach((overlay, i) =>
-    groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: i + 1 }),
+    groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: i + 1, method: methodOf(overlay) }),
   )
 
   return groups.map((group) => ({
@@ -634,11 +640,14 @@ const legendGroups = computed(() => {
     entries: activeChannels.value.flatMap((ch) =>
       activeTraces.value.map((trace) => {
         const style = styleOf(group.runIdx, ch, trace)
+        // nTHD, nD2 … on a frequency-normalized run: the figures are a different measurement
+        // from a conventional run's, and the legend is where the two are told apart.
+        const label = sweepTraceLabel(trace.key, group.method)
         return {
           key: `${group.key}-${ch}-${trace.key}`,
           // Only worth naming the channel when both are drawn — a mono sweep's legend would
           // otherwise read "L THD, L D2, L D3" with nothing to contrast against.
-          label: activeChannels.value.length > 1 ? `${CHANNEL_LABELS[ch]} ${trace.label}` : trace.label,
+          label: activeChannels.value.length > 1 ? `${CHANNEL_LABELS[ch]} ${label}` : label,
           stroke: style.stroke,
           width: style.width,
           dash: dashAttr(style.dash),
@@ -676,6 +685,8 @@ function signature(): string {
     // The whole x grid is rebuilt from a different quantity, so switching axis is a data change as
     // much as an axis one -- and the axis config itself is baked in at construction.
     props.xAxis,
+    // Series labels name the method (THD vs nTHD) and are baked in too.
+    thdMethod.value,
   ].join('|')
 }
 
@@ -772,10 +783,10 @@ function update() {
 
   measuredIdxBySeries = [null] // slot 0 is the x series
   const data: (number | null)[][] = [xs]
-  pushSeriesData(data, xs, points.value)
+  pushSeriesData(data, xs, points.value, thdMethod.value)
   // Order has to match buildOptions' series order exactly — live block first, then one block per
   // active overlay in the same iteration order.
-  for (const overlay of activeOverlays.value) pushSeriesData(data, xs, overlay.sweepPoints ?? [])
+  for (const overlay of activeOverlays.value) pushSeriesData(data, xs, overlay.sweepPoints ?? [], methodOf(overlay))
 
   plot.setData(data as unknown as uPlot.AlignedData)
   applyPendingScaleRestore()
@@ -791,7 +802,7 @@ function update() {
  * different grid than the one on screen would otherwise be all gaps except where the two grids
  * happen to collide.
  */
-function pushSeriesData(data: (number | null)[][], xs: number[], sweepPoints: ThdSweepPoint[]) {
+function pushSeriesData(data: (number | null)[][], xs: number[], sweepPoints: ThdSweepPoint[], method: ThdMethodName) {
   // Index the points once per block rather than searching per series per frequency: a stereo
   // sweep with nine traces would otherwise be O(traces x freqs x points).
   const byChannel = new Map<number, ThdSweepPoint[]>()
@@ -823,7 +834,7 @@ function pushSeriesData(data: (number | null)[][], xs: number[], sweepPoints: Th
     }
 
     for (const trace of activeTraces.value) {
-      const anchorValues = anchorPoints.map((p) => toY(valueOf(p, trace.key), trace.key))
+      const anchorValues = anchorPoints.map((p) => toY(valueOf(p, trace.key, method), trace.key))
       data.push(interpolateOnGrid(xs, anchorIdx, anchorValues, logY))
       // Markers belong at the measured frequencies only, and only where there is a value to mark.
       measuredIdxBySeries.push(anchorIdx.filter((_, k) => anchorValues[k] != null))
@@ -937,7 +948,7 @@ onBeforeUnmount(() => {
         <tbody v-for="group in metricGroups" :key="group.key">
           <tr v-if="group.name">
             <td
-              :colspan="METRIC_COLUMNS.length + 1"
+              :colspan="group.columns.length + 1"
               class="truncate pt-2 pb-0.5 text-neutral-500 dark:text-neutral-400"
               :title="group.name"
             >
@@ -947,7 +958,7 @@ onBeforeUnmount(() => {
           <tr class="text-neutral-400 dark:text-neutral-500">
             <th class="py-0.5 pr-4 text-left font-normal"><span class="sr-only">Channel</span></th>
             <th
-              v-for="col in METRIC_COLUMNS"
+              v-for="col in group.columns"
               :key="col"
               class="py-0.5 pr-4 text-left font-normal whitespace-nowrap"
             >

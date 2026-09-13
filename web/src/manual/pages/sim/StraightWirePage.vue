@@ -37,15 +37,20 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
 
     <p>
       No device at all: both generator channels reach both inputs unaltered, plus whatever the
-      simulator's own <strong>Noise</strong> and <strong>Hum</strong> checkboxes add. It is the
-      default, and it is the simulated equivalent of a loopback cable — the measurement of the
-      analyzer rather than of anything patched to it.
+      simulator's own <strong>Noise</strong>, <strong>Hum</strong> and <strong>Harmonics</strong>
+      checkboxes add. It is the default, and it is the simulated equivalent of a loopback cable —
+      the measurement of the analyzer rather than of anything patched to it.
     </p>
     <p>
-      What it carries is therefore the simulated <em>generator</em>: every tone with its fixed
-      harmonic stack (H2 −46 dBc, H3 −60 dBc, each order above 12 dB lower), the −150 dBV/√Hz noise
-      floor, and mains hum at 50 Hz. Every linear model on the pages that follow reads this same
-      distortion, because none of them adds any of its own.
+      All three boxes start <strong>unchecked</strong>, and with them off the wire carries the
+      simulated <em>generator</em> and nothing else: a tone is one line at exactly the level asked
+      for, there is no floor under it, and THD reads 0.000 %. Each box patches one impairment into
+      that: <strong>Noise</strong> a −150 dBV/√Hz white floor with a little 1/f rise below 300 Hz,
+      <strong>Hum</strong> mains at 50 Hz with two harmonics, and <strong>Harmonics</strong> a fixed
+      stack on every generator tone — H2 −46 dBc, H3 −60 dBc, each order above 12 dB lower — that
+      stands in for a distorting source and reads 0.51 % THD at any level. The linear models on the
+      pages that follow add no distortion of their own, so with Harmonics off they read 0.000 %
+      too, and with it on they read that same 0.51 % bent by their response.
     </p>
 
     <h2>What to expect, in numbers</h2>
@@ -54,9 +59,9 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
       :rows="[
         ['Gain', '0.00 dB at every frequency, both channels'],
         ['Phase', '0° everywhere; the recovered delay reads 0 samples'],
-        ['THD', `${thd.toFixed(3)} % at any level and any frequency — the generator’s stack`],
-        ['Noise floor', `about ${floorDbv.toFixed(0)} dBV per bin at 192 kHz / 65536 / Hann, with a little 1/f rise below 300 Hz`],
-        ['Hum', '−90 dBV at 50 Hz, −96 at 100 Hz, −102 at 150 Hz'],
+        ['THD', `0.000 %; with Harmonics ticked, ${thd.toFixed(3)} % at any level and any frequency — the generator’s stack`],
+        ['Noise floor', `none; with Noise ticked, about ${floorDbv.toFixed(0)} dBV per bin at 192 kHz / 65536 / Hann, with a little 1/f rise below 300 Hz`],
+        ['Hum', 'none; with Hum ticked, −90 dBV at 50 Hz, −96 at 100 Hz, −102 at 150 Hz'],
         ['Impedance', 'an open circuit — a straight wire is also the open calibration standard'],
       ]"
     />
@@ -73,7 +78,9 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
       <li>
         <a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> and
         <a href="#" @click.prevent="showPage('thd-vs-amplitude')">THD vs amplitude</a> — flat at
-        {{ thd.toFixed(2) }} %, for the reason the <button type="button" class="manual-link" @click="showPage('sim-tube-amp')">Tube amp</button> page draws out.
+        0.000 %; tick <strong>Harmonics</strong> and both are flat at {{ thd.toFixed(2) }} % instead,
+        at every level, since the stack is a fixed ratio on the generator. The four nonlinear
+        models are what give those two screens a shape to draw.
       </li>
       <li>
         <a href="#" @click.prevent="showPage('impedance')">Impedance</a> — reads as an open, and
@@ -83,6 +90,12 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
     </ul>
 
     <h2>FFT analysis</h2>
+    <p>
+      With the three boxes off this screen shows one line at −6 dBV and nothing else — worth seeing
+      once, because it is what "no DUT and no analyzer" looks like, and it is the reference every
+      other reading on these pages is relative to. The chart below is the same screen with all
+      three boxes <strong>on</strong>, which is the picture to learn the FFT screen on.
+    </p>
     <SettingsTable
       :rows="[
         ['Stimulus', 'Sine tones, one row: 1000 Hz, −6 dBV, Snap to bin on'],
@@ -91,7 +104,7 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
         ['FFT size', '65536'],
         ['Window', 'Hann'],
         ['Averaging', 'Linear, 8 spectra'],
-        ['Simulator', 'Noise and Hum on'],
+        ['Simulator', 'Noise, Hum and Harmonics on'],
       ]"
     />
     <ManualChart
@@ -118,9 +131,9 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
     <p>Things worth doing on this screen with the wire in place, because each shows one part of the analysis rather than a DUT:</p>
     <ul>
       <li>
-        <strong>Untick Noise.</strong> The floor drops away to whatever the arithmetic leaves, far
-        below anything a converter could do, and the harmonic stack stands alone down to H9 at
-        −138 dBV. This is the only way to see the whole stack.
+        <strong>Untick Noise again, leaving Harmonics on.</strong> The floor drops away to whatever
+        the arithmetic leaves, far below anything a converter could do, and the harmonic stack
+        stands alone down to H9 at −138 dBV. This is the only way to see the whole stack.
       </li>
       <li>
         <strong>Change the FFT size</strong> from 65536 to 8192 and watch the noise floor rise by
@@ -142,9 +155,9 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
       </li>
       <li>
         <strong>Add a second tone row</strong> — 19 and 20 kHz at −12 dBV each — for an
-        intermodulation test. The generator's stack is per tone, so besides each tone's harmonics
-        nothing appears at 1 kHz or 39 kHz: the simulated generator does not intermodulate, and a
-        real DUT that shows products there is producing them itself.
+        intermodulation test. With Harmonics on the stack is per tone, so besides each tone's
+        harmonics nothing appears at 1 kHz or 39 kHz: the simulated generator does not
+        intermodulate, and a real DUT that shows products there is producing them itself.
       </li>
     </ul>
 

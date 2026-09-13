@@ -49,6 +49,42 @@ public static class SweepPoints
     }
 
     /// <summary>
+    /// Continues a grid past its end: <c>fromHz·2^(k/stepsPerOctave)</c> for k = 1, 2, … up to and
+    /// including the first value at or above <paramref name="toHz"/>. Empty when there is nothing
+    /// to add.
+    ///
+    /// Exists for the frequency-normalized THD sweep, which has to measure the fundamental at the
+    /// harmonics' own frequencies — up to several times the requested end. It is deliberately
+    /// <em>not</em> <see cref="LogPerOctave"/> over the widened span: that spreads
+    /// <c>floor(steps·octaves)</c> steps evenly, so widening the span re-spaces every requested
+    /// point and the requested end stops being a grid point at all. This keeps the requested grid
+    /// exactly as it was and hangs the extension off its last point at the nominal per-octave
+    /// step, and it overshoots the cap by up to one step rather than stopping short of it, so
+    /// bin-snapping cannot leave the highest harmonic a hair outside the measured response.
+    /// </summary>
+    public static double[] ExtendPerOctave(double fromHz, double toHz, int stepsPerOctave)
+    {
+        if (fromHz <= 0.0)
+            throw new ArgumentOutOfRangeException(nameof(fromHz), fromHz, "Start frequency must be greater than 0.");
+        if (stepsPerOctave < 1)
+            throw new ArgumentOutOfRangeException(nameof(stepsPerOctave), stepsPerOctave, "Steps per octave must be at least 1.");
+
+        if (toHz <= fromHz)
+            return [];
+
+        var values = new List<double>();
+        for (int k = 1; ; k++)
+        {
+            double hz = fromHz * Math.Pow(2.0, (double)k / stepsPerOctave);
+            values.Add(hz);
+            if (hz >= toHz)
+                break;
+        }
+
+        return [.. values];
+    }
+
+    /// <summary>
     /// Snaps each desired frequency onto the nearest coherent bin and returns the distinct tones,
     /// ascending, dropping anything above <paramref name="maxHz"/>.
     ///

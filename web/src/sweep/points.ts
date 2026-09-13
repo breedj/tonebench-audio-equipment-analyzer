@@ -12,7 +12,7 @@
  * can only merge points, never add them.
  */
 
-import type { SweepPreviewSeries } from '../api/client'
+import type { SweepPreviewSeries, ThdMethodName, ThdSweepPoint } from '../api/client'
 
 /** Log-spaced frequencies, `stepsPerOctave` per octave across [startHz, endHz], endpoints included. */
 export function logPerOctave(startHz: number, endHz: number, stepsPerOctave: number): number[] {
@@ -28,6 +28,30 @@ export function logPerOctave(startHz: number, endHz: number, stepsPerOctave: num
     values.push(Math.min(startHz * Math.pow(2, i * logStep), endHz))
   }
   return values
+}
+
+/**
+ * Continues a grid past its end at the nominal per-octave step: `fromHz·2^(k/stepsPerOctave)` for
+ * k = 1, 2, … up to and including the first value at or above `toHz`. Mirrors
+ * SweepPoints.ExtendPerOctave — the frequency-normalized method has to measure the fundamental at
+ * the harmonics' own frequencies, so the sweep keeps going past the requested end. Not
+ * logPerOctave over the widened span: that would re-space every requested point.
+ */
+export function extendGridPerOctave(fromHz: number, toHz: number, stepsPerOctave: number): number[] {
+  if (!(fromHz > 0) || !(stepsPerOctave >= 1) || !(toHz > fromHz)) return []
+
+  const values: number[] = []
+  for (let k = 1; ; k++) {
+    const hz = fromHz * Math.pow(2, k / stepsPerOctave)
+    values.push(hz)
+    if (hz >= toHz) break
+  }
+  return values
+}
+
+/** How far past `endFreqHz` a normalized sweep steps the fundamental — 5x, capped at the sweep's own ceiling. Mirrors ThdSweepRequest.ReferenceEndFreqHz. */
+export function referenceEndFreqHz(endFreqHz: number, sampleRateHz: number): number {
+  return Math.min(ADAPTIVE_HARMONIC_ORDER_FOR_REFERENCE * endFreqHz, 0.98 * (sampleRateHz / 2))
 }
 
 /**
@@ -58,6 +82,8 @@ const ADAPTIVE_MIN_FFT_SIZE = 1024
 const ADAPTIVE_MAX_BIN_WIDTH_HZ = 46.875
 const ADAPTIVE_MAX_RECORD_SECONDS = 131072 / 192000
 const ADAPTIVE_HARMONIC_ORDER = 5
+/** The same order, named for its second job: how far past the end a normalized sweep measures the fundamental. */
+const ADAPTIVE_HARMONIC_ORDER_FOR_REFERENCE = ADAPTIVE_HARMONIC_ORDER
 const SUPPORTED_SAMPLE_RATES_HZ = [48000, 96000, 192000]
 
 function powerOfTwoAtLeast(value: number, cap = ADAPTIVE_MAX_FFT_SIZE): number {
@@ -297,5 +323,97 @@ export function mergePreviewSeries(left: SweepPreviewSeries | null, right: Sweep
     leftMax: left ? x.map((v) => nearestValue(left, v, 'max')) : x.map(() => null),
     rightMin: right ? x.map((v) => nearestValue(right, v, 'min')) : x.map(() => null),
     rightMax: right ? x.map((v) => nearestValue(right, v, 'max')) : x.map(() => null),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Which of a point's figures a trace shows
+// ---------------------------------------------------------------------------
+
+/** The sweep chart's traces, in its own order. */
+export type SweepTraceKey = 'magnitude' | 'thd' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6plus' | 'noise'
+
+/**
+ * One point's value for a trace, under the method the point's run used. NaN where the point has
+ * no such figure — a harmonic above Nyquist, or a normalized order whose reference the sweep has
+ * not measured — which the chart draws as a gap.
+ *
+ * The one place this is decided: ThdSweepChart plots with it and SweepDisplayPanel's Autofit
+ * ranges with it, so the two cannot disagree about what is on screen. A frequency-normalized run
+ * shows its normalized figures for THD and the harmonics; Magnitude and Noise are the same number
+ * under either method (the fundamental is the fundamental, and the residual is referenced to it at
+ * the stimulus frequency either way).
+ */
+export function sweepTraceValue(point: ThdSweepPoint, key: SweepTraceKey, method: ThdMethodName): number {
+  const normalized = method === 'FrequencyNormalized'
+  switch (key) {
+    case 'magnitude':
+      return point.gainDb
+    case 'thd':
+      return normalized ? (point.normalizedThdPercent ?? Number.NaN) : point.thdPercent
+    case 'd2':
+    case 'd3':
+    case 'd4':
+    case 'd5': {
+      const order = Number(key.slice(1)) - 2
+      return normalized
+        ? (point.normalizedHarmonicPercent?.[order] ?? Number.NaN)
+        : (point.harmonicPercent[order] ?? Number.NaN)
+    }
+    case 'd6plus':
+      return normalized ? (point.normalizedD6PlusPercent ?? Number.NaN) : point.d6PlusPercent
+    case 'noise':
+      return point.noisePercent
+  }
+}
+
+/**
+ * What a trace is called under a method: the distortion traces gain an "n" on a normalized run
+ * (nTHD, nD2 …) so a normalized run overlaid on a conventional one reads as two different
+ * measurements, which it is. Magnitude and Noise keep their names — see sweepTraceValue.
+ */
+export function sweepTraceLabel(key: SweepTraceKey, method: ThdMethodName): string {
+  const base: Record<SweepTraceKey, string> = {
+    magnitude: 'Magn',
+    thd: 'THD',
+    d2: 'D2',
+    d3: 'D3',
+    d4: 'D4',
+    d5: 'D5',
+    d6plus: 'D6+',
+    noise: 'Noise',
+  }
+  const label = base[key]
+  if (method !== 'FrequencyNormalized') return label
+  return key === 'magnitude' || key === 'noise' ? label : `n${label}`
+}
+
+/**
+ * The method a stored sweep ran with, read off its as-run `params_json`
+ * (ThdVsFrequencyParameters.thdMethod). Conventional when the field is absent — every row written
+ * before the method existed — or when the JSON is not a sweep's at all.
+ */
+export function sweepMethodFromParams(paramsJson: string | null | undefined): ThdMethodName {
+  const parsed = parseParams(paramsJson)
+  return parsed?.thdMethod === 'FrequencyNormalized' ? 'FrequencyNormalized' : 'Conventional'
+}
+
+/**
+ * The end frequency a stored sweep was asked for, read off its as-run `params_json`, or null when
+ * it does not say. A normalized run measured past this (see extendGridPerOctave), and Autofit
+ * fits the band that was asked for rather than the reference points above it.
+ */
+export function sweepEndFreqHzFromParams(paramsJson: string | null | undefined): number | null {
+  const parsed = parseParams(paramsJson)
+  return typeof parsed?.endFreqHz === 'number' && parsed.endFreqHz > 0 ? parsed.endFreqHz : null
+}
+
+function parseParams(paramsJson: string | null | undefined): { thdMethod?: unknown; endFreqHz?: unknown } | null {
+  if (!paramsJson) return null
+  try {
+    const parsed: unknown = JSON.parse(paramsJson)
+    return parsed !== null && typeof parsed === 'object' ? (parsed as { thdMethod?: unknown; endFreqHz?: unknown }) : null
+  } catch {
+    return null
   }
 }

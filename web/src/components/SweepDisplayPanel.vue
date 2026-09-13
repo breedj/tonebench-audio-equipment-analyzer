@@ -15,9 +15,9 @@
 import { computed, watch } from 'vue'
 import { useSweep } from '../composables/useSweep'
 import { useMeasurements } from '../composables/useMeasurements'
-import { percentToDb } from '../sweep/points'
+import { percentToDb, sweepTraceValue, type SweepTraceKey } from '../sweep/points'
 import { AMPLITUDE_X_AXES, sweepXLabel, sweepXUnit, sweepXValue, type SweepXAxis } from '../sweep/xAxis'
-import type { ThdSweepPoint } from '../api/client'
+import type { ThdMethodName, ThdSweepPoint } from '../api/client'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const unit = defineModel<'percent' | 'db'>('unit', { required: true })
@@ -127,8 +127,21 @@ function onBottomDbChange(event: Event) {
  * encloses the data, not compute an arbitrary bound. The dB axis has no such list (a free-typed
  * field, step 10), so it rounds out to the nearest 10 dB instead, the same convention as Spectrum's.
  */
-const { points: sweepPoints, running } = useSweep()
+const { points: sweepPoints, running, thdMethod, requestedEndFreqHz } = useSweep()
 const { overlays } = useMeasurements()
+
+/**
+ * One run's points with what Autofit needs to know about them: which figures the run is about
+ * (a normalized run's nTHD is not its THD, and fitting the wrong one puts the trace off-screen),
+ * and how far it was asked to go — a normalized sweep measures reference points past its end for
+ * the harmonics' sake, and fitting the x axis to those would open the window to 100 kHz for a
+ * sweep that was asked for 20.
+ */
+interface SweepRun {
+  points: ThdSweepPoint[]
+  method: ThdMethodName
+  endFreqHz: number | null
+}
 
 /** The smallest option that is still >= value, or the largest option if value exceeds all of them. */
 function smallestAtLeast(options: number[], value: number): number {
@@ -143,8 +156,18 @@ function largestAtMost(options: number[], value: number): number {
 }
 
 /** Stored sweeps actually drawable right now — visible, and carrying points — same filter ThdSweepChart applies to its own overlays prop. */
-function activeOverlaySweeps(): ThdSweepPoint[][] {
-  return overlays.value.filter((o) => o.visible && o.sweepPoints?.length).map((o) => o.sweepPoints!)
+function activeOverlaySweeps(): SweepRun[] {
+  return overlays.value
+    .filter((o) => o.visible && o.sweepPoints?.length)
+    .map((o) => ({ points: o.sweepPoints!, method: o.sweepMethod ?? 'Conventional', endFreqHz: o.sweepEndFreqHz ?? null }))
+}
+
+/** Every run on screen, the live sweep first. */
+function activeRuns(): SweepRun[] {
+  return [
+    { points: sweepPoints.value, method: thdMethod.value, endFreqHz: requestedEndFreqHz.value },
+    ...activeOverlaySweeps(),
+  ]
 }
 
 function activeChannels(): number[] {
@@ -154,28 +177,9 @@ function activeChannels(): number[] {
   return channels
 }
 
-/** One point's raw value for a given trace key — mirrors ThdSweepChart's valueOf(). */
-function rawValue(point: ThdSweepPoint, key: string): number {
-  switch (key) {
-    case 'magnitude':
-      return point.gainDb
-    case 'thd':
-      return point.thdPercent
-    case 'd2':
-    case 'd3':
-    case 'd4':
-    case 'd5':
-      return point.harmonicPercent[Number(key.slice(1)) - 2] ?? Number.NaN
-    case 'd6plus':
-      return point.d6PlusPercent
-    default:
-      return point.noisePercent
-  }
-}
-
 /** Highest/lowest value across every currently-checked trace and channel, live sweep plus visible overlays. */
 function computeDistortionExtent(): { min: number; max: number } | null {
-  const keys: string[] = []
+  const keys: SweepTraceKey[] = []
   if (unit.value === 'db' && showMagnitude.value) keys.push('magnitude')
   if (showThd.value) keys.push('thd')
   if (showD2.value) keys.push('d2')
@@ -190,11 +194,13 @@ function computeDistortionExtent(): { min: number; max: number } | null {
 
   let min = Infinity
   let max = -Infinity
-  function consider(pts: ThdSweepPoint[]) {
-    for (const p of pts) {
+  function consider(run: SweepRun) {
+    for (const p of run.points) {
       if (!channels.includes(p.channel)) continue
       for (const key of keys) {
-        const raw = rawValue(p, key)
+        // The same figure the chart plots for this run — sweepTraceValue is the one place that
+        // decides which of a point's two sets of figures its run is about.
+        const raw = sweepTraceValue(p, key, run.method)
         if (!Number.isFinite(raw)) continue
         // A non-positive percentage has no position on the log percent axis (see ThdSweepChart's
         // toY) and would drag the dB axis to -Infinity, so it is excluded from either extent — the
@@ -206,8 +212,7 @@ function computeDistortionExtent(): { min: number; max: number } | null {
       }
     }
   }
-  consider(sweepPoints.value)
-  for (const pts of activeOverlaySweeps()) consider(pts)
+  for (const run of activeRuns()) consider(run)
 
   return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
 }
@@ -234,17 +239,24 @@ function computeXExtent(): { min: number; max: number } | null {
 
   let min = Infinity
   let max = -Infinity
-  function consider(pts: ThdSweepPoint[]) {
-    for (const p of pts) {
+  function consider(run: SweepRun) {
+    for (const p of run.points) {
       if (!channels.includes(p.channel)) continue
-      const x = sweepXValue(p, xAxis.value)
+      // The band that was asked for, not the reference points a normalized sweep measured above
+      // it -- those are still drawn if the window is widened, but they are not what the run is
+      // about. Only on the frequency axis: the level axes plot the same points against a level.
+      if (isFrequencyAxis.value && run.endFreqHz !== null && p.freqHz > run.endFreqHz * 1.001) continue
+      let x = sweepXValue(p, xAxis.value)
       if (!(x > 0) || !Number.isFinite(x)) continue
+      // The top point snaps to the nearest coherent bin, which can land a few hertz *above* the
+      // requested end (20 kHz becomes 20015.6 Hz), and the preset just above that is 50 kHz. A
+      // sweep asked for 20 kHz should fit to 20 kHz.
+      if (isFrequencyAxis.value && run.endFreqHz !== null) x = Math.min(x, run.endFreqHz)
       if (x > max) max = x
       if (x < min) min = x
     }
   }
-  consider(sweepPoints.value)
-  for (const pts of activeOverlaySweeps()) consider(pts)
+  for (const run of activeRuns()) consider(run)
 
   return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
 }

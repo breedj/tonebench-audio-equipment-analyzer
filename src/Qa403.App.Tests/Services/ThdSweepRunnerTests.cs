@@ -177,6 +177,118 @@ public class ThdSweepRunnerTests
         Assert.Equal(status.Points.Count, status.Points.Select(p => Math.Round(p.MeasuredFreqHz, 1)).Distinct().Count());
     }
 
+    /// <summary>
+    /// The simulator's RIAA stage with the generator's harmonic stack on: a pure biquad cascade
+    /// with no shaper of its own, so the stack (H2 -46 dBc, H3 -60 dBc, synthesized on the
+    /// generator ahead of the DUT) passes through RIAA(n·f) while the fundamental passes through
+    /// RIAA(f). The left channel is the one with the DUT in it.
+    /// </summary>
+    private static SimulatedDevice RiaaWithGeneratorStack()
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        device.SignalProfile = device.SignalProfile with
+        {
+            Dut = SimulatedDutModel.PhonoRiaa,
+            HarmonicsEnabled = true,
+            NoiseEnabled = false,
+            HumEnabled = false,
+        };
+
+        return device;
+    }
+
+    private static double DbcOfPercent(double percent) => 20.0 * Math.Log10(percent / 100.0);
+
+    [Fact]
+    public async Task FrequencyNormalized_ThroughATiltedDut_ReadsTheStacksTrueLevelWhereConventionalDoesNot()
+    {
+        // The whole point of the method: through the RIAA tilt the stack's second harmonic at 2f is
+        // attenuated more than the fundamental at f, so a conventional D2 reads it low (the manual
+        // quotes 2.6 dB at 1 kHz). Dividing by the fundamental the same sweep measured at 2f
+        // cancels the tilt and reads the stack's own -46 dBc.
+        var harness = await CreateAsync(RiaaWithGeneratorStack());
+        var request = Request(startHz: 500.0, endHz: 4000.0, stepsPerOctave: 2) with { ThdMethod = ThdMethod.FrequencyNormalized };
+
+        var started = await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(ThdMethod.FrequencyNormalized, status.ThdMethod);
+        Assert.Equal(started.PointCount, status.Points.Count);
+
+        var requested = status.Points.Where(p => p.FreqHz <= request.EndFreqHz * 1.001).ToList();
+        var extension = status.Points.Where(p => p.FreqHz > request.EndFreqHz * 1.001).ToList();
+
+        // The fundamental was swept on past the end so that every requested point has a reference
+        // at 2f..5f -- up to 5x the end, or the sweep's own ceiling, whichever comes first.
+        Assert.NotEmpty(extension);
+        Assert.True(extension[^1].FreqHz >= Math.Min(5.0 * request.EndFreqHz, request.MaxSweepFreqHz) * 0.99,
+            $"the reference points stop at {extension[^1].FreqHz:0} Hz");
+        // A reference point is an ordinary point: the lower ones have their own 2f inside the
+        // extension and are normalized like any other, and only those whose 2f lies above the
+        // last tone measured have nothing to be referenced against. The top one never does.
+        double topHz = status.Points[^1].FreqHz;
+        Assert.All(status.Points, p =>
+        {
+            bool referenced = 2.0 * p.FreqHz <= topHz;
+            Assert.Equal(referenced, p.NormalizedHarmonicPercent![0] is not null);
+            Assert.Equal(referenced, p.NormalizedThdPercent is not null);
+        });
+        Assert.Null(status.Points[^1].NormalizedThdPercent);
+        Assert.Null(status.Points[^1].NormalizedD6PlusPercent);
+        Assert.All(status.Points[^1].NormalizedHarmonicPercent!, h => Assert.Null(h));
+
+        Assert.NotEmpty(requested);
+        Assert.All(requested, p =>
+        {
+            Assert.NotNull(p.NormalizedHarmonicPercent);
+            Assert.Equal(4, p.NormalizedHarmonicPercent!.Count);
+
+            // nD2 is near-exact: 2f is two grid steps up, so its reference is (almost) a measured
+            // point. nD3 is interpolated between grid points, so it gets a looser bound.
+            Assert.NotNull(p.NormalizedHarmonicPercent[0]);
+            Assert.InRange(DbcOfPercent(p.NormalizedHarmonicPercent[0]!.Value), -46.4, -45.6);
+            Assert.NotNull(p.NormalizedHarmonicPercent[1]);
+            Assert.InRange(DbcOfPercent(p.NormalizedHarmonicPercent[1]!.Value), -61.0, -59.0);
+            Assert.NotNull(p.NormalizedThdPercent);
+
+            // Conventional D2 at the same point is the stack read through the tilt: low, and by
+            // more than the interpolation noise above could account for.
+            Assert.True(DbcOfPercent(p.HarmonicPercent[0]) < -46.0 - 1.5,
+                $"conventional D2 at {p.FreqHz:0} Hz reads {DbcOfPercent(p.HarmonicPercent[0]):0.00} dBc -- the tilt should have pulled it lower");
+        });
+    }
+
+    [Fact]
+    public async Task Conventional_NeverSweepsPastTheRequestedEnd()
+    {
+        // The default path is unchanged: no reference points, no normalized figures.
+        var harness = await CreateAsync();
+        var request = Request(startHz: 500.0, endHz: 4000.0, stepsPerOctave: 2);
+
+        await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(ThdMethod.Conventional, status.ThdMethod);
+        Assert.True(status.Points[^1].FreqHz <= request.EndFreqHz * 1.001);
+        Assert.All(status.Points, p =>
+        {
+            Assert.Null(p.NormalizedThdPercent);
+            Assert.Null(p.NormalizedHarmonicPercent);
+            Assert.Null(p.NormalizedD6PlusPercent);
+        });
+    }
+
+    [Fact]
+    public void Validate_FrequencyNormalizedOnTheAmplitudeAxis_IsRejected()
+    {
+        var request = AmplitudeRequest() with { ThdMethod = ThdMethod.FrequencyNormalized };
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => request.Validate());
+        Assert.Equal(nameof(ThdSweepRequest.ThdMethod), ex.ParamName);
+    }
+
     [Fact]
     public async Task Sweep_EveryPoint_MeasuresTheSimulatedDutsHarmonicDistortion()
     {

@@ -178,6 +178,26 @@ function onSimulatedHumChange(e: Event) {
   emit('setSimulatedProfile', { humEnabled: (e.target as HTMLInputElement).checked })
 }
 
+function onSimulatedHarmonicsChange(e: Event) {
+  emit('setSimulatedProfile', { harmonicsEnabled: (e.target as HTMLInputElement).checked })
+}
+
+/**
+ * The four nonlinear amplifier models carry their own distortion and switch the generator's
+ * harmonic stack off whatever the profile says, so the checkbox is shown but disabled under one of
+ * them — a live checkbox that changes nothing reads as a bug.
+ */
+const harmonicsSwitchInert = computed(() => {
+  const dut = props.status?.simulatedDut
+  return dut != null && DUT_MODELS.some((m) => m.value === dut && m.group === 'Nonlinear amplifiers')
+})
+
+const harmonicsSwitchTitle = computed(() =>
+  harmonicsSwitchInert.value
+    ? "This DUT model distorts on its own, so the generator's harmonic stack is off regardless."
+    : 'Fixed harmonic stack on each generator tone: H2 at −46 dBc, H3 at −60 dBc, then 12 dB per order — 0.51 % THD at any level.',
+)
+
 function onSimulatedDutChange(e: Event) {
   emit('setSimulatedProfile', { dut: (e.target as HTMLSelectElement).value as SimulatedDutModel })
 }
@@ -241,6 +261,19 @@ function onSimulatedDutChange(e: Event) {
         >
           <input type="checkbox" :checked="status.simulatedHumEnabled ?? false" @change="onSimulatedHumChange" />
           Hum
+        </label>
+        <label
+          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
+          :class="{ 'opacity-50': harmonicsSwitchInert }"
+          :title="harmonicsSwitchTitle"
+        >
+          <input
+            type="checkbox"
+            :checked="status.simulatedHarmonicsEnabled ?? false"
+            :disabled="harmonicsSwitchInert"
+            @change="onSimulatedHarmonicsChange"
+          />
+          Harmonics
         </label>
         <label
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"

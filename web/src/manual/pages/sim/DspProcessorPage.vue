@@ -67,7 +67,7 @@ const impulseMarkers: ManualMarker[] = [{ x: PROCESSOR_LATENCY_MS, label: `${PRO
         ['−3 dB corners', `< start, ${formatHz(bw.threeDbHighHz!)}`],
         ['±1 dB corners', `< start, ${formatHz(bw.oneDbHighHz!)}`],
         ['Impulse', `a symmetric-looking pulse at t = ${PROCESSOR_LATENCY_MS} ms, ringing briefly at the corner`],
-        ['THD', 'the generator’s 0.51 %, until the harmonics reach the corner'],
+        ['THD', '0.000 %; with Harmonics ticked, the generator’s 0.51 % until the harmonics reach the corner'],
       ]"
     />
 
@@ -76,8 +76,8 @@ const impulseMarkers: ManualMarker[] = [{ x: PROCESSOR_LATENCY_MS, label: `${PRO
       <li><a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a> — the one to see the delay readout and the <em>Restore removed delay</em> option on.</li>
       <li><a href="#" @click.prevent="showPage('impulse-response')">Impulse response</a> — an impulse that is not at zero, and what the gate does about it.</li>
       <li><a href="#" @click.prevent="showPage('stepped-response')">Stepped sine response</a> — the same brick wall, and a phase that wraps 240 times.</li>
-      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — flat at 0.51 % until 10 kHz, where H2 crosses the corner and D2 disappears; D3 goes at 6.7 kHz.</li>
-      <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> and <a href="#" @click.prevent="showPage('thd-vs-amplitude')">THD vs amplitude</a> — as the straight wire at 1 kHz; a 10 kHz tone loses its second harmonic.</li>
+      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — zero; with Harmonics ticked, flat at 0.51 % until 10 kHz, where H2 crosses the corner and D2 disappears; D3 goes at 6.7 kHz.</li>
+      <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> and <a href="#" @click.prevent="showPage('thd-vs-amplitude')">THD vs amplitude</a> — as the straight wire at 1 kHz; with Harmonics ticked, a 10 kHz tone loses its second harmonic.</li>
       <li><a href="#" @click.prevent="showPage('impedance')">Impedance</a> — not applicable.</li>
     </ul>
 

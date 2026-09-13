@@ -162,4 +162,39 @@ public class SweepPointsTests
         Assert.True(steps[0].FftSize > steps[^1].FftSize,
             $"the bottom of the sweep ({steps[0].FftSize}) should use a longer record than the top ({steps[^1].FftSize})");
     }
+
+    [Fact]
+    public void ExtendPerOctave_ContinuesAtTheNominalStepAndIncludesTheFirstValueAtOrAboveTheCap()
+    {
+        // 20 kHz at 5 steps/octave towards 5x = 100 kHz: 2.32 octaves is 11.6 steps, so the
+        // twelfth step (20000 * 2^(12/5) = 105.6 kHz) is the first at or above the cap and is kept.
+        var values = SweepPoints.ExtendPerOctave(20000.0, 100000.0, 5);
+
+        Assert.Equal(12, values.Length);
+        Assert.Equal(20000.0 * Math.Pow(2.0, 1.0 / 5.0), values[0], 6);
+        for (int i = 1; i < values.Length; i++)
+            Assert.Equal(Math.Pow(2.0, 1.0 / 5.0), values[i] / values[i - 1], 9);
+        Assert.True(values[^2] < 100000.0);
+        Assert.True(values[^1] >= 100000.0);
+    }
+
+    [Fact]
+    public void ExtendPerOctave_CapAtOrBelowTheStart_AddsNothing()
+    {
+        Assert.Empty(SweepPoints.ExtendPerOctave(20000.0, 20000.0, 5));
+        Assert.Empty(SweepPoints.ExtendPerOctave(20000.0, 10000.0, 5));
+    }
+
+    [Fact]
+    public void ExtendPerOctave_LeavesTheRequestedGridUntouched()
+    {
+        // The whole reason this is not LogPerOctave(start, 5*end): the requested points must be
+        // the same frequencies whether or not the sweep is extended past them.
+        var requested = SweepPoints.LogPerOctave(20.0, 20000.0, 5);
+        var extension = SweepPoints.ExtendPerOctave(20000.0, 100000.0, 5);
+
+        Assert.Equal(20000.0, requested[^1], 9);
+        Assert.True(extension[0] > requested[^1]);
+        Assert.Equal(requested, SweepPoints.LogPerOctave(20.0, 20000.0, 5));
+    }
 }

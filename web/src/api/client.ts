@@ -17,6 +17,12 @@ export interface DeviceStatus {
   /** Simulated DUT mains hum on/off; same null convention. */
   simulatedHumEnabled: boolean | null
   /**
+   * The simulated generator's fixed harmonic stack (H2 −46 dBc, 0.51 % THD) on/off; same null
+   * convention. The nonlinear amplifier models drop the stack regardless, so under one of those the
+   * value is reported but has no effect.
+   */
+  simulatedHarmonicsEnabled: boolean | null
+  /**
    * Which simulated device under test is patched in; null when the device isn't the simulator.
    * Unlike the two switches above this changes the DUT's response rather than what is added to it.
    */
@@ -94,6 +100,7 @@ export type DeviceKindName = 'Hardware' | 'Simulated'
 export interface SimulatedProfileRequest {
   noiseEnabled?: boolean
   humEnabled?: boolean
+  harmonicsEnabled?: boolean
   dut?: SimulatedDutModel
 }
 
@@ -1370,6 +1377,14 @@ export type SweepLevelMode = 'GeneratorVoltage' | 'OutputVoltage' | 'OutputPower
 /** Mirrors Qa403.App.Services.ThdSweepLevelUnit. 'Watt' is only valid with the OutputPower mode. */
 export type SweepLevelUnit = 'Dbv' | 'Volt' | 'MilliVolt' | 'Watt'
 
+/**
+ * Mirrors Qa403.App.Services.ThdMethod: what each harmonic is divided by. Conventional is the
+ * fundamental at the stimulus frequency; FrequencyNormalized is the fundamental the same sweep
+ * measured at the harmonic's own frequency n·f, which removes the DUT's frequency response from
+ * the reading. Frequency axis only.
+ */
+export type ThdMethodName = 'Conventional' | 'FrequencyNormalized'
+
 /** Mirrors Qa403.App.Services.ThdSweepPhase. */
 export type SweepPhaseName =
   | 'Idle'
@@ -1401,6 +1416,12 @@ export interface ThdSweepStartRequest {
    * `fftSize` and `sampleRateHz` above are ignored.
    */
   adaptiveResolution: boolean
+  /**
+   * How the harmonics are referenced. Under FrequencyNormalized the sweep keeps stepping the
+   * fundamental past `endFreqHz` (to 5x it, or Nyquist) so every harmonic has a fundamental to be
+   * divided by; those extra points come back like any other.
+   */
+  thdMethod: ThdMethodName
 }
 
 /**
@@ -1545,6 +1566,16 @@ export interface ThdSweepPoint {
   previewFft: SweepPreviewSeries | null
   /** A small decimated oscilloscope trace, in volts. Null if not captured. */
   previewScope: SweepPreviewSeries | null
+  /**
+   * The frequency-normalized figures — each harmonic over the fundamental measured at its own
+   * frequency. Null on a conventional sweep; on a normalized one, null until the sweep has
+   * measured the fundamental at 2f (the point is re-sent as its orders fill in), and null for good
+   * near the top of the extended grid, above which nothing was swept.
+   */
+  normalizedThdPercent: number | null
+  /** Normalized D2..D5, index 0 = 2nd harmonic; four entries, each null without a reference. Null as a whole on a conventional sweep. */
+  normalizedHarmonicPercent: (number | null)[] | null
+  normalizedD6PlusPercent: number | null
 }
 
 export interface StoredSweepPoint {
@@ -1575,6 +1606,8 @@ export interface ThdSweepStatus {
   error: string | null
   /** Every point measured so far. Present on a finished, cancelled or still-running sweep alike. */
   points: ThdSweepPoint[]
+  /** How the points' harmonics are referenced — which of a point's two sets of figures this run is about. */
+  thdMethod: ThdMethodName
 }
 
 export const api = {

@@ -274,22 +274,34 @@ public static class StreamFrame
     /// ..  (f32 freqHz, f32 dbvMin, f32 dbvMax) * fftPreviewCount  -- see SweepPreviewSeries
     /// ..  u32  scopePreviewCount
     /// ..  (f32 timeS, f32 vMin, f32 vMax) * scopePreviewCount     -- see SweepPreviewSeries
+    /// ..  f32  normalizedThdPercent      -- frequency-normalized figures (ThdMethod.FrequencyNormalized);
+    /// ..  f32  normalizedD6PlusPercent      NaN = not available, which is every field of a conventional
+    /// ..  f32 * 4  normalizedD2..D5          sweep and any order still waiting for its reference
     /// </code>
     /// x0 = the point's frequency (Hz), dx = 0, nPoints = harmonicCount, seq = the point's index in
     /// the sweep, channel = 0/1. One frame per channel per point, so a stereo sweep sends two.
     /// A count of 0 (both preview arrays absent, e.g. <see cref="Qa403.App.Streaming.SpectrumPipelineOptions.CapturePreview"/>
     /// was off) is a valid, empty payload — decoding never assumes either count is nonzero.
+    ///
+    /// <para>The normalized trailer is a fixed 24 bytes, written on every frame whatever the method:
+    /// a payload whose length depends on a flag is a decoder bug waiting to happen, and NaN is a
+    /// perfectly good "absent" in a binary frame — it is only in JSON that it cannot be written,
+    /// which is why the <see cref="ThdSweepPoint"/> itself carries null. The same point may be sent
+    /// again later with the trailer filled in, under the same seq: the normalization needs the
+    /// fundamental at 2f..5f, which the sweep only reaches after the point was first sent.</para>
     /// </summary>
     public static byte[] EncodeSweepPoint(ThdSweepPoint point, uint pointIndex)
     {
         const int scalarsAndCountLength = (9 * sizeof(float)) + sizeof(uint);
+        const int normalizedTrailerLength = (2 + NormalizedHarmonicSlots) * sizeof(float);
         int harmonicCount = point.HarmonicPercent.Count;
         int fftCount = point.PreviewFft?.X.Length ?? 0;
         int scopeCount = point.PreviewScope?.X.Length ?? 0;
 
         int length = HeaderLength + scalarsAndCountLength + (harmonicCount * sizeof(float))
             + sizeof(uint) + (fftCount * 3 * sizeof(float))
-            + sizeof(uint) + (scopeCount * 3 * sizeof(float));
+            + sizeof(uint) + (scopeCount * 3 * sizeof(float))
+            + normalizedTrailerLength;
         byte[] buffer = new byte[length];
 
         var channel = point.Channel == 0 ? StreamChannel.Left : StreamChannel.Right;
@@ -314,10 +326,26 @@ public static class StreamFrame
         }
 
         offset = WriteSweepPreview(buffer, offset, point.PreviewFft);
-        WriteSweepPreview(buffer, offset, point.PreviewScope);
+        offset = WriteSweepPreview(buffer, offset, point.PreviewScope);
+
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), NanIfAbsent(point.NormalizedThdPercent)); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), NanIfAbsent(point.NormalizedD6PlusPercent)); offset += 4;
+        for (int i = 0; i < NormalizedHarmonicSlots; i++)
+        {
+            double? value = point.NormalizedHarmonicPercent is { } list && i < list.Count ? list[i] : null;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), NanIfAbsent(value));
+            offset += 4;
+        }
 
         return buffer;
     }
+
+    /// <summary>Orders 2..5 in the normalized trailer — <see cref="Qa403.Dsp.NormalizedDistortion.IndividualOrders"/>.</summary>
+    private const int NormalizedHarmonicSlots = Qa403.Dsp.NormalizedDistortion.IndividualOrders;
+
+    private static float NanIfAbsent(double? value) => value is { } v ? (float)v : float.NaN;
+
+    private static float? NullIfNan(float value) => float.IsNaN(value) ? null : value;
 
     private static int WriteSweepPreview(byte[] buffer, int offset, SweepPreviewSeries? preview)
     {
@@ -673,9 +701,19 @@ public static class StreamFrame
         var previewFft = ReadSweepPreview(frame, ref offset);
         var previewScope = ReadSweepPreview(frame, ref offset);
 
+        float? normalizedThd = NullIfNan(BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4))); offset += 4;
+        float? normalizedD6Plus = NullIfNan(BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4))); offset += 4;
+        var normalizedHarmonics = new float?[NormalizedHarmonicSlots];
+        for (int i = 0; i < NormalizedHarmonicSlots; i++)
+        {
+            normalizedHarmonics[i] = NullIfNan(BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)));
+            offset += 4;
+        }
+
         return new DecodedSweepPoint(
             header.X0, header.Channel, header.Seq, thdPercent, thdNPercent, snrDb, fundamentalDbv,
-            gainDb, powerWatt, d6PlusPercent, noisePercent, generatorDbv, harmonicPercent, previewFft, previewScope);
+            gainDb, powerWatt, d6PlusPercent, noisePercent, generatorDbv, harmonicPercent, previewFft, previewScope,
+            normalizedThd, normalizedHarmonics, normalizedD6Plus);
     }
 
     private static SweepPreviewSeries? ReadSweepPreview(ReadOnlySpan<byte> frame, ref int offset)
@@ -790,7 +828,8 @@ public readonly record struct DecodedSweepPoint(
     float FreqHz, StreamChannel Channel, uint PointIndex,
     float ThdPercent, float ThdNPercent, float SnrDb, float FundamentalDbv,
     float GainDb, float PowerWatt, float D6PlusPercent, float NoisePercent, float GeneratorDbv,
-    float[] HarmonicPercent, SweepPreviewSeries? PreviewFft, SweepPreviewSeries? PreviewScope);
+    float[] HarmonicPercent, SweepPreviewSeries? PreviewFft, SweepPreviewSeries? PreviewScope,
+    float? NormalizedThdPercent, float?[] NormalizedHarmonicPercent, float? NormalizedD6PlusPercent);
 
 /// <param name="CurrentX">The point being measured, in the sweep axis' own unit — Hz or generator volts.</param>
 public readonly record struct DecodedSweepProgress(int Index, int Total, float CurrentX, ThdSweepPhase Phase);

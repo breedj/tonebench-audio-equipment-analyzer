@@ -74,10 +74,12 @@ const { showPage } = useManual()
     <ul>
       <li>
         <strong>Both generator channels play the same stimulus</strong>, exactly as on the hardware,
-        and each generator tone carries a fixed harmonic stack standing in for a distorting source:
-        H2 at −46 dBc, H3 at −60 dBc, and every order above that 12 dB further down. That stack is
-        the same at 1 mV and at 1 V. It is why every <em>linear</em> model reads 0.51 % THD at any
-        level, and why the four nonlinear amplifier models switch it off — see below.
+        and with <strong>Harmonics</strong> ticked in the status bar each generator tone carries a
+        fixed harmonic stack standing in for a distorting source: H2 at −46 dBc, H3 at −60 dBc, and
+        every order above that 12 dB further down. That stack is the same at 1 mV and at 1 V. It is
+        why every <em>linear</em> model then reads 0.51 % THD at any level, and why the four
+        nonlinear amplifier models switch it off — see below. The box starts unchecked, as do
+        <strong>Noise</strong> and <strong>Hum</strong>, so an untouched simulator is a clean bench.
       </li>
       <li>
         <strong>A DUT model sits on the left input only.</strong> The left input measures the device;
@@ -135,7 +137,7 @@ const { showPage } = useManual()
           <td>
             <button type="button" class="manual-link" @click="showPage('sim-straight-wire')">Straight wire</button>
           </td>
-          <td>Nothing in the path. The generator, with its harmonic stack, hum and noise, reaches both inputs unaltered.</td>
+          <td>Nothing in the path. The generator — with whichever of its harmonic stack, hum and noise are switched on — reaches both inputs unaltered.</td>
           <td>Learning the FFT screen; a loopback check of the analysis itself.</td>
         </tr>
         <tr>
@@ -204,9 +206,10 @@ const { showPage } = useManual()
 
     <h3>Nonlinear amplifiers</h3>
     <p>
-      Selecting any of these switches the generator's harmonic stack <em>off</em>: the left channel
-      then carries only what the model does to the signal, and the right is a clean generator tap.
-      It comes back when a linear model is selected again.
+      Selecting any of these switches the generator's harmonic stack <em>off</em> whatever the
+      <strong>Harmonics</strong> box says — the box is greyed out to show it: the left channel then
+      carries only what the model does to the signal, and the right is a clean generator tap. The
+      box's own setting comes back into force when a linear model is selected again.
     </p>
     <table>
       <thead>

@@ -46,10 +46,11 @@ const transferSeries = computed<ManualSeries[]>(() => {
     </p>
     <p>
       This is the first model whose distortion depends on level, and therefore the first that gives a
-      THD-vs-amplitude sweep anything to draw. Every linear model reads the generator's fixed 0.51 %
-      at every level; selecting this one (or any of the three that follow) switches that stack
-      <em>off</em>, so the left channel carries only what the model does and the right channel is a
-      clean generator tap, as on a real bench. And its answer is on paper: for a polynomial,
+      THD-vs-amplitude sweep anything to draw. Every linear model reads 0.000 % — or, with the
+      simulator's Harmonics box ticked, the generator's fixed 0.51 % at every level; selecting this
+      one (or any of the three that follow) switches that stack <em>off</em> whatever the box says,
+      so the left channel carries only what the model does and the right channel is a clean
+      generator tap, as on a real bench. And its answer is on paper: for a polynomial,
       <strong>H2/H1 = k₂A/2</strong> and <strong>H3/H1 = k₃A²/4</strong> with A the peak drive, so
       H2 is 0.5 % at 1 V peak and climbs exactly 1 dB per dB of level.
     </p>

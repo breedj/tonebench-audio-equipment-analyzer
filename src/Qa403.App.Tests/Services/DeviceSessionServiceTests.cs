@@ -116,28 +116,54 @@ public class DeviceSessionServiceTests
     }
 
     [Fact]
-    public async Task TrySetSimulatedProfile_TogglesNoiseAndHumAndShowsUpInStatus()
+    public async Task TrySetSimulatedProfile_TogglesNoiseHumAndHarmonicsAndShowsUpInStatus()
     {
         var session = CreateService();
         await session.ConnectAsync(CancellationToken.None);
 
-        // The simulated DUT ships with both on (SimulatedSignalProfile.NoiseEnabled/HumEnabled).
+        // A directly constructed SimulatedDevice ships with all three on
+        // (SimulatedSignalProfile.NoiseEnabled/HumEnabled/HarmonicsEnabled); the app's factory is
+        // what turns them off — see AnalyzerDeviceFactory_HandsOutTheSimulatorWithEveryImpairmentOff.
         Assert.True(session.SimulatedNoiseEnabled);
         Assert.True(session.SimulatedHumEnabled);
+        Assert.True(session.SimulatedHarmonicsEnabled);
 
-        Assert.True(session.TrySetSimulatedProfile(noiseEnabled: false, humEnabled: false));
+        Assert.True(session.TrySetSimulatedProfile(noiseEnabled: false, humEnabled: false, harmonicsEnabled: false));
 
         Assert.False(session.SimulatedNoiseEnabled);
         Assert.False(session.SimulatedHumEnabled);
+        Assert.False(session.SimulatedHarmonicsEnabled);
         Assert.False(session.GetStatus().SimulatedNoiseEnabled);
         Assert.False(session.GetStatus().SimulatedHumEnabled);
+        Assert.False(session.GetStatus().SimulatedHarmonicsEnabled);
+    }
+
+    /// <summary>
+    /// The user's simulator starts clean: a straight wire that reads 0.51 % THD, −90 dBV of hum
+    /// and a −150 dBV/√Hz floor is a bench with three impairments patched in, and each one is a
+    /// checkbox to switch on rather than a number to explain away. The device type's own defaults
+    /// stay on, because the bench most tests are written against has them.
+    /// </summary>
+    [Fact]
+    public void AnalyzerDeviceFactory_HandsOutTheSimulatorWithEveryImpairmentOff()
+    {
+        var factory = new AnalyzerDeviceFactory(NullLoggerFactory.Instance, DeviceKind.Simulated);
+
+        var device = Assert.IsType<SimulatedDevice>(factory.Create(DeviceKind.Simulated));
+
+        Assert.False(device.SignalProfile.NoiseEnabled);
+        Assert.False(device.SignalProfile.HumEnabled);
+        Assert.False(device.SignalProfile.HarmonicsEnabled);
+        // Everything else is the device's own default — the factory only touches the three switches.
+        Assert.Equal(new SimulatedDevice().SignalProfile.Dut, device.SignalProfile.Dut);
+        Assert.Equal(new SimulatedDevice().SignalProfile.GeneratorLeft, device.SignalProfile.GeneratorLeft);
     }
 
     [Fact]
     public async Task TrySetSimulatedProfile_LeavesOmittedSettingsAlone()
     {
-        // Patch semantics: the UI's two checkboxes each send only their own field, so toggling one
-        // must not reset the other.
+        // Patch semantics: the UI's three checkboxes each send only their own field, so toggling one
+        // must not reset the others.
         var session = CreateService();
         await session.ConnectAsync(CancellationToken.None);
 
@@ -145,11 +171,19 @@ public class DeviceSessionServiceTests
 
         Assert.False(session.SimulatedNoiseEnabled);
         Assert.True(session.SimulatedHumEnabled);
+        Assert.True(session.SimulatedHarmonicsEnabled);
 
         Assert.True(session.TrySetSimulatedProfile(noiseEnabled: null, humEnabled: false));
 
         Assert.False(session.SimulatedNoiseEnabled);
         Assert.False(session.SimulatedHumEnabled);
+        Assert.True(session.SimulatedHarmonicsEnabled);
+
+        Assert.True(session.TrySetSimulatedProfile(noiseEnabled: null, humEnabled: null, harmonicsEnabled: false));
+
+        Assert.False(session.SimulatedNoiseEnabled);
+        Assert.False(session.SimulatedHumEnabled);
+        Assert.False(session.SimulatedHarmonicsEnabled);
     }
 
     [Fact]
@@ -163,11 +197,13 @@ public class DeviceSessionServiceTests
             NullLogger<DeviceSessionService>.Instance);
         await session.ConnectAsync(CancellationToken.None);
 
-        Assert.False(session.TrySetSimulatedProfile(noiseEnabled: false, humEnabled: false));
+        Assert.False(session.TrySetSimulatedProfile(noiseEnabled: false, humEnabled: false, harmonicsEnabled: false));
         Assert.Null(session.SimulatedNoiseEnabled);
         Assert.Null(session.SimulatedHumEnabled);
+        Assert.Null(session.SimulatedHarmonicsEnabled);
         Assert.Null(session.GetStatus().SimulatedNoiseEnabled);
         Assert.Null(session.GetStatus().SimulatedHumEnabled);
+        Assert.Null(session.GetStatus().SimulatedHarmonicsEnabled);
     }
 
     [Fact]

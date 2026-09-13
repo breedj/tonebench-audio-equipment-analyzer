@@ -14,6 +14,8 @@ function buildSweepPointFrame(opts: {
   generatorDbv?: number
   fftPreview: { x: number; min: number; max: number }[] | null
   scopePreview: { x: number; min: number; max: number }[] | null
+  /** The normalized trailer [nThd, nD6Plus, nD2, nD3, nD4, nD5], NaN = absent. Omitted = an old frame with no trailer at all. */
+  normalized?: number[]
 }): ArrayBuffer {
   const fftCount = opts.fftPreview?.length ?? 0
   const scopeCount = opts.scopePreview?.length ?? 0
@@ -25,7 +27,8 @@ function buildSweepPointFrame(opts: {
     4 +
     fftCount * 3 * 4 +
     4 +
-    scopeCount * 3 * 4
+    scopeCount * 3 * 4 +
+    (opts.normalized?.length ?? 0) * 4
 
   const buffer = new ArrayBuffer(length)
   const view = new DataView(buffer)
@@ -68,6 +71,7 @@ function buildSweepPointFrame(opts: {
   }
   writePreview(opts.fftPreview)
   writePreview(opts.scopePreview)
+  for (const v of opts.normalized ?? []) writeF32(v)
 
   return buffer
 }
@@ -126,6 +130,45 @@ describe('decodeSweepPointFrame', () => {
 
     expect(frame.previewFft).toBeNull()
     expect(frame.previewScope).toBeNull()
+  })
+
+  it('decodes the normalized trailer, NaN as null', () => {
+    const buffer = buildSweepPointFrame({
+      freqHz: 1000,
+      channel: 0,
+      pointIndex: 3,
+      harmonicPercent: [0.4, 0.1, 0.02, 0.01],
+      fftPreview: null,
+      scopePreview: null,
+      normalized: [0.52, Number.NaN, 0.5, 0.12, Number.NaN, Number.NaN],
+    })
+
+    const frame = decodeSweepPointFrame(buffer)
+
+    expect(frame.normalizedThdPercent).toBeCloseTo(0.52, 5)
+    expect(frame.normalizedD6PlusPercent).toBeNull()
+    expect(frame.normalizedHarmonicPercent).toHaveLength(4)
+    expect(frame.normalizedHarmonicPercent[0]).toBeCloseTo(0.5, 5)
+    expect(frame.normalizedHarmonicPercent[1]).toBeCloseTo(0.12, 5)
+    expect(frame.normalizedHarmonicPercent[2]).toBeNull()
+    expect(frame.normalizedHarmonicPercent[3]).toBeNull()
+  })
+
+  it('reads a frame without the trailer as having no normalized figures', () => {
+    const buffer = buildSweepPointFrame({
+      freqHz: 1000,
+      channel: 0,
+      pointIndex: 0,
+      harmonicPercent: [0.4],
+      fftPreview: null,
+      scopePreview: null,
+    })
+
+    const frame = decodeSweepPointFrame(buffer)
+
+    expect(frame.normalizedThdPercent).toBeNull()
+    expect(frame.normalizedD6PlusPercent).toBeNull()
+    expect(frame.normalizedHarmonicPercent).toEqual([null, null, null, null])
   })
 
   it('decodes only the fft preview when the scope one is absent', () => {

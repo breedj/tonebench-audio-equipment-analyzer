@@ -9,7 +9,6 @@ import {
   impulseCurve,
   magnitudeCurve,
   phaseCurve,
-  thdVsFrequencyCurve,
 } from '../../sim/curves'
 import { LOUDSPEAKER_REFLECTION, loudspeaker } from '../../sim/models'
 import { useManual } from '../../useManual'
@@ -72,10 +71,9 @@ const burstSeries = computed<ManualSeries[]>(() => [
 ])
 const reflectionPeriodsAt4k2 = (LOUDSPEAKER_REFLECTION.delayMs / 1000) * 4200
 
-// THD vs frequency, the response acting on each harmonic.
-const thdSeries = computed<ManualSeries[]>(() => [
-  { name: 'THD', points: thdVsFrequencyCurve(dut, 20, 20_000, 0.98 * 96_000), color: 'gain' },
-])
+// No THD chart: with the simulator's Harmonics box off (the default) this linear model reads
+// 0.000 % everywhere, and the figures quoted for the box ticked are the generator's stack bent by
+// the response above, not a property of the loudspeaker.
 </script>
 
 <template>
@@ -95,7 +93,7 @@ const thdSeries = computed<ManualSeries[]>(() => [
       display gate exists to remove, and the two resonances are what the decay surfaces exist to
       show; on the frequency-response screen the same reflection appears as a comb across the whole
       band, {{ combSpacingHz.toFixed(0) }} Hz between teeth, which is why no single frequency of this
-      model reads its own section's gain. Linear, so its distortion is the generator's stack.
+      model reads its own section's gain. Linear, so it has no distortion of its own.
     </p>
 
     <h2>What to expect, in numbers</h2>
@@ -106,7 +104,7 @@ const thdSeries = computed<ManualSeries[]>(() => [
         ['Reflection comb', `${combSpacingHz.toFixed(0)} Hz spacing, ±2.2 dB unsmoothed, averaging to +0.26 dB under 1/24-octave smoothing above about 5 kHz`],
         ['Impulse', 'the direct spike at t = 0, an inverted copy 12 dB down at 3 ms'],
         ['Burst decay', 'the panel loses 1.1 dB per period of 230 Hz; the breakup 1.6 dB per period of 4.2 kHz until the reflection arrives'],
-        ['THD', '0.51 % in the middle of the band, bent by the response at the resonances'],
+        ['THD', '0.000 %; with Harmonics ticked, the generator’s 0.51 % bent by the response at the resonances'],
         ['DUT delay', 'about 0.3 samples'],
       ]"
     />
@@ -116,7 +114,7 @@ const thdSeries = computed<ManualSeries[]>(() => [
       <li><a href="#" @click.prevent="showPage('impulse-response')">Impulse response</a> — the one it is for: the gate, the gated response, both decay surfaces.</li>
       <li><a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a> — the ungated picture, comb and all.</li>
       <li><a href="#" @click.prevent="showPage('stepped-response')">Stepped sine response</a> — the same curve, each point landing somewhere on the comb.</li>
-      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — the generator's stack, bent by the response.</li>
+      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — zero; with Harmonics ticked, the generator's stack bent by the response.</li>
       <li>
         <a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> and
         <a href="#" @click.prevent="showPage('thd-vs-amplitude')">THD vs amplitude</a> — as the
@@ -272,36 +270,16 @@ const thdSeries = computed<ManualSeries[]>(() => [
     </p>
 
     <h2>THD vs frequency</h2>
-    <SettingsTable
-      :rows="[
-        ['Start / End (Hz)', '20 / 20000'],
-        ['Steps per octave', '5'],
-        ['Level mode', 'Generator voltage, −20 dBV'],
-        ['Left / Right', 'Left'],
-        ['Averages per point', '4'],
-        ['Adaptive resolution', 'On'],
-        ['Measure noise floor first', 'On'],
-      ]"
-    />
-    <ManualChart
-      :series="thdSeries"
-      :x-min="15"
-      :x-max="25000"
-      :y-min="0.01"
-      :y-max="10"
-      y-log
-      x-label="Hz"
-      y-label="%"
-      :height="220"
-      caption="Expected THD against frequency: the generator's 0.51 % stack, read through a response that treats each harmonic differently from its fundamental."
-    />
     <p>
-      The curve is the response's shape folded onto itself: THD dips where the fundamental sits on
-      a peak (115 Hz, whose H2 lands on the 230 Hz panel, reads <em>high</em>; 230 Hz itself reads
-      low; 2.1 kHz, whose H2 lands on the breakup, reads high again) and climbs at the bottom where
-      the fundamental is rolling off faster than its harmonics. None of it is distortion in the
-      loudspeaker — the right channel, which taps the generator, reads a flat 0.51 % throughout, and
-      switching to a nonlinear model is the only way to make the two channels differ.
+      Reads <strong>0.000 %</strong> across the band: the model is linear. Tick the simulator's
+      <strong>Harmonics</strong> box and the sweep (20 Hz – 20 kHz at −20 dBV, five steps per
+      octave) draws the generator's 0.51 % stack read through a response that treats each harmonic
+      differently from its fundamental — the response's shape folded onto itself. THD reads
+      <em>high</em> at 115 Hz, whose H2 lands on the 230 Hz panel, low at 230 Hz itself, high again
+      at 2.1 kHz, whose H2 lands on the breakup, and climbs at the bottom where the fundamental is
+      rolling off faster than its harmonics. None of it is distortion in the loudspeaker — the
+      right channel, which taps the generator, reads a flat 0.51 % throughout, and switching to a
+      nonlinear model is the only way to make the two channels differ.
     </p>
   </div>
 </template>

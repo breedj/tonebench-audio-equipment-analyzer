@@ -209,6 +209,15 @@ public sealed class DeviceSessionService(
     public bool? SimulatedHumEnabled => (_device as SimulatedDevice)?.SignalProfile.HumEnabled;
 
     /// <summary>
+    /// Whether the simulated generator carries its fixed harmonic stack (H2 at −46 dBc, H3 at
+    /// −60 dBc, 12 dB per order below that — 0.51 % THD on every linear DUT at any level), or
+    /// <c>null</c> when the device isn't the simulator. This is the profile's own setting: the four
+    /// nonlinear DUT models switch the stack off regardless (<see cref="SimulatedDevice"/>), so
+    /// under one of those it reads true while contributing nothing.
+    /// </summary>
+    public bool? SimulatedHarmonicsEnabled => (_device as SimulatedDevice)?.SignalProfile.HarmonicsEnabled;
+
+    /// <summary>
     /// Which simulated device under test is patched in, or <c>null</c> when the device isn't the
     /// simulator. Unlike the noise and hum switches this one changes the DUT's <i>response</i>
     /// rather than what is added to it — see <see cref="SimulatedDutModel"/>.
@@ -220,7 +229,7 @@ public sealed class DeviceSessionService(
     /// false when the device isn't the simulator, so the caller can answer with a 400 rather than
     /// silently accepting a setting that does nothing.
     /// </summary>
-    public bool TrySetSimulatedProfile(bool? noiseEnabled, bool? humEnabled, SimulatedDutModel? dut = null)
+    public bool TrySetSimulatedProfile(bool? noiseEnabled, bool? humEnabled, bool? harmonicsEnabled = null, SimulatedDutModel? dut = null)
     {
         if (_device is not SimulatedDevice simulated)
             return false;
@@ -232,6 +241,7 @@ public sealed class DeviceSessionService(
         {
             NoiseEnabled = noiseEnabled ?? profile.NoiseEnabled,
             HumEnabled = humEnabled ?? profile.HumEnabled,
+            HarmonicsEnabled = harmonicsEnabled ?? profile.HarmonicsEnabled,
             Dut = dut ?? profile.Dut,
         };
 
@@ -494,13 +504,13 @@ public sealed class DeviceSessionService(
 
         if (_info is not { } info)
             return new DeviceStatusResponse(
-                false, "", "", "", false, 0, 0, false, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
+                false, "", "", "", false, 0, 0, false, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled, SimulatedHarmonicsEnabled,
                 SimulatedDut?.ToString(), _kind.ToString(),
                 _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
-            _device.InputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled,
+            _device.InputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled, SimulatedHarmonicsEnabled,
             SimulatedDut?.ToString(), _kind.ToString(),
             _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks);
     }

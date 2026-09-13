@@ -128,7 +128,9 @@ public sealed class MeasurementSaveService(
             Window: WindowType.Hann,
             AverageCount: 4,
             SampleRateHz: 192000.0,
-            MeasureNoiseFloor: true), SerializerOptions);
+            MeasureNoiseFloor: true,
+            AdaptiveResolution: true,
+            ThdMethod: nameof(Services.ThdMethod.Conventional)), SerializerOptions);
 
     /// <summary>
     /// A brand-new THD-vs-amplitude type's <c>params_json</c>, on the same terms as
@@ -437,6 +439,7 @@ public sealed class MeasurementSaveService(
                     request.LoadOhms, request.ProcessLeft, request.ProcessRight,
                     request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
                     request.MeasureNoiseFloor, status.GeneratorAmpDbv,
+                    request.AdaptiveResolution, request.ThdMethod.ToString(),
                     CaptureDelayMs: session.LastAppliedCaptureDelayMs),
                 SerializerOptions);
 
@@ -855,6 +858,23 @@ public sealed class MeasurementSaveService(
 
             for (int i = 0; i < point.HarmonicPercent.Count; i++)
                 metrics.Add(new MeasurementMetric(ch, $"h{i + 2}_percent", point.HarmonicPercent[i], "%"));
+
+            // The frequency-normalized figures, written only where they exist: a conventional sweep
+            // has none, and a normalized one has none at the points near the top of its extended
+            // grid. Absent, not 0 -- the same reasoning as the short harmonic list above, since a 0
+            // reads back as a real -inf dBc point.
+            if (point.NormalizedThdPercent is { } nThd)
+                metrics.Add(new MeasurementMetric(ch, "nthd_percent", nThd, "%"));
+            if (point.NormalizedD6PlusPercent is { } nD6Plus)
+                metrics.Add(new MeasurementMetric(ch, "nd6plus_percent", nD6Plus, "%"));
+            if (point.NormalizedHarmonicPercent is { } normalized)
+            {
+                for (int i = 0; i < normalized.Count; i++)
+                {
+                    if (normalized[i] is { } value)
+                        metrics.Add(new MeasurementMetric(ch, $"nh{i + 2}_percent", value, "%"));
+                }
+            }
         }
 
         return metrics;

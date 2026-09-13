@@ -21,12 +21,10 @@ public static class SweepEndpoints
             if (!EnumParsing.TryParse(request.Window, WindowType.Hann, out WindowType window, out var windowError))
                 return Results.BadRequest(windowError);
 
-            var sweep = new ThdSweepRequest(
-                request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave,
-                levelMode, request.LevelValue, levelUnit, request.LoadOhms,
-                request.ProcessLeft, request.ProcessRight,
-                request.FftSize, window, request.AverageCount,
-                request.SampleRateHz, request.MeasureNoiseFloor, request.AdaptiveResolution);
+            if (!EnumParsing.TryParse(request.ThdMethod, ThdMethod.Conventional, out ThdMethod thdMethod, out var methodError))
+                return Results.BadRequest(methodError);
+
+            var sweep = request.ToMeasurement(levelMode, levelUnit, window, thdMethod);
 
             try
             {
@@ -157,7 +155,25 @@ public sealed record ThdSweepStartRequest(
     double SampleRateHz,
     bool MeasureNoiseFloor,
     /// <summary>Size the FFT per point and pick the sample rate from the sweep range — see <see cref="ThdSweepRequest.AdaptiveResolution"/>. Defaults off so an older client keeps the fixed behaviour.</summary>
-    bool AdaptiveResolution = false);
+    bool AdaptiveResolution = false,
+    /// <summary>"Conventional" or "FrequencyNormalized" — see <see cref="Services.ThdMethod"/>. Absent means conventional, so an older client is unaffected.</summary>
+    string? ThdMethod = null)
+{
+    /// <summary>
+    /// The runner's request, field by field. A method rather than an inline construction in the
+    /// endpoint so that a test can check every wire field actually arrives: the mapping fails
+    /// silently otherwise — a field left out is not an error, it is a default, and the run then
+    /// measures settings the user never asked for (see <c>ThdSweepStartRequestTests</c>).
+    /// </summary>
+    public ThdSweepRequest ToMeasurement(ThdSweepLevelMode levelMode, ThdSweepLevelUnit levelUnit, WindowType window, ThdMethod thdMethod) =>
+        new(
+            StartFreqHz, EndFreqHz, StepsPerOctave,
+            levelMode, LevelValue, levelUnit, LoadOhms,
+            ProcessLeft, ProcessRight,
+            FftSize, window, AverageCount,
+            SampleRateHz, MeasureNoiseFloor, AdaptiveResolution,
+            ThdMethod: thdMethod);
+}
 
 /// <summary>
 /// Wire shape for starting a THD-vs-amplitude sweep. No enums, so nothing to parse: the window,

@@ -54,10 +54,10 @@ const amplitudeSeries = computed<ManualSeries[]>(() => {
       This is the model for a THD-vs-<em>frequency</em> sweep, and the curve every
       transformer-coupled amplifier draws in real life. The
       <button type="button" class="manual-link" @click="showPage('sim-tube-amp')">Tube amp</button>
-      model deliberately has no saturation, so its THD curve is the generator's flat 0.51 % bent by
-      the response; this one is the missing half of a real output stage. Like the other three
-      nonlinear models it switches the generator's harmonic stack off, so what you measure is its
-      own.
+      model deliberately has no saturation, so its THD curve is nothing at all — or, with the
+      simulator's Harmonics box ticked, the generator's flat 0.51 % bent by the response; this one
+      is the missing half of a real output stage. Like the other three nonlinear models it switches
+      the generator's harmonic stack off whatever that box says, so what you measure is its own.
     </p>
 
     <h2>What to expect, in numbers</h2>

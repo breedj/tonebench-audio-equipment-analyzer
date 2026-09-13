@@ -44,6 +44,20 @@ public enum ThdSweepLevelUnit
     Watt,
 }
 
+/// <summary>
+/// What each harmonic is divided by. <see cref="Conventional"/> is the textbook figure: every
+/// harmonic over the fundamental at the stimulus frequency. <see cref="FrequencyNormalized"/> is
+/// Temme's (Listen Inc.) normalized distortion: harmonic n over the fundamental the same sweep
+/// measured <em>at n·f</em>, so the DUT's own frequency response cancels out of the reading and
+/// what is left is the nonlinearity — see <see cref="Qa403.Dsp.FrequencyNormalizedDistortion"/>.
+/// Frequency axis only: an amplitude sweep has one frequency and no response to normalize against.
+/// </summary>
+public enum ThdMethod
+{
+    Conventional,
+    FrequencyNormalized,
+}
+
 /// <summary>Where a running sweep is, for the status endpoint and the progress frames.</summary>
 public enum ThdSweepPhase
 {
@@ -107,7 +121,15 @@ public sealed record ThdSweepRequest(
     double StartAmplitudeVolt = 0.001,
 
     /// <summary>Highest generator amplitude of an amplitude sweep, in volts RMS.</summary>
-    double EndAmplitudeVolt = 1.0)
+    double EndAmplitudeVolt = 1.0,
+
+    /// <summary>
+    /// How the harmonics are referenced — see <see cref="Services.ThdMethod"/>. Under
+    /// <see cref="ThdMethod.FrequencyNormalized"/> the runner keeps stepping the fundamental past
+    /// <see cref="EndFreqHz"/> (to <see cref="ReferenceEndFreqHz"/>) so every harmonic of every
+    /// requested point has a fundamental to be divided by.
+    /// </summary>
+    ThdMethod ThdMethod = ThdMethod.Conventional)
 {
     /// <summary>The level expressed in dBV. Watts are converted through the load: V = sqrt(P·R).</summary>
     public double LevelDbv => LevelUnit switch
@@ -186,6 +208,27 @@ public sealed record ThdSweepRequest(
 
     /// <summary>Analysis resolution at a given sweep point, Hz per bin.</summary>
     public double BinSizeHzAt(double freqHz) => EffectiveSampleRateHz / FftSizeAt(freqHz);
+
+    /// <summary>
+    /// How far past <see cref="EndFreqHz"/> the fundamental is measured under
+    /// <see cref="ThdMethod.FrequencyNormalized"/>: <see cref="SweepResolution.HarmonicHeadroomOrder"/>
+    /// times the end (the D2..D5 the chart draws individually all have a reference), capped where
+    /// the sweep itself is capped. Equal to <see cref="EndFreqHz"/> for a conventional sweep, so
+    /// callers can always read this as "the highest tone the sweep will play".
+    /// </summary>
+    public double ReferenceEndFreqHz =>
+        ThdMethod == ThdMethod.FrequencyNormalized
+            ? Math.Min(SweepResolution.HarmonicHeadroomOrder * EndFreqHz, MaxSweepFreqHz)
+            : EndFreqHz;
+
+    /// <summary>The highest tone any frequency sweep plays: a little under Nyquist, matching the runner's own ceiling.</summary>
+    public double MaxSweepFreqHz => MaxFrequencyNyquistFraction * EffectiveSampleRateHz / 2.0;
+
+    /// <summary>
+    /// Fraction of Nyquist a sweep tone may reach. At Nyquist itself a tone has no harmonics and
+    /// sits on the half-weighted top bin; 98 % keeps the last point clear of both.
+    /// </summary>
+    public const double MaxFrequencyNyquistFraction = 0.98;
 
     /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> for anything the runner cannot act on.</summary>
     public void Validate()
@@ -272,6 +315,8 @@ public sealed record ThdSweepRequest(
             throw new ArgumentOutOfRangeException(nameof(AdaptiveResolution), "An amplitude sweep measures one frequency, so there is nothing for adaptive resolution to adapt to.");
         if (LevelMode != ThdSweepLevelMode.GeneratorVoltage)
             throw new ArgumentOutOfRangeException(nameof(LevelMode), LevelMode, "An amplitude sweep steps the generator voltage itself, so it has no level mode to solve for.");
+        if (ThdMethod != ThdMethod.Conventional)
+            throw new ArgumentOutOfRangeException(nameof(ThdMethod), ThdMethod, "An amplitude sweep measures one frequency, so there is no frequency response to normalize the harmonics against.");
     }
 
     /// <summary>
@@ -351,7 +396,20 @@ public sealed record ThdSweepPoint(
     /// always turns on -- so in practice these are populated for every sweep point.
     /// </summary>
     SweepPreviewSeries? PreviewFft,
-    SweepPreviewSeries? PreviewScope);
+    SweepPreviewSeries? PreviewScope,
+    /// <summary>
+    /// The frequency-normalized figures — each harmonic over the fundamental measured at its own
+    /// frequency (see <see cref="ThdMethod.FrequencyNormalized"/>) — as a percentage. Null on a
+    /// conventional sweep, and null on a normalized one wherever the fundamental at n·f has not
+    /// been measured: every point until the sweep reaches 2f, and for good on the points near the
+    /// top of the extended grid, above which nothing was swept. <b>Null, never NaN</b>: this record
+    /// is serialized on the status endpoint, and a NaN truncates the whole response.
+    /// </summary>
+    double? NormalizedThdPercent = null,
+    /// <summary>Normalized D2..D5, index 0 = second harmonic; always four entries, each null without a reference.</summary>
+    IReadOnlyList<double?>? NormalizedHarmonicPercent = null,
+    /// <summary>Normalized sixth harmonic and above, power-summed, like <see cref="D6PlusPercent"/>.</summary>
+    double? NormalizedD6PlusPercent = null);
 
 /// <summary>A running or finished sweep, as the status endpoint reports it.</summary>
 public sealed record ThdSweepStatus(
@@ -367,7 +425,9 @@ public sealed record ThdSweepStatus(
     /// <summary>Which quantity the sweep steps, so a reattaching client knows how to read the progress fields.</summary>
     SweepAxis Axis = SweepAxis.Frequency,
     /// <summary>The generator amplitude of the point being measured, in volts. Only moves on the amplitude axis.</summary>
-    double CurrentAmplitudeVolt = 0.0);
+    double CurrentAmplitudeVolt = 0.0,
+    /// <summary>How the points' harmonics are referenced, so a client knows which of a point's two sets of figures the run is about.</summary>
+    ThdMethod ThdMethod = ThdMethod.Conventional);
 
 /// <summary>The immediate reply to a start request: the sweep itself runs in the background.</summary>
 /// <param name="PointCount">How many points the sweep will measure.</param>

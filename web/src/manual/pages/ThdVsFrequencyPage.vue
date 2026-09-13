@@ -26,6 +26,14 @@ const { showPage } = useManual()
       the generator off.
     </p>
     <p>
+      What each harmonic is <em>divided by</em> is a choice (<strong>THD method</strong>, below).
+      The conventional figure divides every harmonic by the fundamental at the stimulus frequency.
+      The frequency-normalized figure divides harmonic <em>n</em> by the fundamental the same sweep
+      measured at <em>n</em> times the stimulus frequency — where that harmonic actually sits — so
+      the DUT's own frequency response drops out of the reading and what is left is the
+      nonlinearity. A normalized run stores both sets of figures per point.
+    </p>
+    <p>
       All of it is stored per point, so the chart can be re-read in percent or dB, and the FFT and
       waveform behind any single point can be inspected afterwards without re-running the sweep.
     </p>
@@ -71,6 +79,25 @@ const { showPage } = useManual()
             output-referred: the analyzer probes at 1 kHz first, works out the gain, and sets the
             generator so the DUT delivers what you asked for. That is what makes "THD at 1 W into
             8 Ω" expressible at all.
+          </td>
+        </tr>
+        <tr>
+          <td>THD method</td>
+          <td>
+            <strong>Conventional</strong> is the textbook figure: harmonic over fundamental, both at
+            the stimulus frequency. It folds the DUT's frequency response into the distortion — a
+            6 dB/octave roll-off reads the second harmonic 6 dB wrong and the third 9.5 dB wrong for
+            reasons that have nothing to do with distortion, and a resonance shows up as a bump in
+            every distortion trace. <strong>Frequency normalized</strong> (Temme, Listen Inc.)
+            divides harmonic <em>n</em> by the fundamental this sweep measured at <em>n</em>·f
+            instead, which cancels that response and leaves the nonlinearity. To have those
+            fundamentals, the sweep keeps stepping past End — to five times it, or to just under
+            Nyquist, whichever comes first; the line under the settings says how far. <strong>Those
+            are real tones at the sweep level</strong>, above the band you asked about: a 20 kHz
+            sweep at 192 kHz drives the DUT to 94 kHz, which matters in the output-power modes into
+            a tweeter or a transformer-coupled stage. The extra points are drawn like any other,
+            with the Magnitude trace showing the response up there; their own distortion figures
+            stay blank, since nothing above them was measured to reference against.
           </td>
         </tr>
         <tr>
@@ -124,7 +151,16 @@ const { showPage } = useManual()
       Distortion against frequency, both axes logarithmic in percent mode. Each checked trace is
       drawn per channel — blue left, red right — and each overlaid history run gets its own dash
       pattern. The legend under the chart draws the actual line style of every entry, so a curve can
-      always be traced back to a run.
+      always be traced back to a run. A frequency-normalized run's traces are labelled
+      <strong>nTHD</strong>, <strong>nD2</strong> … so that, overlaid on a conventional run, the two
+      read as the different measurements they are; Magnitude and Noise are the same number under
+      either method and keep their names.
+    </p>
+    <p>
+      During a normalized sweep the normalized traces fill in about an octave <em>behind</em> the
+      point being measured: a point's nD2 needs the fundamental at twice its frequency, which the
+      sweep has not reached yet. That is not a stall — the conventional figures for the same point
+      are already there, and the point is updated in place as its references arrive.
     </p>
 
     <h3>The readings table</h3>
@@ -200,6 +236,21 @@ const { showPage } = useManual()
         Nyquist frequency, the higher harmonics have nowhere to land, so D5 and D6+ fall away for
         arithmetic reasons rather than because the DUT improved. Raise the sample rate — or turn off
         adaptive resolution — if the top octave matters.
+      </li>
+      <li>
+        <strong>Conventional and normalized disagree exactly where the response is not flat.</strong>
+        Through a flat DUT the two methods read the same number, which is the check that nothing
+        else moved. Where they differ, the difference is the DUT's gain between f and n·f — a
+        roll-off, a resonance, a room reflection — and only the normalized figure is distortion. The
+        simulator's <button type="button" class="manual-link" @click="showPage('sim-phono-riaa')">phono stage</button>
+        is the clearest demonstration: its 40 dB tilt pulls conventional D2 2.6 dB low at 1 kHz,
+        and the normalized reading is the generator stack's true −46 dBc, flat across the band.
+      </li>
+      <li>
+        <strong>A normalized figure is blank where its reference is missing.</strong> That is every
+        harmonic whose n·f lies above the last frequency the sweep measured — so the reference
+        points past End are the ones without figures of their own, and a sweep that stopped at
+        Nyquist loses the upper orders first, as above.
       </li>
     </ul>
 

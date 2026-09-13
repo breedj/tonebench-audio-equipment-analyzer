@@ -99,6 +99,14 @@ public sealed record ThdVsFrequencyParameters(
     bool MeasureNoiseFloor,
     /// <summary>The generator amplitude the run actually used -- solved by probing for the output-referred modes, so it is only known after the fact.</summary>
     double GeneratorAmpDbv = 0.0,
+    /// <summary>Whether the FFT was sized per point. Absent on rows written before it was recorded; those ran fixed, which is what the default says.</summary>
+    bool AdaptiveResolution = false,
+    /// <summary>
+    /// "Conventional" or "FrequencyNormalized" -- what each point's harmonics were divided by. A
+    /// stored result needs it because a normalized run carries two sets of figures per point and
+    /// only this says which one the run was about; rows written before it existed are conventional.
+    /// </summary>
+    string ThdMethod = "Conventional",
     // The sweep chart's own axis bounds, per-trace visibility and line-style toggles -- purely a UI
     // display preference, never fed into the sweep runner. Optional with defaults so rows saved
     // before this field existed still deserialize; null means "use App.vue's own sweep* ref

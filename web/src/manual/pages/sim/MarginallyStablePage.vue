@@ -58,7 +58,7 @@ const burstSeries = computed<ManualSeries[]>(() => [
         ['Phase', 'a full 180° turn inside 2 Hz — invisible at any ordinary resolution'],
         ['Ring', `a 1 kHz tail with a time constant of about ${ringTimeConstantMs.toFixed(0)} ms; still audible at −60 dB a third of a second in`],
         ['Burst decay', `${dbPerPeriod.toFixed(3)} dB per period at 1 kHz: under 1 dB over the last twenty periods, after a 26 dB step in the first five`],
-        ['THD', 'the generator’s 0.51 %; at 500 Hz the second harmonic sits on the peak and D2 reads 12 dB high'],
+        ['THD', '0.000 %; with Harmonics ticked, the generator’s 0.51 % — at 500 Hz the second harmonic sits on the peak and D2 reads 12 dB high'],
       ]"
     />
 
@@ -68,7 +68,7 @@ const burstSeries = computed<ManualSeries[]>(() => [
       <li><a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a> — the peak, and how completely smoothing can hide it.</li>
       <li><a href="#" @click.prevent="showPage('stepped-response')">Stepped sine response</a> — five points per octave step straight over a 2 Hz peak; 48 per octave still miss it half the time.</li>
       <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> — a 1 kHz tone comes back +12 dB; move it to 1010 Hz and it comes back at 0 dB.</li>
-      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — flat at 0.51 % except for a spike at 500 Hz (H2 on the peak) and a dip at 1 kHz.</li>
+      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — zero; with Harmonics ticked, flat at 0.51 % except for a spike at 500 Hz (H2 on the peak) and a dip at 1 kHz.</li>
       <li><a href="#" @click.prevent="showPage('impedance')">Impedance</a> — not applicable.</li>
     </ul>
 

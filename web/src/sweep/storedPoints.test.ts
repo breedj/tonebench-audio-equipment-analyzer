@@ -44,6 +44,24 @@ describe('toSweepPoints', () => {
     expect(point.powerWatt).toBe(0.00125)
   })
 
+  it('reads the frequency-normalized figures where the save wrote them, and null where it did not', () => {
+    // A normalized run writes nthd/nh2..nh5/nd6plus only where the point had a reference; a
+    // conventional run writes none. Absent must come back null (a gap), never 0 or NaN-as-a-value.
+    const [conventional] = toSweepPoints([stored(1000, full)])
+    expect(conventional.normalizedThdPercent).toBeNull()
+    expect(conventional.normalizedHarmonicPercent).toEqual([null, null, null, null])
+    expect(conventional.normalizedD6PlusPercent).toBeNull()
+
+    const [normalized] = toSweepPoints([
+      stored(1000, { ...full, nthd_percent: 0.02, nh2_percent: 0.016, nh3_percent: 0.008, nd6plus_percent: 0.001 }),
+    ])
+    expect(normalized.normalizedThdPercent).toBe(0.02)
+    expect(normalized.normalizedHarmonicPercent).toEqual([0.016, 0.008, null, null])
+    expect(normalized.normalizedD6PlusPercent).toBe(0.001)
+    // The conventional figures ride along unchanged.
+    expect(normalized.thdPercent).toBe(0.01)
+  })
+
   it('splits a stereo capture into one point per channel', () => {
     const points = toSweepPoints([
       { seqIndex: 0, freqHz: 1000, metricsByChannel: { 0: full, 1: { ...full, gain_db: -1.5 } }, previewsByChannel: null },

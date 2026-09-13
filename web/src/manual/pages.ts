@@ -150,7 +150,7 @@ export const MANUAL_PAGES: ManualPage[] = [
   {
     id: 'sim-straight-wire',
     title: 'Straight wire',
-    summary: 'No DUT: the generator, its harmonic stack, hum and noise, and what the analysis reads with nothing in the path.',
+    summary: 'No DUT: the bare generator, what the Noise, Hum and Harmonics boxes add to it, and what the analysis reads with nothing in the path.',
     group: 'Simulator',
     component: manualPage(() => import('./pages/sim/StraightWirePage.vue')),
   },

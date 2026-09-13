@@ -181,8 +181,8 @@ const frSeries = computed<ManualSeries[]>(() => {
     <h2>The other screens</h2>
     <p>
       The THD sweeps report a spurious "harmonic" whenever a harmonic bin happens to fall near
-      1010 Hz — at a fundamental of 505 Hz, say, or 336.7 Hz — and elsewhere the ordinary 0.51 %,
-      since the through path is a straight wire. The impulse-response screen deconvolves a record
+      1010 Hz — at a fundamental of 505 Hz, say, or 336.7 Hz — and elsewhere 0.000 %, since the
+      through path is a straight wire (or the generator's 0.51 %, with Harmonics ticked). The impulse-response screen deconvolves a record
       that carries a continuous 1 kHz tone: the impulse sits on a sinusoidal carpet from end to end,
       the gated response shows the same +33 dB spike, and both decay surfaces show a 1 kHz ridge at
       constant level to the back of the chart, which is what "never decays" looks like there.

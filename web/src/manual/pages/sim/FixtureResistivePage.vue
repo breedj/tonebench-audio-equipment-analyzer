@@ -62,7 +62,8 @@ const markers: ManualMarker[] = [{ y: load, label: `${load} Ω`, color: 'grey', 
       <li><a href="#" @click.prevent="showPage('impedance')">Impedance</a> — the only measurement a fixture is for.</li>
       <li>
         Everything else measures the <em>left</em> input, which for a fixture carries the generator
-        untouched: the response screens read a straight wire, the THD screens the generator's stack.
+        untouched: the response screens read a straight wire, the THD screens nothing (or the
+        generator's stack, with Harmonics ticked).
         Select the fixture on those screens and you are measuring nothing.
       </li>
     </ul>

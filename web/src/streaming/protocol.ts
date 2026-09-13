@@ -314,7 +314,20 @@ export interface SweepPointFrame {
   previewFft: SweepPreviewSeries | null
   /** A small decimated oscilloscope trace, in volts, spanning ScopeDisplayWindow.SecondsFor(fundamentalFreqHz). Null if not captured. */
   previewScope: SweepPreviewSeries | null
+  /**
+   * The frequency-normalized figures (ThdMethod FrequencyNormalized): each harmonic over the
+   * fundamental measured at its *own* frequency. Null on a conventional sweep, and null on a
+   * normalized one for every order whose reference the sweep has not reached yet — the same point
+   * is sent again, under the same pointIndex, as they fill in.
+   */
+  normalizedThdPercent: number | null
+  /** Normalized D2..D5, index 0 = 2nd harmonic. Always four entries, each null without a reference. */
+  normalizedHarmonicPercent: (number | null)[]
+  normalizedD6PlusPercent: number | null
 }
+
+/** Orders 2..5 in the normalized trailer — NormalizedDistortion.IndividualOrders server-side. */
+const NORMALIZED_HARMONIC_SLOTS = 4
 
 /**
  * Sweep point payload (offsets relative to the 20-byte header):
@@ -333,6 +346,9 @@ export interface SweepPointFrame {
  * ..  (f32 x, f32 min, f32 max) * fftPreviewCount
  * ..  u32  scopePreviewCount
  * ..  (f32 x, f32 min, f32 max) * scopePreviewCount
+ * ..  f32  normalizedThdPercent     — the normalized trailer, fixed 24 bytes on every frame;
+ * ..  f32  normalizedD6PlusPercent    NaN = not available (decoded as null)
+ * ..  f32 * 4  normalizedD2..D5
  *
  * x0 = the point's frequency (Hz), dx = 0, nPoints = harmonicCount, seq = the point's index. A
  * preview count of 0 decodes to `null`, not an empty array — see EncodeSweepPoint server-side.
@@ -382,6 +398,19 @@ export function decodeSweepPointFrame(buffer: ArrayBuffer): SweepPointFrame {
   const previewFft = readPreview()
   const previewScope = readPreview()
 
+  // NaN is the frame's "absent"; it is only JSON that cannot carry it, which is why the point
+  // itself holds null. A frame without the trailer at all (an older server) reads as all-absent
+  // rather than as a read past the end.
+  const readNormalized = (): number | null => {
+    if (offset + 4 > buffer.byteLength) return null
+    const v = readF32()
+    return Number.isNaN(v) ? null : v
+  }
+  const normalizedThdPercent = readNormalized()
+  const normalizedD6PlusPercent = readNormalized()
+  const normalizedHarmonicPercent: (number | null)[] = new Array(NORMALIZED_HARMONIC_SLOTS)
+  for (let i = 0; i < NORMALIZED_HARMONIC_SLOTS; i++) normalizedHarmonicPercent[i] = readNormalized()
+
   return {
     header,
     freqHz: header.x0,
@@ -399,6 +428,9 @@ export function decodeSweepPointFrame(buffer: ArrayBuffer): SweepPointFrame {
     harmonicPercent,
     previewFft,
     previewScope,
+    normalizedThdPercent,
+    normalizedHarmonicPercent,
+    normalizedD6PlusPercent,
   }
 }
 

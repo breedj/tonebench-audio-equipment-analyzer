@@ -1,19 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ManualChart, { type ManualMarker, type ManualSeries } from '../../components/ManualChart.vue'
-import {
-  bandwidth,
-  harmonicVsFrequencyCurve,
-  impulseCurve,
-  linearThdPercent,
-  logSpace,
-  magnitudeCurve,
-  noiseFloorDbvPerBin,
-  phaseCurve,
-  thdVsFrequencyCurve,
-  toneStems,
-} from '../../sim/curves'
-import { HUM_HARMONICS, tubeAmplifier } from '../../sim/models'
+import { bandwidth, impulseCurve, logSpace, magnitudeCurve, phaseCurve } from '../../sim/curves'
+import { tubeAmplifier } from '../../sim/models'
 import { formatHz } from '../../../response/format'
 import { useManual } from '../../useManual'
 
@@ -79,44 +68,9 @@ const steppedSeries = computed<ManualSeries[]>(() => [
   },
 ])
 
-// --- FFT: 1 kHz at −6 dBV, 192 kHz, 65536, Hann, 8 linear averages. --------------------------
-const FFT_RATE = 192_000
-const FFT_SIZE = 65536
-const fftFloorDbv = noiseFloorDbvPerBin(FFT_RATE, FFT_SIZE)
-const fftSeries = computed<ManualSeries[]>(() => [
-  { name: 'Tone and its harmonics', points: toneStems(fr, 1000, -6, FFT_RATE / 2), color: 'left', kind: 'stem' },
-  { name: 'Hum', points: HUM_HARMONICS.map((h) => [h.freqHz, h.dbv] as const), color: 'amber', kind: 'stem' },
-  {
-    name: 'Noise floor (per bin)',
-    points: [
-      [5, fftFloorDbv + 6],
-      [30, fftFloorDbv + 2],
-      [300, fftFloorDbv],
-      [FFT_RATE / 2, fftFloorDbv],
-    ],
-    color: 'grey',
-  },
-])
-
-// --- THD vs frequency: 20 Hz – 20 kHz at −20 dBV; the sweep picks 192 kHz for that end frequency,
-//     and counts harmonics up to 98 % of Nyquist. ---------------------------------------------
-const THD_MAX_HARMONIC_HZ = 0.98 * 96_000
-const thdSeries = computed<ManualSeries[]>(() => [
-  { name: 'THD', points: thdVsFrequencyCurve(fr, 20, 20_000, THD_MAX_HARMONIC_HZ), color: 'gain' },
-  { name: 'D2', points: harmonicVsFrequencyCurve(fr, 2, 20, 20_000, THD_MAX_HARMONIC_HZ), color: 'left' },
-  { name: 'D3', points: harmonicVsFrequencyCurve(fr, 3, 20, 20_000, THD_MAX_HARMONIC_HZ), color: 'right' },
-])
-
-// --- THD vs amplitude: 1 kHz, 1 mV – 1 V. A linear DUT under a level-independent stack. ------
-const amplitudeVolts = logSpace(0.001, 1, Math.round(Math.log2(1000) * 5) + 1)
-const thdAmplitudeSeries = computed<ManualSeries[]>(() => {
-  const thdAt1k = linearThdPercent(fr, 1000, THD_MAX_HARMONIC_HZ)
-  return [
-    { name: 'THD', points: amplitudeVolts.map((v) => [v, thdAt1k] as const), color: 'gain' },
-    { name: 'D2', points: amplitudeVolts.map((v) => [v, 100 * Math.pow(10, -46 / 20)] as const), color: 'left' },
-    { name: 'D3', points: amplitudeVolts.map((v) => [v, 100 * Math.pow(10, -60 / 20)] as const), color: 'right' },
-  ]
-})
+// The FFT and THD sections below have no chart: a linear model with the simulator's Harmonics box
+// off (the default) has nothing to draw there but the tone itself, and the figures quoted for the
+// box ticked are the generator's stack bent by the response above, not a property of the amplifier.
 
 // --- Impulse response: the same 96 kHz sweep, drawn ±0.3 ms around the peak. ------------------
 const impulseSeries = computed<ManualSeries[]>(() => [
@@ -142,9 +96,11 @@ function db(v: number, digits = 1): string {
       back at the level it went in.
     </p>
     <p>
-      It is a <em>linear</em> model — it has a frequency response and nothing else. Its distortion
-      is therefore the simulated generator's own harmonic stack (H2 −46 dBc, H3 −60 dBc), the same at
-      every level, passed through that response. The interesting part of it sits
+      It is a <em>linear</em> model — it has a frequency response and nothing else, so its THD
+      reads 0.000 % at every level and every frequency. (Tick the simulator's
+      <strong>Harmonics</strong> box and it reads the generator's own stack, H2 −46 dBc and H3
+      −60 dBc, passed through that response; the figures for that case are given below, marked as
+      such.) The interesting part of it sits
       <strong>above 24 kHz</strong>, which is the argument for measuring an amplifier at a 96 kHz
       span in one picture: at 24 kHz the resonance is invisible and the amplifier looks flat to the
       top of the band.
@@ -179,8 +135,8 @@ function db(v: number, digits = 1): string {
           <td>{{ db(fr.magnitudeDb(38_000)) }} at 38 kHz.</td>
         </tr>
         <tr>
-          <td>THD, 1 kHz, any level</td>
-          <td>0.51 % — the generator's stack. About 0.6 % at 20 Hz and 0.7 % at 20 kHz, see below.</td>
+          <td>THD, any level</td>
+          <td>0.000 %. With Harmonics ticked, 0.51 % at 1 kHz, about 0.6 % at 20 Hz and 0.7 % at 20 kHz — see below.</td>
         </tr>
         <tr>
           <td>DUT delay</td>
@@ -194,8 +150,8 @@ function db(v: number, digits = 1): string {
       <li><a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a> — the one it is for.</li>
       <li><a href="#" @click.prevent="showPage('stepped-response')">Stepped sine response</a> — the same curve, slowly.</li>
       <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> — a tone through a flat passband.</li>
-      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — flat, with the response acting on the harmonics at each end.</li>
-      <li><a href="#" @click.prevent="showPage('thd-vs-amplitude')">THD vs amplitude</a> — flat, and why.</li>
+      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — zero; with Harmonics ticked, flat with the response acting on the harmonics at each end.</li>
+      <li><a href="#" @click.prevent="showPage('thd-vs-amplitude')">THD vs amplitude</a> — zero at every level, and why that is the wrong model for the screen.</li>
       <li><a href="#" @click.prevent="showPage('impulse-response')">Impulse response</a> — a spike with a very short ring.</li>
       <li>
         <a href="#" @click.prevent="showPage('impedance')">Impedance</a> — not applicable: this is a device, not a fixture.
@@ -395,21 +351,9 @@ function db(v: number, digits = 1): string {
         <tr><td>FFT size</td><td>65536</td></tr>
         <tr><td>Window</td><td>Hann</td></tr>
         <tr><td>Averaging</td><td>Linear, 8 spectra</td></tr>
-        <tr><td>Simulator</td><td>Noise and Hum on</td></tr>
+        <tr><td>Simulator</td><td>Noise, Hum and Harmonics off (the default)</td></tr>
       </tbody>
     </table>
-
-    <ManualChart
-      :series="fftSeries"
-      :x-min="5"
-      :x-max="96000"
-      :y-min="-160"
-      :y-max="10"
-      x-label="Hz"
-      y-label="dBV"
-      :height="260"
-      caption="Expected spectrum: the tone at −6 dBV with its stack, hum at 50/100/150 Hz, and the noise floor near −144 dBV per bin with a little 1/f rise at the bottom. The real chart draws the floor as a band a few dB tall — the min/max spread of each column."
-    />
 
     <table>
       <thead>
@@ -420,108 +364,49 @@ function db(v: number, digits = 1): string {
       </thead>
       <tbody>
         <tr><td>Level</td><td>−6.00 dBV at 999.0 Hz — the bin Snap to bin moved the tone to</td></tr>
-        <tr><td>THD</td><td>0.511 % (−45.8 dB)</td></tr>
-        <tr><td>THD+N</td><td>0.511 % — the −150 dBV/√Hz floor integrates to −107 dBV over 20 Hz – 20 kHz, 100 dB under the tone</td></tr>
-        <tr><td>SNR</td><td>About 101 dB</td></tr>
-        <tr><td>Harmonics table</td><td>H2 −46.0 dBc, H3 −60.0, H4 −72.0, H5 −84.0 … each 12 dB lower, until they meet the floor near H9</td></tr>
+        <tr><td>THD</td><td>0.000 %</td></tr>
+        <tr><td>THD+N</td><td>0.000 % — there is no floor to integrate; tick Noise and the −150 dBV/√Hz floor integrates to −107 dBV over 20 Hz – 20 kHz, 100 dB under the tone</td></tr>
+        <tr><td>SNR</td><td>Meaningless without a floor; about 101 dB with Noise ticked</td></tr>
+        <tr><td>Harmonics table</td><td>Nothing above the arithmetic's own floor; with Harmonics ticked, H2 −46.0 dBc, H3 −60.0, H4 −72.0 … each 12 dB lower</td></tr>
       </tbody>
     </table>
     <p>
       At 1 kHz this is <strong>identical to the straight wire</strong>, and that is the point: the
-      amplifier is unity there, and its distortion is not its own. Two things show that it is in the
-      path at all. The right channel reads the same tone and the same stack, being the generator's
-      tap — flip the DUT to the phono stage and the two channels part company at once. And a tone
-      moved to the band edge picks up the response: at 20 Hz the fundamental reads −6.15 dBV while
-      H2 at 40 Hz is lifted 1.2 dB by the 45 Hz bump, so THD reads about 0.59 %.
+      amplifier is unity there and adds nothing. Two things show that it is in the path at all. A
+      tone moved to the band edge picks up the response: at 20 Hz the fundamental reads
+      −6.15 dBV on the left while the right channel, the generator's tap, still reads −6.00. And
+      with <strong>Harmonics</strong> ticked the two channels' harmonics tables part company at the
+      band edges even though their levels agree: at 20 Hz the left's H2 at 40 Hz is lifted 1.2 dB
+      by the 45 Hz bump, so its THD reads about 0.59 % against the right's 0.51 %.
     </p>
 
-    <h2>THD vs frequency</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Control</th>
-          <th>Setting</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td>Start / End (Hz)</td><td>20 / 20000</td></tr>
-        <tr><td>Steps per octave</td><td>5</td></tr>
-        <tr><td>Level mode</td><td>Generator voltage, −20 dBV</td></tr>
-        <tr><td>Left / Right</td><td>Left</td></tr>
-        <tr><td>Averages per point</td><td>4</td></tr>
-        <tr><td>Adaptive resolution</td><td>On</td></tr>
-        <tr><td>Measure noise floor first</td><td>On</td></tr>
-        <tr><td>Display</td><td>Units %, THD, D2 and D3 checked</td></tr>
-      </tbody>
-    </table>
-
-    <ManualChart
-      :series="thdSeries"
-      :x-min="15"
-      :x-max="25000"
-      :y-min="0.01"
-      :y-max="10"
-      y-log
-      x-label="Hz"
-      y-label="%"
-      :height="240"
-      caption="Expected THD (black), D2 (blue) and D3 (orange) against frequency: the generator's stack, with the response acting on each harmonic separately from its fundamental."
-    />
+    <h2>The THD sweeps</h2>
     <p>
-      The line is flat at <strong>0.51 %</strong> through the middle, and the two ends are not
-      distortion. At 20 Hz the fundamental sits on the roll-off (−0.2 dB) while its second harmonic
-      at 40 Hz sits on the +1.2 dB lift, so D2 <em>relative to the fundamental</em> reads 1.4 dB
-      high and THD climbs to about 0.6 %; at 45 Hz it is the fundamental that is lifted and THD dips
-      to 0.42 %. At the top, the second harmonic of anything above 15 kHz lands on the
-      38 kHz resonance — the sweep runs at 192 kHz and counts harmonics up to 94 kHz — and THD rises
-      to about 0.7 % at 20 kHz. D2 and D3 both run to the end of the sweep, since three times
-      20 kHz is still inside that limit; a sweep ending higher would see D3 stop where 3·f left the
-      band, and the legend says where.
+      Both read <strong>0.000 %</strong> at every point: the model is linear, and there is nothing
+      for a THD sweep to draw. That is not a shortcoming of the sweep — it is what a distortionless
+      amplifier looks like on it — but it does make this the wrong model for learning either screen.
+      The four nonlinear models each draw a different shape there, and are what those screens are for.
+    </p>
+    <p>
+      Tick <strong>Harmonics</strong> and the sweeps show the generator's stack read through the
+      response, which is instructive in its own right because none of what moves is distortion in
+      the amplifier. Against frequency (20 Hz – 20 kHz at −20 dBV, five steps per octave) the line
+      is flat at 0.51 % through the middle and bends at the ends: at 20 Hz the fundamental sits on
+      the roll-off (−0.2 dB) while its second harmonic at 40 Hz sits on the +1.2 dB lift, so D2
+      <em>relative to the fundamental</em> reads 1.4 dB high and THD climbs to about 0.6 %; at 45 Hz
+      it is the fundamental that is lifted and THD dips to 0.42 %; at the top, the second harmonic
+      of anything above 15 kHz lands on the 38 kHz resonance — the sweep runs at 192 kHz and counts
+      harmonics up to 94 kHz — and THD rises to about 0.7 % at 20 kHz. Against amplitude (1 kHz,
+      1 mV – 1 V) it is a flat line at 0.51 %, D2 at 0.50 % and D3 at 0.10 %, because the stack is a
+      fixed ratio on the generator and so the same fraction of a 1 mV tone as of a 1 V one. The
+      noise floor trace, with <strong>Measure noise floor first</strong> on and Noise ticked, climbs
+      from about 0.00001 % at 1 V to 0.01 % at 1 mV as the tone descends towards a fixed floor —
+      still fifty times under the stack, so nothing there is noise-limited.
     </p>
     <p>
       A real transformer-coupled amplifier draws a rising THD curve at the bottom for a different
       reason — core saturation — which this model deliberately does not have. The
       <strong>Output transformer (saturating)</strong> model does, and its page draws that curve.
-    </p>
-
-    <h2>THD vs amplitude</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Control</th>
-          <th>Setting</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td>Frequency (Hz)</td><td>1000</td></tr>
-        <tr><td>Start / End (V)</td><td>0.001 / 1</td></tr>
-        <tr><td>Steps per octave</td><td>5</td></tr>
-        <tr><td>Left / Right</td><td>Left</td></tr>
-        <tr><td>Averages per point</td><td>4</td></tr>
-        <tr><td>Measure noise floor first</td><td>On</td></tr>
-      </tbody>
-    </table>
-
-    <ManualChart
-      :series="thdAmplitudeSeries"
-      :x-min="0.0008"
-      :x-max="1.25"
-      :y-min="0.01"
-      :y-max="10"
-      y-log
-      x-label="V"
-      y-label="%"
-      :height="220"
-      caption="Expected THD against level: a flat line at 0.51 %, D2 at 0.50 % and D3 at 0.10 %, from 1 mV to 1 V."
-    />
-    <p>
-      A flat line, and the reason is the simulator's, not the amplifier's: the harmonic stack is a
-      fixed ratio on the generator, so it is the same fraction of a 1 mV tone as of a 1 V one. Every
-      linear model draws this. The noise floor trace, if you check it, climbs from about 0.00001 % at 1 V
-      to 0.01 % at 1 mV as the tone descends towards a fixed floor — still fifty times under the
-      distortion, so nothing here is noise-limited; that trace is what <strong>Measure noise floor
-      first</strong> exists to show, and it matters on the nonlinear models. The four nonlinear models each
-      draw a different shape here, and are what this screen is for.
     </p>
 
     <h2>Impulse response</h2>
@@ -564,10 +449,11 @@ function db(v: number, digits = 1): string {
     </p>
     <ul>
       <li>
-        <strong>Harmonics</strong> draws the generator's stack: D2 flat at −46 dB and D3 at −60 dB
-        against fundamental frequency, each ending where its harmonic leaves the sweep's band. The
-        gate has removed their packets from the impulse, which for a linear DUT changes nothing
-        visible.
+        <strong>Harmonics</strong> draws nothing but the arithmetic's floor: a linear DUT has no
+        harmonic packets in its impulse, so the gate has nothing to remove. With the simulator's
+        Harmonics box ticked it draws the generator's stack instead — D2 flat at −46 dB and D3 at
+        −60 dB against fundamental frequency, each ending where its harmonic leaves the sweep's
+        band — and the gate removes their packets, which for a linear DUT changes nothing visible.
       </li>
       <li>
         <strong>Cumulative spectral decay</strong> and <strong>Burst decay</strong> are nearly

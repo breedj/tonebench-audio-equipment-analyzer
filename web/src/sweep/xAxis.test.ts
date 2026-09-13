@@ -27,6 +27,9 @@ function point(partial: Partial<ThdSweepPoint>): ThdSweepPoint {
     generatorDbv: -20,
     previewFft: null,
     previewScope: null,
+    normalizedThdPercent: null,
+    normalizedHarmonicPercent: null,
+    normalizedD6PlusPercent: null,
     ...partial,
   }
 }

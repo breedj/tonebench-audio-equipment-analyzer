@@ -3,6 +3,7 @@ import { computed, nextTick, reactive, watch } from 'vue'
 import type {
   SweepLevelMode,
   SweepLevelUnit,
+  ThdMethodName,
   ThdSweepStartRequest,
   ThdVsFrequencyParameters,
   WindowType,
@@ -17,8 +18,10 @@ import {
   adaptiveSampleRateHz,
   estimateAdaptiveDurationSeconds,
   estimateDurationSeconds,
+  extendGridPerOctave,
   formatDuration,
   logPerOctave,
+  referenceEndFreqHz,
 } from '../sweep/points'
 
 /**
@@ -71,6 +74,17 @@ const LEVEL_MODES: { value: SweepLevelMode; label: string }[] = [
   { value: 'OutputPower', label: 'DUT output power' },
 ]
 
+/**
+ * What each harmonic is divided by. Conventional is the textbook figure; frequency normalized is
+ * Temme's (Listen Inc.): harmonic n over the fundamental the same sweep measured at n·f, so the
+ * DUT's own frequency response cancels out and what is left is the nonlinearity. The second one
+ * keeps the sweep going past End to measure those references (see referenceEndFreqHz).
+ */
+const THD_METHODS: { value: ThdMethodName; label: string }[] = [
+  { value: 'Conventional', label: 'Conventional' },
+  { value: 'FrequencyNormalized', label: 'Frequency normalized' },
+]
+
 const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
   { value: 'Dbv', label: 'dBV' },
   { value: 'Volt', label: 'V' },
@@ -95,6 +109,7 @@ const form = reactive({
    * of them.
    */
   adaptiveResolution: true,
+  thdMethod: 'Conventional' as ThdMethodName,
 })
 
 /**
@@ -143,6 +158,8 @@ function applyStoredParams(paramsJson: string) {
   // they must reload as rather than silently changing resolution on reopen.
   form.adaptiveResolution = stored.adaptiveResolution === true
   if (typeof stored.measureNoiseFloor === 'boolean') form.measureNoiseFloor = stored.measureNoiseFloor
+  // Absent in types saved before the method existed; those ran conventional.
+  form.thdMethod = stored.thdMethod === 'FrequencyNormalized' ? 'FrequencyNormalized' : 'Conventional'
 
   // The form writes land in this tick; the watcher runs on the next one, so the flag has to
   // survive until then.
@@ -193,12 +210,27 @@ const effectiveSampleRateHz = computed(() =>
   form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz) : SWEEP_SAMPLE_RATE_HZ,
 )
 
-/** The pre-snap log grid, shared by the point count and the adaptive duration estimate. */
-const gridHz = computed(() =>
-  logPerOctave(form.startFreqHz, form.endFreqHz, form.stepsPerOctave).filter(
-    (hz) => hz > 0 && hz <= 0.98 * (effectiveSampleRateHz.value / 2),
-  ),
-)
+const isNormalized = computed(() => form.thdMethod === 'FrequencyNormalized')
+
+/**
+ * How far past End a normalized sweep measures the fundamental — 5x, or the sweep's own ceiling.
+ * Mirrors ThdSweepRequest.ReferenceEndFreqHz; quoted in the readout because those are real tones
+ * played into the DUT at the sweep level, above the band the user asked about.
+ */
+const referenceEndHz = computed(() => referenceEndFreqHz(form.endFreqHz, effectiveSampleRateHz.value))
+
+/**
+ * The pre-snap log grid, shared by the point count and the adaptive duration estimate. Under the
+ * frequency-normalized method it continues past End to the reference points the server will add
+ * (same step, same rule — see extendGridPerOctave), so the count and time estimate include them.
+ */
+const gridHz = computed(() => {
+  const requested = logPerOctave(form.startFreqHz, form.endFreqHz, form.stepsPerOctave)
+  const extension = isNormalized.value
+    ? extendGridPerOctave(form.endFreqHz, referenceEndHz.value, form.stepsPerOctave)
+    : []
+  return [...requested, ...extension].filter((hz) => hz > 0 && hz <= 0.98 * (effectiveSampleRateHz.value / 2))
+})
 
 const pointCount = computed(() => gridHz.value.length)
 
@@ -280,6 +312,7 @@ function buildParamsJson(): string {
     sampleRateHz: SWEEP_SAMPLE_RATE_HZ,
     measureNoiseFloor: form.measureNoiseFloor,
     adaptiveResolution: form.adaptiveResolution,
+    thdMethod: form.thdMethod,
     generatorAmpDbv: 0,
   }
   return JSON.stringify(parameters)
@@ -307,6 +340,7 @@ function run() {
     sampleRateHz: SWEEP_SAMPLE_RATE_HZ,
     measureNoiseFloor: form.measureNoiseFloor,
     adaptiveResolution: form.adaptiveResolution,
+    thdMethod: form.thdMethod,
   })
 }
 </script>
@@ -362,6 +396,20 @@ function run() {
         class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
       >
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+      </select>
+    </label>
+
+    <label
+      class="flex flex-col gap-1 text-xs"
+      title="Conventional divides every harmonic by the fundamental at the stimulus frequency. Frequency normalized divides harmonic n by the fundamental measured at n times the stimulus frequency, which removes the DUT's own frequency response from the distortion figure — the sweep keeps stepping the fundamental past End to measure those references."
+    >
+      THD method
+      <select
+        v-model="form.thdMethod"
+        :disabled="running"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="method in THD_METHODS" :key="method.value" :value="method.value">{{ method.label }}</option>
       </select>
     </label>
 
@@ -470,6 +518,13 @@ function run() {
 
     <p class="text-xs text-neutral-500 dark:text-neutral-400">
       ≈{{ pointCount }} points · ≈{{ durationLabel }}
+      <span
+        v-if="isNormalized"
+        class="block"
+        title="Frequency normalized needs the fundamental at up to five times every measured frequency, so the sweep keeps going past End. These are real tones at the sweep level, above the band you asked about."
+      >
+        Fundamental swept on to {{ (Math.min(referenceEndHz, maxFreqHz) / 1000).toFixed(1) }} kHz for the harmonic references.
+      </span>
       <span v-if="truncated" class="block text-amber-600 dark:text-amber-500">
         Above {{ maxFreqHz }} Hz is beyond Nyquist — the sweep will stop there.
       </span>

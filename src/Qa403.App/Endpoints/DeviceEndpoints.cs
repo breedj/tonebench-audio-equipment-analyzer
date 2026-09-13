@@ -114,7 +114,8 @@ public static class DeviceEndpoints
         });
 
         // Simulator-only: shapes the synthesized input signal, which real hardware cannot do.
-        // Exposed so the noise floor and hum can be taken out of the way while reading a spectrum.
+        // Exposed so the noise floor, hum and the generator's harmonic stack can be taken out of the
+        // way while reading a spectrum.
         // Patch-style — an omitted field leaves that setting alone.
         group.MapPost("/sim-profile", (SimulatedProfileRequest request, DeviceSessionService session) =>
         {
@@ -127,7 +128,7 @@ public static class DeviceEndpoints
                 dut = parsed;
             }
 
-            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled, dut))
+            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled, request.HarmonicsEnabled, dut))
                 return Results.BadRequest("The connected device is not the simulator, so it has no signal-profile switches.");
 
             return Results.Ok(session.GetStatus());
@@ -150,6 +151,12 @@ public sealed record DeviceStatusResponse(
     bool? SimulatedNoiseEnabled,
     /// <summary>Simulated DUT mains hum on/off, same null convention as <see cref="SimulatedNoiseEnabled"/>.</summary>
     bool? SimulatedHumEnabled,
+    /// <summary>
+    /// The simulated generator's fixed harmonic stack (−46 dBc H2, 0.51 % THD) on/off, same null
+    /// convention. The four nonlinear DUT models drop the stack whatever this says, so the UI greys
+    /// the switch out under those rather than offering a checkbox that does nothing.
+    /// </summary>
+    bool? SimulatedHarmonicsEnabled,
     /// <summary>
     /// Which simulated device under test is patched in ("StraightWire", "TubeAmplifier",
     /// "Loudspeaker", "BandpassFilter"), or null when the device isn't the simulator. Unlike the two
@@ -240,7 +247,7 @@ public sealed record AutoRangeStepDownDelayRequest(double DelayMs);
 /// Which simulated device under test to patch in. Omitted leaves it alone, same as the two
 /// switches — see <see cref="Qa403.Device.Simulation.SimulatedDutModel"/>.
 /// </param>
-public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled, string? Dut = null);
+public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled, bool? HarmonicsEnabled = null, string? Dut = null);
 
 /// <param name="Kind">"Hardware" or "Simulated" — see <see cref="Qa403.App.Services.DeviceKind"/>.</param>
 public sealed record DeviceKindRequest(string? Kind);

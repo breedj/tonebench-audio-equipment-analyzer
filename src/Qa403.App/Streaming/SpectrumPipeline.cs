@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Numerics;
 using Qa403.App.Diagnostics;
 using Qa403.Device;

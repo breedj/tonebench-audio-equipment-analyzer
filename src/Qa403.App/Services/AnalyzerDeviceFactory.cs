@@ -74,7 +74,26 @@ public class AnalyzerDeviceFactory
         _pinned
         ?? kind switch
         {
-            DeviceKind.Simulated => new SimulatedDevice(),
+            DeviceKind.Simulated => CreateSimulator(),
             _ => new Qa40xUsbDevice(_loggerFactory.CreateLogger<Qa40xUsbDevice>()),
         };
+
+    /// <summary>
+    /// The simulator as the app hands it to the user: noise floor, mains hum and the generator's
+    /// fixed harmonic stack all <b>off</b>, so a straight wire reads as a straight wire and each
+    /// impairment is something to switch on from the status bar rather than something to explain
+    /// away. <see cref="SimulatedDevice"/>'s own defaults keep all three on — a large number of
+    /// tests are written against that bench, and a device built directly still gets it.
+    /// </summary>
+    private static SimulatedDevice CreateSimulator()
+    {
+        var device = new SimulatedDevice();
+        device.SignalProfile = device.SignalProfile with
+        {
+            NoiseEnabled = false,
+            HumEnabled = false,
+            HarmonicsEnabled = false,
+        };
+        return device;
+    }
 }

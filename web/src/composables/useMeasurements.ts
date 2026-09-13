@@ -7,6 +7,7 @@ import {
   type SaveMeasurementRequest,
   type StoredResponseTrace,
   type StoredSweepPoint,
+  type ThdMethodName,
   type ThdSweepPoint,
   type UpdateMeasurementRequest,
 } from '../api/client'
@@ -17,6 +18,7 @@ import {
   isSteppedResponseKind,
   isSweepKind,
 } from '../measurements/kinds'
+import { sweepEndFreqHzFromParams, sweepMethodFromParams } from '../sweep/points'
 import type { ResponseTrace } from './useFrequencyResponse'
 import type { ImpedanceTrace } from './useImpedance'
 
@@ -42,6 +44,16 @@ export interface OverlayEntry {
    * for an FFTSpectrum result, whose trace lives in `detail.channelsData` instead.
    */
   sweepPoints?: ThdSweepPoint[]
+
+  /**
+   * How a stored sweep's harmonics were referenced, off its as-run params_json — which of a point's
+   * two sets of figures the chart draws for this run. Conventional for a row written before the
+   * method existed. Only meaningful alongside `sweepPoints`.
+   */
+  sweepMethod?: ThdMethodName
+
+  /** The end frequency a stored sweep was asked for, or null when its params_json does not say. A normalized sweep measured past it. */
+  sweepEndFreqHz?: number | null
 
   /**
    * A frequency-response result's stored curves, in the same shape the live measurement produces —
@@ -154,6 +166,14 @@ export function toSweepPoints(stored: StoredSweepPoint[]): ThdSweepPoint[] {
         generatorDbv: value('generator_dbv'),
         previewFft: previews?.fft ?? null,
         previewScope: previews?.scope ?? null,
+        // The frequency-normalized figures. Written only where they existed (a conventional
+        // sweep has none; a normalized one has none near the top of its extended grid), so
+        // absent reads back as null and the chart draws a gap, exactly as it does live.
+        normalizedThdPercent: 'nthd_percent' in metrics ? metrics.nthd_percent : null,
+        normalizedHarmonicPercent: [2, 3, 4, 5].map((order) =>
+          `nh${order}_percent` in metrics ? metrics[`nh${order}_percent`] : null,
+        ),
+        normalizedD6PlusPercent: 'nd6plus_percent' in metrics ? metrics.nd6plus_percent : null,
       })
     }
   }
@@ -364,6 +384,11 @@ export function useMeasurements() {
       const sweepPoints = isSweepKind(detail.kind)
         ? toSweepPoints((await api.getStoredSweep(resultId)).points)
         : undefined
+      // Which figures that sweep is about, and how far it was asked to go: both live only in the
+      // as-run params_json the save wrote, so they are read once here rather than parsed by every
+      // consumer.
+      const sweepMethod = sweepPoints ? sweepMethodFromParams(detail.paramsJson) : undefined
+      const sweepEndFreqHz = sweepPoints ? sweepEndFreqHzFromParams(detail.paramsJson) : undefined
       // Likewise a response result: its curves live in response_trace, not in spectrum rows, and
       // likewise an impulse result: its gated magnitude and phase are response_trace rows, so they
       // come back through the same reader and overlay onto the same chart. The impulse itself and
@@ -380,7 +405,7 @@ export function useMeasurements() {
         : undefined
       overlays.value = [
         ...overlays.value,
-        { id: resultId, detail, visible: true, sweepPoints, responseTraces, impedanceTraces },
+        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepEndFreqHz, responseTraces, impedanceTraces },
       ]
       error.value = null
     } catch (e) {

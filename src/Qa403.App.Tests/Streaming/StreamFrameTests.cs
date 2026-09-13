@@ -216,6 +216,42 @@ public class StreamFrameTests
 
         Assert.Null(decoded.PreviewFft);
         Assert.Null(decoded.PreviewScope);
+
+        // A conventional point (no normalized figures at all) decodes those as null, not as 0 --
+        // 0 would read back as a real -inf dBc point on the chart.
+        Assert.Null(decoded.NormalizedThdPercent);
+        Assert.Null(decoded.NormalizedD6PlusPercent);
+        Assert.Equal(4, decoded.NormalizedHarmonicPercent.Length);
+        Assert.All(decoded.NormalizedHarmonicPercent, h => Assert.Null(h));
+    }
+
+    /// <summary>
+    /// The normalized trailer, with the mix of present and absent orders a point in a running
+    /// normalized sweep has: its H2 and H3 already referenced, H4 and H5 still waiting.
+    /// </summary>
+    [Fact]
+    public void SweepPoint_frame_round_trips_partlyNormalizedFigures()
+    {
+        var point = new ThdSweepPoint(
+            FreqHz: 1000.0, Channel: 0, MeasuredFreqHz: 1000.0, FundamentalDbv: -20.0, GainDb: 0.0,
+            PowerWatt: 0.0, ThdPercent: 0.5, ThdNPercent: 0.6, SnrDb: 90.0,
+            HarmonicPercent: [0.4, 0.1, 0.02, 0.01], D6PlusPercent: 0.005, NoisePercent: 0.001,
+            GeneratorDbv: -20.0, PreviewFft: null, PreviewScope: null,
+            NormalizedThdPercent: 0.52, NormalizedHarmonicPercent: [0.5, 0.12, null, null], NormalizedD6PlusPercent: null);
+
+        byte[] frame = StreamFrame.EncodeSweepPoint(point, pointIndex: 3);
+        var decoded = StreamFrame.DecodeSweepPoint(frame);
+
+        Assert.Equal(0.52f, decoded.NormalizedThdPercent!.Value, precision: 5);
+        Assert.Null(decoded.NormalizedD6PlusPercent);
+        Assert.Equal(0.5f, decoded.NormalizedHarmonicPercent[0]!.Value, precision: 5);
+        Assert.Equal(0.12f, decoded.NormalizedHarmonicPercent[1]!.Value, precision: 5);
+        Assert.Null(decoded.NormalizedHarmonicPercent[2]);
+        Assert.Null(decoded.NormalizedHarmonicPercent[3]);
+
+        // The conventional figures ride along unchanged in the same frame.
+        Assert.Equal(0.5f, decoded.ThdPercent, precision: 5);
+        Assert.Equal(4, decoded.HarmonicPercent.Length);
     }
 
     private static FrequencyResponseTrace SampleTrace(FrequencyResponseTraceKind kind = FrequencyResponseTraceKind.Gain) =>

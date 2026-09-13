@@ -123,6 +123,74 @@ public class CsvExporterTests
     }
 
     /// <summary>
+    /// Every sweep writes the level it ran at on every point, so a frequency sweep's rows all carry
+    /// one and the same generator_volt. That must not make it a level-stepped sweep: keyed on the
+    /// metric's presence, every frequency sweep saved since the amplitude axis existed exported
+    /// with a constant 0.1 V as its leading column and no frequency column at all.
+    /// </summary>
+    [Fact]
+    public void ExportSweep_FrequencySweepWithItsLevelOnEveryPoint_StillLeadsWithFrequency()
+    {
+        var detail = BuildSweepDetail();
+        StoredSweepPoint At(int seq, double hz)
+        {
+            var metrics = SweepMetrics(-1.0);
+            metrics["generator_dbv"] = -20.0;
+            metrics["generator_volt"] = 0.1;
+            return new StoredSweepPoint(seq, hz, new Dictionary<int, IReadOnlyDictionary<string, double>> { [0] = metrics });
+        }
+
+        string csv = CsvExporter.ExportSweep(detail, [At(0, 100.0), At(1, 1000.0)]);
+        var dataLines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => !l.StartsWith('#'))
+            .ToArray();
+
+        Assert.StartsWith("freq_hz,ch0_magnitude_db,", dataLines[0]);
+        Assert.StartsWith("100.000000,", dataLines[1]);
+        Assert.StartsWith("1000.000000,", dataLines[2]);
+    }
+
+    /// <summary>
+    /// A frequency-normalized sweep carries a second set of figures per point, appended as their
+    /// own columns after the conventional ones -- and only then, so a conventional sweep's file
+    /// keeps the header it always had. A point near the top of the extended grid has no normalized
+    /// figures at all (nothing above it was measured), and its fields are empty, not 0.
+    /// </summary>
+    [Fact]
+    public void ExportSweep_FrequencyNormalizedSweep_AppendsTheNormalizedColumns()
+    {
+        var detail = BuildSweepDetail();
+        var normalized = SweepMetrics(-1.0);
+        normalized["nthd_percent"] = 0.02;
+        normalized["nh2_percent"] = 0.016;
+        normalized["nh3_percent"] = 0.008;
+        normalized["nd6plus_percent"] = 0.001;
+        var referenced = new StoredSweepPoint(0, 1000.0, new Dictionary<int, IReadOnlyDictionary<string, double>> { [0] = normalized });
+        var topOfGrid = new StoredSweepPoint(1, 80000.0, new Dictionary<int, IReadOnlyDictionary<string, double>> { [0] = SweepMetrics(-3.0) });
+
+        string csv = CsvExporter.ExportSweep(detail, [referenced, topOfGrid]);
+        var dataLines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => !l.StartsWith('#'))
+            .ToArray();
+
+        Assert.EndsWith(
+            "ch0_noise_percent,ch0_nthd_percent,ch0_nd2_percent,ch0_nd3_percent,ch0_nd4_percent,ch0_nd5_percent,ch0_nd6plus_percent",
+            dataLines[0]);
+
+        var first = dataLines[1].Split(',');
+        Assert.Equal(15, first.Length);
+        Assert.Equal("0.020000", first[9]);
+        Assert.Equal("0.016000", first[10]);
+        Assert.Equal("0.008000", first[11]);
+        Assert.Equal("", first[12]);   // nd4: no reference at this point
+        Assert.Equal("0.001000", first[14]);
+
+        var top = dataLines[2].Split(',');
+        Assert.Equal(15, top.Length);
+        Assert.All(top[9..], field => Assert.Equal("", field));
+    }
+
+    /// <summary>
     /// An amplitude sweep's rows are told apart by the level, not the frequency -- every point
     /// shares one tone, so a freq_hz column would repeat the same number down the file and identify
     /// nothing. The frequency moves into a header comment instead, where it is stated once.

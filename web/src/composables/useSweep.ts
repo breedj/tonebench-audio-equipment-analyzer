@@ -2,6 +2,7 @@ import { computed, ref, shallowRef } from 'vue'
 import {
   api,
   type ThdAmplitudeSweepStartRequest,
+  type ThdMethodName,
   type ThdSweepPoint,
   type ThdSweepStartRequest,
   type ThdSweepStatus,
@@ -32,6 +33,21 @@ const axis = ref<'Frequency' | 'Amplitude'>('Frequency')
 
 /** The point being measured, in the running sweep's own unit — hertz, or generator volts. */
 const currentX = ref(0)
+
+/**
+ * How the running (or last) sweep's harmonics are referenced — which of a point's two sets of
+ * figures the chart draws. Mirrors ThdSweepStatus.thdMethod; set optimistically from the start
+ * request so the first point is drawn the right way rather than a status poll later.
+ */
+const thdMethod = ref<ThdMethodName>('Conventional')
+
+/**
+ * The end frequency the running (or last) frequency sweep was asked for. A normalized sweep
+ * measures past it (reference points for the harmonics at the top of the band), and Autofit fits
+ * the band that was asked for, not the reference points. Null when unknown — a sweep found already
+ * running by a reload, whose request this browser never saw.
+ */
+const requestedEndFreqHz = ref<number | null>(null)
 const generatorAmpDbv = ref(0)
 const error = ref<string | null>(null)
 
@@ -83,13 +99,15 @@ function applyStatus(status: ThdSweepStatus) {
   currentX.value = axis.value === 'Amplitude' ? status.currentAmplitudeVolt : status.currentFreqHz
   generatorAmpDbv.value = status.generatorAmpDbv
   error.value = status.error
+  thdMethod.value = status.thdMethod ?? 'Conventional'
   measured.value = status.points
 }
 
 /**
  * Folds one live sweep-point frame in. Keyed by (channel, frequency, level) rather than appended
  * blindly: a reload that calls refresh() and then starts receiving frames again would otherwise
- * duplicate every point it had already loaded.
+ * duplicate every point it had already loaded. The same key is what lets a frequency-normalized
+ * sweep re-send a point as its normalized figures fill in — the later frame replaces the earlier.
  *
  * Both coordinates are in the key, and neither alone would do — a frequency sweep repeats its level
  * at every point and an amplitude sweep repeats its frequency at every point, so keying on either
@@ -114,12 +132,16 @@ function ingestPoint(frame: SweepPointFrame) {
     generatorDbv: frame.generatorDbv,
     previewFft: frame.previewFft,
     previewScope: frame.previewScope,
+    normalizedThdPercent: frame.normalizedThdPercent,
+    normalizedHarmonicPercent: frame.normalizedHarmonicPercent,
+    normalizedD6PlusPercent: frame.normalizedD6PlusPercent,
   })
   next.sort((a, b) => a.freqHz - b.freqHz || a.generatorDbv - b.generatorDbv || a.channel - b.channel)
   measured.value = next
 }
 
 function ingestProgress(frame: SweepProgressFrame) {
+  const wasRunning = running.value
   phase.value = frame.phase
   index.value = frame.index
   currentX.value = frame.currentX
@@ -131,6 +153,12 @@ function ingestProgress(frame: SweepProgressFrame) {
 
   // The frame carries no message; the reason lives on the status endpoint.
   if (frame.phase === SweepPhase.Failed) void refresh()
+
+  // A sweep this browser did not start -- another tab, or a script against the API -- announces
+  // itself only through its progress frames, which carry neither the method nor the axis, and
+  // the points that follow would merge into whatever sweep was on screen before. The status has
+  // all of it, so a sweep that starts from elsewhere is read from there.
+  if (!wasRunning && running.value) void refresh()
 }
 
 async function refresh() {
@@ -138,11 +166,17 @@ async function refresh() {
 }
 
 async function start(request: ThdSweepStartRequest) {
-  return began('Frequency', await beginWith(() => api.startThdSweep(request)))
+  const started = began('Frequency', await beginWith(() => api.startThdSweep(request)))
+  thdMethod.value = request.thdMethod
+  requestedEndFreqHz.value = request.endFreqHz
+  return started
 }
 
 async function startAmplitude(request: ThdAmplitudeSweepStartRequest) {
-  return began('Amplitude', await beginWith(() => api.startThdAmplitudeSweep(request)))
+  const started = began('Amplitude', await beginWith(() => api.startThdAmplitudeSweep(request)))
+  thdMethod.value = 'Conventional'
+  requestedEndFreqHz.value = null
+  return started
 }
 
 async function beginWith<T>(call: () => Promise<T>): Promise<T> {
@@ -189,6 +223,8 @@ export function useSweep() {
     generatorAmpDbv,
     error,
     points,
+    thdMethod,
+    requestedEndFreqHz,
 
     /** "Point 7/31 · 1.26 kHz" (or "· 250 mV") — the progress readout, in the style of metrics.ts's formatAveraging. */
     progressLabel: computed(() => {

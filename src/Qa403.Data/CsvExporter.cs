@@ -62,6 +62,24 @@ public static class CsvExporter
     ];
 
     /// <summary>
+    /// The frequency-normalized figures (each harmonic over the fundamental at its own frequency),
+    /// appended only when the sweep has any -- a conventional sweep's file keeps the columns it
+    /// always had. Keyed off <c>nthd_percent</c>, which every normalized point that has a reference
+    /// at all carries.
+    /// </summary>
+    private static readonly (string Metric, string Column)[] NormalizedSweepColumns =
+    [
+        ("nthd_percent", "nthd_percent"),
+        ("nh2_percent", "nd2_percent"),
+        ("nh3_percent", "nd3_percent"),
+        ("nh4_percent", "nd4_percent"),
+        ("nh5_percent", "nd5_percent"),
+        ("nd6plus_percent", "nd6plus_percent"),
+    ];
+
+    private const string NormalizedMarkerMetric = "nthd_percent";
+
+    /// <summary>
     /// The amplitude axis' column set: the frequency sweep's, plus two columns that only mean
     /// something here -- the level actually reached at the DUT's output, and the power that works
     /// out to. Both are what the chart's own x-axis choices plot, so the CSV can reproduce any of
@@ -326,8 +344,21 @@ public static class CsvExporter
             .Order()
             .ToList();
 
-        bool amplitudeAxis = points.Any(p => p.MetricsByChannel.Values.Any(m => m.ContainsKey(AmplitudeAxisMetric)));
+        // Told apart by the level *varying*, the same rule MeasurementRepository.SelectHeadlineCapture
+        // applies -- not by the metric being present. Every sweep writes generator_volt on every
+        // point (it is the level the point was played at), so presence marked every frequency sweep
+        // saved since the amplitude axis existed as level-stepped: a constant 0.1 V leading column
+        // and no frequency column at all.
+        bool amplitudeAxis = points
+            .SelectMany(p => p.MetricsByChannel.Values)
+            .Where(m => m.ContainsKey(AmplitudeAxisMetric))
+            .Select(m => m[AmplitudeAxisMetric])
+            .Distinct()
+            .Count() > 1;
+        bool normalized = points.Any(p => p.MetricsByChannel.Values.Any(m => m.ContainsKey(NormalizedMarkerMetric)));
         var columns = amplitudeAxis ? AmplitudeSweepColumns : SweepColumns;
+        if (normalized)
+            columns = [.. columns, .. NormalizedSweepColumns];
 
         var sb = new StringBuilder();
         WriteComment(sb, "project", detail.ProjectName);
@@ -370,7 +401,7 @@ public static class CsvExporter
         return sb.ToString();
     }
 
-    /// <summary>The metric whose presence marks a sweep as level-stepped rather than frequency-stepped.</summary>
+    /// <summary>The metric whose value moving from point to point marks a sweep as level-stepped rather than frequency-stepped.</summary>
     private const string AmplitudeAxisMetric = "generator_volt";
 
     /// <summary>

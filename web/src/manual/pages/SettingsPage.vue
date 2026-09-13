@@ -109,11 +109,17 @@
               generator is silenced by the switch either way.
             </p>
             <p>
-              The simulator's own controls beside it — <strong>Noise</strong>, <strong>Hum</strong>
-              and <strong>DUT</strong> — stay live throughout, deliberately: changing the DUT while a
-              live spectrum is running shows the difference immediately, which is the clearest thing
-              the simulator can demonstrate. Changing one part-way through a <em>sweep</em> will
-              quietly give you a result measured under two different conditions, so don't.
+              The simulator's own controls beside it — <strong>Noise</strong>, <strong>Hum</strong>,
+              <strong>Harmonics</strong> and <strong>DUT</strong> — stay live throughout,
+              deliberately: changing the DUT while a live spectrum is running shows the difference
+              immediately, which is the clearest thing the simulator can demonstrate. Changing one
+              part-way through a <em>sweep</em> will quietly give you a result measured under two
+              different conditions, so don't. The three checkboxes start <strong>unchecked</strong>:
+              a straight wire then reads as a straight wire, and the noise floor
+              (−150 dBV/√Hz white plus 1/f), the mains hum (50 Hz and two harmonics) and the
+              generator's fixed harmonic stack (0.51 % THD, level-independent) are each something
+              to switch on. <strong>Harmonics</strong> is greyed out under a nonlinear amplifier
+              model, which drops the stack whatever the box says.
             </p>
             <p>
               Selecting the QA403 with none attached is not an error: the session simply ends up
@@ -198,13 +204,14 @@
             </p>
             <p>
               The next four are the <strong>nonlinear amplifiers</strong>, and they exist for the
-              two THD sweeps. Every model above is linear, and until these arrived the only
-              distortion in the simulator was a fixed harmonic stack added to the
-              <em>generator</em> — the same −46 dBc second harmonic at 1 mV and at 1 V, on both
-              channels — under which a THD-vs-amplitude sweep is a flat line whatever the DUT.
-              Selecting any nonlinear model switches that stack off: the left channel carries only
-              what the model does to the signal, and the right channel is the clean generator tap a
-              real bench has. (The stack comes back when you select a linear model again.) It also
+              two THD sweeps. Every model above is linear, so it reads 0.000 % THD — or, with the
+              status bar's <strong>Harmonics</strong> box ticked, the fixed harmonic stack that box
+              adds to the <em>generator</em>: the same −46 dBc second harmonic at 1 mV and at 1 V,
+              on both channels, under which a THD-vs-amplitude sweep is a flat line whatever the
+              DUT. Selecting any nonlinear model switches that stack off whatever the box says: the
+              left channel carries only what the model does to the signal, and the right channel is
+              the clean generator tap a real bench has. (The box's setting comes back into force
+              when you select a linear model again.) It also
               gives the chirp's <em>gate the sweep's harmonic packets</em> option something to
               remove, which no linear model can.
             </p>

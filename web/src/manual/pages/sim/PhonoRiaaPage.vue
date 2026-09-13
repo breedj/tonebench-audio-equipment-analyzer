@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import ManualChart, { type ManualMarker, type ManualSeries } from '../../components/ManualChart.vue'
 import SettingsTable from '../../components/SettingsTable.vue'
-import { logSpace, magnitudeCurve, phaseCurve, toneStems } from '../../sim/curves'
+import { logSpace, magnitudeCurve, phaseCurve } from '../../sim/curves'
 import { phonoRiaa } from '../../sim/models'
 import { useManual } from '../../useManual'
 
@@ -43,10 +43,11 @@ const steppedSeries = computed<ManualSeries[]>(() => [
   { name: 'Gain (dB)', points: steppedFreqs.map((f) => [f, dut.magnitudeDb(f)] as const), color: 'gain', kind: 'points' },
 ])
 
-// FFT: a 1 kHz tone at −6 dBV passes at unity; a 20 Hz one comes back +19 dB.
+// FFT: a 1 kHz tone at −6 dBV passes at unity; a 20 Hz one comes back +19 dB. Just the two
+// fundamentals — with the simulator's Harmonics box off (the default) there is nothing else.
 const fftSeries = computed<ManualSeries[]>(() => [
-  { name: '1 kHz tone at −6 dBV', points: toneStems(dut192, 1000, -6, 96_000), color: 'left', kind: 'stem' },
-  { name: '20 Hz tone at −20 dBV', points: toneStems(dut192, 20, -20, 96_000), color: 'amber', kind: 'stem' },
+  { name: '1 kHz tone at −6 dBV', points: [[1000, -6 + dut192.magnitudeDb(1000)]], color: 'left', kind: 'stem' },
+  { name: '20 Hz tone at −20 dBV', points: [[20, -20 + dut192.magnitudeDb(20)]], color: 'amber', kind: 'stem' },
 ])
 </script>
 
@@ -80,7 +81,8 @@ const fftSeries = computed<ManualSeries[]>(() => [
         ['20 kHz', `${dut.magnitudeDb(20_000).toFixed(2)} dB (analog: ${analogRiaaDb(20_000).toFixed(2)}) — the model is solved to hit this figure at every sample rate`],
         ['Phase', 'about −20° at 20 Hz, −55° near 100 Hz, −45° at 1 kHz, rising back through 0° above 10 kHz'],
         ['Bandwidth rows', 'meaningless — there is no passband; see below'],
-        ['THD', 'the generator’s stack, tilted: D2 reads 2.6 dB low at 1 kHz because the second harmonic is attenuated relative to its fundamental, D3 4.7 dB low'],
+        ['THD', '0.000 %; with Harmonics ticked, the generator’s stack tilted: D2 reads 2.6 dB low at 1 kHz because the second harmonic is attenuated relative to its fundamental, D3 4.7 dB low'],
+        ['THD, frequency normalized', 'with Harmonics ticked, the stack’s own figures back: nD2 −46 dBc (0.50 %) and nD3 −60 dBc (0.10 %), flat across the band — the tilt cancels once each harmonic is divided by the fundamental at its own frequency'],
       ]"
     />
 
@@ -89,7 +91,7 @@ const fftSeries = computed<ManualSeries[]>(() => [
       <li><a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a> — the one it is for.</li>
       <li><a href="#" @click.prevent="showPage('stepped-response')">Stepped sine response</a> — the same curve, and the screen that shows the input ranging working point by point.</li>
       <li><a href="#" @click.prevent="showPage('fft-spectrum')">FFT analysis</a> — a low tone comes back large; the only model on which the two channels read different levels.</li>
-      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — the stack read through a 6 dB per octave tilt: D2 reads about 2.6 dB low and D3 about 4.7 dB low at 1 kHz, and more the further up the slope the fundamental sits.</li>
+      <li><a href="#" @click.prevent="showPage('thd-vs-frequency')">THD vs frequency</a> — zero; with Harmonics ticked, the stack read through a 6 dB per octave tilt: D2 reads about 2.6 dB low and D3 about 4.7 dB low at 1 kHz, and more the further up the slope the fundamental sits. Set <strong>THD method</strong> to <strong>Frequency normalized</strong> and the tilt cancels: nD2 reads the stack’s own −46 dBc and nD3 its −60 dBc, flat from end to end. This model is the cleanest demonstration of what that method is for.</li>
       <li><a href="#" @click.prevent="showPage('impulse-response')">Impulse response</a> — a spike with a long low-frequency tail; the gated response repeats the curve above the gate's limit.</li>
       <li><a href="#" @click.prevent="showPage('impedance')">Impedance</a> — not applicable.</li>
     </ul>
@@ -196,12 +198,13 @@ const fftSeries = computed<ManualSeries[]>(() => [
       x-label="Hz"
       y-label="dBV"
       :height="240"
-      caption="Expected left-channel tones: 1 kHz at −6 dBV with its stack tilted down (H2 at −52 − 2.6 dB, H3 lower still), and a 20 Hz tone sent at −20 dBV coming back at −0.7 dBV, its harmonics riding the top of the curve."
+      caption="Expected left-channel tones: 1 kHz at −6 dBV, passed at unity, and a 20 Hz tone sent at −20 dBV coming back at −0.7 dBV. With the Harmonics box ticked each tone would also carry the generator's stack, tilted by the curve's slope at each harmonic's own frequency."
     />
     <p>
-      At 1 kHz the left and right <em>levels</em> agree — unity is unity — but the harmonics tables
-      do not: left reads H2 at −48.6 dBc and H3 at −64.7 dBc against the right's −46 and −60,
-      because each harmonic is attenuated by the curve's slope at its own frequency. The 20 Hz tone
+      At 1 kHz the left and right <em>levels</em> agree — unity is unity. Tick
+      <strong>Harmonics</strong> and the harmonics tables do not: left reads H2 at −48.6 dBc and H3
+      at −64.7 dBc against the right's −46 and −60, because each harmonic is attenuated by the
+      curve's slope at its own frequency. The 20 Hz tone
       is the one to try with care: sent at −20 dBV it comes back at −0.7 dBV; sent at −6 dBV it
       would come back at +13 dBV, which is 4.5 V rms and past the simulated ADC's clip on the range
       the FFT screen sits on. The metric tiles would then report clipping-shaped distortion that is

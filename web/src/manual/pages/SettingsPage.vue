@@ -25,10 +25,17 @@
         <tr>
           <td>Capture delay (ms)</td>
           <td>
-            How long to wait after the generator is enabled before capture actually starts. It lets
-            the output settle — through external gear, or through a DUT with a slow input stage —
-            before the FFT begins averaging. Raise it if the first result of a run is consistently
-            different from the ones after it.
+            How long the device under test is given to settle after <em>every</em> generator change
+            before the analysis window starts filling — each point of a THD, stepped-sine or
+            stepped-impedance sweep, every stimulus change on the FFT screen, and Run itself. It is
+            applied on top of the audio already committed to the DAC when the change was made, which
+            the analyzer always discards, and it costs that many milliseconds per point. Raise it for
+            a DUT that rings or drifts after a tone step: an output transformer or coupling capacitors
+            ring for tens of milliseconds, and without a settle time that ringing sits at the front of
+            the first averaged record and shows as a shelf below the tone in the spectrum, reading
+            like DC. Around 300 ms clears it on a tube amplifier; 0 disables it. Stored with the
+            analyzer's configuration, so every browser tab sees the same value, and recorded with each
+            saved result.
           </td>
         </tr>
         <tr>

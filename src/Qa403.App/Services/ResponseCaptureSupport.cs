@@ -190,15 +190,16 @@ internal static class ResponseCaptureSupport
 
     /// <summary>
     /// How long one record may take: the time to refill the window after the flush, plus the
-    /// in-flight audio the flush discards, times three for slack. Loose on purpose — this exists to
-    /// notice a wedged device, not to police timing.
+    /// in-flight audio the flush discards and the settle time the session discards after it
+    /// (<see cref="DeviceSessionService.CaptureDelayMs"/>), times three for slack. Loose on purpose —
+    /// this exists to notice a wedged device, not to police timing.
     /// </summary>
-    public static TimeSpan CaptureTimeout(double sampleRateHz, int fftSize)
+    public static TimeSpan CaptureTimeout(double sampleRateHz, int fftSize, double captureDelayMs)
     {
         const double StimulusLatencySeconds = 0.1;
 
         double recordSeconds = fftSize / sampleRateHz;
-        return TimeSpan.FromSeconds(((recordSeconds + StimulusLatencySeconds) * 3.0) + 2.0);
+        return TimeSpan.FromSeconds(((recordSeconds + StimulusLatencySeconds + (captureDelayMs / 1000.0)) * 3.0) + 2.0);
     }
 
     /// <summary>

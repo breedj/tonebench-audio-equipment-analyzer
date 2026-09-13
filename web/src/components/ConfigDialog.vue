@@ -15,7 +15,7 @@ const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
-const { captureDelayMs } = useCaptureDelay()
+const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
 const { config, apply: applyConfig } = useSpectrumConfig()
 const { status: deviceStatus } = useDevice()
 const { updateCheckEnabled } = useUpdateCheck()
@@ -24,8 +24,8 @@ const { fixture, hasCalibration, error: fixtureError, load: loadFixture, save: s
 
 /**
  * Which tab is showing. Grouped by what a setting is *about* rather than by where it is stored —
- * the auto-ranging delay lives on the device and the capture delay in the browser, but both are
- * things you reach for while setting up an acquisition.
+ * the auto-ranging delay lives on the device and the capture delay in the configuration database,
+ * but both are things you reach for while setting up an acquisition.
  */
 type ConfigTab = 'General' | 'Acquisition' | 'Measurement' | 'Impedance'
 const TABS: ConfigTab[] = ['General', 'Acquisition', 'Measurement', 'Impedance']
@@ -56,6 +56,15 @@ watch(
 
 async function applyAutoRangeStepDownDelay() {
   deviceStatus.value = await api.setAutoRangeStepDownDelay(autoRangeStepDownDelayMs.value)
+}
+
+// On change rather than on every keystroke: each write is a round trip that lands in the
+// configuration database, and a half-typed "3" applied to the next sweep point is not a setting.
+async function onCaptureDelayChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const ms = Number(input.value)
+  await setCaptureDelay(Number.isFinite(ms) && ms >= 0 ? Math.min(ms, 10000) : 0)
+  input.value = String(captureDelayMs.value)
 }
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
@@ -171,14 +180,16 @@ async function clearStoredCalibration() {
         <template v-else-if="activeTab === 'Acquisition'">
           <label
             class="flex flex-col gap-1"
-            title="How long to wait, after Run or Single enables the generator, before capture actually starts. Lets the generator/output settle (e.g. through external gear) before the FFT starts averaging."
+            title="How long the device under test is given to settle after every generator change — each sweep point, every stimulus change on the FFT screen, and Run itself — before the analysis window starts filling. Raise it for a DUT that rings or drifts after a tone step (an output transformer, coupling capacitors, slow external gear)."
           >
             Capture delay (ms)
             <input
               type="number"
               min="0"
+              max="10000"
               step="10"
-              v-model.number="captureDelayMs"
+              :value="captureDelayMs"
+              @change="onCaptureDelayChange"
               class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             />
           </label>

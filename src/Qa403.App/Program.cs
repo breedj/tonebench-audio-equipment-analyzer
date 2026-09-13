@@ -2,8 +2,10 @@
 using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using Qa403.App.Diagnostics;
 using Qa403.App.Endpoints;
@@ -101,6 +103,7 @@ try
     builder.Services.AddSingleton<DiagnosticRecorder>();
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
+    builder.Services.AddSingleton<CaptureDelaySetting>();
     builder.Services.AddSingleton<DeviceSessionService>();
     builder.Services.AddSingleton<ThdSweepRunner>();
     builder.Services.AddSingleton<FrequencyResponseRunner>();
@@ -168,6 +171,15 @@ try
         await using var configConnection = await configFactory.OpenAsync(CancellationToken.None);
         await new MigrationRunner(MigrationRunner.ConfigResourcePrefix)
             .RunAsync(configConnection, CancellationToken.None);
+
+        // The capture delay is read on every stimulus change, under the session lock, so it is
+        // loaded into memory once here rather than fetched from the database each time -- see
+        // CaptureDelaySetting. The endpoint keeps the two in step from then on.
+        app.Services.GetRequiredService<CaptureDelaySetting>().Ms =
+            (await ConfigEndpoints.ReadCaptureDelayAsync(
+                scope.ServiceProvider.GetRequiredService<ConfigRepository>(),
+                app.Services.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions,
+                CancellationToken.None)).CaptureDelayMs;
     }
 
     app.UseWebSockets();

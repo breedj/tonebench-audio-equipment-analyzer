@@ -65,7 +65,14 @@ public sealed record FftSpectrumParameters(
     bool? ChartShowWaterfall = null,
     bool? ChartShowOscilloscope = null,
     bool? ChartShowHarmonics = null,
-    bool? ChartShowOtherPeaks = null);
+    bool? ChartShowOtherPeaks = null,
+    /// <summary>
+    /// The settle time the run discarded after each stimulus change, in ms -- the Configuration
+    /// dialog's "Capture delay", applied server-side (see DeviceSessionService.CaptureDelayMs). A
+    /// run record, not a type setting: null on a type's own params_json and on results saved
+    /// before it was recorded, and the value the session actually used on a saved result.
+    /// </summary>
+    double? CaptureDelayMs = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
@@ -122,7 +129,14 @@ public sealed record ThdVsFrequencyParameters(
     /// Loudspeaker. A display choice, so it sits with the other <c>Chart*</c> fields and is null on
     /// a type stored before it existed.
     /// </summary>
-    string? ChartDutType = null);
+    string? ChartDutType = null,
+    /// <summary>
+    /// The settle time the run discarded after each stimulus change, in ms -- the Configuration
+    /// dialog's "Capture delay", applied server-side (see DeviceSessionService.CaptureDelayMs). A
+    /// run record, not a type setting: null on a type's own params_json and on results saved
+    /// before it was recorded, and the value the session actually used on a saved result.
+    /// </summary>
+    double? CaptureDelayMs = null);
 
 /// <summary>
 /// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a
@@ -233,7 +247,14 @@ public sealed record ThdVsAmplitudeParameters(
     double? ChartYTopDb = null,
     double? ChartYBottomDb = null,
     /// <summary>Off unless the user opts in -- see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. Null on a type saved before this existed, treated as false.</summary>
-    bool? ChartAutofitOnDone = null);
+    bool? ChartAutofitOnDone = null,
+    /// <summary>
+    /// The settle time the run discarded after each stimulus change, in ms -- the Configuration
+    /// dialog's "Capture delay", applied server-side (see DeviceSessionService.CaptureDelayMs). A
+    /// run record, not a type setting: null on a type's own params_json and on results saved
+    /// before it was recorded, and the value the session actually used on a saved result.
+    /// </summary>
+    double? CaptureDelayMs = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm
@@ -483,7 +504,14 @@ public sealed record ImpedanceParameters(
     double? ChartXToHz = null,
     double? ChartPhaseTopDeg = null,
     double? ChartPhaseBottomDeg = null,
-    bool? ChartAutofitOnDone = null);
+    bool? ChartAutofitOnDone = null,
+    /// <summary>
+    /// The settle time the run discarded after each stimulus change, in ms -- the Configuration
+    /// dialog's "Capture delay", applied server-side (see DeviceSessionService.CaptureDelayMs). A
+    /// run record, not a type setting: null on a type's own params_json and on results saved
+    /// before it was recorded, and the value the session actually used on a saved result.
+    /// </summary>
+    double? CaptureDelayMs = null);
 
 /// <summary>One save of a frequency-response measurement: a result row, its single capture, and the curves.</summary>
 public sealed record ResponseSaveRequest(
@@ -603,7 +631,14 @@ public sealed record FrequencyResponseParameters(
     /// corners mean.
     /// </summary>
     double? BandwidthReferenceLowHz = null,
-    double? BandwidthReferenceHighHz = null);
+    double? BandwidthReferenceHighHz = null,
+    /// <summary>
+    /// The settle time the run discarded after each stimulus change, in ms -- the Configuration
+    /// dialog's "Capture delay", applied server-side (see DeviceSessionService.CaptureDelayMs). A
+    /// run record, not a type setting: null on a type's own params_json and on results saved
+    /// before it was recorded, and the value the session actually used on a saved result.
+    /// </summary>
+    double? CaptureDelayMs = null);
 
 /// <summary>
 /// A stepped-sine response measurement type's <c>params_json</c>: the run settings, then the chart's
@@ -685,7 +720,14 @@ public sealed record SteppedResponseParameters(
     /// corners mean.
     /// </summary>
     double? BandwidthReferenceLowHz = null,
-    double? BandwidthReferenceHighHz = null);
+    double? BandwidthReferenceHighHz = null,
+    /// <summary>
+    /// The settle time the run discarded after each stimulus change, in ms -- the Configuration
+    /// dialog's "Capture delay", applied server-side (see DeviceSessionService.CaptureDelayMs). A
+    /// run record, not a type setting: null on a type's own params_json and on results saved
+    /// before it was recorded, and the value the session actually used on a saved result.
+    /// </summary>
+    double? CaptureDelayMs = null);
 
 /// <summary>The <c>impulse_result.kind</c> values — mirrors the subset of FrequencyResponseTraceKind an impulse response has.</summary>
 public static class ImpulseTraceKind
@@ -861,4 +903,11 @@ public sealed record ImpulseResponseParameters(
     /// <summary>The burst decay's analysis, on the same footing.</summary>
     int? ChartBurstMaxPeriods = null,
     int? ChartBurstPointsPerPeriod = null,
-    string? ChartBurstResolution = null);
+    string? ChartBurstResolution = null,
+    /// <summary>
+    /// The settle time the run discarded after each stimulus change, in ms -- the Configuration
+    /// dialog's "Capture delay", applied server-side (see DeviceSessionService.CaptureDelayMs). A
+    /// run record, not a type setting: null on a type's own params_json and on results saved
+    /// before it was recorded, and the value the session actually used on a saved result.
+    /// </summary>
+    double? CaptureDelayMs = null);

@@ -849,8 +849,8 @@ public sealed class SteppedResponseRunner(
     /// discarded in-flight audio), plus the averages, times three for slack. Generous on purpose —
     /// this exists to notice a wedged device, not to police timing.
     /// </summary>
-    private static TimeSpan CaptureTimeout(SteppedResponseRequest request, int fftSize) =>
-        TimeSpan.FromSeconds((PointSeconds(request, fftSize) * 3.0) + 2.0);
+    private TimeSpan CaptureTimeout(SteppedResponseRequest request, int fftSize) =>
+        TimeSpan.FromSeconds((PointSeconds(request, fftSize, session.CaptureDelayMs / 1000.0) * 3.0) + 2.0);
 
     /// <summary>
     /// How long one point is expected to take: the in-flight audio the flush discards, the throwaway
@@ -858,23 +858,25 @@ public sealed class SteppedResponseRunner(
     /// record to refill the window after its flush, then <c>AverageCount</c> averages at
     /// <see cref="AverageHopFraction"/> — <c>1 + (n-1)·hop</c> records rather than <c>n</c>.
     /// </summary>
-    private static double PointSeconds(SteppedResponseRequest request, int fftSize)
+    private static double PointSeconds(SteppedResponseRequest request, int fftSize, double settleSeconds)
     {
         // ~65 ms at every sample rate (Qa40xUsbDevice.StimulusLatencyFrames); 100 ms is a
         // deliberately loose stand-in rather than widening DeviceSessionService's surface for it.
+        // The settle time is the user's own number (DeviceSessionService.CaptureDelayMs), discarded
+        // on top of it at every stimulus change.
         const double StimulusLatencySeconds = 0.1;
 
         double recordSeconds = fftSize / request.EffectiveSampleRateHz;
         double averageSeconds = (1.0 + ((Math.Max(1, request.AverageCount) - 1) * AverageHopFraction)) * recordSeconds;
-        return (2.0 * recordSeconds) + StimulusLatencySeconds + averageSeconds;
+        return (2.0 * recordSeconds) + StimulusLatencySeconds + settleSeconds + averageSeconds;
     }
 
     /// <summary>
     /// What the whole run should take, for the UI's estimate. The level probe is not counted: it is
     /// at most <see cref="MaxProbeIterations"/> short captures and usually two.
     /// </summary>
-    private static double EstimateSeconds(SteppedResponseRequest request, SteppedStepPlan[] steps) =>
-        steps.Sum(s => PointSeconds(request, s.FftSize));
+    private double EstimateSeconds(SteppedResponseRequest request, SteppedStepPlan[] steps) =>
+        steps.Sum(s => PointSeconds(request, s.FftSize, session.CaptureDelayMs / 1000.0));
 
     private static GeneratorConfig ToneConfig(double freqHz, double ampDbv, SteppedResponseRequest request)
     {

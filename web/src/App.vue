@@ -112,8 +112,10 @@ const {
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
 const { kind: stimulusKind } = useGeneratorStimulus()
 const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
-const { captureDelayMs } = useCaptureDelay()
-
+// Loaded at startup so the sweep panels' time estimates already include it; the value itself is
+// applied server-side (see useCaptureDelay).
+const { load: loadCaptureDelay } = useCaptureDelay()
+void loadCaptureDelay()
 
 // Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the +Metrics button
 // and the chart — same formatAveraging formula, just relocated. Either channel's averagesTaken is
@@ -1034,10 +1036,10 @@ function runMeasurement(runConfig: RunConfig) {
       })
       generatorPanel.value?.resyncTones(status.value)
 
-      // Lets the generator settle (through external gear, DUT, etc.) before capture starts — see
-      // ConfigDialog's "Capture delay" field. Only meaningful once the generator's actually been
-      // enabled above, not on every Run (e.g. a generator-less measurement).
-      if (captureDelayMs.value > 0) await new Promise((resolve) => setTimeout(resolve, captureDelayMs.value))
+      // No wait for the generator to settle here: the Configuration dialog's "Capture delay" is
+      // applied server-side, as a discard at the front of the analysis window when acquisition
+      // starts with the generator on -- see DeviceSessionService.StartAcquisitionAsync. It used to
+      // be a setTimeout between these two calls, which covered this one path and no sweep point.
     }
 
     const newStatus = await api.startAcquisition({ sampleRateHz, channelCount })

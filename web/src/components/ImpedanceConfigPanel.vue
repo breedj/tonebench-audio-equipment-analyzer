@@ -21,6 +21,7 @@ import {
   logPerOctave,
 } from '../sweep/points'
 import { useProjects } from '../composables/useProjects'
+import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useImpedance } from '../composables/useImpedance'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { formatHz } from '../response/format'
@@ -357,6 +358,12 @@ const steppedFftRange = computed(() => {
  * here sits behind its own `Flush(0)`, so the records are independent — which is the only thing that
  * makes the measured coherence mean anything. See ImpedanceRunner.CaptureStepAsync.</p>
  */
+// Discarded at the front of every point on top of the stimulus latency -- see useCaptureDelay --
+// so it belongs in the estimate the same way the latency does. 0.1 rather than 0.065 for the
+// latency: this panel rounds the same way ImpedanceRunner.PointSeconds does.
+const { captureDelayMs } = useCaptureDelay()
+const steppedPerPointDiscardSeconds = computed(() => 0.1 + captureDelayMs.value / 1000)
+
 const steppedDurationLabel = computed(() =>
   formatDuration(
     estimateAdaptiveDurationSeconds(
@@ -364,7 +371,7 @@ const steppedDurationLabel = computed(() =>
       steppedSampleRateHz.value,
       form.averageCount,
       1.0,
-      0.1,
+      steppedPerPointDiscardSeconds.value,
       { maxFftSize: steppedFftCeiling.value, recordsBeforeAverages: 1 },
     ),
   ),

@@ -1032,7 +1032,7 @@ public sealed class ImpulseResponseRunner(
 
     private async Task WaitForCaptureAsync(ImpulseResponseRequest request, int fftSize, CancellationToken ct)
     {
-        var timeout = ResponseCaptureSupport.CaptureTimeout(request.SampleRateHz, fftSize);
+        var timeout = ResponseCaptureSupport.CaptureTimeout(request.SampleRateHz, fftSize, session.CaptureDelayMs);
         long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
 
         while (!pipeline.SingleShotComplete)

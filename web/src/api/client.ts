@@ -255,6 +255,17 @@ export interface UiLayoutConfig {
   sidebarPinned: boolean
 }
 
+/**
+ * How long the DUT is given to settle after every stimulus change, before the analysis window
+ * starts filling — the Configuration dialog's "Capture delay". Applied server-side at the one place
+ * every generator change passes through, so it covers the live FFT screen and every sweep point
+ * alike; stored in the configuration database because the runners cannot read a browser's storage.
+ */
+export interface CaptureDelayConfig {
+  /** Milliseconds discarded after the stimulus latency on every generator change and at every acquisition start with the generator on. 0 disables it. */
+  captureDelayMs: number
+}
+
 export interface ImpedanceStartRequest {
   method: ImpedanceMethodName
   stimulus: ImpedanceStimulusName
@@ -1707,6 +1718,11 @@ export const api = {
 
   setUiLayout: (layout: UiLayoutConfig) =>
     request<UiLayoutConfig>('/config/ui-layout', { method: 'PUT', body: JSON.stringify(layout) }),
+
+  getCaptureDelay: () => request<CaptureDelayConfig>('/config/capture-delay'),
+
+  setCaptureDelay: (config: CaptureDelayConfig) =>
+    request<CaptureDelayConfig>('/config/capture-delay', { method: 'PUT', body: JSON.stringify(config) }),
 
   startImpedance: (req: ImpedanceStartRequest) =>
     request<ImpedanceStarted>('/impedance/start', { method: 'POST', body: JSON.stringify(req) }),

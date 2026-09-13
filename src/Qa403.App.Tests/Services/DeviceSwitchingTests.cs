@@ -84,6 +84,7 @@ public class DeviceSwitchingTests
     private static DeviceSessionService CreateSession(AnalyzerDeviceFactory? factory = null) =>
         new(factory ?? new FakeFactory(DeviceKind.Simulated),
             new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
+            new CaptureDelaySetting(),
             NullLogger<DeviceSessionService>.Instance);
 
     /// <summary>

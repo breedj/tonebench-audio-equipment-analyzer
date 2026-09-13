@@ -154,6 +154,13 @@ public sealed class SpectrumPipeline(
     }
 
     /// <summary>
+    /// What the most recent <see cref="Flush"/> was asked to discard. Test observability only: the
+    /// session's stimulus path composes that number from two sources (device latency and the
+    /// configured settle time), and this is how a test checks the composition without streaming.
+    /// </summary>
+    internal int LastFlushDiscardFrames { get; private set; }
+
+    /// <summary>
     /// Drops every buffered sample and all averaging state, so the next broadcast frame is built
     /// only from samples captured after the change that prompted this call actually reached the wire.
     ///
@@ -175,6 +182,8 @@ public sealed class SpectrumPipeline(
     /// </summary>
     public void Flush(int discardFrames = 0)
     {
+        LastFlushDiscardFrames = discardFrames;
+
         // Before anything else, so a tick already running is guaranteed to see the new value by the
         // time it reaches its commit check.
         Interlocked.Increment(ref _flushGeneration);

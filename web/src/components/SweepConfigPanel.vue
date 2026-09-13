@@ -8,6 +8,7 @@ import type {
   WindowType,
 } from '../api/client'
 import { useLoadOhms } from '../composables/useLoadOhms'
+import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
 import {
@@ -208,11 +209,20 @@ const adaptiveFftRange = computed(() => {
   return { max: Math.max(...sizes), min: Math.min(...sizes) }
 })
 
+// Discarded at the front of every point on top of the ~65 ms stimulus latency -- see
+// useCaptureDelay -- so it belongs in the estimate the same way the latency does.
+const { captureDelayMs } = useCaptureDelay()
+const perPointDiscardSeconds = computed(() => 0.065 + captureDelayMs.value / 1000)
+
 const durationLabel = computed(() =>
   formatDuration(
     form.adaptiveResolution
-      ? estimateAdaptiveDurationSeconds(gridHz.value, effectiveSampleRateHz.value, form.averageCount)
-      : estimateDurationSeconds(pointCount.value, SWEEP_FFT_SIZE, SWEEP_SAMPLE_RATE_HZ, form.averageCount),
+      ? estimateAdaptiveDurationSeconds(
+          gridHz.value, effectiveSampleRateHz.value, form.averageCount, 0.5, perPointDiscardSeconds.value,
+        )
+      : estimateDurationSeconds(
+          pointCount.value, SWEEP_FFT_SIZE, SWEEP_SAMPLE_RATE_HZ, form.averageCount, 0.5, perPointDiscardSeconds.value,
+        ),
   ),
 )
 

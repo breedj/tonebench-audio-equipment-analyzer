@@ -856,8 +856,12 @@ public sealed class ThdSweepRunner(
         // widening DeviceSessionService's surface for a timeout estimate.
         const double StimulusLatencySeconds = 0.1;
 
+        // The settle time the session discards on top of the latency at every stimulus change --
+        // a user's number, so it has to be in the budget or a long settle reads as a wedged device.
+        double settleSeconds = session.CaptureDelayMs / 1000.0;
+
         double recordSeconds = fftSize / request.EffectiveSampleRateHz;
-        double fillSeconds = recordSeconds + StimulusLatencySeconds;
+        double fillSeconds = recordSeconds + StimulusLatencySeconds + settleSeconds;
 
         // Averages are now paced by fresh signal, not by the display tick, so the budget has to be
         // too: AverageCount averages at AverageHopFraction cost (1 + (n-1)*hop) records. Timing this

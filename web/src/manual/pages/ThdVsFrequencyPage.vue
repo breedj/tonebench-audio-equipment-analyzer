@@ -17,8 +17,10 @@ const { showPage } = useManual()
 
     <h2>What it measures</h2>
     <p>
-      At each frequency the generator plays one tone, the analyzer waits for it to settle, and one
-      capture is analysed for the fundamental and its harmonics. Each point stores the total
+      At each frequency the generator plays one tone, the analyzer waits for it to settle (the
+      audio still in flight to the DAC, plus the <strong>Capture delay</strong> in
+      <button type="button" class="manual-link" @click="showPage('settings')">Configuration</button>),
+      and one capture is analysed for the fundamental and its harmonics. Each point stores the total
       harmonic distortion, the individual harmonics D2 through D5, everything from the sixth upward
       as D6+, the measured fundamental level, and — if you asked for it — the residual measured with
       the generator off.

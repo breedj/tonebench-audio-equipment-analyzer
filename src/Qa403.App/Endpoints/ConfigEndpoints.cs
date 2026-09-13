@@ -13,6 +13,29 @@ namespace Qa403.App.Endpoints;
 /// </summary>
 public static class ConfigEndpoints
 {
+    /// <summary>
+    /// The stored capture delay, or the default when nothing has been stored or the document cannot
+    /// be read -- the same contract as the fixture and the layout. Shared with <c>Program</c>, which
+    /// loads it into <see cref="CaptureDelaySetting"/> at startup.
+    /// </summary>
+    public static async Task<CaptureDelayConfig> ReadCaptureDelayAsync(
+        ConfigRepository repo, JsonSerializerOptions serializerOptions, CancellationToken ct)
+    {
+        string? stored = await repo.GetAsync(ConfigRepository.CaptureDelayKey, ct);
+        if (string.IsNullOrWhiteSpace(stored))
+            return CaptureDelayConfig.Default;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize<CaptureDelayConfig>(stored, serializerOptions);
+            return config is { IsValid: true } ? config : CaptureDelayConfig.Default;
+        }
+        catch (JsonException)
+        {
+            return CaptureDelayConfig.Default;
+        }
+    }
+
     public static void MapConfigEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/config");
@@ -96,6 +119,32 @@ public static class ConfigEndpoints
             {
                 return Results.Ok(UiLayoutConfig.Default);
             }
+        });
+
+        // The capture delay: how long the DUT is given to settle after every stimulus change. The
+        // document is the durable copy; CaptureDelaySetting is the one the session reads, and a PUT
+        // writes both so a sweep started a moment later already runs with the new value.
+        group.MapGet("/capture-delay", async (
+            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            Results.Ok(await ReadCaptureDelayAsync(repo, jsonOptions.Value.SerializerOptions, ct)));
+
+        group.MapPut("/capture-delay", async (
+            CaptureDelayConfig config, ConfigRepository repo, CaptureDelaySetting setting,
+            IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            if (!config.IsValid)
+            {
+                return Results.BadRequest(
+                    $"The capture delay must be between 0 and {CaptureDelayConfig.MaxCaptureDelayMs:0} ms.");
+            }
+
+            await repo.SetAsync(
+                ConfigRepository.CaptureDelayKey,
+                JsonSerializer.Serialize(config, jsonOptions.Value.SerializerOptions),
+                ct);
+            setting.Ms = config.CaptureDelayMs;
+
+            return Results.Ok(config);
         });
 
         group.MapPut("/ui-layout", async (

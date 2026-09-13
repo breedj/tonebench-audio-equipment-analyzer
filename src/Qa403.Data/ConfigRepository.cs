@@ -63,6 +63,33 @@ public sealed record UiLayoutConfig(bool SidebarPinned = true)
 }
 
 /// <summary>
+/// How long the DUT is given to settle after every stimulus change, before the analysis window
+/// starts filling. Applied server-side, at the one place every generator change passes through
+/// (<c>DeviceSessionService.ConfigureGeneratorAsync</c>), so it covers the live FFT screen and every
+/// sweep point alike — not the browser's Run button, which is where it used to live.
+///
+/// <para>Stored here rather than in <c>localStorage</c> for the same reason as the fixture: the
+/// runners execute on the server and cannot read a browser's storage, and a settle time describes
+/// this bench (its amplifier's coupling caps, its external gear), which is what the configuration
+/// database is for.</para>
+/// </summary>
+/// <param name="CaptureDelayMs">
+/// Milliseconds of audio discarded after the stimulus latency, on every generator change and at
+/// every acquisition start with the generator on. 0 disables it. Bounded by
+/// <see cref="MaxCaptureDelayMs"/> — a settle time that is a sizeable fraction of a sweep point is a
+/// mistake, not a preference.
+/// </param>
+public sealed record CaptureDelayConfig(double CaptureDelayMs = 0.0)
+{
+    public const double MaxCaptureDelayMs = 10_000.0;
+
+    public static CaptureDelayConfig Default { get; } = new();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid => double.IsFinite(CaptureDelayMs) && CaptureDelayMs >= 0.0 && CaptureDelayMs <= MaxCaptureDelayMs;
+}
+
+/// <summary>
 /// Reads and writes the configuration database's key/value documents.
 ///
 /// <para>Deliberately takes <see cref="ConfigConnectionFactory"/> and not
@@ -76,6 +103,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The window layout's key. One document, see <see cref="UiLayoutConfig"/>.</summary>
     public const string UiLayoutKey = "ui.layout";
+
+    /// <summary>The capture delay's key. One document, see <see cref="CaptureDelayConfig"/>.</summary>
+    public const string CaptureDelayKey = "acquisition.captureDelay";
 
     public async Task<string?> GetAsync(string key, CancellationToken ct)
     {

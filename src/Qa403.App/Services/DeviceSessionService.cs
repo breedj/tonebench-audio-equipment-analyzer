@@ -15,7 +15,8 @@ namespace Qa403.App.Services;
 /// duration of each acquisition run.
 /// </summary>
 public sealed class DeviceSessionService(
-    AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, ILogger<DeviceSessionService> logger)
+    AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
+    ILogger<DeviceSessionService> logger)
     : IDisposable
 {
     /// <summary>
@@ -33,9 +34,31 @@ public sealed class DeviceSessionService(
     /// keep — the real app goes through the factory.
     /// </summary>
     public DeviceSessionService(IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, ILogger<DeviceSessionService> logger)
-        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, logger)
+        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, new CaptureDelaySetting(), logger)
     {
     }
+
+    /// <summary>The pinned-device overload with a capture delay of the test's choosing.</summary>
+    public DeviceSessionService(
+        IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
+        ILogger<DeviceSessionService> logger)
+        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger)
+    {
+    }
+
+    /// <summary>
+    /// The settle time currently configured — see <see cref="CaptureDelaySetting"/>. The runners
+    /// read it to size their per-point timeouts; the discard itself is applied here, not by them.
+    /// </summary>
+    public double CaptureDelayMs => captureDelay.Ms;
+
+    /// <summary>
+    /// The settle time the most recent stimulus change or acquisition start actually discarded, or
+    /// null when none has happened yet. What a saved result records, rather than the setting's
+    /// current value: the two differ only if the setting was edited between a run and its save,
+    /// and the record is meant to say what the run used.
+    /// </summary>
+    public double? LastAppliedCaptureDelayMs { get; private set; }
 
     /// <summary>Real QA403 hardware queue depth (docs/qa403-app-stack-spec.md §2.1) — also the floor enforced on <see cref="StartAcquisitionAsync"/>'s <c>BlockFrameCount</c>.</summary>
     public const int MinBlockFrameCount = 1024;
@@ -631,6 +654,31 @@ public sealed class DeviceSessionService(
         _device.StimulusLatencyFrames(_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
 
     /// <summary>
+    /// Frames of settle time to discard on top of <see cref="StimulusLatencyFrames"/> — the DUT's
+    /// time, not the device's. The latency is audio the DAC had already committed when the change
+    /// returned; this is how long the thing being measured needs after the new stimulus finally
+    /// reaches it. A tube amplifier's output transformer and coupling caps ring for tens of
+    /// milliseconds on a tone step, and with no settle time that ringing sits at the front of the
+    /// first averaged record: measured against the simulator's tube-amp model, a −77 dBV shelf below
+    /// the tone that reads as DC and vanishes once the record starts 300 ms after the step.
+    /// Discarded as frames on the ring buffer rather than awaited, so it is exact and costs nothing
+    /// when 0.
+    /// </summary>
+    private int CaptureDelayFrames =>
+        captureDelay.FramesAt(_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
+
+    /// <summary>
+    /// The one flush every stimulus change ends with: the in-flight audio, then the settle time.
+    /// Only stimulus changes — an input-range step is a gain change in the ADC path that the DUT
+    /// never sees, so <see cref="SetInputRangeCoreAsync"/> flushes the latency alone.
+    /// </summary>
+    private void FlushAfterStimulusChange()
+    {
+        spectrumPipeline.Flush(StimulusLatencyFrames + CaptureDelayFrames);
+        LastAppliedCaptureDelayMs = captureDelay.Ms;
+    }
+
+    /// <summary>
     /// Re-applies the last generator request. Needed after an FFT-size or sample-rate change, because
     /// which frequency is coherent depends on both — without this, snapping silently goes stale and
     /// the tone drifts back off-bin the moment the analyzer is reconfigured.
@@ -778,9 +826,10 @@ public sealed class DeviceSessionService(
             // Every sample already buffered predates this stimulus, so an FFT record spanning the
             // change would show the step as a broad skirt around the tone rather than the real
             // noise floor. And so does everything still queued for the DAC at this instant, which is
-            // why this passes the stimulus latency rather than flushing bare. See
-            // SpectrumPipeline.Flush.
-            spectrumPipeline.Flush(StimulusLatencyFrames);
+            // why this passes the stimulus latency rather than flushing bare — plus the configured
+            // settle time, for the DUT's own response to the step. See SpectrumPipeline.Flush and
+            // CaptureDelayFrames.
+            FlushAfterStimulusChange();
             return;
         }
 
@@ -838,6 +887,20 @@ public sealed class DeviceSessionService(
         await EnsureStreamRunningAsync(config, ct);
         spectrumPipeline.Start(config.SampleRateHz, config.ChannelCount);
         _isAcquiring = true;
+
+        // The FFT screen's Run: the generator was configured while nothing was acquiring, so
+        // ConfigureGeneratorCoreAsync had no window to flush and the settle time has been applied
+        // to nothing. The stimulus reached the DUT no later than this stream started (a
+        // generator-only stream brought up by that configure, or the one just started), so counting
+        // the settle from here is conservative. No stimulus latency on top: nothing changed on the
+        // wire, and Start() already emptied the window.
+        if (_generatorConfig.Left.Enabled || _generatorConfig.Right.Enabled)
+        {
+            int settleFrames = CaptureDelayFrames;
+            if (settleFrames > 0)
+                spectrumPipeline.Flush(settleFrames);
+            LastAppliedCaptureDelayMs = captureDelay.Ms;
+        }
 
         // Which frequency is coherent depends on the sample rate, so a rate change has to re-snap the
         // generator or its tones silently drift off-bin at the new rate.

@@ -964,19 +964,20 @@ public sealed class ImpedanceRunner(
     /// How long one point is expected to take: the in-flight audio the flush discards, the throwaway
     /// record after the stimulus change, then one whole record per average.
     /// </summary>
-    private static double PointSeconds(ImpedanceRequest request, int fftSize)
+    private static double PointSeconds(ImpedanceRequest request, int fftSize, double settleSeconds)
     {
         // ~65 ms at every sample rate (Qa40xUsbDevice.StimulusLatencyFrames); 100 ms is a deliberately
-        // loose stand-in rather than widening DeviceSessionService's surface for it.
+        // loose stand-in rather than widening DeviceSessionService's surface for it. The settle time
+        // is the user's own number (DeviceSessionService.CaptureDelayMs), discarded on top of it.
         const double StimulusLatencySeconds = 0.1;
 
         double recordSeconds = fftSize / request.SampleRateHz;
-        return ((1 + Math.Max(1, request.AverageCount)) * recordSeconds) + StimulusLatencySeconds;
+        return ((1 + Math.Max(1, request.AverageCount)) * recordSeconds) + StimulusLatencySeconds + settleSeconds;
     }
 
     /// <summary>What the whole sweep should take, for the UI's estimate. The range probe is one short capture and is not counted.</summary>
-    private static double EstimateSeconds(ImpedanceRequest request, ImpedanceStepPlan[] steps) =>
-        steps.Sum(step => PointSeconds(request, step.FftSize));
+    private double EstimateSeconds(ImpedanceRequest request, ImpedanceStepPlan[] steps) =>
+        steps.Sum(step => PointSeconds(request, step.FftSize, session.CaptureDelayMs / 1000.0));
 
     /// <summary>
     /// Pipeline settings for a stepped-sine capture. Two differ from the chirp's
@@ -1088,7 +1089,7 @@ public sealed class ImpedanceRunner(
 
     private async Task WaitForCaptureAsync(ImpedanceRequest request, int fftSize, CancellationToken ct)
     {
-        var timeout = ResponseCaptureSupport.CaptureTimeout(request.SampleRateHz, fftSize);
+        var timeout = ResponseCaptureSupport.CaptureTimeout(request.SampleRateHz, fftSize, session.CaptureDelayMs);
         long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
 
         while (!pipeline.SingleShotComplete)

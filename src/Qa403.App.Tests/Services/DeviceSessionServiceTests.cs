@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.App.Services;
@@ -204,6 +204,84 @@ public class DeviceSessionServiceTests
         Assert.Equal(1, device.StreamEndCount);
     }
 
+    /// <summary>
+    /// The capture delay is the DUT's settle time, and it is applied at the one place every stimulus
+    /// change passes through — not in the browser's Run handler, where it used to live and where no
+    /// sweep point ever saw it. Measured against the simulator's tube-amp model with no settle: the
+    /// 12 Hz high-pass ringing on the tone step sat at −77 dBV across the bins below the tone in
+    /// every point of a THD sweep, read as DC, and was gone once the record started 300 ms after
+    /// the step. Three things pinned here: a generator change while acquiring discards the device
+    /// latency <i>plus</i> the settle; an input-range change discards the latency alone (the DUT
+    /// never sees an ADC gain step); and the applied value is recorded for the saved result.
+    /// </summary>
+    [Fact]
+    public async Task ConfigureGeneratorAsync_WhileAcquiring_DiscardsTheStimulusLatencyPlusTheCaptureDelay()
+    {
+        var device = new RecordingDevice { LatencyFrames = 3584 };
+        var pipeline = new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance);
+        var delay = new CaptureDelaySetting { Ms = 100.0 };
+        var session = new DeviceSessionService(device, pipeline, delay, NullLogger<DeviceSessionService>.Instance);
+        await session.ConnectAsync(CancellationToken.None);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 2, BlockFrameCount: 4096);
+        await session.StartAcquisitionAsync(config, CancellationToken.None);
+        Assert.Null(session.LastAppliedCaptureDelayMs);
+
+        var tone = new GeneratorConfig(
+            new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, -20.0)]), ChannelGeneratorConfig.Off);
+        await session.ConfigureGeneratorAsync(tone, CancellationToken.None);
+
+        // 100 ms at 48 kHz is 4800 frames, on top of the 3584 the device reports in flight.
+        Assert.Equal(3584 + 4800, pipeline.LastFlushDiscardFrames);
+        Assert.Equal(100.0, session.LastAppliedCaptureDelayMs);
+
+        await session.SetInputRangeAsync(6.0, CancellationToken.None);
+        Assert.Equal(3584, pipeline.LastFlushDiscardFrames);
+
+        // Edited between two stimulus changes: the next one uses the new value, and the record follows it.
+        delay.Ms = 250.0;
+        await session.ConfigureGeneratorAsync(GeneratorConfig.Off, CancellationToken.None);
+        Assert.Equal(3584 + 12_000, pipeline.LastFlushDiscardFrames);
+        Assert.Equal(250.0, session.LastAppliedCaptureDelayMs);
+
+        await session.ShutdownAsync();
+    }
+
+    /// <summary>
+    /// The FFT screen's Run configures the generator <i>before</i> acquisition starts, so the
+    /// generator change has no window to flush and the settle would be applied to nothing. The
+    /// acquisition start applies it instead — the settle alone, with no stimulus latency, since
+    /// nothing changed on the wire — and only when a generator channel is on: a generator-less
+    /// capture has nothing to settle.
+    /// </summary>
+    [Fact]
+    public async Task StartAcquisitionAsync_WithTheGeneratorAlreadyOn_DiscardsTheCaptureDelay()
+    {
+        var device = new RecordingDevice { LatencyFrames = 3584 };
+        var pipeline = new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance);
+        var delay = new CaptureDelaySetting { Ms = 100.0 };
+        var session = new DeviceSessionService(device, pipeline, delay, NullLogger<DeviceSessionService>.Instance);
+        await session.ConnectAsync(CancellationToken.None);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 2, BlockFrameCount: 4096);
+
+        // Generator off: Start()'s own bare flush is the last one.
+        await session.StartAcquisitionAsync(config, CancellationToken.None);
+        Assert.Equal(0, pipeline.LastFlushDiscardFrames);
+        Assert.Null(session.LastAppliedCaptureDelayMs);
+        await session.StopAcquisitionAsync();
+
+        var tone = new GeneratorConfig(
+            new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, -20.0)]), ChannelGeneratorConfig.Off);
+        await session.ConfigureGeneratorAsync(tone, CancellationToken.None, config);
+        await session.StartAcquisitionAsync(config, CancellationToken.None);
+
+        Assert.Equal(4800, pipeline.LastFlushDiscardFrames);
+        Assert.Equal(100.0, session.LastAppliedCaptureDelayMs);
+
+        await session.ShutdownAsync();
+    }
+
     [Fact]
     public async Task ShutdownAsync_StopsTheStreamEvenWhenTheGeneratorIsOnAndAcquisitionNeverStarted()
     {
@@ -352,7 +430,10 @@ public class DeviceSessionServiceTests
 
         public bool StopRequested { get; private set; }
 
-        public int StimulusLatencyFrames(double sampleRateHz) => 0;
+        /// <summary>0 by default, like the simulator once was; a test that cares sets a hardware-like figure.</summary>
+        public int LatencyFrames { get; init; }
+
+        public int StimulusLatencyFrames(double sampleRateHz) => LatencyFrames;
 
         public Task<DeviceInfo> ConnectAsync(CancellationToken ct) =>
             Task.FromResult(new DeviceInfo("QA403", "HW-0001", "1.0", IsSimulated: false));

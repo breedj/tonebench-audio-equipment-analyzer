@@ -351,7 +351,9 @@ public sealed class MeasurementSaveService(
         if (snapshots.Length == 0)
             throw new InvalidOperationException("No spectrum has been captured yet.");
 
-        var parameters = BuildParameters();
+        // The settle time is a run record, set here and not in BuildParameters: that method also
+        // writes a type's own params_json, where the field has to stay null.
+        var parameters = BuildParameters() with { CaptureDelayMs = session.LastAppliedCaptureDelayMs };
         string paramsJson = JsonSerializer.Serialize(parameters, SerializerOptions);
         string? genJson = JsonSerializer.Serialize(session.EffectiveGeneratorConfig, SerializerOptions);
 
@@ -425,7 +427,8 @@ public sealed class MeasurementSaveService(
                     request.FixedFreqHz, request.StartAmplitudeVolt, request.EndAmplitudeVolt,
                     request.StepsPerOctave, request.LoadOhms, request.ProcessLeft, request.ProcessRight,
                     request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
-                    request.MeasureNoiseFloor),
+                    request.MeasureNoiseFloor,
+                    CaptureDelayMs: session.LastAppliedCaptureDelayMs),
                 SerializerOptions)
             : JsonSerializer.Serialize(
                 new ThdVsFrequencyParameters(
@@ -433,7 +436,8 @@ public sealed class MeasurementSaveService(
                     request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
                     request.LoadOhms, request.ProcessLeft, request.ProcessRight,
                     request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
-                    request.MeasureNoiseFloor, status.GeneratorAmpDbv),
+                    request.MeasureNoiseFloor, status.GeneratorAmpDbv,
+                    CaptureDelayMs: session.LastAppliedCaptureDelayMs),
                 SerializerOptions);
 
         // One capture per sweep point, in sweep order. Points arrive per channel, so group them back
@@ -495,7 +499,8 @@ public sealed class MeasurementSaveService(
                 LoadOhms: request.LoadOhms,
                 BandwidthReference: request.BandwidthReference.ToString(),
                 BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
-                BandwidthReferenceHighHz: request.BandwidthReferenceHighHz),
+                BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
             SerializerOptions);
 
         var info = session.Info;
@@ -544,7 +549,8 @@ public sealed class MeasurementSaveService(
                 status.GeneratorAmpDbv,
                 BandwidthReference: request.BandwidthReference.ToString(),
                 BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
-                BandwidthReferenceHighHz: request.BandwidthReferenceHighHz),
+                BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
             SerializerOptions);
 
         var info = session.Info;
@@ -597,7 +603,8 @@ public sealed class MeasurementSaveService(
                 request.ReferenceMode.ToString(), request.ReferenceCalibrationId,
                 request.GatePreMs, request.GatePostMs, request.GateWindow.ToString(),
                 request.ExtractHarmonics, request.MaxHarmonicOrder,
-                status.GeneratorAmpDbv, request.ChirpStartHz, request.LoadOhms),
+                status.GeneratorAmpDbv, request.ChirpStartHz, request.LoadOhms,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
             SerializerOptions);
 
         var info = session.Info;
@@ -704,7 +711,8 @@ public sealed class MeasurementSaveService(
                 StartFreqHz: request.StartFreqHz,
                 EndFreqHz: request.EndFreqHz,
                 StepsPerOctave: request.StepsPerOctave,
-                AdaptiveResolution: request.AdaptiveResolution),
+                AdaptiveResolution: request.AdaptiveResolution,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
             SerializerOptions);
 
         var info = session.Info;

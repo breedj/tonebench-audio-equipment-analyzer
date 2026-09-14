@@ -92,6 +92,19 @@ public sealed class SteppedResponseRunner(
     private SteppedResponseRequest? _lastRequest;
 
     /// <summary>
+    /// The points behind <see cref="_traces"/> and the level they were measured at, kept so the
+    /// bandwidth reference can be changed after the run without re-measuring — the same reason
+    /// <c>FrequencyResponseRunner</c> keeps its estimates. Replaced per point, dropped by <see cref="Clear"/>.
+    /// </summary>
+    private (double GeneratorAmpDbv, List<SteppedPoint> Points)? _lastPoints;
+
+    /// <summary>
+    /// A bandwidth reference applied after the run started; the points still to come publish with
+    /// it. Cleared by <see cref="StartAsync"/>, whose request carries the panel's current value.
+    /// </summary>
+    private BandwidthReferenceSpec? _bandwidthOverride;
+
+    /// <summary>
     /// The request the most recent run used. Saving needs the as-run configuration, not whatever the
     /// panel happens to show by the time Save is pressed.
     /// </summary>
@@ -173,6 +186,8 @@ public sealed class SteppedResponseRunner(
                 _phaseKind = request.PhaseKind;
                 _rightChannelIsReference = request.RightChannelIsReference;
                 _traces = [];
+                _lastPoints = null;
+                _bandwidthOverride = null;
             }
 
             _lastRequest = request;
@@ -234,6 +249,7 @@ public sealed class SteppedResponseRunner(
                 throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before clearing.");
 
             _traces = [];
+            _lastPoints = null;
             _phase = FrequencyResponsePhase.Idle;
             _pointsMeasured = 0;
             _pointCount = 0;
@@ -243,6 +259,49 @@ public sealed class SteppedResponseRunner(
 
             return Status;
         }
+    }
+
+    /// <summary>
+    /// Re-finds the bandwidth corners of the traces on screen against a new reference, without
+    /// re-measuring — see <see cref="FrequencyResponseRunner.ApplyBandwidthReference"/>, whose
+    /// reasoning this shares. While a sweep is running the points still to come publish with the
+    /// new reference; the ones already on screen are rebuilt with them.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The band is not one a median can be taken over.</exception>
+    public FrequencyResponseStatus ApplyBandwidthReference(BandwidthReferenceSpec spec)
+    {
+        spec.Validate();
+
+        SteppedResponseRequest? request;
+        (double GeneratorAmpDbv, List<SteppedPoint> Points)? points;
+        lock (_stateLock)
+        {
+            _bandwidthOverride = spec;
+            if (_lastRequest is not null)
+                _lastRequest = WithBandwidthReference(_lastRequest, spec);
+            request = _lastRequest;
+            points = Running ? null : _lastPoints;
+        }
+
+        if (request is not null && points is { } p)
+            PublishTraces(request, p.GeneratorAmpDbv, p.Points);
+
+        return Status;
+    }
+
+    private static SteppedResponseRequest WithBandwidthReference(SteppedResponseRequest request, BandwidthReferenceSpec spec) =>
+        request with
+        {
+            BandwidthReference = spec.Mode,
+            BandwidthReferenceLowHz = spec.LowHz,
+            BandwidthReferenceHighHz = spec.HighHz,
+        };
+
+    /// <summary>The run's request with any reference applied since it started — what a point publishes its traces with.</summary>
+    private SteppedResponseRequest EffectiveRequest(SteppedResponseRequest request)
+    {
+        lock (_stateLock)
+            return _bandwidthOverride is { } spec ? WithBandwidthReference(request, spec) : request;
     }
 
     /// <summary>
@@ -981,10 +1040,14 @@ public sealed class SteppedResponseRunner(
         if (points.Count < 2)
             return;
 
-        var traces = BuildTraces(request, points);
+        var traces = BuildTraces(EffectiveRequest(request), points);
 
         lock (_stateLock)
+        {
             _traces = traces;
+            // A copy: the run keeps appending to its own list, and a rebuild must see a fixed set.
+            _lastPoints = (generatorAmpDbv, [.. points]);
+        }
 
         foreach (var trace in traces)
             hub.Broadcast(StreamFrame.EncodeFrequencyResponse(trace, stepped: true));

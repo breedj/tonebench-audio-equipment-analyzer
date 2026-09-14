@@ -142,25 +142,6 @@ const { showPage } = useManual()
             record always reads 1.
           </td>
         </tr>
-        <tr>
-          <td>Bandwidth reference</td>
-          <td>
-            What the ±1 dB and −3 dB corners are measured down from.
-            <strong>Passband median</strong> (the default) takes the median level over the reference
-            band below. <strong>Peak</strong> uses the highest point of the curve — right only when
-            the DUT's response <em>is</em> a peak, such as a bandpass filter or a tweeter. See
-            <em>Choosing the reference</em> below.
-          </td>
-        </tr>
-        <tr>
-          <td>Reference from / to (Hz)</td>
-          <td>
-            The band the passband median is taken over, 200 Hz – 2 kHz by default. It must lie
-            somewhere the DUT is flat: a band that straddles a corner is already part-way down the
-            roll-off, and every figure referenced to it shifts with it. Shown only for the passband
-            median.
-          </td>
-        </tr>
       </tbody>
     </table>
     <p>
@@ -212,6 +193,31 @@ const { showPage } = useManual()
       with <strong>&lt;</strong> or <strong>&gt;</strong> was never reached inside the measured band —
       that is where the search stopped, not where the response rolls off. Widen the sweep before
       quoting it.
+    </p>
+    <p>
+      At the top of the panel is what those corners are measured down from, and it can be changed
+      after the measurement: the corners are re-found on the curves already on screen, without a new
+      run, and the chart's markers follow. Nothing about the measurement itself moves — the
+      reference is a reading <em>of</em> the response, not a parameter of the stimulus, which is why
+      it lives here and the smoothing, which is baked into the curve, stays in the settings.
+    </p>
+    <ul>
+      <li>
+        <strong>Bandwidth reference</strong> — <strong>Passband median</strong> (the default) takes
+        the median level over the reference band below. <strong>Peak</strong> uses the highest point
+        of the curve — right only when the DUT's response <em>is</em> a peak, such as a bandpass
+        filter or a tweeter. See <em>Choosing the reference</em> below.
+      </li>
+      <li>
+        <strong>Reference from / to (Hz)</strong> — the band the passband median is taken over,
+        200 Hz – 2 kHz by default. It must lie somewhere the DUT is flat: a band that straddles a
+        corner is already part-way down the roll-off, and every figure referenced to it shifts with
+        it. Shown only for the passband median.
+      </li>
+    </ul>
+    <p>
+      The setting is saved with the measurement like the others, so a result saved afterwards
+      records the reference its corners were found against.
     </p>
     <p>
       The two rows answer different questions, which is why one is symmetric and the other is not:

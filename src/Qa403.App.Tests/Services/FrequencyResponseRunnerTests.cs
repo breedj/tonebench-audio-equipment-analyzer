@@ -991,6 +991,63 @@ public class FrequencyResponseRunnerTests
             $"expected the passband reference to reach down the band, lower corner was {bandReferenced.OneDb.LowerHz:0} Hz");
     }
 
+    [Fact]
+    public async Task ApplyBandwidthReference_AfterTheRun_RefindsTheCornersWithoutRemeasuring()
+    {
+        // The reference is a reading of the response, not a parameter of the stimulus, so the panel
+        // can change it after the run and the corners follow -- against the estimates the runner
+        // kept, at full resolution, exactly as a fresh measurement against that reference finds
+        // them. Same DUT as the test above; measured peak-referenced, then re-referenced to the
+        // passband in place, which must agree with measuring passband-referenced outright.
+        var harness = await CreateAsync(new ResonantDevice(CleanDevice(), cornerHz: 10_000.0, resonanceHz: 9_000.0));
+
+        await harness.Runner.StartAsync(
+            Request(smoothing: 24, bandwidthReference: BandwidthReferenceMode.Peak),
+            CancellationToken.None);
+        var peakReferenced = Trace(await AwaitCompletionAsync(harness.Runner), FrequencyResponseTraceKind.Left);
+
+        var reapplied = Trace(
+            harness.Runner.ApplyBandwidthReference(BandwidthReferenceSpec.DefaultBand),
+            FrequencyResponseTraceKind.Left);
+
+        await harness.Runner.StartAsync(Request(smoothing: 24), CancellationToken.None);
+        var bandReferenced = Trace(await AwaitCompletionAsync(harness.Runner), FrequencyResponseTraceKind.Left);
+
+        Assert.NotEqual(peakReferenced.OneDb.LowerHz, reapplied.OneDb.LowerHz);
+        Assert.Equal(BandwidthReferenceMode.BandMedian, reapplied.ReferenceMode);
+        Assert.Equal(bandReferenced.ReferenceDb, reapplied.ReferenceDb, 3);
+        Assert.Equal(bandReferenced.OneDb.LowerHz, reapplied.OneDb.LowerHz, 1);
+        Assert.Equal(bandReferenced.OneDb.UpperHz, reapplied.OneDb.UpperHz, 1);
+        Assert.Equal(bandReferenced.ThreeDb.LowerHz, reapplied.ThreeDb.LowerHz, 1);
+        Assert.Equal(bandReferenced.ThreeDb.UpperHz, reapplied.ThreeDb.UpperHz, 1);
+    }
+
+    [Fact]
+    public async Task ApplyBandwidthReference_IsRecordedOnTheRequestASaveReads()
+    {
+        // A result saved after the reference was changed must carry the reference its corners were
+        // found against, not the one the run started with -- LastRequest is what the save reads.
+        var harness = await CreateAsync(CleanDevice());
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        await AwaitCompletionAsync(harness.Runner);
+
+        harness.Runner.ApplyBandwidthReference(new BandwidthReferenceSpec(BandwidthReferenceMode.BandMedian, 500.0, 5_000.0));
+
+        var request = Assert.IsType<FrequencyResponseRequest>(harness.Runner.LastRequest);
+        Assert.Equal(BandwidthReferenceMode.BandMedian, request.BandwidthReference);
+        Assert.Equal(500.0, request.BandwidthReferenceLowHz);
+        Assert.Equal(5_000.0, request.BandwidthReferenceHighHz);
+    }
+
+    [Fact]
+    public async Task ApplyBandwidthReference_WithNothingMeasured_ChangesNothingButIsNotAnError()
+    {
+        var harness = await CreateAsync(CleanDevice());
+        var status = harness.Runner.ApplyBandwidthReference(BandwidthReferenceSpec.Peak);
+        Assert.Empty(status.Traces);
+        Assert.Null(harness.Runner.LastRequest);
+    }
+
     /// <summary>
     /// Wraps a simulated device and low-passes its left channel, so a test has a DUT with a corner
     /// the measurement is supposed to find. Only the left input is filtered — the right stays the

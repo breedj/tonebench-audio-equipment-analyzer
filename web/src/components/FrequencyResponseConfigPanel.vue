@@ -6,10 +6,10 @@ import {
   RESPONSE_SPANS_HZ,
   type FrequencyResponseParameters,
   type FrequencyResponseStartRequest,
-  type ResponseReferenceModeName,
   type SweepLevelMode,
   type SweepLevelUnit,
 } from '../api/client'
+import { useBandwidthReference } from '../composables/useBandwidthReference'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -39,22 +39,6 @@ const LEVEL_MODES: { value: SweepLevelMode; label: string }[] = [
   { value: 'OutputPower', label: 'Output power' },
 ]
 
-/**
- * What the ±1 dB and −3 dB corners are measured down from.
- *
- * "Passband median" is the default because the peak is only the right reference when the DUT's
- * response *is* a peak. An output transformer's leakage inductance resonating against its winding
- * capacitance sits above the audio band and is routinely several dB above the passband, so a peak
- * reference puts the −1 dB threshold above the whole passband and both corners land on the
- * resonance's own skirts — a correct measurement of the resonance that says nothing about the
- * amplifier. Pick "Peak" for a bandpass filter, a tweeter, or anything else whose response is one
- * hump.
- */
-const BANDWIDTH_REFERENCES: { value: ResponseReferenceModeName; label: string }[] = [
-  { value: 'BandMedian', label: 'Passband median' },
-  { value: 'Peak', label: 'Peak' },
-]
-
 const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
   { value: 'MilliVolt', label: 'mV' },
   { value: 'Volt', label: 'V' },
@@ -76,10 +60,11 @@ const form = reactive({
   smoothingDenominator: 24,
   averageCount: 1,
   chirpStartHz: 2,
-  bandwidthReference: 'BandMedian' as ResponseReferenceModeName,
-  bandwidthReferenceLowHz: 200,
-  bandwidthReferenceHighHz: 2000,
 })
+
+// Edited in the Measurements panel next to the corners they define, saved and sent from here —
+// see useBandwidthReference. Watched with the form below, since they are part of the stored type.
+const { bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz } = useBandwidthReference()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 
@@ -119,12 +104,12 @@ function applyStoredParams(paramsJson: string) {
   // Absent on a type saved before the reference was configurable. Those runs were peak-referenced,
   // but the default here is the passband median on purpose: the stored value describes how the type
   // was last configured, not a promise to keep reproducing a reference that was wrong for it.
-  if (stored.bandwidthReference) form.bandwidthReference = stored.bandwidthReference
+  if (stored.bandwidthReference) bandwidthReference.value = stored.bandwidthReference
   if (typeof stored.bandwidthReferenceLowHz === 'number') {
-    form.bandwidthReferenceLowHz = stored.bandwidthReferenceLowHz
+    bandwidthReferenceLowHz.value = stored.bandwidthReferenceLowHz
   }
   if (typeof stored.bandwidthReferenceHighHz === 'number') {
-    form.bandwidthReferenceHighHz = stored.bandwidthReferenceHighHz
+    bandwidthReferenceHighHz.value = stored.bandwidthReferenceHighHz
   }
   // Shared state rather than a form field, so it is written through the composable — a type that
   // stored a load restores it for every screen reading the same one.
@@ -149,7 +134,7 @@ watch(
 // so "something in the form moved" is exactly the condition. The load is watched alongside it
 // because it is saved with the type but lives in a shared composable, not in the form.
 watch(
-  [form, loadOhms],
+  [form, loadOhms, bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz],
   () => {
     if (!restoring) markDirty()
   },
@@ -165,7 +150,7 @@ const solvesLevel = computed(() => form.levelMode !== 'GeneratorVoltage')
 const sampleRateHz = computed(() => form.frequencySpanHz * 2)
 
 /** The band boxes are only read — and so only validated and only shown — by the median reference. */
-const usesReferenceBand = computed(() => form.bandwidthReference === 'BandMedian')
+const usesReferenceBand = computed(() => bandwidthReference.value === 'BandMedian')
 
 /**
  * The analysis size. The base size scales with the sample rate (32768 / 65536 / 131072 for
@@ -213,11 +198,11 @@ const invalid = computed<string | null>(() => {
   // Checked only when a run would read it — an untouched default must never block a measurement
   // that never looks at it, the rule the impedance panel's two stimulus groups already follow.
   if (usesReferenceBand.value) {
-    if (!Number.isFinite(form.bandwidthReferenceLowHz) || !Number.isFinite(form.bandwidthReferenceHighHz))
+    if (!Number.isFinite(bandwidthReferenceLowHz.value) || !Number.isFinite(bandwidthReferenceHighHz.value))
       return 'The reference band must be two numbers.'
-    if (form.bandwidthReferenceLowHz < 1 || form.bandwidthReferenceHighHz > 96000)
+    if (bandwidthReferenceLowHz.value < 1 || bandwidthReferenceHighHz.value > 96000)
       return 'The reference band must lie between 1 Hz and 96 kHz.'
-    if (form.bandwidthReferenceHighHz <= form.bandwidthReferenceLowHz)
+    if (bandwidthReferenceHighHz.value <= bandwidthReferenceLowHz.value)
       return 'The reference band must end above where it starts.'
   }
   return null
@@ -245,9 +230,9 @@ function buildParamsJson(): string {
     averageCount: form.averageCount,
     chirpStartHz: form.chirpStartHz,
     loadOhms: loadOhms.value,
-    bandwidthReference: form.bandwidthReference,
-    bandwidthReferenceLowHz: form.bandwidthReferenceLowHz,
-    bandwidthReferenceHighHz: form.bandwidthReferenceHighHz,
+    bandwidthReference: bandwidthReference.value,
+    bandwidthReferenceLowHz: bandwidthReferenceLowHz.value,
+    bandwidthReferenceHighHz: bandwidthReferenceHighHz.value,
     generatorAmpDbv: null,
   }
   return JSON.stringify(parameters)
@@ -273,9 +258,9 @@ function buildRequest(continuous: boolean): FrequencyResponseStartRequest | null
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
     chirpStartHz: form.chirpStartHz,
-    bandwidthReference: form.bandwidthReference,
-    bandwidthReferenceLowHz: form.bandwidthReferenceLowHz,
-    bandwidthReferenceHighHz: form.bandwidthReferenceHighHz,
+    bandwidthReference: bandwidthReference.value,
+    bandwidthReferenceLowHz: bandwidthReferenceLowHz.value,
+    bandwidthReferenceHighHz: bandwidthReferenceHighHz.value,
     continuous,
   }
 }
@@ -429,47 +414,6 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
       />
     </label>
-
-    <label
-      class="flex flex-col gap-1 text-xs"
-      title="What the bandwidth corners are measured down from. Passband median is right for an amplifier: its output transformer's HF resonance is often taller than the passband, and referencing the peak then measures the resonance instead. Pick Peak for a DUT whose response is itself a peak."
-    >
-      Bandwidth reference
-      <select
-        v-model="form.bandwidthReference"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-      >
-        <option v-for="option in BANDWIDTH_REFERENCES" :key="option.value" :value="option.value">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
-
-    <div v-if="usesReferenceBand" class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="Bottom of the band the reference level is the median of.">
-        Reference from (Hz)
-        <input
-          v-model.number="form.bandwidthReferenceLowHz"
-          type="number"
-          min="1"
-          max="96000"
-          :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        />
-      </label>
-      <label class="flex flex-col gap-1" title="Top of the band the reference level is the median of.">
-        Reference to (Hz)
-        <input
-          v-model.number="form.bandwidthReferenceHighHz"
-          type="number"
-          min="1"
-          max="96000"
-          :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        />
-      </label>
-    </div>
 
     <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
       Analysis: {{ (sampleRateHz / 1000).toFixed(0) }} kHz · {{ fftSize }} points ·

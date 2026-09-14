@@ -108,19 +108,17 @@ const { showPage } = useManual()
             reference comparable with a THD sweep. The line underneath states what will be used.
           </td>
         </tr>
-        <tr>
-          <td>Bandwidth reference</td>
-          <td>
-            What the ±1 dB and −3 dB corners are measured down from, with the reference band
-            underneath it. The same control, the same default and the same reasoning as the chirp
-            measurement's — see
-            <button type="button" class="manual-link" @click="showPage('frequency-response')">
-              Frequency response
-            </button>.
-          </td>
-        </tr>
       </tbody>
     </table>
+    <p>
+      What the ±1 dB and −3 dB corners are measured down from is set at the top of the
+      <strong>Measurements</strong> panel, not here: the same control, the same default and the
+      same reasoning as the chirp measurement's, and changed after the sweep it re-finds the corners
+      of the points already on screen — see
+      <button type="button" class="manual-link" @click="showPage('frequency-response')">
+        Frequency response
+      </button>.
+    </p>
 
     <h2>What the views show</h2>
     <p>

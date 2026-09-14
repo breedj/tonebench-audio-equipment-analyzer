@@ -3,12 +3,15 @@ import { computed } from 'vue'
 import type { ResponseView } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { formatBandwidth, formatCorner, formatDb, formatHz, formatRatio } from '../response/format'
+import BandwidthReferenceControls from './BandwidthReferenceControls.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const props = defineProps<{
   traces: ResponseTrace[]
   view: ResponseView
   showLeft: boolean
+  /** Which measurement the reference controls apply their change to. */
+  stepped: boolean
 }>()
 
 const showOneDb = defineModel<boolean>('showOneDb', { required: true })
@@ -28,7 +31,7 @@ const trace = computed<ResponseTrace | null>(() => {
  * distinction is real: in the dBV view the peak is an output level, in the gain view it is a gain.
  */
 const peakLabel = computed(() => (props.view === 'Gain' ? 'Max. gain' : 'Max. amplitude'))
-const peakFreqLabel = computed(() => (props.view === 'Gain' ? 'Highest gain freq.' : 'Highest amplitude freq.'))
+const peakFreqLabel = 'Peak at'
 
 /**
  * What the two rows were measured down from, spelled out — because the same table reads completely
@@ -46,6 +49,10 @@ const referenceLabel = computed(() => {
 
 <template>
   <CollapsibleSection title="Measurements">
+    <!-- The reference the corners below are measured down from, above them: changing it re-finds
+         the corners on the curves already on screen (see BandwidthReferenceControls). -->
+    <BandwidthReferenceControls :stepped="stepped" />
+
     <table v-if="trace" class="w-full text-left text-[11px] whitespace-nowrap">
       <thead class="text-neutral-500 dark:text-neutral-400">
         <tr>
@@ -78,19 +85,25 @@ const referenceLabel = computed(() => {
       </tbody>
     </table>
 
-    <dl v-if="trace" class="mt-2 grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 text-xs">
+    <!-- The label column is the one that gives: a value split over two lines ("4.41" / "dB") reads
+         as two numbers, a label split over two does not. -->
+    <dl v-if="trace" class="mt-2 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-3 gap-y-1 text-xs">
       <dt class="text-neutral-500 dark:text-neutral-400">{{ peakLabel }}</dt>
-      <dd class="font-mono">{{ formatDb(trace.peakDb) }}</dd>
-      <dd class="font-mono text-neutral-500 dark:text-neutral-400">{{ formatRatio(trace.peakDb) }}</dd>
+      <dd class="whitespace-nowrap font-mono">{{ formatDb(trace.peakDb) }}</dd>
+      <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ formatRatio(trace.peakDb) }}</dd>
 
       <dt class="text-neutral-500 dark:text-neutral-400">{{ peakFreqLabel }}</dt>
-      <dd class="font-mono">{{ formatHz(trace.peakFreqHz) }}</dd>
+      <dd class="whitespace-nowrap font-mono">{{ formatHz(trace.peakFreqHz) }}</dd>
       <dd></dd>
 
+      <!-- One cell across both value columns: a mode name in the third column would set that
+           column's width for every row and squeeze the labels above into wrapping. -->
       <template v-if="referenceLabel">
         <dt class="text-neutral-500 dark:text-neutral-400">Reference</dt>
-        <dd class="font-mono">{{ trace.referenceDb === null ? '—' : formatDb(trace.referenceDb) }}</dd>
-        <dd class="text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</dd>
+        <dd class="col-span-2">
+          <span class="whitespace-nowrap font-mono">{{ trace.referenceDb === null ? '—' : formatDb(trace.referenceDb) }}</span>
+          <span class="ml-3 text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</span>
+        </dd>
       </template>
     </dl>
 

@@ -65,6 +65,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ThdAmplitudeSweepStartRequest))]
 [JsonSerializable(typeof(ThdVsAmplitudeParameters))]
 [JsonSerializable(typeof(FrequencyResponseStartRequest))]
+[JsonSerializable(typeof(BandwidthReferenceRequest))]
 [JsonSerializable(typeof(FrequencyResponseStarted))]
 [JsonSerializable(typeof(FrequencyResponseStatus))]
 [JsonSerializable(typeof(SaveFrequencyResponseRequest))]

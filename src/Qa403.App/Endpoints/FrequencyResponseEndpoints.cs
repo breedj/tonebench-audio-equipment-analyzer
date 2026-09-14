@@ -54,6 +54,30 @@ public static class FrequencyResponseEndpoints
         // mid-measurement can redraw what has been measured rather than waiting for a rerun.
         group.MapGet("/status", (FrequencyResponseRunner runner) => Results.Ok(runner.Status));
 
+        // The bandwidth reference is a reading of the response rather than a parameter of the
+        // stimulus, so it can be changed after the run: the runner re-finds the corners on the
+        // full-resolution estimates it kept and pushes the rebuilt traces out. See
+        // FrequencyResponseRunner.ApplyBandwidthReference.
+        group.MapPut("/bandwidth-reference", (BandwidthReferenceRequest request, FrequencyResponseRunner runner) =>
+        {
+            if (!EnumParsing.TryParse(
+                    request.BandwidthReference, BandwidthReferenceMode.BandMedian,
+                    out BandwidthReferenceMode mode, out var referenceError))
+            {
+                return Results.BadRequest(referenceError);
+            }
+
+            try
+            {
+                return Results.Ok(runner.ApplyBandwidthReference(
+                    new BandwidthReferenceSpec(mode, request.BandwidthReferenceLowHz, request.BandwidthReferenceHighHz)));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
         group.MapPost("/clear", (FrequencyResponseRunner runner) =>
         {
             try
@@ -98,6 +122,16 @@ public static class FrequencyResponseEndpoints
 /// <param name="ResolutionMultiplier">1, 2 or 4 — the FFT size multiplier giving 1.46, 0.73 or 0.37 Hz bins.</param>
 /// <param name="LevelMode">GeneratorVoltage ("Input voltage"), OutputVoltage or OutputPower.</param>
 /// <param name="SmoothingDenominator">0 (none), 69, 48, 24, 12, 6 or 3 — the N in 1/N octave.</param>
+/// <summary>
+/// The wire shape of <c>PUT /api/frequency-response/bandwidth-reference</c> and its stepped twin:
+/// the same three fields the start requests carry, applied to the traces already on screen.
+/// </summary>
+/// <param name="BandwidthReference">BandMedian or Peak.</param>
+public sealed record BandwidthReferenceRequest(
+    string? BandwidthReference,
+    double BandwidthReferenceLowHz,
+    double BandwidthReferenceHighHz);
+
 public sealed record FrequencyResponseStartRequest(
     double FrequencySpanHz,
     int ResolutionMultiplier,

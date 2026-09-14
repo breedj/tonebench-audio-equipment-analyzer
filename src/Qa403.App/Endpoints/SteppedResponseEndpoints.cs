@@ -63,6 +63,30 @@ public static class SteppedResponseEndpoints
         // mid-run can redraw what has been measured rather than waiting for a rerun.
         group.MapGet("/status", (SteppedResponseRunner runner) => Results.Ok(runner.Status));
 
+        // The bandwidth reference is a reading of the response rather than a parameter of the
+        // stimulus, so it can be changed after the run: the runner re-finds the corners on the
+        // full-resolution estimates it kept and pushes the rebuilt traces out. See
+        // SteppedResponseRunner.ApplyBandwidthReference.
+        group.MapPut("/bandwidth-reference", (BandwidthReferenceRequest request, SteppedResponseRunner runner) =>
+        {
+            if (!EnumParsing.TryParse(
+                    request.BandwidthReference, BandwidthReferenceMode.BandMedian,
+                    out BandwidthReferenceMode mode, out var referenceError))
+            {
+                return Results.BadRequest(referenceError);
+            }
+
+            try
+            {
+                return Results.Ok(runner.ApplyBandwidthReference(
+                    new BandwidthReferenceSpec(mode, request.BandwidthReferenceLowHz, request.BandwidthReferenceHighHz)));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
         group.MapPost("/clear", (SteppedResponseRunner runner) =>
         {
             try

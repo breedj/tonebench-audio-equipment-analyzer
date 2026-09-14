@@ -86,6 +86,24 @@ public sealed class FrequencyResponseRunner(
     private FrequencyResponseRequest? _lastRequest;
 
     /// <summary>
+    /// The full-resolution estimates behind <see cref="_traces"/>, kept so the bandwidth reference
+    /// can be changed after the run without re-measuring. The corners are found on the
+    /// full-resolution smoothed trace <i>before</i> decimation (see
+    /// <see cref="ResponseCaptureSupport.BuildTraces"/>), so the decimated traces cannot answer for
+    /// a new reference — half a display column at the low end is several hertz. Three arrays of
+    /// <c>FftSize/2</c> doubles, replaced per pass and dropped by <see cref="Clear"/>.
+    /// </summary>
+    private (double GeneratorAmpDbv, FrequencyResponseResult Left, FrequencyResponseResult Right, FrequencyResponseResult? Gain)? _lastResults;
+
+    /// <summary>
+    /// A bandwidth reference applied after the run started, which the next pass of a continuous run
+    /// builds its traces with — the panel's change would otherwise show for one redraw and be
+    /// undone by the pass that followed. Cleared by <see cref="StartAsync"/>, whose request carries
+    /// the panel's current value itself.
+    /// </summary>
+    private BandwidthReferenceSpec? _bandwidthOverride;
+
+    /// <summary>
     /// The request the most recent run used. Saving needs the as-run configuration, not whatever the
     /// panel happens to show by the time Save is pressed.
     /// </summary>
@@ -153,6 +171,8 @@ public sealed class FrequencyResponseRunner(
                 _error = null;
                 _rightChannelIsReference = request.RightChannelIsReference;
                 _traces = [];
+                _lastResults = null;
+                _bandwidthOverride = null;
             }
 
             _lastRequest = request;
@@ -207,6 +227,7 @@ public sealed class FrequencyResponseRunner(
                 throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before clearing.");
 
             _traces = [];
+            _lastResults = null;
             _phase = FrequencyResponsePhase.Idle;
             _continuous = false;
             _passesCompleted = 0;
@@ -218,6 +239,63 @@ public sealed class FrequencyResponseRunner(
 
             return Status;
         }
+    }
+
+    /// <summary>
+    /// Re-finds the bandwidth corners of the traces on screen against a new reference, without
+    /// re-measuring, and pushes the rebuilt traces out the way a pass does. What is measured is
+    /// untouched: the reference is a reading <i>of</i> the response, not a parameter of the stimulus,
+    /// which is why it can move after the fact when the smoothing, say, cannot.
+    ///
+    /// <para>Also recorded on <see cref="LastRequest"/>, so a result saved afterwards carries the
+    /// reference its corners were actually found against. During a continuous run the rebuild is
+    /// left to the next pass — it is at most a record away, and racing it for the same traces would
+    /// gain nothing.</para>
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The band is not one a median can be taken over.</exception>
+    public FrequencyResponseStatus ApplyBandwidthReference(BandwidthReferenceSpec spec)
+    {
+        spec.Validate();
+
+        FrequencyResponseRequest? request;
+        (double GeneratorAmpDbv, FrequencyResponseResult Left, FrequencyResponseResult Right, FrequencyResponseResult? Gain)? results;
+        lock (_stateLock)
+        {
+            _bandwidthOverride = spec;
+            if (_lastRequest is not null)
+                _lastRequest = WithBandwidthReference(_lastRequest, spec);
+            request = _lastRequest;
+            results = Running ? null : _lastResults;
+        }
+
+        if (request is null || results is not { } r)
+            return Status;
+
+        // Outside the lock: smoothing and corner-finding walk every bin of three traces.
+        var traces = ResponseCaptureSupport.BuildTraces(request, r.GeneratorAmpDbv, DisplayColumns, r.Left, r.Right, r.Gain);
+
+        lock (_stateLock)
+            _traces = traces;
+
+        foreach (var trace in traces)
+            hub.Broadcast(StreamFrame.EncodeFrequencyResponse(trace));
+
+        return Status;
+    }
+
+    private static FrequencyResponseRequest WithBandwidthReference(FrequencyResponseRequest request, BandwidthReferenceSpec spec) =>
+        request with
+        {
+            BandwidthReference = spec.Mode,
+            BandwidthReferenceLowHz = spec.LowHz,
+            BandwidthReferenceHighHz = spec.HighHz,
+        };
+
+    /// <summary>The run's request with any reference applied since it started — what a pass builds its traces with.</summary>
+    private FrequencyResponseRequest EffectiveRequest(FrequencyResponseRequest request)
+    {
+        lock (_stateLock)
+            return _bandwidthOverride is { } spec ? WithBandwidthReference(request, spec) : request;
     }
 
     private async Task RunAsync(FrequencyResponseRequest request, CancellationToken ct)
@@ -509,8 +587,14 @@ public sealed class FrequencyResponseRunner(
             BroadcastProgress(record + 1, request.AverageCount, FrequencyResponsePhase.Measuring);
         }
 
-        return (ResponseCaptureSupport.BuildTraces(
-            request, generatorAmpDbv, DisplayColumns, left.Complete(), right.Complete(), gain?.Complete()), peakDbv);
+        var results = (generatorAmpDbv, left.Complete(), right.Complete(), gain?.Complete());
+        var traces = ResponseCaptureSupport.BuildTraces(
+            EffectiveRequest(request), results.Item1, DisplayColumns, results.Item2, results.Item3, results.Item4);
+
+        lock (_stateLock)
+            _lastResults = results;
+
+        return (traces, peakDbv);
     }
 
     /// <summary>

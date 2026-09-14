@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
-import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import type { DecayLayout, DecayPick, OrientedSurface, WallRib } from '../measurements/decay'
 import {
@@ -76,6 +77,10 @@ const { isDark } = useAppTheme()
 
 const container = ref<HTMLDivElement | null>(null)
 const canvas = ref<HTMLCanvasElement | null>(null)
+// Fitted to the view — see charts/useResultChartHeight.ts. This chart has no furniture of its own:
+// the container is the root and the canvas fills it, so the fit is the view's height outright.
+const chartHeight = useResultChartHeight(container, canvas)
+watch(chartHeight, () => draw())
 /**
  * The marker under the cursor, on its own canvas over the chart. A mousemove must not redraw the
  * waterfall: a 400-column surface times eighty curves is tens of thousands of segments, and paying
@@ -135,7 +140,7 @@ function draw() {
   if (!element || !box) return
 
   const cssWidth = Math.max(200, box.getBoundingClientRect().width)
-  const cssHeight = RESULT_CHART_HEIGHT_PX
+  const cssHeight = chartHeight.value
   const dpr = window.devicePixelRatio || 1
 
   // Only the backing store is sized here. The CSS width is the `w-full` class's, deliberately: this
@@ -851,6 +856,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="container" class="relative w-full">
+    <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
     <canvas
       ref="canvas"
       class="block w-full"

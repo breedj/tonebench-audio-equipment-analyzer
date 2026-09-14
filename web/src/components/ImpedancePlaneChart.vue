@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ImpedanceTrace } from '../composables/useImpedance'
 import { fitTransform, niceTicks, type Viewport } from '../charts/planeTransform'
-import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { formatHz } from '../response/format'
 import { dbOhmsToOhms, formatOhms } from '../impedance/equivalent'
@@ -39,8 +40,11 @@ const { isDark } = useAppTheme()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const overlay = ref<HTMLCanvasElement | null>(null)
 const container = ref<HTMLDivElement | null>(null)
+const root = ref<HTMLDivElement | null>(null)
 
-const CHART_HEIGHT_PX = RESULT_CHART_HEIGHT_PX
+// Fitted to the view — see charts/useResultChartHeight.ts; set as an inline style on the plot box
+// so the ResizeObserver below keeps reading one number whatever changed.
+const chartHeight = useResultChartHeight(root, container)
 const INSETS = { left: 62, right: 18, top: 16, bottom: 34 }
 
 const CURVE_COLOR = ['#111827', '#f3f4f6'] as const
@@ -129,7 +133,7 @@ function draw() {
 
   const ratio = window.devicePixelRatio || 1
   const width = box.clientWidth || 800
-  const height = box.clientHeight || CHART_HEIGHT_PX
+  const height = box.clientHeight || chartHeight.value
 
   for (const c of [el, overlay.value]) {
     if (!c) continue
@@ -229,7 +233,7 @@ function drawMarker() {
 
   const ratio = window.devicePixelRatio || 1
   const width = box.clientWidth || 800
-  const height = box.clientHeight || CHART_HEIGHT_PX
+  const height = box.clientHeight || chartHeight.value
 
   const ctx = el.getContext('2d')
   if (!ctx) return
@@ -256,7 +260,7 @@ function onMove(event: MouseEvent) {
 
   const rect = box.getBoundingClientRect()
   const width = box.clientWidth || 800
-  const height = box.clientHeight || CHART_HEIGHT_PX
+  const height = box.clientHeight || chartHeight.value
   const transform = fitTransform(viewport.value, width, height, INSETS, true)
 
   const mx = event.clientX - rect.left
@@ -325,8 +329,9 @@ watch([isDark, () => props.thickLines], () => draw())
 </script>
 
 <template>
-  <div class="flex flex-col gap-2">
-    <div class="flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+  <div ref="root" class="relative flex flex-col gap-2">
+    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+    <div class="pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span v-if="hoverText" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
         <span class="text-neutral-800 dark:text-neutral-100">{{ hoverText.freq }}</span>
         <span>R <span class="text-neutral-800 dark:text-neutral-100">{{ hoverText.r }}</span></span>
@@ -341,7 +346,7 @@ watch([isDark, () => props.thickLines], () => draw())
     <div
       ref="container"
       class="relative w-full"
-      :style="{ height: `${CHART_HEIGHT_PX}px` }"
+      :style="{ height: `${chartHeight}px` }"
       @mousemove="onMove"
       @mouseleave="onLeave"
     >

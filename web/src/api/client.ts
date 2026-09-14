@@ -260,6 +260,10 @@ export interface ImpedanceFixtureConfig {
 export interface UiLayoutConfig {
   /** Whether the measurement sidebar stays open at full width; unpinned it collapses to icons and floats open on hover. */
   sidebarPinned: boolean
+  /** Whether the settings rail left of the chart is collapsed to its edge strip. */
+  settingsRailCollapsed: boolean
+  /** Whether the display rail right of the chart is collapsed to its edge strip (applies where it is a column, ≥ 1280 px). */
+  displayRailCollapsed: boolean
 }
 
 /**
@@ -696,6 +700,17 @@ export interface ResponseBandwidthJson {
 
 /** What a trace's bandwidth corners were measured down from. Mirrors BandwidthReferenceMode. */
 export type ResponseReferenceModeName = 'Peak' | 'BandMedian'
+
+/**
+ * The bandwidth reference applied to the response traces on screen — `PUT .../bandwidth-reference`
+ * on either response measurement. The same three fields the start requests carry; here they
+ * re-find the corners of what was already measured, without a new run.
+ */
+export interface BandwidthReferenceRequest {
+  bandwidthReference: ResponseReferenceModeName
+  bandwidthReferenceLowHz: number
+  bandwidthReferenceHighHz: number
+}
 
 export interface FrequencyResponseTraceJson {
   kind: ResponseTraceKindName
@@ -1785,6 +1800,11 @@ export const api = {
   saveFrequencyResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/frequency-response/save', { method: 'POST', body: JSON.stringify(req) }),
 
+  // Re-finds the corners of the traces on screen against a new reference; the rebuilt traces
+  // arrive over the stream like a pass's, and the status is returned for whoever wants it.
+  setFrequencyResponseBandwidthReference: (req: BandwidthReferenceRequest) =>
+    request<FrequencyResponseStatus>('/frequency-response/bandwidth-reference', { method: 'PUT', body: JSON.stringify(req) }),
+
   // The stepped-sine Bode plot. Deliberately the same five verbs and the same status payload as the
   // chirp above: the two produce identical data and the browser drives them through one store.
   startSteppedResponse: (req: SteppedResponseStartRequest) =>
@@ -1800,6 +1820,9 @@ export const api = {
 
   saveSteppedResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/stepped-response/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  setSteppedResponseBandwidthReference: (req: BandwidthReferenceRequest) =>
+    request<FrequencyResponseStatus>('/stepped-response/bandwidth-reference', { method: 'PUT', body: JSON.stringify(req) }),
 
   // The impulse response. The same five verbs as the two response measurements above, plus the
   // loopback calibration sub-resource — capturing one has a physical precondition (patch the

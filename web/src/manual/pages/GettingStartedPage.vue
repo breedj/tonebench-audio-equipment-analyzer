@@ -54,7 +54,9 @@ const { showPage } = useManual()
       measurement, still selectable, with the name in a tooltip — and gives the chart the width it
       was using; moving the pointer onto the column opens the full menu over the chart, and moving
       off it closes it again. Pin it back with the same button. Whether it is pinned is remembered
-      on this machine, for every browser tab.
+      on this machine, for every browser tab. On a window narrower than 1080 px a pinned sidebar
+      behaves as the column of icons anyway, and comes back as a column when the window is wider
+      again.
     </p>
     <p>
       A red dot next to a measurement's name means its settings have been changed but not saved.

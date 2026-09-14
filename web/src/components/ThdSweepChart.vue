@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useSweep } from '../composables/useSweep'
@@ -114,9 +115,12 @@ const { points, thdMethod } = useSweep()
 const { isDark } = useAppTheme()
 const { loadOhms } = useLoadOhms()
 
+const rootRef = ref<HTMLElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 
-const CHART_HEIGHT = RESULT_CHART_HEIGHT_PX
+// Fitted to the view — see charts/useResultChartHeight.ts. uPlot sizes the container itself, so a
+// new height is applied through setSize, the same call a width change makes in handleResize.
+const chartHeight = useResultChartHeight(rootRef, containerRef)
 
 /**
  * One entry per drawn trace. Order is fixed and shared by buildOptions and update() — the series
@@ -408,7 +412,7 @@ function buildOptions(width: number): uPlot.Options {
 
   return {
     width,
-    height: CHART_HEIGHT,
+    height: chartHeight.value,
     scales: {
       // Both axes *start* pinned to the dropdowns rather than fitted to the data. auto:false is
       // what makes that stick -- otherwise every setData() re-fits, and a sweep calls setData once
@@ -848,26 +852,34 @@ watch(
   () => update(),
 )
 
+// Observes the container rather than the window: the column this chart sits in also changes width
+// when the measurement sidebar is pinned or unpinned, which is not a window resize — measured, the
+// canvas stayed at 432 px inside a column that had grown to 661 px. Same mechanism as the
+// ResizeObserver in FrequencyResponseChart.
+let resizeObserver: ResizeObserver | null = null
 function handleResize() {
   if (plot && containerRef.value)
-    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
+    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: chartHeight.value })
 }
+watch(chartHeight, handleResize)
 
 onMounted(() => {
-  window.addEventListener('resize', handleResize)
+  resizeObserver = new ResizeObserver(handleResize)
+  if (containerRef.value) resizeObserver.observe(containerRef.value)
   update()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
+  resizeObserver?.disconnect()
   plot?.destroy()
   plot = null
 })
 </script>
 
 <template>
-  <section class="flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+  <section ref="rootRef" class="relative flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+    <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
+    <div class="pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Distortion vs {{ sweepXLabel(props.xAxis).toLowerCase() }}</span>
       <span v-if="!hasData">No sweep data yet — press Run sweep.</span>
       <!-- The only visible sign that the axes are no longer the window the display panel's

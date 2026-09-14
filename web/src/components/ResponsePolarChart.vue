@@ -4,7 +4,8 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import type { ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { responseOverlayDash } from '../measurements/sweepOverlayStyles'
-import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { fitTransform, niceTicks, type PlaneTransform, type Viewport } from '../charts/planeTransform'
 import { toComplexCurve, type ComplexPoint } from '../response/complexPlane'
 import { stabilityMargins } from '../response/margins'
@@ -64,10 +65,13 @@ const props = defineProps<{
 
 const { isDark } = useAppTheme()
 
+const root = ref<HTMLDivElement | null>(null)
 const container = ref<HTMLDivElement | null>(null)
 const canvas = ref<HTMLCanvasElement | null>(null)
 
-const CHART_HEIGHT_PX = RESULT_CHART_HEIGHT_PX
+// Fitted to the view — see charts/useResultChartHeight.ts; set as an inline style on the plot box
+// so the ResizeObserver below keeps reading one number whatever changed.
+const chartHeight = useResultChartHeight(root, container)
 const INSETS = { left: 56, right: 16, top: 16, bottom: 34 }
 
 const CURVE_COLOR = ['#111827', '#f3f4f6'] as const
@@ -210,7 +214,7 @@ function draw() {
 
   const dpr = window.devicePixelRatio || 1
   const width = box.clientWidth || 800
-  const height = box.clientHeight || CHART_HEIGHT_PX
+  const height = box.clientHeight || chartHeight.value
 
   // Only resize when it actually changed: assigning width/height clears the canvas, so doing it
   // every frame is both a wasted allocation and a guaranteed flash.
@@ -689,8 +693,9 @@ defineExpose({ margins, curve })
 </script>
 
 <template>
-  <div class="flex flex-col gap-2">
-    <div class="flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+  <div ref="root" class="relative flex flex-col gap-2">
+    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+    <div class="pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span v-if="hover" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
         <span class="text-neutral-800 dark:text-neutral-100">{{ formatHz(hover.freqHz) }}</span>
         <span>{{ hover.magDb.toFixed(2) }} dB</span>
@@ -712,7 +717,7 @@ defineExpose({ margins, curve })
       <span v-else class="shrink-0">Drag a box to zoom</span>
     </div>
 
-    <div ref="container" class="relative w-full" :style="{ height: `${CHART_HEIGHT_PX}px` }">
+    <div ref="container" class="relative w-full" :style="{ height: `${chartHeight}px` }">
       <canvas
         ref="canvas"
         class="h-full w-full touch-none"

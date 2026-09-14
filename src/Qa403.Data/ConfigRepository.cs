@@ -57,7 +57,19 @@ public sealed record ImpedanceFixtureConfig(
 /// icons and floats open over the content while hovered, which is the extra chart width a small
 /// screen needs. Pinned is the default because it is what the app always did.
 /// </param>
-public sealed record UiLayoutConfig(bool SidebarPinned = true)
+/// <param name="SettingsRailCollapsed">
+/// Whether the settings rail on the left of every measurement screen is collapsed to its edge
+/// strip, leaving the width to the chart. The strip carries the button that opens it again.
+/// </param>
+/// <param name="DisplayRailCollapsed">
+/// The same for the display rail on the right. Only meaningful on a window wide enough for that
+/// rail to be a column (1280 px); narrower, the display sections sit under the chart and the flag
+/// is kept but not applied.
+/// </param>
+public sealed record UiLayoutConfig(
+    bool SidebarPinned = true,
+    bool SettingsRailCollapsed = false,
+    bool DisplayRailCollapsed = false)
 {
     public static UiLayoutConfig Default { get; } = new();
 }

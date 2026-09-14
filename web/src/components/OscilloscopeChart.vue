@@ -273,6 +273,11 @@ watch(() => props.scope, update)
 // otherwise the field looks dead while acquisition is stopped.
 watch(scopePeriods, update)
 
+// Observes the container rather than the window: the column this chart sits in also changes width
+// when the measurement sidebar is pinned or unpinned, which is not a window resize — measured, the
+// canvas stayed at 432 px inside a column that had grown to 661 px. Same mechanism as the
+// ResizeObserver in FrequencyResponseChart.
+let resizeObserver: ResizeObserver | null = null
 function handleResize() {
   if (plot && containerRef.value)
     plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
@@ -287,12 +292,13 @@ function handleThemeChange() {
 }
 
 onMounted(() => {
-  window.addEventListener('resize', handleResize)
+  resizeObserver = new ResizeObserver(handleResize)
+  if (containerRef.value) resizeObserver.observe(containerRef.value)
   darkQuery.addEventListener('change', handleThemeChange)
 })
 onBeforeUnmount(() => {
   clearTimeout(liveCommitTimer)
-  window.removeEventListener('resize', handleResize)
+  resizeObserver?.disconnect()
   darkQuery.removeEventListener('change', handleThemeChange)
   plot?.destroy()
   plot = null

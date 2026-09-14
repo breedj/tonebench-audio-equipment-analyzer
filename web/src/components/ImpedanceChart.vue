@@ -6,7 +6,8 @@ import type { ImpedanceZScale } from '../api/client'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
 import { impedanceOverlayDash } from '../measurements/sweepOverlayStyles'
-import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -60,10 +61,14 @@ const props = defineProps<{
 
 const { isDark } = useAppTheme()
 
+const root = ref<HTMLDivElement | null>(null)
+const plotBox = ref<HTMLDivElement | null>(null)
 const container = ref<HTMLDivElement | null>(null)
 const plot = shallowRef<uPlot | null>(null)
 
-const CHART_HEIGHT_PX = RESULT_CHART_HEIGHT_PX
+// Fitted to the view — see charts/useResultChartHeight.ts; set as an inline style on the plot box
+// so the ResizeObserver below keeps reading one number whatever changed.
+const chartHeight = useResultChartHeight(root, plotBox)
 
 const IMPEDANCE_COLOR = ['#111827', '#f3f4f6'] as const
 const SHORT_CAL_COLOR = ['#c2410c', '#fb923c'] as const
@@ -694,7 +699,7 @@ function rebuild() {
   cursorReadout.value = null
 
   const width = el.clientWidth || 800
-  const height = el.clientHeight || CHART_HEIGHT_PX
+  const height = el.clientHeight || chartHeight.value
   plot.value = new uPlot(buildOptions(width, height), buildData(), el)
 
   if (restore?.x) plot.value.setScale('x', restore.x)
@@ -718,7 +723,7 @@ onMounted(() => {
   rebuild()
   observer = new ResizeObserver(() => {
     const el = container.value
-    if (el && plot.value) plot.value.setSize({ width: el.clientWidth || 800, height: el.clientHeight || CHART_HEIGHT_PX })
+    if (el && plot.value) plot.value.setSize({ width: el.clientWidth || 800, height: el.clientHeight || chartHeight.value })
   })
   if (container.value) observer.observe(container.value)
 })
@@ -752,8 +757,9 @@ const outOfRange = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-2">
-    <div class="flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+  <div ref="root" class="relative flex flex-col gap-2">
+    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+    <div class="pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <!-- One row that is the legend at rest and gains values on hover, rather than a legend and a
            separate readout saying the same names twice. Each swatch is drawn with the series' own
            colour, width and dash pattern, which is the only thing that tells two history overlays
@@ -798,7 +804,7 @@ const outOfRange = computed(() => {
       <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
 
-    <div class="relative w-full" :style="{ height: `${CHART_HEIGHT_PX}px` }">
+    <div ref="plotBox" class="relative w-full" :style="{ height: `${chartHeight}px` }">
       <div ref="container" class="h-full w-full" @dblclick="resetZoom" />
       <div
         v-if="outOfRange.above"

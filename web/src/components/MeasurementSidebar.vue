@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useProjects } from '../composables/useProjects'
-import { useSidebarPin } from '../composables/useSidebarPin'
+import { SIDEBAR_PIN_MIN_WIDTH_PX, useMediaQuery } from '../composables/useMediaQuery'
+import { useUiLayout } from '../composables/useUiLayout'
 import { dropIndex, moveItem } from '../measurements/reorder'
 import MeasurementKindIcon from './MeasurementKindIcon.vue'
 import NewMeasurementDialog from './NewMeasurementDialog.vue'
@@ -15,10 +16,17 @@ const dialogOpen = ref(false)
 // kind icons — the extra width a chart on a small screen needs — and the full menu floats over the
 // content while the pointer (or keyboard focus) is on it. Full width is the same 15.4rem either
 // way, so pinning and unpinning never reflows the list itself.
-const { sidebarPinned, load: loadPin, setPinned } = useSidebarPin()
-void loadPin()
+//
+// The pin is honoured only from SIDEBAR_PIN_MIN_WIDTH_PX up: narrower, a pinned sidebar behaves as
+// the rail while the stored preference stays pinned, so the column comes back with the width.
+// `pinned` is that effective state and is what the template reads; `sidebarPinned` is the
+// preference, read only by the pin button.
+const { sidebarPinned, load: loadLayout, setPinned } = useUiLayout()
+void loadLayout()
+const wideEnoughToPin = useMediaQuery(`(min-width: ${SIDEBAR_PIN_MIN_WIDTH_PX}px)`)
+const pinned = computed(() => sidebarPinned.value && wideEnoughToPin.value)
 const hovered = ref(false)
-const expanded = computed(() => sidebarPinned.value || hovered.value)
+const expanded = computed(() => pinned.value || hovered.value)
 
 // Keyboard users reach the rail by Tab, so focus entering it expands the menu too; focus leaving
 // for somewhere outside the sidebar collapses it again, while focus moving between its own rows
@@ -110,7 +118,7 @@ async function onDelete(id: number) {
 <template>
   <aside
     class="relative shrink-0 border-r border-neutral-200 dark:border-neutral-800"
-    :class="sidebarPinned ? 'w-[15.4rem]' : 'w-11'"
+    :class="pinned ? 'w-[15.4rem]' : 'w-11'"
     @mouseenter="hovered = true"
     @mouseleave="hovered = false"
     @focusin="hovered = true"
@@ -118,7 +126,7 @@ async function onDelete(id: number) {
   >
     <!-- The rail: what an unpinned sidebar shows at rest. One icon per measurement so the list is
          still recognisable and selectable without opening it; names are in the tooltip. -->
-    <div v-if="!sidebarPinned" class="flex flex-col items-center gap-2 p-1.5">
+    <div v-if="!pinned" class="flex flex-col items-center gap-2 p-1.5">
       <button
         type="button"
         class="flex h-7 w-7 items-center justify-center rounded bg-neutral-900 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
@@ -160,7 +168,7 @@ async function onDelete(id: number) {
       v-if="expanded"
       class="flex flex-col gap-2 p-2"
       :class="
-        sidebarPinned
+        pinned
           ? 'h-full'
           : 'absolute inset-y-0 left-0 z-30 w-[15.4rem] overflow-y-auto border-r border-neutral-200 bg-neutral-50 shadow-xl dark:border-neutral-800 dark:bg-neutral-950'
       "

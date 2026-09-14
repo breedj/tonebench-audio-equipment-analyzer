@@ -399,20 +399,6 @@ function run() {
       </select>
     </label>
 
-    <label
-      class="flex flex-col gap-1 text-xs"
-      title="Conventional divides every harmonic by the fundamental at the stimulus frequency. Frequency normalized divides harmonic n by the fundamental measured at n times the stimulus frequency, which removes the DUT's own frequency response from the distortion figure — the sweep keeps stepping the fundamental past End to measure those references."
-    >
-      THD method
-      <select
-        v-model="form.thdMethod"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-      >
-        <option v-for="method in THD_METHODS" :key="method.value" :value="method.value">{{ method.label }}</option>
-      </select>
-    </label>
-
     <div class="flex items-end gap-2 text-xs">
       <label class="flex flex-1 flex-col gap-1">
         {{ isPowerMode ? 'Power (W)' : 'Level' }}
@@ -478,6 +464,20 @@ function run() {
         />
       </label>
     </div>
+
+    <label
+      class="flex flex-col gap-1 text-xs"
+      title="Conventional divides every harmonic by the fundamental at the stimulus frequency. Frequency normalized divides harmonic n by the fundamental measured at n times the stimulus frequency, which removes the DUT's own frequency response from the distortion figure — the sweep keeps stepping the fundamental past End to measure those references."
+    >
+      THD method
+      <select
+        v-model="form.thdMethod"
+        :disabled="running"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="method in THD_METHODS" :key="method.value" :value="method.value">{{ method.label }}</option>
+      </select>
+    </label>
 
     <label
       class="flex items-center gap-1.5 text-xs"

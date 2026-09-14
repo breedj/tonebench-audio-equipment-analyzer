@@ -29,6 +29,7 @@ import OtherPeaksTable from './components/OtherPeaksTable.vue'
 import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
 import MeasurementChecklist from './components/MeasurementChecklist.vue'
 import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
+import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
 import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
@@ -168,6 +169,8 @@ const saveDialogOpen = ref(false)
 const saveTypeAsOpen = ref(false)
 const saveProjectAsOpen = ref(false)
 const metricPickerOpen = ref(false)
+// The FFT screen's metrics block, handed to SpectrumChart so its height fit leaves room for it.
+const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
 // The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
 // because the header's button and the per-measurement help button have to drive one dialog.
@@ -1827,18 +1830,6 @@ function confirmSaveProjectAs(name: string) {
               class="h-2 w-2 shrink-0 rounded-full bg-red-500"
               title="Unsaved changes"
             ></span>
-            <!-- Shortcut into the manual chapter for whichever kind is selected. It sits in this
-                 toolbar rather than in each screen's own template because the toolbar is the one
-                 row all three screens share, so the button is in the same place everywhere. -->
-            <button
-              type="button"
-              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-              :aria-label="`Help for ${currentType?.kind ? currentType.name : 'this measurement'}`"
-              title="Open this measurement's chapter of the manual."
-              @click="openManualForKind(currentType?.kind)"
-            >
-              ?
-            </button>
             <button
               type="button"
               class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
@@ -1960,6 +1951,19 @@ function confirmSaveProjectAs(name: string) {
             >
               Clear
             </button>
+            <!-- Shortcut into the manual chapter for whichever kind is selected. It sits in this
+                 toolbar rather than in each screen's own template because the toolbar is the one
+                 row every screen shares, so the button is in the same place everywhere: the far right
+                 of the row, clear of the save buttons. -->
+            <button
+              type="button"
+              class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              :aria-label="`Help for ${currentType?.kind ? currentType.name : 'this measurement'}`"
+              title="Open this measurement's chapter of the manual."
+              @click="openManualForKind(currentType?.kind)"
+            >
+              ?
+            </button>
           </div>
 
           <!-- THD vs frequency screen: sweep settings rail on the left, the result chart in the
@@ -1978,8 +1982,8 @@ function confirmSaveProjectAs(name: string) {
                harmonic distortion pulled out of the stretch of record the frequency-response
                measurement discards. -->
           <template v-if="isImpulseResponse">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+            <MeasurementLayout>
+              <template #rail>
                 <div class="flex gap-3">
                   <button
                     type="button"
@@ -1993,7 +1997,7 @@ function confirmSaveProjectAs(name: string) {
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-300 py-4 text-sm font-bold tracking-wide transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-blue-400 ring-offset-2 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
                     :disabled="impulseRunning || !!impulseConfigPanel?.invalid"
                     :title="impulseConfigPanel?.invalid ?? 'Measures the impulse response once and stops.'"
                     @click="runImpulseResponse(false)"
@@ -2018,9 +2022,9 @@ function confirmSaveProjectAs(name: string) {
                   :running="impulseRunning"
                   @capture-reference="loopbackDialogOpen = true"
                 />
-              </div>
+              </template>
 
-              <div class="flex min-w-0 flex-1 flex-col gap-3">
+              <template #default>
                 <ImpulseResponseChart
                   v-if="impulseView === 'Impulse'"
                   :impulse="impulseTrace"
@@ -2120,9 +2124,9 @@ function confirmSaveProjectAs(name: string) {
                 </p>
 
                 <MeasurementHistoryPanel @error="reportError" />
-              </div>
+              </template>
 
-              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+              <template #aside>
                 <ImpulseResponseDisplayPanel
                   v-model:view="impulseView"
                   v-model:normalised-impulse="impulseNormalised"
@@ -2153,8 +2157,8 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <MeasurementChecklist @error="reportError" />
-              </div>
-            </div>
+              </template>
+            </MeasurementLayout>
 
             <LoopbackReferenceDialog
               :open="loopbackDialogOpen"
@@ -2165,8 +2169,8 @@ function confirmSaveProjectAs(name: string) {
           </template>
 
           <template v-else-if="isFrequencyResponse">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+            <MeasurementLayout>
+              <template #rail>
                 <!-- RUN / SINGLE / STOP, the same trio and the same shape as the FFT screen's, so
                      the button that starts a measurement sits in one place whichever screen you are
                      on. RUN repeats until stopped; SINGLE measures once and stops itself. -->
@@ -2188,7 +2192,7 @@ function confirmSaveProjectAs(name: string) {
                   <button
                     v-if="isChirpResponse"
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-300 py-4 text-sm font-bold tracking-wide transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-blue-400 ring-offset-2 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
                     :disabled="responseRunning || !!responseConfigPanel?.invalid"
                     :title="
                       responseConfigPanel?.invalid ??
@@ -2262,10 +2266,11 @@ function confirmSaveProjectAs(name: string) {
                   :traces="responseTraces"
                   :view="responseView"
                   :show-left="responseShowLeft"
+                  :stepped="!isChirpResponse"
                 />
-              </div>
+              </template>
 
-              <div class="flex min-w-0 flex-1 flex-col gap-3">
+              <template #default>
                 <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   <span>{{ responseProgressLabel || 'Idle' }}</span>
                   <!-- Number.isFinite, not truthiness: 0 dBV is a perfectly ordinary drive level
@@ -2332,9 +2337,9 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <MeasurementHistoryPanel @error="reportError" />
-              </div>
+              </template>
 
-              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+              <template #aside>
                 <FrequencyResponseDisplayPanel
                   :allow-coherence="isChirpResponse"
                   v-model:view="responseView"
@@ -2362,13 +2367,13 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <MeasurementChecklist @error="reportError" />
-              </div>
-            </div>
+              </template>
+            </MeasurementLayout>
           </template>
 
           <template v-else-if="isImpedance">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+            <MeasurementLayout>
+              <template #rail>
                 <!-- RUN / SINGLE / STOP, the same trio and the same slot as every other screen. -->
                 <div class="flex gap-3">
                   <button
@@ -2387,11 +2392,11 @@ function confirmSaveProjectAs(name: string) {
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-sm font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-base font-bold tracking-wide text-white transition disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0"
                     :class="
                       impedanceIsStepped
-                        ? 'bg-green-600 text-base text-white ring-2 ring-green-400 ring-offset-2 hover:bg-green-500 disabled:bg-neutral-400 disabled:ring-0 dark:ring-offset-neutral-950'
-                        : 'border border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
+                        ? 'bg-green-600 ring-2 ring-green-400 ring-offset-2 hover:bg-green-500 dark:ring-offset-neutral-950'
+                        : 'bg-blue-600 ring-2 ring-blue-400 ring-offset-2 hover:bg-blue-500 dark:ring-offset-neutral-950'
                     "
                     :disabled="impedanceRunning || !!impedanceConfigPanel?.invalid"
                     :title="impedanceConfigPanel?.invalid ?? 'Measures the impedance once and stops.'"
@@ -2435,9 +2440,9 @@ function confirmSaveProjectAs(name: string) {
                   :drive-current-amps="impedanceDriveCurrentAmps"
                   :reference-ohms="impedanceReferenceOhms"
                 />
-              </div>
+              </template>
 
-              <div class="flex min-w-0 flex-1 flex-col gap-3">
+              <template #default>
                 <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   <span>{{ impedanceProgressLabel || 'Idle' }}</span>
                   <!-- Number.isFinite, not truthiness: 0 dBV is an ordinary drive level. -->
@@ -2476,9 +2481,9 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <MeasurementHistoryPanel @error="reportError" />
-              </div>
+              </template>
 
-              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+              <template #aside>
                 <ImpedanceDisplayPanel
                   :traces="impedanceTraces"
                   :running="impedanceRunning"
@@ -2499,13 +2504,13 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <MeasurementChecklist @error="reportError" />
-              </div>
-            </div>
+              </template>
+            </MeasurementLayout>
           </template>
 
           <template v-else-if="isSweepKind">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+            <MeasurementLayout>
+              <template #rail>
                 <div class="flex gap-3">
                   <button
                     v-if="!sweepRunning"
@@ -2567,9 +2572,9 @@ function confirmSaveProjectAs(name: string) {
                     :point-right="selectedSweepPointForOverlay(overlay, 1)"
                   />
                 </template>
-              </div>
+              </template>
 
-              <div class="flex min-w-0 flex-1 flex-col gap-3">
+              <template #default>
                 <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   <span>{{ sweepProgressLabel || 'Idle' }}</span>
                   <span v-if="sweepGeneratorAmpDbv">· gen {{ sweepGeneratorAmpDbv.toFixed(2) }} dBV</span>
@@ -2606,9 +2611,9 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <MeasurementHistoryPanel @error="reportError" />
-              </div>
+              </template>
 
-              <div class="flex w-full flex-col gap-3 lg:w-64 lg:flex-none">
+              <template #aside>
                 <SweepDisplayPanel
                   v-model:unit="sweepUnit"
                   v-model:show-noise-floor="sweepShowNoiseFloor"
@@ -2634,15 +2639,15 @@ function confirmSaveProjectAs(name: string) {
                 />
 
                 <MeasurementChecklist @error="reportError" />
-              </div>
-            </div>
+              </template>
+            </MeasurementLayout>
           </template>
 
           <!-- FFT Spectrum screen, matching the wireframe: settings rail on the left, chart in the
                center, display options + history checklist on the right. -->
           <template v-else>
-          <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
-            <div class="flex w-full flex-col gap-3 lg:w-72 lg:flex-none">
+          <MeasurementLayout aside-width="sm">
+            <template #rail>
               <div class="flex gap-3">
                 <button
                   type="button"
@@ -2667,7 +2672,6 @@ function confirmSaveProjectAs(name: string) {
                   title="Same as Run, but captures one settled spectrum (the configured average count, or one FFT if averaging is off) and stops automatically — no need to press Stop."
                   @click="singleShotCapture"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="9" /></svg>
                   SINGLE
                 </button>
                 <button
@@ -2692,11 +2696,15 @@ function confirmSaveProjectAs(name: string) {
                 @error="reportError"
                 @sample-rate-change="onSampleRateChange"
               />
-            </div>
+            </template>
 
             <div class="min-w-0 flex-1">
+              <!-- The metrics row and the averages line are one block for SpectrumChart's fit-above,
+                   which reserves one line of tiles of it — see oneLineOfMetrics there. The tiles
+                   flow in the inner row, which is the one it measures. -->
+              <div ref="fftAbove">
               <div class="mb-3 flex flex-wrap items-start gap-3">
-                <div class="flex flex-1 flex-wrap gap-3">
+                <div data-metrics-row class="flex flex-1 flex-wrap gap-3">
                   <GeneratorMetricsPanel />
                   <MetricsPanel
                     v-if="spectrumConfig?.processLeft ?? true"
@@ -2724,8 +2732,10 @@ function confirmSaveProjectAs(name: string) {
               <div v-if="averagesLabel" class="mb-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                 Averages: {{ averagesLabel }}
               </div>
+              </div>
 
               <SpectrumChart
+                :fit-above="fftAbove"
                 :spectrum="spectrum"
                 :meters="meters"
                 :overlays="overlays"
@@ -2735,10 +2745,12 @@ function confirmSaveProjectAs(name: string) {
               <OscilloscopeChart v-if="chartShowOscilloscope" class="mt-3" :scope="scope" :status="status" />
             </div>
 
-            <ChartDisplayPanel>
-              <MeasurementChecklist @error="reportError" />
-            </ChartDisplayPanel>
-          </div>
+            <template #aside>
+              <ChartDisplayPanel>
+                <MeasurementChecklist @error="reportError" />
+              </ChartDisplayPanel>
+            </template>
+          </MeasurementLayout>
 
           <!-- Everything below isn't part of the new FFT Spectrum design — kept here for now, to be
                repositioned later. -->

@@ -85,7 +85,8 @@
     </p>
     <ul>
       <li>
-        <strong>The History checklist</strong> in the right-hand rail. Tick a result to draw it on
+        <strong>The History checklist</strong> in the display rail, right of the chart or under it on
+        a narrow window. Tick a result to draw it on
         the chart alongside the live one, in the same units and the same window. A counter in its
         header shows how many of the plot budget are in use; ticking beyond it is disabled rather
         than silently dropping a trace. On the sweep screens each checked run also shows the dash

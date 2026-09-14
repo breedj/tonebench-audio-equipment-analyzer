@@ -4,3 +4,11 @@
    default `prefers-color-scheme` media query, so a manual Light/Dark choice in the Configuration
    dialog can override the OS setting; Auto mode just mirrors the OS onto the class itself. */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* An expanded chart (ExpandToggle, useExpandedChart) is pinned over the whole window: it gets
+   the page's ground, a little padding, and no rounded corners against the window edge. Above the
+   sidebar's floating menu (z-30), below the dialogs (z-50). The padding is what
+   useResultChartHeight corrects for when it fits the plot to the window. */
+[data-chart-expanded] {
+  @apply fixed inset-0 z-40 overflow-auto rounded-none bg-neutral-50 p-3 dark:bg-neutral-950;
+}

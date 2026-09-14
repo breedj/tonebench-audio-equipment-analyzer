@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type MetersFrame, type SpectrumFrame } from '../streaming/protocol'
@@ -8,6 +8,8 @@ import { useChartDisplay } from '../composables/useChartDisplay'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useAppTheme } from '../composables/useAppTheme'
+import { fullHeightWithMargin, useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
@@ -19,6 +21,12 @@ const props = defineProps<{
   meters: Record<number, MetersFrame>
   /** Stored measurements loaded onto the chart, in add order — see useMeasurements.ts. */
   overlays: OverlayEntry[]
+  /**
+   * The block above this chart in the same column — the metrics row and the averages line —
+   * that the fit should leave room for, so the readings and the chart share the view. See
+   * oneLineOfMetrics for how much of it is reserved.
+   */
+  fitAbove?: HTMLElement | null
 }>()
 
 const emit = defineEmits<{
@@ -85,7 +93,6 @@ const PEAK_HOLD_COLOR = '#eab308'
 // line above it now does. It keeps its own two-hue blue/orange distinction rather than switching to
 // LIVE_COLOR for both, which is the only way left to tell an overlapping L band from an R band.
 const CHANNEL_BAND_COLORS = ['rgba(59, 130, 246, 0.35)', 'rgba(249, 115, 22, 0.35)']
-const CHART_HEIGHT = 720
 // Peak-hold: running per-bin maximum, keyed by that bin's column frequency (as broadcast — stable
 // across ticks for a given FFT size/zoom window, since the server's log-decimation always picks
 // the same center bin for the same range/budget). Cleared only by the Reset button (see
@@ -130,7 +137,27 @@ function currentTheme() {
   return isDark.value ? THEME.dark : THEME.light
 }
 
+const rootRef = ref<HTMLElement | null>(null)
 const containerRef = ref<HTMLDivElement>()
+// Fitted to the view — see charts/useResultChartHeight.ts. uPlot sizes the container itself, so a
+// new height is applied through setSize, the same call a width change makes in handleResize.
+//
+// The metrics row above the chart is reserved at ONE line of tiles, however many lines it wraps
+// to: the first line is what a glance at the screen reads together with the chart, and a wall of
+// metrics must not squeeze the chart into a strip — the row scrolls, the chart does not shrink
+// past it. The averages line under the row is one line already and is taken whole.
+function oneLineOfMetrics(block: HTMLElement): number {
+  const row = block.querySelector<HTMLElement>('[data-metrics-row]')
+  if (!row) return fullHeightWithMargin(block)
+  const tiles = [...row.children] as HTMLElement[]
+  const firstTop = tiles[0]?.offsetTop
+  const firstLine = tiles.filter((t) => t.offsetTop === firstTop).reduce((h, t) => Math.max(h, t.offsetHeight), 0)
+  return fullHeightWithMargin(block) - row.offsetHeight + firstLine
+}
+const chartHeight = useResultChartHeight(rootRef, containerRef, {
+  above: toRef(props, 'fitAbove'),
+  aboveHeight: oneLineOfMetrics,
+})
 const cursorReadout = ref<{ freqHz: number; dbv: number } | null>(null)
 
 // uPlot instance is created exactly once and reused via setData()/setSize() for the component's
@@ -351,7 +378,7 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
 
   return {
     width,
-    height: CHART_HEIGHT,
+    height: chartHeight.value,
     scales: {
       // auto:false — uPlot's x scale defaults to auto-ranging from each setData() call's own
       // data, which re-fits the view to the incoming frame on every one of these (up to
@@ -796,10 +823,16 @@ watch([xFrom, xTo], ([from, to]) => {
   plot?.setScale('x', { min: from, max: to })
 })
 
+// Observes the container rather than the window: the column this chart sits in also changes width
+// when the measurement sidebar is pinned or unpinned, which is not a window resize — measured, the
+// canvas stayed at 432 px inside a column that had grown to 661 px. Same mechanism as the
+// ResizeObserver in FrequencyResponseChart.
+let resizeObserver: ResizeObserver | null = null
 function handleResize() {
   if (plot && containerRef.value)
-    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
+    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: chartHeight.value })
 }
+watch(chartHeight, handleResize)
 
 // Rebuilds with the new palette on a Light/Dark/Auto change (OS or the Configuration dialog).
 // Rebuilding is only acceptable because this fires on a theme change, not per frame —
@@ -816,10 +849,11 @@ function handleThemeChange() {
 watch(isDark, handleThemeChange)
 
 onMounted(() => {
-  window.addEventListener('resize', handleResize)
+  resizeObserver = new ResizeObserver(handleResize)
+  if (containerRef.value) resizeObserver.observe(containerRef.value)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
+  resizeObserver?.disconnect()
   clearTimeout(viewportTimer)
   plot?.destroy()
   plot = null
@@ -827,8 +861,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+  <section ref="rootRef" class="relative flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+    <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
+    <div class="pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Spectrum</span>
       <span v-if="cursorReadout" class="font-mono">
         {{ cursorReadout.freqHz.toFixed(1) }} Hz · {{ cursorReadout.dbv.toFixed(1) }} dBV

@@ -82,25 +82,6 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>THD method</td>
-          <td>
-            <strong>Conventional</strong> is the textbook figure: harmonic over fundamental, both at
-            the stimulus frequency. It folds the DUT's frequency response into the distortion — a
-            6 dB/octave roll-off reads the second harmonic 6 dB wrong and the third 9.5 dB wrong for
-            reasons that have nothing to do with distortion, and a resonance shows up as a bump in
-            every distortion trace. <strong>Frequency normalized</strong> (Temme, Listen Inc.)
-            divides harmonic <em>n</em> by the fundamental this sweep measured at <em>n</em>·f
-            instead, which cancels that response and leaves the nonlinearity. To have those
-            fundamentals, the sweep keeps stepping past End — to five times it, or to just under
-            Nyquist, whichever comes first; the line under the settings says how far. <strong>Those
-            are real tones at the sweep level</strong>, above the band you asked about: a 20 kHz
-            sweep at 192 kHz drives the DUT to 94 kHz, which matters in the output-power modes into
-            a tweeter or a transformer-coupled stage. The extra points are drawn like any other,
-            with the Magnitude trace showing the response up there; their own distortion figures
-            stay blank, since nothing above them was measured to reference against.
-          </td>
-        </tr>
-        <tr>
           <td>Level / Power and Unit</td>
           <td>The target itself, in dBV, V or mV — or in watts in output-power mode.</td>
         </tr>
@@ -120,6 +101,25 @@ const { showPage } = useManual()
           <td>
             How many records are averaged before a point is recorded. More averages lower each
             reading's own noise floor, at a proportional cost in time.
+          </td>
+        </tr>
+        <tr>
+          <td>THD method</td>
+          <td>
+            <strong>Conventional</strong> is the textbook figure: harmonic over fundamental, both at
+            the stimulus frequency. It folds the DUT's frequency response into the distortion — a
+            6 dB/octave roll-off reads the second harmonic 6 dB wrong and the third 9.5 dB wrong for
+            reasons that have nothing to do with distortion, and a resonance shows up as a bump in
+            every distortion trace. <strong>Frequency normalized</strong> (Temme, Listen Inc.)
+            divides harmonic <em>n</em> by the fundamental this sweep measured at <em>n</em>·f
+            instead, which cancels that response and leaves the nonlinearity. To have those
+            fundamentals, the sweep keeps stepping past End — to five times it, or to just under
+            Nyquist, whichever comes first; the line under the settings says how far. <strong>Those
+            are real tones at the sweep level</strong>, above the band you asked about: a 20 kHz
+            sweep at 192 kHz drives the DUT to 94 kHz, which matters in the output-power modes into
+            a tweeter or a transformer-coupled stage. The extra points are drawn like any other,
+            with the Magnitude trace showing the response up there; their own distortion figures
+            stay blank, since nothing above them was measured to reference against.
           </td>
         </tr>
         <tr>

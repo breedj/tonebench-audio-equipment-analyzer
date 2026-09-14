@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { HarmonicCurveJson } from '../api/client'
-import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import { freqAxis } from '../freqAxis'
@@ -30,7 +31,11 @@ const props = defineProps<{
 
 const { isDark } = useAppTheme()
 
+const root = ref<HTMLElement | null>(null)
 const container = ref<HTMLDivElement | null>(null)
+// Fitted to the view — see charts/useResultChartHeight.ts. uPlot sizes the container itself, so a
+// new height is applied through setSize, the same call a width change makes below.
+const chartHeight = useResultChartHeight(root, container)
 const plot = shallowRef<uPlot | null>(null)
 
 /** Matches the sweep chart's harmonic colours, so H2 means the same colour on both screens. */
@@ -98,7 +103,7 @@ function buildOptions(width: number): uPlot.Options {
   const t = theme()
   return {
     width,
-    height: RESULT_CHART_HEIGHT_PX,
+    height: chartHeight.value,
     scales: {
       // What puts the panel's window on the x axis is applyScales()'s explicit setScale, not the
       // `??` here: on an x scale that fallback is dead code, because uPlot only ever passes null for
@@ -178,12 +183,15 @@ function refresh() {
 
 let observer: ResizeObserver | null = null
 
+function fit() {
+  const el = container.value
+  if (el && plot.value) plot.value.setSize({ width: el.getBoundingClientRect().width, height: chartHeight.value })
+}
+watch(chartHeight, fit)
+
 onMounted(() => {
   rebuild()
-  observer = new ResizeObserver(() => {
-    const el = container.value
-    if (el && plot.value) plot.value.setSize({ width: el.getBoundingClientRect().width, height: RESULT_CHART_HEIGHT_PX })
-  })
+  observer = new ResizeObserver(fit)
   if (container.value) observer.observe(container.value)
 })
 
@@ -200,8 +208,9 @@ watch([() => props.harmonics, () => props.freqFromHz, () => props.freqToHz, () =
 </script>
 
 <template>
-  <section class="flex flex-col gap-1">
-    <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+  <section ref="root" class="relative flex flex-col gap-1">
+    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+    <div class="pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Harmonic distortion vs fundamental</span>
       <span class="flex items-center gap-3">
         <span v-for="curve in ordered" :key="curve.order" class="flex items-center gap-1">

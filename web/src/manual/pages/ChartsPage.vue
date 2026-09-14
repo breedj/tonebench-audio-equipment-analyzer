@@ -4,9 +4,31 @@
 
     <p>
       Every measurement screen has the same three-column shape: settings on the left, the chart in
-      the middle, display options on the right. The settings rail decides what is
+      the middle, display options on the right. On a window narrower than 1280 px the display
+      options move under the chart so it keeps its width, and narrower than 1024 px the three
+      stack into one column. The settings rail decides what is
       <em>measured</em>; the display rail decides only what is <em>drawn</em>, so changing anything
       there is free — it never re-runs a measurement and never alters stored data.
+    </p>
+    <p>
+      Each rail has a thin strip on its chart-side edge with a chevron: press it to fold the rail
+      away to that edge and give the chart the width, press the strip again to bring it back.
+      Whether each rail is folded is remembered on this machine, for every browser tab, like the
+      sidebar's pin. The display rail folds only where it is a column, from 1280 px up.
+    </p>
+
+    <h2>Height and expanding</h2>
+    <p>
+      A chart takes the height of the window less the header and the status bar, so scrolled to
+      the top it is in view completely; on the FFT screen it also leaves room for one line of the
+      metrics above it, however many lines they wrap to. The window can be made shorter than a
+      chart is willing to go, at which point the chart scrolls rather than squashes.
+    </p>
+    <p>
+      The <strong>expand</strong> button in a chart's top-right corner — four arrows to the corners
+      — spreads that chart over the whole window, with everything else out of the way. The same
+      button, now four arrows to the centre, or <strong>Esc</strong> brings it back. The chart is
+      the same one, still live, still zoomable; nothing is re-measured.
     </p>
 
     <h2>Zooming</h2>
@@ -98,7 +120,8 @@
 
     <h2>Comparing runs</h2>
     <p>
-      The <strong>History</strong> checklist in the right-hand rail lists everything saved under the
+      The <strong>History</strong> checklist in the display rail (right of the chart, or under it on
+      a narrow window) lists everything saved under the
       current measurement. Ticking a result draws it on the same chart as the live one, in the same
       units and the same window. Up to a fixed number of results can be plotted at once; the counter
       in the checklist header says how many of that budget are in use.

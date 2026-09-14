@@ -6,7 +6,8 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import type { ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
-import { RESULT_CHART_HEIGHT_PX } from '../charts/dimensions'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -44,16 +45,18 @@ const props = defineProps<{
 
 const { isDark } = useAppTheme()
 
+const root = ref<HTMLDivElement | null>(null)
+const plotBox = ref<HTMLDivElement | null>(null)
 const container = ref<HTMLDivElement | null>(null)
 const plot = shallowRef<uPlot | null>(null)
 
 /**
- * Matches the sweep chart exactly — one constant, see charts/dimensions.ts. The plot is sized from
- * the container's own height, so this is set as an inline style rather than baked into the uPlot
- * options: the ResizeObserver below then keeps reading one number, whether the change came from
- * here or from the window.
+ * Fitted to the view — see charts/useResultChartHeight.ts. The plot is sized from the box's own
+ * height, so this is set as an inline style rather than baked into the uPlot options: the
+ * ResizeObserver below then keeps reading one number, whether the change came from here or from
+ * the window.
  */
-const CHART_HEIGHT_PX = RESULT_CHART_HEIGHT_PX
+const chartHeight = useResultChartHeight(root, plotBox)
 
 /**
  * Hue is the quantity, matching the sweep chart's convention: the gain curve is the one the
@@ -781,7 +784,7 @@ function rebuild() {
   cursorReadout.value = null
 
   const width = el.clientWidth || 800
-  const height = el.clientHeight || CHART_HEIGHT_PX
+  const height = el.clientHeight || chartHeight.value
   const u = new uPlot(buildOptions(width, height), buildData(), el)
   plot.value = u
 
@@ -838,10 +841,11 @@ watch(phaseRange, () => refresh())
 </script>
 
 <template>
-  <div class="flex flex-col gap-2">
+  <div ref="root" class="relative flex flex-col gap-2">
+    <ExpandToggle class="absolute right-0 top-0" :target="root" />
     <!-- Cursor readout on the left, zoom state on the right. Both are about the plot below rather
          than about the measurement, so they sit with it and not in the display panel. -->
-    <div class="flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span v-if="cursorReadout" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
         <span class="text-neutral-800 dark:text-neutral-100">{{ formatHz(cursorReadout.freqHz) }}</span>
         <span v-for="entry in cursorReadout.entries" :key="entry.key" class="flex items-center gap-1">
@@ -867,7 +871,7 @@ watch(phaseRange, () => refresh())
       <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
 
-    <div class="relative w-full" :style="{ height: `${CHART_HEIGHT_PX}px` }">
+    <div ref="plotBox" class="relative w-full" :style="{ height: `${chartHeight}px` }">
       <div ref="container" class="h-full w-full" />
       <!-- Off-scale cue: real data sits above/below the currently visible dB/dBV window. -->
       <div

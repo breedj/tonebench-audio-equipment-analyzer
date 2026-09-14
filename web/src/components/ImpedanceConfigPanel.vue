@@ -1065,7 +1065,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
     <label
       v-if="form.stimulus === 'Chirp'"
       class="flex items-center gap-2 text-xs"
-      title="Removes the harmonic packets a swept measurement of a distorting DUT picks up, at a factor of two in frequency resolution. Rarely needed for a passive load."
+      title="Deconvolving a chirp turns each harmonic the DUT produces into its own small impulse, sitting a fixed time ahead of the main one. Those add a fine ripple to |Z| and phase over whatever band the DUT distorts in, and no amount of averaging or smoothing removes them. This cuts them out of the impulse response before the spectrum is taken, at the cost of halving the frequency resolution. A passive load distorts far too little to need it; turn it on for an amplifier input or anything nonlinear whose trace shows fine ripple."
     >
       <input v-model="form.applySweepGate" type="checkbox" :disabled="running" />
       Gate the sweep's harmonic packets
@@ -1073,7 +1073,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 
     <label
       class="flex flex-col gap-1 text-xs"
-      title="The analyzer's own input impedance sits across the measurement node. Leave blank for anything up to a few kilohms; it only matters when the reference resistor approaches it, as when measuring a valve grid input."
+      title="The analyzer's own input (about 100 kΩ, from the QA403 datasheet) hangs off the measurement node in parallel with the DUT, so the divider reads DUT ∥ input rather than the DUT alone. The error is roughly Z_dut / Z_in: nothing for an 8 Ω driver or a 1 kΩ load, a factor of two for a 100 kΩ valve grid. Enter the figure and it is taken back out of both the measurement and the open calibration. Blank means infinite — right for every passive load — and there is deliberately no default, since a guessed one would silently bias every high-impedance reading."
     >
       Analyzer input impedance (Ω, blank = ignore)
       <input

@@ -290,6 +290,50 @@ function onBackdropClick(e: MouseEvent) {
 .manual-prose .manual-note p:last-child {
   margin-bottom: 0;
 }
+/* A hand-drawn schematic: strokes in the prose colour so it follows the theme, labels a step
+   quieter. Distinct from .manual-chart, which is a plotted curve with axes. */
+.manual-prose .manual-figure {
+  margin: 0.5rem 0 1rem;
+}
+.manual-prose .manual-figure svg {
+  display: block;
+  width: 100%;
+  max-width: 34rem;
+  height: auto;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.manual-prose .manual-figure svg text {
+  fill: currentColor;
+  stroke: none;
+}
+.manual-prose .manual-figure svg .muted {
+  fill: rgb(115 115 115);
+}
+.dark .manual-prose .manual-figure svg .muted {
+  fill: rgb(163 163 163);
+}
+.manual-prose .manual-figure svg .node {
+  fill: currentColor;
+}
+.manual-prose .manual-figure svg .dashed {
+  stroke-dasharray: 4 3;
+}
+.manual-prose .manual-figure svg .tap {
+  stroke-width: 1;
+}
+.manual-prose .manual-figure figcaption {
+  font-size: 0.75rem;
+  color: rgb(115 115 115);
+  margin-top: 0.35rem;
+}
+.dark .manual-prose .manual-figure figcaption {
+  color: rgb(163 163 163);
+}
 .manual-prose .manual-link {
   color: rgb(29 78 216);
   text-decoration: underline;

@@ -375,23 +375,168 @@ const { showPage } = useManual()
     <h2>Advanced</h2>
     <h3>Analyzer input impedance</h3>
     <p>
-      The analyzer's own input sits across the measurement node and takes a share of the current.
-      For anything up to a few kilohms this is far below the noise and the field should be left
-      blank. When the reference resistor approaches the analyzer's own input impedance — as it must
-      when measuring a valve grid input — it stops being negligible: at 100 kΩ against 100 kΩ,
-      leaving it uncorrected reads roughly <em>twice</em> the true impedance. Enter the figure from
-      the QA403's datasheet and it is taken out of both the measurement and the open calibration.
-      There is no default value, deliberately: a guessed one would quietly bias every
-      high-impedance measurement instead of leaving the correction off.
+      The divider arithmetic assumes the only thing hanging off the measurement node is the DUT.
+      It is not: the analyzer's input that reads that node is itself a load &mdash; a resistance of
+      about 100 kΩ from the node to ground, per the QA403 datasheet &mdash; and it sits in
+      <strong>parallel</strong> with the DUT. What the divider actually measures is
+      <code>Z_dut ∥ Z_in</code>.
+    </p>
+    <figure class="manual-figure">
+      <svg viewBox="0 0 520 190" role="img" aria-label="The fixture: generator, series reference resistor, measurement node with the DUT to ground and the analyzer input impedance in parallel with it; the left input reads the generator side of the resistor, the right input the node.">
+        <!-- ground rail -->
+        <line x1="40" y1="160" x2="440" y2="160" />
+        <!-- generator -->
+        <circle cx="40" cy="105" r="16" />
+        <text x="40" y="110" text-anchor="middle" font-size="16">~</text>
+        <line x1="40" y1="121" x2="40" y2="160" />
+        <line x1="40" y1="89" x2="40" y2="60" />
+        <text x="40" y="48" text-anchor="middle" class="label">SOURCE</text>
+        <!-- top rail to the resistor -->
+        <line x1="40" y1="60" x2="150" y2="60" />
+        <rect x="150" y="50" width="70" height="20" />
+        <text x="185" y="44" text-anchor="middle" class="label">R (reference)</text>
+        <line x1="220" y1="60" x2="270" y2="60" />
+        <!-- node -->
+        <circle cx="270" cy="60" r="3.5" class="node" />
+        <!-- DUT down to ground -->
+        <line x1="270" y1="60" x2="270" y2="90" />
+        <rect x="260" y="90" width="20" height="45" />
+        <text x="250" y="117" text-anchor="end" class="label">DUT</text>
+        <line x1="270" y1="135" x2="270" y2="160" />
+        <!-- analyzer input in parallel, dashed -->
+        <line x1="270" y1="60" x2="370" y2="60" class="dashed" />
+        <line x1="370" y1="60" x2="370" y2="90" class="dashed" />
+        <rect x="360" y="90" width="20" height="45" class="dashed" />
+        <line x1="370" y1="135" x2="370" y2="160" class="dashed" />
+        <text x="388" y="110" class="label">Z_in</text>
+        <text x="388" y="124" class="label muted">analyzer input,</text>
+        <text x="388" y="138" class="label muted">≈100 kΩ, in parallel</text>
+        <!-- input taps -->
+        <line x1="120" y1="60" x2="120" y2="22" class="tap" />
+        <circle cx="120" cy="22" r="2.5" class="node" />
+        <text x="126" y="18" class="label">Left in — V_ref</text>
+        <line x1="270" y1="60" x2="270" y2="22" class="tap" />
+        <circle cx="270" cy="22" r="2.5" class="node" />
+        <text x="276" y="18" class="label">Right in — V_dut</text>
+        <!-- ground symbol -->
+        <line x1="440" y1="160" x2="440" y2="168" />
+        <line x1="430" y1="168" x2="450" y2="168" />
+        <line x1="434" y1="173" x2="446" y2="173" />
+        <line x1="438" y1="178" x2="442" y2="178" />
+      </svg>
+      <figcaption>
+        The divider the formula solves is R against everything from the node to ground &mdash; and
+        the analyzer's own input is part of that.
+      </figcaption>
+    </figure>
+    <p>
+      Putting a much larger impedance in parallel barely changes anything: the relative error is
+      roughly <code>Z_dut / Z_in</code>. Against a 100 kΩ input:
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>DUT</th>
+          <th>Node reads</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8 Ω driver</td>
+          <td>7.9994 Ω</td>
+          <td>0.008 % &mdash; invisible</td>
+        </tr>
+        <tr>
+          <td>1 kΩ</td>
+          <td>990 Ω</td>
+          <td>1 % &mdash; under the noise</td>
+        </tr>
+        <tr>
+          <td>47 kΩ</td>
+          <td>32 kΩ</td>
+          <td>32 %</td>
+        </tr>
+        <tr>
+          <td>100 kΩ (a valve grid, a 100 k pot)</td>
+          <td>50 kΩ</td>
+          <td>a factor of two</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      So for every ordinary passive load &mdash; a driver, a crossover, a capacitor, an inductor
+      &mdash; leave the field blank. It starts to matter only when the DUT's impedance approaches
+      the analyzer's own, which in practice means the <strong>input</strong> of an amplifier stage:
+      a valve grid with a 100 k&ndash;1 M grid leak, a high-impedance instrument input. That is
+      also the case where you will have chosen a large reference resistor to keep the divider ratio
+      readable, and a large reference is what makes the second effect below bite.
+    </p>
+    <p>
+      With a figure entered, the app solves the divider as before to get the parallel value and then
+      takes the analyzer's share back out by admittance, <code>Z_dut = 1 / (1/Z_p − 1/Z_in)</code>
+      &mdash; ordinary un-paralleling. It uses the same figure in a second, less obvious place. The
+      <strong>open calibration</strong> is meant to capture the gain and phase mismatch between the
+      two input channels, but an open fixture is not actually open: the analyzer's input is still
+      there, so the open reads the mismatch times <code>Z_in / (R + Z_in)</code>. Dividing a
+      measurement by that over-corrects by exactly that factor. For a 100 Ω reference it is
+      0.009 dB and nothing; for a 100 kΩ reference it is a <em>factor of two</em>. That is why an
+      uncorrected high-impedance reading with an open calibration applied comes out roughly
+      <em>twice</em> the true value, even though the parallel loading on its own would make it read
+      half &mdash; the two errors stack the other way. The app recovers the true mismatch from the
+      open using the same <code>Z_in</code> it de-embeds with, so both corrections agree.
+    </p>
+    <p>
+      Blank means infinite, i.e. no correction &mdash; right for nearly every measurement. There is
+      deliberately no default: a preset 100 kΩ would shift every high-impedance reading by whatever
+      the true figure differs from the guess, with nothing on screen to say a correction had been
+      applied. Leaving it empty makes the correction an explicit choice, taken from the datasheet,
+      at the moment you know you need it. The value is a pure resistance; the input's few tens of
+      picofarads of capacitance are not modelled, so a high-impedance reading will still tilt a
+      little at the top of the band. That tilt is real, not a fault in the measurement.
     </p>
 
     <h3>Gate the sweep's harmonic packets</h3>
     <p>
-      Deconvolving a chirp recovers the DUT's harmonic distortion alongside its linear response, and
-      those packets add a fine ripple to the result. Gating removes them at the cost of halving the
-      frequency resolution. A passive load distorts far too little for this to matter; it is here
-      for the cases where it does. It appears only for the chirp: the packets are a product of sweep
-      deconvolution, so the other two stimuli have nothing for it to remove.
+      The chirp measurement works by <em>deconvolution</em>: the record of what came back is divided
+      by the sweep that was played, and transformed to the time domain that is the fixture's impulse
+      response &mdash; ideally one sharp spike, plus whatever ringing follows it. An exponential sweep
+      has a peculiar property on top of that. If the DUT distorts, each harmonic it produces comes
+      back as <strong>its own small impulse</strong>, sitting a fixed time <em>ahead</em> of the main
+      one &mdash; the offset depends only on the sweep's geometry, and at this screen's defaults it is
+      about 60 ms for the second harmonic and 100 ms for the third, growing with the record length
+      and shrinking as the sweep covers more octaves. Because the chirp is periodic
+      and the record circular, &ldquo;ahead&rdquo; does not mean before the recording started: the
+      packets wrap round and land at the far end of the record, still inside the data.
+    </p>
+    <p>
+      That matters because |Z| and phase are the spectrum of the whole record, and nothing in the
+      frequency domain separates a packet from the main impulse: two impulses a time <em>&Delta;t</em>
+      apart add into a spectrum with a fine comb ripple of spacing 1/<em>&Delta;t</em>. So a DUT
+      that distorts over part of the band shows a ripple over exactly that part and looks clean
+      everywhere else. Averaging does not remove it &mdash; the packets are deterministic and average
+      to themselves &mdash; and neither does smoothing, which only blurs it into a gentle tilt.
+    </p>
+    <p>
+      Gating cuts the packets out of the impulse response before the spectrum is taken: everything
+      outside a window around the main impulse, reaching back half way to where the second-harmonic
+      packet sits, is set to zero. The ripple goes with them. The cost is that about half the record
+      is discarded, and frequency resolution is one over the record's length, so every bin becomes
+      twice as coarse. That is why it is a choice here rather than always on: a passive load &mdash; a
+      driver, a capacitor, an inductor &mdash; distorts far too little to produce visible packets, and
+      would pay the resolution for nothing. Turn it on for an amplifier input or anything else
+      nonlinear whose trace shows a fine ripple that averaging does not settle.
+    </p>
+    <p>
+      It appears only for the chirp. The packets are a product of <em>sweep</em> deconvolution
+      &mdash; the mapping from harmonic order to time offset comes from the chirp's frequency-against-
+      time law &mdash; and a stepped sine measures one tone at a time while noise has no such
+      structure. For those a gate would delete part of a perfectly good impulse response and call it
+      distortion, so the setting is hidden and the server ignores it. The same gate is always applied,
+      invisibly, on the
+      <a href="#" @click.prevent="showPage('frequency-response')">frequency response</a> and
+      <a href="#" @click.prevent="showPage('impulse-response')">impulse response</a> screens, where
+      an amplifier is the usual DUT and the ripple was first measured.
     </p>
 
     <h2>What is not here yet</h2>

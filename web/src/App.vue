@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { useDevice } from './composables/useDevice'
 import { useSpectrumStream } from './composables/useSpectrumStream'
@@ -63,6 +63,16 @@ import ResponsePolarChart from './components/ResponsePolarChart.vue'
 import ResponseStabilityPanel from './components/ResponseStabilityPanel.vue'
 import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
+import ReportDialog from './components/ReportDialog.vue'
+import ProjectReportDialog from './components/ProjectReportDialog.vue'
+import { responseDisplayFromParams, type ResponseDisplay } from './response/display'
+import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
+import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
+import { impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
+import { CHART_EXPORT_HEIGHT_PX, CHART_EXPORT_WIDTH_PX } from './charts/exportChart'
+import { downloadBlob, safeFileName } from './report/download'
+import { reportHasChart } from './report/elements'
+import type { ReportSubject } from './report/types'
 import { useFrequencyResponse } from './composables/useFrequencyResponse'
 import { isDutType, type DutType } from './impedance/component'
 import { useImpedance } from './composables/useImpedance'
@@ -166,6 +176,15 @@ interface RunConfig {
 const generatorPanel = ref<InstanceType<typeof GeneratorPanel> | null>(null)
 const spectrumConfigPanel = ref<InstanceType<typeof SpectrumConfigPanel> | null>(null)
 const saveDialogOpen = ref(false)
+// Reports — see report/buildReport.ts. One dialog serves the measurement on screen and a stored
+// result alike; `reportSubject` is which.
+const reportOpen = ref(false)
+// shallowRef: a subject holds whole traces and, for a spectrum, a display source of refs — neither
+// should be made deeply reactive. Snapshotted when a dialog opens, so a pass arriving mid-report is
+// not half in it.
+const reportLiveSubject = shallowRef<ReportSubject | null>(null)
+const reportPreselectResultId = ref<number | null>(null)
+const projectReportOpen = ref(false)
 const saveTypeAsOpen = ref(false)
 const saveProjectAsOpen = ref(false)
 const metricPickerOpen = ref(false)
@@ -190,6 +209,7 @@ const {
   generatorAmpDbv: sweepGeneratorAmpDbv,
   error: sweepError,
   points: sweepPoints,
+  thdMethod: sweepThdMethod,
   viewAxis: sweepViewAxis,
   start: startSweep,
   startAmplitude: startAmplitudeSweep,
@@ -493,6 +513,33 @@ watch(
  * instead of in that panel's form. Guarded the same way: a parse failure (an FFT type's params, or
  * a sweep saved before these fields existed) just keeps whatever's already showing.
  */
+/** The sweep chart's display state as the refs above hold it — what a live report renders the chart with. */
+function currentSweepDisplay(): SweepDisplay {
+  return {
+    unit: sweepUnit.value,
+    showNoiseFloor: sweepShowNoiseFloor.value,
+    showMagnitude: sweepShowMagnitude.value,
+    showThd: sweepShowThd.value,
+    showD2: sweepShowD2.value,
+    showD3: sweepShowD3.value,
+    showD4: sweepShowD4.value,
+    showD5: sweepShowD5.value,
+    showD6Plus: sweepShowD6Plus.value,
+    showLeft: sweepShowLeft.value,
+    showRight: sweepShowRight.value,
+    thickLines: sweepThickLines.value,
+    showDataPoints: sweepShowDataPoints.value,
+    yMaxPercent: sweepYMaxPercent.value,
+    yMinPercent: sweepYMinPercent.value,
+    yTopDb: sweepYTopDb.value,
+    yBottomDb: sweepYBottomDb.value,
+    xFromHz: sweepXFromHz.value,
+    xToHz: sweepXToHz.value,
+    amplitudeXAxis: sweepAmplitudeXAxis.value,
+    amplitudeBounds: Object.fromEntries(Object.entries(sweepAmplitudeBounds).map(([k, v]) => [k, { ...v }])),
+  }
+}
+
 function applyStoredSweepDisplay(paramsJson: string) {
   // The two records share every chart field but the x pair, so one loose shape reads both: the
   // frequency sweep stores chartXFromHz/chartXToHz in hertz, the amplitude one chartXFrom/chartXTo
@@ -508,30 +555,30 @@ function applyStoredSweepDisplay(paramsJson: string) {
   }
 
   sweepDisplayRestoring = true
-  if (stored.chartXAxis) sweepAmplitudeXAxis.value = stored.chartXAxis
-  if (typeof stored.chartXFrom === 'number' && stored.chartXFrom > 0)
-    sweepAmplitudeBounds[sweepAmplitudeXAxis.value].from = stored.chartXFrom
-  if (typeof stored.chartXTo === 'number' && stored.chartXTo > 0)
-    sweepAmplitudeBounds[sweepAmplitudeXAxis.value].to = stored.chartXTo
-  if (stored.chartUnit) sweepUnit.value = stored.chartUnit
-  if (typeof stored.chartShowNoiseFloor === 'boolean') sweepShowNoiseFloor.value = stored.chartShowNoiseFloor
-  if (typeof stored.chartShowMagnitude === 'boolean') sweepShowMagnitude.value = stored.chartShowMagnitude
-  if (typeof stored.chartShowThd === 'boolean') sweepShowThd.value = stored.chartShowThd
-  if (typeof stored.chartShowD2 === 'boolean') sweepShowD2.value = stored.chartShowD2
-  if (typeof stored.chartShowD3 === 'boolean') sweepShowD3.value = stored.chartShowD3
-  if (typeof stored.chartShowD4 === 'boolean') sweepShowD4.value = stored.chartShowD4
-  if (typeof stored.chartShowD5 === 'boolean') sweepShowD5.value = stored.chartShowD5
-  if (typeof stored.chartShowD6Plus === 'boolean') sweepShowD6Plus.value = stored.chartShowD6Plus
-  if (typeof stored.chartShowLeft === 'boolean') sweepShowLeft.value = stored.chartShowLeft
-  if (typeof stored.chartShowRight === 'boolean') sweepShowRight.value = stored.chartShowRight
-  if (typeof stored.chartThickLines === 'boolean') sweepThickLines.value = stored.chartThickLines
-  if (typeof stored.chartShowDataPoints === 'boolean') sweepShowDataPoints.value = stored.chartShowDataPoints
-  if (typeof stored.chartYMaxPercent === 'number') sweepYMaxPercent.value = stored.chartYMaxPercent
-  if (typeof stored.chartYMinPercent === 'number') sweepYMinPercent.value = stored.chartYMinPercent
-  if (typeof stored.chartXFromHz === 'number') sweepXFromHz.value = stored.chartXFromHz
-  if (typeof stored.chartXToHz === 'number') sweepXToHz.value = stored.chartXToHz
-  if (typeof stored.chartYTopDb === 'number') sweepYTopDb.value = stored.chartYTopDb
-  if (typeof stored.chartYBottomDb === 'number') sweepYBottomDb.value = stored.chartYBottomDb
+  // The chart's own fields go through the shared restore (sweep/display.ts), which the PDF report
+  // also uses to render a stored sweep — so a type restores the same on screen and on paper.
+  const display = sweepDisplayFromParams(paramsJson, currentSweepDisplay())
+  sweepAmplitudeXAxis.value = display.amplitudeXAxis
+  for (const [axis, bounds] of Object.entries(display.amplitudeBounds)) sweepAmplitudeBounds[axis] = { ...bounds }
+  sweepUnit.value = display.unit
+  sweepShowNoiseFloor.value = display.showNoiseFloor
+  sweepShowMagnitude.value = display.showMagnitude
+  sweepShowThd.value = display.showThd
+  sweepShowD2.value = display.showD2
+  sweepShowD3.value = display.showD3
+  sweepShowD4.value = display.showD4
+  sweepShowD5.value = display.showD5
+  sweepShowD6Plus.value = display.showD6Plus
+  sweepShowLeft.value = display.showLeft
+  sweepShowRight.value = display.showRight
+  sweepThickLines.value = display.thickLines
+  sweepShowDataPoints.value = display.showDataPoints
+  sweepYMaxPercent.value = display.yMaxPercent
+  sweepYMinPercent.value = display.yMinPercent
+  sweepXFromHz.value = display.xFromHz
+  sweepXToHz.value = display.xToHz
+  sweepYTopDb.value = display.yTopDb
+  sweepYBottomDb.value = display.yBottomDb
   if (typeof stored.chartAutofitOnDone === 'boolean') sweepAutofitOnDone.value = stored.chartAutofitOnDone
 
   void nextTick(() => {
@@ -643,6 +690,33 @@ const responseFitOrder = ref(2)
 // unsaved edit, and marking it dirty there would light Save up on every selection.
 let responseDisplayRestoring = false
 
+/** The Bode chart's display state as the refs above hold it — what a live report renders the chart with. */
+function currentResponseDisplay(): ResponseDisplay {
+  return {
+    view: responseView.value,
+    showLeft: responseShowLeft.value,
+    showRight: responseShowRight.value,
+    showPhase: responseShowPhase.value,
+    showCoherence: responseShowCoherence.value,
+    showOneDb: responseShowOneDb.value,
+    showThreeDb: responseShowThreeDb.value,
+    thickLines: responseThickLines.value,
+    showDataPoints: responseShowDataPoints.value,
+    yTopDb: responseYTopDb.value,
+    yBottomDb: responseYBottomDb.value,
+    yTopDbv: responseYTopDbv.value,
+    yBottomDbv: responseYBottomDbv.value,
+    xFromHz: responseXFromHz.value,
+    xToHz: responseXToHz.value,
+    phaseTopDeg: responsePhaseTopDeg.value,
+    phaseBottomDeg: responsePhaseBottomDeg.value,
+    nyquistRadius: responseNyquistRadius.value,
+    nyquistRadiusFloorDb: responseNyquistRadiusFloorDb.value,
+    invertLoopSign: responseInvertLoopSign.value,
+    restoreDelay: responseRestoreDelay.value,
+  }
+}
+
 /**
  * Restores a frequency-response type's stored chart state. Every field is optional and guarded, so
  * a type saved before one of them existed simply keeps whatever is showing.
@@ -658,30 +732,33 @@ function applyStoredResponseDisplay(paramsJson: string) {
   }
 
   responseDisplayRestoring = true
-  if (stored.chartView) responseView.value = stored.chartView
-  if (typeof stored.chartShowLeft === 'boolean') responseShowLeft.value = stored.chartShowLeft
-  if (typeof stored.chartShowRight === 'boolean') responseShowRight.value = stored.chartShowRight
-  if (typeof stored.chartShowPhase === 'boolean') responseShowPhase.value = stored.chartShowPhase
-  if (typeof stored.chartShowCoherence === 'boolean') responseShowCoherence.value = stored.chartShowCoherence
-  if (typeof stored.chartShowOneDb === 'boolean') responseShowOneDb.value = stored.chartShowOneDb
-  if (typeof stored.chartShowThreeDb === 'boolean') responseShowThreeDb.value = stored.chartShowThreeDb
-  if (typeof stored.chartThickLines === 'boolean') responseThickLines.value = stored.chartThickLines
-  if (typeof stored.chartShowDataPoints === 'boolean') responseShowDataPoints.value = stored.chartShowDataPoints
-  if (typeof stored.chartYTopDb === 'number') responseYTopDb.value = stored.chartYTopDb
-  if (typeof stored.chartYBottomDb === 'number') responseYBottomDb.value = stored.chartYBottomDb
-  if (typeof stored.chartYTopDbv === 'number') responseYTopDbv.value = stored.chartYTopDbv
-  if (typeof stored.chartYBottomDbv === 'number') responseYBottomDbv.value = stored.chartYBottomDbv
-  if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) responseXFromHz.value = stored.chartXFromHz
-  if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) responseXToHz.value = stored.chartXToHz
-  if (typeof stored.chartPhaseTopDeg === 'number') responsePhaseTopDeg.value = stored.chartPhaseTopDeg
-  if (typeof stored.chartPhaseBottomDeg === 'number') responsePhaseBottomDeg.value = stored.chartPhaseBottomDeg
+  // The Bode chart's own fields go through the shared restore (response/display.ts), which the PDF
+  // report also uses to render a stored measurement — so a type restores the same on screen and on
+  // paper. What follows is the screen's own state: the polar views, autofit and the fit order.
+  const display = responseDisplayFromParams(paramsJson, currentResponseDisplay())
+  responseView.value = display.view
+  responseShowLeft.value = display.showLeft
+  responseShowRight.value = display.showRight
+  responseShowPhase.value = display.showPhase
+  responseShowCoherence.value = display.showCoherence
+  responseShowOneDb.value = display.showOneDb
+  responseShowThreeDb.value = display.showThreeDb
+  responseThickLines.value = display.thickLines
+  responseShowDataPoints.value = display.showDataPoints
+  responseYTopDb.value = display.yTopDb
+  responseYBottomDb.value = display.yBottomDb
+  responseYTopDbv.value = display.yTopDbv
+  responseYBottomDbv.value = display.yBottomDbv
+  responseXFromHz.value = display.xFromHz
+  responseXToHz.value = display.xToHz
+  responsePhaseTopDeg.value = display.phaseTopDeg
+  responsePhaseBottomDeg.value = display.phaseBottomDeg
+  responseNyquistRadius.value = display.nyquistRadius
+  responseNyquistRadiusFloorDb.value = display.nyquistRadiusFloorDb
+  responseInvertLoopSign.value = display.invertLoopSign
+  responseRestoreDelay.value = display.restoreDelay
   if (typeof stored.chartAutofitOnDone === 'boolean') responseAutofitOnDone.value = stored.chartAutofitOnDone
   if (stored.chartProjection) responseProjection.value = stored.chartProjection
-  if (stored.chartNyquistRadius) responseNyquistRadius.value = stored.chartNyquistRadius
-  if (typeof stored.chartNyquistRadiusFloorDb === 'number' && stored.chartNyquistRadiusFloorDb < 0)
-    responseNyquistRadiusFloorDb.value = stored.chartNyquistRadiusFloorDb
-  if (typeof stored.chartInvertLoopSign === 'boolean') responseInvertLoopSign.value = stored.chartInvertLoopSign
-  if (typeof stored.chartRestoreDelay === 'boolean') responseRestoreDelay.value = stored.chartRestoreDelay
 
   void nextTick(() => {
     responseDisplayRestoring = false
@@ -745,6 +822,25 @@ let impedanceDisplayRestoring = false
  * Restores an impedance type's stored chart state. Every field is optional and guarded, so a type
  * saved before one of them existed simply keeps whatever is showing.
  */
+/** The impedance chart's display state as the refs above hold it — what a live report renders the chart with. */
+function currentImpedanceDisplay(): ImpedanceDisplay {
+  return {
+    view: impedanceView.value,
+    showPhase: impedanceShowPhase.value,
+    showCoherence: impedanceShowCoherence.value,
+    showShortCal: impedanceShowShortCal.value,
+    thickLines: impedanceThickLines.value,
+    showDataPoints: impedanceShowDataPoints.value,
+    zScale: impedanceZScale.value,
+    zTopOhms: impedanceZTopOhms.value,
+    zBottomOhms: impedanceZBottomOhms.value,
+    xFromHz: impedanceXFromHz.value,
+    xToHz: impedanceXToHz.value,
+    phaseTopDeg: impedancePhaseTopDeg.value,
+    phaseBottomDeg: impedancePhaseBottomDeg.value,
+  }
+}
+
 function applyStoredImpedanceDisplay(paramsJson: string) {
   type StoredDisplay = Partial<import('./api/client').ImpedanceParameters>
 
@@ -756,21 +852,22 @@ function applyStoredImpedanceDisplay(paramsJson: string) {
   }
 
   impedanceDisplayRestoring = true
-  if (stored.chartView) impedanceView.value = stored.chartView
-  if (typeof stored.chartShowPhase === 'boolean') impedanceShowPhase.value = stored.chartShowPhase
-  if (typeof stored.chartShowCoherence === 'boolean') impedanceShowCoherence.value = stored.chartShowCoherence
-  if (typeof stored.chartShowShortCal === 'boolean') impedanceShowShortCal.value = stored.chartShowShortCal
-  if (typeof stored.chartThickLines === 'boolean') impedanceThickLines.value = stored.chartThickLines
-  if (typeof stored.chartShowDataPoints === 'boolean') impedanceShowDataPoints.value = stored.chartShowDataPoints
-  impedanceZScale.value = stored.chartZScale === 'Log' ? 'Log' : 'Linear'
-  // The top must stay above zero on either scale; the bottom may sit on zero only on the linear one.
-  if (typeof stored.chartZTopOhms === 'number' && stored.chartZTopOhms > 0) impedanceZTopOhms.value = stored.chartZTopOhms
-  if (typeof stored.chartZBottomOhms === 'number' && (impedanceZScale.value === 'Linear' ? stored.chartZBottomOhms >= 0 : stored.chartZBottomOhms > 0))
-    impedanceZBottomOhms.value = stored.chartZBottomOhms
-  if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) impedanceXFromHz.value = stored.chartXFromHz
-  if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) impedanceXToHz.value = stored.chartXToHz
-  if (typeof stored.chartPhaseTopDeg === 'number') impedancePhaseTopDeg.value = stored.chartPhaseTopDeg
-  if (typeof stored.chartPhaseBottomDeg === 'number') impedancePhaseBottomDeg.value = stored.chartPhaseBottomDeg
+  // The chart's own fields go through the shared restore (impedance/display.ts), which the PDF
+  // report also uses to render a stored impedance — so a type restores the same on screen and on paper.
+  const display = impedanceDisplayFromParams(paramsJson, currentImpedanceDisplay())
+  impedanceView.value = display.view
+  impedanceShowPhase.value = display.showPhase
+  impedanceShowCoherence.value = display.showCoherence
+  impedanceShowShortCal.value = display.showShortCal
+  impedanceThickLines.value = display.thickLines
+  impedanceShowDataPoints.value = display.showDataPoints
+  impedanceZScale.value = display.zScale
+  impedanceZTopOhms.value = display.zTopOhms
+  impedanceZBottomOhms.value = display.zBottomOhms
+  impedanceXFromHz.value = display.xFromHz
+  impedanceXToHz.value = display.xToHz
+  impedancePhaseTopDeg.value = display.phaseTopDeg
+  impedancePhaseBottomDeg.value = display.phaseBottomDeg
   if (typeof stored.chartAutofitOnDone === 'boolean') impedanceAutofitOnDone.value = stored.chartAutofitOnDone
   impedanceDutType.value = isDutType(stored.chartDutType) ? stored.chartDutType : 'None'
 
@@ -1222,6 +1319,167 @@ function openSaveDialog() {
   saveDialogOpen.value = true
 }
 
+// Every screen's charts, for the Screenshot button — each exposes exportPng. Only the chart of the
+// view that is mounted is non-null, which is how screenshotChart picks the one on screen.
+const responseChart = ref<InstanceType<typeof FrequencyResponseChart> | null>(null)
+const spectrumChart = ref<InstanceType<typeof SpectrumChart> | null>(null)
+const sweepChart = ref<InstanceType<typeof ThdSweepChart> | null>(null)
+const impulseChart = ref<InstanceType<typeof ImpulseResponseChart> | null>(null)
+const impulseResponseChart = ref<InstanceType<typeof FrequencyResponseChart> | null>(null)
+const impulseHarmonicsChart = ref<InstanceType<typeof ImpulseHarmonicsChart> | null>(null)
+const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(null)
+const impedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
+const impedancePlaneChart = ref<InstanceType<typeof ImpedancePlaneChart> | null>(null)
+
+/** The chart on screen — whichever view or projection the screen is showing. */
+function chartOnScreen() {
+  if (isFrequencyResponse.value) return activeResponseProjection.value === 'Bode' ? responseChart.value : responsePolarChart.value
+  if (isSweepKind.value) return sweepChart.value
+  if (isImpulseResponse.value) {
+    switch (impulseView.value) {
+      case 'Impulse':
+        return impulseChart.value
+      case 'Response':
+        return impulseResponseChart.value
+      case 'Harmonics':
+        return impulseHarmonicsChart.value
+      default:
+        return impulseDecayChart.value
+    }
+  }
+  if (isImpedance.value) return impedanceView.value === 'Bode' ? impedanceChart.value : impedancePlaneChart.value
+  return spectrumChart.value
+}
+
+/** Whether the chart on screen has something to draw. */
+const screenshotAvailable = computed(() => {
+  if (isFrequencyResponse.value) return responseTraces.value.length > 0
+  if (isSweepKind.value) return sweepPoints.value.length > 0
+  if (isImpulseResponse.value) {
+    switch (impulseView.value) {
+      case 'Impulse':
+        return impulseTrace.value !== null
+      case 'Response':
+        return impulseTraces.value.length > 0
+      case 'Harmonics':
+        return impulseHarmonics.value.length > 0
+      case 'Csd':
+        return impulseCsdSurface.value !== null
+      default:
+        return impulseBurstSurface.value !== null
+    }
+  }
+  if (isImpedance.value) return impedanceTraces.value.length > 0
+  return Object.keys(spectrum.value).length > 0
+})
+
+/**
+ * The chart as a PNG of a fixed size, in the light palette, at the zoom on screen. The chart draws it
+ * itself (see FrequencyResponseChart.exportPng and its siblings), so what is in the file is what is
+ * on screen — only the size and the colours are pinned.
+ */
+async function screenshotChart() {
+  const chart = chartOnScreen()
+  if (!chart) return
+  try {
+    const png = await chart.exportPng({ width: CHART_EXPORT_WIDTH_PX, height: CHART_EXPORT_HEIGHT_PX, captureZoom: true })
+    downloadBlob(png, `${safeFileName(currentType.value?.name ?? 'chart')}.png`)
+  } catch (e) {
+    reportError((e as Error).message)
+  }
+}
+
+/**
+ * What is on screen as a report subject, or null when there is no measurement open. Assembled from
+ * the live refs: the curves, the display panel's state, and the type's *current* settings — which
+ * may be edited since the run, so the chapter labels them as configured rather than as run. A stored
+ * result's chapter is exact. The report dialogs decide from `subjectHasChartData` whether to offer it.
+ */
+function buildLiveSubject(): ReportSubject | null {
+  const type = currentType.value
+  if (!type) return null
+
+  const facts: { label: string; value: string }[] = []
+  const subject: ReportSubject = {
+    id: 'live',
+    resultId: null,
+    typeId: type.id,
+    kind: type.kind,
+    typeName: type.name,
+    resultName: null,
+    projectName: currentProject.value?.name ?? '',
+    typeNotes: type.notes,
+    resultNotes: null,
+    paramsJson: buildTypeParamsJson() ?? type.paramsJson,
+    timestampUtc: null,
+    facts,
+    sampleRateHz: 0,
+    detail: null,
+    data: { kind: 'none' },
+  }
+
+  if (isFrequencyResponse.value) {
+    subject.sampleRateHz = responseSampleRateHz.value
+    if (responseSampleRateHz.value > 0) facts.push({ label: 'Sample rate', value: `${responseSampleRateHz.value} Hz` })
+    if (responseBinHz.value > 0) facts.push({ label: 'Resolution', value: `${responseBinHz.value.toFixed(3)} Hz per bin` })
+    if (responseTraces.value.length > 0) facts.push({ label: 'Generator level', value: `${responseGeneratorAmpDbv.value.toFixed(2)} dBV` })
+    subject.data = {
+      kind: 'response',
+      traces: responseTraces.value,
+      display: currentResponseDisplay(),
+      phaseKind: responsePhaseKind.value,
+      rightChannelIsReference: responseRightChannelIsReference.value,
+      latencySamples: responseLatencySamples.value,
+    }
+  } else if (isSweepKind.value) {
+    if (sweepPoints.value.length > 0) facts.push({ label: 'Points', value: String(sweepPoints.value.length) })
+    subject.data = {
+      kind: 'sweep',
+      points: sweepPoints.value,
+      method: sweepThdMethod.value,
+      display: currentSweepDisplay(),
+    }
+  } else if (isImpulseResponse.value) {
+    subject.sampleRateHz = impulseStatus.value?.sampleRateHz ?? 0
+    if (subject.sampleRateHz > 0) facts.push({ label: 'Sample rate', value: `${subject.sampleRateHz} Hz` })
+    subject.data = {
+      kind: 'impulse',
+      impulse: impulseTrace.value,
+      traces: impulseTraces.value,
+      harmonics: impulseHarmonics.value,
+      display: currentImpulseDisplay(),
+    }
+  } else if (isImpedance.value) {
+    facts.push({ label: 'Reference resistor', value: `${impedanceReferenceOhms.value} Ω` })
+    if (impedanceTraces.value.length > 0) facts.push({ label: 'Generator level', value: `${impedanceGeneratorAmpDbv.value.toFixed(2)} dBV` })
+    subject.data = { kind: 'impedance', traces: impedanceTraces.value, display: currentImpedanceDisplay() }
+  } else {
+    if (spectrumConfig.value) {
+      facts.push({ label: 'FFT size', value: String(spectrumConfig.value.fftSize) })
+      facts.push({ label: 'Window', value: spectrumConfig.value.window })
+    }
+    // The screen's own display singleton: the report draws exactly what the display panel shows.
+    subject.data = { kind: 'spectrum', spectrum: spectrum.value, meters: meters.value, display: useChartDisplay() }
+  }
+
+  return subject
+}
+
+/**
+ * "Report…" for the open measurement: from the toolbar with what is on screen preselected, from a
+ * History row with that result preselected. One dialog either way — it lists both.
+ */
+function openReport(preselectResultId: number | null) {
+  reportLiveSubject.value = buildLiveSubject()
+  reportPreselectResultId.value = preselectResultId
+  reportOpen.value = true
+}
+
+function openProjectReport() {
+  reportLiveSubject.value = buildLiveSubject()
+  projectReportOpen.value = true
+}
+
 // The Clear button next to Save measurement result: discards the retained (stopped) spectrum both
 // server-side (so Save has nothing stale left to save) and here in the client's own display state,
 // same reset runMeasurement does before a fresh Run — so the chart goes straight back to "Waiting
@@ -1406,6 +1664,43 @@ watch(
 let impulseDisplayRestoring = false
 
 /** Restores an impulse-response type's stored chart state. Every field is optional and guarded. */
+/** The impulse screen's display state as the refs above hold it — what a live report renders its charts with. */
+function currentImpulseDisplay(): ImpulseDisplay {
+  return {
+    normalised: impulseNormalised.value,
+    thickLines: impulseThickLines.value,
+    showDataPoints: impulseShowDataPoints.value,
+    timeFromMs: impulseTimeFromMs.value,
+    timeToMs: impulseTimeToMs.value,
+    yTopDb: impulseYWindows.Impulse.top,
+    yBottomDb: impulseYWindows.Impulse.bottom,
+    showPhase: impulseShowPhase.value,
+    showCoherence: impulseShowCoherence.value,
+    responseYTopDb: impulseYWindows.Response.top,
+    responseYBottomDb: impulseYWindows.Response.bottom,
+    harmonicsYTopDb: impulseYWindows.Harmonics.top,
+    harmonicsYBottomDb: impulseYWindows.Harmonics.bottom,
+    phaseTopDeg: impulsePhaseTopDeg.value,
+    phaseBottomDeg: impulsePhaseBottomDeg.value,
+    freqFromHz: impulseFreqFromHz.value,
+    freqToHz: impulseFreqToHz.value,
+    decayMode: impulseDecayMode.value,
+    decayPalette: impulseDecayPalette.value,
+    decayColoredCurves: impulseDecayColoredCurves.value,
+    decayRangeDb: impulseDecayRangeDb.value,
+    csd: {
+      fftLength: impulseCsdFftLength.value,
+      blockShiftSamples: impulseCsdBlockShiftSamples.value,
+      blockCount: impulseCsdBlockCount.value,
+      windowMode: impulseCsdWindowMode.value,
+      riseTimeMs: impulseCsdRiseTimeMs.value,
+    },
+    burstMaxPeriods: impulseBurstMaxPeriods.value,
+    burstPointsPerPeriod: impulseBurstPointsPerPeriod.value,
+    burstResolution: impulseBurstResolution.value,
+  }
+}
+
 function applyStoredImpulseDisplay(paramsJson: string) {
   type StoredDisplay = Partial<import('./api/client').ImpulseResponseParameters>
 
@@ -1417,43 +1712,42 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   }
 
   impulseDisplayRestoring = true
-  if (stored.chartView) impulseView.value = stored.chartView
-  if (typeof stored.chartNormalisedImpulse === 'boolean') impulseNormalised.value = stored.chartNormalisedImpulse
-  if (typeof stored.chartShowPhase === 'boolean') impulseShowPhase.value = stored.chartShowPhase
-  if (typeof stored.chartShowCoherence === 'boolean') impulseShowCoherence.value = stored.chartShowCoherence
-  if (typeof stored.chartThickLines === 'boolean') impulseThickLines.value = stored.chartThickLines
-  if (typeof stored.chartShowDataPoints === 'boolean') impulseShowDataPoints.value = stored.chartShowDataPoints
-  if (typeof stored.chartYTopDb === 'number') impulseYWindows.Impulse.top = stored.chartYTopDb
-  if (typeof stored.chartYBottomDb === 'number') impulseYWindows.Impulse.bottom = stored.chartYBottomDb
-  if (typeof stored.chartResponseYTopDb === 'number') impulseYWindows.Response.top = stored.chartResponseYTopDb
-  if (typeof stored.chartResponseYBottomDb === 'number') impulseYWindows.Response.bottom = stored.chartResponseYBottomDb
-  if (typeof stored.chartHarmonicsYTopDb === 'number') impulseYWindows.Harmonics.top = stored.chartHarmonicsYTopDb
-  if (typeof stored.chartHarmonicsYBottomDb === 'number') impulseYWindows.Harmonics.bottom = stored.chartHarmonicsYBottomDb
-  if (typeof stored.chartPhaseTopDeg === 'number') impulsePhaseTopDeg.value = stored.chartPhaseTopDeg
-  if (typeof stored.chartPhaseBottomDeg === 'number') impulsePhaseBottomDeg.value = stored.chartPhaseBottomDeg
-  if (typeof stored.chartTimeFromMs === 'number') impulseTimeFromMs.value = stored.chartTimeFromMs
-  if (typeof stored.chartTimeToMs === 'number') impulseTimeToMs.value = stored.chartTimeToMs
-  if (typeof stored.chartFreqFromHz === 'number' && stored.chartFreqFromHz > 0)
-    impulseFreqFromHz.value = stored.chartFreqFromHz
-  if (typeof stored.chartFreqToHz === 'number' && stored.chartFreqToHz > 0) impulseFreqToHz.value = stored.chartFreqToHz
-  if (stored.chartDecayMode) impulseDecayMode.value = stored.chartDecayMode
-  if (stored.chartDecayPalette) impulseDecayPalette.value = stored.chartDecayPalette
-  if (typeof stored.chartDecayColoredCurves === 'boolean')
-    impulseDecayColoredCurves.value = stored.chartDecayColoredCurves
-  if (typeof stored.chartDecayRangeDb === 'number' && stored.chartDecayRangeDb > 0)
-    impulseDecayRangeDb.value = stored.chartDecayRangeDb
+  // The impulse chart's own fields go through the shared restore (measurements/impulseDisplay.ts),
+  // which the PDF report also uses to render a stored impulse — so a type restores the same on
+  // screen and on paper. The other views' state follows below.
+  const display = impulseDisplayFromParams(paramsJson, currentImpulseDisplay())
+  impulseNormalised.value = display.normalised
+  impulseThickLines.value = display.thickLines
+  impulseShowDataPoints.value = display.showDataPoints
+  impulseTimeFromMs.value = display.timeFromMs
+  impulseTimeToMs.value = display.timeToMs
+  impulseYWindows.Impulse.top = display.yTopDb
+  impulseYWindows.Impulse.bottom = display.yBottomDb
+  impulseShowPhase.value = display.showPhase
+  impulseShowCoherence.value = display.showCoherence
+  impulseYWindows.Response.top = display.responseYTopDb
+  impulseYWindows.Response.bottom = display.responseYBottomDb
+  impulseYWindows.Harmonics.top = display.harmonicsYTopDb
+  impulseYWindows.Harmonics.bottom = display.harmonicsYBottomDb
+  impulsePhaseTopDeg.value = display.phaseTopDeg
+  impulsePhaseBottomDeg.value = display.phaseBottomDeg
+  impulseFreqFromHz.value = display.freqFromHz
+  impulseFreqToHz.value = display.freqToHz
+  impulseDecayMode.value = display.decayMode
+  impulseDecayPalette.value = display.decayPalette
+  impulseDecayColoredCurves.value = display.decayColoredCurves
+  impulseDecayRangeDb.value = display.decayRangeDb
   // A stored analysis is a deliberate choice, so it also stops the sample-rate watcher above from
   // replacing it: the values no longer match the previous rate's defaults.
-  if (typeof stored.chartCsdFftLength === 'number') impulseCsdFftLength.value = stored.chartCsdFftLength
-  if (typeof stored.chartCsdBlockShiftSamples === 'number')
-    impulseCsdBlockShiftSamples.value = stored.chartCsdBlockShiftSamples
-  if (typeof stored.chartCsdBlockCount === 'number') impulseCsdBlockCount.value = stored.chartCsdBlockCount
-  if (stored.chartCsdWindowMode) impulseCsdWindowMode.value = stored.chartCsdWindowMode
-  if (typeof stored.chartCsdRiseTimeMs === 'number') impulseCsdRiseTimeMs.value = stored.chartCsdRiseTimeMs
-  if (typeof stored.chartBurstMaxPeriods === 'number') impulseBurstMaxPeriods.value = stored.chartBurstMaxPeriods
-  if (typeof stored.chartBurstPointsPerPeriod === 'number')
-    impulseBurstPointsPerPeriod.value = stored.chartBurstPointsPerPeriod
-  if (stored.chartBurstResolution) impulseBurstResolution.value = stored.chartBurstResolution
+  impulseCsdFftLength.value = display.csd.fftLength
+  impulseCsdBlockShiftSamples.value = display.csd.blockShiftSamples
+  impulseCsdBlockCount.value = display.csd.blockCount
+  impulseCsdWindowMode.value = display.csd.windowMode
+  impulseCsdRiseTimeMs.value = display.csd.riseTimeMs
+  impulseBurstMaxPeriods.value = display.burstMaxPeriods
+  impulseBurstPointsPerPeriod.value = display.burstPointsPerPeriod
+  impulseBurstResolution.value = display.burstResolution
+  if (stored.chartView) impulseView.value = stored.chartView
 
   void nextTick(() => {
     impulseDisplayRestoring = false
@@ -1783,6 +2077,15 @@ function confirmSaveProjectAs(name: string) {
       >
         Save project as…
       </button>
+      <button
+        v-if="currentProjectId !== null"
+        type="button"
+        class="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        title="A PDF of the stored results in this project, one chapter each, grouped by measurement."
+        @click="openProjectReport"
+      >
+        Project report…
+      </button>
       <span class="flex-1"></span>
       <!-- The whole manual, from its index. Each measurement screen has its own "?" further down
            that jumps straight to that measurement's chapter. -->
@@ -1951,6 +2254,29 @@ function confirmSaveProjectAs(name: string) {
             >
               Clear
             </button>
+            <!-- The two exports, on every screen whose chart can produce them (the Screenshot) or
+                 on every screen at all (the Report — a kind without a chart builder yet still gets
+                 its description and settings). Both read what is on screen, so a running
+                 measurement disables them the way Save does. -->
+            <button
+              v-if="reportHasChart(currentType?.kind)"
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="!screenshotAvailable"
+              title="Downloads the chart on screen — whichever view or projection is showing — as a PNG of a fixed size (1600×900) in the light colour scheme, at the zoom shown."
+              @click="screenshotChart"
+            >
+              Screenshot
+            </button>
+            <button
+              type="button"
+              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="!currentType || responseRunning || sweepRunning || impedanceRunning || impulseRunning"
+              title="A PDF report of what is on screen: chart, notes, settings and readings, as chosen. Stored results have their own Report button in History details."
+              @click="openReport(null)"
+            >
+              Report…
+            </button>
             <!-- Shortcut into the manual chapter for whichever kind is selected. It sits in this
                  toolbar rather than in each screen's own template because the toolbar is the one
                  row every screen shares, so the button is in the same place everywhere: the far right
@@ -2027,6 +2353,7 @@ function confirmSaveProjectAs(name: string) {
               <template #default>
                 <ImpulseResponseChart
                   v-if="impulseView === 'Impulse'"
+                  ref="impulseChart"
                   :impulse="impulseTrace"
                   :normalised="impulseNormalised"
                   :thick-lines="impulseThickLines"
@@ -2040,6 +2367,7 @@ function confirmSaveProjectAs(name: string) {
                      be kept in step with it. -->
                 <FrequencyResponseChart
                   v-else-if="impulseView === 'Response'"
+                  ref="impulseResponseChart"
                   run-label="RUN"
                   :traces="impulseTraces"
                   :overlays="[]"
@@ -2064,6 +2392,7 @@ function confirmSaveProjectAs(name: string) {
                 />
                 <ImpulseHarmonicsChart
                   v-else-if="impulseView === 'Harmonics'"
+                  ref="impulseHarmonicsChart"
                   :harmonics="impulseHarmonics"
                   :thick-lines="impulseThickLines"
                   :show-data-points="impulseShowDataPoints"
@@ -2076,6 +2405,7 @@ function confirmSaveProjectAs(name: string) {
                      counts and in nothing about how it is drawn. -->
                 <DecaySurfaceChart
                   v-else
+                  ref="impulseDecayChart"
                   :surface="impulseView === 'Csd' ? impulseCsdSurface : impulseBurstSurface"
                   :mode="impulseDecayMode"
                   :palette="impulseDecayPalette"
@@ -2123,7 +2453,7 @@ function confirmSaveProjectAs(name: string) {
                   ≈{{ impulseGateResolutionHz.toFixed(0) }} Hz is resolved, however convincing the curve looks there.
                 </p>
 
-                <MeasurementHistoryPanel @error="reportError" />
+                <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
               <template #aside>
@@ -2293,6 +2623,7 @@ function confirmSaveProjectAs(name: string) {
                      claiming a measurement nobody made. -->
                 <FrequencyResponseChart
                   v-if="activeResponseProjection === 'Bode'"
+                  ref="responseChart"
                   :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
@@ -2336,7 +2667,7 @@ function confirmSaveProjectAs(name: string) {
                   :fitted-model="responsePoleZeroPanel?.fit?.model ?? null"
                 />
 
-                <MeasurementHistoryPanel @error="reportError" />
+                <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
               <template #aside>
@@ -2457,6 +2788,7 @@ function confirmSaveProjectAs(name: string) {
 
                 <ImpedanceChart
                   v-if="impedanceView === 'Bode'"
+                  ref="impedanceChart"
                   :traces="impedanceTraces"
                   :overlays="visibleImpedanceOverlays"
                   :show-phase="impedanceShowPhase"
@@ -2474,13 +2806,14 @@ function confirmSaveProjectAs(name: string) {
                 />
                 <ImpedancePlaneChart
                   v-else
+                  ref="impedancePlaneChart"
                   :traces="impedanceTraces"
                   :x-from-hz="impedanceXFromHz"
                   :x-to-hz="impedanceXToHz"
                   :thick-lines="impedanceThickLines"
                 />
 
-                <MeasurementHistoryPanel @error="reportError" />
+                <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
               <template #aside>
@@ -2583,6 +2916,7 @@ function confirmSaveProjectAs(name: string) {
                 <p v-if="sweepError" class="text-xs text-red-600 dark:text-red-400">{{ sweepError }}</p>
 
                 <ThdSweepChart
+                  ref="sweepChart"
                   :unit="sweepUnit"
                   :show-noise-floor="sweepShowNoiseFloor"
                   :show-magnitude="sweepShowMagnitude"
@@ -2610,7 +2944,7 @@ function confirmSaveProjectAs(name: string) {
                   @cursor-x="onSweepCursorX"
                 />
 
-                <MeasurementHistoryPanel @error="reportError" />
+                <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
               <template #aside>
@@ -2735,6 +3069,7 @@ function confirmSaveProjectAs(name: string) {
               </div>
 
               <SpectrumChart
+                ref="spectrumChart"
                 :fit-above="fftAbove"
                 :spectrum="spectrum"
                 :meters="meters"
@@ -2777,7 +3112,7 @@ function confirmSaveProjectAs(name: string) {
           <!-- History details sits at the bottom, spanning the whole measurement view rather than
                the centre column it used to share with the charts: its rows are a name, a timestamp,
                per-channel headlines and three buttons, which a third of the width could only wrap. -->
-          <MeasurementHistoryPanel @error="reportError" />
+          <MeasurementHistoryPanel @error="reportError" @report="openReport" />
           </template>
         </template>
 
@@ -2812,6 +3147,19 @@ function confirmSaveProjectAs(name: string) {
       @confirm="confirmSaveProjectAs"
     />
     <MetricPickerDialog :open="metricPickerOpen" @close="metricPickerOpen = false" />
+    <ReportDialog
+      :open="reportOpen"
+      :live-subject="reportLiveSubject"
+      :preselect-result-id="reportPreselectResultId"
+      @close="reportOpen = false"
+    />
+    <ProjectReportDialog
+      :open="projectReportOpen"
+      :project="currentProject"
+      :types="types"
+      :live-subject="reportLiveSubject"
+      @close="projectReportOpen = false"
+    />
     <ConfigDialog :open="configDialogOpen" @close="configDialogOpen = false" />
     <ManualDialog />
   </div>

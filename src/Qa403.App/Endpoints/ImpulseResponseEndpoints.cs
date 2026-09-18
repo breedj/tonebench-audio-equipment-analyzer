@@ -1,6 +1,10 @@
+﻿using System.Text.Json;
+using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Extensions.Options;
 using Qa403.App.Services;
 using Qa403.Data;
 using Qa403.Dsp;
+using Qa403.Dsp.Fft;
 
 namespace Qa403.App.Endpoints;
 
@@ -164,8 +168,121 @@ public static class ImpulseResponseEndpoints
             var stored = await repo.GetImpulseResultAsync(id, ct);
             return stored is null ? Results.NotFound() : Results.Ok(stored);
         });
+
+        // The same stored result in the shape the chart draws: the left impulse gated and windowed the
+        // way it was on screen, min/max decimated. The raw IR above is the record; this is the picture,
+        // built by the runner's own BuildImpulseTrace so a report of a stored result and the live
+        // screen cannot draw the same measurement two different ways.
+        app.MapGet("/api/measurements/{id:long}/impulse-trace", async (
+            long id, MeasurementRepository repo, CancellationToken ct) =>
+        {
+            var stored = await repo.GetImpulseResultAsync(id, ct);
+            if (stored is null)
+                return Results.NotFound();
+
+            var left = stored.Impulses.FirstOrDefault(i => i.Kind == "left") ?? stored.Impulses.FirstOrDefault();
+            if (left is null || left.Ir.Length == 0)
+                return Results.Ok(new StoredImpulseTraceResponse(null));
+
+            var window = Enum.TryParse<WindowType>(left.GateWindow, ignoreCase: true, out var parsed) ? parsed : WindowType.Hann;
+            var ir = Array.ConvertAll(left.Ir, v => (double)v);
+            var trace = ImpulseResponseRunner.BuildImpulseTrace(
+                FrequencyResponseTraceKind.Left, ir, left.PeakIndex,
+                left.GatePreMs, left.GatePostMs, left.SampleRateHz, window);
+            return Results.Ok(new StoredImpulseTraceResponse(trace));
+        });
+
+        // The two decay surfaces of a stored result, computed from its stored IR the way the live ones
+        // are computed from the runner's (the DSP is stateless; only the live endpoints go through the
+        // runner's memory). The record's own run settings supply the sweep gate — see
+        // ImpulseResponseRunner.StoredAvailablePostSamples — so a stored result's decay reads the same
+        // record the screen read when it was measured, cut at the same place.
+        app.MapPost("/api/measurements/{id:long}/decay/csd", async (
+            long id, ImpulseCsdRequest request, MeasurementRepository repo,
+            IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            if (!EnumParsing.TryParse(request.WindowMode, CsdWindowMode.Apodizing, out CsdWindowMode windowMode, out var windowError))
+                return Results.BadRequest(windowError);
+
+            var stored = await LoadStoredImpulseAsync(id, repo, jsonOptions.Value.SerializerOptions, ct);
+            if (stored is null)
+                return Results.NotFound();
+
+            try
+            {
+                var (ir, left, available) = stored.Value;
+                var settings = request.ToSettings(windowMode);
+                return Results.Ok(await Task.Run(
+                    () => CumulativeSpectralDecay.Compute(ir, left.PeakIndex, left.SampleRateHz, available, settings, new MathNetBackend()),
+                    ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/measurements/{id:long}/decay/burst", async (
+            long id, ImpulseBurstDecayRequest request, MeasurementRepository repo,
+            IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            if (!EnumParsing.TryParse(request.Resolution, BurstDecayResolution.PreferTime, out BurstDecayResolution resolution, out var resolutionError))
+                return Results.BadRequest(resolutionError);
+
+            var stored = await LoadStoredImpulseAsync(id, repo, jsonOptions.Value.SerializerOptions, ct);
+            if (stored is null)
+                return Results.NotFound();
+
+            try
+            {
+                var (ir, left, available) = stored.Value;
+                var settings = request.ToSettings(resolution);
+                return Results.Ok(await Task.Run(
+                    () => BurstDecay.Compute(ir, left.PeakIndex, left.SampleRateHz, available, settings),
+                    ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+    }
+
+    /// <summary>
+    /// A stored result's left impulse as doubles, with how far past the peak a decay analysis may
+    /// read; null when the result does not exist or holds no impulse.
+    /// </summary>
+    private static async Task<(double[] Ir, StoredImpulseTrace Left, int AvailablePostSamples)?> LoadStoredImpulseAsync(
+        long id, MeasurementRepository repo, JsonSerializerOptions serializerOptions, CancellationToken ct)
+    {
+        var stored = await repo.GetImpulseResultAsync(id, ct);
+        var left = stored?.Impulses.FirstOrDefault(i => i.Kind == "left") ?? stored?.Impulses.FirstOrDefault();
+        if (left is null || left.Ir.Length == 0)
+            return null;
+
+        var detail = await repo.GetResultAsync(id, ct);
+        ImpulseResponseParameters? parameters = null;
+        if (detail is not null)
+        {
+            try
+            {
+                parameters = JsonSerializer.Deserialize<ImpulseResponseParameters>(detail.ParamsJson, serializerOptions);
+            }
+            catch (JsonException)
+            {
+                // A row whose settings this build cannot read: bound the analysis by the row alone.
+            }
+        }
+
+        int available = parameters is null
+            ? Math.Max(0, left.Ir.Length - left.PeakIndex - 1)
+            : ImpulseResponseRunner.StoredAvailablePostSamples(left, parameters);
+        return (Array.ConvertAll(left.Ir, v => (double)v), left, available);
     }
 }
+
+/// <summary>A stored impulse response as its display trace; null when the result holds no impulse.</summary>
+public sealed record StoredImpulseTraceResponse(ImpulseTrace? Impulse);
 
 /// <summary>
 /// Wire shape for starting an impulse-response measurement. Enums arrive as strings, matching the

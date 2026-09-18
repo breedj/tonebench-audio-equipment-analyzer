@@ -1,4 +1,4 @@
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, ref, watch, type InjectionKey, type Ref } from 'vue'
 import { useProjects } from './useProjects'
 
 // Module-level singleton, same pattern as useMeasurements.ts / useSpectrumConfig.ts — the chart
@@ -70,6 +70,99 @@ const resetPeakHoldTrigger = ref(0)
 const autofitYTrigger = ref(0)
 const autofitXTrigger = ref(0)
 
+/**
+ * The stored chart preferences of an FFT measurement type — the `chart*` half of
+ * FftSpectrumParameters. Every field optional: a type saved before one existed falls back to that
+ * field's default.
+ */
+export interface StoredSpectrumDisplay {
+  chartYTopDbv?: number | null
+  chartYBottomDbv?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartShowMinMax?: boolean | null
+  chartShowPeakHold?: boolean | null
+  chartAutofitOnDone?: boolean | null
+  chartShowWaterfall?: boolean | null
+  chartShowOscilloscope?: boolean | null
+  chartShowHarmonics?: boolean | null
+  chartShowOtherPeaks?: boolean | null
+}
+
+/**
+ * What SpectrumChart reads of the display state — the subset of this composable it draws from. The
+ * screen's chart takes the singleton below; a headless render for a report (report/renderChart.ts)
+ * provides a stored measurement type's own state under SPECTRUM_DISPLAY_KEY, so a report of a stored
+ * FFT result is drawn with that type's window and not whichever screen happens to be open.
+ */
+export interface SpectrumDisplaySource {
+  yTop: Ref<number>
+  yBottom: Ref<number>
+  xFrom: Ref<number>
+  xTo: Ref<number>
+  thickLines: Ref<boolean>
+  showDataPoints: Ref<boolean>
+  visibleL: Ref<boolean>
+  visibleR: Ref<boolean>
+  showMinMax: Ref<boolean>
+  showPeakHold: Ref<boolean>
+  activeXRange: Ref<{ min: number; max: number } | null>
+  resetPeakHoldTrigger: Ref<number>
+  autofitYTrigger: Ref<number>
+  autofitXTrigger: Ref<number>
+  resetYDefaults(): void
+  resetXDefaults(): void
+  /**
+   * Whether a channel is being processed at all — the acquisition panel's L/R checkboxes on screen.
+   * A stored result answers from which channels it holds.
+   */
+  channelEnabled?: (channel: number) => boolean
+}
+
+export const SPECTRUM_DISPLAY_KEY: InjectionKey<SpectrumDisplaySource> = Symbol('spectrumDisplay')
+
+/**
+ * A display source of its own, seeded from a stored type's preferences, that shares nothing with
+ * the screen's singleton — for rendering a stored FFT result headless. Same defaults as applyLoaded.
+ */
+export function createSpectrumDisplaySource(
+  loaded: StoredSpectrumDisplay | null | undefined,
+  channels: readonly number[],
+): SpectrumDisplaySource {
+  const yTopRef = ref(loaded?.chartYTopDbv ?? DEFAULT_Y_TOP)
+  const yBottomRef = ref(loaded?.chartYBottomDbv ?? DEFAULT_Y_BOTTOM)
+  const xFromRef = ref(loaded?.chartXFromHz ?? DEFAULT_X_FROM)
+  const xToRef = ref(loaded?.chartXToHz ?? DEFAULT_X_TO)
+  return {
+    yTop: yTopRef,
+    yBottom: yBottomRef,
+    xFrom: xFromRef,
+    xTo: xToRef,
+    thickLines: ref(loaded?.chartThickLines ?? false),
+    showDataPoints: ref(loaded?.chartShowDataPoints ?? false),
+    visibleL: ref(true),
+    visibleR: ref(true),
+    showMinMax: ref(loaded?.chartShowMinMax ?? true),
+    // Never for a stored result: the peak-hold maps are the screen's own running state.
+    showPeakHold: ref(false),
+    activeXRange: ref(null),
+    resetPeakHoldTrigger: ref(0),
+    autofitYTrigger: ref(0),
+    autofitXTrigger: ref(0),
+    resetYDefaults() {
+      yTopRef.value = DEFAULT_Y_TOP
+      yBottomRef.value = DEFAULT_Y_BOTTOM
+    },
+    resetXDefaults() {
+      xFromRef.value = DEFAULT_X_FROM
+      xToRef.value = DEFAULT_X_TO
+    },
+    channelEnabled: (channel) => channels.includes(channel),
+  }
+}
+
 export function useChartDisplay() {
   function resetYDefaults() {
     yTop.value = DEFAULT_Y_TOP
@@ -87,21 +180,7 @@ export function useChartDisplay() {
    * saved before this feature existed, or a freshly created one — falls back to that field's own
    * default, same as resetYDefaults/resetXDefaults.
    */
-  function applyLoaded(loaded: {
-    chartYTopDbv?: number | null
-    chartYBottomDbv?: number | null
-    chartXFromHz?: number | null
-    chartXToHz?: number | null
-    chartThickLines?: boolean | null
-    chartShowDataPoints?: boolean | null
-    chartShowMinMax?: boolean | null
-    chartShowPeakHold?: boolean | null
-    chartAutofitOnDone?: boolean | null
-    chartShowWaterfall?: boolean | null
-    chartShowOscilloscope?: boolean | null
-    chartShowHarmonics?: boolean | null
-    chartShowOtherPeaks?: boolean | null
-  } | null | undefined) {
+  function applyLoaded(loaded: StoredSpectrumDisplay | null | undefined) {
     restoring = true
     yTop.value = loaded?.chartYTopDbv ?? DEFAULT_Y_TOP
     yBottom.value = loaded?.chartYBottomDbv ?? DEFAULT_Y_BOTTOM

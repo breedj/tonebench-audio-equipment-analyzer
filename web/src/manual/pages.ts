@@ -269,7 +269,7 @@ export const MANUAL_PAGES: ManualPage[] = [
   {
     id: 'saving',
     title: 'Projects, saving and history',
-    summary: 'What gets stored where, overlays, CSV export and deleting.',
+    summary: 'What gets stored where, overlays, CSV export, screenshots and PDF reports, deleting.',
     group: 'Reference',
     component: manualPage(() => import('./pages/SavingPage.vue')),
   },

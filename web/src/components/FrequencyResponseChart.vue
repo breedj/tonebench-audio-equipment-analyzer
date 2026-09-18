@@ -7,6 +7,15 @@ import type { ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import {
+  CHART_EXPORT_HEADER_PX,
+  composeChartPng,
+  nextPaint,
+  type ChartExportOptions,
+  type ExportLegendEntry,
+} from '../charts/exportChart'
+import { makeChartPalette, type ChartPalette } from '../charts/palette'
+import { exportAxisLabel } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
@@ -81,9 +90,12 @@ const BANDWIDTH_COLORS = {
 /** The horizontal line at the level both readings were measured down from. Deliberately quiet — it is context, not a curve. */
 const REFERENCE_COLOR = ['#9ca3af', '#6b7280'] as const
 
-function color(pair: readonly string[]): string {
-  return isDark.value ? pair[1] : pair[0]
-}
+// See charts/palette.ts for why the palette is an argument and not a module-level flag.
+type Palette = ChartPalette
+const makePalette = makeChartPalette
+
+/** The screen's palette, following the app theme. */
+const palette = computed(() => makePalette(isDark.value))
 
 const gainTrace = computed(() => props.traces.find((t) => t.kind === 'Gain') ?? null)
 const leftTrace = computed(() => props.traces.find((t) => t.kind === 'Left') ?? null)
@@ -188,7 +200,7 @@ const phaseLabel = computed(() => (props.phaseKind === 'ChannelDifference' ? 'Ph
  * a rippled response would be redrawn riding along the top of its own ripple rather than through
  * the middle of it.
  */
-function minMaxBandPlugin(): uPlot.Plugin {
+function minMaxBandPlugin(p: Palette): uPlot.Plugin {
   return {
     hooks: {
       drawAxes: [
@@ -210,7 +222,7 @@ function minMaxBandPlugin(): uPlot.Plugin {
               path.lineTo(x, u.valToPos(trace.magnitudeMaxDb[i], 'y', true))
             }
 
-            ctx.strokeStyle = color(TRACE_COLORS[trace.kind])
+            ctx.strokeStyle = p.color(TRACE_COLORS[trace.kind])
             ctx.globalAlpha = 0.35
             ctx.lineWidth = 1
             ctx.stroke(path)
@@ -232,7 +244,7 @@ function minMaxBandPlugin(): uPlot.Plugin {
  * A clamped end is drawn at the edge of the measured band and labelled with a "&gt;", because the
  * curve never reached the threshold there: it is where the search stopped, not a corner.
  */
-function bandwidthPlugin(): uPlot.Plugin {
+function bandwidthPlugin(p: Palette): uPlot.Plugin {
   return {
     hooks: {
       draw: [
@@ -259,8 +271,8 @@ function bandwidthPlugin(): uPlot.Plugin {
           if (trace.referenceDb !== null && readings.length > 0) {
             const yRef = u.valToPos(trace.referenceDb, 'y', true)
 
-            ctx.strokeStyle = color(REFERENCE_COLOR)
-            ctx.fillStyle = color(REFERENCE_COLOR)
+            ctx.strokeStyle = p.color(REFERENCE_COLOR)
+            ctx.fillStyle = p.color(REFERENCE_COLOR)
             ctx.lineWidth = 1
             ctx.setLineDash([])
             ctx.beginPath()
@@ -281,7 +293,7 @@ function bandwidthPlugin(): uPlot.Plugin {
                 ? [trace.referenceDb - reading.dropDb, trace.referenceDb + reading.dropDb]
                 : [trace.referenceDb - reading.dropDb]
 
-              ctx.strokeStyle = color(palette)
+              ctx.strokeStyle = p.color(palette)
               for (const level of levels) {
                 const y = u.valToPos(level, 'y', true)
                 ctx.beginPath()
@@ -294,7 +306,7 @@ function bandwidthPlugin(): uPlot.Plugin {
           }
 
           for (const { label, reading, palette, row } of readings) {
-            const stroke = color(palette)
+            const stroke = p.color(palette)
             const xLow = u.valToPos(Math.max(reading.lowerHz, u.scales.x.min ?? 1), 'x', true)
             const xHigh = u.valToPos(Math.min(reading.upperHz, u.scales.x.max ?? reading.upperHz), 'x', true)
 
@@ -341,7 +353,7 @@ function bandwidthPlugin(): uPlot.Plugin {
 
             const midX = (xLow + xHigh) / 2
             const width = ctx.measureText(text).width + 8
-            ctx.fillStyle = isDark.value ? '#111827' : '#ffffff'
+            ctx.fillStyle = p.labelBackground
             ctx.fillRect(midX - width / 2, y - 8, width, 16)
             ctx.strokeRect(midX - width / 2, y - 8, width, 16)
             ctx.fillStyle = stroke
@@ -421,7 +433,7 @@ function resampleOnto(trace: ResponseTrace, grid: Float64Array): (number | null)
   return out
 }
 
-function buildSeries(): uPlot.Series[] {
+function buildSeries(p: Palette): uPlot.Series[] {
   const width = props.thickLines ? 2 : 1
   const points = { show: props.showDataPoints, size: 3 }
 
@@ -430,7 +442,7 @@ function buildSeries(): uPlot.Series[] {
   for (const trace of visibleTraces.value) {
     series.push({
       label: trace.kind === 'Gain' ? 'Gain' : trace.kind,
-      stroke: color(TRACE_COLORS[trace.kind]),
+      stroke: p.color(TRACE_COLORS[trace.kind]),
       width,
       points,
     })
@@ -440,7 +452,7 @@ function buildSeries(): uPlot.Series[] {
     series.push({
       label: phaseLabel.value,
       scale: 'phase',
-      stroke: color(PHASE_COLOR),
+      stroke: p.color(PHASE_COLOR),
       width,
       dash: [4, 3],
       points: { show: false },
@@ -451,7 +463,7 @@ function buildSeries(): uPlot.Series[] {
     series.push({
       label: 'Coherence',
       scale: 'coh',
-      stroke: color(COHERENCE_COLOR),
+      stroke: p.color(COHERENCE_COLOR),
       width,
       dash: [2, 2],
       points: { show: false },
@@ -461,7 +473,7 @@ function buildSeries(): uPlot.Series[] {
   for (const overlay of overlayCurves.value) {
     series.push({
       label: overlay.name,
-      stroke: color(TRACE_COLORS.Gain),
+      stroke: p.color(TRACE_COLORS.Gain),
       width: 1,
       dash: sweepOverlayDash(props.overlays, overlay.id) ?? [6, 3],
       points: { show: false },
@@ -489,7 +501,7 @@ interface ReadoutSeries {
   digits: number
 }
 
-const readoutSeries = computed<ReadoutSeries[]>(() => {
+function buildReadoutSeries(p: Palette): ReadoutSeries[] {
   // In gain view the one curve is a ratio; in dBV view the curves are absolute input levels. The
   // axis does not say which, because it is the same numbers either way — the readout is the only
   // place the distinction is written down.
@@ -500,32 +512,34 @@ const readoutSeries = computed<ReadoutSeries[]>(() => {
     entries.push({
       key: `live-${trace.kind}`,
       label: trace.kind,
-      color: color(TRACE_COLORS[trace.kind]),
+      color: p.color(TRACE_COLORS[trace.kind]),
       unit: magnitudeUnit,
       digits: 2,
     })
   }
 
   if (props.showPhase) {
-    entries.push({ key: 'phase', label: phaseLabel.value, color: color(PHASE_COLOR), unit: '°', digits: 1 })
+    entries.push({ key: 'phase', label: phaseLabel.value, color: p.color(PHASE_COLOR), unit: '°', digits: 1 })
   }
 
   if (props.showCoherence) {
-    entries.push({ key: 'coherence', label: 'Coh', color: color(COHERENCE_COLOR), unit: '', digits: 3 })
+    entries.push({ key: 'coherence', label: 'Coh', color: p.color(COHERENCE_COLOR), unit: '', digits: 3 })
   }
 
   for (const overlay of overlayCurves.value) {
     entries.push({
       key: `overlay-${overlay.id}`,
       label: overlay.name,
-      color: color(TRACE_COLORS.Gain),
+      color: p.color(TRACE_COLORS.Gain),
       unit: magnitudeUnit,
       digits: 2,
     })
   }
 
   return entries
-})
+}
+
+const readoutSeries = computed<ReadoutSeries[]>(() => buildReadoutSeries(palette.value))
 
 const cursorReadout = ref<{ freqHz: number; entries: (ReadoutSeries & { text: string })[] } | null>(null)
 
@@ -626,7 +640,12 @@ function windowOf(scale: uPlot.Scale | undefined): ScaleWindow | null {
   return scale?.min != null && scale.max != null ? { min: scale.min, max: scale.max } : null
 }
 
-function buildOptions(width: number, height: number): uPlot.Options {
+/**
+ * @param p The palette every colour is taken from — see Palette.
+ * @param interactive False for the export's offscreen plot: no cursor, and none of the hooks that
+ *   feed the readout and the zoom flag, which would otherwise fire for a plot nobody can see.
+ */
+function buildOptions(width: number, height: number, p: Palette, interactive: boolean): uPlot.Options {
   return {
     width,
     height,
@@ -673,17 +692,21 @@ function buildOptions(width: number, height: number): uPlot.Options {
       coh: { range: () => [0, 1] as [number, number] },
     },
     axes: [
+      // Axis titles with units on the export only: on screen the display panel names the
+      // quantities and the space is the plot's; on paper the picture has to stand on its own.
       {
         ...freqAxis(),
-        stroke: isDark.value ? '#9ca3af' : '#4b5563',
-        grid: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
-        ticks: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
+        ...exportAxisLabel(interactive, 'Frequency (Hz)'),
+        stroke: p.axis,
+        grid: { stroke: p.grid, width: 1 },
+        ticks: { stroke: p.grid, width: 1 },
       },
       {
         size: 50,
-        stroke: isDark.value ? '#9ca3af' : '#4b5563',
-        grid: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
-        ticks: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
+        ...exportAxisLabel(interactive, props.view === 'Gain' ? 'Gain (dB)' : 'Level (dBV)'),
+        stroke: p.axis,
+        grid: { stroke: p.grid, width: 1 },
+        ticks: { stroke: p.grid, width: 1 },
       },
       // Right-hand axes, outermost last. Only the visible trace's axis is shown, and neither draws
       // gridlines: a second and third grid over the dB one turns the plot into graph paper, and the
@@ -693,73 +716,143 @@ function buildOptions(width: number, height: number): uPlot.Options {
         side: 1,
         show: props.showPhase,
         size: 52,
+        ...exportAxisLabel(interactive, `${phaseLabel.value} (°)`),
         incrs: [15, 30, 45, 90, 180, 360, 720, 1440],
         values: (_u, vals) => vals.map((v) => `${v}°`),
-        stroke: color(PHASE_COLOR),
+        stroke: p.color(PHASE_COLOR),
         grid: { show: false },
-        ticks: { stroke: color(PHASE_COLOR), width: 1 },
+        ticks: { stroke: p.color(PHASE_COLOR), width: 1 },
       },
       {
         scale: 'coh',
         side: 1,
         show: props.showCoherence,
         size: 44,
+        ...exportAxisLabel(interactive, 'Coherence'),
         incrs: [0.1, 0.2, 0.25, 0.5],
         values: (_u, vals) => vals.map((v) => v.toFixed(1)),
-        stroke: color(COHERENCE_COLOR),
+        stroke: p.color(COHERENCE_COLOR),
         grid: { show: false },
-        ticks: { stroke: color(COHERENCE_COLOR), width: 1 },
+        ticks: { stroke: p.color(COHERENCE_COLOR), width: 1 },
       },
     ],
-    series: buildSeries(),
-    cursor: {
-      // A dot on every curve at the hovered column, so the numbers in the readout above can be
-      // told apart when two curves run close together.
-      points: { show: true },
-      // Both axes draggable, with `uni` making a drag unidirectional unless it is a real box: a
-      // drag that stays under 12 px in one direction zooms the other axis across its full span.
-      // Frequency-only is the common gesture (narrowing onto a corner), but a dB window matters
-      // just as much on a response that is flat to a fraction of a dB, and demanding a
-      // pixel-accurate horizontal drag to get one without the other would make both awkward.
-      drag: { x: true, y: true, uni: 12 },
-    },
+    series: buildSeries(p),
+    cursor: interactive
+      ? {
+          // A dot on every curve at the hovered column, so the numbers in the readout above can be
+          // told apart when two curves run close together.
+          points: { show: true },
+          // Both axes draggable, with `uni` making a drag unidirectional unless it is a real box: a
+          // drag that stays under 12 px in one direction zooms the other axis across its full span.
+          // Frequency-only is the common gesture (narrowing onto a corner), but a dB window matters
+          // just as much on a response that is flat to a fraction of a dB, and demanding a
+          // pixel-accurate horizontal drag to get one without the other would make both awkward.
+          drag: { x: true, y: true, uni: 12 },
+        }
+      : { show: false },
     // Same reason as the other charts: uPlot's own legend doubles as a click-to-hide control, which
     // would desync from the display panel's checkboxes — those are the single source of visibility.
     legend: { show: false },
-    hooks: {
-      // Drives the Reset zoom button. Fires on a completed drag and nothing else — uPlot suppresses
-      // it for the selection it hides afterwards — so it is the one unambiguous "the user zoomed"
-      // signal. setScale is not: it fires on every setData as well.
-      setSelect: [
-        (u: uPlot) => {
-          if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
-        },
-      ],
-      // u.cursor.idx indexes the shared x array buildData produced — not a pixel-derived value, so
-      // it always names a column something was actually plotted at, and the readout can index every
-      // series at it. null once the pointer leaves the plot (uPlot clears idx on mouseleave).
-      setCursor: [
-        (u: uPlot) => {
-          const idx = u.cursor.idx
-          const xs = u.data[0]
-          if (idx == null || idx < 0 || xs == null || xs[idx] == null) {
-            cursorReadout.value = null
-            return
-          }
+    hooks: interactive
+      ? {
+          // Drives the Reset zoom button. Fires on a completed drag and nothing else — uPlot suppresses
+          // it for the selection it hides afterwards — so it is the one unambiguous "the user zoomed"
+          // signal. setScale is not: it fires on every setData as well.
+          setSelect: [
+            (u: uPlot) => {
+              if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
+            },
+          ],
+          // u.cursor.idx indexes the shared x array buildData produced — not a pixel-derived value, so
+          // it always names a column something was actually plotted at, and the readout can index every
+          // series at it. null once the pointer leaves the plot (uPlot clears idx on mouseleave).
+          setCursor: [
+            (u: uPlot) => {
+              const idx = u.cursor.idx
+              const xs = u.data[0]
+              if (idx == null || idx < 0 || xs == null || xs[idx] == null) {
+                cursorReadout.value = null
+                return
+              }
 
-          cursorReadout.value = {
-            freqHz: xs[idx] as number,
-            entries: readoutSeries.value.map((series, i) => {
-              const value = u.data[i + 1]?.[idx]
-              return { ...series, text: value == null ? '—' : formatReading(value as number, series) }
-            }),
-          }
-        },
-      ],
-    },
-    plugins: [minMaxBandPlugin(), bandwidthPlugin()],
+              cursorReadout.value = {
+                freqHz: xs[idx] as number,
+                entries: readoutSeries.value.map((series, i) => {
+                  const value = u.data[i + 1]?.[idx]
+                  return { ...series, text: value == null ? '—' : formatReading(value as number, series) }
+                }),
+              }
+            },
+          ],
+        }
+      : {},
+    plugins: [minMaxBandPlugin(p), bandwidthPlugin(p)],
   }
 }
+
+/** What the export's header line calls the plot — which y quantity it shows. */
+function exportTitle(): string {
+  return props.view === 'Gain' ? 'Gain (dB) vs frequency' : 'Level (dBV) vs frequency'
+}
+
+/**
+ * The chart as a PNG of exactly the requested size, drawn with the light palette whatever the theme.
+ *
+ * A second uPlot is built offscreen from the same options and data as the visible one, so the
+ * export is this chart and not an imitation of it — the min/max band, the bandwidth arrows, the
+ * reference line and every overlay come along, because the plugins are the same functions. The host
+ * has to be *attached* (positioned off to the left) rather than detached: uPlot measures its
+ * container, and a detached div measures zero. uPlot commits its first draw in a microtask, hence the
+ * wait before compositing. The visible plot is never touched.
+ *
+ * Exposed for the Screenshot button (`captureZoom`, so the file shows the window on screen) and for
+ * the report, which mounts this component headless and calls it with the display panel's window.
+ */
+async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+  const light = makePalette(false)
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  const restore =
+    captureZoom && plot.value ? { x: windowOf(plot.value.scales.x), y: windowOf(plot.value.scales.y) } : null
+
+  let u: uPlot | null = null
+  try {
+    u = new uPlot(buildOptions(width, plotHeight, light, false), buildData(), host)
+    // Same order as rebuild(): the data goes to the constructor, so a setScale afterwards is not
+    // clobbered by a later setData. The x range callback reads `zoomed`, which is this component's
+    // own flag, so a captured drag window passes through it the way it does on screen.
+    if (restore?.x) u.setScale('x', restore.x)
+    if (restore?.y) u.setScale('y', restore.y)
+    await nextPaint()
+
+    // The primary curves carry the report's name for this measurement when it shares the chart with
+    // history overlays; the overlays already carry theirs.
+    const legend: ExportLegendEntry[] = buildReadoutSeries(light).map((entry) => ({
+      label: primaryLabel && !entry.key.startsWith('overlay-') ? `${primaryLabel} — ${entry.label}` : entry.label,
+      color: entry.color,
+      dash: entry.key === 'phase' ? [4, 3] : entry.key === 'coherence' ? [2, 2] : entry.key.startsWith('overlay-') ? [6, 3] : undefined,
+    }))
+
+    return await composeChartPng({
+      width,
+      height,
+      plotCanvas: u.ctx.canvas,
+      headerHeight: header,
+      title: exportTitle(),
+      legend,
+    })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
 
 function rebuild() {
   const el = container.value
@@ -785,7 +878,7 @@ function rebuild() {
 
   const width = el.clientWidth || 800
   const height = el.clientHeight || chartHeight.value
-  const u = new uPlot(buildOptions(width, height), buildData(), el)
+  const u = new uPlot(buildOptions(width, height, palette.value, true), buildData(), el)
   plot.value = u
 
   // uPlot's own double-click resets the x axis to the data extent, which on an auto:false chart is

@@ -102,6 +102,35 @@ public sealed record CaptureDelayConfig(double CaptureDelayMs = 0.0)
 }
 
 /// <summary>
+/// Which elements a PDF report of a measurement includes, remembered per measurement kind — the
+/// vocabulary (<c>chart</c>, <c>description</c>, <c>settings</c>, <c>measurements</c>, ...) is the
+/// client's, and it only ever uses what it recognises, so the server stores the strings and checks
+/// nothing but that they are strings. A kind with no entry gets every element it offers.
+/// </summary>
+/// <param name="Elements">The element ids to include, in the client's own order.</param>
+/// <param name="Views">Which of the kind's chart views to include (the client's ids); null on a document written before views were chosen.</param>
+/// <param name="Mode">How several measurements share a report: <c>combined</c> (one chart) or <c>individual</c> (a chart each); null before it existed.</param>
+public sealed record ReportKindSettings(string[] Elements, string[]? Views = null, string? Mode = null);
+
+/// <summary>
+/// The report settings document, one entry per measurement kind. Lives here rather than in the
+/// project database because it describes how this user likes a report, not what a measurement was.
+/// </summary>
+public sealed record ReportSettingsConfig(Dictionary<string, ReportKindSettings> Kinds)
+{
+    public static ReportSettingsConfig Default { get; } = new(new Dictionary<string, ReportKindSettings>());
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid =>
+        Kinds is not null
+        && Kinds.All(kind => !string.IsNullOrWhiteSpace(kind.Key)
+                             && kind.Value?.Elements is { } elements
+                             && elements.All(e => !string.IsNullOrWhiteSpace(e))
+                             && (kind.Value.Views is null || kind.Value.Views.All(v => !string.IsNullOrWhiteSpace(v)))
+                             && kind.Value.Mode is null or "combined" or "individual");
+}
+
+/// <summary>
 /// Reads and writes the configuration database's key/value documents.
 ///
 /// <para>Deliberately takes <see cref="ConfigConnectionFactory"/> and not
@@ -118,6 +147,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The capture delay's key. One document, see <see cref="CaptureDelayConfig"/>.</summary>
     public const string CaptureDelayKey = "acquisition.captureDelay";
+
+    /// <summary>The report settings' key. One document, see <see cref="ReportSettingsConfig"/>.</summary>
+    public const string ReportSettingsKey = "report.settings";
 
     public async Task<string?> GetAsync(string key, CancellationToken ct)
     {

@@ -216,7 +216,7 @@ function requireOverlaySlot(kind: string): void {
  * ('z', 'z_open', 'z_short'); anything else in the result belongs to another measurement and is
  * dropped rather than drawn on an ohms axis.
  */
-function toImpedanceTraces(traces: StoredResponseTrace[]): ImpedanceTrace[] {
+export function toImpedanceTraces(traces: StoredResponseTrace[]): ImpedanceTrace[] {
   const kinds: Record<string, ImpedanceTrace['kind']> = {
     z: 'Impedance',
     z_open: 'OpenCal',

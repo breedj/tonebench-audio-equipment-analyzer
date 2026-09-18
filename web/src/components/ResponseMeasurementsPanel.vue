@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { ResponseView } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { formatBandwidth, formatCorner, formatDb, formatHz, formatRatio } from '../response/format'
+import { peakLabel as peakLabelFor, primaryResponseTrace, referenceLabel as referenceLabelFor } from '../response/measurements'
 import BandwidthReferenceControls from './BandwidthReferenceControls.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
@@ -17,34 +18,12 @@ const props = defineProps<{
 const showOneDb = defineModel<boolean>('showOneDb', { required: true })
 const showThreeDb = defineModel<boolean>('showThreeDb', { required: true })
 
-/** The curve these numbers describe — the same one the chart's markers are drawn for. */
-const trace = computed<ResponseTrace | null>(() => {
-  if (props.view === 'Gain') return props.traces.find((t) => t.kind === 'Gain') ?? null
-  return (props.showLeft ? props.traces.find((t) => t.kind === 'Left') : null)
-    ?? props.traces.find((t) => t.kind === 'Right')
-    ?? props.traces.find((t) => t.kind === 'Left')
-    ?? null
-})
-
-/**
- * The previous app re-captioned these with the view (`frmFrequencyResponse.cs:746-781`), and the
- * distinction is real: in the dBV view the peak is an output level, in the gain view it is a gain.
- */
-const peakLabel = computed(() => (props.view === 'Gain' ? 'Max. gain' : 'Max. amplitude'))
+// The curve, the captions and the reference wording all come from response/measurements.ts, which
+// the PDF report reads too — so the paper says exactly what this panel says.
+const trace = computed<ResponseTrace | null>(() => primaryResponseTrace(props.traces, props.view, props.showLeft))
+const peakLabel = computed(() => peakLabelFor(props.view))
 const peakFreqLabel = 'Peak at'
-
-/**
- * What the two rows were measured down from, spelled out — because the same table reads completely
- * differently depending on it, and a reader comparing two saved runs has no other way to tell.
- *
- * Absent (null) on a result saved before the reference was recorded. Those were peak-referenced, but
- * the row is left blank rather than back-filled: it says what the stored result says and no more.
- */
-const referenceLabel = computed(() => {
-  if (!trace.value || trace.value.referenceMode === null) return null
-  if (trace.value.referenceMode === 'Peak') return 'Peak'
-  return trace.value.referenceFellBackToPeak ? 'Peak (band not measured)' : 'Passband median'
-})
+const referenceLabel = computed(() => (trace.value ? referenceLabelFor(trace.value) : null))
 </script>
 
 <template>

@@ -79,6 +79,12 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ImpedanceFixtureConfig))]
 [JsonSerializable(typeof(UiLayoutConfig))]
 [JsonSerializable(typeof(CaptureDelayConfig))]
+// A Qa403.Data record, so AppJsonContextTests' scan of the Endpoints namespace does not see it —
+// registered by hand, like the three config documents above it.
+[JsonSerializable(typeof(ReportSettingsConfig))]
+// The PDF report the browser assembles (Endpoints/ReportsEndpoints.cs). Its chapters, sections and
+// rows are reached through the root; the PNG bytes ride as base64.
+[JsonSerializable(typeof(ReportDocument))]
 [JsonSerializable(typeof(StoredResponseTracesResponse))]
 [JsonSerializable(typeof(FrequencyResponseParameters))]
 // The stepped-sine response's own DTOs. Missing until now, which is exactly the failure this file's
@@ -101,6 +107,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(LoopbackReferenceInfo))]
 [JsonSerializable(typeof(LoopbackReferencesResponse))]
 [JsonSerializable(typeof(StoredImpulseResult))]
+[JsonSerializable(typeof(StoredImpulseTraceResponse))]
 [JsonSerializable(typeof(ImpulseCsdRequest))]
 [JsonSerializable(typeof(ImpulseBurstDecayRequest))]
 [JsonSerializable(typeof(DecaySurface))]

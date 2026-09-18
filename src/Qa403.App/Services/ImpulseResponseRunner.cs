@@ -1,5 +1,6 @@
 ﻿using System.Numerics;
 using Qa403.App.Streaming;
+using Qa403.Data;
 using Qa403.Device;
 using Qa403.Dsp;
 using Qa403.Dsp.Fft;
@@ -168,6 +169,24 @@ public sealed class ImpulseResponseRunner(
                 impulse.Gated, impulse.PeakIndex, request.SampleRateHz,
                 AvailablePostSamples(request), settings),
             ct);
+    }
+
+    /// <summary>
+    /// How far past the impulse a <i>stored</i> record is the DUT rather than an edge — the same bound
+    /// <see cref="AvailablePostSamples"/> applies to the live one, rebuilt from the run settings the
+    /// result stores (the sweep gate is fixed by the sweep geometry, which those settings name), and
+    /// further bounded by what was stored: the row keeps a window centred on the peak, and past its
+    /// end there is nothing, which a decay analysis would read as a perfect decay.
+    /// </summary>
+    public static int StoredAvailablePostSamples(StoredImpulseTrace stored, ImpulseResponseParameters parameters)
+    {
+        double sampleRateHz = parameters.FrequencySpanHz * 2.0;
+        int fftSize = (int)Math.Round(sampleRateHz / FrequencyResponseRequest.BaseBinHz) * Math.Max(1, parameters.ResolutionMultiplier);
+        double chirpEndHz = FrequencyResponseRequest.ChirpEndNyquistFraction * sampleRateHz / 2.0;
+        var gate = ImpulseGate.ForSweep(fftSize, Math.Max(parameters.ChirpStartHz, 0.1), chirpEndHz);
+        int fromGate = Math.Max(0, gate.PostSamples - gate.TaperSamples);
+        int fromRow = Math.Max(0, stored.Ir.Length - stored.PeakIndex - 1);
+        return Math.Min(fromGate, fromRow);
     }
 
     /// <summary>The measured impulse and the settings that produced it, or a message saying there is none.</summary>
@@ -788,11 +807,23 @@ public sealed class ImpulseResponseRunner(
     }
 
     private static ImpulseTrace BuildImpulseTrace(
-        ImpulseResponseRequest request, FrequencyResponseTraceKind kind, ImpulseResponseResult impulse)
-    {
-        var gated = ImpulseWindow.WindowIr(
-            impulse.Gated, impulse.PeakIndex,
+        ImpulseResponseRequest request, FrequencyResponseTraceKind kind, ImpulseResponseResult impulse) =>
+        BuildImpulseTrace(
+            kind, impulse.Gated, impulse.PeakIndex,
             request.GatePreMs, request.GatePostMs, request.SampleRateHz, request.GateWindow);
+
+    /// <summary>
+    /// The display trace of an impulse response: gated about the peak with the user's window, then
+    /// min/max decimated. Public and free of the runner's state so a <i>stored</i> result — which keeps
+    /// the raw peak-centred IR, not this trace — is drawn back through exactly this code (see
+    /// <c>GET /api/measurements/{id}/impulse-trace</c>), rather than a client-side imitation of the
+    /// half-window gate.
+    /// </summary>
+    public static ImpulseTrace BuildImpulseTrace(
+        FrequencyResponseTraceKind kind, ReadOnlySpan<double> ir, int peakIndex,
+        double gatePreMs, double gatePostMs, double sampleRateHz, WindowType gateWindow)
+    {
+        var gated = ImpulseWindow.WindowIr(ir, peakIndex, gatePreMs, gatePostMs, sampleRateHz, gateWindow);
 
         int columns = Math.Min(ImpulseDisplayColumns, gated.Samples.Length);
         var minMax = new MinMax[columns];
@@ -813,14 +844,14 @@ public sealed class ImpulseResponseRunner(
         for (int c = 0; c < columns; c++)
         {
             double centreSample = (c + 0.5) * gated.Samples.Length / columns;
-            timeS[c] = (float)(gated.FirstSampleTimeS + (centreSample / request.SampleRateHz));
+            timeS[c] = (float)(gated.FirstSampleTimeS + (centreSample / sampleRateHz));
             minVolts[c] = (float)minMax[c].Min;
             maxVolts[c] = (float)minMax[c].Max;
         }
 
         return new ImpulseTrace(
-            kind, timeS, minVolts, maxVolts, peakVolts, request.SampleRateHz,
-            gated.Samples.Length, request.GatePreMs, request.GatePostMs, gated.ResolutionLimitHz);
+            kind, timeS, minVolts, maxVolts, peakVolts, sampleRateHz,
+            gated.Samples.Length, gatePreMs, gatePostMs, gated.ResolutionLimitHz);
     }
 
     /// <summary>

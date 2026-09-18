@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import type { DecayLayout, DecayPick, OrientedSurface, WallRib } from '../measurements/decay'
@@ -102,8 +103,12 @@ const THEME: { dark: ChartTheme; light: ChartTheme } = {
   light: { background: '#ffffff', axis: '#525252', grid: '#d4d4d4', plain: '#1d6fd0', text: '#404040' },
 }
 
+// Which theme the drawing code reads — the screen's, or light for the duration of an export. Safe as
+// module state only because the drawing is synchronous; see ResponsePolarChart's `paint`.
+let paintDark = isDark.value
+
 function theme(): ChartTheme {
-  return isDark.value ? THEME.dark : THEME.light
+  return paintDark ? THEME.dark : THEME.light
 }
 
 /** Room for the level axis with its colour key, the depth labels and the axis under the front slice. */
@@ -155,14 +160,24 @@ function draw() {
   const ctx = element.getContext('2d')
   if (!ctx) return
 
+  // Whatever was under the cursor belongs to the picture that was there before this one.
+  hover.value = null
+  drawMarker(null)
+
+  renderScene(ctx, cssWidth, cssHeight, dpr, isDark.value)
+}
+
+/**
+ * The whole picture onto any context: the page, the surface in whichever mode, the box and the
+ * three axes. `dpr` is the backing-store scale of `ctx`'s canvas — the sonogram is blitted in
+ * backing-store pixels (putImageData ignores the transform), so it has to know.
+ */
+function renderScene(ctx: CanvasRenderingContext2D, cssWidth: number, cssHeight: number, dpr: number, dark: boolean) {
+  paintDark = dark
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   const colors = theme()
   ctx.fillStyle = colors.background
   ctx.fillRect(0, 0, cssWidth, cssHeight)
-
-  // Whatever was under the cursor belongs to the picture that was there before this one.
-  hover.value = null
-  drawMarker(null)
 
   const surface = props.surface
   const view = oriented.value
@@ -204,6 +219,39 @@ function draw() {
 }
 
 /**
+ * The chart as a PNG of exactly the requested size, light whatever the theme — see
+ * ResponsePolarChart.exportPng, which explains the arrangement for a canvas chart. This one paints its
+ * own page, so the export's canvas is drawn at a backing-store scale of 1.
+ */
+async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+  const plot = document.createElement('canvas')
+  plot.width = width
+  plot.height = plotHeight
+  const ctx = plot.getContext('2d')
+  if (!ctx) throw new Error('Could not get a 2D context for the chart export.')
+
+  try {
+    renderScene(ctx, width, plotHeight, 1, false)
+  } finally {
+    paintDark = isDark.value
+  }
+
+  const kind = props.surface?.sliceAxis === 'Periods' ? 'Burst decay' : 'Cumulative spectral decay'
+  const how = props.mode === 'Sonogram' ? 'sonogram' : props.mode === 'WaterfallPeriods' ? 'waterfall, by period' : 'waterfall'
+  return composeChartPng({
+    width,
+    height,
+    plotCanvas: plot,
+    headerHeight: header,
+    title: `${kind} — ${how}, ${props.rangeDb} dB range`,
+  })
+}
+
+defineExpose({ exportPng })
+
+/**
  * Stacked curves, back to front. Each one is filled down to the foot of the box before it is
  * stroked, which is the whole of the hidden-line removal: a nearer curve is drawn lower, so its
  * fill covers whatever of the curves behind falls beneath it.
@@ -217,7 +265,7 @@ function drawWaterfall(
   plotHeight: number,
   colors: ChartTheme,
 ) {
-  const lut = paletteLut(props.palette, isDark.value)
+  const lut = paletteLut(props.palette, paintDark)
   const body = bodyColor(lut, colors)
   const count = view.depth.length
   const width = props.thickLines ? 1.6 : 1.0
@@ -374,7 +422,7 @@ function paintTrailingWall(
  * removal either way, and all that asks of it is that it be opaque.
  */
 function bodyColor(lut: Uint8Array, colors: ChartTheme): string {
-  return isDark.value ? lutColor(lut, 0) : colors.background
+  return paintDark ? lutColor(lut, 0) : colors.background
 }
 
 /** Colour resolution of the stroked curves. Enough that the ramp reads as continuous. */
@@ -403,7 +451,7 @@ function drawSonogram(
   const width = Math.round(plotWidth)
   const height = Math.round(plotHeight)
   const image = ctx.createImageData(width, height)
-  const lut = paletteLut(props.palette, isDark.value)
+  const lut = paletteLut(props.palette, paintDark)
   const colors = theme()
   const background = hexToRgb(colors.background)
 
@@ -567,7 +615,7 @@ function drawLevelAxis(
   // Row by row out of the same lookup table the surface is coloured from, rather than a canvas
   // gradient rebuilt from the stops: one source of colour means the key cannot drift from the
   // picture it is a key to.
-  const lut = paletteLut(props.palette, isDark.value)
+  const lut = paletteLut(props.palette, paintDark)
   const rows = Math.max(1, Math.round(height))
   for (let row = 0; row < rows; row++) {
     ctx.fillStyle = lutColor(lut, Math.round(((rows - 1 - row) / (rows - 1 || 1)) * 255))

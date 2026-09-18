@@ -316,6 +316,18 @@ const { showPage } = useManual()
       response rather than all of it.
     </p>
 
+    <h2>Screenshot and report</h2>
+    <p>
+      <strong>Screenshot</strong> in the toolbar downloads the plot on screen — Bode, Nyquist or
+      Nichols — as a 1600 × 900 PNG in the light colour scheme, at the zoom on screen, with the
+      bandwidth markers and any overlays. <strong>Report…</strong> makes a PDF of this measurement:
+      the results ticked in its dialog, the current one among them, with any of the three
+      projections, the notes, the settings and the Measurements panel's readings, as chosen; a stored
+      result has its own Report button in History details. The report's charts follow the display
+      panel's view and ranges, not the zoom. See <em>Projects, saving and history</em> for the
+      details and the project report.
+    </p>
+
     <h2>Reading it</h2>
     <ul>
       <li>

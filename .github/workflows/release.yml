@@ -80,7 +80,9 @@ jobs:
 
       # Verifies the trimmed self-contained binary actually runs, not just that it built — trimming
       # is the likeliest way to silently break Dapper's reflection-based mapping (see
-      # Qa403.App.csproj's TrimmerRootAssembly note).
+      # Qa403.App.csproj's TrimmerRootAssembly note). The PDF render is the second thing only a
+      # published binary can prove: QuestPDF's native Skia library has to be found after the
+      # single-file self-extract, and on Linux it has to link against the runner's libfontconfig.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         working-directory: publish/${{ matrix.rid }}
@@ -90,9 +92,17 @@ jobs:
           PID=$!
           for i in $(seq 1 20); do
             if curl -fs http://127.0.0.1:8399/api/update-check >/dev/null 2>&1; then
-              echo "App responded, smoke test passed."
+              echo "App responded."
+              HEAD=$(curl -fs -H 'Content-Type: application/json' \
+                -d '{"title":"smoke","subtitle":null,"generated":"now","notes":null,"chapters":[]}' \
+                http://127.0.0.1:8399/api/reports/pdf | head -c 5)
               kill $PID
-              exit 0
+              if [ "$HEAD" = "%PDF-" ]; then
+                echo "PDF rendered, smoke test passed."
+                exit 0
+              fi
+              echo "PDF endpoint did not return a PDF (got '$HEAD')" >&2
+              exit 1
             fi
             sleep 1
           done
@@ -116,12 +126,28 @@ jobs:
               Start-Sleep -Seconds 1
             }
           }
+          $pdfOk = $false
+          if ($ok) {
+            try {
+              $body = '{"title":"smoke","subtitle":null,"generated":"now","notes":null,"chapters":[]}'
+              $response = Invoke-WebRequest -UseBasicParsing -Method Post -ContentType 'application/json' -Body $body `
+                -Uri http://127.0.0.1:8399/api/reports/pdf -TimeoutSec 30
+              $bytes = $response.Content
+              $pdfOk = $bytes.Length -gt 5 -and [System.Text.Encoding]::ASCII.GetString($bytes, 0, 5) -eq '%PDF-'
+            } catch {
+              Write-Host "PDF request failed: $_"
+            }
+          }
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           if (-not $ok) {
             Write-Error "App did not respond within 20s"
             exit 1
           }
-          Write-Host "App responded, smoke test passed."
+          if (-not $pdfOk) {
+            Write-Error "PDF endpoint did not return a PDF"
+            exit 1
+          }
+          Write-Host "App responded and rendered a PDF, smoke test passed."
 
       - name: Package (zip)
         if: matrix.archive == 'zip'

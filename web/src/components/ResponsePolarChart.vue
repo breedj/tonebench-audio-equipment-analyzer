@@ -5,6 +5,7 @@ import type { ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { responseOverlayDash } from '../measurements/sweepOverlayStyles'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import { fitTransform, niceTicks, type PlaneTransform, type Viewport } from '../charts/planeTransform'
 import { toComplexCurve, type ComplexPoint } from '../response/complexPlane'
@@ -82,8 +83,16 @@ const AXIS_COLOR = ['#4b5563', '#9ca3af'] as const
 const MARKER_COLOR = ['#d97706', '#fbbf24'] as const
 const FIT_COLOR = ['#7c3aed', '#a78bfa'] as const
 
+/**
+ * What the drawing code reads instead of the DOM: which theme, and the canvas size in CSS pixels.
+ * Set by renderScene for the duration of one synchronous paint — the screen's, or the export's,
+ * which draws the same scene light and at a fixed size onto a canvas of its own. Safe as module
+ * state only because everything here draws synchronously; see charts/palette.ts for the uPlot case.
+ */
+let paint = { dark: isDark.value, width: 800, height: 400 }
+
 function color(pair: readonly string[]): string {
-  return isDark.value ? pair[1] : pair[0]
+  return paint.dark ? pair[1] : pair[0]
 }
 
 /**
@@ -231,13 +240,26 @@ function draw() {
   ctx.save()
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, width, height)
+  transform = renderScene(ctx, width, height, isDark.value, zoomViewport.value ?? baseViewport(), true)
+  ctx.restore()
+}
 
-  transform = fitTransform(zoomViewport.value ?? baseViewport(), width, height, INSETS, equalAspect.value)
+/** The whole picture — grid, decorations, overlays, the curve, the fit, the crossings — onto any context. */
+function renderScene(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  dark: boolean,
+  viewport: Viewport,
+  showHover: boolean,
+): PlaneTransform {
+  paint = { dark, width, height }
+  const t = fitTransform(viewport, width, height, INSETS, equalAspect.value)
 
-  drawGrid(ctx, width, height, transform)
-  drawDecorations(ctx, transform)
+  drawGrid(ctx, width, height, t)
+  drawDecorations(ctx, t)
   for (const overlay of overlayCurves.value) {
-    drawCurve(ctx, overlay.points, transform, {
+    drawCurve(ctx, overlay.points, t, {
       stroke: color(CURVE_COLOR),
       width: 1,
       dash: responseOverlayDash(props.overlays, overlay.id) ?? [6, 3],
@@ -245,18 +267,53 @@ function draw() {
       points: false,
     })
   }
-  drawCurve(ctx, curve.value, transform, {
+  drawCurve(ctx, curve.value, t, {
     stroke: color(CURVE_COLOR),
     width: props.thickLines ? 2 : 1,
     dash: [],
     alpha: 1,
     points: props.showDataPoints,
   })
-  drawFittedModel(ctx, transform)
-  drawCrossings(ctx, transform)
-  drawHover(ctx, transform)
+  drawFittedModel(ctx, t)
+  drawCrossings(ctx, t)
+  if (showHover) drawHover(ctx, t)
+  return t
+}
 
-  ctx.restore()
+/**
+ * The chart as a PNG of exactly the requested size, light whatever the theme — the same arrangement
+ * as FrequencyResponseChart.exportPng. A canvas chart needs no offscreen component: the scene is
+ * drawn straight onto the export's own canvas at 1:1.
+ */
+async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+  const plot = document.createElement('canvas')
+  plot.width = width
+  plot.height = plotHeight
+  const ctx = plot.getContext('2d')
+  if (!ctx) throw new Error('Could not get a 2D context for the chart export.')
+
+  try {
+    renderScene(ctx, width, plotHeight, false, (captureZoom ? zoomViewport.value : null) ?? baseViewport(), false)
+  } finally {
+    paint = { ...paint, dark: isDark.value }
+  }
+
+  const title =
+    props.projection === 'Nyquist'
+      ? `Nyquist — real vs imaginary (${props.radiusMode === 'Linear' ? 'linear' : 'log'} radius)`
+      : 'Nichols — gain (dB) vs phase (°)'
+  const legend = [
+    { label: primaryLabel ?? 'Response', color: CURVE_COLOR[0] },
+    ...overlayCurves.value.map((o) => ({
+      label: o.name,
+      color: CURVE_COLOR[0],
+      dash: responseOverlayDash(props.overlays, o.id) ?? [6, 3],
+    })),
+    ...(props.fittedModel ? [{ label: 'Fitted model', color: FIT_COLOR[0], dash: [5, 3] }] : []),
+  ]
+  return composeChartPng({ width, height, plotCanvas: plot, headerHeight: header, title, legend })
 }
 
 function clipToPlot(ctx: CanvasRenderingContext2D, width: number, height: number) {
@@ -315,11 +372,7 @@ function tickLabel(v: number): string {
 }
 
 function drawDecorations(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
-  const el = canvas.value
-  if (!el) return
-  const dpr = window.devicePixelRatio || 1
-  const width = el.width / dpr
-  const height = el.height / dpr
+  const { width, height } = paint
 
   ctx.save()
   clipToPlot(ctx, width, height)
@@ -392,12 +445,9 @@ interface CurveStyle {
 
 function drawCurve(ctx: CanvasRenderingContext2D, points: ComplexPoint[], t: PlaneTransform, style: CurveStyle) {
   if (points.length === 0) return
-  const el = canvas.value
-  if (!el) return
-  const dpr = window.devicePixelRatio || 1
 
   ctx.save()
-  clipToPlot(ctx, el.width / dpr, el.height / dpr)
+  clipToPlot(ctx, paint.width, paint.height)
   ctx.globalAlpha = style.alpha
   ctx.strokeStyle = style.stroke
   ctx.lineWidth = style.width
@@ -478,9 +528,6 @@ function drawFittedModel(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
   const model = props.fittedModel
   const measured = curve.value
   if (!model || measured.length < 2) return
-  const el = canvas.value
-  if (!el) return
-  const dpr = window.devicePixelRatio || 1
 
   const lowHz = measured[0].freqHz
   const highHz = measured[measured.length - 1].freqHz
@@ -490,7 +537,7 @@ function drawFittedModel(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
   const ratio = Math.log(highHz / lowHz)
 
   ctx.save()
-  clipToPlot(ctx, el.width / dpr, el.height / dpr)
+  clipToPlot(ctx, paint.width, paint.height)
   ctx.strokeStyle = color(FIT_COLOR)
   ctx.lineWidth = 1.5
   ctx.setLineDash([5, 3])
@@ -517,13 +564,10 @@ function drawFittedModel(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
 
 /** Rings at the crossings the margin readout is quoting, so a number in the panel has a place on the plot. */
 function drawCrossings(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
-  const el = canvas.value
-  if (!el) return
-  const dpr = window.devicePixelRatio || 1
   const { gainCrossoverHz, phaseCrossoverHz } = margins.value
 
   ctx.save()
-  clipToPlot(ctx, el.width / dpr, el.height / dpr)
+  clipToPlot(ctx, paint.width, paint.height)
   ctx.strokeStyle = color(MARKER_COLOR)
   ctx.lineWidth = 1.5
 
@@ -689,7 +733,7 @@ watch(
   { deep: true },
 )
 
-defineExpose({ margins, curve })
+defineExpose({ margins, curve, exportPng })
 </script>
 
 <template>

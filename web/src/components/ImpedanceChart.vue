@@ -7,6 +7,15 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
 import { impedanceOverlayDash } from '../measurements/sweepOverlayStyles'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import {
+  CHART_EXPORT_HEADER_PX,
+  composeChartPng,
+  nextPaint,
+  exportAxisLabel,
+  type ChartExportOptions,
+  type ExportLegendEntry,
+} from '../charts/exportChart'
+import { makeChartPalette, type ChartPalette } from '../charts/palette'
 import ExpandToggle from './ExpandToggle.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
@@ -75,8 +84,11 @@ const SHORT_CAL_COLOR = ['#c2410c', '#fb923c'] as const
 const PHASE_COLOR = ['#7c3aed', '#a78bfa'] as const
 const COHERENCE_COLOR = ['#059669', '#34d399'] as const
 
+/** The screen's palette, following the app theme; the export builds its own light one. See charts/palette.ts. */
+const palette = computed(() => makeChartPalette(isDark.value))
+
 function color(pair: readonly string[]): string {
-  return isDark.value ? pair[1] : pair[0]
+  return palette.value.color(pair)
 }
 
 /** The DUT curve. */
@@ -172,7 +184,7 @@ const overlayCurves = computed(() =>
  * drawn: plotting the max alone throws the min away in the browser and draws a curve's own ripple as
  * a thin line above where it really sits.
  */
-function minMaxBandPlugin(): uPlot.Plugin {
+function minMaxBandPlugin(p: ChartPalette): uPlot.Plugin {
   return {
     hooks: {
       drawAxes: [
@@ -196,7 +208,7 @@ function minMaxBandPlugin(): uPlot.Plugin {
             path.lineTo(x, u.valToPos(dbOhmsToOhms(t.magnitudeMaxDbOhms[i]), 'y', true))
           }
 
-          ctx.strokeStyle = color(IMPEDANCE_COLOR)
+          ctx.strokeStyle = p.color(IMPEDANCE_COLOR)
           ctx.globalAlpha = 0.35
           ctx.lineWidth = 1
           ctx.stroke(path)
@@ -330,6 +342,8 @@ type PlottedSeries = {
    */
   scale?: string
   points: boolean
+  /** The `[light, dark]` pair `color` was picked from — the export picks again for its own palette. */
+  pair: readonly string[]
 }
 
 /** Every curve on the chart, in the order buildData stacks their arrays. */
@@ -341,6 +355,7 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       key: 'z',
       label: '|Z|',
       color: color(IMPEDANCE_COLOR),
+      pair: IMPEDANCE_COLOR,
       unit: 'ohms',
       width,
       points: props.showDataPoints,
@@ -354,6 +369,7 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       key: `o${overlay.id}`,
       label: overlay.name,
       color: color(IMPEDANCE_COLOR),
+      pair: IMPEDANCE_COLOR,
       unit: 'ohms',
       width: 1,
       dash: impedanceOverlayDash(props.overlays, overlay.id) ?? undefined,
@@ -366,6 +382,7 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       key: 'short',
       label: 'Short cal',
       color: color(SHORT_CAL_COLOR),
+      pair: SHORT_CAL_COLOR,
       unit: 'ohms',
       width: 1,
       dash: [2, 3],
@@ -378,6 +395,7 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       key: 'phase',
       label: 'Phase',
       color: color(PHASE_COLOR),
+      pair: PHASE_COLOR,
       unit: 'deg',
       width,
       dash: [4, 3],
@@ -393,6 +411,7 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
         key: `o${overlay.id}p`,
         label: `${overlay.name} phase`,
         color: color(PHASE_COLOR),
+      pair: PHASE_COLOR,
         unit: 'deg',
         width: 1,
         dash: impedanceOverlayDash(props.overlays, overlay.id) ?? undefined,
@@ -409,6 +428,7 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       // The standard's colour with the phase curve's dash: colour says which curve, dash says which
       // quantity, so it reads against both the orange magnitude and the purple phase beside it.
       color: color(SHORT_CAL_COLOR),
+      pair: SHORT_CAL_COLOR,
       unit: 'deg',
       width: 1,
       dash: [4, 3],
@@ -422,6 +442,7 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       key: 'coh',
       label: 'Coherence',
       color: color(COHERENCE_COLOR),
+      pair: COHERENCE_COLOR,
       unit: 'ratio',
       width: 1,
       scale: 'coh',
@@ -442,7 +463,7 @@ function swatchWidth(series: PlottedSeries): number {
   return Math.max(series.width, 1.5)
 }
 
-function buildSeries(): uPlot.Series[] {
+function buildSeries(p: ChartPalette): uPlot.Series[] {
   return [
     // Slot 0 is the x series, which is never drawn.
     {},
@@ -461,7 +482,7 @@ function buildSeries(): uPlot.Series[] {
     ...plottedSeries.value.map((s) => ({
       label: s.label,
       scale: s.scale ?? 'y',
-      stroke: s.color,
+      stroke: p.color(s.pair),
       width: s.width,
       dash: s.dash,
       points: { show: s.points, size: 4 },
@@ -559,7 +580,12 @@ function windowOf(scale: uPlot.Scale | undefined): { min: number; max: number } 
   return scale?.min != null && scale.max != null ? { min: scale.min, max: scale.max } : null
 }
 
-function buildOptions(width: number, height: number): uPlot.Options {
+/**
+ * @param p The palette every colour is taken from — see charts/palette.ts.
+ * @param interactive False for the export's offscreen plot: no cursor, and none of the hooks that
+ *   feed the readout and the zoom flag.
+ */
+function buildOptions(width: number, height: number, p: ChartPalette, interactive: boolean): uPlot.Options {
   return {
     width,
     height,
@@ -605,76 +631,133 @@ function buildOptions(width: number, height: number): uPlot.Options {
     axes: [
       {
         ...freqAxis(),
-        stroke: isDark.value ? '#9ca3af' : '#4b5563',
-        grid: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
-        ticks: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
+        ...exportAxisLabel(interactive, 'Frequency (Hz)'),
+        stroke: p.axis,
+        grid: { stroke: p.grid, width: 1 },
+        ticks: { stroke: p.grid, width: 1 },
       },
       {
         ...ohmAxis(logZ.value),
         size: 54,
-        stroke: isDark.value ? '#9ca3af' : '#4b5563',
-        grid: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
-        ticks: { stroke: isDark.value ? '#374151' : '#e5e7eb', width: 1 },
+        ...exportAxisLabel(interactive, '|Z| (Ω)'),
+        stroke: p.axis,
+        grid: { stroke: p.grid, width: 1 },
+        ticks: { stroke: p.grid, width: 1 },
       },
       {
         scale: 'phase',
         side: 1,
         show: props.showPhase,
         size: 52,
+        ...exportAxisLabel(interactive, 'Phase (°)'),
         incrs: [15, 30, 45, 90, 180, 360],
         values: (_u, vals) => vals.map((v) => `${v}°`),
-        stroke: color(PHASE_COLOR),
+        stroke: p.color(PHASE_COLOR),
         grid: { show: false },
-        ticks: { stroke: color(PHASE_COLOR), width: 1 },
+        ticks: { stroke: p.color(PHASE_COLOR), width: 1 },
       },
       {
         scale: 'coh',
         side: 1,
         show: props.showCoherence,
         size: 44,
+        ...exportAxisLabel(interactive, 'Coherence'),
         incrs: [0.1, 0.2, 0.25, 0.5],
         values: (_u, vals) => vals.map((v) => v.toFixed(1)),
-        stroke: color(COHERENCE_COLOR),
+        stroke: p.color(COHERENCE_COLOR),
         grid: { show: false },
-        ticks: { stroke: color(COHERENCE_COLOR), width: 1 },
+        ticks: { stroke: p.color(COHERENCE_COLOR), width: 1 },
       },
     ],
-    series: buildSeries(),
-    cursor: {
-      points: { show: true },
-      drag: { x: true, y: true, uni: 12 },
-    },
+    series: buildSeries(p),
+    cursor: interactive
+      ? {
+          points: { show: true },
+          drag: { x: true, y: true, uni: 12 },
+        }
+      : { show: false },
     legend: { show: false },
-    hooks: {
-      // Fires on a completed drag and nothing else — uPlot suppresses it for the selection it hides
-      // afterwards — so this is the one unambiguous "the user zoomed" signal.
-      setSelect: [
-        (u: uPlot) => {
-          if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
-        },
-      ],
-      setCursor: [
-        (u: uPlot) => {
-          const idx = u.cursor.idx
-          const xs = u.data[0]
-          if (idx == null || idx < 0 || xs == null || xs[idx] == null) {
-            cursorReadout.value = null
-            return
-          }
+    hooks: interactive
+      ? {
+          // Fires on a completed drag and nothing else — uPlot suppresses it for the selection it hides
+          // afterwards — so this is the one unambiguous "the user zoomed" signal.
+          setSelect: [
+            (u: uPlot) => {
+              if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
+            },
+          ],
+          setCursor: [
+            (u: uPlot) => {
+              const idx = u.cursor.idx
+              const xs = u.data[0]
+              if (idx == null || idx < 0 || xs == null || xs[idx] == null) {
+                cursorReadout.value = null
+                return
+              }
 
-          cursorReadout.value = {
-            freqHz: xs[idx] as number,
-            entries: plottedSeries.value.map((series, i) => {
-              const value = u.data[i + 1]?.[idx]
-              return { ...series, text: value == null ? '—' : formatReading(value as number, series) }
-            }),
-          }
-        },
-      ],
-    },
-    plugins: [minMaxBandPlugin()],
+              cursorReadout.value = {
+                freqHz: xs[idx] as number,
+                entries: plottedSeries.value.map((series, i) => {
+                  const value = u.data[i + 1]?.[idx]
+                  return { ...series, text: value == null ? '—' : formatReading(value as number, series) }
+                }),
+              }
+            },
+          ],
+        }
+      : {},
+    plugins: [minMaxBandPlugin(p)],
   }
 }
+
+/**
+ * The chart as a PNG of exactly the requested size, drawn with the light palette whatever the theme —
+ * the same arrangement as FrequencyResponseChart.exportPng, which explains it. The offscreen plot is
+ * built from the same options and data as the visible one, so the min/max band, the short standard,
+ * the phase and every overlay come along.
+ */
+async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+  const light = makeChartPalette(false)
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  const restore =
+    captureZoom && plot.value ? { x: windowOf(plot.value.scales.x), y: windowOf(plot.value.scales.y) } : null
+
+  let u: uPlot | null = null
+  try {
+    u = new uPlot(buildOptions(width, plotHeight, light, false), buildData(), host)
+    if (restore?.x) u.setScale('x', restore.x)
+    if (restore?.y) u.setScale('y', restore.y)
+    await nextPaint()
+
+    // The primary curves carry the report's name for this measurement when it shares the chart with
+    // history overlays (keys `o<id>`), which already carry theirs.
+    const legend: ExportLegendEntry[] = plottedSeries.value.map((s) => ({
+      label: primaryLabel && !s.key.startsWith('o') ? `${primaryLabel} — ${s.label}` : s.label,
+      color: light.color(s.pair),
+      dash: s.dash,
+    }))
+
+    return await composeChartPng({
+      width,
+      height,
+      plotCanvas: u.ctx.canvas,
+      headerHeight: header,
+      title: `Impedance vs frequency${logZ.value ? ' (log Ω)' : ''}`,
+      legend,
+    })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
 
 function rebuild() {
   const el = container.value
@@ -700,7 +783,7 @@ function rebuild() {
 
   const width = el.clientWidth || 800
   const height = el.clientHeight || chartHeight.value
-  plot.value = new uPlot(buildOptions(width, height), buildData(), el)
+  plot.value = new uPlot(buildOptions(width, height, palette.value, true), buildData(), el)
 
   if (restore?.x) plot.value.setScale('x', restore.x)
   if (restore?.y) plot.value.setScale('y', restore.y)

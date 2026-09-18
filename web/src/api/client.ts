@@ -267,6 +267,66 @@ export interface UiLayoutConfig {
 }
 
 /**
+ * Which elements a PDF report includes, remembered per measurement kind (`report.settings` in the
+ * configuration database). The ids are the client's own — see report/elements.ts; the server keeps
+ * the strings and validates nothing beyond that. A kind with no entry gets every element it offers.
+ */
+export interface ReportKindSettings {
+  elements: string[]
+  /** Which of the kind's chart views to include — see report/views.ts. Absent on a document written before views were chosen. */
+  views?: string[] | null
+  /** How several measurements share a report: one chart, or a chart each. Absent before it existed. */
+  mode?: 'combined' | 'individual' | null
+}
+
+export interface ReportSettingsConfig {
+  kinds: Record<string, ReportKindSettings>
+}
+
+/**
+ * A PDF report as the browser assembles it and `POST /api/reports/pdf` lays it out. The client owns
+ * the content — every number is one the screen already formats, and the chart is the app's own chart
+ * rendered to a PNG — and the server owns nothing but the page. Mirrors ReportDocument in
+ * ReportsEndpoints.cs.
+ */
+export interface ReportDocument {
+  title: string
+  subtitle: string | null
+  /** When the client built it, already formatted for the reader. */
+  generated: string
+  /** Project notes, on the title page. */
+  notes: string | null
+  chapters: ReportChapter[]
+}
+
+export interface ReportChapter {
+  title: string
+  meta: ReportRow[]
+  notes: string | null
+  sections: ReportSection[]
+}
+
+export interface ReportRow {
+  label: string
+  value: string
+}
+
+export type ReportSectionKind = 'keyValues' | 'table' | 'paragraph' | 'image'
+
+/** One flat shape with a discriminator; only the fields for `kind` are set. */
+export interface ReportSection {
+  kind: ReportSectionKind
+  title?: string | null
+  rows?: ReportRow[] | null
+  headers?: string[] | null
+  cells?: string[][] | null
+  text?: string | null
+  /** Base64 PNG. */
+  png?: string | null
+  caption?: string | null
+}
+
+/**
  * How long the DUT is given to settle after every stimulus change, before the analysis window
  * starts filling — the Configuration dialog's "Capture delay". Applied server-side at the one place
  * every generator change passes through, so it covers the live FFT screen and every sweep point
@@ -1025,6 +1085,11 @@ export interface StoredHarmonicCurve {
   levelDbc: number[]
 }
 
+/** A stored impulse response as its display trace; `impulse` is null when the result holds none. */
+export interface StoredImpulseTraceResponse {
+  impulse: ImpulseTraceJson | null
+}
+
 export interface StoredImpulseResult {
   impulses: StoredImpulseTrace[]
   harmonics: StoredHarmonicCurve[]
@@ -1764,6 +1829,28 @@ export const api = {
 
   getUiLayout: () => request<UiLayoutConfig>('/config/ui-layout'),
 
+  getReportSettings: () => request<ReportSettingsConfig>('/config/report-settings'),
+
+  setReportSettings: (settings: ReportSettingsConfig) =>
+    request<ReportSettingsConfig>('/config/report-settings', { method: 'PUT', body: JSON.stringify(settings) }),
+
+  /**
+   * The rendered PDF. Not `request`, which reads the body as JSON; and a POST rather than a GET link
+   * because the body is the whole document, chart PNGs included.
+   */
+  renderReportPdf: async (document: ReportDocument): Promise<Blob> => {
+    const response = await fetch('/api/reports/pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(document),
+    })
+    if (!response.ok) {
+      const body = await response.text()
+      throw new Error(`POST /api/reports/pdf failed: ${response.status} ${body}`)
+    }
+    return response.blob()
+  },
+
   setUiLayout: (layout: UiLayoutConfig) =>
     request<UiLayoutConfig>('/config/ui-layout', { method: 'PUT', body: JSON.stringify(layout) }),
 
@@ -1864,6 +1951,17 @@ export const api = {
 
   getStoredImpulse: (measurementId: number) =>
     request<StoredImpulseResult>(`/measurements/${measurementId}/impulse`),
+
+  /** The stored impulse as the chart draws it — gated and windowed server-side by the runner's own code. */
+  getStoredImpulseTrace: (measurementId: number) =>
+    request<StoredImpulseTraceResponse>(`/measurements/${measurementId}/impulse-trace`),
+
+  /** The two decay surfaces of a stored result, from its stored IR — the same analyses the live endpoints run on the runner's. */
+  computeStoredImpulseCsd: (measurementId: number, req: ImpulseCsdRequest) =>
+    request<DecaySurface>(`/measurements/${measurementId}/decay/csd`, { method: 'POST', body: JSON.stringify(req) }),
+
+  computeStoredImpulseBurstDecay: (measurementId: number, req: ImpulseBurstDecayRequest) =>
+    request<DecaySurface>(`/measurements/${measurementId}/decay/burst`, { method: 'POST', body: JSON.stringify(req) }),
 
   getStoredResponse: (measurementId: number) =>
     request<StoredResponseTracesResponse>(`/measurements/${measurementId}/response-traces`),

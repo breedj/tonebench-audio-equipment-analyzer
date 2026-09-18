@@ -69,6 +69,12 @@ try
     var port = FindAvailablePort(8399, 8409);
     builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
 
+    // A project report's request carries one PNG per stored result (see ReportsEndpoints). The
+    // endpoint declares its own limit as metadata too, but the server is loopback-only, so raising
+    // Kestrel's 30 MB default globally is the one that cannot depend on which middleware honours it.
+    builder.WebHost.ConfigureKestrel(options =>
+        options.Limits.MaxRequestBodySize = ReportsEndpoints.MaxReportRequestBytes);
+
     // --simulate picks which analyzer the app *starts* on; it is no longer which one it is stuck
     // with. The device is built by AnalyzerDeviceFactory and owned by DeviceSessionService, which
     // can replace it at runtime — see POST /api/device/kind. Registering IAnalyzerDevice as a
@@ -208,6 +214,7 @@ try
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapMeasurementsEndpoints();
+    app.MapReportsEndpoints();
     app.MapUpdateCheckEndpoints();
 
     app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = wwwroot, OnPrepareResponse = CacheHeaders });

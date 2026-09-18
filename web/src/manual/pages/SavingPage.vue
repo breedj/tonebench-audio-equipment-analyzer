@@ -96,12 +96,64 @@
         <strong>History details</strong> under the chart. One row per result with its name, notes,
         timestamp and headline figures, filterable by date, with three actions:
         <strong>Edit</strong> to rename or re-note it, <strong>CSV</strong> to download the
-        measurement as text, and <strong>Delete</strong>, which asks for confirmation first.
+        measurement as text, <strong>Report</strong> for a PDF of it (below), and
+        <strong>Delete</strong>, which asks for confirmation first.
       </li>
     </ul>
     <p>
       Only results of the same kind as the selected measurement can be overlaid — a spectrum and a
       sweep have no common axes to share.
+    </p>
+
+    <h2>Screenshots and reports</h2>
+    <p>
+      Two more exports sit in the toolbar above every chart, next to the save buttons, and a third in
+      the project bar at the top of the window.
+    </p>
+    <ul>
+      <li>
+        <strong>Screenshot</strong> downloads the chart on screen as a PNG. The picture is always the
+        same size — 1600 × 900 pixels — and always in the light colour scheme, whatever the window and
+        the theme are doing, so a series of screenshots lines up in a document. It shows the window on
+        screen, zoom included, with a title line and a legend above the plot, and the axes carry their
+        units. Every view and projection exports — the spectrum, the distortion sweep, the Bode,
+        Nyquist and Nichols responses, the impulse screen's five views, the impedance curve and its
+        locus — and the history items ticked on in the checklist come along.
+      </li>
+      <li>
+        <strong>Report…</strong> makes a PDF of the measurement that is open. The dialog lists the
+        measurement's stored results, and the <strong>current measurement</strong> — the one on screen,
+        not saved — when there is one; tick the ones to include. Opened from the toolbar the current
+        measurement and the history items ticked in the checklist start ticked, so the report shows
+        the chart on screen; opened from a row's <strong>Report</strong> button in History details,
+        that result does. With several measurements ticked, choose <strong>one chart with every
+        measurement</strong> — the first as the main curve, the rest as history overlays, and each
+        measurement's notes, settings and readings beneath it in the same order — or <strong>a chart
+        per measurement</strong>, each with its own notes. A kind with several views or projections
+        (the response's Bode, Nyquist and Nichols; the impulse screen's impulse, response, harmonics
+        and two decays; the impedance Bode and Nyquist) has a checkbox per view under
+        <strong>Charts</strong>, and every ticked view goes in; a view that draws one measurement at
+        a time (the impulse, the harmonics, the decays, the impedance locus) is drawn once per
+        measurement even in a combined report. Then the elements: the chart, the description (the
+        notes on the result and on the measurement), the settings it ran with, and its readings (the
+        Measurements panel, for a response). Views, layout and elements are remembered per kind, so
+        the next report of the same kind comes out the same way; which results are ticked is not.
+      </li>
+      <li>
+        <strong>Project report…</strong> makes one PDF of the project: a title page with the
+        project's notes, a contents list, then one chapter per result, grouped by measurement in the
+        sidebar's order. Every stored result is ticked to begin with, and so is the current
+        measurement of the screen that is open, listed under its measurement when something has been
+        measured; untick what should stay out. Each chapter includes whatever its kind's Report
+        dialog last chose — the views and the elements.
+      </li>
+    </ul>
+    <p>
+      The charts in a report are drawn by the same code as the charts on screen, at the report's fixed
+      size and with the display panel's view and axis ranges — for a stored result, the view and
+      ranges last saved with its measurement. A stored impulse response's decay surfaces are analysed
+      again from its stored impulse with those saved analysis settings. The numbers in a report are
+      the ones the panels show, formatted the same way.
     </p>
 
     <h2>A workflow that works</h2>

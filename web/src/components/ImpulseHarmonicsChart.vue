@@ -4,6 +4,7 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { HarmonicCurveJson } from '../api/client'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useZoomBounds } from '../composables/useZoomBounds'
@@ -51,13 +52,17 @@ const THEME = {
   light: { axis: '#525252', grid: '#e5e5e5' },
 } as const
 
-function theme() {
-  return isDark.value ? THEME.dark : THEME.light
+type Theme = (typeof THEME)[keyof typeof THEME]
+
+// Threaded through as an argument rather than read at draw time — the export builds a second, light
+// plot while the screen may be dark. See charts/palette.ts.
+function themeFor(dark: boolean): Theme {
+  return dark ? THEME.dark : THEME.light
 }
 
-function colorFor(order: number): string {
+function colorFor(order: number, dark: boolean = isDark.value): string {
   const pair = ORDER_COLORS[order] ?? ORDER_COLORS[5]
-  return isDark.value ? pair.dark : pair.light
+  return dark ? pair.dark : pair.light
 }
 
 const ordered = computed(() => [...props.harmonics].sort((a, b) => a.order - b.order))
@@ -99,11 +104,15 @@ const { zoomed, noteScale, resetZoom } = useZoomBounds(
   () => ({ xMin: props.freqFromHz, xMax: props.freqToHz, yMin: props.yBottomDb, yMax: props.yTopDb }),
 )
 
-function buildOptions(width: number): uPlot.Options {
-  const t = theme()
+/**
+ * @param dark Which theme to build with — see themeFor.
+ * @param interactive False for the export's offscreen plot: no cursor and no zoom bookkeeping.
+ */
+function buildOptions(width: number, height: number, dark: boolean, interactive: boolean): uPlot.Options {
+  const t = themeFor(dark)
   return {
     width,
-    height: chartHeight.value,
+    height,
     scales: {
       // What puts the panel's window on the x axis is applyScales()'s explicit setScale, not the
       // `??` here: on an x scale that fallback is dead code, because uPlot only ever passes null for
@@ -139,18 +148,18 @@ function buildOptions(width: number): uPlot.Options {
       { label: 'Fundamental (Hz)' },
       ...ordered.value.map((curve) => ({
         label: `H${curve.order}`,
-        stroke: colorFor(curve.order),
+        stroke: colorFor(curve.order, dark),
         width: props.thickLines ? 2 : 1,
         points: { show: props.showDataPoints, size: 4 },
       })),
     ],
     // Both axes: narrowing onto the band a DUT distorts in is the common gesture, but a dBc window
     // matters just as much on a curve that sits 90 dB down.
-    cursor: { drag: { x: true, y: true, uni: 12 } },
+    cursor: interactive ? { drag: { x: true, y: true, uni: 12 } } : { show: false },
     legend: { show: false },
     // Fires on setData too (both scales are auto:false, so setData re-applies the same window),
     // hence the change gate inside noteScale.
-    hooks: { setScale: [(u: uPlot) => noteScale(u)] },
+    hooks: interactive ? { setScale: [(u: uPlot) => noteScale(u)] } : {},
   }
 }
 
@@ -160,11 +169,57 @@ function rebuild() {
 
   plot.value?.destroy()
   const width = el.getBoundingClientRect().width || 600
-  plot.value = new uPlot(buildOptions(width), data.value, el)
+  plot.value = new uPlot(buildOptions(width, chartHeight.value, isDark.value, true), data.value, el)
   // uPlot has no double-click-to-reset of its own once drag zoom is on.
   plot.value.over.addEventListener('dblclick', resetZoom)
   applyScales()
 }
+
+/**
+ * The chart as a PNG of exactly the requested size, light whatever the theme — the same arrangement
+ * as FrequencyResponseChart.exportPng. This chart's own ordering is kept: data to the constructor,
+ * then the explicit setScale pair that puts the panel's window on the axes.
+ */
+async function exportPng({ width, height, captureZoom = false }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  const live = plot.value
+  const xWindow =
+    captureZoom && live?.scales.x.min != null && live.scales.x.max != null
+      ? { min: live.scales.x.min, max: live.scales.x.max }
+      : { min: props.freqFromHz, max: props.freqToHz }
+  const yWindow =
+    captureZoom && live?.scales.y.min != null && live.scales.y.max != null
+      ? { min: live.scales.y.min, max: live.scales.y.max }
+      : { min: props.yBottomDb, max: props.yTopDb }
+
+  let u: uPlot | null = null
+  try {
+    u = new uPlot(buildOptions(width, plotHeight, false, false), data.value, host)
+    u.setScale('x', xWindow)
+    u.setScale('y', yWindow)
+    await nextPaint()
+
+    return await composeChartPng({
+      width,
+      height,
+      plotCanvas: u.ctx.canvas,
+      headerHeight: header,
+      title: 'Harmonic distortion vs fundamental',
+      legend: ordered.value.map((curve) => ({ label: `H${curve.order}`, color: colorFor(curve.order, false) })),
+    })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
 
 function applyScales() {
   const p = plot.value

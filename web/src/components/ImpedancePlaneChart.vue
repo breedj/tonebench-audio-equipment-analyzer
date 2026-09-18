@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ImpedanceTrace } from '../composables/useImpedance'
 import { fitTransform, niceTicks, type Viewport } from '../charts/planeTransform'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { formatHz } from '../response/format'
@@ -53,8 +54,12 @@ const GRID_COLOR = ['#e5e7eb', '#374151'] as const
 const ZERO_COLOR = ['#9ca3af', '#6b7280'] as const
 const MARKER_COLOR = ['#dc2626', '#f87171'] as const
 
+// Which theme the drawing code reads — the screen's, or light for the duration of an export. Safe as
+// module state only because the drawing is synchronous; see ResponsePolarChart's `paint`.
+let paintDark = isDark.value
+
 function color(pair: readonly string[]): string {
-  return isDark.value ? pair[1] : pair[0]
+  return paintDark ? pair[1] : pair[0]
 }
 
 interface PlanePoint {
@@ -148,6 +153,14 @@ function draw() {
 
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
   ctx.clearRect(0, 0, width, height)
+  renderScene(ctx, width, height, isDark.value)
+  drawMarker()
+}
+
+/** The hovered point, on its own canvas so a mousemove costs one small redraw rather than the whole plot. */
+/** The whole picture — grid, axes, the locus — onto any context, in CSS pixels. */
+function renderScene(ctx: CanvasRenderingContext2D, width: number, height: number, dark: boolean) {
+  paintDark = dark
 
   const transform = fitTransform(viewport.value, width, height, INSETS, true)
   const view = transform.viewport
@@ -222,10 +235,39 @@ function draw() {
     ctx.restore()
   }
 
-  drawMarker()
 }
 
-/** The hovered point, on its own canvas so a mousemove costs one small redraw rather than the whole plot. */
+/**
+ * The chart as a PNG of exactly the requested size, light whatever the theme — see
+ * ResponsePolarChart.exportPng, which explains the arrangement for a canvas chart.
+ */
+async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+  const plot = document.createElement('canvas')
+  plot.width = width
+  plot.height = plotHeight
+  const ctx = plot.getContext('2d')
+  if (!ctx) throw new Error('Could not get a 2D context for the chart export.')
+
+  try {
+    renderScene(ctx, width, plotHeight, false)
+  } finally {
+    paintDark = isDark.value
+  }
+
+  return composeChartPng({
+    width,
+    height,
+    plotCanvas: plot,
+    headerHeight: header,
+    title: 'Impedance locus — resistance vs reactance (Ω)',
+    legend: [{ label: '|Z| locus', color: CURVE_COLOR[0] }],
+  })
+}
+
+defineExpose({ exportPng })
+
 function drawMarker() {
   const el = overlay.value
   const box = container.value

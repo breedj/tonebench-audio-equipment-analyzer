@@ -6,7 +6,7 @@ import { useMeasurements } from '../composables/useMeasurements'
 import EditMeasurementDialog from './EditMeasurementDialog.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
-const emit = defineEmits<{ error: [message: string] }>()
+const emit = defineEmits<{ error: [message: string]; report: [resultId: number] }>()
 
 const { currentTypeId } = useProjects()
 const { items, filter, error, load, remove } = useMeasurements()
@@ -127,6 +127,14 @@ async function onConfirmDelete(item: MeasurementSummary) {
                 >
                   CSV
                 </a>
+                <button
+                  type="button"
+                  class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                  title="A PDF report of this stored result."
+                  @click="emit('report', item.resultId)"
+                >
+                  Report
+                </button>
                 <template v-if="pendingDeleteId === item.resultId">
                   <button
                     type="button"

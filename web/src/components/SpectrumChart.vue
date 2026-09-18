@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type MetersFrame, type SpectrumFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
-import { useChartDisplay } from '../composables/useChartDisplay'
+import { SPECTRUM_DISPLAY_KEY, useChartDisplay, type SpectrumDisplaySource } from '../composables/useChartDisplay'
+import {
+  CHART_EXPORT_HEADER_PX,
+  composeChartPng,
+  nextPaint,
+  exportAxisLabel,
+  type ChartExportOptions,
+  type ExportLegendEntry,
+} from '../charts/exportChart'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -39,7 +47,7 @@ const emit = defineEmits<{
 // spectrum stream only ever adds entries per channel, never removes a stale one).
 const { config: spectrumConfig } = useSpectrumConfig()
 
-function channelEnabled(ch: number): boolean {
+function channelEnabledOnScreen(ch: number): boolean {
   if (!spectrumConfig.value) return true
   return ch === 0 ? spectrumConfig.value.processLeft : spectrumConfig.value.processRight
 }
@@ -51,6 +59,10 @@ function channelEnabled(ch: number): boolean {
 // flag) painted on regardless. Routing both live-line and band visibility through these two refs
 // instead of two independently-toggleable mechanisms is what keeps them from drifting out of sync
 // again.
+//
+// The screen's shared display state, or a stored measurement type's own when a report renders this
+// chart headless — see SPECTRUM_DISPLAY_KEY.
+const display: SpectrumDisplaySource = inject(SPECTRUM_DISPLAY_KEY, null) ?? useChartDisplay()
 const {
   yTop,
   yBottom,
@@ -68,7 +80,8 @@ const {
   autofitXTrigger,
   resetYDefaults,
   resetXDefaults,
-} = useChartDisplay()
+} = display
+const channelEnabled = display.channelEnabled ?? channelEnabledOnScreen
 function channelVisible(ch: number): boolean {
   return channelEnabled(ch) && (ch === 0 ? visibleL.value : visibleR.value)
 }
@@ -133,7 +146,10 @@ const THEME = {
 // Canvas colours can't follow Tailwind's `dark:` classes (see THEME's own remarks above), so this
 // reads the same Auto/Light/Dark state as everything else — see useAppTheme.ts.
 const { isDark } = useAppTheme()
-function currentTheme() {
+type Theme = (typeof THEME)[keyof typeof THEME]
+// The screen's theme; the export builds a light plot and hands its theme in as an argument rather
+// than reading this at draw time — see charts/palette.ts for why.
+function currentTheme(): Theme {
   return isDark.value ? THEME.dark : THEME.light
 }
 
@@ -268,38 +284,41 @@ function reportViewport(u: uPlot) {
   )
 }
 
-function harmonicMarkersPlugin(): uPlot.Plugin {
+function harmonicMarkersPlugin(theme: Theme, interactive: boolean): uPlot.Plugin {
+  const drawHook = (u: uPlot) => {
+    if (stimulusKind.value !== 'Tones') return
+    const ch0 = props.meters[0]
+    if (!ch0 || ch0.harmonics.length === 0) return
+
+    const ctx = u.ctx
+    ctx.save()
+    ctx.strokeStyle = theme.markerLine
+    ctx.fillStyle = theme.markerText
+    ctx.font = '10px ui-monospace, monospace'
+    ctx.lineWidth = 1
+
+    for (const h of ch0.harmonics) {
+      if (h.freqHz <= 0) continue
+      const x = u.valToPos(h.freqHz, 'x', true)
+      if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) continue
+
+      ctx.beginPath()
+      ctx.moveTo(x, u.bbox.top)
+      ctx.lineTo(x, u.bbox.top + u.bbox.height)
+      ctx.stroke()
+      ctx.fillText(`${h.dbc.toFixed(0)}`, x + 3, u.bbox.top + 10)
+    }
+
+    ctx.restore()
+  }
+
+  // The offscreen export plot draws the markers and nothing else: no viewport to report, no zoom
+  // to note, no readout to feed.
+  if (!interactive) return { hooks: { draw: [drawHook] } }
+
   return {
     hooks: {
-      draw: [
-        (u) => {
-          if (stimulusKind.value !== 'Tones') return
-          const ch0 = props.meters[0]
-          if (!ch0 || ch0.harmonics.length === 0) return
-
-          const theme = currentTheme()
-          const ctx = u.ctx
-          ctx.save()
-          ctx.strokeStyle = theme.markerLine
-          ctx.fillStyle = theme.markerText
-          ctx.font = '10px ui-monospace, monospace'
-          ctx.lineWidth = 1
-
-          for (const h of ch0.harmonics) {
-            if (h.freqHz <= 0) continue
-            const x = u.valToPos(h.freqHz, 'x', true)
-            if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) continue
-
-            ctx.beginPath()
-            ctx.moveTo(x, u.bbox.top)
-            ctx.lineTo(x, u.bbox.top + u.bbox.height)
-            ctx.stroke()
-            ctx.fillText(`${h.dbc.toFixed(0)}`, x + 3, u.bbox.top + 10)
-          }
-
-          ctx.restore()
-        },
-      ],
+      draw: [drawHook],
       setScale: [
         (u, key) => {
           if (key === 'x') {
@@ -352,8 +371,19 @@ function formatDbTick(v: number | null): string | null {
   return v == null ? null : `${v}`
 }
 
-function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]): uPlot.Options {
-  const theme = currentTheme()
+/**
+ * @param theme Which theme to build with — see currentTheme.
+ * @param interactive False for the export's offscreen plot: no cursor, and none of the hooks that
+ *   report the viewport, note the zoom or feed the readout.
+ */
+function buildOptions(
+  width: number,
+  height: number,
+  nyquistHz: number,
+  overlays: OverlayEntry[],
+  theme: Theme,
+  interactive: boolean,
+): uPlot.Options {
   const liveWidth = thickLines.value ? 3 : 1.5
   const overlayWidth = thickLines.value ? 2.5 : 1.25
   const points = { show: showDataPoints.value }
@@ -378,7 +408,7 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
 
   return {
     width,
-    height: chartHeight.value,
+    height,
     scales: {
       // auto:false — uPlot's x scale defaults to auto-ranging from each setData() call's own
       // data, which re-fits the view to the incoming frame on every one of these (up to
@@ -412,6 +442,7 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
         // the two axes agree column for column — see the reasoning there for why uPlot's own
         // log-axis ticking isn't usable once you zoom in.
         ...freqAxis(),
+        ...exportAxisLabel(interactive, 'Frequency (Hz)'),
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },
@@ -419,20 +450,21 @@ function buildOptions(width: number, nyquistHz: number, overlays: OverlayEntry[]
       {
         values: (_u, vals) => vals.map(formatDbTick),
         size: 50,
+        ...exportAxisLabel(interactive, 'Level (dBV)'),
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },
       },
     ],
     series,
-    cursor: { points: { show: false } },
+    cursor: interactive ? { points: { show: false } } : { show: false },
     // uPlot's built-in legend doubles as a click-to-hide-series control — that's what caused a
     // channel's band to keep drawing after its line was hidden (the band plugin didn't know about
     // uPlot's internal per-series `show`). Visibility is now this component's own checkboxes
     // (live L/R) and the overlay list (each stored trace), both driving null-fill instead of
     // uPlot's `show`, so there's exactly one place that decides what's visible.
     legend: { show: false },
-    plugins: [minMaxBandPlugin(() => props.spectrum), harmonicMarkersPlugin()],
+    plugins: [minMaxBandPlugin(() => props.spectrum), harmonicMarkersPlugin(theme, interactive)],
   }
 }
 
@@ -532,7 +564,7 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   // needs the assertion.
   const dataSlots = 5 + overlays.length * 2
   const emptyData = Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData
-  plot = new uPlot(buildOptions(width, nyquistHz, overlays), emptyData, el)
+  plot = new uPlot(buildOptions(width, chartHeight.value, nyquistHz, overlays, currentTheme(), true), emptyData, el)
 
   // uPlot's own double-click handler calls autoScaleX(), which fits the axis to the *data* extent.
   // While a zoomed frame is on screen that extent is the zoom window, so its reset would be a
@@ -693,7 +725,21 @@ watch(autofitXTrigger, () => {
   }
 })
 
-function update() {
+/** What one tick draws: the full span the axis is sized from, and every series on the active x grid, in buildOptions' order. */
+interface FrameData {
+  fullLoFreqHz: number
+  fullHiFreqHz: number
+  data: uPlot.AlignedData
+}
+
+/**
+ * The plot's data for the current props, or null when there is nothing to draw — no live frame and
+ * no overlay to fall back to. Shared by update() and the export, so the PNG is exactly this tick.
+ * The full span carries over from the previous call for a zoomed frame, which only describes its
+ * window; peak-hold folds this tick's columns into the running maps as a side effect (a maximum,
+ * so calling it twice for one tick is harmless).
+ */
+function computeFrame(): FrameData | null {
   const ch0 = props.spectrum[0]
   const ch1 = props.spectrum[1]
   // The frame that drives the x grid this tick — L when it's being processed, otherwise R. A
@@ -705,30 +751,22 @@ function update() {
   const firstOverlay = props.overlays[0]?.detail
   const firstOverlayChannel = firstOverlay && (channelByIndex(firstOverlay, 0) ?? channelByIndex(firstOverlay, 1))
 
-  // Nothing to draw — no live frame and no overlay to fall back to (the Clear button, or before
-  // the very first frame ever arrives). Destroying rather than merely returning matters here: a
-  // bare return leaves whatever the last setData() call painted sitting on the canvas, so the
-  // chart would keep showing a stale trace under the "Waiting for data…" label in the header. This
-  // also clears the stale fullHiFreqHz that return would otherwise leave behind.
-  if (!primary && !firstOverlayChannel) {
-    plot?.destroy()
-    plot = null
-    fullHiFreqHz = -1
-    return
-  }
+  if (!primary && !firstOverlayChannel) return null
 
   // Only an overview frame describes the whole spectrum; a zoomed one describes the zoom window.
   // The axis must always be built from the former, or zooming would redefine "fully zoomed out".
   // With no live data at all (viewing loaded overlays before ever streaming), fall back to the
   // first overlay — recomputed every call, so switching overlays re-fits it.
+  let lo = fullLoFreqHz
+  let hi = fullHiFreqHz
   if (primary && (primary.header.flags & STREAM_FLAG_ZOOMED) === 0) {
-    fullLoFreqHz = primary.loFreqHz
-    fullHiFreqHz = primary.hiFreqHz
+    lo = primary.loFreqHz
+    hi = primary.hiFreqHz
   } else if (!primary && firstOverlayChannel && firstOverlayChannel.columns.length > 0) {
-    fullLoFreqHz = firstOverlayChannel.columns[0].freqHz
-    fullHiFreqHz = firstOverlayChannel.columns[firstOverlayChannel.columns.length - 1].freqHz
+    lo = firstOverlayChannel.columns[0].freqHz
+    hi = firstOverlayChannel.columns[firstOverlayChannel.columns.length - 1].freqHz
   }
-  if (fullHiFreqHz <= 0) return
+  if (hi <= 0) return null
 
   // The active x grid: whichever of L/R is actually streaming (L preferred when both are, matching
   // the original single-channel assumption everywhere else in this file), otherwise the first
@@ -736,9 +774,6 @@ function update() {
   // See measurements/resample.ts.
   const xs = primary ? freqTrace(primary.columns, primary.header.nPoints) : channelFreqs(firstOverlayChannel!)
   const nPoints = xs.length
-
-  ensurePlot(fullHiFreqHz, props.overlays)
-  if (!plot) return
 
   // Only real data for channels actually streaming, enabled, and toggled visible — an idle,
   // disabled, or hidden channel must not show up as a phantom trace (idle: single-channel
@@ -787,7 +822,31 @@ function update() {
       overlay.visible && chR ? resample(toTrace(chR), xs) : nullFill(nPoints),
     ]
   })
-  plot.setData([xs, left, right, leftPeak, rightPeak, ...overlayData])
+  return { fullLoFreqHz: lo, fullHiFreqHz: hi, data: [xs, left, right, leftPeak, rightPeak, ...overlayData] }
+}
+
+function update() {
+  const frame = computeFrame()
+
+  // Nothing to draw — no live frame and no overlay to fall back to (the Clear button, or before
+  // the very first frame ever arrives). Destroying rather than merely returning matters here: a
+  // bare return leaves whatever the last setData() call painted sitting on the canvas, so the
+  // chart would keep showing a stale trace under the "Waiting for data…" label in the header. This
+  // also clears the stale fullHiFreqHz that return would otherwise leave behind.
+  if (!frame) {
+    plot?.destroy()
+    plot = null
+    fullHiFreqHz = -1
+    return
+  }
+
+  fullLoFreqHz = frame.fullLoFreqHz
+  fullHiFreqHz = frame.fullHiFreqHz
+
+  ensurePlot(fullHiFreqHz, props.overlays)
+  if (!plot) return
+
+  plot.setData(frame.data)
 
   // See ensurePlot's pendingZoomRestore comment — must run after setData, not before.
   if (pendingZoomRestore) {
@@ -795,6 +854,66 @@ function update() {
     pendingZoomRestore = null
   }
 }
+
+/**
+ * The chart as a PNG of exactly the requested size, drawn with the light theme whatever the screen's
+ * — the same arrangement as FrequencyResponseChart.exportPng, which explains it. This chart's own
+ * ordering is kept: empty construction, then setData. On screen the x axis is then the data's span,
+ * which the server already cut to the panel's window; a headless render of a stored result has the
+ * whole stored span as data, so the panel's From/To is applied explicitly — the same setScale the
+ * dropdowns make.
+ */
+async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
+  const frame = computeFrame()
+  if (!frame) throw new Error('There is no spectrum to export.')
+
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  const live = plot
+  const xWindow =
+    captureZoom && live?.scales.x.min != null && live.scales.x.max != null
+      ? { min: live.scales.x.min, max: live.scales.x.max }
+      : { min: xFrom.value, max: xTo.value }
+
+  let u: uPlot | null = null
+  try {
+    const dataSlots = 5 + props.overlays.length * 2
+    const emptyData = Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData
+    u = new uPlot(buildOptions(width, plotHeight, frame.fullHiFreqHz, props.overlays, THEME.light, false), emptyData, host)
+    u.setData(frame.data)
+    u.setScale('x', xWindow)
+    await nextPaint()
+
+    const own = (label: string) => (primaryLabel ? `${primaryLabel} — ${label}` : label)
+    const legend: ExportLegendEntry[] = []
+    if (props.spectrum[0] && channelVisible(0)) legend.push({ label: own('L'), color: LIVE_COLOR })
+    if (props.spectrum[1] && channelVisible(1)) legend.push({ label: own('R'), color: LIVE_COLOR, dash: [6, 3] })
+    if (showPeakHold.value) legend.push({ label: own('Peak hold'), color: PEAK_HOLD_COLOR, dash: [2, 2] })
+    for (const overlay of props.overlays) {
+      if (!overlay.visible) continue
+      legend.push({ label: overlay.detail.name, color: fftOverlayColor(props.overlays, overlay.id) })
+    }
+
+    return await composeChartPng({
+      width,
+      height,
+      plotCanvas: u.ctx.canvas,
+      headerHeight: header,
+      title: 'Spectrum (dBV)',
+      legend,
+    })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
 
 watch(() => props.spectrum, update)
 watch(() => props.overlays, update, { deep: true })

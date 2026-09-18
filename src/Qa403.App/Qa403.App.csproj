@@ -35,12 +35,20 @@
   <!-- Trimming (dotnet publish -p:PublishTrimmed=true) can't see Dapper's reflection-based POCO
        mapping in Qa403.Data (ProjectRepository/MeasurementRepository), so that assembly is rooted
        to keep its full metadata rather than risk silently-null-mapped columns. -->
+  <!-- QuestPDF is rooted as insurance: under TrimMode=partial only assemblies that opt in are
+       trimmed, but a PDF that comes out blank on a published build is the kind of failure only the
+       release smoke test would see. -->
   <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
     <TrimmerRootAssembly Include="Qa403.Data" />
+    <TrimmerRootAssembly Include="QuestPDF" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.10" />
+    <!-- PDF reports (Endpoints/ReportsEndpoints.cs, Reports/ReportPdfRenderer.cs). Ships its own
+         native Skia per RID, carried by IncludeNativeLibrariesForSelfExtract in the release publish;
+         on Linux that library links against libfontconfig1 (packaging/linux/install.sh). -->
+    <PackageReference Include="QuestPDF" Version="2026.9.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>

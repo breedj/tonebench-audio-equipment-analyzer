@@ -49,6 +49,12 @@
       overview did.
     </p>
 
+    <p>
+      A <strong>Screenshot</strong> keeps the zoom: the PNG shows the window on screen, at a fixed
+      size and in the light colour scheme. A report's chart does not — it is drawn with the display
+      panel's ranges, so two reports of one measurement compare like for like.
+    </p>
+
     <h2>Cursors and readouts</h2>
     <ul>
       <li>

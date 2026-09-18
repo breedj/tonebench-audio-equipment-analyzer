@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import {
+  CHART_EXPORT_HEADER_PX,
+  composeChartPng,
+  nextPaint,
+  exportAxisLabel,
+  type ChartExportOptions,
+  type ExportLegendEntry,
+} from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
-import { useSweep } from '../composables/useSweep'
+import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
 import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceKey } from '../sweep/points'
 import {
   decadeOrFallbackSplits,
@@ -14,6 +22,7 @@ import {
   logMinorGridAxis,
   sweepXAxis,
   sweepXLabel,
+  sweepXUnit,
   sweepXValue,
   type SweepXAxis,
 } from '../sweep/xAxis'
@@ -111,7 +120,9 @@ const props = defineProps<{
  */
 const emit = defineEmits<{ cursorX: [x: number | null] }>()
 
-const { points, thdMethod } = useSweep()
+// The screen's run from the shared store, or a stored result's when a report renders this chart
+// headless — see SWEEP_POINTS_KEY.
+const { points, thdMethod } = inject(SWEEP_POINTS_KEY, null) ?? useSweep()
 const { isDark } = useAppTheme()
 const { loadOhms } = useLoadOhms()
 
@@ -175,15 +186,19 @@ const THEME = {
   light: { axis: '#525252', grid: '#e5e5e5', gridMajor: '#c8c8c8', gridMinor: '#ededed' },
 } as const
 
-function currentTheme() {
-  return isDark.value ? THEME.dark : THEME.light
+type Theme = (typeof THEME)[keyof typeof THEME]
+
+// Threaded through as an argument (which theme, via `dark`) rather than read at draw time — the
+// export builds a second, light plot while the screen may be dark. See charts/palette.ts.
+function themeFor(dark: boolean): Theme {
+  return dark ? THEME.dark : THEME.light
 }
 
 /** Minimum pixels between two labelled distortion ticks, for the sub-decade fallback. Tighter than the x axis': a number is far shorter than it is tall. */
 const Y_AXIS_SPACE = 30
 
 /** One label-less axis whose only job is the thin 2..9 gridlines of a log scale. */
-function minorGridAxis(scale: 'x' | 'y', side: 1 | 2 | 3, theme: ReturnType<typeof currentTheme>): uPlot.Axis {
+function minorGridAxis(scale: 'x' | 'y', side: 1 | 2 | 3, theme: Theme): uPlot.Axis {
   return {
     ...logMinorGridAxis(),
     scale,
@@ -201,14 +216,14 @@ function minorGridAxis(scale: 'x' | 'y', side: 1 | 2 | 3, theme: ReturnType<type
  * place stroke/width/dash is decided, shared with the legend below the chart so the two can never
  * disagree about what a line looks like — see sweepLineStyle's own note on why that matters.
  */
-function styleOf(runIdx: number, channel: number, trace: (typeof TRACES)[number]) {
+function styleOf(runIdx: number, channel: number, trace: (typeof TRACES)[number], dark: boolean) {
   return sweepLineStyle({
     runIdx,
     channel,
     color: trace.color,
     traceWidth: trace.width,
     thickLines: props.thickLines,
-    isDark: isDark.value,
+    isDark: dark,
   })
 }
 
@@ -358,8 +373,13 @@ const outOfRange = computed(() => {
   return { above, below }
 })
 
-function buildOptions(width: number): uPlot.Options {
-  const theme = currentTheme()
+/**
+ * @param dark Which theme to build with — see themeFor.
+ * @param interactive False for the export's offscreen plot: no cursor, and none of the hooks that
+ *   feed the zoom flag and the preview charts.
+ */
+function buildOptions(width: number, height: number, dark: boolean, interactive: boolean): uPlot.Options {
+  const theme = themeFor(dark)
   // Decade emphasis on x is for the level axes only. The frequency axis is shared with the FFT
   // screen (freqAxis), where the 1/2/5 ladder and its kHz labels are long-standing.
   const decadeGridX = props.xAxis !== 'frequency'
@@ -381,7 +401,7 @@ function buildOptions(width: number): uPlot.Options {
     for (const trace of activeTraces.value) {
       series.push({
         label: `${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, thdMethod.value)}`,
-        ...styleOf(0, ch, trace),
+        ...styleOf(0, ch, trace, dark),
         points,
         scale: 'y',
       })
@@ -402,7 +422,7 @@ function buildOptions(width: number): uPlot.Options {
       for (const trace of activeTraces.value) {
         series.push({
           label: `${overlay.detail.name} ${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, methodOf(overlay))}`,
-          ...styleOf(overlayIdx + 1, ch, trace),
+          ...styleOf(overlayIdx + 1, ch, trace, dark),
           points,
           scale: 'y',
         })
@@ -412,7 +432,7 @@ function buildOptions(width: number): uPlot.Options {
 
   return {
     width,
-    height: chartHeight.value,
+    height,
     scales: {
       // Both axes *start* pinned to the dropdowns rather than fitted to the data. auto:false is
       // what makes that stick -- otherwise every setData() re-fits, and a sweep calls setData once
@@ -455,6 +475,7 @@ function buildOptions(width: number): uPlot.Options {
     axes: [
       {
         ...sweepXAxis(props.xAxis),
+        ...exportAxisLabel(interactive, `${sweepXLabel(props.xAxis)} (${sweepXUnit(props.xAxis)})`),
         stroke: theme.axis,
         grid: { stroke: decadeGridX ? theme.gridMajor : theme.grid, width: decadeGridX ? 1.5 : 1 },
         ticks: { stroke: theme.grid, width: 1 },
@@ -462,6 +483,7 @@ function buildOptions(width: number): uPlot.Options {
       {
         scale: 'y',
         size: 62,
+        ...exportAxisLabel(interactive, props.unit === 'percent' ? 'Distortion (%)' : 'Distortion (dB)'),
         ...(decadeGridY
           ? {
               splits: (u, axisIdx, scaleMin, scaleMax) =>
@@ -483,39 +505,43 @@ function buildOptions(width: number): uPlot.Options {
       ...(decadeGridY ? [minorGridAxis('y', 3, theme)] : []),
     ],
     series,
-    cursor: {
-      points: { show: false },
-      // Both axes draggable, with `uni` making a drag unidirectional unless it is a real box: a
-      // drag that stays under 12 px in one direction zooms the other axis only, across the full
-      // span of this one. Frequency-only is the common case on a sweep (narrowing to an octave
-      // around a rise in THD), but a distortion window matters just as much when four harmonic
-      // traces sit within a few dB of each other, and demanding a pixel-accurate horizontal drag
-      // to get one without the other would make both awkward.
-      drag: { x: true, y: true, uni: 12 },
-    },
+    cursor: interactive
+      ? {
+          points: { show: false },
+          // Both axes draggable, with `uni` making a drag unidirectional unless it is a real box: a
+          // drag that stays under 12 px in one direction zooms the other axis only, across the full
+          // span of this one. Frequency-only is the common case on a sweep (narrowing to an octave
+          // around a rise in THD), but a distortion window matters just as much when four harmonic
+          // traces sit within a few dB of each other, and demanding a pixel-accurate horizontal drag
+          // to get one without the other would make both awkward.
+          drag: { x: true, y: true, uni: 12 },
+        }
+      : { show: false },
     // Replaced by the SVG legend in this component's own template. uPlot's marker is a CSS border
     // and legend.markers.dash only understands "solid"/"dashed", so it could not show *which* of
     // the three history dash patterns a row used -- the one thing this chart's legend most needs to
     // say. Its rows also toggle their series on click, which would silently desync the display
     // panel's checkboxes; the replacement is inert markup with no such trap.
     legend: { show: false },
-    hooks: {
-      // Drives the Reset zoom button. Fires on setData too (the x scale is auto:false, so setData
-      // re-applies the same min/max every point of a running sweep), hence the change-gate inside
-      // noteScale -- writing an unchanged `false` 50 times per sweep would be harmless but
-      // pointless.
-      setScale: [(u: uPlot) => noteScale(u)],
-      // u.cursor.idx indexes the shared x array from update() -- not a pixel-derived value, so it
-      // always names a value something was actually plotted at. null once the pointer leaves the
-      // plot area (uPlot clears idx on mouseleave), which is the "nothing hovered" state the small
-      // preview charts fall back from.
-      setCursor: [
-        (u: uPlot) => {
-          const idx = u.cursor.idx
-          emit('cursorX', idx != null && idx >= 0 ? (xValues.value[idx] ?? null) : null)
-        },
-      ],
-    },
+    hooks: interactive
+      ? {
+          // Drives the Reset zoom button. Fires on setData too (the x scale is auto:false, so setData
+          // re-applies the same min/max every point of a running sweep), hence the change-gate inside
+          // noteScale -- writing an unchanged `false` 50 times per sweep would be harmless but
+          // pointless.
+          setScale: [(u: uPlot) => noteScale(u)],
+          // u.cursor.idx indexes the shared x array from update() -- not a pixel-derived value, so it
+          // always names a value something was actually plotted at. null once the pointer leaves the
+          // plot area (uPlot clears idx on mouseleave), which is the "nothing hovered" state the small
+          // preview charts fall back from.
+          setCursor: [
+            (u: uPlot) => {
+              const idx = u.cursor.idx
+              emit('cursorX', idx != null && idx >= 0 ? (xValues.value[idx] ?? null) : null)
+            },
+          ],
+        }
+      : {},
   }
 }
 
@@ -633,7 +659,7 @@ const metricGroups = computed(() => {
  * the dash readable as an identity: every entry under "before mod" shares one pattern, and the
  * heading names it.
  */
-const legendGroups = computed(() => {
+function legendGroupsFor(dark: boolean) {
   const groups = [{ key: 'live', name: 'Live sweep', runIdx: 0, method: thdMethod.value }]
   activeOverlays.value.forEach((overlay, i) =>
     groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: i + 1, method: methodOf(overlay) }),
@@ -643,7 +669,7 @@ const legendGroups = computed(() => {
     ...group,
     entries: activeChannels.value.flatMap((ch) =>
       activeTraces.value.map((trace) => {
-        const style = styleOf(group.runIdx, ch, trace)
+        const style = styleOf(group.runIdx, ch, trace, dark)
         // nTHD, nD2 … on a frequency-normalized run: the figures are a different measurement
         // from a conventional run's, and the legend is where the two are told apart.
         const label = sweepTraceLabel(trace.key, group.method)
@@ -655,11 +681,14 @@ const legendGroups = computed(() => {
           stroke: style.stroke,
           width: style.width,
           dash: dashAttr(style.dash),
+          dashArray: style.dash,
         }
       }),
     ),
   }))
-})
+}
+
+const legendGroups = computed(() => legendGroupsFor(isDark.value))
 
 let plot: uPlot | null = null
 
@@ -753,7 +782,7 @@ function ensurePlot() {
   // Same AlignedData typing wrinkle as SpectrumChart: a runtime-sized array cannot be contextually
   // typed against uPlot's tuple type. The runtime shape is correct; only the static type needs it.
   const empty = Array.from({ length: slots }, () => [] as number[]) as unknown as uPlot.AlignedData
-  plot = new uPlot(buildOptions(width), empty, el)
+  plot = new uPlot(buildOptions(width, chartHeight.value, isDark.value, true), empty, el)
 
   // uPlot's own double-click resets the x axis to the *data* extent, which on an auto:false chart
   // is whatever the zoom already shows — a no-op, and no way back out. Ours runs after it.
@@ -770,13 +799,31 @@ function applyPendingScaleRestore() {
   if (pending.y) plot.setScale('y', pending.y)
 }
 
+/**
+ * Every series' data on the shared x grid, in buildOptions' series order — live block first, then
+ * one block per active overlay in the same iteration order. Null with nothing to plot. Refills
+ * measuredIdxBySeries as a side effect, which buildOptions' point filter reads.
+ */
+function buildData(): uPlot.AlignedData | null {
+  const xs = xValues.value
+  if (xs.length === 0) {
+    measuredIdxBySeries = []
+    return null
+  }
+
+  measuredIdxBySeries = [null] // slot 0 is the x series
+  const data: (number | null)[][] = [xs]
+  pushSeriesData(data, xs, points.value, thdMethod.value)
+  for (const overlay of activeOverlays.value) pushSeriesData(data, xs, overlay.sweepPoints ?? [], methodOf(overlay))
+  return data as unknown as uPlot.AlignedData
+}
+
 function update() {
   ensurePlot()
   if (!plot) return
 
-  const xs = xValues.value
-  if (xs.length === 0) {
-    measuredIdxBySeries = []
+  const data = buildData()
+  if (!data) {
     plot.setData([[]] as unknown as uPlot.AlignedData)
     // Nothing plotted, so nothing to hold a zoom against — drop it rather than reapply it to an
     // empty chart, where the next real data would arrive already zoomed into a window chosen for
@@ -785,16 +832,61 @@ function update() {
     return
   }
 
-  measuredIdxBySeries = [null] // slot 0 is the x series
-  const data: (number | null)[][] = [xs]
-  pushSeriesData(data, xs, points.value, thdMethod.value)
-  // Order has to match buildOptions' series order exactly — live block first, then one block per
-  // active overlay in the same iteration order.
-  for (const overlay of activeOverlays.value) pushSeriesData(data, xs, overlay.sweepPoints ?? [], methodOf(overlay))
-
-  plot.setData(data as unknown as uPlot.AlignedData)
+  plot.setData(data)
   applyPendingScaleRestore()
 }
+
+/**
+ * The chart as a PNG of exactly the requested size, drawn with the light theme whatever the screen's
+ * — the same arrangement as FrequencyResponseChart.exportPng, which explains it. This chart's own
+ * ordering is kept: empty construction, then setData, so the x range callback seeds the axis from the
+ * dropdowns (see buildOptions). The legend is the same one the SVG legend under the chart draws.
+ */
+async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  const restore = captureZoom && plot ? { x: windowOf(plot.scales.x), y: windowOf(plot.scales.y) } : null
+
+  let u: uPlot | null = null
+  try {
+    const blocks = 1 + activeOverlays.value.length
+    const slots = 1 + blocks * activeChannels.value.length * activeTraces.value.length
+    const empty = Array.from({ length: slots }, () => [] as number[]) as unknown as uPlot.AlignedData
+    u = new uPlot(buildOptions(width, plotHeight, false, false), empty, host)
+    const data = buildData()
+    if (data) u.setData(data)
+    if (restore?.x) u.setScale('x', restore.x)
+    if (restore?.y) u.setScale('y', restore.y)
+    await nextPaint()
+
+    const legend: ExportLegendEntry[] = legendGroupsFor(false).flatMap((group) =>
+      group.entries.map((entry) => ({
+        label: group.runIdx === 0 ? (primaryLabel ? `${primaryLabel} ${entry.label}` : entry.label) : `${group.name} ${entry.label}`,
+        color: entry.stroke,
+        dash: entry.dashArray,
+      })),
+    )
+
+    return await composeChartPng({
+      width,
+      height,
+      plotCanvas: u.ctx.canvas,
+      headerHeight: header,
+      title: `Distortion vs ${sweepXLabel(props.xAxis).toLowerCase()}`,
+      legend,
+    })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
 
 /**
  * Appends one channel x trace block of y arrays for a set of sweep points, aligned to `xs`.

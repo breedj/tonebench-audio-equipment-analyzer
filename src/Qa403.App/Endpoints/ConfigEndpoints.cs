@@ -157,5 +157,40 @@ public static class ConfigEndpoints
 
             return Results.Ok(layout);
         });
+
+        // Which elements a report includes, per measurement kind. Same contract as the layout: the
+        // client owns the vocabulary, so a document this build cannot read is replaced by the
+        // defaults (every element) rather than surfaced.
+        group.MapGet("/report-settings", async (
+            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            string? stored = await repo.GetAsync(ConfigRepository.ReportSettingsKey, ct);
+            if (string.IsNullOrWhiteSpace(stored))
+                return Results.Ok(ReportSettingsConfig.Default);
+
+            try
+            {
+                var settings = JsonSerializer.Deserialize<ReportSettingsConfig>(stored, jsonOptions.Value.SerializerOptions);
+                return Results.Ok(settings is { IsValid: true } ? settings : ReportSettingsConfig.Default);
+            }
+            catch (JsonException)
+            {
+                return Results.Ok(ReportSettingsConfig.Default);
+            }
+        });
+
+        group.MapPut("/report-settings", async (
+            ReportSettingsConfig settings, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            if (!settings.IsValid)
+                return Results.BadRequest("Every report element must be a non-empty id under a non-empty kind.");
+
+            await repo.SetAsync(
+                ConfigRepository.ReportSettingsKey,
+                JsonSerializer.Serialize(settings, jsonOptions.Value.SerializerOptions),
+                ct);
+
+            return Results.Ok(settings);
+        });
     }
 }

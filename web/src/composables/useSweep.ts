@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, type InjectionKey, type Ref } from 'vue'
 import {
   api,
   type ThdAmplitudeSweepStartRequest,
@@ -210,6 +210,19 @@ async function cancel() {
 async function clear() {
   applyStatus(await api.clearSweep())
 }
+
+/**
+ * What ThdSweepChart needs to draw a run: the points and the method their figures are read under.
+ * The screen's chart takes them from this composable; a headless render for a report provides a
+ * stored result's instead, under this key — see report/renderChart.ts. An injection rather than
+ * props so the screen's own wiring stays as it is.
+ */
+export interface SweepPointsSource {
+  points: Readonly<Ref<ThdSweepPoint[]>>
+  thdMethod: Readonly<Ref<ThdMethodName>>
+}
+
+export const SWEEP_POINTS_KEY: InjectionKey<SweepPointsSource> = Symbol('sweepPoints')
 
 export function useSweep() {
   return {

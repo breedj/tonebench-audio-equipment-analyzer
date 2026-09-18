@@ -4,6 +4,7 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { ImpulseTraceJson } from '../api/client'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
+import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useZoomBounds } from '../composables/useZoomBounds'
@@ -46,7 +47,11 @@ const THEME = {
   light: { axis: '#525252', grid: '#e5e5e5', trace: '#1d6fd0', marker: '#b45309' },
 } as const
 
-function theme() {
+type Theme = (typeof THEME)[keyof typeof THEME]
+
+// The screen's theme; the export builds its own light plot and hands the theme in as an argument
+// rather than reading this at draw time — see charts/palette.ts for why.
+function theme(): Theme {
   return isDark.value ? THEME.dark : THEME.light
 }
 
@@ -116,7 +121,7 @@ const series = computed(() => {
  * sends both, and a client that drew only the max would redraw the waveform riding along one edge
  * of itself.
  */
-function minMaxBandPlugin(): uPlot.Plugin {
+function minMaxBandPlugin(t: Theme): uPlot.Plugin {
   return {
     hooks: {
       drawAxes: [
@@ -138,7 +143,7 @@ function minMaxBandPlugin(): uPlot.Plugin {
             path.lineTo(x, u.valToPos(max[i], 'y', true))
           }
 
-          ctx.strokeStyle = theme().trace
+          ctx.strokeStyle = t.trace
           ctx.globalAlpha = 0.35
           ctx.lineWidth = 1
           ctx.stroke(path)
@@ -150,7 +155,7 @@ function minMaxBandPlugin(): uPlot.Plugin {
 }
 
 /** A dashed vertical at t = 0 — where the impulse is, and the origin every reflection is read from. */
-function impulseMarkerPlugin(): uPlot.Plugin {
+function impulseMarkerPlugin(t: Theme): uPlot.Plugin {
   return {
     hooks: {
       drawAxes: [
@@ -161,7 +166,7 @@ function impulseMarkerPlugin(): uPlot.Plugin {
           const ctx = u.ctx
           ctx.save()
           ctx.setLineDash([4, 4])
-          ctx.strokeStyle = theme().marker
+          ctx.strokeStyle = t.marker
           ctx.lineWidth = 1
           ctx.beginPath()
           ctx.moveTo(x, u.bbox.top)
@@ -183,11 +188,14 @@ const { zoomed, noteScale, resetZoom } = useZoomBounds(
   () => ({ xMin: props.timeFromMs, xMax: props.timeToMs, yMin: yWindow.value.min, yMax: yWindow.value.max }),
 )
 
-function buildOptions(width: number): uPlot.Options {
-  const t = theme()
+/**
+ * @param t The theme every colour is taken from.
+ * @param interactive False for the export's offscreen plot: no cursor and no zoom bookkeeping.
+ */
+function buildOptions(width: number, height: number, t: Theme, interactive: boolean): uPlot.Options {
   return {
     width,
-    height: chartHeight.value,
+    height,
     scales: {
       // Arguments passed through rather than ignored, so a drag-zoom survives setScale — the same
       // idiom the other charts use. Note that what actually puts the panel's window on the x axis is
@@ -221,16 +229,69 @@ function buildOptions(width: number): uPlot.Options {
         points: { show: false },
       },
     ],
-    plugins: [minMaxBandPlugin(), impulseMarkerPlugin()],
+    plugins: [minMaxBandPlugin(t), impulseMarkerPlugin(t)],
     // Both axes, because a reflection is read off the time axis and its level off the other, and
     // demanding a pixel-accurate one-axis drag to get either would make both awkward.
-    cursor: { drag: { x: true, y: true, uni: 12 } },
+    cursor: interactive ? { drag: { x: true, y: true, uni: 12 } } : { show: false },
     legend: { show: false },
     // Fires on setData too (both scales are auto:false, so setData re-applies the same window),
     // hence the change gate inside noteScale.
-    hooks: { setScale: [(u: uPlot) => noteScale(u)] },
+    hooks: interactive ? { setScale: [(u: uPlot) => noteScale(u)] } : {},
   }
 }
+
+/**
+ * The chart as a PNG of exactly the requested size, drawn with the light theme whatever the screen's
+ * — the same arrangement as FrequencyResponseChart.exportPng, which explains it. This chart's own
+ * ordering is kept: empty construction, setData, then the explicit setScale pair, which is what puts
+ * the window on the axes (see buildOptions).
+ */
+async function exportPng({ width, height, captureZoom = false }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  const live = plot.value
+  const xWindow =
+    captureZoom && live?.scales.x.min != null && live.scales.x.max != null
+      ? { min: live.scales.x.min, max: live.scales.x.max }
+      : { min: props.timeFromMs, max: props.timeToMs }
+  const yWin =
+    captureZoom && live?.scales.y.min != null && live.scales.y.max != null
+      ? { min: live.scales.y.min, max: live.scales.y.max }
+      : { min: yWindow.value.min, max: yWindow.value.max }
+
+  let u: uPlot | null = null
+  try {
+    u = new uPlot(buildOptions(width, plotHeight, THEME.light, false), [[], []], host)
+    const { timeMs, max } = series.value
+    u.setData([timeMs, max])
+    u.setScale('x', xWindow)
+    u.setScale('y', yWin)
+    await nextPaint()
+
+    const impulse = props.impulse
+    const detail = impulse
+      ? ` — peak ${peakLabel.value} · gate −${impulse.gatePreMs}/+${impulse.gatePostMs} ms`
+      : ''
+    return await composeChartPng({
+      width,
+      height,
+      plotCanvas: u.ctx.canvas,
+      headerHeight: header,
+      title: `Impulse response${props.normalised ? ' (dB re peak)' : ''}${detail}`,
+      legend: [{ label: props.normalised ? 'Level' : 'Impulse', color: THEME.light.trace }],
+    })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
 
 function rebuild() {
   const el = container.value
@@ -238,7 +299,7 @@ function rebuild() {
 
   plot.value?.destroy()
   const width = el.getBoundingClientRect().width || 600
-  plot.value = new uPlot(buildOptions(width), [[], []], el)
+  plot.value = new uPlot(buildOptions(width, chartHeight.value, theme(), true), [[], []], el)
   // uPlot has no double-click-to-reset of its own once drag zoom is on.
   plot.value.over.addEventListener('dblclick', resetZoom)
   refresh()

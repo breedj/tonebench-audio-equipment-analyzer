@@ -48,7 +48,8 @@ const { showPage } = useManual()
           <td>SINGLE</td>
           <td>
             Captures one settled spectrum — the configured number of averages, or one record if
-            averaging is off — and stops by itself. This is what you want before saving a result.
+            averaging is off or the count is 1 — and stops by itself. This is what you want before
+            saving a result. It measures exactly what RUN measures, capture delay included.
           </td>
         </tr>
         <tr>

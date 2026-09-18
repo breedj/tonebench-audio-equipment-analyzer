@@ -45,11 +45,16 @@ public sealed record SpectrumPipelineOptions
     /// Mirrors a bench analyzer's "Single" sweep button: start, capture settles, then stops on its
     /// own instead of free-running.
     ///
-    /// Not a persisted UI setting — it is turned on only by the "Single" action (POST
-    /// /api/acquisition/spectrum-capture, which also calls <see cref="SpectrumPipeline.Flush"/> to
-    /// arm a fresh capture) and turned back off by the next plain Run (POST
-    /// /api/acquisition/start), so a normal continuous run is never left holding from a previous
-    /// Single press. Off by default (continuous/free-run).
+    /// Not a persisted UI setting — it is whatever the last POST /api/acquisition/start asked for
+    /// (<c>singleShot: true</c> is the "Single" button, anything else is Run), so a normal
+    /// continuous run is never left holding from a previous Single press. The start's own flushes
+    /// are what arm the capture; there must be no separate "arm" flush after the start, because a
+    /// bare <see cref="SpectrumPipeline.Flush"/> zeroes the capture-delay discard the start just
+    /// booked and puts the DUT's settle back inside the first record. Off by default
+    /// (continuous/free-run).
+    ///
+    /// A count of 1 completes after one record whatever <see cref="Averaging"/> says, the same way
+    /// <see cref="SpectrumAverager"/> treats <c>count &lt;= 1</c> as no averaging.
     /// </summary>
     public bool SingleShot { get; init; } = false;
 

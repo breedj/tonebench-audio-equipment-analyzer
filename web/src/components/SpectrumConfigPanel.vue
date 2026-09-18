@@ -169,7 +169,7 @@ defineExpose({ getSampleRateHz })
           {{ form.averaging === 'Linear' ? 'Spectra averaged' : 'Time constant' }}
           <input
             type="number"
-            min="2"
+            min="1"
             v-model.number="form.averageCount"
             class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             @change="apply"

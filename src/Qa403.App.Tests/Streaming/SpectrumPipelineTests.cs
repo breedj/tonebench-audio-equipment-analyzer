@@ -224,6 +224,89 @@ public class SpectrumPipelineTests
         }
     }
 
+    /// <summary>
+    /// A count of 1 is "no averaging" by <see cref="SpectrumAverager"/>'s own rule (it treats
+    /// <c>count &lt;= 1</c> as Off and leaves <c>Count</c> at 0), so a single shot has to complete on
+    /// its first record whatever the mode says. It did not: the completion test was
+    /// <c>averagesTaken &gt;= AverageCount</c>, i.e. 0 &gt;= 1, and the FFT screen's Single with one
+    /// average free-ran until Stop while every higher count held as it should.
+    /// </summary>
+    [Theory]
+    [InlineData(AveragingMode.Linear)]
+    [InlineData(AveragingMode.Exponential)]
+    public async Task SingleShot_WithASingleAverage_HoldsAfterTheFirstRecord(AveragingMode averaging)
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        await device.ConnectAsync(CancellationToken.None);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 0.0)]), ChannelGeneratorConfig.Off), CancellationToken.None);
+
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
+        {
+            Options = new SpectrumPipelineOptions
+            {
+                FftSize = 4096, TargetFrameRateHz = 40, DisplayColumns = 200,
+                Averaging = averaging, AverageCount = 1, SingleShot = true,
+            },
+        };
+
+        var (_, reader) = hub.Subscribe();
+        pipeline.Start(sampleRateHz: 48000, channelCount: 1);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48000, ChannelCount: 1, BlockFrameCount: 4096);
+        using var streamCts = new CancellationTokenSource();
+        var drainTask = Task.Run(async () =>
+        {
+            await foreach (var block in device.StreamAsync(config, streamCts.Token).WithCancellation(streamCts.Token))
+                pipeline.Enqueue(block);
+        });
+
+        try
+        {
+            // The very first meters frame is the completed capture.
+            uint heldSeq;
+            using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (true)
+            {
+                byte[] frame = await reader.ReadAsync(readCts.Token);
+                var header = StreamFrame.DecodeHeader(frame);
+                if (header.MsgType != StreamMsgType.Meters)
+                    continue;
+
+                Assert.True(header.Flags.HasFlag(StreamFlags.Held), "the first meters frame of a one-average single shot must be Held");
+                // One spectrum was recorded, and the "x1 (1/1)" readout is built from this.
+                Assert.Equal(1u, StreamFrame.DecodeMeters(frame).AveragesTaken);
+                heldSeq = header.Seq;
+                break;
+            }
+
+            // And it holds: nothing from a later tick arrives even though samples keep streaming.
+            using var holdCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+            try
+            {
+                while (true)
+                {
+                    byte[] frame = await reader.ReadAsync(holdCts.Token);
+                    Assert.Equal(heldSeq, StreamFrame.DecodeHeader(frame).Seq);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected: the hold window elapsed with nothing but same-tick leftovers, if any.
+            }
+
+            Assert.True(pipeline.SingleShotComplete);
+        }
+        finally
+        {
+            streamCts.Cancel();
+            try { await drainTask; } catch (OperationCanceledException) { }
+            await device.StopAsync();
+            await pipeline.StopAsync();
+        }
+    }
+
     [Fact]
     public async Task Pipeline_broadcasts_spectrum_and_meters_frames_for_a_known_tone()
     {

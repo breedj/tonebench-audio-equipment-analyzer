@@ -15,9 +15,17 @@ public static class AcquisitionEndpoints
         {
             try
             {
-                // Run always free-runs continuously, even if a previous Single press left the
-                // pipeline holding — SingleShot is a one-off capture mode, not a sticky setting.
-                pipeline.Options = pipeline.Options with { SingleShot = false };
+                // Backs both Run and Single: SingleShot is a one-off capture mode, not a sticky
+                // setting, so it is whatever this start asks for — Run always free-runs even if a
+                // previous Single left the pipeline holding. Set *before* the start, because the
+                // start's own flushes (Start()'s bare one, then the capture delay's) are what arm
+                // the capture: they clear the held flags and the averagers, and the settle discard
+                // is the last flush to land. Single used to be armed by a separate call after this
+                // one that did a bare Flush(), and SampleRingBuffer.Reset(0) zeroed the settle
+                // discard that had just been booked — so a Single's first record started at the
+                // tone step while Run's started a capture delay later, which on a tube amp's
+                // 12 Hz high-pass ringing read as a bump around 50 Hz that no averaging removed.
+                pipeline.Options = pipeline.Options with { SingleShot = request.SingleShot ?? false };
 
                 var config = new AcquisitionConfig(request.SampleRateHz, request.ChannelCount, request.BlockFrameCount ?? 4096);
                 await session.StartAcquisitionAsync(config, ct);
@@ -83,20 +91,6 @@ public static class AcquisitionEndpoints
 
         group.MapGet("/spectrum-config", (SpectrumPipeline pipeline) => Results.Ok(pipeline.Options));
 
-        // Backs the "Single" button (see App.vue, between Run and Stop): turns on
-        // SpectrumPipelineOptions.SingleShot and arms a fresh capture, so the next AverageCount
-        // ticks build a clean average and then hold — no more frames for that channel until the
-        // next Run or Single. Not part of SpectrumConfigRequest/spectrum-config on purpose: this is
-        // a one-off action like Run/Stop, never a saved measurement setting. Run always resets
-        // SingleShot back to false (see "/start" above) so a plain continuous run is never left
-        // holding from a previous Single press.
-        group.MapPost("/spectrum-capture", (SpectrumPipeline pipeline) =>
-        {
-            pipeline.Options = pipeline.Options with { SingleShot = true };
-            pipeline.Flush();
-            return Results.Ok(pipeline.Options);
-        });
-
         // Backs the "Clear" button next to Save measurement result: discards the retained (stopped)
         // spectrum so the chart goes back to "Waiting for data..." and Save measurement result has
         // nothing stale left to save. Meaningful only while stopped -- the client disables the
@@ -109,7 +103,11 @@ public static class AcquisitionEndpoints
     }
 }
 
-public sealed record AcquisitionStartRequest(double SampleRateHz, int ChannelCount, int? BlockFrameCount);
+/// <param name="SingleShot">
+/// True for the FFT screen's Single button: capture the configured averages, then hold (see
+/// <see cref="SpectrumPipelineOptions.SingleShot"/>). Null or false free-runs.
+/// </param>
+public sealed record AcquisitionStartRequest(double SampleRateHz, int ChannelCount, int? BlockFrameCount, bool? SingleShot = null);
 
 public sealed record SpectrumConfigRequest(
     int? FftSize, string? Window, string? Averaging, int? AverageCount, int? TargetFrameRateHz, int? OtherPeaksCount,

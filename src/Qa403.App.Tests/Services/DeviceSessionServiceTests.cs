@@ -289,6 +289,13 @@ public class DeviceSessionServiceTests
     /// acquisition start applies it instead — the settle alone, with no stimulus latency, since
     /// nothing changed on the wire — and only when a generator channel is on: a generator-less
     /// capture has nothing to settle.
+    ///
+    /// <para>The Single button is the same start with <c>SingleShot</c> already set on the pipeline,
+    /// and the settle discard must still be the <i>last</i> flush to land. It used to be armed by a
+    /// separate call after the start that did a bare <c>Flush()</c>, which zeroed the settle just
+    /// booked: a Single's first record then began at the tone step while Run's began a capture
+    /// delay later, and on the simulator's tube amp that was a bump around 50 Hz that no number of
+    /// averages removed.</para>
     /// </summary>
     [Fact]
     public async Task StartAcquisitionAsync_WithTheGeneratorAlreadyOn_DiscardsTheCaptureDelay()
@@ -314,6 +321,16 @@ public class DeviceSessionServiceTests
 
         Assert.Equal(4800, pipeline.LastFlushDiscardFrames);
         Assert.Equal(100.0, session.LastAppliedCaptureDelayMs);
+        await session.StopAcquisitionAsync();
+
+        // Single: the flag is set ahead of the start (as /api/acquisition/start does), and the
+        // start's flushes arm it -- the settle discard is still what the record waits for.
+        pipeline.Options = pipeline.Options with { SingleShot = true };
+        await session.StartAcquisitionAsync(config, CancellationToken.None);
+
+        Assert.True(pipeline.Options.SingleShot);
+        Assert.False(pipeline.SingleShotComplete);
+        Assert.Equal(4800, pipeline.LastFlushDiscardFrames);
 
         await session.ShutdownAsync();
     }

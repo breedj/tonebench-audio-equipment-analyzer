@@ -1162,6 +1162,13 @@ export interface AcquisitionStartRequest {
   sampleRateHz: number
   channelCount: number
   blockFrameCount?: number
+  /**
+   * The "Single" button: capture the configured averages, then hold (SpectrumPipelineOptions.SingleShot).
+   * Rides on the start itself rather than a follow-up call, because the start's own flushes are what
+   * arm the capture — a separate arming flush after it zeroed the capture-delay discard the start had
+   * just booked. Omitted/false free-runs (Run). Not a saved config value.
+   */
+  singleShot?: boolean
 }
 
 export type WindowType = 'Rectangular' | 'Hann' | 'Hamming' | 'BlackmanHarris' | 'FlatTop'
@@ -1732,9 +1739,6 @@ export const api = {
 
   setSpectrumConfig: (config: SpectrumConfigRequest) =>
     request<SpectrumConfig>('/acquisition/spectrum-config', { method: 'POST', body: JSON.stringify(config) }),
-
-  /** Backs the "Single" button: turns on SpectrumPipelineOptions.SingleShot and arms a fresh capture — see the server endpoint's remarks. Not a saved config value; call startAcquisition (Run) to go back to free-running. */
-  armSpectrumCapture: () => request<SpectrumConfig>('/acquisition/spectrum-capture', { method: 'POST' }),
 
   /** Backs the "Clear" button: discards the retained (stopped) spectrum server-side, so Save measurement result has nothing stale left to save. */
   clearSpectrum: () => request<void>('/acquisition/clear', { method: 'POST' }),

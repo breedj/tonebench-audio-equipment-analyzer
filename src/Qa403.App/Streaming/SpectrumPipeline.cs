@@ -575,7 +575,17 @@ public sealed class SpectrumPipeline(
 
             // Off has no "reached count" signal of its own (SpectrumAverager.Count stays 0 when
             // averaging is off), so a single shot without averaging just holds after this one tick.
-            bool singleShotComplete = options.SingleShot && (options.Averaging == AveragingMode.Off || averagesTaken >= options.AverageCount);
+            // A count of 1 is "off" by the averager's own definition too (Update treats count <= 1
+            // as Off and leaves Count at 0), so it has to be tested here the same way: against
+            // `averagesTaken >= AverageCount` it was 0 >= 1 forever, and a Single with one average
+            // never held -- the FFT screen kept running until Stop.
+            bool notAveraging = options.Averaging == AveragingMode.Off || options.AverageCount <= 1;
+            bool singleShotComplete = options.SingleShot && (notAveraging || averagesTaken >= options.AverageCount);
+
+            // A count of 1 still records one spectrum, and the "Linear x1 (1/1)" readout should say
+            // so rather than repeat the averager's 0 -- Off has no readout to feed.
+            if (notAveraging && options.Averaging != AveragingMode.Off)
+                averagesTaken = 1;
 
             // A Flush while this tick was running means the samples it just analyzed predate a
             // stimulus change (a new generator frequency, a new range, a restart). Committing them

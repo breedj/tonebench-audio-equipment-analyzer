@@ -1105,7 +1105,11 @@ function connectDevice() {
 // the device's own hardware ranger or the live monitor below for devices that don't (the
 // simulator) — see DeviceStatusBar's read-only display.
 // Block size isn't user-configurable — omitted from both calls below, the server defaults it to 4096.
-function runMeasurement(runConfig: RunConfig) {
+//
+// singleShotArmed: whether the Single button armed the capture this screen is now waiting on — see
+// the autoStopOnceHeld watcher below for why merely seeing `held` is not enough.
+const singleShotArmed = ref(false)
+function runMeasurement(runConfig: RunConfig, singleShot = false) {
   return withErrorReporting(async () => {
     const { sampleRateHz, channelCount } = runConfig
 
@@ -1115,6 +1119,11 @@ function runMeasurement(runConfig: RunConfig) {
     meters.value = {}
     spectrum.value = {}
     clearScope()
+
+    // Armed before the start request goes out, not after it returns: a held meters frame can
+    // land before the response does (a 4096-point record is 21 ms at 192 kHz), and a held channel
+    // sends nothing further for the watcher to react to. A plain Run disarms a pending Single.
+    singleShotArmed.value = singleShot
 
     // Gated on the *device* actually having auto-ranging (status.autoRangeEnabled null means it
     // doesn't — the simulator, currently) rather than unconditionally requesting it: the server
@@ -1142,7 +1151,9 @@ function runMeasurement(runConfig: RunConfig) {
       // be a setTimeout between these two calls, which covered this one path and no sweep point.
     }
 
-    const newStatus = await api.startAcquisition({ sampleRateHz, channelCount })
+    // Single rides on the start itself (see AcquisitionStartRequest.singleShot): it used to be a
+    // separate arming call after this one, whose bare flush threw that capture delay away again.
+    const newStatus = await api.startAcquisition({ sampleRateHz, channelCount, singleShot })
     status.value = newStatus
     // A sample-rate change re-snaps the generator server-side (see DeviceSessionService.StartAcquisitionAsync);
     // newStatus already carries the new frequencies, this just pulls them into the form fields.
@@ -1154,19 +1165,19 @@ function runMeasurement(runConfig: RunConfig) {
 // settings' sample rate) — builds the RunConfig fresh from whatever's currently staged each time,
 // rather than the button owning a fixed one.
 function runFromCurrentSettings() {
-  return runMeasurement({
+  return runMeasurement(currentRunConfig())
+}
+
+function currentRunConfig(): RunConfig {
+  return {
     sampleRateHz: spectrumConfigPanel.value?.getSampleRateHz() ?? 192000,
     channelCount: ranges.value?.maxChannelCount ?? 2,
-  })
+  }
 }
 
 // The Stop button's counterpart — same "stop everything" used automatically when switching
 // measurements (see useProjects.ts's selectType), just with a snappy refresh here since this one
 // has a button sitting right there waiting on it, unlike the switch-measurement case.
-// Whether the Single button armed the capture this screen is now waiting on — see the
-// autoStopOnceHeld watcher below for why merely seeing `held` is not enough.
-const singleShotArmed = ref(false)
-
 function stopMeasurement() {
   return withErrorReporting(async () => {
     singleShotArmed.value = false
@@ -1175,20 +1186,17 @@ function stopMeasurement() {
   })
 }
 
-// The Single button: same as Run, except it arms SpectrumPipelineOptions.SingleShot right after
-// starting, so the capture settles to the configured average count and holds instead of
-// free-running — the autoStopOnceHeld watcher below then stops it automatically, same as pressing
-// Stop, once every processed channel's meters frame comes back flagged Held. Not a saved config
-// value (see useSpectrumConfig().arm) — just another way to capture data, alongside Run/Stop.
-const { arm: armSingleShotCapture } = useSpectrumConfig()
-function singleShotCapture() {
-  return withErrorReporting(async () => {
-    await runFromCurrentSettings()
-    if (status.value?.acquiring) {
-      singleShotArmed.value = true
-      await armSingleShotCapture()
-    }
-  })
+// The Single button: the same start as Run with SpectrumPipelineOptions.SingleShot asked for on
+// it, so the capture settles to the configured average count and holds instead of free-running —
+// the autoStopOnceHeld watcher below then stops it automatically, same as pressing Stop, once
+// every processed channel's meters frame comes back flagged Held. Not a saved config value — just
+// another way to capture data, alongside Run/Stop. One request rather than start-then-arm on
+// purpose: the arming call's own flush used to cancel the capture delay the start had booked, so
+// Single measured the DUT still settling where Run did not.
+async function singleShotCapture() {
+  await runMeasurement(currentRunConfig(), true)
+  if (!status.value?.acquiring)
+    singleShotArmed.value = false
 }
 
 // Companion to singleShotCapture: stops automatically once every enabled/processed channel's
@@ -1203,9 +1211,13 @@ function singleShotCapture() {
 // so while acquiring), the pipeline stayed held, and every remaining point reported the first
 // point's spectrum. Only reproducible with a browser tab open, which is why the API-level tests
 // never saw it.
+//
+// Also re-evaluated when `acquiring` flips, not only on a meters frame: a held frame that arrives
+// before the start response has set status is otherwise dropped for good, since a held channel
+// sends nothing further.
 let autoStopping = false
-watch(meters, (m) => {
-  if (!singleShotArmed.value || !status.value?.acquiring || autoStopping) return
+watch([meters, () => status.value?.acquiring], ([m, acquiring]) => {
+  if (!singleShotArmed.value || !acquiring || autoStopping) return
 
   const config = spectrumConfig.value
   if (!config || (!config.processLeft && !config.processRight)) return

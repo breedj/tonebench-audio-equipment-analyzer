@@ -1,6 +1,5 @@
 ﻿using System.Text.Json;
-using Microsoft.AspNetCore.Http.Json;
-using Microsoft.Extensions.Options;
+using Qa403.App.Json;
 using Qa403.App.Services;
 using Qa403.Data;
 using Qa403.Dsp;
@@ -19,7 +18,7 @@ public static class ConfigEndpoints
     /// loads it into <see cref="CaptureDelaySetting"/> at startup.
     /// </summary>
     public static async Task<CaptureDelayConfig> ReadCaptureDelayAsync(
-        ConfigRepository repo, JsonSerializerOptions serializerOptions, CancellationToken ct)
+        ConfigRepository repo, CancellationToken ct)
     {
         string? stored = await repo.GetAsync(ConfigRepository.CaptureDelayKey, ct);
         if (string.IsNullOrWhiteSpace(stored))
@@ -27,7 +26,7 @@ public static class ConfigEndpoints
 
         try
         {
-            var config = JsonSerializer.Deserialize<CaptureDelayConfig>(stored, serializerOptions);
+            var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.CaptureDelayConfig);
             return config is { IsValid: true } ? config : CaptureDelayConfig.Default;
         }
         catch (JsonException)
@@ -44,7 +43,7 @@ public static class ConfigEndpoints
         // standards. Returns the defaults rather than 404 when nothing has been stored, so a client
         // never has to special-case a machine that has not calibrated yet.
         group.MapGet("/impedance-fixture", async (
-            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            ConfigRepository repo, CancellationToken ct) =>
         {
             string? stored = await repo.GetAsync(ConfigRepository.ImpedanceFixtureKey, ct);
             if (string.IsNullOrWhiteSpace(stored))
@@ -52,8 +51,7 @@ public static class ConfigEndpoints
 
             try
             {
-                var fixture = JsonSerializer.Deserialize<ImpedanceFixtureConfig>(
-                    stored, jsonOptions.Value.SerializerOptions);
+                var fixture = JsonSerializer.Deserialize(stored, AppJsonContext.Default.ImpedanceFixtureConfig);
                 return Results.Ok(fixture ?? ImpedanceFixtureConfig.Default);
             }
             catch (JsonException)
@@ -66,7 +64,7 @@ public static class ConfigEndpoints
 
         group.MapPut("/impedance-fixture", async (
             ImpedanceFixtureConfig fixture, ConfigRepository repo,
-            IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            CancellationToken ct) =>
         {
             if (!(fixture.ReferenceOhms >= ImpedanceRequest.MinReferenceOhms
                   && fixture.ReferenceOhms <= ImpedanceRequest.MaxReferenceOhms))
@@ -88,7 +86,7 @@ public static class ConfigEndpoints
 
             await repo.SetAsync(
                 ConfigRepository.ImpedanceFixtureKey,
-                JsonSerializer.Serialize(fixture, jsonOptions.Value.SerializerOptions),
+                JsonSerializer.Serialize(fixture, AppJsonContext.Default.ImpedanceFixtureConfig),
                 ct);
 
             return Results.Ok(fixture);
@@ -104,7 +102,7 @@ public static class ConfigEndpoints
         // contract as the fixture: defaults rather than 404, and an unreadable document is replaced
         // by them rather than surfaced, since nothing about a layout is worth an error.
         group.MapGet("/ui-layout", async (
-            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            ConfigRepository repo, CancellationToken ct) =>
         {
             string? stored = await repo.GetAsync(ConfigRepository.UiLayoutKey, ct);
             if (string.IsNullOrWhiteSpace(stored))
@@ -112,7 +110,7 @@ public static class ConfigEndpoints
 
             try
             {
-                var layout = JsonSerializer.Deserialize<UiLayoutConfig>(stored, jsonOptions.Value.SerializerOptions);
+                var layout = JsonSerializer.Deserialize(stored, AppJsonContext.Default.UiLayoutConfig);
                 return Results.Ok(layout ?? UiLayoutConfig.Default);
             }
             catch (JsonException)
@@ -125,12 +123,12 @@ public static class ConfigEndpoints
         // document is the durable copy; CaptureDelaySetting is the one the session reads, and a PUT
         // writes both so a sweep started a moment later already runs with the new value.
         group.MapGet("/capture-delay", async (
-            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
-            Results.Ok(await ReadCaptureDelayAsync(repo, jsonOptions.Value.SerializerOptions, ct)));
+            ConfigRepository repo, CancellationToken ct) =>
+            Results.Ok(await ReadCaptureDelayAsync(repo, ct)));
 
         group.MapPut("/capture-delay", async (
             CaptureDelayConfig config, ConfigRepository repo, CaptureDelaySetting setting,
-            IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            CancellationToken ct) =>
         {
             if (!config.IsValid)
             {
@@ -140,7 +138,7 @@ public static class ConfigEndpoints
 
             await repo.SetAsync(
                 ConfigRepository.CaptureDelayKey,
-                JsonSerializer.Serialize(config, jsonOptions.Value.SerializerOptions),
+                JsonSerializer.Serialize(config, AppJsonContext.Default.CaptureDelayConfig),
                 ct);
             setting.Ms = config.CaptureDelayMs;
 
@@ -153,11 +151,11 @@ public static class ConfigEndpoints
             Results.Ok(await session.ReadStartupAsync(ct)));
 
         group.MapPut("/startup", async (
-            StartupConfig config, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            StartupConfig config, ConfigRepository repo, CancellationToken ct) =>
         {
             await repo.SetAsync(
                 ConfigRepository.StartupKey,
-                JsonSerializer.Serialize(config, jsonOptions.Value.SerializerOptions),
+                JsonSerializer.Serialize(config, AppJsonContext.Default.StartupConfig),
                 ct);
 
             return Results.Ok(config);
@@ -168,7 +166,7 @@ public static class ConfigEndpoints
         // and the server only keeps it. Defaults rather than 404, and an unreadable document is the
         // default -- nothing about a preference is worth an error.
         group.MapGet("/autosave", async (
-            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            ConfigRepository repo, CancellationToken ct) =>
         {
             string? stored = await repo.GetAsync(ConfigRepository.AutosaveKey, ct);
             if (string.IsNullOrWhiteSpace(stored))
@@ -176,7 +174,7 @@ public static class ConfigEndpoints
 
             try
             {
-                var config = JsonSerializer.Deserialize<AutosaveConfig>(stored, jsonOptions.Value.SerializerOptions);
+                var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.AutosaveConfig);
                 return Results.Ok(config ?? AutosaveConfig.Default);
             }
             catch (JsonException)
@@ -186,22 +184,22 @@ public static class ConfigEndpoints
         });
 
         group.MapPut("/autosave", async (
-            AutosaveConfig config, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            AutosaveConfig config, ConfigRepository repo, CancellationToken ct) =>
         {
             await repo.SetAsync(
                 ConfigRepository.AutosaveKey,
-                JsonSerializer.Serialize(config, jsonOptions.Value.SerializerOptions),
+                JsonSerializer.Serialize(config, AppJsonContext.Default.AutosaveConfig),
                 ct);
 
             return Results.Ok(config);
         });
 
         group.MapPut("/ui-layout", async (
-            UiLayoutConfig layout, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            UiLayoutConfig layout, ConfigRepository repo, CancellationToken ct) =>
         {
             await repo.SetAsync(
                 ConfigRepository.UiLayoutKey,
-                JsonSerializer.Serialize(layout, jsonOptions.Value.SerializerOptions),
+                JsonSerializer.Serialize(layout, AppJsonContext.Default.UiLayoutConfig),
                 ct);
 
             return Results.Ok(layout);
@@ -211,7 +209,7 @@ public static class ConfigEndpoints
         // client owns the vocabulary, so a document this build cannot read is replaced by the
         // defaults (every element) rather than surfaced.
         group.MapGet("/report-settings", async (
-            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            ConfigRepository repo, CancellationToken ct) =>
         {
             string? stored = await repo.GetAsync(ConfigRepository.ReportSettingsKey, ct);
             if (string.IsNullOrWhiteSpace(stored))
@@ -219,7 +217,7 @@ public static class ConfigEndpoints
 
             try
             {
-                var settings = JsonSerializer.Deserialize<ReportSettingsConfig>(stored, jsonOptions.Value.SerializerOptions);
+                var settings = JsonSerializer.Deserialize(stored, AppJsonContext.Default.ReportSettingsConfig);
                 return Results.Ok(settings is { IsValid: true } ? settings : ReportSettingsConfig.Default);
             }
             catch (JsonException)
@@ -229,14 +227,14 @@ public static class ConfigEndpoints
         });
 
         group.MapPut("/report-settings", async (
-            ReportSettingsConfig settings, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+            ReportSettingsConfig settings, ConfigRepository repo, CancellationToken ct) =>
         {
             if (!settings.IsValid)
                 return Results.BadRequest("Every report element must be a non-empty id under a non-empty kind.");
 
             await repo.SetAsync(
                 ConfigRepository.ReportSettingsKey,
-                JsonSerializer.Serialize(settings, jsonOptions.Value.SerializerOptions),
+                JsonSerializer.Serialize(settings, AppJsonContext.Default.ReportSettingsConfig),
                 ct);
 
             return Results.Ok(settings);

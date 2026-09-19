@@ -198,7 +198,6 @@ try
         app.Services.GetRequiredService<CaptureDelaySetting>().Ms =
             (await ConfigEndpoints.ReadCaptureDelayAsync(
                 scope.ServiceProvider.GetRequiredService<ConfigRepository>(),
-                app.Services.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions,
                 CancellationToken.None)).CaptureDelayMs;
     }
 

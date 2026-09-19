@@ -116,7 +116,7 @@ export function toResponseTraces(stored: StoredResponseTrace[]): ResponseTrace[]
     peakFreqHz: trace.peakHz,
     // Null on a result saved before the reference was recorded. It is left null rather than
     // back-filled with peakDb: those rows were peak-referenced, but a build that did not record it
-    // may also have searched differently, and drawing a reference line on that claim would be
+    // may also have searched differently, and quoting a reference on that claim would be
     // asserting something the row does not say.
     referenceDb: trace.referenceDb,
     referenceMode: trace.referenceMode,

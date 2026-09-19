@@ -17,6 +17,7 @@ import {
 import { makeChartPalette, type ChartPalette } from '../charts/palette'
 import { exportAxisLabel } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
+import ToolbarIcon from './ToolbarIcon.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -86,9 +87,6 @@ const BANDWIDTH_COLORS = {
   oneDb: ['#d97706', '#fbbf24'],
   threeDb: ['#2563eb', '#60a5fa'],
 } as const
-
-/** The horizontal line at the level both readings were measured down from. Deliberately quiet — it is context, not a curve. */
-const REFERENCE_COLOR = ['#9ca3af', '#6b7280'] as const
 
 // See charts/palette.ts for why the palette is an argument and not a module-level flag.
 type Palette = ChartPalette
@@ -262,49 +260,11 @@ function bandwidthPlugin(p: Palette): uPlot.Plugin {
           if (props.showOneDb) readings.push({ label: 'B1', reading: trace.oneDb, palette: BANDWIDTH_COLORS.oneDb, row: 0 })
           if (props.showThreeDb) readings.push({ label: 'B3', reading: trace.threeDb, palette: BANDWIDTH_COLORS.threeDb, row: 1 })
 
-          // The reference and the thresholds the corners were found against, drawn first so the
-          // arrows sit on top of them. Without these the corners are unexplainable by eye: a
-          // passband-referenced reading's level is a median that appears nowhere in the readouts, so
-          // a reader looking at a peak 4 dB above the trace has no way to see what the numbers were
-          // measured from. Skipped entirely when referenceDb is null — a stored result from a build
-          // that did not record it, where drawing a line would be inventing one.
-          if (trace.referenceDb !== null && readings.length > 0) {
-            const yRef = u.valToPos(trace.referenceDb, 'y', true)
-
-            ctx.strokeStyle = p.color(REFERENCE_COLOR)
-            ctx.fillStyle = p.color(REFERENCE_COLOR)
-            ctx.lineWidth = 1
-            ctx.setLineDash([])
-            ctx.beginPath()
-            ctx.moveTo(u.bbox.left, yRef)
-            ctx.lineTo(u.bbox.left + u.bbox.width, yRef)
-            ctx.stroke()
-
-            ctx.font = '10px ui-sans-serif, system-ui, sans-serif'
-            ctx.textAlign = 'left'
-            ctx.textBaseline = 'bottom'
-            ctx.fillText('ref', u.bbox.left + 3, yRef - 1)
-
-            ctx.setLineDash([2, 3])
-            for (const { reading, palette } of readings) {
-              // Both sides for a symmetric reading, the lower one only for a one-sided one — which
-              // is the difference between the two rows made visible rather than left in a tooltip.
-              const levels = reading.symmetric
-                ? [trace.referenceDb - reading.dropDb, trace.referenceDb + reading.dropDb]
-                : [trace.referenceDb - reading.dropDb]
-
-              ctx.strokeStyle = p.color(palette)
-              for (const level of levels) {
-                const y = u.valToPos(level, 'y', true)
-                ctx.beginPath()
-                ctx.moveTo(u.bbox.left, y)
-                ctx.lineTo(u.bbox.left + u.bbox.width, y)
-                ctx.stroke()
-              }
-            }
-            ctx.setLineDash([])
-          }
-
+          // Only the corners and the arrow are drawn. The reference level and the thresholds the
+          // corners were found against used to be drawn as horizontals too (a grey `ref` line and a
+          // dotted line per threshold), and were removed: on a trace with several readings and a
+          // phase curve they read as more curves, and the Measurements panel already quotes the
+          // reference level in numbers.
           for (const { label, reading, palette, row } of readings) {
             const stroke = p.color(palette)
             const xLow = u.valToPos(Math.max(reading.lowerHz, u.scales.x.min ?? 1), 'x', true)
@@ -799,8 +759,8 @@ function exportTitle(): string {
  * The chart as a PNG of exactly the requested size, drawn with the light palette whatever the theme.
  *
  * A second uPlot is built offscreen from the same options and data as the visible one, so the
- * export is this chart and not an imitation of it — the min/max band, the bandwidth arrows, the
- * reference line and every overlay come along, because the plugins are the same functions. The host
+ * export is this chart and not an imitation of it — the min/max band, the bandwidth arrows and
+ * every overlay come along, because the plugins are the same functions. The host
  * has to be *attached* (positioned off to the left) rather than detached: uPlot measures its
  * container, and a detached div measures zero. uPlot commits its first draw in a microtask, hence the
  * wait before compositing. The visible plot is never touched.
@@ -938,7 +898,7 @@ watch(phaseRange, () => refresh())
     <ExpandToggle class="absolute right-0 top-0" :target="root" />
     <!-- Cursor readout on the left, zoom state on the right. Both are about the plot below rather
          than about the measurement, so they sit with it and not in the display panel. -->
-    <div class="pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span v-if="cursorReadout" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
         <span class="text-neutral-800 dark:text-neutral-100">{{ formatHz(cursorReadout.freqHz) }}</span>
         <span v-for="entry in cursorReadout.entries" :key="entry.key" class="flex items-center gap-1">
@@ -955,10 +915,11 @@ watch(phaseRange, () => refresh())
       <button
         v-if="zoomed"
         type="button"
-        class="shrink-0 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex shrink-0 items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
         title="Back to the frequency and dB window set in the display panel."
         @click="resetZoom"
       >
+        <ToolbarIcon name="reset-zoom" />
         Reset zoom
       </button>
       <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>

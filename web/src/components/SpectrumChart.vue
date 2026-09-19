@@ -18,6 +18,7 @@ import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useAppTheme } from '../composables/useAppTheme'
 import { fullHeightWithMargin, useResultChartHeight } from '../charts/useResultChartHeight'
 import ExpandToggle from './ExpandToggle.vue'
+import ToolbarIcon from './ToolbarIcon.vue'
 import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
@@ -982,23 +983,29 @@ onBeforeUnmount(() => {
 <template>
   <section ref="rootRef" class="relative flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
-    <div class="pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>Spectrum</span>
-      <span v-if="cursorReadout" class="font-mono">
+    <!-- Three slots — title, cursor readout, zoom state — that never take each other's place, and a
+         min-height the Reset zoom button fits inside: the readout used to *replace* the button while
+         the cursor was over the plot, and since the button is taller than a line of text the header
+         shrank on every hover and the plot below jumped up by the difference. -->
+    <div class="min-h-6 pr-7 flex items-center justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+      <span class="shrink-0">Spectrum</span>
+      <span v-if="cursorReadout" class="min-w-0 truncate font-mono">
         {{ cursorReadout.freqHz.toFixed(1) }} Hz · {{ cursorReadout.dbv.toFixed(1) }} dBV
       </span>
+      <span v-else-if="!spectrum[0] && !spectrum[1]" class="min-w-0 truncate">Waiting for data…</span>
+      <span v-else class="flex-1"></span>
       <!-- The only visible sign that the frequency axis is no longer showing the full data span —
            double-clicking does the same thing, but nothing else on screen would say so. -->
       <button
-        v-else-if="zoomed"
+        v-if="zoomed"
         type="button"
-        class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex shrink-0 items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
         title="Back to the full frequency span."
         @click="resetZoom"
       >
+        <ToolbarIcon name="reset-zoom" />
         Reset zoom
       </button>
-      <span v-else-if="!spectrum[0] && !spectrum[1]">Waiting for data…</span>
     </div>
     <!-- L/R/min-max/thick-lines/show-points/dBV-range/frequency-range controls now live in
          ChartDisplayPanel.vue, a sibling column next to the chart — see App.vue — all reading and

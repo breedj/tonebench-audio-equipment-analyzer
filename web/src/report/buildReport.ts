@@ -9,7 +9,9 @@ import {
   type ReportSection,
 } from '../api/client'
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
+import { useLoadOhms } from '../composables/useLoadOhms'
 import { toImpedanceTraces, toResponseTraces, toSweepPoints } from '../composables/useMeasurements'
+import { DEFAULT_SELECTED_METRICS } from '../composables/useMetricSelection'
 import { impedanceDisplayFromParams } from '../impedance/display'
 import { defaultImpulseDisplay, impulseDisplayFromParams } from '../measurements/impulseDisplay'
 import {
@@ -26,8 +28,8 @@ import { sweepMethodFromParams } from '../sweep/points'
 import { chapterSections } from './builders'
 import { blobToBase64 } from './download'
 import type { ReportElementId } from './elements'
-import { renderView, viewIsCombinable, type RenderedChart } from './render'
-import { storedSpectrumFrames } from './spectrumFrames'
+import { renderExtraCharts, renderView, viewIsCombinable, type RenderedChart } from './render'
+import { storedGeneratorTones, storedMetersFrames, storedSpectrumFrames } from './spectrumFrames'
 import { subjectLabel, type ReportPlan, type ReportSubject, type ReportSubjectData } from './types'
 import { reportViewsForKind } from './views'
 
@@ -43,10 +45,10 @@ export function kindLabel(kind: string): string {
   return MEASUREMENT_KINDS.find((k) => k.kind === kind)?.label ?? kind
 }
 
-function formatTimestamp(iso: string | null): string {
-  if (!iso) return 'On screen — not saved'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
+function formatTimestamp(subject: ReportSubject): string {
+  if (!subject.timestampUtc) return subject.data.kind === 'none' ? 'Not measured — settings and notes only' : 'On screen — not saved'
+  const date = new Date(subject.timestampUtc)
+  return Number.isNaN(date.getTime()) ? subject.timestampUtc : date.toLocaleString()
 }
 
 export function formatRangeDbv(dbv: number | null | undefined): string | null {
@@ -83,14 +85,25 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
   }
 
   if (detail.kind === FFT_SPECTRUM_KIND) {
+    const stored = parseStoredDisplay(displayParams)
+    const selected = (stored as { selectedMetrics?: unknown } | null)?.selectedMetrics
     return {
       kind: 'spectrum',
       spectrum: storedSpectrumFrames(detail),
-      meters: {},
+      meters: storedMetersFrames(detail),
       display: createSpectrumDisplaySource(
-        parseStoredDisplay(displayParams),
+        stored,
         detail.channelsData.map((c) => c.channel),
       ),
+      selectedMetrics:
+        Array.isArray(selected) && selected.length > 0
+          ? selected.filter((l): l is string => typeof l === 'string')
+          : [...DEFAULT_SELECTED_METRICS],
+      generatorTones: storedGeneratorTones(detail.genJson),
+      loadOhms: useLoadOhms().loadOhms.value,
+      scope: {},
+      status: null,
+      waterfall: null,
     }
   }
 
@@ -127,6 +140,33 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
   }
 
   return { kind: 'none' }
+}
+
+/**
+ * A measurement that has no stored result as a report subject: its notes and its current settings,
+ * nothing measured. What the project report offers for a measurement that was set up but never
+ * saved a result — the chapter then says what the measurement is, so the project's report is
+ * complete even where its history is not. `data` is `none`, which every chart renderer answers with
+ * nothing, and `paramsJson` is the type's own.
+ */
+export function typeOnlySubject(type: MeasurementType, projectName: string): ReportSubject {
+  return {
+    id: `type-${type.id}`,
+    resultId: null,
+    typeId: type.id,
+    kind: type.kind,
+    typeName: type.name,
+    resultName: null,
+    projectName,
+    typeNotes: type.notes,
+    resultNotes: null,
+    paramsJson: type.paramsJson,
+    timestampUtc: null,
+    facts: [],
+    sampleRateHz: 0,
+    detail: null,
+    data: { kind: 'none' },
+  }
 }
 
 /** A stored result as a report subject. */
@@ -167,18 +207,27 @@ async function imageSection(chart: RenderedChart, caption: string): Promise<Repo
 }
 
 /** The chart sections of one subject on its own: one per chosen view it has data for. */
-async function ownChartSections(subject: ReportSubject, views: readonly string[]): Promise<ReportSection[]> {
+async function ownChartSections(subject: ReportSubject, views: readonly string[], monochrome: boolean): Promise<ReportSection[]> {
   const sections: ReportSection[] = []
   for (const view of views) {
-    const chart = await renderView(view, subject, [], null)
+    const chart = await renderView(view, subject, [], null, monochrome)
     if (chart) sections.push(await imageSection(chart, chart.caption))
+  }
+  return sections
+}
+
+/** The secondary charts a kind's elements ask for (the FFT's oscilloscope and waterfall), as image sections. */
+async function extraChartSections(subject: ReportSubject, elements: readonly ReportElementId[], monochrome: boolean): Promise<ReportSection[]> {
+  const sections: ReportSection[] = []
+  for (const chart of await renderExtraCharts(subject, elements, monochrome)) {
+    sections.push(await imageSection(chart, chart.caption))
   }
   return sections
 }
 
 /** The rows that head a subject's part of a chapter: when it was taken and what it was taken with. */
 function subjectMeta(subject: ReportSubject): ReportRow[] {
-  return [{ label: 'Taken', value: formatTimestamp(subject.timestampUtc) }, ...subject.facts]
+  return [{ label: 'Taken', value: formatTimestamp(subject) }, ...subject.facts]
 }
 
 /** One chapter for one subject: its charts first (when chosen and available), then the builder's sections. */
@@ -186,9 +235,11 @@ export async function buildChapter(
   subject: ReportSubject,
   elements: readonly ReportElementId[],
   views: readonly string[],
+  monochrome = false,
 ): Promise<ReportChapter> {
   const sections: ReportSection[] = []
-  if (elements.includes('chart')) sections.push(...(await ownChartSections(subject, views)))
+  if (elements.includes('chart')) sections.push(...(await ownChartSections(subject, views, monochrome)))
+  sections.push(...(await extraChartSections(subject, elements, monochrome)))
   sections.push(...chapterSections(subject, elements))
 
   return {
@@ -214,7 +265,7 @@ async function buildCombinedChapter(plan: ReportPlan, onProgress?: (message: str
     for (const view of plan.views) {
       if (viewIsCombinable(primary.kind, view)) {
         onProgress?.(`Rendering ${view}…`)
-        const chart = await renderView(view, primary, rest, rest.length > 0 ? subjectLabel(primary) : null)
+        const chart = await renderView(view, primary, rest, rest.length > 0 ? subjectLabel(primary) : null, plan.monochrome)
         if (chart) {
           const names = plan.subjects.map(subjectLabel).join(', ')
           sections.push(await imageSection(chart, `${chart.caption} — ${names}`))
@@ -222,16 +273,20 @@ async function buildCombinedChapter(plan: ReportPlan, onProgress?: (message: str
       } else {
         for (const subject of plan.subjects) {
           onProgress?.(`Rendering ${view} — ${subjectLabel(subject)}…`)
-          const chart = await renderView(view, subject, [], null)
+          const chart = await renderView(view, subject, [], null, plan.monochrome)
           if (chart) sections.push(await imageSection(chart, `${chart.caption} — ${subjectLabel(subject)}`))
         }
       }
     }
   }
 
+  // The secondary charts are per subject even here: a waterfall or a waveform is one measurement's.
   const textElements = plan.elements.filter((e) => e !== 'chart')
   for (const subject of plan.subjects) {
     sections.push({ kind: 'keyValues', title: subjectLabel(subject), rows: subjectMeta(subject) })
+    for (const chart of await renderExtraCharts(subject, plan.elements, plan.monochrome)) {
+      sections.push(await imageSection(chart, `${chart.caption} — ${subjectLabel(subject)}`))
+    }
     sections.push(...chapterSections(subject, textElements))
   }
 
@@ -259,7 +314,7 @@ export async function buildMeasurementReport(plan: ReportPlan, onProgress?: (mes
     chapters = []
     for (const subject of plan.subjects) {
       onProgress?.(`Rendering ${subjectLabel(subject)}…`)
-      chapters.push(await buildChapter(subject, plan.elements, plan.views))
+      chapters.push(await buildChapter(subject, plan.elements, plan.views, plan.monochrome))
     }
   }
 
@@ -282,13 +337,15 @@ export async function buildProjectReport(
   project: Project,
   items: readonly ProjectReportItem[],
   includeProjectNotes: boolean,
+  monochrome: boolean,
   onProgress?: (done: number, total: number, title: string) => void,
 ): Promise<ReportDocument> {
   const chapters: ReportChapter[] = []
   for (let i = 0; i < items.length; i++) {
     const { subject, elements, views } = items[i]
     onProgress?.(i, items.length, subjectLabel(subject))
-    chapters.push(await buildChapter(subject, elements, views.length > 0 ? views : reportViewsForKind(subject.kind).slice(0, 1).map((v) => v.id)))
+    const chapterViews = views.length > 0 ? views : reportViewsForKind(subject.kind).slice(0, 1).map((v) => v.id)
+    chapters.push(await buildChapter(subject, elements, chapterViews, monochrome))
   }
   onProgress?.(items.length, items.length, '')
 

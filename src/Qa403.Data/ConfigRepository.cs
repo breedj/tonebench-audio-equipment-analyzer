@@ -116,7 +116,9 @@ public sealed record ReportKindSettings(string[] Elements, string[]? Views = nul
 /// The report settings document, one entry per measurement kind. Lives here rather than in the
 /// project database because it describes how this user likes a report, not what a measurement was.
 /// </summary>
-public sealed record ReportSettingsConfig(Dictionary<string, ReportKindSettings> Kinds)
+/// <param name="Kinds">The per-kind choices.</param>
+/// <param name="ChartsMonochrome">Whether report charts are rendered in black and white. One flag for every kind — a project report spans kinds and prints as one document; null on a document written before it existed.</param>
+public sealed record ReportSettingsConfig(Dictionary<string, ReportKindSettings> Kinds, bool? ChartsMonochrome = null)
 {
     public static ReportSettingsConfig Default { get; } = new(new Dictionary<string, ReportKindSettings>());
 

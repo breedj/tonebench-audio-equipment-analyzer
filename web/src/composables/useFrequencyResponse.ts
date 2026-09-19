@@ -55,9 +55,8 @@ export interface ResponseTrace {
   peakFreqHz: number
   /**
    * The level both readings were measured down from, or null for a stored result saved before the
-   * reference was recorded. The chart draws the reference line and its thresholds from it; null
-   * draws none rather than inventing one from the decimated columns, which are not the trace the
-   * corners were found on.
+   * reference was recorded. The Measurements panel quotes it; null shows a dash rather than a
+   * figure invented from the decimated columns, which are not the trace the corners were found on.
    */
   referenceDb: number | null
   referenceMode: ResponseReferenceModeName | null

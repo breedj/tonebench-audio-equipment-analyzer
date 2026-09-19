@@ -59,6 +59,13 @@
       <strong>Save as…</strong> creates a new measurement from them and lets the current one revert
       to its own last-saved settings, so experimenting with a setup never costs you the original.
     </p>
+    <p>
+      Under every measurement's settings sits a <strong>Notes</strong> box: free text about the
+      measurement itself — the DUT, the wiring, what to look for. It is saved with the measurement
+      by the same Save and Save as…, and typing in it marks the measurement unsaved like any
+      setting. When a result is saved, the Save dialog starts with a copy of these notes, to keep or
+      edit for that result; a report's Description prints both.
+    </p>
 
     <h2>Results</h2>
     <p>
@@ -66,7 +73,7 @@
       <strong>Save measurement result</strong> on the FFT screen,
       <strong>Save sweep result</strong> on the two distortion sweeps,
       <strong>Save response result</strong> on the two response screens — and each asks for a name
-      and optional notes.
+      and notes, the notes starting as a copy of the measurement's own Notes box.
     </p>
     <p>
       Stop the measurement first: all three are disabled while one is running, because what gets
@@ -112,13 +119,16 @@
     </p>
     <ul>
       <li>
-        <strong>Screenshot</strong> downloads the chart on screen as a PNG. The picture is always the
-        same size — 1600 × 900 pixels — and always in the light colour scheme, whatever the window and
-        the theme are doing, so a series of screenshots lines up in a document. It shows the window on
-        screen, zoom included, with a title line and a legend above the plot, and the axes carry their
-        units. Every view and projection exports — the spectrum, the distortion sweep, the Bode,
-        Nyquist and Nichols responses, the impulse screen's five views, the impedance curve and its
-        locus — and the history items ticked on in the checklist come along.
+        <strong>Screenshot</strong> downloads the chart on screen as a PNG, after one question:
+        <strong>Colour</strong> or <strong>Black and white</strong>. Black and white is for a
+        monochrome printer — every hue becomes its grey, while the line styles that tell a history
+        overlay from a live curve are kept. The picture is always the same size — 1600 × 900 pixels
+        — and always in the light colour scheme, whatever the window and the theme are doing, so a
+        series of screenshots lines up in a document. It shows the window on screen, zoom included,
+        with a title line and a legend above the plot, and the axes carry their units. Every view and
+        projection exports — the spectrum, the distortion sweep, the Bode, Nyquist and Nichols
+        responses, the impulse screen's five views, the impedance curve and its locus — and the
+        history items ticked on in the checklist come along.
       </li>
       <li>
         <strong>Report…</strong> makes a PDF of the measurement that is open. The dialog lists the
@@ -135,17 +145,27 @@
         <strong>Charts</strong>, and every ticked view goes in; a view that draws one measurement at
         a time (the impulse, the harmonics, the decays, the impedance locus) is drawn once per
         measurement even in a combined report. Then the elements: the chart, the description (the
-        notes on the result and on the measurement), the settings it ran with, and its readings (the
-        Measurements panel, for a response). Views, layout and elements are remembered per kind, so
-        the next report of the same kind comes out the same way; which results are ticked is not.
+        notes on the result and on the measurement), the settings it ran with, and its readings —
+        the Measurements panel for a response; for an FFT the <strong>Metrics</strong> tiles chosen
+        with the Metrics button, the <strong>Harmonics table</strong>, and the
+        <strong>Oscilloscope</strong> and <strong>Waterfall</strong> under the spectrum. Those last
+        two exist only for the measurement on screen (a stored result keeps no waveform and no
+        history), and the waterfall only while the display panel shows it. Until you choose, a report
+        has the current measurement ticked, every element but the settings, and a chart per
+        measurement. <strong>Charts in black and white</strong> renders every chart in greys, for a
+        monochrome printer; it is one setting for every kind. Views, layout and elements are
+        remembered per kind, so the next report of the same kind comes out the same way; which
+        results are ticked is not.
       </li>
       <li>
         <strong>Project report…</strong> makes one PDF of the project: a title page with the
-        project's notes, a contents list, then one chapter per result, grouped by measurement in the
-        sidebar's order. Every stored result is ticked to begin with, and so is the current
-        measurement of the screen that is open, listed under its measurement when something has been
-        measured; untick what should stay out. Each chapter includes whatever its kind's Report
-        dialog last chose — the views and the elements.
+        project's notes, a contents list, then the measurements in the sidebar's order — one chapter
+        per stored result, the current measurement of the screen that is open when something has
+        been measured, and for a measurement that has no result at all a chapter of its
+        <strong>notes and settings</strong>, so the report describes the whole project. Everything is
+        ticked to begin with; untick what should stay out. Each chapter includes whatever its kind's
+        Report dialog last chose — the views and the elements — or the defaults where that dialog
+        has never been used. The black-and-white setting is the same one the Report dialog shows.
       </li>
     </ul>
     <p>

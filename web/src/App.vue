@@ -7,6 +7,7 @@ import { useMeasurements, type OverlayEntry } from './composables/useMeasurement
 import { useProjects } from './composables/useProjects'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
+import { useLoadOhms } from './composables/useLoadOhms'
 import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useChartDisplay } from './composables/useChartDisplay'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
@@ -65,11 +66,13 @@ import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import ReportDialog from './components/ReportDialog.vue'
 import ProjectReportDialog from './components/ProjectReportDialog.vue'
+import ToolbarIcon from './components/ToolbarIcon.vue'
+import ScreenshotDialog from './components/ScreenshotDialog.vue'
 import { responseDisplayFromParams, type ResponseDisplay } from './response/display'
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
 import { impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
-import { CHART_EXPORT_HEIGHT_PX, CHART_EXPORT_WIDTH_PX } from './charts/exportChart'
+import { CHART_EXPORT_HEIGHT_PX, CHART_EXPORT_WIDTH_PX, monochromeChartPng } from './charts/exportChart'
 import { downloadBlob, safeFileName } from './report/download'
 import { reportHasChart } from './report/elements'
 import type { ReportSubject } from './report/types'
@@ -99,6 +102,8 @@ const { spectrum, meters, scope, setViewport, clearScope } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
+// For the report's Metrics element — the power tiles need the load the Generator pane names.
+const { loadOhms } = useLoadOhms()
 const { scopePeriods, applyLoaded: applyLoadedScopePeriods } = useScopeDisplay()
 const {
   yTop: chartYTop,
@@ -128,7 +133,7 @@ const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
 const { load: loadCaptureDelay } = useCaptureDelay()
 void loadCaptureDelay()
 
-// Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the +Metrics button
+// Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the Metrics button
 // and the chart — same formatAveraging formula, just relocated. Either channel's averagesTaken is
 // fine (both average together, see SystemMetricsPanel's own meters prop).
 const averagesLabel = computed(() => {
@@ -1342,6 +1347,9 @@ const impulseHarmonicsChart = ref<InstanceType<typeof ImpulseHarmonicsChart> | n
 const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(null)
 const impedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const impedancePlaneChart = ref<InstanceType<typeof ImpedancePlaneChart> | null>(null)
+// The FFT screen's waterfall, for the report's Waterfall element (not the Screenshot, which takes
+// the main chart): mounted only while the display panel shows it, null otherwise.
+const waterfallChart = ref<InstanceType<typeof WaterfallChart> | null>(null)
 
 /** The chart on screen — whichever view or projection the screen is showing. */
 function chartOnScreen() {
@@ -1386,16 +1394,20 @@ const screenshotAvailable = computed(() => {
 })
 
 /**
- * The chart as a PNG of a fixed size, in the light palette, at the zoom on screen. The chart draws it
- * itself (see FrequencyResponseChart.exportPng and its siblings), so what is in the file is what is
- * on screen — only the size and the colours are pinned.
+ * The chart as a PNG of a fixed size, in the light palette, at the zoom on screen — in colour or in
+ * black and white, which the Screenshot dialog asks first. The chart draws it itself (see
+ * FrequencyResponseChart.exportPng and its siblings), so what is in the file is what is on screen —
+ * only the size and the colours are pinned.
  */
-async function screenshotChart() {
+const screenshotDialogOpen = ref(false)
+
+async function screenshotChart(monochrome: boolean) {
+  screenshotDialogOpen.value = false
   const chart = chartOnScreen()
   if (!chart) return
   try {
     const png = await chart.exportPng({ width: CHART_EXPORT_WIDTH_PX, height: CHART_EXPORT_HEIGHT_PX, captureZoom: true })
-    downloadBlob(png, `${safeFileName(currentType.value?.name ?? 'chart')}.png`)
+    downloadBlob(monochrome ? await monochromeChartPng(png) : png, `${safeFileName(currentType.value?.name ?? 'chart')}.png`)
   } catch (e) {
     reportError((e as Error).message)
   }
@@ -1471,7 +1483,20 @@ function buildLiveSubject(): ReportSubject | null {
       facts.push({ label: 'Window', value: spectrumConfig.value.window })
     }
     // The screen's own display singleton: the report draws exactly what the display panel shows.
-    subject.data = { kind: 'spectrum', spectrum: spectrum.value, meters: meters.value, display: useChartDisplay() }
+    // The scope frames and the mounted waterfall come along for the report's two secondary charts —
+    // the waterfall's picture is the history the chart on screen collected, and only it can draw it.
+    subject.data = {
+      kind: 'spectrum',
+      spectrum: spectrum.value,
+      meters: meters.value,
+      display: useChartDisplay(),
+      selectedMetrics: selectedMetrics.value,
+      generatorTones: status.value?.generatorLeft.tones ?? [],
+      loadOhms: loadOhms.value,
+      scope: scope.value,
+      status: status.value,
+      waterfall: waterfallChart.value,
+    }
   }
 
   return subject
@@ -2147,109 +2172,120 @@ function confirmSaveProjectAs(name: string) {
             ></span>
             <button
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="!isCurrentTypeDirty"
               title="Save the current settings into this measurement."
               @click="saveCurrentType"
             >
+              <ToolbarIcon name="save" />
               Save
             </button>
             <button
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
               title="Save the current settings as a new measurement in this project; this one reverts to its own last-saved settings."
               @click="saveTypeAsOpen = true"
             >
+              <ToolbarIcon name="save-as" />
               Save as…
             </button>
             <button
               v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
               title="Saves the currently displayed (stopped) spectrum as a new measurement result — stop acquisition first."
               @click="openSaveDialog"
             >
+              <ToolbarIcon name="save-result" />
               Save measurement result
             </button>
             <button
               v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
               title="Clears the currently displayed spectrum, oscilloscope trace and meters — stop acquisition first. Does not delete anything saved to History."
               @click="clearMeasurement"
             >
+              <ToolbarIcon name="clear" />
               Clear
             </button>
             <button
               v-if="isSweepKind"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="sweepRunning || sweepPoints.length === 0"
               title="Saves the sweep on screen as a new measurement result — one stored point per frequency. A cancelled sweep can be saved too."
               @click="openSaveDialog"
             >
+              <ToolbarIcon name="save-result" />
               Save sweep result
             </button>
             <button
               v-if="isFrequencyResponse"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
               title="Saves the curves on screen as a new measurement result, with their bandwidth readings."
               @click="openSaveDialog"
             >
+              <ToolbarIcon name="save-result" />
               Save response result
             </button>
             <button
               v-if="isImpedance"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="impedanceRunning || impedanceTraces.length === 0"
               title="Saves the impedance curve on screen as a new measurement result, together with the fixture calibration that produced it."
               @click="openSaveDialog"
             >
+              <ToolbarIcon name="save-result" />
               Save impedance result
             </button>
             <button
               v-if="isImpedance"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="impedanceRunning || impedanceTraces.length === 0"
               title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings and the calibration alone."
               @click="clearImpedance"
             >
+              <ToolbarIcon name="clear" />
               Clear
             </button>
             <button
               v-if="isImpulseResponse"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="impulseRunning || impulseTraces.length === 0"
               title="Saves the impulse response on screen as a new measurement result, with its gated curves and harmonic distortion."
               @click="openSaveDialog"
             >
+              <ToolbarIcon name="save-result" />
               Save impulse result
             </button>
             <button
               v-if="isImpulseResponse"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="impulseRunning || impulseTraces.length === 0"
               title="Clears what is on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearImpulseResponse"
             >
+              <ToolbarIcon name="clear" />
               Clear
             </button>
             <button
               v-if="isFrequencyResponse"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
               title="Clears the curves on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearFrequencyResponse"
             >
+              <ToolbarIcon name="clear" />
               Clear
             </button>
             <!-- The sweep screen's Clear, in the same slot and the same shape as the FFT screen's
@@ -2259,11 +2295,12 @@ function confirmSaveProjectAs(name: string) {
             <button
               v-if="isSweepKind"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="sweepRunning || sweepPoints.length === 0"
               title="Clears the sweep on screen and its preview traces — cancel a running sweep first. Does not delete anything saved to History, and leaves the sweep settings alone."
               @click="clearSweep"
             >
+              <ToolbarIcon name="clear" />
               Clear
             </button>
             <!-- The two exports, on every screen whose chart can produce them (the Screenshot) or
@@ -2273,20 +2310,22 @@ function confirmSaveProjectAs(name: string) {
             <button
               v-if="reportHasChart(currentType?.kind)"
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="!screenshotAvailable"
               title="Downloads the chart on screen — whichever view or projection is showing — as a PNG of a fixed size (1600×900) in the light colour scheme, at the zoom shown."
-              @click="screenshotChart"
+              @click="screenshotDialogOpen = true"
             >
+              <ToolbarIcon name="screenshot" />
               Screenshot
             </button>
             <button
               type="button"
-              class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="!currentType || responseRunning || sweepRunning || impedanceRunning || impulseRunning"
               title="A PDF report of what is on screen: chart, notes, settings and readings, as chosen. Stored results have their own Report button in History details."
               @click="openReport(null)"
             >
+              <ToolbarIcon name="report" />
               Report…
             </button>
             <!-- Shortcut into the manual chapter for whichever kind is selected. It sits in this
@@ -3067,11 +3106,12 @@ function confirmSaveProjectAs(name: string) {
                 </div>
                 <button
                   type="button"
-                  class="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                  class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
                   title="Choose which metrics appear above the graph."
                   @click="metricPickerOpen = true"
                 >
-                  + Metrics
+                  <ToolbarIcon name="metrics" />
+                  Metrics
                 </button>
               </div>
 
@@ -3088,7 +3128,7 @@ function confirmSaveProjectAs(name: string) {
                 :overlays="overlays"
                 @viewport-change="setViewport"
               />
-              <WaterfallChart v-if="chartShowWaterfall" class="mt-3" :spectrum="spectrum" />
+              <WaterfallChart v-if="chartShowWaterfall" ref="waterfallChart" class="mt-3" :spectrum="spectrum" />
               <OscilloscopeChart v-if="chartShowOscilloscope" class="mt-3" :scope="scope" :status="status" />
             </div>
 
@@ -3165,6 +3205,7 @@ function confirmSaveProjectAs(name: string) {
       :preselect-result-id="reportPreselectResultId"
       @close="reportOpen = false"
     />
+    <ScreenshotDialog :open="screenshotDialogOpen" @close="screenshotDialogOpen = false" @confirm="screenshotChart" />
     <ProjectReportDialog
       :open="projectReportOpen"
       :project="currentProject"

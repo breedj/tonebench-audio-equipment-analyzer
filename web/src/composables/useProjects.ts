@@ -27,6 +27,11 @@ const currentTypeId = ref<number | null>(null)
 // The currently-selected type's generator/acquisition settings, as returned by the last apply —
 // GeneratorPanel/SpectrumConfigPanel watch this to stage their forms. Null means nothing loaded yet.
 const loadedParams = ref<MeasurementTypeAppliedResponse | null>(null)
+// The open type's notes as they read on screen — the Notes box under every measurement's settings
+// (MeasurementNotesPanel). Staged like the settings: an edit marks the type dirty and Save writes
+// it, so a type's stored `notes` and this ref differ exactly while the red dot shows. Also what the
+// Save measurement dialog copies into a new result's notes.
+const typeNotes = ref('')
 
 // A type's "current configuration" only ever exists in one place at a time: whatever's live in the
 // device/pipeline right now (see MeasurementSaveService.BuildCurrentParametersJson). Selecting a
@@ -75,6 +80,7 @@ export function useProjects() {
     currentProjectId.value = id
     currentTypeId.value = null
     loadedParams.value = null
+    typeNotes.value = ''
     await loadTypes(id)
   }
 
@@ -88,8 +94,23 @@ export function useProjects() {
     if (id !== currentTypeId.value && !confirmDiscardCurrentIfDirty()) return
     await stopRun()
     currentTypeId.value = id
+    typeNotes.value = types.value.find((t) => t.id === id)?.notes ?? ''
     loadedParams.value = await applyMeasurementType(id)
     markClean(id)
+  }
+
+  /** The Notes box: a user edit, so it dirties the open type like any staged setting. */
+  function setTypeNotes(notes: string) {
+    if (notes === typeNotes.value) return
+    typeNotes.value = notes
+    markDirty()
+  }
+
+  /** The notes to store for a type: the staged text for the open one, its stored notes for any other. */
+  function notesToSave(type: MeasurementType): string | null {
+    if (type.id !== currentTypeId.value) return type.notes
+    const trimmed = typeNotes.value.trim()
+    return trimmed.length > 0 ? trimmed : null
   }
 
   /** Flags the currently-open type as having live edits not yet reflected in its stored params_json. */
@@ -236,8 +257,9 @@ export function useProjects() {
     const type = types.value.find((t) => t.id === id)
     if (!type) throw new Error(`Measurement type ${id} not found.`)
     try {
-      await api.updateMeasurementType(id, { kind: type.kind, name: type.name, notes: type.notes, staged, paramsJson })
+      await api.updateMeasurementType(id, { kind: type.kind, name: type.name, notes: notesToSave(type), staged, paramsJson })
       await loadTypes(type.projectId)
+      if (id === currentTypeId.value) typeNotes.value = types.value.find((t) => t.id === id)?.notes ?? ''
       markClean(id)
       error.value = null
     } catch (e) {
@@ -262,9 +284,11 @@ export function useProjects() {
     if (!type) throw new Error(`Measurement type ${id} not found.`)
     try {
       const { id: newId } = await api.createMeasurementType(type.projectId, {
-        kind: type.kind, name: newName, notes: type.notes, staged, paramsJson,
+        kind: type.kind, name: newName, notes: notesToSave(type), staged, paramsJson,
       })
       loadedParams.value = await applyMeasurementType(id)
+      // The original reverts to its own stored notes along with its stored settings.
+      typeNotes.value = type.notes ?? ''
       markClean(id)
       await loadTypes(type.projectId)
       error.value = null
@@ -320,6 +344,8 @@ export function useProjects() {
     currentProjectId,
     currentTypeId,
     loadedParams,
+    typeNotes,
+    setTypeNotes,
     dirtyTypeIds,
     error,
     loadProjects,

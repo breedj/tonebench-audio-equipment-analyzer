@@ -1,9 +1,10 @@
 import type { ReportSection } from '../../api/client'
-import { isFrequencyResponseKind } from '../../measurements/kinds'
+import { FFT_SPECTRUM_KIND, isFrequencyResponseKind } from '../../measurements/kinds'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { frequencyResponseSections } from './frequencyResponse'
 import { descriptionSections, genericSettingsSection } from './generic'
+import { spectrumSections } from './spectrum'
 
 /**
  * The chapter's sections for a subject of any kind, chart excluded — the chart is an image the
@@ -13,6 +14,7 @@ import { descriptionSections, genericSettingsSection } from './generic'
  */
 export function chapterSections(subject: ReportSubject, elements: readonly ReportElementId[]): ReportSection[] {
   if (isFrequencyResponseKind(subject.kind)) return frequencyResponseSections(subject, elements)
+  if (subject.kind === FFT_SPECTRUM_KIND) return spectrumSections(subject, elements)
 
   const sections: ReportSection[] = []
   if (elements.includes('description')) sections.push(...descriptionSections(subject))

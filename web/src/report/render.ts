@@ -7,9 +7,11 @@ import ImpedanceChart from '../components/ImpedanceChart.vue'
 import ImpedancePlaneChart from '../components/ImpedancePlaneChart.vue'
 import ImpulseHarmonicsChart from '../components/ImpulseHarmonicsChart.vue'
 import ImpulseResponseChart from '../components/ImpulseResponseChart.vue'
+import OscilloscopeChart from '../components/OscilloscopeChart.vue'
 import ResponsePolarChart from '../components/ResponsePolarChart.vue'
 import SpectrumChart from '../components/SpectrumChart.vue'
 import ThdSweepChart from '../components/ThdSweepChart.vue'
+import { monochromeChartPng } from '../charts/exportChart'
 import { SPECTRUM_DISPLAY_KEY } from '../composables/useChartDisplay'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { SWEEP_POINTS_KEY } from '../composables/useSweep'
@@ -18,6 +20,7 @@ import { responseChartFlags } from '../response/display'
 import { sweepChartWindow } from '../sweep/display'
 import { sweepEndFreqHzFromParams } from '../sweep/points'
 import { sweepXLabel } from '../sweep/xAxis'
+import type { ReportElementId } from './elements'
 import { renderChartPng, type ChartProvision } from './renderChart'
 import { subjectLabel, type ReportSubject } from './types'
 import { reportViewsForKind } from './views'
@@ -79,8 +82,38 @@ export function viewIsCombinable(kind: string, view: string): boolean {
   return reportViewsForKind(kind).find((v) => v.id === view)?.combinable ?? false
 }
 
-function exportOptions(primaryLabel: string | null): ChartExportOptions {
-  return { ...SIZE, primaryLabel: primaryLabel ?? undefined }
+function exportOptions(primaryLabel: string | null, monochrome: boolean): ChartExportOptions {
+  return { ...SIZE, primaryLabel: primaryLabel ?? undefined, monochrome }
+}
+
+/**
+ * The FFT chapter's two secondary charts, when their elements are chosen and the subject has them:
+ * the oscilloscope (rendered headless from the subject's scope frames, like any chart) and the
+ * waterfall, which only the instance on screen can draw — its picture is the history it collected
+ * frame by frame, and a fresh instance would have one row. Neither is combinable, so they are
+ * per subject; a stored result has neither, and simply gets none.
+ */
+export async function renderExtraCharts(
+  subject: ReportSubject,
+  elements: readonly ReportElementId[],
+  monochrome: boolean,
+): Promise<RenderedChart[]> {
+  const data = subject.data
+  if (data.kind !== 'spectrum') return []
+  const charts: RenderedChart[] = []
+  const options = exportOptions(null, monochrome)
+
+  if (elements.includes('oscilloscope') && Object.keys(data.scope).length > 0) {
+    const png = await renderChartPng(OscilloscopeChart, { scope: data.scope, status: data.status }, options)
+    charts.push({ png, caption: 'Oscilloscope' })
+  }
+
+  if (elements.includes('waterfall') && data.waterfall) {
+    const png = await data.waterfall.exportPng({ ...SIZE, captureZoom: false })
+    charts.push({ png: monochrome ? await monochromeChartPng(png) : png, caption: 'Waterfall' })
+  }
+
+  return charts
 }
 
 /**
@@ -93,10 +126,11 @@ export async function renderView(
   primary: ReportSubject,
   overlays: readonly ReportSubject[],
   primaryLabel: string | null,
+  monochrome = false,
 ): Promise<RenderedChart | null> {
   const data = primary.data
   const overlayEntries = overlays.map(toOverlayEntry).filter((o): o is OverlayEntry => o !== null)
-  const options = exportOptions(primaryLabel)
+  const options = exportOptions(primaryLabel, monochrome)
 
   switch (data.kind) {
     case 'response': {

@@ -180,9 +180,9 @@ const { showPage } = useManual()
       </li>
       <li>
         <strong>±1 dB</strong> and <strong>−3 dB</strong> bandwidth markers: a labelled arrow at each
-        corner with dashed lines down to the axis, plus a grey horizontal line at the reference level
-        (marked <em>ref</em>) and dotted lines at the thresholds each reading was found against. The
-        corners are where the curve crosses those dotted lines.
+        corner with dashed lines down to the axis. The corners are where the curve crosses the
+        threshold below (or, for the ±1 dB row, above) the reference level — the level itself is
+        quoted in the Measurements panel rather than drawn on the plot.
       </li>
     </ul>
 

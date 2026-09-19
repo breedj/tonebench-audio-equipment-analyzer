@@ -281,6 +281,8 @@ export interface ReportKindSettings {
 
 export interface ReportSettingsConfig {
   kinds: Record<string, ReportKindSettings>
+  /** Report charts in black and white. One flag across kinds, since a project report is one document; absent before it existed. */
+  chartsMonochrome?: boolean | null
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   type ExportLegendEntry,
 } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
+import ToolbarIcon from './ToolbarIcon.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
@@ -971,7 +972,7 @@ onBeforeUnmount(() => {
 <template>
   <section ref="rootRef" class="relative flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
-    <div class="pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Distortion vs {{ sweepXLabel(props.xAxis).toLowerCase() }}</span>
       <span v-if="!hasData">No sweep data yet — press Run sweep.</span>
       <!-- The only visible sign that the axes are no longer the window the display panel's
@@ -981,10 +982,11 @@ onBeforeUnmount(() => {
       <button
         v-else-if="zoomed"
         type="button"
-        class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
         title="Back to the From/To and distortion-range window set in the display panel."
         @click="resetZoom"
       >
+        <ToolbarIcon name="reset-zoom" />
         Reset zoom
       </button>
       <span v-else>Drag to zoom · double-click to reset</span>

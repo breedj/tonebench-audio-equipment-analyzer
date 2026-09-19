@@ -46,6 +46,13 @@ export interface ChartExportOptions {
    * screen, where the primary is simply the live measurement.
    */
   primaryLabel?: string
+  /**
+   * Black and white instead of colour. Not read by the charts' own `exportPng` — the two callers
+   * that hand a PNG on (renderChartPng for reports, the Screenshot dialog) apply
+   * `monochromeChartPng` to the finished picture — but carried here so one options object describes
+   * the whole export.
+   */
+  monochrome?: boolean
 }
 
 export interface ComposeChartOptions {
@@ -171,4 +178,49 @@ export function composeChartPng(options: ComposeChartOptions): Promise<Blob> {
       else reject(new Error('The browser produced no PNG for the chart export.'))
     }, 'image/png')
   })
+}
+
+/**
+ * Turns an exported chart into greys, in place: each pixel becomes its Rec. 601 luma, the same
+ * weighting a monochrome printer's driver applies, so the picture on paper is the picture the
+ * dialog promised. Alpha is left alone. Pure, so the arithmetic is unit-tested without a canvas
+ * (exportChart.test.ts) — the canvas plumbing is `monochromeChartPng`.
+ */
+export function desaturateInPlace(rgba: Uint8ClampedArray): void {
+  for (let i = 0; i < rgba.length; i += 4) {
+    const grey = Math.round(0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2])
+    rgba[i] = grey
+    rgba[i + 1] = grey
+    rgba[i + 2] = grey
+  }
+}
+
+/**
+ * A chart PNG re-encoded in black and white — the Screenshot dialog's and the report settings'
+ * "Black and white" option. Applied to the finished PNG rather than inside each chart's
+ * `exportPng`, so nine charts need no second palette and the legend swatches turn grey together
+ * with the curves they name. Curves keep their line styles (the dashes that tell an overlay from a
+ * live curve survive), and only their hue is lost.
+ */
+export async function monochromeChartPng(png: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(png)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Could not get a 2D context for the black-and-white conversion.')
+    ctx.drawImage(bitmap, 0, 0)
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    desaturateInPlace(image.data)
+    ctx.putImageData(image, 0, 0)
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('The browser produced no PNG for the black-and-white conversion.'))
+      }, 'image/png')
+    })
+  } finally {
+    bitmap.close()
+  }
 }

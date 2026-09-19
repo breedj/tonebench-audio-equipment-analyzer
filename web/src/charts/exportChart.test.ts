@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutLegend } from './exportChart'
+import { desaturateInPlace, layoutLegend } from './exportChart'
 
 describe('layoutLegend', () => {
   const entries = [
@@ -24,5 +24,19 @@ describe('layoutLegend', () => {
 
   it('handles an empty legend', () => {
     expect(layoutLegend([], [], 800, 12)).toEqual([])
+  })
+})
+
+describe('desaturateInPlace', () => {
+  it('replaces every channel with the Rec. 601 luma and keeps alpha', () => {
+    const rgba = new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 0, 200, 200, 200, 255])
+    desaturateInPlace(rgba)
+    expect(Array.from(rgba)).toEqual([76, 76, 76, 255, 150, 150, 150, 128, 29, 29, 29, 0, 200, 200, 200, 255])
+  })
+
+  it('leaves white and black where they are, so the page and the axes are untouched', () => {
+    const rgba = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255])
+    desaturateInPlace(rgba)
+    expect(Array.from(rgba)).toEqual([255, 255, 255, 255, 0, 0, 0, 255])
   })
 })

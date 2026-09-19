@@ -13,7 +13,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 // only opens from the "Save measurement result" button, which itself only shows once a type is
 // selected (see App.vue), so currentTypeId is never null here. Same currentType/currentProject
 // lookup App.vue itself does — useProjects doesn't keep a derived "current" object of its own.
-const { projects, types, currentTypeId } = useProjects()
+const { projects, types, currentTypeId, typeNotes } = useProjects()
 const { save, saveSweep, saveResponse, saveImpulse,
     saveImpedance, error } = useMeasurements()
 
@@ -39,9 +39,12 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return
-    // Reset per open, not per mount — the dialog is a template singleton in App.vue.
+    // Reset per open, not per mount — the dialog is a template singleton in App.vue. The notes
+    // start as the measurement's own (the Notes box on screen, as it reads now, saved or not), so a
+    // result carries the description of the measurement it came from; edit them freely, the
+    // measurement's copy is untouched.
     form.name = timestampName()
-    form.notes = ''
+    form.notes = typeNotes.value
   },
 )
 
@@ -80,7 +83,7 @@ async function onSave() {
       </label>
 
       <label class="flex flex-col gap-1">
-        Notes
+        <span>Notes <span class="text-xs text-neutral-500 dark:text-neutral-400">— copied from the measurement's Notes box; edit for this result</span></span>
         <textarea
           v-model="form.notes"
           rows="3"

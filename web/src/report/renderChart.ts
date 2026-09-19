@@ -1,5 +1,5 @@
 import { createApp, nextTick, type Component, type InjectionKey } from 'vue'
-import type { ChartExportOptions } from '../charts/exportChart'
+import { monochromeChartPng, type ChartExportOptions } from '../charts/exportChart'
 
 /** What a chart component has to expose (`defineExpose({ exportPng })`) to be rendered for a report. */
 export interface ExportableChart {
@@ -45,7 +45,8 @@ export async function renderChartPng(
     }
     // One tick so the component's computed state settles from the props before the export reads it.
     await nextTick()
-    return await instance.exportPng({ ...size, captureZoom: false })
+    const png = await instance.exportPng({ ...size, captureZoom: false })
+    return size.monochrome ? await monochromeChartPng(png) : png
   } finally {
     app.unmount()
     host.remove()

@@ -24,6 +24,7 @@
 // DOM node in every state and a collapse is a layout change the charts' ResizeObservers see, not
 // a remount.
 import { useUiLayout } from '../composables/useUiLayout'
+import MeasurementNotesPanel from './MeasurementNotesPanel.vue'
 
 withDefaults(defineProps<{ asideWidth?: 'md' | 'sm' }>(), { asideWidth: 'md' })
 
@@ -58,6 +59,10 @@ const STRIP =
         :class="settingsRailCollapsed ? 'lg:hidden' : ''"
       >
         <slot name="rail" />
+        <!-- Every measurement's Notes box, under its settings: here rather than in each screen's
+             rail template, so it is in the same place on every screen and cannot be forgotten by a
+             new one. -->
+        <MeasurementNotesPanel />
       </div>
       <button
         type="button"

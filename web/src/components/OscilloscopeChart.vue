@@ -6,6 +6,14 @@ import type { DeviceStatus } from '../api/client'
 import type { ScopeFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { MAX_SCOPE_PERIODS, useScopeDisplay } from '../composables/useScopeDisplay'
+import {
+  CHART_EXPORT_HEADER_PX,
+  composeChartPng,
+  exportAxisLabel,
+  nextPaint,
+  type ChartExportOptions,
+  type ExportLegendEntry,
+} from '../charts/exportChart'
 
 const props = defineProps<{
   scope: Record<number, ScopeFrame>
@@ -41,11 +49,10 @@ const shownPeriods = ref<number | null>(null)
 let plot: uPlot | null = null
 let plotIsDark = darkQuery.matches
 
-function buildOptions(width: number): uPlot.Options {
-  const theme = currentTheme()
+function buildOptions(width: number, height: number, theme: (typeof THEME)[keyof typeof THEME], interactive: boolean): uPlot.Options {
   return {
     width,
-    height: CHART_HEIGHT,
+    height,
     scales: {
       // Auto-ranging on both axes is exactly right here, unlike SpectrumChart's fixed/reported
       // scales: every incoming frame is a fresh, self-contained snapshot (see ScopeFrame's own
@@ -61,6 +68,7 @@ function buildOptions(width: number): uPlot.Options {
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },
+        ...exportAxisLabel(interactive, 'Time (ms)'),
       },
       {
         values: (_u, vals) => vals.map((v) => (v == null ? null : `${v}`)),
@@ -68,6 +76,7 @@ function buildOptions(width: number): uPlot.Options {
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },
+        ...exportAxisLabel(interactive, 'Volts'),
       },
     ],
     series: [
@@ -87,7 +96,7 @@ function ensurePlot() {
 
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
-  plot = new uPlot(buildOptions(width), [[], [], []], el)
+  plot = new uPlot(buildOptions(width, CHART_HEIGHT, currentTheme(), true), [[], [], []], el)
   plotIsDark = darkQuery.matches
 }
 
@@ -219,20 +228,15 @@ function sliceSamples(samples: Float32Array, start: number, count: number): (num
   return out
 }
 
-function update() {
+/**
+ * What one tick draws — the triggered window of both channels on a millisecond axis — and how many
+ * periods it managed. Null when there is no frame at all. Shared by the visible plot and the export,
+ * so the picture in a report is the trace on screen.
+ */
+function computeData(): { data: uPlot.AlignedData; periods: number | null } | null {
   const ch0 = props.scope[0]
   const ch1 = props.scope[1]
-  // Destroying rather than merely returning matters here: a bare return leaves whatever the last
-  // setData() call painted sitting on the canvas, so the chart would keep showing a stale waveform
-  // under the "Waiting for data…" label in the header (see the Clear button in App.vue).
-  if (!ch0 && !ch1) {
-    plot?.destroy()
-    plot = null
-    return
-  }
-
-  ensurePlot()
-  if (!plot) return
+  if (!ch0 && !ch1) return null
 
   // Triggers off whichever enabled channel is available, preferring L — both channels then draw
   // from that same window, so their relative phase stays meaningful. Falls back to the raw start
@@ -243,15 +247,12 @@ function update() {
 
   let startStep = 0
   let count = (ch0 ?? ch1!).samples.length
+  let periods: number | null = null
   if (freqHz && triggerSource) {
     const window = findTriggerWindow(triggerSource.samples, freqHz, triggerSource.samplePeriodS, scopePeriods.value)
     startStep = window.startStep
     count = window.count
-    shownPeriods.value = window.periods
-  } else {
-    // Untriggered (no known tone frequency): the whole buffer is drawn, so the Periods field has
-    // nothing to act on and its readout says so rather than claiming a count it didn't honour.
-    shownPeriods.value = null
+    periods = window.periods
   }
 
   // Both channels' frames arrive independently, so their sample counts can momentarily differ —
@@ -265,8 +266,64 @@ function update() {
   const left = ch0 && channelEnabled(0) ? sliceSamples(ch0.samples, startStep, count) : new Array(count).fill(null)
   const right = ch1 && channelEnabled(1) ? sliceSamples(ch1.samples, startStep, count) : new Array(count).fill(null)
 
-  plot.setData([xs, left, right])
+  return { data: [xs, left, right] as unknown as uPlot.AlignedData, periods }
 }
+
+function update() {
+  const computed = computeData()
+  // Destroying rather than merely returning matters here: a bare return leaves whatever the last
+  // setData() call painted sitting on the canvas, so the chart would keep showing a stale waveform
+  // under the "Waiting for data…" label in the header (see the Clear button in App.vue).
+  if (!computed) {
+    plot?.destroy()
+    plot = null
+    return
+  }
+
+  ensurePlot()
+  if (!plot) return
+
+  // Untriggered (no known tone frequency): the whole buffer is drawn, so the Periods field has
+  // nothing to act on and its readout says so rather than claiming a count it didn't honour.
+  shownPeriods.value = computed.periods
+  plot.setData(computed.data)
+}
+
+/**
+ * The trace as a PNG of exactly the requested size, drawn with the light theme whatever the screen's
+ * — the same arrangement as SpectrumChart.exportPng, for the FFT report's Oscilloscope element. A
+ * second uPlot is built offscreen from the same data as the visible one, so the export is this
+ * chart and not an imitation of it; the axes carry their units, which on screen the header implies.
+ */
+async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
+  const computed = computeData()
+  if (!computed) throw new Error('There is no waveform to export.')
+
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  let u: uPlot | null = null
+  try {
+    u = new uPlot(buildOptions(width, plotHeight, THEME.light, false), computed.data, host)
+    await nextPaint()
+
+    const legend: ExportLegendEntry[] = []
+    if (props.scope[0] && channelEnabled(0)) legend.push({ label: CHANNEL_LABELS[0], color: CHANNEL_COLORS[0] })
+    if (props.scope[1] && channelEnabled(1)) legend.push({ label: CHANNEL_LABELS[1], color: CHANNEL_COLORS[1] })
+
+    const title = computed.periods === null ? 'Oscilloscope' : `Oscilloscope — ${computed.periods} period${computed.periods === 1 ? '' : 's'}`
+    return await composeChartPng({ width, height, plotCanvas: u.ctx.canvas, headerHeight: header, title, legend })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
 
 watch(() => props.scope, update)
 // A Periods change has to redraw off the *last* frame rather than waiting for the next one —

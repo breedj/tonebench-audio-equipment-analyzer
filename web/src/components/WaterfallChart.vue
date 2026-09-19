@@ -8,6 +8,7 @@ import { useChartDisplay } from '../composables/useChartDisplay'
 import { useAppTheme } from '../composables/useAppTheme'
 // Shared with SpectrumChart.vue — the two charts sit on one x span and must label it identically.
 import { freqAxis } from '../freqAxis'
+import { CHART_EXPORT_HEADER_PX, composeChartPng, exportAxisLabel, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 
 const props = defineProps<{
   spectrum: Record<number, SpectrumFrame>
@@ -89,7 +90,8 @@ const THEME = {
   dark: { axis: '#a3a3a3', grid: '#404040', empty: [23, 23, 23] as const },
   light: { axis: '#525252', grid: '#e5e5e5', empty: [245, 245, 245] as const },
 } as const
-function currentTheme() {
+type WaterfallTheme = (typeof THEME)[keyof typeof THEME]
+function currentTheme(): WaterfallTheme {
   return isDark.value ? THEME.dark : THEME.light
 }
 
@@ -132,8 +134,6 @@ let fullHiFreqHz = 0
 
 let plot: uPlot | null = null
 let plotIsDark = isDark.value
-// Reused across frames — reallocating a ~900x220 ImageData 20 times a second is pure garbage.
-let image: ImageData | null = null
 // The y span (seconds of history) last pushed into the scale. uPlot only re-runs a scale's range
 // callback for a scale that is auto or has a pending setScale — an auto:false scale like this one
 // keeps whatever min/max it was first given, so without an explicit push the axis would stay stuck
@@ -162,11 +162,16 @@ function historySeconds(): number {
   return Math.max(0.5, (rows[rows.length - 1].timeMs - rows[0].timeMs) / 1000)
 }
 
-function buildOptions(width: number, span: { min: number; max: number }): uPlot.Options {
-  const theme = currentTheme()
+function buildOptions(
+  width: number,
+  height: number,
+  span: { min: number; max: number },
+  theme: WaterfallTheme,
+  interactive: boolean,
+): uPlot.Options {
   return {
     width,
-    height: CHART_HEIGHT,
+    height,
     scales: {
       // Same log x scale as SpectrumChart. auto:false for the same reason it is there — setData
       // runs 20 times a second and an auto x scale would re-fit to the data on every one of them.
@@ -188,6 +193,7 @@ function buildOptions(width: number, span: { min: number; max: number }): uPlot.
         stroke: theme.axis,
         grid: { show: false },
         ticks: { stroke: theme.grid, width: 1 },
+        ...exportAxisLabel(interactive, 'Frequency (Hz)'),
       },
       {
         // size: 50 matches SpectrumChart's y axis exactly, which is what keeps the two plot areas
@@ -202,6 +208,7 @@ function buildOptions(width: number, span: { min: number; max: number }): uPlot.
         stroke: theme.axis,
         grid: { show: false },
         ticks: { stroke: theme.grid, width: 1 },
+        ...exportAxisLabel(interactive, 'Seconds ago'),
       },
     ],
     // A placeholder: the image is the content (see waterfallPlugin), but uPlot still needs a
@@ -209,7 +216,7 @@ function buildOptions(width: number, span: { min: number; max: number }): uPlot.
     series: [{}, { stroke: 'transparent', points: { show: false } }],
     cursor: { show: false },
     legend: { show: false },
-    plugins: [waterfallPlugin()],
+    plugins: [waterfallPlugin(theme)],
   }
 }
 
@@ -270,7 +277,10 @@ function renderRow(row: WaterfallRow, width: number, logMin: number, logSpan: nu
  * putImageData works in backing-store pixels and ignores the canvas transform, which is the same
  * space uPlot's bbox is already in — no devicePixelRatio conversion needed on either side.
  */
-function waterfallPlugin(): uPlot.Plugin {
+function waterfallPlugin(theme: WaterfallTheme): uPlot.Plugin {
+  // Reused across frames — reallocating a ~900x220 ImageData 20 times a second is pure garbage.
+  // Per plugin instance, since the export's plot is a different size from the screen's.
+  let image: ImageData | null = null
   return {
     hooks: {
       draw: [
@@ -289,12 +299,14 @@ function waterfallPlugin(): uPlot.Plugin {
             image = new ImageData(width, height)
           const img = image
 
-          const theme = currentTheme()
           const logMin = Math.log10(span.min)
           const logSpan = Math.log10(span.max) - logMin
           if (!(logSpan > 0)) return
 
-          const key = `${width}|${span.min}|${span.max}|${bottomDb.value}|${topDb.value}|${isDark.value}`
+          // The row cache is keyed on everything a rendered row depends on, the theme's empty
+          // colour included — an export at another width or in the light theme re-renders every
+          // row, and the screen's plot re-renders them back on its next draw.
+          const key = `${width}|${span.min}|${span.max}|${bottomDb.value}|${topDb.value}|${theme.empty.join(',')}`
           if (key !== gridKey) {
             for (const row of rows) row.pixels = null
             gridKey = key
@@ -323,11 +335,10 @@ function ensurePlot(span: { min: number; max: number }) {
 
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
-  plot = new uPlot(buildOptions(width, span), [[span.min, span.max], [null, null]], el)
+  plot = new uPlot(buildOptions(width, CHART_HEIGHT, span, currentTheme(), true), [[span.min, span.max], [null, null]], el)
   plotIsDark = isDark.value
   lastYSpanS = -1
   lastXSpan = { min: span.min, max: span.max }
-  image = null
   gridKey = ''
 }
 
@@ -381,9 +392,47 @@ function clearHistory() {
   rowCount.value = 0
   lastSeq = -1
   lastYSpanS = -1
-  image = null
   plot?.redraw()
 }
+
+/**
+ * The waterfall as a PNG of exactly the requested size, in the light theme — the FFT report's
+ * Waterfall element. Only this instance can draw it: the picture is the history `rows` collected
+ * frame by frame, which a headless copy would not have, so the report reads it off the chart on
+ * screen (see report/render.ts renderExtraCharts). A second uPlot is built offscreen over the same
+ * rows and the same span; the plugin re-renders every row onto the export's wider grid, and the
+ * visible plot renders them back on its next draw.
+ */
+async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
+  const span = xSpan()
+  if (rows.length === 0 || !span) throw new Error('The waterfall has no history to export.')
+
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  let u: uPlot | null = null
+  try {
+    u = new uPlot(buildOptions(width, plotHeight, span, THEME.light, false), [[span.min, span.max], [null, null]], host)
+    u.setScale('y', { min: -historySeconds(), max: 0 })
+    await nextPaint()
+    // The screen's plot keys its row cache on its own grid; its next draw restores it.
+    gridKey = ''
+
+    const seconds = historySeconds()
+    const title = `Waterfall — ${CHANNEL_LABELS[selectedChannel.value]}, ${rows.length} spectra over ${seconds.toFixed(1)} s, ${bottomDb.value} to ${topDb.value} dBV`
+    return await composeChartPng({ width, height, plotCanvas: u.ctx.canvas, headerHeight: header, title, legend: [] })
+  } finally {
+    u?.destroy()
+    host.remove()
+    plot?.redraw()
+  }
+}
+
+defineExpose({ exportPng })
 
 function update() {
   // App.vue empties the whole spectrum record when a run starts — history from the previous run
@@ -466,7 +515,6 @@ let resizeObserver: ResizeObserver | null = null
 function handleResize() {
   if (plot && containerRef.value) {
     plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
-    image = null
   }
 }
 

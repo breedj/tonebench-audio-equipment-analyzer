@@ -178,7 +178,7 @@ const { showPage } = useManual()
     <p>
       Above the chart, one violet <strong>Gen</strong> tile summarising what the generator is
       playing, then the selected readings for each processed channel.
-      <strong>+ Metrics</strong> chooses which appear; the ✕ on a tile removes it. The choices
+      <strong>Metrics</strong> chooses which appear; the ✕ on a tile removes it. The choices
       include level in several conventions (<code>dBV</code>, <code>dBu</code>, <code>Vrms</code>,
       watts), distortion as a percentage or in dB, THD+N, SNR, peak and RMS, the measured
       fundamental frequency and its nearest musical note, and gain relative to the generator.

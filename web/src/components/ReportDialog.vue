@@ -35,7 +35,7 @@ const emit = defineEmits<{ close: [] }>()
 const { currentTypeId, types } = useProjects()
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 const { overlays } = useMeasurements()
-const { load, choiceFor, setChoiceFor } = useReportSettings()
+const { load, choiceFor, setChoiceFor, chartsMonochrome, setChartsMonochrome } = useReportSettings()
 
 const kind = computed(() => currentType.value?.kind ?? '')
 const elements = computed(() => reportElementsForKind(kind.value))
@@ -48,7 +48,8 @@ const includeLive = ref(false)
 const selected = ref<Set<number>>(new Set())
 const chosenElements = ref<Set<ReportElementId>>(new Set())
 const chosenViews = ref<Set<string>>(new Set())
-const mode = ref<ReportMode>('combined')
+const mode = ref<ReportMode>('individual')
+const monochrome = ref(false)
 const busy = ref(false)
 const progress = ref<string | null>(null)
 const error = ref<string | null>(null)
@@ -69,6 +70,7 @@ watch(
       chosenElements.value = new Set(choice.elements)
       chosenViews.value = new Set(choice.views)
       mode.value = choice.mode
+      monochrome.value = chartsMonochrome.value
 
       const response = await api.listMeasurements({ measurementTypeId: currentType.value.id, take: 100 })
       // Newest first is how the History list reads; oldest first is how a report reads.
@@ -88,6 +90,20 @@ watch(
 )
 
 const selectionCount = computed(() => selected.value.size + (includeLive.value ? 1 : 0))
+
+/**
+ * Whether an element can appear in *this* report, given what is ticked: the oscilloscope and the
+ * waterfall exist only for the measurement on screen (a stored result keeps neither), and the
+ * waterfall only while it is shown. Ticking one anyway is harmless — the chapter simply has no
+ * such picture — but the label is dimmed so the absence is not a surprise.
+ */
+function elementAvailable(id: ReportElementId): boolean {
+  const live = props.liveSubject
+  const liveSpectrum = includeLive.value && live?.data.kind === 'spectrum' ? live.data : null
+  if (id === 'oscilloscope') return liveSpectrum !== null && Object.keys(liveSpectrum.scope).length > 0
+  if (id === 'waterfall') return liveSpectrum !== null && liveSpectrum.waterfall !== null
+  return true
+}
 const canGenerate = computed(
   () => selectionCount.value > 0 && chosenElements.value.size > 0 && !busy.value && !loading.value,
 )
@@ -109,6 +125,7 @@ async function generate() {
   const viewIds = views.value.map((v) => v.id).filter((id) => chosenViews.value.has(id))
   try {
     await setChoiceFor(kind.value, { elements: elementIds, views: viewIds, mode: mode.value })
+    if (monochrome.value !== chartsMonochrome.value) await setChartsMonochrome(monochrome.value)
 
     const subjects: ReportSubject[] = []
     if (includeLive.value && props.liveSubject) subjects.push(props.liveSubject)
@@ -119,7 +136,7 @@ async function generate() {
     }
 
     const document = await buildMeasurementReport(
-      { subjects, elements: elementIds, views: viewIds, mode: mode.value },
+      { subjects, elements: elementIds, views: viewIds, mode: mode.value, monochrome: monochrome.value },
       (message) => {
         progress.value = message
       },
@@ -204,7 +221,13 @@ async function generate() {
 
       <fieldset class="flex flex-col gap-2">
         <legend class="mb-1 text-xs text-neutral-500 dark:text-neutral-400">Include</legend>
-        <label v-for="element in elements" :key="element.id" class="flex items-start gap-2" :title="element.hint">
+        <label
+          v-for="element in elements"
+          :key="element.id"
+          class="flex items-start gap-2"
+          :class="{ 'opacity-50': !elementAvailable(element.id) }"
+          :title="element.hint"
+        >
           <input
             type="checkbox"
             class="mt-0.5"
@@ -218,6 +241,12 @@ async function generate() {
           </span>
         </label>
       </fieldset>
+
+      <label class="flex items-center gap-2" :class="{ 'opacity-50': !chosenElements.has('chart') }">
+        <input v-model="monochrome" type="checkbox" :disabled="busy || !chosenElements.has('chart')" />
+        <span>Charts in black and white</span>
+        <span class="text-xs text-neutral-500 dark:text-neutral-400">for a monochrome printer; one setting for every kind</span>
+      </label>
 
       <p class="text-xs text-neutral-500 dark:text-neutral-400">
         The charts, the layout and the elements are remembered for every {{ kindLabelLower }} report.

@@ -209,6 +209,26 @@ public class ReportJsonTests
             ["ImpulseResponse"] = new(["chart"], null, "sideways"),
         }).IsValid);
     }
+
+    /// <summary>
+    /// Black and white is one flag beside the kinds, not inside each one: a project report spans
+    /// kinds. A document written before it existed reads with the flag null (colour).
+    /// </summary>
+    [Fact]
+    public void ReportSettings_ChartsMonochrome_IsOptionalAndRoundTrips()
+    {
+        var old = JsonSerializer.Deserialize<ReportSettingsConfig>(
+            """{"kinds":{}}""", SerializerOptions);
+        Assert.NotNull(old);
+        Assert.True(old.IsValid);
+        Assert.Null(old.ChartsMonochrome);
+
+        var mono = new ReportSettingsConfig(new Dictionary<string, ReportKindSettings>(), ChartsMonochrome: true);
+        string json = JsonSerializer.Serialize(mono, SerializerOptions);
+        Assert.Contains("\"chartsMonochrome\":true", json);
+        var back = JsonSerializer.Deserialize<ReportSettingsConfig>(json, SerializerOptions);
+        Assert.True(back!.ChartsMonochrome);
+    }
 }
 
 /// <summary>

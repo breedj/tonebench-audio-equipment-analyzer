@@ -1,4 +1,6 @@
 import type {
+  DeviceStatus,
+  GeneratorTone,
   HarmonicCurveJson,
   ImpulseTraceJson,
   MeasurementDetail,
@@ -13,9 +15,10 @@ import type { ImpedanceDisplay } from '../impedance/display'
 import type { ImpulseDisplay } from '../measurements/impulseDisplay'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
-import type { MetersFrame, SpectrumFrame } from '../streaming/protocol'
+import type { MetersFrame, ScopeFrame, SpectrumFrame } from '../streaming/protocol'
 import type { SpectrumDisplaySource } from '../composables/useChartDisplay'
 import type { ReportElementId } from './elements'
+import type { ExportableChart } from './renderChart'
 
 /**
  * What a report chapter is about, in one shape whether it came from the screen or from History.
@@ -66,9 +69,21 @@ export type ReportSubjectData =
   | {
       kind: 'spectrum'
       spectrum: Record<number, SpectrumFrame>
+      /** The meters per channel — live frames, or a stored result's metric rows repacked (storedMetersFrames). */
       meters: Record<number, MetersFrame>
       /** The chart's display state — the screen's singleton, or a stored type's own (see SPECTRUM_DISPLAY_KEY). */
       display: SpectrumDisplaySource
+      /** The metric tiles' labels in their order: the screen's selection, or the stored type's. */
+      selectedMetrics: string[]
+      /** The generator's tones, for the Gain tile; empty when nothing is known. */
+      generatorTones: GeneratorTone[]
+      loadOhms: number
+      /** The oscilloscope frames — the screen's; empty for a stored result, which keeps no waveform. */
+      scope: Record<number, ScopeFrame>
+      /** What the oscilloscope triggers from; null for a stored result. */
+      status: DeviceStatus | null
+      /** The waterfall chart on screen, whose collected history only it can draw; null off screen or for a stored result. */
+      waterfall: ExportableChart | null
     }
   | {
       kind: 'sweep'
@@ -101,6 +116,8 @@ export interface ReportPlan {
   elements: readonly ReportElementId[]
   views: readonly string[]
   mode: ReportMode
+  /** Charts in black and white. */
+  monochrome: boolean
 }
 
 /** A name for a subject wherever the report has to tell several apart. */

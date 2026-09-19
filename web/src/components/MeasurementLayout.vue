@@ -8,8 +8,9 @@
 //               checklist flow two-wide UNDER the chart. Three columns here left the chart ~170 px
 //               with the sidebar pinned (246 + 32 + 304 + 272 of a 1024 px window), narrower than
 //               the same window one pixel smaller, where everything stacked.
-//   ≥ 1280 px   three columns: the same 16rem rail, chart, 16rem display rail (12rem on the FFT
-//               screen, whose ChartDisplayPanel was designed for that width).
+//   ≥ 1280 px   three columns: the same 16rem rail, chart, 16rem display rail. The FFT screen's
+//               used to be 12rem, which its ChartDisplayPanel was designed for; every screen is
+//               16rem since 2026-09-19 so the display rails line up when switching screens.
 //
 // It is a grid rather than a flex row because the aside has to be the third COLUMN at xl and a
 // second ROW under the chart at lg without being rendered twice — a duplicated
@@ -24,8 +25,6 @@
 // DOM node in every state and a collapse is a layout change the charts' ResizeObservers see, not
 // a remount.
 import { useUiLayout } from '../composables/useUiLayout'
-
-withDefaults(defineProps<{ asideWidth?: 'md' | 'sm' }>(), { asideWidth: 'md' })
 
 const {
   settingsRailCollapsed,
@@ -96,8 +95,8 @@ const STRIP =
         </svg>
       </button>
       <div
-        class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:items-start xl:flex xl:flex-none xl:flex-col xl:items-stretch"
-        :class="[asideWidth === 'sm' ? 'xl:w-48' : 'xl:w-64', displayRailCollapsed ? 'xl:hidden' : '']"
+        class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:items-start xl:flex xl:w-64 xl:flex-none xl:flex-col xl:items-stretch"
+        :class="displayRailCollapsed ? 'xl:hidden' : ''"
       >
         <slot name="aside" />
       </div>

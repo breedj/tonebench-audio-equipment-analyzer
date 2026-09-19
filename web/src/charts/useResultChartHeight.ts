@@ -4,16 +4,17 @@ import { MIN_RESULT_CHART_HEIGHT_PX, RESULT_CHART_HEIGHT_PX } from './dimensions
 
 export interface ResultChartHeightOptions {
   /**
-   * An element above the chart in the same column whose height the fit should also leave room
-   * for — the FFT screen's metrics row, so the chart and its readings share the view. Observed
-   * for size changes of its own, since a metric added or removed changes it without the window
-   * moving.
+   * An element above the chart in the same column whose height the fit should reserve only part
+   * of — the FFT screen's metrics row, so the chart and its readings share the view. Everything
+   * above the chart is reserved in full by default; this names the one block that is not.
+   * Observed for size changes of its own, since a metric added or removed changes it without the
+   * window moving.
    */
   above?: Ref<HTMLElement | null | undefined>
   /**
-   * How much of `above` to reserve. The default reserves all of it plus its bottom margin; the
-   * FFT screen passes a function that reserves one line of tiles however many lines there are,
-   * because a wall of metrics must not shrink the chart into a strip.
+   * How much of `above` to reserve. The default reserves all of it plus its bottom margin, i.e.
+   * changes nothing; the FFT screen passes a function that reserves one line of tiles however
+   * many lines there are, because a wall of metrics must not shrink the chart into a strip.
    */
   aboveHeight?: (el: HTMLElement) => number
 }
@@ -24,11 +25,29 @@ export function fullHeightWithMargin(el: HTMLElement): number {
 }
 
 /**
+ * Everything above the chart's root in the view: the measurement's toolbar row (its name, Save,
+ * Save as…, Clear, the ? button) that `<main>` lays out above the layout, and whatever the screen
+ * puts above the chart inside its column — the sweep and response screens' run-status line, the
+ * FFT screen's metrics. Measured as the root's offset from main's content top rather than listed,
+ * so it is whatever precedes the chart and not a list of what does today; `scrollTop` is added
+ * back because the rectangle is where the root is drawn, not where it sits in the content. The
+ * toolbar wraps onto two lines on a narrow window, which the ResizeObserver on main already sees.
+ * Without this the fit was 26 px too tall on every screen (a 42 px toolbar row less main's 16 px
+ * padding), 54 px on the screens with a status line, and the x axis's title sat below the fold
+ * until the view was scrolled.
+ */
+function offsetAbove(main: HTMLElement, rootEl: HTMLElement): number {
+  const contentTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(main).paddingTop)
+  return rootEl.getBoundingClientRect().top - contentTop + main.scrollTop
+}
+
+/**
  * The plot height that lets a whole result chart fit the measurement view: the window, less the
- * app header and the status bar, less the view's own padding, less the chart's own furniture — its
- * readout row, the axis labels it draws outside the plot, whatever else the component puts around
- * the plot box. Scrolled to the top of the view, the chart is then in view completely, and on any
- * screen tall enough the chart simply takes the height it is given.
+ * app header and the status bar, less the view's own padding, less whatever sits above the chart
+ * in the view (`offsetAbove`), less the chart's own furniture — its readout row, the axis
+ * labels it draws outside the plot, whatever else the component puts around the plot box.
+ * Scrolled to the top of the view, the chart is then in view completely, and on any screen tall
+ * enough the chart simply takes the height it is given.
  *
  * Two arguments, both elements the component already has: `root` is the component's outermost
  * element and `plot` the box whose height this sets. The furniture is measured as the difference
@@ -87,9 +106,10 @@ export function useResultChartHeight(
     } else {
       furniture = rootEl.getBoundingClientRect().height - plotEl.getBoundingClientRect().height
       rootPadding = verticalPadding(rootEl)
-      visible = main.clientHeight - verticalPadding(main)
+      visible = main.clientHeight - verticalPadding(main) - offsetAbove(main, rootEl)
+      // The offset already holds the whole of `above`; the caller decides how much of it to keep.
       const above = options.above?.value
-      if (above) visible -= aboveHeight(above)
+      if (above) visible += fullHeightWithMargin(above) - aboveHeight(above)
     }
     height.value = Math.max(MIN_RESULT_CHART_HEIGHT_PX, Math.round(visible - furniture))
   }

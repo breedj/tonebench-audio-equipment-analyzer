@@ -76,8 +76,8 @@
             Ticked, every change to the selected measurement's settings — a generator level, an axis
             range, a note — is written into it a moment after it is made, so the measurement's
             <strong>Save</strong> button never needs pressing and switching measurements never asks
-            about unsaved changes. Unticked (the default), changes wait for Save and the red dot says
-            so. Either way <strong>Save as…</strong> still makes a copy, and saving a
+            about unsaved changes. It is ticked by default; unticked, changes wait for Save and the red
+            dot says so. Either way <strong>Save as…</strong> still makes a copy, and saving a
             <em>result</em> is always a separate, deliberate step.
           </td>
         </tr>

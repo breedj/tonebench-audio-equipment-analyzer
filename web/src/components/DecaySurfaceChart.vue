@@ -111,8 +111,14 @@ function theme(): ChartTheme {
   return paintDark ? THEME.dark : THEME.light
 }
 
-/** Room for the level axis with its colour key, the depth labels and the axis under the front slice. */
-const MARGIN = { left: 62, right: 76, top: 22, bottom: 30 }
+/**
+ * Room for the level axis with its colour key and title, the depth labels with their title down the
+ * right edge, and the axis under the front slice with its title beneath it.
+ */
+const MARGIN = { left: 70, right: 92, top: 22, bottom: 44 }
+
+/** The axis titles' font — a bolder cut of the tick font, the way uPlot titles its axes on the other charts. */
+const AXIS_TITLE_FONT = '600 11px system-ui, sans-serif'
 
 /** How much of the box the depth axis takes. Half, which is what makes a decay legible as depth rather than as a smear. */
 const DEPTH_FRACTION_Y = 0.5
@@ -642,10 +648,29 @@ function drawLevelAxis(
     ctx.fillText(db.toFixed(0), keyRight - keyWidth - 4, y)
   }
 
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'alphabetic'
+  // The title stands up the canvas's own left edge, centred on the axis it names — which in the
+  // waterfall is the front face's half of the height, not the whole of it.
+  drawRotatedTitle(ctx, 'Level (dB)', 12, top + height / 2, -Math.PI / 2, colors)
+}
+
+/** An axis title along a vertical edge, centred on (x, y) and turned by `angle`. */
+function drawRotatedTitle(
+  ctx: CanvasRenderingContext2D,
+  title: string,
+  x: number,
+  y: number,
+  angle: number,
+  colors: ChartTheme,
+) {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.rotate(angle)
+  ctx.font = AXIS_TITLE_FONT
   ctx.fillStyle = colors.text
-  ctx.fillText('dB', keyRight - keyWidth, top - 7)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(title, 0, 0)
+  ctx.restore()
 }
 
 /**
@@ -678,19 +703,30 @@ function drawAcrossAxis(
   ctx.lineTo(offsetX + width, y + 0.5)
   ctx.stroke()
 
-  const ticks = acrossTicks(view)
-  for (const [i, tick] of ticks.entries()) {
+  for (const tick of acrossTicks(view)) {
     const x = offsetX + tick.fraction * width
     ctx.beginPath()
     ctx.moveTo(x, y)
     ctx.lineTo(x, y + 4)
     ctx.stroke()
-    // The unit rides on the last tick when the axis counts time, because a bare "30.0" does not say
-    // whether it is milliseconds or periods, and those are the two measurements this chart draws.
-    // A frequency axis goes unlabelled, as it does on every other chart in the app.
-    const last = i === ticks.length - 1 && !view.acrossIsFrequency
-    ctx.fillText(last ? `${tick.label} ${timeUnit.value}` : tick.label, x, y + 6)
+    ctx.fillText(tick.label, x, y + 6)
   }
+
+  // The title carries the unit — which matters for the time axes, since a bare "30.0" does not say
+  // whether it is milliseconds or periods, and those are the two measurements this chart draws.
+  // Centred under the front curve, which is the span the ticks were laid along.
+  ctx.font = AXIS_TITLE_FONT
+  ctx.fillText(acrossTitle(view), offsetX + width / 2, y + 22)
+}
+
+/** What the across axis counts, with its unit. */
+function acrossTitle(view: OrientedSurface): string {
+  return view.acrossIsFrequency ? 'Frequency (Hz)' : `Time (${timeUnit.value})`
+}
+
+/** What the depth axis counts, with its unit — the other of the two. */
+function depthTitle(view: OrientedSurface): string {
+  return view.depthIsFrequency ? 'Frequency (Hz)' : `Time (${timeUnit.value})`
 }
 
 /**
@@ -725,9 +761,7 @@ function drawDepthAxis(
         label: (first + (last - first) * (t / 6)).toFixed(decimals),
       }))
 
-  const unit = view.depthIsFrequency ? 'Hz' : timeUnit.value
-
-  for (const [i, tick] of ticks.entries()) {
+  for (const tick of ticks) {
     let x: number
     let y: number
     if (isWaterfall.value) {
@@ -746,7 +780,7 @@ function drawDepthAxis(
     ctx.lineTo(x + 4, y)
     ctx.stroke()
 
-    const label = i === ticks.length - 1 ? `${tick.label} ${unit}` : tick.label
+    const label = tick.label
 
     // Haloed, because in the waterfall this axis runs *through* the picture rather than beside it:
     // it is the box's own receding edge, and the curves in front of any given depth are drawn
@@ -760,6 +794,13 @@ function drawDepthAxis(
     ctx.fillStyle = colors.text
     ctx.fillText(label, x + 7, y)
   }
+
+  // The title runs down the canvas's right edge, reading top to bottom, centred on the axis's own
+  // vertical span: the lower half of the box in the waterfall, where the floor's far edge runs,
+  // and the whole of it in the sonogram.
+  const spanTop = MARGIN.top + (isWaterfall.value ? layout.levelHeight : 0)
+  const spanBottom = MARGIN.top + plotHeight
+  drawRotatedTitle(ctx, depthTitle(view), MARGIN.left + plotWidth + MARGIN.right - 10, (spanTop + spanBottom) / 2, Math.PI / 2, colors)
 }
 
 /**
@@ -913,8 +954,16 @@ onBeforeUnmount(() => {
     ></canvas>
     <canvas ref="overlay" class="pointer-events-none absolute left-0 top-0 block w-full"></canvas>
 
+    <!-- A box in the middle of the chart while the surface is being computed, over the previous
+         one if there is one: the analysis takes seconds, and a note in a corner was missed. -->
     <p
-      v-if="error"
+      v-if="computing"
+      class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded border border-neutral-300 bg-white/95 px-4 py-2 text-center text-xs text-neutral-700 shadow dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-300"
+    >
+      Analysing…
+    </p>
+    <p
+      v-else-if="error"
       class="absolute inset-x-16 top-1/2 -translate-y-1/2 rounded border border-red-300 bg-white/95 px-3 py-2 text-center text-xs text-red-700 dark:border-red-800 dark:bg-neutral-900/95 dark:text-red-400"
     >
       {{ error }}
@@ -923,17 +972,12 @@ onBeforeUnmount(() => {
       v-else-if="!surface"
       class="absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs text-neutral-500 dark:text-neutral-400"
     >
-      {{ computing ? 'Analysing…' : emptyMessage }}
+      {{ emptyMessage }}
     </p>
 
-    <p
-      v-if="computing && surface"
-      class="absolute right-3 top-3 text-[11px] text-neutral-500 dark:text-neutral-400"
-    >
-      Analysing…
-    </p>
-
-    <p v-if="hover" class="absolute bottom-0 left-16 font-mono text-[11px] text-neutral-500 dark:text-neutral-400">
+    <!-- Top left, which is empty in both views (the waterfall's back wall starts one depth run in,
+         the sonogram below the top margin); the bottom now holds the across axis's title. -->
+    <p v-if="hover" class="absolute left-2 top-1 font-mono text-[11px] text-neutral-500 dark:text-neutral-400">
       {{ hover }}
     </p>
   </div>

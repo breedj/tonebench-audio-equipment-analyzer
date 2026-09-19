@@ -297,12 +297,14 @@ const { showPage } = useManual()
       measured band is an extrapolation — widen the sweep rather than trusting one.
     </p>
 
-    <h2>Display panel</h2>
+    <h2>Display panels</h2>
     <p>
-      <strong>Projection</strong> chooses Bode, Nyquist or Nichols. Under Bode:
-      <strong>View</strong> switches FR (dBV) against Gain (dB), each remembering its own vertical
-      window; then the channel checkboxes, the bandwidth markers, the extra traces, and separate
-      Top/Bottom ranges with Autofit for the dB axis, the phase axis and the frequency axis.
+      The axis windows come first, each with its own Autofit, laid out the way the FFT screen's are:
+      <strong>Gain range</strong> (or <strong>dBV range</strong>, whichever view is showing — each
+      remembers its own), <strong>Frequency range (Hz)</strong>, and <strong>Phase range (°)</strong>
+      while the Phase trace is on. Under them, <strong>Display</strong>: <strong>Projection</strong>
+      chooses Bode, Nyquist or Nichols, and under Bode <strong>View</strong> switches FR (dBV)
+      against Gain (dB); then the channel checkboxes, the bandwidth markers and the extra traces.
       <strong>Autofit when measurement done</strong> refits at the end of every pass.
     </p>
 

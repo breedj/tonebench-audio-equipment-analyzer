@@ -417,7 +417,7 @@ function run() {
         min="1"
         max="48"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
       />
     </label>
 
@@ -435,15 +435,17 @@ function run() {
       </select>
     </label>
 
+    <!-- Level is as narrow as Steps per octave, the THD sweep's width for a short number: a level
+         is a few digits, and a field the width of the rail reads as if it expected more. -->
     <div class="flex items-end gap-2 text-xs">
-      <label class="flex flex-1 flex-col gap-1">
+      <label class="flex flex-col gap-1">
         {{ isPowerMode ? 'Power (W)' : 'Level' }}
         <input
           v-model.number="form.levelValue"
           type="number"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
         />
       </label>
       <label v-if="!isPowerMode" class="flex flex-col gap-1">

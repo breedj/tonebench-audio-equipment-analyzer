@@ -99,10 +99,10 @@ public sealed record StartupConfig(bool ShowWelcomeOnStartup = true)
 
 /// <summary>
 /// Whether a measurement's settings are written the moment they change, instead of waiting for its
-/// Save button. Off by default: an existing bench keeps the explicit Save it has always had, and a
-/// setting that silently rewrites stored measurements has to be asked for.
+/// Save button. On by default (since 2026-09-19): a setting left unsaved is the commoner mistake,
+/// and the explicit Save is still there for a bench that would rather turn this off.
 /// </summary>
-public sealed record AutosaveConfig(bool Enabled = false)
+public sealed record AutosaveConfig(bool Enabled = true)
 {
     public static AutosaveConfig Default { get; } = new();
 }

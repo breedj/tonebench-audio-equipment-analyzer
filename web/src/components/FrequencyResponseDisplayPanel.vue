@@ -269,6 +269,101 @@ watch(running, (isRunning, wasRunning) => {
 </script>
 
 <template>
+  <!-- The axis windows are their own sections ahead of Display, laid out the way the FFT screen's
+       dBV range / Frequency range are (ChartDisplayPanel.vue): label over a full-width field,
+       Autofit under. Multi-root, so they flow into MeasurementLayout's aside grid one by one like
+       SweepDisplayPanel's. -->
+  <CollapsibleSection v-if="bodeShowing" :title="view === 'Dbv' ? 'dBV range' : 'Gain range'" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      Top
+      <input
+        :value="yTopDb"
+        type="number"
+        :step="DB_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onTopDbChange"
+      />
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      Bottom
+      <input
+        :value="yBottomDb"
+        type="number"
+        :step="DB_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onBottomDbChange"
+      />
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      @click="autofitDb"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Frequency range (Hz)" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      From
+      <select
+        v-model.number="xFromHz"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+      </select>
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      To
+      <select
+        v-model.number="xToHz"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+      </select>
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      @click="autofitX"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
+       shown-but-inert, since the axis it configures is not drawn otherwise. -->
+  <CollapsibleSection v-if="bodeShowing && showPhase && phaseAvailable" title="Phase range (°)" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      Top
+      <input
+        :value="phaseTopDeg"
+        type="number"
+        :step="PHASE_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onTopPhaseChange"
+      />
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      Bottom
+      <input
+        :value="phaseBottomDeg"
+        type="number"
+        :step="PHASE_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onBottomPhaseChange"
+      />
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
+      @click="autofitPhase"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
   <CollapsibleSection title="Display">
     <!-- The toggle groups here (Projection, Radius, View) highlight the selected option the way the
          sweep screens' Units toggle does, black on white: one look for "which of these is on" across
@@ -437,100 +532,6 @@ watch(running, (isRunning, wasRunning) => {
       >
         Coherence needs 2+ averages; a single record reads 1 everywhere.
       </p>
-    </div>
-
-    <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
-         shown-but-inert, since the axis it configures is not drawn otherwise. -->
-    <div v-if="bodeShowing && showPhase && phaseAvailable" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Phase range (°)</span>
-      <label class="flex items-center justify-between gap-2">
-        Top
-        <input
-          :value="phaseTopDeg"
-          type="number"
-          :step="PHASE_STEP"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="onTopPhaseChange"
-        />
-      </label>
-      <label class="flex items-center justify-between gap-2">
-        Bottom
-        <input
-          :value="phaseBottomDeg"
-          type="number"
-          :step="PHASE_STEP"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="onBottomPhaseChange"
-        />
-      </label>
-      <button
-        type="button"
-        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
-        @click="autofitPhase"
-      >
-        Autofit
-      </button>
-    </div>
-
-    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">{{ view === 'Dbv' ? 'dBV range' : 'Gain range' }}</span>
-      <label class="flex items-center justify-between gap-2">
-        Top
-        <input
-          :value="yTopDb"
-          type="number"
-          :step="DB_STEP"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="onTopDbChange"
-        />
-      </label>
-      <label class="flex items-center justify-between gap-2">
-        Bottom
-        <input
-          :value="yBottomDb"
-          type="number"
-          :step="DB_STEP"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          @change="onBottomDbChange"
-        />
-      </label>
-      <button
-        type="button"
-        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        @click="autofitDb"
-      >
-        Autofit
-      </button>
-    </div>
-
-    <div class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Frequency range (Hz)</span>
-      <label class="flex items-center justify-between gap-2">
-        From
-        <select
-          v-model.number="xFromHz"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-        </select>
-      </label>
-      <label class="flex items-center justify-between gap-2">
-        To
-        <select
-          v-model.number="xToHz"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-        </select>
-      </label>
-      <button
-        type="button"
-        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        @click="autofitX"
-      >
-        Autofit
-      </button>
     </div>
 
     <div class="flex flex-col gap-1 text-xs">

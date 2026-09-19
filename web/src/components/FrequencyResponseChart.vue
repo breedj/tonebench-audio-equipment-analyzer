@@ -15,7 +15,7 @@ import {
   type ExportLegendEntry,
 } from '../charts/exportChart'
 import { makeChartPalette, type ChartPalette } from '../charts/palette'
-import { exportAxisLabel } from '../charts/exportChart'
+import { axisLabel } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
 import { freqAxis } from '../freqAxis'
@@ -51,6 +51,12 @@ const props = defineProps<{
   phaseKind: ResponsePhaseKindName
   /** The button that starts this screen's measurement — RUN on the chirp, RUN SWEEP on the stepped sine. */
   runLabel?: string
+  /**
+   * Axis titles on screen, not only on the export. On the response screens the display panel names
+   * the quantities and the space is the plot's; on the impulse screen every other view titles its
+   * axes, so the gated response does too.
+   */
+  axisTitles?: boolean
 }>()
 
 const { isDark } = useAppTheme()
@@ -652,18 +658,18 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
       coh: { range: () => [0, 1] as [number, number] },
     },
     axes: [
-      // Axis titles with units on the export only: on screen the display panel names the
-      // quantities and the space is the plot's; on paper the picture has to stand on its own.
+      // Axis titles with units on the export, and on screen only where the screen asks for them
+      // (`axisTitles`): on paper the picture has to stand on its own.
       {
         ...freqAxis(),
-        ...exportAxisLabel(interactive, 'Frequency (Hz)'),
+        ...axisLabel(props.axisTitles ?? false, interactive, 'Frequency (Hz)'),
         stroke: p.axis,
         grid: { stroke: p.grid, width: 1 },
         ticks: { stroke: p.grid, width: 1 },
       },
       {
         size: 50,
-        ...exportAxisLabel(interactive, props.view === 'Gain' ? 'Gain (dB)' : 'Level (dBV)'),
+        ...axisLabel(props.axisTitles ?? false, interactive, props.view === 'Gain' ? 'Gain (dB)' : 'Level (dBV)'),
         stroke: p.axis,
         grid: { stroke: p.grid, width: 1 },
         ticks: { stroke: p.grid, width: 1 },
@@ -676,7 +682,7 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
         side: 1,
         show: props.showPhase,
         size: 52,
-        ...exportAxisLabel(interactive, `${phaseLabel.value} (°)`),
+        ...axisLabel(props.axisTitles ?? false, interactive, `${phaseLabel.value} (°)`),
         incrs: [15, 30, 45, 90, 180, 360, 720, 1440],
         values: (_u, vals) => vals.map((v) => `${v}°`),
         stroke: p.color(PHASE_COLOR),
@@ -688,7 +694,7 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
         side: 1,
         show: props.showCoherence,
         size: 44,
-        ...exportAxisLabel(interactive, 'Coherence'),
+        ...axisLabel(props.axisTitles ?? false, interactive, 'Coherence'),
         incrs: [0.1, 0.2, 0.25, 0.5],
         values: (_u, vals) => vals.map((v) => v.toFixed(1)),
         stroke: p.color(COHERENCE_COLOR),

@@ -118,6 +118,17 @@ export function exportAxisLabel(interactive: boolean, label: string): Pick<uPlot
   return { label, labelSize: 24, labelFont: '600 13px ui-sans-serif, system-ui, sans-serif' }
 }
 
+/**
+ * `exportAxisLabel`, plus the same title on screen when `onScreen` is set — in uPlot's own label
+ * style, which is what ImpulseResponseChart and ImpulseHarmonicsChart draw theirs in. The impulse
+ * screen titles every view's axes (its gated response is a FrequencyResponseChart), so a chart
+ * shared with a screen that does not takes the choice as a prop rather than a constant.
+ */
+export function axisLabel(onScreen: boolean, interactive: boolean, label: string): Pick<uPlot.Axis, 'label' | 'labelSize' | 'labelFont'> {
+  if (!interactive) return exportAxisLabel(false, label)
+  return onScreen ? { label } : {}
+}
+
 /** One macrotask later — uPlot commits its first draw in a microtask after construction, so a plain `await` is not enough. */
 export function nextPaint(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))

@@ -2526,6 +2526,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :phase-top-deg="impulsePhaseTopDeg"
                   :phase-bottom-deg="impulsePhaseBottomDeg"
                   phase-kind="PerTrace"
+                  :axis-titles="true"
                 />
                 <ImpulseHarmonicsChart
                   v-else-if="impulseView === 'Harmonics'"
@@ -3121,7 +3122,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
           <!-- FFT Spectrum screen, matching the wireframe: settings rail on the left, chart in the
                center, display options + history checklist on the right. -->
           <template v-else>
-          <MeasurementLayout aside-width="sm">
+          <MeasurementLayout>
             <template #rail>
               <div class="flex gap-3">
                 <button

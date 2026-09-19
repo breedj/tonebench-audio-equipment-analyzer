@@ -194,10 +194,12 @@ const { showPage } = useManual()
       The colour key runs up the left-hand edge of the waterfall's box, and it is the box's own dB
       axis — a level is drawn at the height its number is printed at, so a colour on the surface can
       be carried across to a figure by eye. The back wall is ruled at the same steps, which is what
-      the empty part of it above the surface is for. Time runs down the right-hand edge, labelled in
+      the empty part of it above the surface is for. Time runs down the right-hand edge, in
       milliseconds for a cumulative spectral decay and in periods for a burst decay. In
       <strong>Waterfall (p)</strong> the two swap over: time is along the curves and the receding
-      axis is frequency.
+      axis is frequency. All three axes are titled with their unit, whichever way round they are.
+      While a surface is being computed an <em>Analysing…</em> box sits in the middle of the chart,
+      over the previous surface if there is one.
     </p>
     <p>
       The band running down the right-hand edge is the cut face of the solid, not decoration. Each

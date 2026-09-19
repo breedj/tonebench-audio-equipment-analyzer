@@ -51,7 +51,7 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
 <template>
   <!-- `contents`: the sections (and the checklist passed through the slot) are laid out directly
        by MeasurementLayout's aside grid, so under the chart they flow two-wide like every other
-       screen's display panel. The 12rem the wrapper used to carry is the shell's xl column. -->
+       screen's display panel. The width is the shell's xl column, the same 16rem as every other screen. -->
   <div class="contents">
     <CollapsibleSection title="dBV range" size="xs">
       <label class="flex flex-col gap-1 text-xs">

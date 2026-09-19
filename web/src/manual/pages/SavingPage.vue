@@ -63,8 +63,9 @@ const { showPage } = useManual()
       <strong>Save</strong> writes the current settings into the selected measurement.
       <strong>Save as…</strong> creates a new measurement from them and lets the current one revert
       to its own last-saved settings, so experimenting with a setup never costs you the original.
-      With <strong>Autosave measurement settings</strong> ticked in Configuration ▸ General, Save
-      happens by itself a moment after every change, and the red dot only ever flickers.
+      With <strong>Autosave measurement settings</strong> ticked in Configuration ▸ General — it
+      is by default — Save happens by itself a moment after every change, and the red dot only ever
+      flickers.
     </p>
     <p>
       Above every screen's History details sits a <strong>Notes</strong> box: free text about the

@@ -199,19 +199,18 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Distortion range / dB range</td>
-          <td>The vertical window, with an Autofit that fits every checked trace.</td>
-        </tr>
-        <tr>
-          <td>Frequency range</td>
-          <td>The horizontal window, with its own Autofit to the measured span.</td>
-        </tr>
-        <tr>
           <td>Style</td>
           <td>Thick lines and data points.</td>
         </tr>
       </tbody>
     </table>
+    <p>
+      Above Display sit two sections of their own, the way the FFT screen has them:
+      <strong>Distortion range (%)</strong> — <strong>dB range</strong> when the units are dB — is the
+      vertical window, with an Autofit that fits every checked trace, and
+      <strong>Frequency range (Hz)</strong> the horizontal one, with its own Autofit to the measured
+      span. <strong>Autofit when measurement done</strong> is on for a newly created measurement.
+    </p>
 
     <h2>Zooming</h2>
     <p>

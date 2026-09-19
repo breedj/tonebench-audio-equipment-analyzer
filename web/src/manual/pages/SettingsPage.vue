@@ -62,6 +62,25 @@
             installs anything, and fails silently on a machine with no internet access.
           </td>
         </tr>
+        <tr>
+          <td>Show welcome page on startup</td>
+          <td>
+            Ticked, the app starts on the welcome screen with its list of recent projects. Unticked,
+            it opens the project that was open last time — if that file still exists; otherwise the
+            welcome screen. The same setting is on the welcome screen itself.
+          </td>
+        </tr>
+        <tr>
+          <td>Autosave measurement settings</td>
+          <td>
+            Ticked, every change to the selected measurement's settings — a generator level, an axis
+            range, a note — is written into it a moment after it is made, so the measurement's
+            <strong>Save</strong> button never needs pressing and switching measurements never asks
+            about unsaved changes. Unticked (the default), changes wait for Save and the red dot says
+            so. Either way <strong>Save as…</strong> still makes a copy, and saving a
+            <em>result</em> is always a separate, deliberate step.
+          </td>
+        </tr>
       </tbody>
     </table>
 
@@ -258,12 +277,14 @@
         <tr>
           <td>Database damaged</td>
           <td>
-            The measurement database failed its integrity check when the app started. The app keeps
+            The project file failed its integrity check when it was opened, or the app's
+            configuration database failed it at startup; the message says which. The app keeps
             running — every stored result outside the damaged pages still opens, and new saves usually
             still work — but a result whose data sits on a damaged page fails to open, and the message
-            stays until the file is repaired. Close the app, keep a copy of <code>qa403.db</code>
-            (under <code>%LOCALAPPDATA%\Qa403</code>) before anything else, then rebuild it: every
-            readable row can be copied into a fresh database, and only the damaged rows are lost.
+            stays until the file is repaired (for a project, until it is closed). Close it, keep a copy
+            of the file before anything else, then rebuild it: every readable row can be copied into a
+            fresh database, and only the damaged rows are lost. The configuration database is
+            <code>qa403-config.db</code> under <code>%LOCALAPPDATA%\Qa403</code>.
           </td>
         </tr>
         <tr>

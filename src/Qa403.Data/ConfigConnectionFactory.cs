@@ -19,5 +19,5 @@ namespace Qa403.Data;
 public sealed class ConfigConnectionFactory(Qa403ConfigDatabaseOptions options)
 {
     public Task<SqliteConnection> OpenAsync(CancellationToken ct) =>
-        SqliteConnectionFactory.OpenAtAsync(options.Path, ct);
+        SqliteConnectionFactory.OpenAtAsync(options.Path, create: true, ct);
 }

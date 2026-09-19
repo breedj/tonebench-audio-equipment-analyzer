@@ -50,25 +50,6 @@ public class ProjectRepositoryTests
     }
 
     [Fact]
-    public async Task DeleteProject_WithTypes_Fails()
-    {
-        string path = TestDb.CreateTempPath();
-        try
-        {
-            var repo = new ProjectRepository(await TestDb.CreateMigratedFactoryAsync(path));
-            long projectId = await repo.CreateProjectAsync("GM70", null, CancellationToken.None);
-            await repo.CreateTypeAsync(projectId, "FFTSpectrum", "type", null, "{}", CancellationToken.None);
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                repo.DeleteProjectAsync(projectId, CancellationToken.None));
-        }
-        finally
-        {
-            TestDb.Cleanup(path);
-        }
-    }
-
-    [Fact]
     public async Task ListTypes_ScopedToProject()
     {
         string path = TestDb.CreateTempPath();

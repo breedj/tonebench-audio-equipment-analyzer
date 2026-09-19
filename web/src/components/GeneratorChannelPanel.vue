@@ -136,19 +136,25 @@ defineExpose({ currentConfig, syncFromStatus })
             <input
               type="number"
               v-model.number="tone.freqHz"
-              class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-16 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
               placeholder="Freq (Hz)"
               @change="emit('change')"
             />
-            <span v-if="actualFreqHz[i] != null" class="text-xs text-neutral-400 dark:text-neutral-600">
-              → {{ actualFreqHz[i]!.toFixed(2) }} Hz
+            <!-- No unit of its own: the "Hz @" beside the field already names it, and at w-16 the
+                 unit wrapped onto a second line. -->
+            <span
+              v-if="actualFreqHz[i] != null"
+              class="whitespace-nowrap text-xs text-neutral-400 dark:text-neutral-600"
+              title="The coherent bin frequency actually playing."
+            >
+              → {{ actualFreqHz[i]!.toFixed(2) }}
             </span>
           </div>
           <span class="pt-1.5 text-neutral-500">Hz @</span>
           <input
             type="number"
             v-model.number="tone.ampDbv"
-            class="w-16 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="w-12 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             placeholder="Amp (dBV)"
             @change="emit('change')"
           />

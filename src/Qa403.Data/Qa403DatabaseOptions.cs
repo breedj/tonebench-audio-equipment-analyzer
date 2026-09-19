@@ -1,23 +1,13 @@
-namespace Qa403.Data;
+﻿namespace Qa403.Data;
 
 /// <summary>
-/// Where <c>qa403.db</c> lives. Defaults under LocalApplicationData rather than next to the
-/// binary (the pattern the app's Serilog file sink uses) because measurement history is user
-/// data — a `dotnet clean` or a rebuild must not silently destroy it. Override with the
-/// <c>Database:Path</c> configuration key.
+/// A fixed path for a measurement database. Kept for the tests, which build their databases by
+/// opening a fresh temp path and migrating it (<see cref="SqliteConnectionFactory(Qa403DatabaseOptions)"/>);
+/// the app itself has no fixed measurement database any more — a project is one file, and which one
+/// is open is <see cref="CurrentProjectFile"/>'s. The old default, <c>%LOCALAPPDATA%\Qa403\qa403.db</c>,
+/// is left where it is and can be opened as a project when it holds a single project row.
 /// </summary>
 public sealed record Qa403DatabaseOptions
 {
     public required string Path { get; init; }
-
-    public static Qa403DatabaseOptions Default
-    {
-        get
-        {
-            string directory = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Qa403");
-            Directory.CreateDirectory(directory);
-            return new Qa403DatabaseOptions { Path = System.IO.Path.Combine(directory, "qa403.db") };
-        }
-    }
 }

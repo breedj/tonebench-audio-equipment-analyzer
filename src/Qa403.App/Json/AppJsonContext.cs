@@ -47,10 +47,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(MeasurementListResponse))]
 [JsonSerializable(typeof(MeasurementDetailResponse))]
 [JsonSerializable(typeof(IdResponse))]
-[JsonSerializable(typeof(SaveProjectRequest))]
 [JsonSerializable(typeof(ProjectResponse))]
-// Results.Ok(projects.Select(ToResponse)) — LINQ Select's static return type, not IReadOnlyList.
-[JsonSerializable(typeof(IEnumerable<ProjectResponse>))]
 [JsonSerializable(typeof(SaveMeasurementTypeRequest))]
 [JsonSerializable(typeof(MeasurementTypeResponse))]
 [JsonSerializable(typeof(IEnumerable<MeasurementTypeResponse>))]
@@ -79,6 +76,21 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ImpedanceFixtureConfig))]
 [JsonSerializable(typeof(UiLayoutConfig))]
 [JsonSerializable(typeof(CaptureDelayConfig))]
+[JsonSerializable(typeof(StartupConfig))]
+[JsonSerializable(typeof(AutosaveConfig))]
+[JsonSerializable(typeof(RecentProjectsConfig))]
+[JsonSerializable(typeof(LastOpenedProjectConfig))]
+// The project session: the open file, its dialogs' requests, the recent list and the file browser.
+[JsonSerializable(typeof(ProjectSessionResponse))]
+[JsonSerializable(typeof(OpenProjectRequest))]
+[JsonSerializable(typeof(CreateProjectRequest))]
+[JsonSerializable(typeof(DeleteProjectRequest))]
+[JsonSerializable(typeof(SaveProjectAsRequest))]
+[JsonSerializable(typeof(ProjectPropertiesRequest))]
+[JsonSerializable(typeof(RecentProjectResponse))]
+[JsonSerializable(typeof(IEnumerable<RecentProjectResponse>))]
+[JsonSerializable(typeof(RemoveRecentProjectRequest))]
+[JsonSerializable(typeof(FileBrowseResponse))]
 // A Qa403.Data record, so AppJsonContextTests' scan of the Endpoints namespace does not see it —
 // registered by hand, like the three config documents above it.
 [JsonSerializable(typeof(ReportSettingsConfig))]

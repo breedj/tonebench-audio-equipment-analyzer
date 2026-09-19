@@ -432,7 +432,10 @@ export function useMeasurements() {
     return true
   }
 
-  if (items.value.length === 0) load()
+  // No eager load: the list belongs to the open project, and the first use of this composable is
+  // App.vue's, at startup, when there may be none (the welcome screen) — a request then is a 409
+  // with nothing to show it on. MeasurementHistoryPanel loads on mount and on every type change,
+  // which covers every screen the list is shown on.
 
   return { items, filter, overlays, error, load, save, saveSweep, saveResponse, saveImpulse, saveImpedance,
     update, remove,

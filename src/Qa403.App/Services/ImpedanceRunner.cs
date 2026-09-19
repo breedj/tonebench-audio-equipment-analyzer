@@ -52,7 +52,7 @@ public sealed class ImpedanceRunner(
     DeviceSessionService session,
     SpectrumPipeline pipeline,
     SpectrumBroadcastHub hub,
-    ILogger<ImpedanceRunner> logger)
+    ILogger<ImpedanceRunner> logger) : IMeasurementRun
 {
     /// <summary>Columns sent to the chart per trace, matching the frequency response's.</summary>
     public const int DisplayColumns = 1600;

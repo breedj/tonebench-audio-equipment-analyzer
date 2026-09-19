@@ -154,27 +154,35 @@ defineExpose({ getSampleRateHz })
           </select>
         </label>
 
-        <label class="flex flex-col gap-1">
-          Averaging
-          <select
-            v-model="form.averaging"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="apply"
-          >
-            <option v-for="m in AVERAGING_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
-          </select>
-        </label>
+        <!-- One non-wrapping row, so the count always sits beside the mode it belongs to rather
+             than wrapping under it when the rail is narrow. -->
+        <div class="flex items-end gap-2">
+          <label class="flex flex-col gap-1">
+            Averaging
+            <select
+              v-model="form.averaging"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              @change="apply"
+            >
+              <option v-for="m in AVERAGING_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+            </select>
+          </label>
 
-        <label v-if="form.averaging !== 'Off'" class="flex flex-col gap-1">
-          {{ form.averaging === 'Linear' ? 'Spectra averaged' : 'Time constant' }}
-          <input
-            type="number"
-            min="1"
-            v-model.number="form.averageCount"
-            class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="apply"
-          />
-        </label>
+          <label
+            v-if="form.averaging !== 'Off'"
+            class="flex flex-col gap-1"
+            :title="form.averaging === 'Linear' ? 'How many records are averaged before the display holds.' : 'Time constant of the exponential average, in records.'"
+          >
+            Averages
+            <input
+              type="number"
+              min="1"
+              v-model.number="form.averageCount"
+              class="w-12 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              @change="apply"
+            />
+          </label>
+        </div>
       </div>
     </div>
     <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">Loading…</div>

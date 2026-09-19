@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { useDevice } from './composables/useDevice'
 import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
 import { useProjects } from './composables/useProjects'
+import { useProjectSession } from './composables/useProjectSession'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
 import { useLoadOhms } from './composables/useLoadOhms'
@@ -12,12 +13,18 @@ import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useChartDisplay } from './composables/useChartDisplay'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
 import { useCaptureDelay } from './composables/useCaptureDelay'
+import { useAutosave } from './composables/useAutosave'
 import { determineAttenuation, nearestInputRange } from './attenuation'
 import { formatAveraging } from './metrics'
 import { stopRun } from './deviceControl'
 import DeviceStatusBar from './components/DeviceStatusBar.vue'
 import MeasurementSidebar from './components/MeasurementSidebar.vue'
-import ProjectPanel from './components/ProjectPanel.vue'
+import ProjectMenu, { type ProjectMenuAction } from './components/ProjectMenu.vue'
+import ProjectDialog from './components/ProjectDialog.vue'
+import FileBrowserDialog from './components/FileBrowserDialog.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
+import WelcomeScreen from './components/WelcomeScreen.vue'
+import { type ProjectDialogMode, type ProjectForm } from './projects/projectDialogModel'
 import GeneratorPanel from './components/GeneratorPanel.vue'
 import SpectrumConfigPanel from './components/SpectrumConfigPanel.vue'
 import SpectrumChart from './components/SpectrumChart.vue'
@@ -146,18 +153,24 @@ const averagesLabel = computed(() => {
   )
 })
 const {
-  projects,
+  currentProject,
+  sessionLoaded,
   types,
   currentProjectId,
   currentTypeId,
   loadedParams,
   dirtyTypeIds,
+  hasDirty: hasAnyDirtyInProject,
   markDirty,
+  setAutosaveFlush,
   saveMeasurementType,
   saveMeasurementTypeAs,
   saveProject,
-  saveProjectAs,
 } = useProjects()
+const projectSession = useProjectSession()
+// Configuration ▸ General ▸ Autosave — see the isCurrentTypeDirty watcher further down.
+const { autosaveEnabled, load: loadAutosave } = useAutosave()
+void loadAutosave()
 
 // Syncs the display-only settings — the metrics-picker selection, the oscilloscope's period count,
 // and the spectrum chart's own axis bounds/line-style toggles — whenever a measurement type is
@@ -192,7 +205,11 @@ const reportLiveSubject = shallowRef<ReportSubject | null>(null)
 const reportPreselectResultId = ref<number | null>(null)
 const projectReportOpen = ref(false)
 const saveTypeAsOpen = ref(false)
-const saveProjectAsOpen = ref(false)
+// The Project menu's dialogs: one form for New…/Save As…/Properties… (its mode says which), and
+// the file dialog for Open…. See useProjectSession for what each action does once confirmed.
+const projectDialogOpen = ref(false)
+const projectDialogMode = ref<ProjectDialogMode>('new')
+const openProjectDialogOpen = ref(false)
 const metricPickerOpen = ref(false)
 // The FFT screen's metrics block, handed to SpectrumChart so its height fit leaves room for it.
 const fftAbove = ref<HTMLDivElement | null>(null)
@@ -200,11 +217,6 @@ const configDialogOpen = ref(false)
 // The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
 // because the header's button and the per-measurement help button have to drive one dialog.
 const { openManual, openManualForKind } = useManual()
-// Placeholder for the real "Projects" dialog — for now the button just expands the existing
-// project list/create/delete panel in place, until that gets its own proper dialog.
-const projectPanelOpen = ref(false)
-
-const currentProject = computed(() => projects.value.find((p) => p.id === currentProjectId.value) ?? null)
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 // ---------------------------------------------------------------------------
 // THD vs frequency
@@ -1053,9 +1065,39 @@ watch(isSweepKind, (isSweep) => {
 })
 
 const isCurrentTypeDirty = computed(() => currentTypeId.value !== null && dirtyTypeIds.value.has(currentTypeId.value))
-const hasAnyDirtyInProject = computed(() =>
-  types.value.some((t) => t.projectId === currentProjectId.value && dirtyTypeIds.value.has(t.id)),
-)
+
+/**
+ * Autosave: the dirty flag going up is the trigger, and the save is the Save button's own
+ * (saveCurrentType). Debounced a little rather than immediate, because a run of edits — typing a
+ * frequency digit by digit, dragging a zoom — dirties the type on the first one and the save reads
+ * the live state when it fires, so one write covers the whole run. The flag stays up until that
+ * write lands, so nothing edited in between is missed: the next edit after a save raises it again.
+ *
+ * Only while the type is still dirty when the timer fires: a switch in between has already saved
+ * (through the flush below) or discarded, and saving a clean type would just rewrite it.
+ */
+const AUTOSAVE_DEBOUNCE_MS = 750
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelPendingAutosave() {
+  if (autosaveTimer !== null) clearTimeout(autosaveTimer)
+  autosaveTimer = null
+}
+
+async function autosaveNow() {
+  cancelPendingAutosave()
+  if (!autosaveEnabled.value || !isCurrentTypeDirty.value) return
+  await saveCurrentType()
+}
+
+watch([isCurrentTypeDirty, autosaveEnabled], ([dirty, enabled]) => {
+  cancelPendingAutosave()
+  if (!dirty || !enabled) return
+  autosaveTimer = setTimeout(() => void autosaveNow(), AUTOSAVE_DEBOUNCE_MS)
+})
+
+// Navigating away flushes instead of asking — see useProjects.confirmDiscardCurrentIfDirty.
+setAutosaveFlush(autosaveNow)
 
 // Every handler below talks to the backend and must not fail silently — an uncaught rejection
 // from a template @click handler is swallowed by Vue (logged to console, nothing shown), which
@@ -2073,12 +2115,80 @@ function saveCurrentProject() {
   })
 }
 
-function confirmSaveProjectAs(name: string) {
+// ---------------------------------------------------------------------------
+// The Project menu
+// ---------------------------------------------------------------------------
+function onProjectAction(action: ProjectMenuAction) {
+  switch (action) {
+    case 'new':
+    case 'saveAs':
+    case 'properties':
+      projectDialogMode.value = action
+      projectDialogOpen.value = true
+      break
+    case 'open':
+      openProjectDialogOpen.value = true
+      break
+    case 'save':
+      void saveCurrentProject()
+      break
+    case 'report':
+      openProjectReport()
+      break
+    case 'delete':
+      void withErrorReporting(async () => {
+        await projectSession.remove()
+      })
+      break
+    case 'close':
+      void withErrorReporting(async () => {
+        await projectSession.close()
+      })
+      break
+  }
+}
+
+/** The New…/Save As…/Properties… form, confirmed. The dialog stays open on failure so the input is not lost. */
+function confirmProjectDialog(form: ProjectForm) {
   return withErrorReporting(async () => {
-    await saveProjectAs(name)
-    saveProjectAsOpen.value = false
+    const notes = form.notes.length > 0 ? form.notes : null
+    let done = false
+    switch (projectDialogMode.value) {
+      case 'new':
+        done = await projectSession.create({ name: form.name, notes, path: form.location })
+        break
+      case 'saveAs':
+        done = await projectSession.saveAs(
+          { name: form.name, notes, path: form.location, includeResults: form.includeResults },
+          async () => {
+            if (currentProjectId.value !== null) await saveProject(currentProjectId.value, buildStagedConfig(), buildTypeParamsJson())
+          },
+        )
+        break
+      case 'properties':
+        done = await projectSession.updateProperties({ name: form.name, notes })
+        break
+    }
+    if (done) projectDialogOpen.value = false
   })
 }
+
+function openProjectFile(path: string) {
+  return withErrorReporting(async () => {
+    if (await projectSession.open(path)) openProjectDialogOpen.value = false
+  })
+}
+
+// Ctrl+S is Project ▸ Save. Ctrl+N and Ctrl+O are left to the browser: it owns them and a page
+// can only sometimes take them over, which is worse than never.
+function onWindowKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    if (currentProjectId.value !== null && hasAnyDirtyInProject.value) void saveCurrentProject()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onWindowKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 </script>
 
 <template>
@@ -2086,44 +2196,12 @@ function confirmSaveProjectAs(name: string) {
     <UpdateBanner />
     <header class="flex items-center gap-3 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
       <span class="text-sm font-semibold">QA403 audio analyzer</span>
-      <button
-        type="button"
-        class="flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        @click="projectPanelOpen = !projectPanelOpen"
-      >
-        {{ currentProject?.name ?? 'Select project' }}
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      <button
-        v-if="currentProjectId !== null"
-        type="button"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        :disabled="!hasAnyDirtyInProject"
-        title="Save every changed measurement in this project at once."
-        @click="saveCurrentProject"
-      >
-        Save project
-      </button>
-      <button
-        v-if="currentProjectId !== null"
-        type="button"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        title="Save this project and its measurements as a new project, leaving this one untouched."
-        @click="saveProjectAsOpen = true"
-      >
-        Save project as…
-      </button>
-      <button
-        v-if="currentProjectId !== null"
-        type="button"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        title="A PDF of the stored results in this project, one chapter each, grouped by measurement."
-        @click="openProjectReport"
-      >
-        Project report…
-      </button>
+      <ProjectMenu
+        :project-name="currentProject?.name ?? null"
+        :dirty="hasAnyDirtyInProject"
+        :busy="projectSession.busy.value"
+        @action="onProjectAction"
+      />
       <span class="flex-1"></span>
       <!-- The whole manual, from its index. Each measurement screen has its own "?" further down
            that jumps straight to that measurement's chapter. -->
@@ -2155,11 +2233,18 @@ function confirmSaveProjectAs(name: string) {
       </button>
     </header>
 
-    <div v-if="projectPanelOpen" class="border-b border-neutral-200 p-4 dark:border-neutral-800">
-      <ProjectPanel />
-    </div>
+    <!-- No project open is the welcome screen; the header (Project menu, manual, configuration)
+         and the status bar stay, so the device can be connected and a database problem read
+         without one. `sessionLoaded` keeps a reload of an open project from flashing the welcome
+         screen while GET /api/project is in flight. -->
+    <WelcomeScreen
+      v-if="sessionLoaded && currentProject === null"
+      @new="onProjectAction('new')"
+      @open="onProjectAction('open')"
+      @open-recent="openProjectFile"
+    />
 
-    <div class="flex flex-1 overflow-hidden">
+    <div v-else-if="currentProject !== null" class="flex flex-1 overflow-hidden">
       <MeasurementSidebar />
 
       <main class="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
@@ -3133,8 +3218,13 @@ function confirmSaveProjectAs(name: string) {
                 :overlays="overlays"
                 @viewport-change="setViewport"
               />
-              <WaterfallChart v-if="chartShowWaterfall" ref="waterfallChart" class="mt-3" :spectrum="spectrum" />
-              <OscilloscopeChart v-if="chartShowOscilloscope" class="mt-3" :scope="scope" :status="status" />
+              <!-- v-show, not v-if: the waterfall's history is collected frame by frame by the
+                   mounted instance (it is what the report exports, see WaterfallChart.exportPng),
+                   and the oscilloscope's period count and channel are its own state. Unchecking
+                   the panel hides it; unmounting it would throw all of that away. Both charts
+                   skip a zero-width resize while hidden and refit when shown again. -->
+              <WaterfallChart v-show="chartShowWaterfall" ref="waterfallChart" class="mt-3" :spectrum="spectrum" />
+              <OscilloscopeChart v-show="chartShowOscilloscope" class="mt-3" :scope="scope" :status="status" />
             </div>
 
             <template #aside>
@@ -3197,13 +3287,20 @@ function confirmSaveProjectAs(name: string) {
       @close="saveTypeAsOpen = false"
       @confirm="confirmSaveTypeAs"
     />
-    <SaveAsDialog
-      :open="saveProjectAsOpen"
-      title="Save project as…"
-      label="New project name"
-      @close="saveProjectAsOpen = false"
-      @confirm="confirmSaveProjectAs"
+    <ProjectDialog
+      :open="projectDialogOpen"
+      :mode="projectDialogMode"
+      :current="currentProject"
+      @close="projectDialogOpen = false"
+      @confirm="confirmProjectDialog"
     />
+    <FileBrowserDialog
+      :open="openProjectDialogOpen"
+      mode="open"
+      @close="openProjectDialogOpen = false"
+      @select="openProjectFile"
+    />
+    <ConfirmDialog />
     <MetricPickerDialog :open="metricPickerOpen" @close="metricPickerOpen = false" />
     <ReportDialog
       :open="reportOpen"

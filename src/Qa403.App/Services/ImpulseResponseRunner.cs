@@ -34,7 +34,7 @@ public sealed class ImpulseResponseRunner(
     DeviceSessionService session,
     SpectrumPipeline pipeline,
     ILoopbackReferenceStore referenceStore,
-    ILogger<ImpulseResponseRunner> logger)
+    ILogger<ImpulseResponseRunner> logger) : IMeasurementRun
 {
     /// <summary>Columns per magnitude/phase trace — the same as the frequency response's, because they are the same curves.</summary>
     public const int DisplayColumns = 1600;

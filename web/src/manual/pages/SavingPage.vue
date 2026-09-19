@@ -1,3 +1,9 @@
+<script setup lang="ts">
+import { useManual } from '../useManual'
+
+const { showPage } = useManual()
+</script>
+
 <template>
   <div>
     <h1>Projects, saving and history</h1>
@@ -17,8 +23,8 @@
       <tbody>
         <tr>
           <td>Project</td>
-          <td>A named body of work holding a list of measurements.</td>
-          <td>Add project, Save project, Save project as…</td>
+          <td>A <code>.qa403</code> file holding a list of measurements and their results.</td>
+          <td>Project ▸ Save, Save As…</td>
         </tr>
         <tr>
           <td>Measurement</td>
@@ -35,16 +41,15 @@
 
     <h2>Projects</h2>
     <p>
-      The button at the top left names the current project and opens the project list. From there
-      you can select one, create one with an optional note, or delete one. Deleting a project
-      deletes the measurements and results inside it.
-    </p>
-    <p>
-      <strong>Save project</strong> saves every changed measurement in the project at once — the
-      button is enabled only when something is actually unsaved.
-      <strong>Save project as…</strong> copies the project and its measurements under a new name and
-      leaves the original untouched, which is the safe way to start a variant of a setup you want to
-      keep.
+      A project is one file, opened, created and closed from the <strong>Project</strong> menu at
+      the top left — its own chapter,
+      <button type="button" class="manual-link" @click="showPage('projects')">Projects</button>,
+      covers the menu, the welcome screen and where the files go. Two of its items belong here:
+      <strong>Save</strong> (or <kbd>Ctrl</kbd>+<kbd>S</kbd>) saves every changed measurement in the
+      project at once and is enabled only when something is actually unsaved, and
+      <strong>Save As…</strong> writes the project to a new file — with or without its results — and
+      continues there, leaving the original untouched, which is the safe way to start a variant of a
+      setup you want to keep.
     </p>
 
     <h2>Measurements</h2>
@@ -58,6 +63,8 @@
       <strong>Save</strong> writes the current settings into the selected measurement.
       <strong>Save as…</strong> creates a new measurement from them and lets the current one revert
       to its own last-saved settings, so experimenting with a setup never costs you the original.
+      With <strong>Autosave measurement settings</strong> ticked in Configuration ▸ General, Save
+      happens by itself a moment after every change, and the red dot only ever flickers.
     </p>
     <p>
       Above every screen's History details sits a <strong>Notes</strong> box: free text about the
@@ -115,7 +122,7 @@
     <h2>Screenshots and reports</h2>
     <p>
       Two more exports sit in the toolbar above every chart, next to the save buttons, and a third in
-      the project bar at the top of the window.
+      the Project menu at the top of the window.
     </p>
     <ul>
       <li>
@@ -158,7 +165,7 @@
         results are ticked is not.
       </li>
       <li>
-        <strong>Project report…</strong> makes one PDF of the project: a title page with the
+        <strong>Project ▸ Report…</strong> makes one PDF of the project: a title page with the
         project's notes, a contents list, then the measurements in the sidebar's order — one chapter
         per stored result, the current measurement of the screen that is open when something has
         been measured, and for a measurement that has no result at all a chapter of its

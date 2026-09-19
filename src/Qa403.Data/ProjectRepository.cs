@@ -1,50 +1,83 @@
 ﻿using Dapper;
+using Microsoft.Data.Sqlite;
 
 namespace Qa403.Data;
 
-/// <summary>Projects and their configured measurement-types. Dapper throughout -- metadata only, no BLOBs.</summary>
+/// <summary>
+/// The project and its configured measurement-types. Dapper throughout -- metadata only, no BLOBs.
+///
+/// <para>A project is one file, and the file holds exactly one <c>project</c> row (the schema's
+/// <c>project_id</c> columns predate that and are kept). So there is no list and no delete here:
+/// listing projects is the recent-projects list and deleting one is deleting its file, both the
+/// project session's business. The static overloads that take a connection exist for that session,
+/// which works on files that are not (yet) the current one.</para>
+/// </summary>
 public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
 {
-    public async Task<IReadOnlyList<ProjectRow>> ListProjectsAsync(CancellationToken ct)
-    {
-        await using var connection = await connectionFactory.OpenAsync(ct);
-        var rows = await connection.QueryAsync<ProjectRowRaw>(
-            "SELECT id AS Id, name AS Name, notes AS Notes, created_utc AS CreatedUtc FROM project ORDER BY name;");
-        return rows.Select(r => new ProjectRow(r.Id, r.Name, r.Notes, Qa403Timestamp.Parse(r.CreatedUtc))).ToList();
-    }
-
     public async Task<long> CreateProjectAsync(string name, string? notes, CancellationToken ct)
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
-        return await connection.ExecuteScalarAsync<long>(
+        return await CreateProjectAsync(connection, name, notes);
+    }
+
+    public static Task<long> CreateProjectAsync(SqliteConnection connection, string name, string? notes) =>
+        connection.ExecuteScalarAsync<long>(
             """
             INSERT INTO project (name, notes, created_utc) VALUES (@name, @notes, @createdUtc)
             RETURNING id;
             """,
             new { name, notes, createdUtc = Qa403Timestamp.Now() });
+
+    /// <summary>Every project row in the file — one for a project file, several for a legacy <c>qa403.db</c>.</summary>
+    public static async Task<IReadOnlyList<ProjectRow>> ListProjectsAsync(SqliteConnection connection)
+    {
+        var rows = await connection.QueryAsync<ProjectRowRaw>(
+            "SELECT id AS Id, name AS Name, notes AS Notes, created_utc AS CreatedUtc FROM project ORDER BY id;");
+        return rows.Select(r => new ProjectRow(r.Id, r.Name, r.Notes, Qa403Timestamp.Parse(r.CreatedUtc))).ToList();
     }
 
     public async Task<bool> UpdateProjectAsync(long id, string name, string? notes, CancellationToken ct)
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
+        return await UpdateProjectAsync(connection, id, name, notes);
+    }
+
+    public static async Task<bool> UpdateProjectAsync(SqliteConnection connection, long id, string name, string? notes)
+    {
         int affected = await connection.ExecuteAsync(
             "UPDATE project SET name = @name, notes = @notes WHERE id = @id;",
             new { id, name, notes });
         return affected > 0;
     }
 
-    /// <summary>Rejects deletion while the project still owns measurement-types -- 409 at the endpoint layer.</summary>
-    public async Task<bool> DeleteProjectAsync(long id, CancellationToken ct)
+    /// <summary>
+    /// Copies the measurement types of one project into another file — Save As without results.
+    /// The order is preserved by copying <c>sort_order</c> as is, which is what the sidebar sorts on;
+    /// ids are not, since the destination allocates its own.
+    /// </summary>
+    public static async Task CopyTypesAsync(SqliteConnection from, long fromProjectId, SqliteConnection to, long toProjectId)
     {
-        await using var connection = await connectionFactory.OpenAsync(ct);
+        var rows = await from.QueryAsync<MeasurementTypeRowRaw>(
+            """
+            SELECT id AS Id, project_id AS ProjectId, kind AS Kind, name AS Name, notes AS Notes,
+                   params_json AS ParamsJson, sort_order AS SortOrder, created_utc AS CreatedUtc
+            FROM measurement_type WHERE project_id = @fromProjectId ORDER BY sort_order, id;
+            """,
+            new { fromProjectId });
 
-        long typeCount = await connection.ExecuteScalarAsync<long>(
-            "SELECT COUNT(*) FROM measurement_type WHERE project_id = @id;", new { id });
-        if (typeCount > 0)
-            throw new InvalidOperationException($"Project {id} still has {typeCount} measurement type(s); delete those first.");
-
-        int affected = await connection.ExecuteAsync("DELETE FROM project WHERE id = @id;", new { id });
-        return affected > 0;
+        foreach (var row in rows)
+        {
+            await to.ExecuteAsync(
+                """
+                INSERT INTO measurement_type (project_id, kind, name, notes, params_json, sort_order, created_utc)
+                VALUES (@projectId, @kind, @name, @notes, @paramsJson, @sortOrder, @createdUtc);
+                """,
+                new
+                {
+                    projectId = toProjectId, kind = row.Kind, name = row.Name, notes = row.Notes,
+                    paramsJson = row.ParamsJson, sortOrder = row.SortOrder, createdUtc = row.CreatedUtc,
+                });
+        }
     }
 
     public async Task<IReadOnlyList<MeasurementTypeRow>> ListTypesAsync(long projectId, CancellationToken ct)

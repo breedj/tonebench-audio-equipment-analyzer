@@ -10,8 +10,9 @@ const { showPage } = useManual()
 
     <p>
       This app drives a QuantAsylum QA403 over USB, does its own signal processing, and stores every
-      result in a local database. Nothing is uploaded anywhere and nothing installs itself; the
-      analyzer window is an ordinary browser tab talking to a server running on this machine.
+      result in a project file you name and place yourself. Nothing is uploaded anywhere and nothing
+      installs itself; the analyzer window is an ordinary browser tab talking to a server running on
+      this machine.
     </p>
 
     <h2>The device</h2>
@@ -33,13 +34,17 @@ const { showPage } = useManual()
     <h2>Projects and measurements</h2>
     <p>
       Work is organised two levels deep. A <strong>project</strong> is a body of work — one
-      amplifier, one investigation. Inside it live <strong>measurements</strong>: named,
+      amplifier, one investigation — and it is one <code>.qa403</code> file on disk. Inside it live
+      <strong>measurements</strong>: named,
       configured instruments, listed in the sidebar on the left. A measurement is not a
       reading — it is a saved <em>setup</em>, such as "1 kHz THD at 1 W" or "response into 8 Ω",
       which you select, run, and run again later under the same conditions.
     </p>
     <ol>
-      <li>Pick or create a project with the project button at the top left.</li>
+      <li>
+        Create a project with <strong>New project…</strong> on the welcome screen, or open one from
+        its recent list — later, from the <strong>Project</strong> menu at the top left.
+      </li>
       <li>Press <strong>+ New measurement</strong> in the sidebar and choose a type.</li>
       <li>Set it up, run it, and save the readings you want to keep.</li>
     </ol>
@@ -61,7 +66,7 @@ const { showPage } = useManual()
     <p>
       A red dot next to a measurement's name means its settings have been changed but not saved.
       <strong>Save</strong> stores the settings into that measurement, <strong>Save as…</strong>
-      makes a new measurement from them, and <strong>Save project</strong> saves every changed
+      makes a new measurement from them, and <strong>Project ▸ Save</strong> saves every changed
       measurement in the project at once.
     </p>
 
@@ -152,6 +157,10 @@ const { showPage } = useManual()
       <li>
         <button type="button" class="manual-link" @click="showPage('fft-spectrum')">FFT analysis</button>
         — the screen to learn first; everything else is built on what it shows.
+      </li>
+      <li>
+        <button type="button" class="manual-link" @click="showPage('projects')">Projects</button>
+        — project files, the Project menu and the welcome screen.
       </li>
       <li>
         <button type="button" class="manual-link" @click="showPage('saving')">

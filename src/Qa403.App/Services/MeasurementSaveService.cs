@@ -130,7 +130,10 @@ public sealed class MeasurementSaveService(
             SampleRateHz: 192000.0,
             MeasureNoiseFloor: true,
             AdaptiveResolution: true,
-            ThdMethod: nameof(Services.ThdMethod.Conventional)), SerializerOptions);
+            ThdMethod: nameof(Services.ThdMethod.Conventional),
+            // On for a new measurement only: a stored type keeps its own (null reads as off), so
+            // nothing saved earlier starts refitting its axes -- see SweepDisplayPanel.vue.
+            ChartAutofitOnDone: true), SerializerOptions);
 
     /// <summary>
     /// A brand-new THD-vs-amplitude type's <c>params_json</c>, on the same terms as
@@ -150,7 +153,8 @@ public sealed class MeasurementSaveService(
             Window: WindowType.Hann,
             AverageCount: 4,
             SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
-            MeasureNoiseFloor: true), SerializerOptions);
+            MeasureNoiseFloor: true,
+            ChartAutofitOnDone: true), SerializerOptions);
 
     /// <summary>
     /// A brand-new frequency-response type's <c>params_json</c>, on the same terms as
@@ -1013,6 +1017,9 @@ public sealed class MeasurementSaveService(
     /// actually had configured — and a brand-new type needs something to Run rather than two
     /// disabled channels.</para>
     ///
+    /// <para>Autofit-when-done is switched on for the same reason SnapToBin is: it is the default a
+    /// fresh measurement should start from, and the live session carries no value for it at all.</para>
+    ///
     /// <para>SnapToBin is unconditional rather than gated like the channel: unlike "silent", "off"
     /// has no fallback state to detect it against — <see cref="GeneratorConfig.SnapToBin"/> is a
     /// plain bool, so a session left with it off from an earlier experiment (or a type that was
@@ -1033,6 +1040,10 @@ public sealed class MeasurementSaveService(
             parameters = parameters with { Generator = parameters.Generator with { Left = parameters.Generator.Left with { Enabled = true } } };
         if (!parameters.Generator.SnapToBin)
             parameters = parameters with { Generator = parameters.Generator with { SnapToBin = true } };
+        // "Autofit when measurement done" starts on for a new type. Only here, never in
+        // BuildParameters: a stored type's null keeps reading as off, so nothing saved before this
+        // default existed starts refitting its axes on the next load.
+        parameters = parameters with { ChartAutofitOnDone = true };
         return JsonSerializer.Serialize(parameters, SerializerOptions);
     }
 

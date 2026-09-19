@@ -184,7 +184,7 @@ public class SweepTypeParamsTests
             var saveService = new MeasurementSaveService(
                 session, pipeline, sweepRunner, responseRunner, steppedRunner,
                 new ImpulseResponseRunner(
-                    session, pipeline, new SqliteLoopbackReferenceStore(new MeasurementRepository(factory)),
+                    session, pipeline, new InMemoryLoopbackReferenceStore(),
                     NullLogger<ImpulseResponseRunner>.Instance),
                 new ImpedanceRunner(
                     session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),

@@ -2,7 +2,8 @@ namespace Qa403.Data;
 
 /// <summary>
 /// Where <c>qa403-config.db</c> lives — the application's own configuration, kept in a
-/// <b>separate file</b> from the measurement history in <c>qa403.db</c>.
+/// <b>separate file</b> from the measurement history, which is one <c>.qa403</c> project file per
+/// project (see <see cref="CurrentProjectFile"/>).
 ///
 /// <para><b>Why a second database rather than more tables in the first one.</b> The two hold
 /// different kinds of thing and want different lifetimes. Measurement history is portable: it is
@@ -15,11 +16,14 @@ namespace Qa403.Data;
 /// so.</para>
 ///
 /// <para>Separating them makes that impossible by construction. It also means a corrupt or deleted
-/// configuration costs you preferences rather than years of measurements, and that a
-/// <c>qa403.db</c> restored from backup does not quietly revert the calibration.</para>
+/// configuration costs you preferences rather than years of measurements, and that a project file
+/// restored from backup does not quietly revert the calibration. The loopback calibrations of the
+/// impulse response live here for the same reason (config migration 002), as do the recent-projects
+/// list, the last opened project and the startup preference — all about this machine.</para>
 ///
-/// <para>Same directory and the same override mechanism as <see cref="Qa403DatabaseOptions"/> —
-/// the <c>Config:Path</c> configuration key.</para>
+/// <para>Under LocalApplicationData (<c>~/.local/share/Qa403</c> on Linux) rather than next to the
+/// binary, because a rebuild must not silently destroy it; override with the <c>Config:Path</c>
+/// configuration key.</para>
 /// </summary>
 public sealed record Qa403ConfigDatabaseOptions
 {

@@ -10,6 +10,11 @@
  * The `xAxis` model is what tells the two screens apart. It is 'frequency' on the THD-vs-frequency
  * screen, where it never changes and its selector is hidden; on the amplitude screen it is one of
  * the three DUT-referred choices and the user picks between them here.
+ *
+ * Multi-root: the two axis windows are their own sections ahead of Display, laid out the way the
+ * FFT screen's dBV range / Frequency range are (ChartDisplayPanel.vue) — label over a full-width
+ * field, Autofit under — so the sections flow into MeasurementLayout's aside grid one by one like
+ * every other display panel's.
  */
 
 import { computed, watch } from 'vue'
@@ -329,6 +334,129 @@ function onXToChange(event: Event) {
 </script>
 
 <template>
+  <CollapsibleSection :title="unit === 'db' ? 'dB range' : 'Distortion range (%)'" size="xs">
+    <template v-if="unit === 'db'">
+      <label class="flex flex-col gap-1 text-xs">
+        Top
+        <input
+          :value="yTopDb"
+          type="number"
+          :min="yBottomDb + DB_MIN_SPAN"
+          :max="DB_MAX"
+          :step="DB_STEP"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onTopDbChange"
+        />
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        Bottom
+        <input
+          :value="yBottomDb"
+          type="number"
+          :min="DB_MIN"
+          :max="yTopDb - DB_MIN_SPAN"
+          :step="DB_STEP"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onBottomDbChange"
+        />
+      </label>
+    </template>
+    <template v-else>
+      <label class="flex flex-col gap-1 text-xs">
+        Top
+        <select
+          v-model.number="yMaxPercent"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="v in Y_MAX_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        Bottom
+        <select
+          v-model.number="yMinPercent"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="v in Y_MIN_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
+        </select>
+      </label>
+    </template>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      title="Fits to the highest and lowest value across every currently-checked trace. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
+      @click="requestAutofitDistortion"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <CollapsibleSection :title="`${sweepXLabel(xAxis)} range (${sweepXUnit(xAxis)})`" size="xs">
+    <!-- Only the amplitude screen has a choice to make: output voltage and output power are what
+         the DUT delivered, input voltage is what it was driven with. -->
+    <label v-if="!isFrequencyAxis" class="flex flex-col gap-1 text-xs">
+      X axis
+      <select
+        v-model="xAxis"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="a in AMPLITUDE_X_AXES" :key="a.value" :value="a.value">{{ a.label }}</option>
+      </select>
+    </label>
+    <template v-if="isFrequencyAxis">
+      <label class="flex flex-col gap-1 text-xs">
+        From
+        <select
+          v-model.number="xFrom"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        To
+        <select
+          v-model.number="xTo"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
+        </select>
+      </label>
+    </template>
+    <template v-else>
+      <label class="flex flex-col gap-1 text-xs">
+        From
+        <input
+          :value="xFrom"
+          type="number"
+          step="any"
+          :min="X_MIN_VALUE"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onXFromChange"
+        />
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        To
+        <input
+          :value="xTo"
+          type="number"
+          step="any"
+          :min="X_MIN_VALUE"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onXToChange"
+        />
+      </label>
+    </template>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      title="Fits From/To to the lowest and highest measured value on this axis."
+      @click="requestAutofitX"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
   <CollapsibleSection title="Display">
     <div class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Units</span>
@@ -420,134 +548,6 @@ function onXToChange(event: Event) {
         <input v-model="showNoiseFloor" type="checkbox" />
         Noise floor
       </label>
-    </div>
-
-    <div class="flex flex-col gap-1.5 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">{{ unit === 'db' ? 'dB range' : 'Distortion range (%)' }}</span>
-      <template v-if="unit === 'db'">
-        <label class="flex items-center justify-between gap-2">
-          Top
-          <input
-            :value="yTopDb"
-            type="number"
-            :min="yBottomDb + DB_MIN_SPAN"
-            :max="DB_MAX"
-            :step="DB_STEP"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="onTopDbChange"
-          />
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          Bottom
-          <input
-            :value="yBottomDb"
-            type="number"
-            :min="DB_MIN"
-            :max="yTopDb - DB_MIN_SPAN"
-            :step="DB_STEP"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="onBottomDbChange"
-          />
-        </label>
-      </template>
-      <template v-else>
-        <label class="flex items-center justify-between gap-2">
-          Top
-          <select
-            v-model.number="yMaxPercent"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          >
-            <option v-for="v in Y_MAX_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
-          </select>
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          Bottom
-          <select
-            v-model.number="yMinPercent"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          >
-            <option v-for="v in Y_MIN_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
-          </select>
-        </label>
-      </template>
-      <button
-        type="button"
-        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        title="Fits to the highest and lowest value across every currently-checked trace. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
-        @click="requestAutofitDistortion"
-      >
-        Autofit
-      </button>
-    </div>
-
-    <!-- Only the amplitude screen has a choice to make: output voltage and output power are what
-         the DUT delivered, input voltage is what it was driven with. -->
-    <div v-if="!isFrequencyAxis" class="flex flex-col gap-1.5 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">X axis</span>
-      <select
-        v-model="xAxis"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-      >
-        <option v-for="a in AMPLITUDE_X_AXES" :key="a.value" :value="a.value">{{ a.label }}</option>
-      </select>
-    </div>
-
-    <div class="flex flex-col gap-1.5 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">
-        {{ sweepXLabel(xAxis) }} range ({{ sweepXUnit(xAxis) }})
-      </span>
-      <template v-if="isFrequencyAxis">
-        <label class="flex items-center justify-between gap-2">
-          From
-          <select
-            v-model.number="xFrom"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          >
-            <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
-          </select>
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          To
-          <select
-            v-model.number="xTo"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          >
-            <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
-          </select>
-        </label>
-      </template>
-      <template v-else>
-        <label class="flex items-center justify-between gap-2">
-          From
-          <input
-            :value="xFrom"
-            type="number"
-            step="any"
-            :min="X_MIN_VALUE"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="onXFromChange"
-          />
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          To
-          <input
-            :value="xTo"
-            type="number"
-            step="any"
-            :min="X_MIN_VALUE"
-            class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            @change="onXToChange"
-          />
-        </label>
-      </template>
-      <button
-        type="button"
-        class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        title="Fits From/To to the lowest and highest measured value on this axis."
-        @click="requestAutofitX"
-      >
-        Autofit
-      </button>
     </div>
 
     <div class="flex flex-col gap-1.5 text-xs">

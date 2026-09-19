@@ -147,6 +147,55 @@ public static class ConfigEndpoints
             return Results.Ok(config);
         });
 
+        // Whether to start on the welcome screen. Client-owned; the server-owned counterpart, which
+        // project was open last, is written by ProjectSessionService and never by a PUT.
+        group.MapGet("/startup", async (ProjectSessionService session, CancellationToken ct) =>
+            Results.Ok(await session.ReadStartupAsync(ct)));
+
+        group.MapPut("/startup", async (
+            StartupConfig config, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            await repo.SetAsync(
+                ConfigRepository.StartupKey,
+                JsonSerializer.Serialize(config, jsonOptions.Value.SerializerOptions),
+                ct);
+
+            return Results.Ok(config);
+        });
+
+        // Whether measurement settings save themselves as they change. Client-owned like the
+        // startup preference: the browser is what decides when to call Save, so it reads the flag
+        // and the server only keeps it. Defaults rather than 404, and an unreadable document is the
+        // default -- nothing about a preference is worth an error.
+        group.MapGet("/autosave", async (
+            ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            string? stored = await repo.GetAsync(ConfigRepository.AutosaveKey, ct);
+            if (string.IsNullOrWhiteSpace(stored))
+                return Results.Ok(AutosaveConfig.Default);
+
+            try
+            {
+                var config = JsonSerializer.Deserialize<AutosaveConfig>(stored, jsonOptions.Value.SerializerOptions);
+                return Results.Ok(config ?? AutosaveConfig.Default);
+            }
+            catch (JsonException)
+            {
+                return Results.Ok(AutosaveConfig.Default);
+            }
+        });
+
+        group.MapPut("/autosave", async (
+            AutosaveConfig config, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
+        {
+            await repo.SetAsync(
+                ConfigRepository.AutosaveKey,
+                JsonSerializer.Serialize(config, jsonOptions.Value.SerializerOptions),
+                ct);
+
+            return Results.Ok(config);
+        });
+
         group.MapPut("/ui-layout", async (
             UiLayoutConfig layout, ConfigRepository repo, IOptions<JsonOptions> jsonOptions, CancellationToken ct) =>
         {

@@ -513,9 +513,11 @@ watch(channelAvailable, ([left, right]) => {
 // ResizeObserver in FrequencyResponseChart.
 let resizeObserver: ResizeObserver | null = null
 function handleResize() {
-  if (plot && containerRef.value) {
-    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
-  }
+  if (!plot || !containerRef.value) return
+  // Zero while the panel is hidden (App.vue's v-show) -- a 0 px canvas is not a size to keep; the
+  // observer fires again with the real width when the panel is shown.
+  const width = containerRef.value.getBoundingClientRect().width
+  if (width > 0) plot.setSize({ width, height: CHART_HEIGHT })
 }
 
 // Axis colours are baked into the options at construction, same as the other two charts — a

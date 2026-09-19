@@ -92,6 +92,36 @@ public class ConfigDatabaseTests
         }
     }
 
+    /// <summary>
+    /// The config set, pinned the way <c>MigrationRunnerTests</c> pins the measurement set: adding a
+    /// file here is a deliberate act, and 002 is the loopback calibration table that moved out of
+    /// the project file.
+    /// </summary>
+    [Fact]
+    public async Task ConfigMigrations_RecordEachVersionInSchemaVersion()
+    {
+        string configPath = TestDb.CreateTempPath();
+        try
+        {
+            var config = await TestDb.CreateMigratedConfigFactoryAsync(configPath);
+            await using var connection = await config.OpenAsync(CancellationToken.None);
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT version, name FROM schema_version ORDER BY version;";
+            await using var reader = await command.ExecuteReaderAsync();
+
+            var rows = new List<(long Version, string Name)>();
+            while (await reader.ReadAsync())
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+
+            Assert.Equal([(1L, "001_app_setting.sql"), (2L, "002_impulse_reference.sql")], rows);
+        }
+        finally
+        {
+            TestDb.Cleanup(configPath);
+        }
+    }
+
     [Fact]
     public async Task RunningTheConfigMigrationsTwice_IsANoOp()
     {

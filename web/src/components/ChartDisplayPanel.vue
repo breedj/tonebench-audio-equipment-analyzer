@@ -111,8 +111,10 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
       </button>
     </CollapsibleSection>
 
+    <!-- text-xs throughout, the same size SweepDisplayPanel uses, so the two screens' display
+         rails read alike; the Channels row is that panel's too (caption, then Left/Right side by side). -->
     <CollapsibleSection title="Display">
-      <section class="flex flex-col gap-1.5 text-sm">
+      <section class="flex flex-col gap-1.5 text-xs">
         <label class="flex items-center gap-1.5">
           <input v-model="thickLines" type="checkbox" />
           Thick lines
@@ -127,15 +129,21 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
         </label>
       </section>
 
-      <section class="flex flex-col gap-1.5 text-sm">
-        <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processLeft }">
-          <input v-model="visibleL" type="checkbox" :disabled="!processLeft" />
-          Left channel
-        </label>
-        <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processRight }">
-          <input v-model="visibleR" type="checkbox" :disabled="!processRight" />
-          Right channel
-        </label>
+      <div class="flex flex-col gap-1.5 text-xs">
+        <span class="text-neutral-500 dark:text-neutral-400">Channels</span>
+        <div class="flex gap-3">
+          <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processLeft }">
+            <input v-model="visibleL" type="checkbox" :disabled="!processLeft" />
+            Left
+          </label>
+          <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processRight }">
+            <input v-model="visibleR" type="checkbox" :disabled="!processRight" />
+            Right
+          </label>
+        </div>
+      </div>
+
+      <section class="flex flex-col gap-1.5 text-xs">
         <label class="flex items-center gap-1.5">
           <input v-model="showMinMax" type="checkbox" />
           Min/max
@@ -158,8 +166,9 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
       <!-- Which of the secondary panels the FFT screen draws at all. Unlike the toggles above,
            these are not about the spectrum chart's own content: they show and hide whole panels
            under it, so a measurement that only needs the spectrum doesn't have to scroll past the
-           three that come with it. All on by default -- see useChartDisplay.ts. -->
-      <section class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 text-sm dark:border-neutral-800">
+           three that come with it. All on by default -- see useChartDisplay.ts. Waterfall and
+           Oscilloscope are hidden rather than unmounted (App.vue), so what they showed comes back. -->
+      <section class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 text-xs dark:border-neutral-800">
         <label class="flex items-center gap-1.5">
           <input v-model="showWaterfall" type="checkbox" />
           Waterfall

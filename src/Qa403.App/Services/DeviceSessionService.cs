@@ -1,4 +1,4 @@
-using Qa403.App.Endpoints;
+﻿using Qa403.App.Endpoints;
 using Qa403.App.Diagnostics;
 using Qa403.App.Streaming;
 using Qa403.Device;
@@ -17,7 +17,7 @@ namespace Qa403.App.Services;
 public sealed class DeviceSessionService(
     AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
     ILogger<DeviceSessionService> logger)
-    : IDisposable
+    : IDisposable, IMeasurementRun
 {
     /// <summary>
     /// The device this session is talking to. A <b>field</b> rather than a constructor parameter
@@ -143,6 +143,9 @@ public sealed class DeviceSessionService(
     public DeviceCapabilities Capabilities => _device.Capabilities;
 
     public bool Acquiring => _isAcquiring;
+
+    /// <summary>An acquisition is something the project file cannot change under — see <see cref="IMeasurementRun"/>.</summary>
+    bool IMeasurementRun.Running => _isAcquiring;
 
     /// <summary>Whether a device has been brought up. False from startup until <see cref="ConnectAsync"/> first succeeds — the app runs fine with no QA403 attached.</summary>
     public bool Connected => _info is not null;

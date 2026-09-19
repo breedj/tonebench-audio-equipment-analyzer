@@ -75,6 +75,50 @@ public sealed record UiLayoutConfig(
 }
 
 /// <summary>
+/// One project file the user opened, for the welcome screen's recent list. <paramref name="Name"/>
+/// is a copy of the project's name at the time, so the list can be drawn without opening ten
+/// databases — and so a file that has since gone missing can still be listed by name.
+/// </summary>
+public sealed record RecentProjectEntry(string Path, string Name, DateTimeOffset LastOpenedUtc);
+
+/// <summary>The recent-projects list, most recent first — see <see cref="RecentProjects"/> for its rules.</summary>
+public sealed record RecentProjectsConfig(IReadOnlyList<RecentProjectEntry> Entries)
+{
+    public static RecentProjectsConfig Default { get; } = new([]);
+}
+
+/// <summary>
+/// Whether the app starts on the welcome screen. Unchecked, the last opened project is opened at
+/// startup instead — if its file still exists; a missing file falls back to the welcome screen
+/// rather than an error, since there is nothing to show an error on yet.
+/// </summary>
+public sealed record StartupConfig(bool ShowWelcomeOnStartup = true)
+{
+    public static StartupConfig Default { get; } = new();
+}
+
+/// <summary>
+/// Whether a measurement's settings are written the moment they change, instead of waiting for its
+/// Save button. Off by default: an existing bench keeps the explicit Save it has always had, and a
+/// setting that silently rewrites stored measurements has to be asked for.
+/// </summary>
+public sealed record AutosaveConfig(bool Enabled = false)
+{
+    public static AutosaveConfig Default { get; } = new();
+}
+
+/// <summary>
+/// The project file that was open most recently — what <see cref="StartupConfig"/> reopens. Server-owned:
+/// written by the project session on every open, never by the client, and distinct from the recent
+/// list's head because Close leaves it alone (the user closed the project, not their preference for
+/// it) while Delete clears it.
+/// </summary>
+public sealed record LastOpenedProjectConfig(string? Path)
+{
+    public static LastOpenedProjectConfig Default { get; } = new((string?)null);
+}
+
+/// <summary>
 /// How long the DUT is given to settle after every stimulus change, before the analysis window
 /// starts filling. Applied server-side, at the one place every generator change passes through
 /// (<c>DeviceSessionService.ConfigureGeneratorAsync</c>), so it covers the live FFT screen and every
@@ -152,6 +196,18 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The report settings' key. One document, see <see cref="ReportSettingsConfig"/>.</summary>
     public const string ReportSettingsKey = "report.settings";
+
+    /// <summary>The recent-projects list's key. One document, see <see cref="RecentProjectsConfig"/>.</summary>
+    public const string RecentProjectsKey = "projects.recent";
+
+    /// <summary>The startup behaviour's key. One document, see <see cref="StartupConfig"/>.</summary>
+    public const string StartupKey = "projects.showWelcomeOnStartup";
+
+    /// <summary>The autosave preference's key. One document, see <see cref="AutosaveConfig"/>.</summary>
+    public const string AutosaveKey = "projects.autosave";
+
+    /// <summary>The last opened project's key. One document, see <see cref="LastOpenedProjectConfig"/>.</summary>
+    public const string LastOpenedProjectKey = "projects.lastOpened";
 
     public async Task<string?> GetAsync(string key, CancellationToken ct)
     {

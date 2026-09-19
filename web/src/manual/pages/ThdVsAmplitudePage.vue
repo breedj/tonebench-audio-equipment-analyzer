@@ -119,8 +119,8 @@ const { showPage } = useManual()
             delivered — the axes to quote a rated power from.
             <strong>Input voltage</strong> is what it was driven with, which is the axis to use when
             comparing against a source's own limits or when the DUT's gain is what you are studying.
-            The From/To fields and their Autofit follow whichever axis is selected, each remembering
-            its own window.
+            It sits at the top of the range section, whose title, From/To fields and Autofit follow
+            whichever axis is selected, each remembering its own window.
           </td>
         </tr>
       </tbody>

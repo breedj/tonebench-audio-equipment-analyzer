@@ -1215,20 +1215,81 @@ export interface SpectrumConfigRequest {
   measurementHiFreqHz?: number
 }
 
-// Projects / measurement-types / measurements — mirrors Qa403.App/Endpoints/ProjectsEndpoints.cs
-// and MeasurementsEndpoints.cs. A project holds several configured measurement-types (only
-// 'FFTSpectrum' exists today); saving a measurement snapshots the type's parameters as-run.
+// Projects / measurement-types / measurements — mirrors Qa403.App/Endpoints/ProjectsEndpoints.cs,
+// ProjectSessionEndpoints.cs and MeasurementsEndpoints.cs. A project is one `.qa403` file holding
+// several configured measurement-types; saving a measurement snapshots the type's parameters as-run.
 
 export interface Project {
   id: number
   name: string
+  /** The project's description. The wire name predates the Project menu. */
   notes: string | null
   createdUtc: string
 }
 
-export interface SaveProjectRequest {
+/** What is open, if anything — GET /api/project. Never fails, which is how the app picks welcome vs workspace. */
+export interface ProjectSession {
+  open: boolean
+  path: string | null
+  project: Project | null
+}
+
+export interface CreateProjectRequest {
   name: string
-  notes?: string | null
+  notes: string | null
+  /** Absolute; `.qa403` is appended when missing. */
+  path: string
+}
+
+export interface SaveProjectAsRequest extends CreateProjectRequest {
+  /** Copy the whole file (results included), or a fresh file with the measurement types only. */
+  includeResults: boolean
+}
+
+export interface ProjectPropertiesRequest {
+  name: string
+  notes: string | null
+}
+
+export interface RecentProject {
+  path: string
+  name: string
+  lastOpenedUtc: string
+  /** Checked when listed: a file on an unplugged drive is shown as missing, not dropped. */
+  exists: boolean
+}
+
+export interface StartupConfig {
+  showWelcomeOnStartup: boolean
+}
+
+/** Configuration ▸ General ▸ Autosave: whether a measurement's settings are saved the moment they change. */
+export interface AutosaveConfig {
+  enabled: boolean
+}
+
+export interface FileBrowseEntry {
+  name: string
+  path: string
+  modifiedUtc: string | null
+  sizeBytes: number | null
+}
+
+export interface FileBrowseRoot {
+  label: string
+  path: string
+}
+
+/** One directory listing for the in-app file dialog — see FileBrowserService. */
+export interface FileBrowseResponse {
+  path: string
+  parent: string | null
+  directories: FileBrowseEntry[]
+  files: FileBrowseEntry[]
+  roots: FileBrowseRoot[]
+  defaultFolder: string
+  /** The server's directory separator, so a folder and a file name are joined the way it will read them. */
+  separator: string
 }
 
 export interface MeasurementType {
@@ -1745,14 +1806,42 @@ export const api = {
   /** Backs the "Clear" button: discards the retained (stopped) spectrum server-side, so Save measurement result has nothing stale left to save. */
   clearSpectrum: () => request<void>('/acquisition/clear', { method: 'POST' }),
 
-  listProjects: () => request<Project[]>('/projects'),
+  // The open project file — see ProjectSessionEndpoints.cs. Every mutation answers with the new
+  // session state; 400 carries a message about the file, 409 one about why not right now (a
+  // measurement running, a target that exists, nothing open).
+  getProjectSession: () => request<ProjectSession>('/project'),
 
-  createProject: (req: SaveProjectRequest) => request<{ id: number }>('/projects', { method: 'POST', body: JSON.stringify(req) }),
+  openProject: (path: string) => request<ProjectSession>('/project/open', { method: 'POST', body: JSON.stringify({ path }) }),
 
-  updateProject: (id: number, req: SaveProjectRequest) =>
-    request<void>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
+  createProject: (req: CreateProjectRequest) => request<ProjectSession>('/project/create', { method: 'POST', body: JSON.stringify(req) }),
 
-  deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  closeProject: () => request<void>('/project/close', { method: 'POST' }),
+
+  /** The path is sent back and checked against the open project, so a stale tab cannot delete whatever is open now. */
+  deleteProject: (path: string) => request<void>('/project/delete', { method: 'POST', body: JSON.stringify({ path }) }),
+
+  saveProjectAs: (req: SaveProjectAsRequest) => request<ProjectSession>('/project/save-as', { method: 'POST', body: JSON.stringify(req) }),
+
+  updateProjectProperties: (req: ProjectPropertiesRequest) =>
+    request<ProjectSession>('/project/properties', { method: 'PUT', body: JSON.stringify(req) }),
+
+  listRecentProjects: () => request<RecentProject[]>('/projects/recent'),
+
+  removeRecentProject: (path: string) => request<void>('/projects/recent/remove', { method: 'POST', body: JSON.stringify({ path }) }),
+
+  getStartupConfig: () => request<StartupConfig>('/config/startup'),
+
+  setStartupConfig: (config: StartupConfig) =>
+    request<StartupConfig>('/config/startup', { method: 'PUT', body: JSON.stringify(config) }),
+
+  getAutosaveConfig: () => request<AutosaveConfig>('/config/autosave'),
+
+  setAutosaveConfig: (config: AutosaveConfig) =>
+    request<AutosaveConfig>('/config/autosave', { method: 'PUT', body: JSON.stringify(config) }),
+
+  /** One directory of the server's file system, for the in-app file dialog. No path lists the default projects folder. */
+  browseFiles: (path: string | null) =>
+    request<FileBrowseResponse>(`/files/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
 
   listMeasurementTypes: (projectId: number) => request<MeasurementType[]>(`/projects/${projectId}/measurement-types`),
 

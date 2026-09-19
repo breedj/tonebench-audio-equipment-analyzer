@@ -23,6 +23,10 @@ var noBrowser = args.Contains("--no-browser");
 // Default is real QA403 hardware; pass --simulate to fall back to the synthetic device.
 var simulate = args.Contains("--simulate");
 
+// --project <path> opens that project file at startup, ahead of the "reopen the last project"
+// preference — see ProjectStartupHostedService.
+var startupProject = StartupProjectArgument.Parse(args);
+
 string poolFloorNote;
 
 // The QA403's RX transfer completions are delivered through the thread pool, and the USB transfer
@@ -123,6 +127,9 @@ try
     // never closes its database at all.
     builder.Services.AddSingleton<DatabaseHealth>();
     builder.Services.AddHostedService<DatabaseLifecycleHostedService>();
+    // Between the two on purpose: the configuration database is ready, the device (slower, and
+    // unrelated) has not started, and it stops before the database service checkpoints the file.
+    builder.Services.AddHostedService<ProjectStartupHostedService>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
 
     // Update-check (docs/qa403-app-stack-spec.md §8): a short timeout and silent-on-failure
@@ -136,15 +143,22 @@ try
     });
     builder.Services.AddSingleton<UpdateCheckService>();
 
-    // First use of configuration binding in this app: appsettings.json's "Database:Path" key
-    // overrides the LocalApplicationData default — see Qa403DatabaseOptions.Default's remarks on
-    // why measurement history lives there rather than next to the binary.
-    var databasePath = builder.Configuration["Database:Path"];
-    var databaseOptions = string.IsNullOrWhiteSpace(databasePath)
-        ? Qa403DatabaseOptions.Default
-        : new Qa403DatabaseOptions { Path = databasePath };
-    builder.Services.AddSingleton(databaseOptions);
+    // Projects are one SQLite file each, opened and switched at runtime by ProjectSessionService;
+    // the holder starts empty and every repository reads it on each open. A request that needs a
+    // project while none is open is a 409, not a 500 — see NoProjectOpenExceptionHandler.
+    builder.Services.AddSingleton<CurrentProjectFile>();
     builder.Services.AddSingleton<SqliteConnectionFactory>();
+    builder.Services.AddSingleton(startupProject);
+    builder.Services.AddSingleton<ProjectSessionService>();
+    builder.Services.AddSingleton<FileBrowserService>();
+
+    // Everything that must be stopped before the project file may change — see IMeasurementRun.
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<DeviceSessionService>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ThdSweepRunner>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<FrequencyResponseRunner>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SteppedResponseRunner>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ImpulseResponseRunner>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ImpedanceRunner>());
 
     // The configuration lives in its own database file, overridable with the "Config:Path" key the
     // same way. Separate from the measurement history on purpose — see Qa403ConfigDatabaseOptions:
@@ -157,6 +171,7 @@ try
     builder.Services.AddSingleton(configOptions);
     builder.Services.AddSingleton<ConfigConnectionFactory>();
     builder.Services.AddSingleton<ConfigRepository>();
+    builder.Services.AddSingleton<LoopbackReferenceRepository>();
     builder.Services.AddSingleton<ProjectRepository>();
     builder.Services.AddSingleton<MeasurementRepository>();
     builder.Services.AddSingleton<MeasurementSaveService>();
@@ -164,15 +179,10 @@ try
     var app = builder.Build();
 
     // Runs once at startup, before the host serves any request — see MigrationRunner's own
-    // remarks on why it's idempotent and why the .sql files are embedded rather than loose.
+    // remarks on why it's idempotent and why the .sql files are embedded rather than loose. Only
+    // the configuration database: a project file is migrated when it is opened.
     {
         using var scope = app.Services.CreateScope();
-        var connectionFactory = scope.ServiceProvider.GetRequiredService<SqliteConnectionFactory>();
-        await using var migrationConnection = await connectionFactory.OpenAsync(CancellationToken.None);
-        await new MigrationRunner().RunAsync(migrationConnection, CancellationToken.None);
-
-        // The configuration database has its own migration set and its own schema_version inside
-        // its own file, so the two version histories advance independently.
         var configFactory = scope.ServiceProvider.GetRequiredService<ConfigConnectionFactory>();
         await using var configConnection = await configFactory.OpenAsync(CancellationToken.None);
         await new MigrationRunner(MigrationRunner.ConfigResourcePrefix)
@@ -188,6 +198,8 @@ try
                 CancellationToken.None)).CaptureDelayMs;
     }
 
+    // A request that needs a project while none is open is a 409 with a message, from any endpoint.
+    app.UseNoProjectOpenHandler();
     app.UseWebSockets();
 
     var wwwroot = new ManifestEmbeddedFileProvider(typeof(Program).Assembly, "wwwroot");
@@ -213,6 +225,7 @@ try
     app.MapConfigEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
+    app.MapProjectSessionEndpoints();
     app.MapMeasurementsEndpoints();
     app.MapReportsEndpoints();
     app.MapUpdateCheckEndpoints();

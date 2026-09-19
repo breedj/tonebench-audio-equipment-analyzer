@@ -4,7 +4,8 @@ using Qa403.Dsp;
 namespace Qa403.App.Services;
 
 /// <summary>
-/// <see cref="ILoopbackReferenceStore"/> over the project database.
+/// <see cref="ILoopbackReferenceStore"/> over the configuration database — see
+/// <see cref="LoopbackReferenceRepository"/> for why a calibration does not live in a project file.
 ///
 /// <para>The only translation it does is between the DSP type and the row: the impulse response is
 /// <c>double[]</c> in <see cref="LoopbackReference"/> and f32 in the database. That is not a loss
@@ -12,7 +13,7 @@ namespace Qa403.App.Services;
 /// finer than the estimator's own regulariser — and it keeps the calibration in the same
 /// <c>PreviewCodec</c> encoding as every other array the app stores.</para>
 /// </summary>
-public sealed class SqliteLoopbackReferenceStore(MeasurementRepository repository) : ILoopbackReferenceStore
+public sealed class SqliteLoopbackReferenceStore(LoopbackReferenceRepository repository) : ILoopbackReferenceStore
 {
     public async Task<IReadOnlyList<LoopbackReferenceInfo>> ListAsync(CancellationToken ct) =>
         [.. (await repository.ListLoopbackReferencesAsync(ct)).Select(ToInfo)];

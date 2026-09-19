@@ -3,10 +3,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { api } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
+import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDevice } from '../composables/useDevice'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import { useStartupConfig } from '../composables/useStartupConfig'
 import { useUpdateCheck } from '../composables/useUpdateCheck'
 import { formatOhms } from '../impedance/equivalent'
 import { formatHz } from '../response/format'
@@ -19,6 +21,10 @@ const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
 const { config, apply: applyConfig } = useSpectrumConfig()
 const { status: deviceStatus } = useDevice()
 const { updateCheckEnabled } = useUpdateCheck()
+const { showWelcomeOnStartup, load: loadStartupConfig, setShowWelcomeOnStartup } = useStartupConfig()
+void loadStartupConfig()
+const { autosaveEnabled, load: loadAutosave, setAutosaveEnabled } = useAutosave()
+void loadAutosave()
 const { fixture, hasCalibration, error: fixtureError, load: loadFixture, save: saveFixture, clear: clearFixture } =
   useImpedanceFixture()
 
@@ -174,6 +180,30 @@ async function clearStoredCalibration() {
           >
             <input type="checkbox" v-model="updateCheckEnabled" />
             Check for updates
+          </label>
+
+          <label
+            class="flex items-center gap-2"
+            title="Unchecked, the last opened project is opened at startup if its file still exists."
+          >
+            <input
+              type="checkbox"
+              :checked="showWelcomeOnStartup"
+              @change="setShowWelcomeOnStartup(($event.target as HTMLInputElement).checked)"
+            />
+            Show welcome page on startup
+          </label>
+
+          <label
+            class="flex items-center gap-2"
+            title="Saves every change to a measurement's settings into it the moment it is made, so the measurement's Save button never needs pressing. Unchecked, changes wait for Save and are shown by the red dot."
+          >
+            <input
+              type="checkbox"
+              :checked="autosaveEnabled"
+              @change="setAutosaveEnabled(($event.target as HTMLInputElement).checked)"
+            />
+            Autosave measurement settings
           </label>
         </template>
 

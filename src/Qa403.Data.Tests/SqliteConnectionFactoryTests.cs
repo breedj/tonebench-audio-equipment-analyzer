@@ -1,9 +1,45 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 
 namespace Qa403.Data.Tests;
 
 public class SqliteConnectionFactoryTests
 {
+    /// <summary>
+    /// Nothing open is an error carrying a message, not an empty database at a null path. The
+    /// endpoints surface this one as a 409 — see NoProjectOpenExceptionHandler.
+    /// </summary>
+    [Fact]
+    public async Task Open_WithNoProjectOpen_ThrowsNoProjectOpen()
+    {
+        var factory = new SqliteConnectionFactory(new CurrentProjectFile());
+        await Assert.ThrowsAsync<NoProjectOpenException>(() => factory.OpenAsync(CancellationToken.None));
+    }
+
+    /// <summary>
+    /// The app's factory never creates a file: a typo in a typed path, or a quick_check on a file
+    /// that has just been deleted, must fail rather than leave an empty database behind at that path.
+    /// Only the pinned (test) constructor and the project session's own create path may.
+    /// </summary>
+    [Fact]
+    public async Task Open_FollowingTheCurrentProject_DoesNotCreateAMissingFile()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = new SqliteConnectionFactory(CurrentProjectFile.At(path));
+            await Assert.ThrowsAsync<SqliteException>(() => factory.OpenAsync(CancellationToken.None));
+            Assert.False(File.Exists(path));
+
+            Assert.False(File.Exists(path));
+            Assert.NotNull(await SqliteConnectionFactory.QuickCheckAsync(path, CancellationToken.None));
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
     [Fact]
     public async Task Open_SetsWalJournalMode_ReadBack()
     {

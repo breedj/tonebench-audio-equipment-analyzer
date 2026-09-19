@@ -6,23 +6,26 @@ using Qa403.Data;
 namespace Qa403.App.Tests.Services;
 
 /// <summary>
-/// The database's own lifecycle: a startup check that says so when a file is damaged, and a
-/// shutdown that leaves the WAL empty and nothing open — neither of which happened before 11 Sept
-/// 2026, when qa403.db was found with zeroed pages for the second time in two days.
+/// The database's own lifecycle: a startup check that says so when the configuration file is
+/// damaged, and a shutdown that leaves the WAL empty and nothing open — neither of which happened
+/// before 11 Sept 2026, when qa403.db was found with zeroed pages for the second time in two days.
+/// The project file's check moved with the open, to <see cref="ProjectSessionService"/>; at
+/// shutdown this service checkpoints whichever project is open at that moment.
 /// </summary>
 public class DatabaseLifecycleHostedServiceTests
 {
-    private static (DatabaseLifecycleHostedService Service, DatabaseHealth Health, string DbPath, string ConfigPath) Create()
+    private static (DatabaseLifecycleHostedService Service, DatabaseHealth Health, CurrentProjectFile Current, string DbPath, string ConfigPath) Create()
     {
         string dbPath = Path.Combine(Path.GetTempPath(), $"qa403-lifecycle-{Guid.NewGuid():N}.db");
         string configPath = Path.Combine(Path.GetTempPath(), $"qa403-lifecycle-{Guid.NewGuid():N}-config.db");
         var health = new DatabaseHealth();
+        var current = new CurrentProjectFile();
         var service = new DatabaseLifecycleHostedService(
-            new Qa403DatabaseOptions { Path = dbPath },
+            current,
             new Qa403ConfigDatabaseOptions { Path = configPath },
             health,
             NullLogger<DatabaseLifecycleHostedService>.Instance);
-        return (service, health, dbPath, configPath);
+        return (service, health, current, dbPath, configPath);
     }
 
     private static void Cleanup(params string[] paths)
@@ -48,12 +51,12 @@ public class DatabaseLifecycleHostedServiceTests
     }
 
     [Fact]
-    public async Task Start_OnSoundFiles_ReportsNoProblem()
+    public async Task Start_OnASoundConfigFile_ReportsNoProblem()
     {
-        var (service, health, dbPath, configPath) = Create();
+        var (service, health, _, dbPath, configPath) = Create();
         try
         {
-            await WriteABlobAsync(dbPath);
+            await WriteABlobAsync(configPath);
             await service.StartAsync(CancellationToken.None);
 
             Assert.Null(health.Problem);
@@ -69,27 +72,21 @@ public class DatabaseLifecycleHostedServiceTests
     /// message on the status, not as a startup crash and not as silence until some read hits it.
     /// </summary>
     [Fact]
-    public async Task Start_OnAFileWithZeroedPages_FlagsTheProblemAndKeepsRunning()
+    public async Task Start_OnAConfigFileWithZeroedPages_FlagsTheProblemAndKeepsRunning()
     {
-        var (service, health, dbPath, configPath) = Create();
+        var (service, health, _, dbPath, configPath) = Create();
         try
         {
-            await WriteABlobAsync(dbPath);
-            await SqliteConnectionFactory.CheckpointAsync(dbPath, CancellationToken.None);
+            await WriteABlobAsync(configPath);
+            await SqliteConnectionFactory.CheckpointAsync(configPath, CancellationToken.None);
             SqliteConnectionFactory.CloseAllPools();
 
-            const int pageSize = 8192;
-            using (var file = new FileStream(dbPath, FileMode.Open, FileAccess.ReadWrite))
-            {
-                long pages = file.Length / pageSize;
-                file.Seek((pages - 3) * pageSize, SeekOrigin.Begin);
-                file.Write(new byte[3 * pageSize]);
-            }
+            ZeroLastPages(configPath);
 
             await service.StartAsync(CancellationToken.None);
 
             Assert.NotNull(health.Problem);
-            Assert.Contains("measurement database is damaged", health.Problem);
+            Assert.Contains("configuration database is damaged", health.Problem);
         }
         finally
         {
@@ -103,12 +100,14 @@ public class DatabaseLifecycleHostedServiceTests
     /// leaves behind — and the state it never used to.
     /// </summary>
     [Fact]
-    public async Task Stop_CheckpointsTheWalAndClosesEveryConnection()
+    public async Task Stop_CheckpointsTheOpenProjectsWalAndClosesEveryConnection()
     {
-        var (service, _, dbPath, configPath) = Create();
+        var (service, _, current, dbPath, configPath) = Create();
         try
         {
+            await WriteABlobAsync(configPath);
             await WriteABlobAsync(dbPath);
+            current.Path = dbPath;
             Assert.True(new FileInfo(dbPath + "-wal").Length > 0);
 
             await service.StopAsync(CancellationToken.None);
@@ -123,5 +122,35 @@ public class DatabaseLifecycleHostedServiceTests
         {
             Cleanup(dbPath, configPath);
         }
+    }
+
+    /// <summary>No project open is the welcome screen, not a failure: only the configuration file is touched.</summary>
+    [Fact]
+    public async Task Stop_WithNoProjectOpen_StillCheckpointsTheConfigFile()
+    {
+        var (service, _, _, dbPath, configPath) = Create();
+        try
+        {
+            await WriteABlobAsync(configPath);
+            Assert.True(new FileInfo(configPath + "-wal").Length > 0);
+
+            await service.StopAsync(CancellationToken.None);
+
+            Assert.True(!File.Exists(configPath + "-wal") || new FileInfo(configPath + "-wal").Length == 0);
+            Assert.False(File.Exists(dbPath));
+        }
+        finally
+        {
+            Cleanup(dbPath, configPath);
+        }
+    }
+
+    internal static void ZeroLastPages(string path)
+    {
+        const int pageSize = 8192;
+        using var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite);
+        long pages = file.Length / pageSize;
+        file.Seek((pages - 3) * pageSize, SeekOrigin.Begin);
+        file.Write(new byte[3 * pageSize]);
     }
 }

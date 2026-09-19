@@ -270,6 +270,9 @@ watch(running, (isRunning, wasRunning) => {
 
 <template>
   <CollapsibleSection title="Display">
+    <!-- The toggle groups here (Projection, Radius, View) highlight the selected option the way the
+         sweep screens' Units toggle does, black on white: one look for "which of these is on" across
+         every display rail. -->
     <div class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Projection</span>
       <div
@@ -283,8 +286,8 @@ watch(running, (isRunning, wasRunning) => {
           class="flex-1 border-l border-neutral-300 px-2 py-1 first:border-l-0 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700"
           :class="
             projection === option.value
-              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
-              : 'bg-white dark:bg-neutral-800'
+              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
           "
           :disabled="option.value !== 'Bode' && !complexAvailable"
           @click="projection = option.value"
@@ -304,8 +307,8 @@ watch(running, (isRunning, wasRunning) => {
           class="flex-1 px-2 py-1"
           :class="
             nyquistRadius === 'Linear'
-              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
-              : 'bg-white dark:bg-neutral-800'
+              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
           "
           title="The textbook plot: distances mean what they look like."
           @click="nyquistRadius = 'Linear'"
@@ -317,8 +320,8 @@ watch(running, (isRunning, wasRunning) => {
           class="flex-1 border-l border-neutral-300 px-2 py-1 dark:border-neutral-700"
           :class="
             nyquistRadius === 'Db'
-              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
-              : 'bg-white dark:bg-neutral-800'
+              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
           "
           title="Keeps a wide range on screen, but distance to −1 is no longer metric."
           @click="nyquistRadius = 'Db'"
@@ -354,8 +357,8 @@ watch(running, (isRunning, wasRunning) => {
           class="flex-1 px-2 py-1"
           :class="
             view === 'Dbv'
-              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
-              : 'bg-white dark:bg-neutral-800'
+              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
           "
           @click="view = 'Dbv'"
         >
@@ -366,8 +369,8 @@ watch(running, (isRunning, wasRunning) => {
           class="flex-1 border-l border-neutral-300 px-2 py-1 dark:border-neutral-700"
           :class="
             view === 'Gain'
-              ? 'bg-amber-100 font-medium dark:bg-amber-900/40'
-              : 'bg-white dark:bg-neutral-800'
+              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
           "
           @click="view = 'Gain'"
         >

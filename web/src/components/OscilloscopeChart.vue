@@ -336,8 +336,10 @@ watch(scopePeriods, update)
 // ResizeObserver in FrequencyResponseChart.
 let resizeObserver: ResizeObserver | null = null
 function handleResize() {
-  if (plot && containerRef.value)
-    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
+  if (!plot || !containerRef.value) return
+  // Zero while the panel is hidden (App.vue's v-show) -- see WaterfallChart's handleResize.
+  const width = containerRef.value.getBoundingClientRect().width
+  if (width > 0) plot.setSize({ width, height: CHART_HEIGHT })
 }
 
 function handleThemeChange() {

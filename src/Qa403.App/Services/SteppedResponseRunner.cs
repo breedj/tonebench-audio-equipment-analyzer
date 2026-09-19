@@ -29,7 +29,7 @@ public sealed class SteppedResponseRunner(
     DeviceSessionService session,
     SpectrumPipeline pipeline,
     SpectrumBroadcastHub hub,
-    ILogger<SteppedResponseRunner> logger)
+    ILogger<SteppedResponseRunner> logger) : IMeasurementRun
 {
     /// <summary>Where the level probe starts, and the level below which it gives up. Both from the previous app.</summary>
     private const double ProbeStartDbv = -40.0;

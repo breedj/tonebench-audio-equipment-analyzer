@@ -11,14 +11,13 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 
 // Always saves into whichever project/measurement is currently open in the sidebar — this dialog
 // only opens from the "Save measurement result" button, which itself only shows once a type is
-// selected (see App.vue), so currentTypeId is never null here. Same currentType/currentProject
-// lookup App.vue itself does — useProjects doesn't keep a derived "current" object of its own.
-const { projects, types, currentTypeId, typeNotes } = useProjects()
+// selected (see App.vue), so currentTypeId is never null here. Same currentType lookup App.vue
+// itself does; the project is the one the server has open.
+const { currentProject, types, currentTypeId, typeNotes } = useProjects()
 const { save, saveSweep, saveResponse, saveImpulse,
     saveImpedance, error } = useMeasurements()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
-const currentProject = computed(() => projects.value.find((p) => p.id === currentType.value?.projectId) ?? null)
 
 const form = reactive({
   name: '',

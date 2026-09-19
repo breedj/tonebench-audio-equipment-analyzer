@@ -256,7 +256,7 @@ function run() {
         min="1"
         max="48"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
       />
     </label>
 
@@ -273,7 +273,7 @@ function run() {
         step="any"
         min="0.1"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
       />
     </label>
 
@@ -288,7 +288,7 @@ function run() {
       </label>
     </div>
 
-    <div class="grid grid-cols-2 gap-2 text-xs">
+    <div class="text-xs">
       <label class="flex flex-col gap-1" title="Averages per point. More averages lower the noise floor of every reading.">
         Averages per point
         <input
@@ -297,7 +297,7 @@ function run() {
           min="1"
           max="64"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
         />
       </label>
     </div>

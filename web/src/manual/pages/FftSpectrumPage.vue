@@ -166,8 +166,11 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Spectra averaged / Time constant</td>
-          <td>How many records the chosen averaging mode uses.</td>
+          <td>Averages</td>
+          <td>
+            Beside Averaging, once it is on: how many records a Linear average takes before it holds,
+            or the time constant of an Exponential one, in records.
+          </td>
         </tr>
       </tbody>
     </table>
@@ -219,7 +222,8 @@ const { showPage } = useManual()
       in dBV and level relative to the fundamental in dBc.
       <strong>Other peaks</strong> lists everything that is neither — mains hum and its harmonics,
       intermodulation products, spurs — largest first, as many as you ask for. Both tables need a
-      single fundamental to refer to, so neither appears for Multitone or White noise.
+      single fundamental to refer to, so neither appears for Multitone or White noise. Other peaks
+      starts collapsed; its ▸ opens it.
     </p>
 
     <h2>Display panel</h2>
@@ -227,10 +231,12 @@ const { showPage } = useManual()
       <strong>dBV range</strong> and <strong>Frequency range</strong> set the spectrum's window,
       each with its own Autofit. The frequency Autofit goes to 10 Hz and just past Nyquist for the
       current sample rate. Below those: <strong>Thick lines</strong>,
-      <strong>Show data points</strong>, <strong>Autofit when measurement done</strong>, the channel
-      and Min/max and Peak-hold toggles, and finally four checkboxes that show or hide the
-      Waterfall, Oscilloscope, Harmonics and Other peaks panels entirely — so a measurement that
-      only needs the spectrum does not have to scroll past the rest.
+      <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (on for a
+      newly created measurement), the <strong>Channels</strong> row, the Min/max and Peak-hold
+      toggles, and finally four checkboxes that show or hide the Waterfall, Oscilloscope, Harmonics
+      and Other peaks panels — so a measurement that only needs the spectrum does not have to scroll
+      past the rest. The waterfall and oscilloscope are only hidden: what they showed is still there
+      when they are ticked back on.
     </p>
 
     <h2>Zooming</h2>

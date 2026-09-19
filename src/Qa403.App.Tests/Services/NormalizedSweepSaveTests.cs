@@ -47,7 +47,7 @@ public class NormalizedSweepSaveTests
                 session, pipeline, sweepRunner,
                 new FrequencyResponseRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<FrequencyResponseRunner>.Instance),
                 new SteppedResponseRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<SteppedResponseRunner>.Instance),
-                new ImpulseResponseRunner(session, pipeline, new SqliteLoopbackReferenceStore(measurements), NullLogger<ImpulseResponseRunner>.Instance),
+                new ImpulseResponseRunner(session, pipeline, new InMemoryLoopbackReferenceStore(), NullLogger<ImpulseResponseRunner>.Instance),
                 new ImpedanceRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),
                 projects, measurements, Options.Create(jsonOptions));
 

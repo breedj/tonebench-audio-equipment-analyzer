@@ -86,8 +86,9 @@
     </p>
     <p>
       <strong>Autofit when measurement done</strong> does the same thing automatically at the end of
-      each run. It is worth leaving on while exploring an unfamiliar DUT and worth turning off once
-      you want two runs framed identically.
+      each run. A newly created FFT or THD sweep measurement starts with it on; it is worth leaving
+      on while exploring an unfamiliar DUT and worth turning off once you want two runs framed
+      identically.
     </p>
     <p>
       Small amber <strong>▲</strong> and <strong>▼</strong> triangles in the corners of a plot mean a

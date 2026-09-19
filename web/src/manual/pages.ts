@@ -78,6 +78,13 @@ export const MANUAL_PAGES: ManualPage[] = [
     component: manualPage(() => import('./pages/GettingStartedPage.vue')),
   },
   {
+    id: 'projects',
+    title: 'Projects',
+    summary: 'Project files, the Project menu, the welcome screen and the recent list.',
+    group: 'Basics',
+    component: manualPage(() => import('./pages/ProjectsPage.vue')),
+  },
+  {
     id: 'charts',
     title: 'Reading the charts',
     summary: 'Cursors, zooming, autofit, colours and the off-scale markers.',

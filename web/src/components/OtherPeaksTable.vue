@@ -26,7 +26,9 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <CollapsibleSection :title="`${channelLabel}: Other peaks`" size="xs">
+  <!-- Collapsed by default: the strongest spurs are the exception on a bench, and the table is
+       long enough that open it pushes everything under it off screen. Harmonics stays open. -->
+  <CollapsibleSection :title="`${channelLabel}: Other peaks`" size="xs" :default-open="false">
     <template #header-right>
       <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
         Show top

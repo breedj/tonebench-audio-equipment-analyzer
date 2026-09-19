@@ -11,7 +11,17 @@ synthetic device instead — no hardware required, useful for UI work or trying 
 dotnet run --project src/Qa403.App -- --simulate
 ```
 
-`--no-browser` skips the automatic browser launch.
+`--no-browser` skips the automatic browser launch. `--project <path>` opens that project file at
+startup, ahead of the "Show welcome page on startup" preference.
+
+## Projects
+
+A project is one SQLite file with the `.qa403` extension, created and opened from the Project menu
+(or the welcome screen) and placed wherever you like — `Documents\QA403 Projects` (`~/QA403 Projects`
+on Linux) by default. The app's own configuration, including the impedance fixture and loopback
+calibrations and the recent-projects list, lives separately in `%LOCALAPPDATA%\Qa403\qa403-config.db`
+(`~/.local/share/Qa403/` on Linux). The `qa403.db` that earlier versions kept in that folder is left
+untouched; when it holds a single project it can be opened by typing its path in the Open dialog.
 
 ## Linux setup: USB permissions
 

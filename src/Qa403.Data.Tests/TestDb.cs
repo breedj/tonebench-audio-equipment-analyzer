@@ -38,6 +38,15 @@ internal static class TestDb
         return factory;
     }
 
+    /// <summary>The configuration database's counterpart: its own migration set, its own file.</summary>
+    public static async Task<ConfigConnectionFactory> CreateMigratedConfigFactoryAsync(string path, CancellationToken ct = default)
+    {
+        var factory = new ConfigConnectionFactory(new Qa403ConfigDatabaseOptions { Path = path });
+        await using (var connection = await factory.OpenAsync(ct))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, ct);
+        return factory;
+    }
+
     public static async Task<long> ScalarAsync(SqliteConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();

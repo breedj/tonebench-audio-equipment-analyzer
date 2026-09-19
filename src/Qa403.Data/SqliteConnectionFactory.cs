@@ -3,14 +3,39 @@ using Microsoft.Data.Sqlite;
 namespace Qa403.Data;
 
 /// <summary>
-/// Opens connections to <c>qa403.db</c> with the §6 pragmas applied. Pragmas are per-connection
-/// state, and Microsoft.Data.Sqlite pools the underlying native handle, so every open — first use
-/// or pooled reuse alike — re-applies them; the calls are idempotent, so re-applying costs nothing
-/// but skipping it on a reused handle would be a silent correctness bug.
+/// Opens connections to the current project file with the §6 pragmas applied. Pragmas are
+/// per-connection state, and Microsoft.Data.Sqlite pools the underlying native handle, so every
+/// open — first use or pooled reuse alike — re-applies them; the calls are idempotent, so
+/// re-applying costs nothing but skipping it on a reused handle would be a silent correctness bug.
+///
+/// <para>Which file is <see cref="CurrentProjectFile"/>'s business: projects are one file each and the
+/// session switches them at runtime, so the path is read on every open rather than captured here.
+/// Nothing open is an error, not an empty file — see <see cref="NoProjectOpenException"/>.</para>
 /// </summary>
-public sealed class SqliteConnectionFactory(Qa403DatabaseOptions options)
+public sealed class SqliteConnectionFactory
 {
-    public Task<SqliteConnection> OpenAsync(CancellationToken ct) => OpenAtAsync(options.Path, ct);
+    private readonly CurrentProjectFile _current;
+    private readonly bool _create;
+
+    /// <summary>The app's factory: follows the open project, and never creates a file.</summary>
+    public SqliteConnectionFactory(CurrentProjectFile current)
+    {
+        _current = current;
+        _create = false;
+    }
+
+    /// <summary>
+    /// A factory pinned to one file that is created on first open — the pre-project-file behaviour,
+    /// kept for tests, which build their databases by opening a fresh temp path and migrating it.
+    /// </summary>
+    public SqliteConnectionFactory(Qa403DatabaseOptions options)
+    {
+        _current = CurrentProjectFile.At(options.Path);
+        _create = true;
+    }
+
+    public Task<SqliteConnection> OpenAsync(CancellationToken ct) =>
+        OpenAtAsync(_current.Path ?? throw new NoProjectOpenException(), _create, ct);
 
     /// <summary>
     /// Opens any of this app's SQLite files with the pragmas above applied.
@@ -18,10 +43,22 @@ public sealed class SqliteConnectionFactory(Qa403DatabaseOptions options)
     /// <para>Shared with <see cref="ConfigConnectionFactory"/> rather than duplicated: the
     /// configuration database wants the identical treatment, and two copies of this list is how one
     /// database quietly ends up in rollback-journal mode while the other is in WAL.</para>
+    ///
+    /// <para><paramref name="create"/> is explicit because a bare <c>Data Source=</c> connection string
+    /// defaults to <c>ReadWriteCreate</c>: opening a path that does not exist silently makes an empty
+    /// database there. That was harmless while there was one fixed file, and is exactly wrong once
+    /// users type paths — a typo in Open, or a <see cref="QuickCheckAsync"/> on a missing file, would
+    /// fabricate a project. Only the project session (creating a file) and the configuration factory
+    /// pass <see langword="true"/>.</para>
     /// </summary>
-    internal static async Task<SqliteConnection> OpenAtAsync(string path, CancellationToken ct)
+    public static async Task<SqliteConnection> OpenAtAsync(string path, bool create, CancellationToken ct)
     {
-        var connection = new SqliteConnection($"Data Source={path}");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = create ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite,
+        }.ToString();
+        var connection = new SqliteConnection(connectionString);
         try
         {
             await connection.OpenAsync(ct);
@@ -120,7 +157,7 @@ public sealed class SqliteConnectionFactory(Qa403DatabaseOptions options)
     /// </returns>
     public static async Task<(bool Completed, long WalFrames)> CheckpointAsync(string path, CancellationToken ct)
     {
-        await using var connection = await OpenAtAsync(path, ct);
+        await using var connection = await OpenAtAsync(path, create: false, ct);
 
         long frames = 0;
         bool busy = false;
@@ -159,7 +196,7 @@ public sealed class SqliteConnectionFactory(Qa403DatabaseOptions options)
     {
         try
         {
-            await using var connection = await OpenAtAsync(path, ct);
+            await using var connection = await OpenAtAsync(path, create: false, ct);
             await using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA quick_check;";
             await using var reader = await command.ExecuteReaderAsync(ct);

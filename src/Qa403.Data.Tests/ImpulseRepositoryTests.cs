@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 
 namespace Qa403.Data.Tests;
 
@@ -146,94 +146,11 @@ public class ImpulseRepositoryTests
         }
     }
 
-    /// <summary>
-    /// A loopback calibration is deliberately not a child of <c>capture</c>: it describes the
-    /// analyzer rather than any measurement. So deleting every measurement in the database must
-    /// leave it standing — losing the bench calibration because a result was tidied up would be a
-    /// nasty surprise.
-    /// </summary>
-    [Fact]
-    public async Task LoopbackReference_SurvivesDeletingTheMeasurementsAroundIt()
-    {
-        string path = TestDb.CreateTempPath();
-        try
-        {
-            var factory = await TestDb.CreateMigratedFactoryAsync(path);
-            long typeId = await CreateImpulseTypeAsync(factory);
-            var repo = new MeasurementRepository(factory);
-
-            long id = await repo.SaveLoopbackReferenceAsync(BuildReference("bench"), CancellationToken.None);
-            long resultId = await repo.SaveImpulseResultAsync(BuildRequest(typeId), CancellationToken.None);
-
-            Assert.True(await repo.DeleteResultAsync(resultId, CancellationToken.None));
-            Assert.True(await new ProjectRepository(factory).DeleteTypeAsync(typeId, CancellationToken.None));
-
-            var stored = await repo.GetLoopbackReferenceAsync(id, CancellationToken.None);
-            Assert.NotNull(stored);
-            Assert.Equal("bench", stored.Name);
-        }
-        finally
-        {
-            TestDb.Cleanup(path);
-        }
-    }
-
-    [Fact]
-    public async Task LoopbackReference_RoundTripsItsIrAndOffsets_AndReplacesOnTheSameName()
-    {
-        string path = TestDb.CreateTempPath();
-        try
-        {
-            var factory = await TestDb.CreateMigratedFactoryAsync(path);
-            var repo = new MeasurementRepository(factory);
-
-            var original = BuildReference("bench");
-            long id = await repo.SaveLoopbackReferenceAsync(original, CancellationToken.None);
-
-            var stored = await repo.GetLoopbackReferenceAsync(id, CancellationToken.None);
-            Assert.NotNull(stored);
-            Assert.Equal(original.Ir, stored.Ir);
-            Assert.Equal(original.PeakOffset, stored.PeakOffset);
-            Assert.Equal(original.RemovedDelaySamples, stored.RemovedDelaySamples);
-            Assert.Equal(original.SampleRateHz, stored.SampleRateHz);
-            Assert.True(stored.IsSimulated);
-
-            // Saving over the same name replaces rather than duplicating: the name is how the picker
-            // identifies a calibration, and two rows sharing one would be indistinguishable there.
-            long again = await repo.SaveLoopbackReferenceAsync(
-                BuildReference("bench") with { SampleRateHz = 96000.0 }, CancellationToken.None);
-
-            Assert.Equal(id, again);
-            Assert.Single(await repo.ListLoopbackReferencesAsync(CancellationToken.None));
-            Assert.Equal(96000.0, (await repo.GetLoopbackReferenceAsync(id, CancellationToken.None))!.SampleRateHz);
-
-            Assert.True(await repo.DeleteLoopbackReferenceAsync(id, CancellationToken.None));
-            Assert.Empty(await repo.ListLoopbackReferencesAsync(CancellationToken.None));
-        }
-        finally
-        {
-            TestDb.Cleanup(path);
-        }
-    }
-
     private static async Task<long> CreateImpulseTypeAsync(SqliteConnectionFactory factory)
     {
         var projectRepo = new ProjectRepository(factory);
         long projectId = await projectRepo.CreateProjectAsync("GM70", null, CancellationToken.None);
         return await projectRepo.CreateTypeAsync(projectId, "ImpulseResponse", "impulse", null, "{}", CancellationToken.None);
-    }
-
-    private static StoredLoopbackReference BuildReference(string name)
-    {
-        var ir = new float[8193];
-        ir[1024] = 1.0f;
-        ir[1023] = -0.25f;
-        ir[1025] = -0.25f;
-
-        return new StoredLoopbackReference(
-            Id: 0, name, DateTimeOffset.UtcNow, SampleRateHz: 48000.0, SourceFftSize: 32768,
-            ChirpStartHz: 2.0, ChirpEndHz: 23520.0, RemovedDelaySamples: 41.5, PeakOffset: 1024,
-            ir, DeviceSerial: "1077527945", IsSimulated: true);
     }
 
     private static ImpulseSaveRequest BuildRequest(long typeId)

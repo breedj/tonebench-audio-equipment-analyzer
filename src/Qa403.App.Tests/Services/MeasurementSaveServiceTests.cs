@@ -52,7 +52,7 @@ public class MeasurementSaveServiceTests
             var saveService = new MeasurementSaveService(
                 session, pipeline, sweepRunner, responseRunner, steppedRunner,
                 new ImpulseResponseRunner(
-                    session, pipeline, new SqliteLoopbackReferenceStore(new MeasurementRepository(factory)),
+                    session, pipeline, new InMemoryLoopbackReferenceStore(),
                     NullLogger<ImpulseResponseRunner>.Instance),
                 new ImpedanceRunner(
                     session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),
@@ -63,6 +63,18 @@ public class MeasurementSaveServiceTests
             using var doc = JsonDocument.Parse(json);
 
             Assert.True(doc.RootElement.GetProperty("generator").GetProperty("snapToBin").GetBoolean());
+
+            // "Autofit when measurement done" is the other default a new type starts with, on every
+            // kind that has the checkbox -- and only a *new* one: BuildCurrentParametersJson, which
+            // a save of an existing type goes through, must keep reporting whatever was staged (null
+            // here), so a type stored before the default existed keeps reading as off.
+            Assert.True(doc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
+            using var sweepDoc = JsonDocument.Parse(saveService.DefaultSweepParametersJson());
+            Assert.True(sweepDoc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
+            using var amplitudeDoc = JsonDocument.Parse(saveService.DefaultAmplitudeSweepParametersJson());
+            Assert.True(amplitudeDoc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
+            using var currentDoc = JsonDocument.Parse(saveService.BuildCurrentParametersJson());
+            Assert.Equal(JsonValueKind.Null, currentDoc.RootElement.GetProperty("chartAutofitOnDone").ValueKind);
         }
         finally
         {
@@ -103,7 +115,7 @@ public class MeasurementSaveServiceTests
             var saveService = new MeasurementSaveService(
                 session, pipeline, sweepRunner, responseRunner, steppedRunner,
                 new ImpulseResponseRunner(
-                    session, pipeline, new SqliteLoopbackReferenceStore(new MeasurementRepository(factory)),
+                    session, pipeline, new InMemoryLoopbackReferenceStore(),
                     NullLogger<ImpulseResponseRunner>.Instance),
                 new ImpedanceRunner(
                     session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),

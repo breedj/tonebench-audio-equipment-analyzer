@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Qa403.App.Services;
 using Qa403.Data;
@@ -11,44 +11,8 @@ public static class ProjectsEndpoints
     {
         var group = app.MapGroup("/api/projects");
 
-        group.MapGet("", async (ProjectRepository repo, CancellationToken ct) =>
-        {
-            var projects = await repo.ListProjectsAsync(ct);
-            return Results.Ok(projects.Select(ToResponse));
-        });
-
-        group.MapPost("", async (SaveProjectRequest request, ProjectRepository repo, CancellationToken ct) =>
-        {
-            try
-            {
-                long id = await repo.CreateProjectAsync(request.Name, request.Notes, ct);
-                return Results.Ok(new IdResponse(id));
-            }
-            catch (SqliteException)
-            {
-                return Results.Conflict($"A project named '{request.Name}' already exists.");
-            }
-        });
-
-        group.MapPut("/{id:long}", async (long id, SaveProjectRequest request, ProjectRepository repo, CancellationToken ct) =>
-        {
-            bool updated = await repo.UpdateProjectAsync(id, request.Name, request.Notes, ct);
-            return updated ? Results.Ok() : Results.NotFound();
-        });
-
-        group.MapDelete("/{id:long}", async (long id, ProjectRepository repo, CancellationToken ct) =>
-        {
-            try
-            {
-                bool deleted = await repo.DeleteProjectAsync(id, ct);
-                return deleted ? Results.NoContent() : Results.NotFound();
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.Conflict(ex.Message);
-            }
-        });
-
+        // The project itself — one per file — is ProjectSessionEndpoints' business (/api/project);
+        // this group is its measurement types, addressed by the project id the file holds.
         group.MapGet("/{id:long}/measurement-types", async (long id, ProjectRepository repo, CancellationToken ct) =>
         {
             var types = await repo.ListTypesAsync(id, ct);
@@ -184,8 +148,6 @@ public static class ProjectsEndpoints
 }
 
 public sealed record IdResponse(long Id);
-
-public sealed record SaveProjectRequest(string Name, string? Notes);
 
 public sealed record ProjectResponse(long Id, string Name, string? Notes, DateTimeOffset CreatedUtc);
 

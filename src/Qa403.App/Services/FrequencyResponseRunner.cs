@@ -31,7 +31,7 @@ public sealed class FrequencyResponseRunner(
     DeviceSessionService session,
     SpectrumPipeline pipeline,
     SpectrumBroadcastHub hub,
-    ILogger<FrequencyResponseRunner> logger)
+    ILogger<FrequencyResponseRunner> logger) : IMeasurementRun
 {
     /// <summary>Columns sent to the chart per trace. Roughly 2x a wide display, per the project's decimation rule.</summary>
     public const int DisplayColumns = 1600;

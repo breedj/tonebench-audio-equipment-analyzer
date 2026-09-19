@@ -1,28 +1,35 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   api,
   type MeasurementType,
   type MeasurementTypeAppliedResponse,
   type Project,
   type SaveMeasurementTypeRequest,
-  type SaveProjectRequest,
   type StagedMeasurementConfig,
 } from '../api/client'
 import { stopRun } from '../deviceControl'
+import { useConfirm } from './useConfirm'
 
-// Module-level, not inside the composable function, so every caller (the project panel, the save
-// dialog's pickers, the history filter) shares one fetched list instead of drifting out of sync
+// Module-level, not inside the composable function, so every caller (the menu, the sidebar, the
+// save dialog's pickers, the history filter) shares one state instead of drifting out of sync
 // with independent copies — same shape as useSpectrumConfig.ts's singleton refs.
-const projects = ref<Project[]>([])
+//
+// The open project is the server's: one `.qa403` file at a time, opened and switched through
+// useProjectSession, and read back here with `refreshSession` (GET /api/project). Null means the
+// welcome screen. There is no client-side list of projects any more — the recent files list is
+// useRecentProjects, and it is a list of files, not of rows.
+const currentProject = ref<Project | null>(null)
 const types = ref<MeasurementType[]>([])
 const typesProjectId = ref<number | null>(null)
 const error = ref<string | null>(null)
-let loadProjectsPromise: Promise<void> | null = null
+/** False until the first GET /api/project has answered, so the shell does not flash the welcome screen on a reload of an open project. */
+const sessionLoaded = ref(false)
+let refreshPromise: Promise<void> | null = null
 
 // The project/type the sidebar has open — shared so the main pane (chart, history, save dialog
 // defaults) can all scope themselves to "whatever's currently selected" without their own copy of
 // the same two ids drifting apart.
-const currentProjectId = ref<number | null>(null)
+const currentProjectId = computed(() => currentProject.value?.id ?? null)
 const currentTypeId = ref<number | null>(null)
 // The currently-selected type's generator/acquisition settings, as returned by the last apply —
 // GeneratorPanel/SpectrumConfigPanel watch this to stage their forms. Null means nothing loaded yet.
@@ -39,49 +46,82 @@ const typeNotes = ref('')
 // ever be dirty — a Set rather than a single flag is just future-proofing, not a sign multiple
 // types can be dirty simultaneously today.
 const dirtyTypeIds = ref<Set<number>>(new Set())
+// The file path of the last session answer, so a Save As (same project id in a new file) still
+// counts as a change of project.
+let lastSessionPath: string | null = null
+
+/** Whether any measurement in the open project has unsaved settings — what enables Project ▸ Save. */
+const hasDirty = computed(() => types.value.some((t) => dirtyTypeIds.value.has(t.id)))
+
+/**
+ * Saves the open type's live settings — App.vue's saveCurrentType, registered through
+ * `setAutosaveFlush`, since building the staged config needs the panels App.vue owns. Called by
+ * confirmDiscardCurrentIfDirty before it asks: with autosave on, an edit made a moment before a
+ * switch is still inside the autosave debounce, and the right answer is to write it, not to ask
+ * whether to throw it away. A no-op (resolving without saving) when autosave is off.
+ */
+let autosaveFlush: (() => Promise<void>) | null = null
 
 export function useProjects() {
-  async function loadProjects() {
-    if (loadProjectsPromise) return loadProjectsPromise
+  /**
+   * Reads which project the server has open and rebuilds the client state around it: types
+   * reloaded, selection and staged settings cleared. Called once on first use and by
+   * useProjectSession after every open/create/close/save-as, and it is the only path that changes
+   * `currentProject` — the server owns that.
+   */
+  async function refreshSession() {
+    if (refreshPromise) return refreshPromise
 
-    loadProjectsPromise = (async () => {
+    refreshPromise = (async () => {
       try {
-        projects.value = await api.listProjects()
+        const session = await api.getProjectSession()
+        const next = session.open ? session.project : null
+        const changed = next?.id !== currentProject.value?.id || session.path !== lastSessionPath
+        lastSessionPath = session.path
+        currentProject.value = next
         error.value = null
-        // Nothing in the UI can pick a project yet on a cold load (the sidebar has nothing to
-        // list until one is selected), so default to the first one rather than leaving the shell empty.
-        if (currentProjectId.value === null && projects.value.length > 0) await selectProject(projects.value[0].id)
+        if (changed) {
+          currentTypeId.value = null
+          loadedParams.value = null
+          typeNotes.value = ''
+          dirtyTypeIds.value = new Set()
+          types.value = []
+          typesProjectId.value = null
+          if (next) await loadTypes(next.id)
+        }
       } catch (e) {
         error.value = (e as Error).message
       } finally {
-        loadProjectsPromise = null
+        sessionLoaded.value = true
+        refreshPromise = null
       }
     })()
 
-    return loadProjectsPromise
+    return refreshPromise
   }
 
   /**
    * True if the current type's live edits would be discarded by navigating away right now — asks
-   * to confirm if so, returns false (caller should abort the switch) on Cancel. A no-op returning
+   * to confirm if so, resolves false (caller should abort the switch) on Cancel. A no-op resolving
    * true when there's nothing dirty to lose.
    */
-  function confirmDiscardCurrentIfDirty(): boolean {
+  async function confirmDiscardCurrentIfDirty(): Promise<boolean> {
     if (currentTypeId.value === null || !dirtyTypeIds.value.has(currentTypeId.value)) return true
+    // Autosave first; if it wrote the type, there is nothing to discard. A failed save leaves the
+    // type dirty and falls through to the question, so an edit is never dropped silently.
+    if (autosaveFlush) {
+      await autosaveFlush().catch(() => undefined)
+      if (!dirtyTypeIds.value.has(currentTypeId.value)) return true
+    }
     const name = types.value.find((t) => t.id === currentTypeId.value)?.name ?? 'this measurement'
-    if (!window.confirm(`Discard unsaved changes to "${name}"?`)) return false
+    const ok = await useConfirm().confirm({
+      title: 'Unsaved changes',
+      message: `Discard unsaved changes to "${name}"?`,
+      confirmLabel: 'Discard',
+    })
+    if (!ok) return false
     markClean(currentTypeId.value)
     return true
-  }
-
-  async function selectProject(id: number) {
-    if (!confirmDiscardCurrentIfDirty()) return
-    await stopRun()
-    currentProjectId.value = id
-    currentTypeId.value = null
-    loadedParams.value = null
-    typeNotes.value = ''
-    await loadTypes(id)
   }
 
   /**
@@ -91,7 +131,7 @@ export function useProjects() {
    * generator/acquisition staged into loadedParams for the Run button. See SpectrumConfigPanel.vue and App.vue's runFromCurrentSettings.
    */
   async function selectType(id: number) {
-    if (id !== currentTypeId.value && !confirmDiscardCurrentIfDirty()) return
+    if (id !== currentTypeId.value && !(await confirmDiscardCurrentIfDirty())) return
     await stopRun()
     currentTypeId.value = id
     typeNotes.value = types.value.find((t) => t.id === id)?.notes ?? ''
@@ -113,6 +153,11 @@ export function useProjects() {
     return trimmed.length > 0 ? trimmed : null
   }
 
+  /** Registers the autosave flush — see `autosaveFlush`. App.vue calls this once. */
+  function setAutosaveFlush(flush: (() => Promise<void>) | null) {
+    autosaveFlush = flush
+  }
+
   /** Flags the currently-open type as having live edits not yet reflected in its stored params_json. */
   function markDirty() {
     if (currentTypeId.value === null || dirtyTypeIds.value.has(currentTypeId.value)) return
@@ -130,40 +175,6 @@ export function useProjects() {
     try {
       types.value = await api.listMeasurementTypes(projectId)
       typesProjectId.value = projectId
-      error.value = null
-    } catch (e) {
-      error.value = (e as Error).message
-      throw e
-    }
-  }
-
-  async function createProject(req: SaveProjectRequest) {
-    try {
-      const { id } = await api.createProject(req)
-      await loadProjects()
-      error.value = null
-      return id
-    } catch (e) {
-      error.value = (e as Error).message
-      throw e
-    }
-  }
-
-  async function updateProject(id: number, req: SaveProjectRequest) {
-    try {
-      await api.updateProject(id, req)
-      await loadProjects()
-      error.value = null
-    } catch (e) {
-      error.value = (e as Error).message
-      throw e
-    }
-  }
-
-  async function deleteProject(id: number) {
-    try {
-      await api.deleteProject(id)
-      await loadProjects()
       error.value = null
     } catch (e) {
       error.value = (e as Error).message
@@ -314,31 +325,11 @@ export function useProjects() {
     }
   }
 
-  /**
-   * Clones the current project and all of its measurement types — using each type's own
-   * already-stored params_json, not whatever happens to be live right now — into a new project,
-   * leaving the original untouched.
-   */
-  async function saveProjectAs(newName: string): Promise<number> {
-    if (currentProjectId.value === null) throw new Error('No project selected.')
-    const sourceProjectId = currentProjectId.value
-    const sourceProject = projects.value.find((p) => p.id === sourceProjectId)
-    try {
-      const newProjectId = await createProject({ name: newName, notes: sourceProject?.notes ?? null })
-      for (const t of types.value.filter((t) => t.projectId === sourceProjectId))
-        await api.createMeasurementType(newProjectId, { kind: t.kind, name: t.name, notes: t.notes, paramsJson: t.paramsJson })
-      error.value = null
-      return newProjectId
-    } catch (e) {
-      error.value = (e as Error).message
-      throw e
-    }
-  }
-
-  if (projects.value.length === 0) loadProjects()
+  if (!sessionLoaded.value) void refreshSession()
 
   return {
-    projects,
+    currentProject,
+    sessionLoaded,
     types,
     typesProjectId,
     currentProjectId,
@@ -347,23 +338,21 @@ export function useProjects() {
     typeNotes,
     setTypeNotes,
     dirtyTypeIds,
+    hasDirty,
     error,
-    loadProjects,
+    refreshSession,
+    confirmDiscardCurrentIfDirty,
     loadTypes,
-    selectProject,
     selectType,
-    createProject,
-    updateProject,
-    deleteProject,
     createMeasurementType,
     updateMeasurementType,
     deleteMeasurementType,
     reorderTypes,
     applyMeasurementType,
     markDirty,
+    setAutosaveFlush,
     saveMeasurementType,
     saveMeasurementTypeAs,
     saveProject,
-    saveProjectAs,
   }
 }

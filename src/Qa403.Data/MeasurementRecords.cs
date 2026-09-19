@@ -54,9 +54,9 @@ public sealed record FftSpectrumParameters(
     bool? ChartShowDataPoints = null,
     bool? ChartShowMinMax = null,
     bool? ChartShowPeakHold = null,
-    // Off (null/false) unless the user opts in -- see ChartDisplayPanel.vue's "Autofit when
-    // measurement done" checkbox. Null on a type saved before this existed, same as the toggles
-    // above, and treated as false so nothing changes for it.
+    // See ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. A new type is created
+    // with it on (MeasurementSaveService.BuildDefaultParametersJsonForNewType); null on a type saved
+    // before this existed, same as the toggles above, and treated as false so nothing changes for it.
     bool? ChartAutofitOnDone = null,
     // Which of the FFT screen's secondary panels (waterfall, oscilloscope, harmonics, other peaks)
     // are drawn -- another display-only preference, on the same terms as the four above. Null means
@@ -130,7 +130,7 @@ public sealed record ThdVsFrequencyParameters(
     double? ChartXToHz = null,
     double? ChartYTopDb = null,
     double? ChartYBottomDb = null,
-    /// <summary>Off unless the user opts in -- see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. Null on a type saved before this existed, treated as false.</summary>
+    /// <summary>See SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. On for a new type (the Default*ParametersJson seeds); null on a type saved before this existed, treated as false.</summary>
     bool? ChartAutofitOnDone = null,
     /// <summary>
     /// Which component the readout interprets the curve as — None, Capacitor, Inductor or

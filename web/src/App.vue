@@ -28,6 +28,7 @@ import GeneratorMetricsPanel from './components/GeneratorMetricsPanel.vue'
 import HarmonicsTable from './components/HarmonicsTable.vue'
 import OtherPeaksTable from './components/OtherPeaksTable.vue'
 import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
+import MeasurementNotesPanel from './components/MeasurementNotesPanel.vue'
 import MeasurementChecklist from './components/MeasurementChecklist.vue'
 import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import MeasurementLayout from './components/MeasurementLayout.vue'
@@ -2504,6 +2505,7 @@ function confirmSaveProjectAs(name: string) {
                   ≈{{ impulseGateResolutionHz.toFixed(0) }} Hz is resolved, however convincing the curve looks there.
                 </p>
 
+                <MeasurementNotesPanel />
                 <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
@@ -2718,6 +2720,7 @@ function confirmSaveProjectAs(name: string) {
                   :fitted-model="responsePoleZeroPanel?.fit?.model ?? null"
                 />
 
+                <MeasurementNotesPanel />
                 <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
@@ -2864,6 +2867,7 @@ function confirmSaveProjectAs(name: string) {
                   :thick-lines="impedanceThickLines"
                 />
 
+                <MeasurementNotesPanel />
                 <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
@@ -2995,6 +2999,7 @@ function confirmSaveProjectAs(name: string) {
                   @cursor-x="onSweepCursorX"
                 />
 
+                <MeasurementNotesPanel />
                 <MeasurementHistoryPanel @error="reportError" @report="openReport" />
               </template>
 
@@ -3164,6 +3169,7 @@ function confirmSaveProjectAs(name: string) {
           <!-- History details sits at the bottom, spanning the whole measurement view rather than
                the centre column it used to share with the charts: its rows are a name, a timestamp,
                per-channel headlines and three buttons, which a third of the width could only wrap. -->
+          <MeasurementNotesPanel />
           <MeasurementHistoryPanel @error="reportError" @report="openReport" />
           </template>
         </template>

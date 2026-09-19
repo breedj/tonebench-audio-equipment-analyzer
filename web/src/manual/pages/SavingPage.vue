@@ -60,7 +60,7 @@
       to its own last-saved settings, so experimenting with a setup never costs you the original.
     </p>
     <p>
-      Under every measurement's settings sits a <strong>Notes</strong> box: free text about the
+      Above every screen's History details sits a <strong>Notes</strong> box: free text about the
       measurement itself — the DUT, the wiring, what to look for. It is saved with the measurement
       by the same Save and Save as…, and typing in it marks the measurement unsaved like any
       setting. When a result is saved, the Save dialog starts with a copy of these notes, to keep or

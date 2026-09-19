@@ -21,9 +21,9 @@ namespace Qa403.Data;
 /// impulse response live here for the same reason (config migration 002), as do the recent-projects
 /// list, the last opened project and the startup preference — all about this machine.</para>
 ///
-/// <para>Under LocalApplicationData (<c>~/.local/share/Qa403</c> on Linux) rather than next to the
-/// binary, because a rebuild must not silently destroy it; override with the <c>Config:Path</c>
-/// configuration key.</para>
+/// <para>Under <see cref="Qa403AppData.RootDirectory"/> (LocalApplicationData,
+/// <c>~/.local/share/Qa403</c> on Linux) rather than next to the binary, because a rebuild must not
+/// silently destroy it; override with the <c>Config:Path</c> configuration key.</para>
 /// </summary>
 public sealed record Qa403ConfigDatabaseOptions
 {
@@ -33,10 +33,8 @@ public sealed record Qa403ConfigDatabaseOptions
     {
         get
         {
-            string directory = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Qa403");
-            Directory.CreateDirectory(directory);
-            return new Qa403ConfigDatabaseOptions { Path = System.IO.Path.Combine(directory, "qa403-config.db") };
+            Directory.CreateDirectory(Qa403AppData.RootDirectory);
+            return new Qa403ConfigDatabaseOptions { Path = Qa403AppData.ConfigDatabasePath };
         }
     }
 }

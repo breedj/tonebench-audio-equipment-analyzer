@@ -1,9 +1,10 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Qa403.App.Streaming;
+using Qa403.Data;
 using Qa403.Device;
 
 namespace Qa403.App.Diagnostics;
@@ -88,7 +89,7 @@ public sealed class DiagnosticRecorder
     public DiagnosticRecorder(ILogger<DiagnosticRecorder> logger)
     {
         _logger = logger;
-        Directory = Path.Combine(AppContext.BaseDirectory, "diagnostics");
+        Directory = Qa403AppData.DiagnosticsDirectory;
 
         _queue = Channel.CreateBounded<IDiagnosticWrite>(
             new BoundedChannelOptions(QueueCapacity)

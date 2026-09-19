@@ -1,0 +1,17 @@
+#!/bin/sh
+# Apply the freshly installed udev rule without a reboot. Tolerates environments with no running
+# udev (containers, chroots, the CI runner) — modelled on qa40x-rs's postinstall.
+set -e
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=usb 2>/dev/null || true
+fi
+
+# A package cannot know which user will sit at the bench, so the one step it cannot do is said out
+# loud. (The tar.gz's install.sh does it, because there the invoking user is known.)
+cat <<'MSG'
+qa403-audio-analyzer: to open the QA403 as a non-root user, run
+    sudo usermod -aG plugdev $USER
+and log out and back in. Start the analyzer from the applications menu or with `qa403-audio-analyzer`.
+MSG
+exit 0

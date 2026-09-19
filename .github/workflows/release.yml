@@ -30,10 +30,8 @@ jobs:
         include:
           - rid: win-x64
             os: windows-latest
-            archive: zip
           - rid: linux-x64
             os: ubuntu-latest
-            archive: tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -51,32 +49,29 @@ jobs:
           npm run build
 
       # Release tags (vX.Y.Z) set the published assembly version to match the tag exactly, so the
-      # update-check feature compares like against like. Non-tag builds keep Directory.Build.props'
-      # dev default.
+      # update-check feature compares like against like. Non-tag builds carry Directory.Build.props'
+      # dev default, read through MSBuild so it is never duplicated here — the packages need a
+      # version in their file names either way.
       - name: Determine version
         id: version
         shell: bash
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            version="${GITHUB_REF#refs/tags/v}"
           else
-            echo "version=" >> "$GITHUB_OUTPUT"
+            version="$(dotnet msbuild src/Qa403.App/Qa403.App.csproj -getProperty:Version -nologo | tr -d '[:space:]')"
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version $version"
 
+      # The single-file/trimmed/self-contained shape lives in Qa403.App.csproj under its publish
+      # condition, so this is the same one-liner packaging/windows/build.ps1, packaging/linux/build.sh
+      # and README.md use.
       - name: Publish
         shell: bash
         run: |
-          VERSION_ARG=""
-          if [[ -n "${{ steps.version.outputs.version }}" ]]; then
-            VERSION_ARG="-p:Version=${{ steps.version.outputs.version }}"
-          fi
           dotnet publish src/Qa403.App/Qa403.App.csproj -c Release -r ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true -p:PublishTrimmed=true -p:TrimMode=partial \
-            -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true \
-            -p:InvariantGlobalization=true \
-            $VERSION_ARG \
-            -o publish/${{ matrix.rid }}
+            -p:Version=${{ steps.version.outputs.version }} -o publish/${{ matrix.rid }}
 
       # Verifies the trimmed self-contained binary actually runs, not just that it built — trimming
       # is the likeliest way to silently break Dapper's reflection-based mapping (see
@@ -149,22 +144,111 @@ jobs:
           }
           Write-Host "App responded and rendered a PDF, smoke test passed."
 
+      # ---- Windows: zip + Inno Setup installer -------------------------------------------------
+
+      # A whitelist, not `*`: the publish folder also holds a loose wwwroot copy (embedded already)
+      # and the static-web-assets manifest. libusb-1.0.dll is inside the exe; QuestPDF's font is not.
       - name: Package (zip)
-        if: matrix.archive == 'zip'
+        if: runner.os == 'Windows'
         working-directory: publish/${{ matrix.rid }}
         shell: pwsh
-        run: Compress-Archive -Path * -DestinationPath ../../qa403-audio-analyzer-${{ matrix.rid }}.zip
+        run: |
+          New-Item -ItemType Directory -Force ../../dist | Out-Null
+          Compress-Archive -Path Qa403.App.exe, QuestPDF.Fonts.Lato.br, appsettings.json `
+            -DestinationPath ../../dist/qa403-audio-analyzer-${{ steps.version.outputs.version }}-win-x64.zip -Force
 
-      # tar.gz rather than zip on Linux to preserve the executable bit on Qa403.App.
-      - name: Package (tar.gz)
-        if: matrix.archive == 'tar.gz'
-        working-directory: publish/${{ matrix.rid }}
-        run: tar -czf ../../qa403-audio-analyzer-${{ matrix.rid }}.tar.gz .
+      - name: Build installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./packaging/windows/build.ps1 -NoPublish -PublishDir publish/${{ matrix.rid }} `
+            -Version ${{ steps.version.outputs.version }}
+
+      # The installed layout is the thing users actually run, and the only place a missing file in
+      # the installer's whitelist shows up. It also proves the app writes its logs to the data folder
+      # and nothing into its own — the property that makes a per-user install and an uninstall safe.
+      - name: Smoke test installed layout (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-Item dist/*-win-x64-setup.exe
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "Installer exited with $($p.ExitCode)"; exit 1 }
+          $app = "$env:LOCALAPPDATA\Programs\QA403 Audio Analyzer"
+          foreach ($f in "Qa403.App.exe", "QuestPDF.Fonts.Lato.br", "appsettings.json", "unins000.exe") {
+            if (-not (Test-Path "$app\$f")) { Write-Error "Installed layout is missing $f"; exit 1 }
+          }
+          $proc = Start-Process -FilePath "$app\Qa403.App.exe" -ArgumentList "--simulate --no-browser" -WorkingDirectory $app -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:8399/api/update-check -TimeoutSec 2 | Out-Null
+              $ok = $true
+              break
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { Write-Error "Installed app did not respond within 20s"; exit 1 }
+          if (-not (Get-ChildItem "$env:LOCALAPPDATA\Qa403\logs\qa403-*.log" -ErrorAction SilentlyContinue)) {
+            Write-Error "No log file under %LOCALAPPDATA%\Qa403\logs"; exit 1
+          }
+          if (Test-Path "$app\logs") { Write-Error "The installed app wrote a logs folder beside the exe"; exit 1 }
+          $u = Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($u.ExitCode -ne 0) { Write-Error "Uninstaller exited with $($u.ExitCode)"; exit 1 }
+          Start-Sleep -Seconds 2
+          if (Test-Path $app) { Write-Error "Uninstall left $app behind"; exit 1 }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Qa403")) { Write-Error "Uninstall removed the user's data folder"; exit 1 }
+          Write-Host "Installed, ran, uninstalled; user data kept."
+
+      # ---- Linux: .deb + tar.gz ----------------------------------------------------------------
+
+      - name: Build packages
+        if: runner.os == 'Linux'
+        run: |
+          ./packaging/linux/build.sh --no-publish --publish-dir publish/${{ matrix.rid }} \
+            --version ${{ steps.version.outputs.version }}
+          # Depends in packaging/linux/deb/control is hand-maintained; this is the cross-check.
+          ldd publish/${{ matrix.rid }}/Qa403.App || true
+          if command -v lintian >/dev/null 2>&1; then lintian dist/*.deb || true; fi
+
+      # apt (with the ./ prefix) resolves Depends and runs postinst, which a bare dpkg -i would not.
+      # The run through /usr/bin proves the symlink, the udev rule's placement, the log location and
+      # that `apt remove` takes the rule with it and leaves the user's data alone.
+      - name: Smoke test installed layout (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y ./dist/qa403-audio-analyzer_*_amd64.deb
+          test -f /usr/lib/udev/rules.d/99-qa403.rules
+          test -f /usr/share/applications/qa403-audio-analyzer.desktop
+          test -L /usr/bin/qa403-audio-analyzer
+          qa403-audio-analyzer --simulate --no-browser &
+          PID=$!
+          ok=0
+          for i in $(seq 1 20); do
+            if curl -fs http://127.0.0.1:8399/api/update-check >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          # SIGTERM rather than SIGINT: a background job of a non-interactive shell inherits SIGINT
+          # ignored, and the runtime honours that. The host treats both as a graceful stop.
+          kill -TERM $PID || true
+          wait $PID || true
+          [ "$ok" = 1 ] || { echo "Installed app did not respond within 20s" >&2; exit 1; }
+          ls "$HOME/.local/share/Qa403/logs"/qa403-*.log
+          grep -q "Host stopped cleanly" "$HOME/.local/share/Qa403/logs"/qa403-*.log
+          sudo apt-get remove -y qa403-audio-analyzer
+          test ! -e /usr/lib/udev/rules.d/99-qa403.rules
+          test ! -e /usr/lib/qa403-audio-analyzer
+          test -d "$HOME/.local/share/Qa403"
+          echo "Installed, ran, shut down cleanly on SIGTERM, removed; user data kept."
 
       - uses: actions/upload-artifact@v4
         with:
           name: qa403-audio-analyzer-${{ matrix.rid }}
-          path: qa403-audio-analyzer-${{ matrix.rid }}.${{ matrix.archive }}
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+            dist/*.deb
+            dist/*.tar.gz
 
   release:
     needs: build
@@ -182,7 +266,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
+            artifacts/qa403-audio-analyzer-win-x64/*-setup.exe \
             artifacts/qa403-audio-analyzer-win-x64/*.zip \
+            artifacts/qa403-audio-analyzer-linux-x64/*.deb \
             artifacts/qa403-audio-analyzer-linux-x64/*.tar.gz \
             --title "${{ github.ref_name }}" \
             --generate-notes

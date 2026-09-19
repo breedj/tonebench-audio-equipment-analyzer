@@ -12,6 +12,35 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <Product>QA403 Audio Analyzer</Product>
+    <Authors>Joost Breed</Authors>
+    <ApplicationIcon>..\..\packaging\windows\qa403.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- The release publish shape (docs/qa403-app-stack-spec.md §2.4), kept here so the workflow, the
+       two packaging scripts and the README all run the same one-liner instead of each carrying a copy
+       of these flags:
+           dotnet publish src/Qa403.App/Qa403.App.csproj -c Release -r <rid> -o <dir> [-p:Version=X]
+       Applied only when `dotnet publish` runs with a RID (_IsPublishing is the global property the
+       SDK sets for publish and keys PublishRelease on; it is underscore-prefixed, so if a future SDK
+       drops it, replace the condition with an explicit -p:ReleasePublish=true that the callers pass).
+       A plain build/run/test never sees trimming or single-file. What the publish folder holds
+       afterwards (measured, not assumed — packaging/windows/build.ps1 checks it): the exe, which has
+       absorbed libusb-1.0.dll (the bundler classifies by file type, so a native .dll reaches the bundle
+       under IncludeNativeLibrariesForSelfExtract even as a None item, and is self-extracted at startup),
+       QuestPDF.Fonts.Lato.br loose beside it (QuestPDF's default font archive, copied by its own
+       .targets and NOT bundled, since only .dll/.so/.dylib content is), appsettings*.json, the
+       static-web-assets manifest and a loose wwwroot copy that the embedded one makes redundant. -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true' And '$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DebugType>none</DebugType>
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
   </PropertyGroup>
 
   <ItemGroup>

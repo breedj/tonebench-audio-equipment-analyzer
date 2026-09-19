@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: qa403-audio-analyzer
+Source: https://github.com/breedj/qa40x-audio-analyzer-cp
+
+Files: *
+Copyright: Joost Breed
+License: as published in the source repository

@@ -57,7 +57,11 @@ string poolFloorNote;
         : $"thread pool floor NOT applied, still {nowWorker}/{nowIo}";
 }
 
-var logDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+// Logs live in the per-user data folder next to the configuration database, never beside the exe:
+// an installed binary's folder belongs to the installer (and is read-only under /usr/lib), and a
+// rebuild must not take the logs with it. Deliberately not tied to the "Config:Path" override below —
+// that names one file, and a log location that silently moved with it would be a surprise.
+var logDirectory = Qa403AppData.LogsDirectory;
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
@@ -235,6 +239,10 @@ try
     var url = $"http://127.0.0.1:{port}";
     Log.Information("QA403 Audio Analyzer listening on {Url} (simulate={Simulate})", url, simulate);
 
+    // The console is what the user is looking at when something goes wrong, so it says where to look.
+    Log.Information("QA403 data: logs {Logs}, diagnostics {Diagnostics}, configuration {Config}",
+        Qa403AppData.LogsDirectory, Qa403AppData.DiagnosticsDirectory, configOptions.Path);
+
     // Logged, because "the fix is in the binary" and "the fix took effect" are different claims and
     // a pump stall looks the same either way.
     Log.Information("QA403 {PoolFloorNote}", poolFloorNote);
@@ -291,11 +299,14 @@ finally
 /// from a CTRL_CLOSE_EVENT handler is what tells Windows to proceed with the kill. Windows allows
 /// roughly 5 s before it terminates regardless, so every timeout on this path is sized to fit inside
 /// it — pump join 2 s &lt; ShutdownTimeout 3 s &lt; watchdog 3.5 s &lt; this wait 4.5 s.
+///
+/// On Linux the same signal is a real SIGHUP: the .deb's desktop entry runs the app in a terminal
+/// (<c>Terminal=true</c>, because the console is the log and its close button the way to quit), and
+/// closing that terminal delivers SIGHUP, whose default action is the same termination mid-transfer.
+/// So the handler is registered on every platform; only the blocking wait is Windows-specific, since
+/// nothing on Linux kills the process when the handler returns — the host simply finishes stopping.
 static IDisposable? RegisterConsoleCloseShutdown(IHostApplicationLifetime lifetime, ManualResetEventSlim shutdownComplete)
 {
-    if (!OperatingSystem.IsWindows())
-        return null;
-
     try
     {
         return PosixSignalRegistration.Create(PosixSignal.SIGHUP, context =>
@@ -305,7 +316,7 @@ static IDisposable? RegisterConsoleCloseShutdown(IHostApplicationLifetime lifeti
 
             lifetime.StopApplication();
 
-            if (!shutdownComplete.Wait(TimeSpan.FromSeconds(4.5)))
+            if (OperatingSystem.IsWindows() && !shutdownComplete.Wait(TimeSpan.FromSeconds(4.5)))
                 Log.Error("Shutdown did not finish before the console-close deadline; Windows will terminate the process");
         });
     }
@@ -412,7 +423,17 @@ static void CacheHeaders(StaticFileResponseContext context)
         return;
     }
 
-    // Everything else is content-addressed by Vite's hash, so a changed file is a changed URL.
+    // Vite's build output under assets/ is content-addressed by hash, so a changed file is a changed
+    // URL and may be cached forever. Files copied verbatim from web/public (favicon.svg) keep their
+    // name across builds, so they get the same revalidate-every-time treatment as index.html — the
+    // icon was found still showing the old design a build later, from a tab that had it "immutable".
+    var isHashedAsset = context.Context.Request.Path.StartsWithSegments("/assets");
+    if (!isHashedAsset)
+    {
+        headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+        return;
+    }
+
     headers.CacheControl = new CacheControlHeaderValue
     {
         Public = true,

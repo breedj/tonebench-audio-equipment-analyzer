@@ -2,23 +2,32 @@
 # Sets up USB access for the QA403 on Linux: installs the udev rule, adds the invoking user to
 # plugdev, and ensures libusb-1.0-0 is installed via apt.
 #
-# Usage: ./packaging/linux/install.sh   (run as the normal user — it re-execs itself with sudo
-# for the parts that need root, so your $USER/$SUDO_USER stays correct throughout)
+# Usage: ./install.sh   (from the extracted release tar.gz, or ./packaging/linux/install.sh in the
+# repo; run as the normal user — it re-execs itself with sudo for the parts that need root, so your
+# $USER/$SUDO_USER stays correct throughout). Users of the .deb do not need this: the package
+# carries the rule and the dependencies, and only the usermod line below still applies.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-UDEV_RULE="$REPO_ROOT/packaging/udev/99-qa403.rules"
 TARGET_USER="${SUDO_USER:-$USER}"
+
+# The rule sits beside this script in the release tar.gz and under packaging/udev/ in the repo.
+UDEV_RULE=""
+for candidate in "$SCRIPT_DIR/99-qa403.rules" "$SCRIPT_DIR/../udev/99-qa403.rules"; do
+    if [[ -f "$candidate" ]]; then
+        UDEV_RULE="$candidate"
+        break
+    fi
+done
 
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "Re-running with sudo for the parts that need root..."
     exec sudo --preserve-env=SUDO_USER "$0" "$@"
 fi
 
-if [[ ! -f "$UDEV_RULE" ]]; then
-    echo "error: $UDEV_RULE not found" >&2
+if [[ -z "$UDEV_RULE" ]]; then
+    echo "error: 99-qa403.rules not found beside $SCRIPT_DIR or in ../udev" >&2
     exit 1
 fi
 

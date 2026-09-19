@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=QA403 Audio Analyzer
+Comment=Audio analyzer for the QuantAsylum QA403
+Exec=qa403-audio-analyzer
+Icon=qa403-audio-analyzer
+# In a terminal on purpose: the console is the log, and its close button (or Ctrl+C) is how the app
+# is shut down — there is no quit control in the browser UI. Closing the terminal sends SIGHUP,
+# which the app handles as a graceful shutdown (Program.cs, RegisterConsoleCloseShutdown).
+Terminal=true
+Categories=AudioVideo;Audio;Science;Electronics;
+Keywords=QA403;QuantAsylum;audio;analyzer;THD;spectrum;
+Actions=Simulate;
+
+[Desktop Action Simulate]
+Name=QA403 Audio Analyzer (simulator)
+Exec=qa403-audio-analyzer --simulate

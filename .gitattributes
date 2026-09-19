@@ -1,0 +1,5 @@
+# Files that Linux executes or that dpkg reads must stay LF whatever core.autocrlf says on the
+# machine that checked them out: a postinst with CRLF line endings fails at "#!/bin/sh".
+*.sh text eol=lf
+packaging/linux/deb/* text eol=lf
+packaging/udev/* text eol=lf

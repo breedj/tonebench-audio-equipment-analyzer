@@ -13,10 +13,23 @@ public static class ProjectPaths
     /// Linux .NET maps <c>MyDocuments</c> to <c>$HOME</c>, so it is <c>~/QA403 Projects</c> there —
     /// visible user data either way, rather than something under an application-data folder that
     /// nobody browses or backs up. Never created here; the session creates it when the first file
-    /// is written into it.
+    /// is written into it. <c>MyDocuments</c> can come back <b>empty</b> — on Linux it is derived from
+    /// <c>$HOME</c>, and a service account or a CI runner may have none — which would make this a
+    /// relative path that the file browser cannot walk up from; the fallbacks are the user profile,
+    /// then the current directory, so it is always absolute.
     /// </summary>
-    public static string DefaultFolder { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "QA403 Projects");
+    public static string DefaultFolder { get; } = Path.Combine(DocumentsFolder(), "QA403 Projects");
+
+    private static string DocumentsFolder()
+    {
+        foreach (var folder in new[] { Environment.SpecialFolder.MyDocuments, Environment.SpecialFolder.UserProfile })
+        {
+            string path = Environment.GetFolderPath(folder);
+            if (!string.IsNullOrEmpty(path))
+                return path;
+        }
+        return Directory.GetCurrentDirectory();
+    }
 
     /// <summary>
     /// A typed path made absolute: a leading <c>~</c> becomes the home directory (the convention on

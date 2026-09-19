@@ -132,6 +132,9 @@ public sealed class FileBrowserService
         }
     }
 
-    private static StringComparer NameComparer =>
-        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    // Case-insensitive on every platform. This is a display order, not the file system's collation:
+    // a dialog that lists "Zed" above "amp" because Linux sorts by byte value reads as unsorted,
+    // and the Windows/Linux split here used to make the same folder list differently — which is
+    // also how the test for it only failed in CI.
+    private static StringComparer NameComparer => StringComparer.OrdinalIgnoreCase;
 }

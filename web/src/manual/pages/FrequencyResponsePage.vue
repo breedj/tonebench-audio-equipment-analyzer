@@ -86,7 +86,9 @@ const { showPage } = useManual()
           <td>
             <strong>Input voltage</strong> drives the generator at the level you enter.
             <strong>Output voltage</strong> and <strong>output power</strong> probe the DUT first
-            and set the generator so that much comes back out of it.
+            and set the generator so that much comes back out of it — at the bandwidth reference.
+            See <em>Setting the level by output</em> below; the line under the selector says where
+            the target applies.
           </td>
         </tr>
         <tr>
@@ -149,6 +151,70 @@ const { showPage } = useManual()
       solved target voltage in power mode, and the estimated run time.
     </p>
 
+    <h3>Setting the level by output</h3>
+    <p>
+      With <strong>Set generator by</strong> on <strong>Output voltage</strong> or
+      <strong>Output power</strong>, the amplitude you enter is what should come <em>out</em> of the
+      DUT, and the run starts by finding the generator level that produces it: a short chirp is
+      played, the DUT's gain is read from it, the generator is corrected by the shortfall, and that
+      repeats until the level lands within half a decibel. The progress line shows the search as
+      it goes.
+    </p>
+    <p>
+      A DUT's output is not one level but a curve, so the target has to say <em>where</em> on the
+      curve it applies. It applies at the <strong>bandwidth reference</strong> from the Measurements
+      panel — the same reference the ±1 dB and −3 dB corners are measured from:
+    </p>
+    <ul>
+      <li>
+        <strong>Passband median</strong> (the default): the target is the median level over the
+        <strong>Reference from / to</strong> band, 200 Hz – 2 kHz unless you change it. This is how
+        a datasheet quotes a level — "1 V out" means at 1 kHz, in the passband — and for a flat DUT
+        it is simply the level everywhere.
+      </li>
+      <li>
+        <strong>Peak</strong>: the target is the highest point of the response, so nothing in the
+        sweep exceeds it. Right for a DUT whose response is a peak, and the reading to use when what
+        you care about is not driving anything past a level.
+      </li>
+    </ul>
+    <p>
+      The line under the selector — <em>at 200–2000 Hz (bandwidth reference)</em>, say — tells you
+      which it is, and after the run the panel's <strong>Reference</strong> row is the level the
+      probe aimed at. For a shaped DUT the difference is large. A phono stage has 20 dB more gain
+      at 20 Hz than at 1 kHz: driven to "0 dBV" at the default band, it puts out 0 dBV at 1 kHz and
+      +20 dBV at its low end; with the band moved to 50 – 100 Hz the generator drops by 15 dB and
+      0 dBV appears there instead; under <strong>Peak</strong> the lowest frequencies read 0 dBV and
+      1 kHz sits 20 dB below. Put the reference band where the DUT is flat and where you would
+      quote its level, and the target means what you expect.
+    </p>
+    <p>
+      Three things follow from this:
+    </p>
+    <ul>
+      <li>
+        The input range is <em>measured</em> to fit the DUT's actual peak, not predicted from the
+        target — the peak of a shaped DUT sits well above its reference level, and a range chosen
+        for the target would clip it. If the peak turns out to need a wider range than the target
+        suggested, the level search is repeated on that range, since its first captures were
+        clipped.
+      </li>
+      <li>
+        A level the generator cannot reach — more than 18 dBV out of it — is clamped, and the log
+        says so. Ask for less, or move the reference band to where the DUT has more gain.
+      </li>
+      <li>
+        Changing the bandwidth reference <em>after</em> a run re-finds the corners on the curves
+        already on screen but cannot re-drive the DUT: the level was decided before the sweep. Run
+        again for the new target to apply.
+      </li>
+    </ul>
+    <p>
+      If the reference band holds no bin of the probe's short record — a band a few hertz wide at
+      the bottom of a 96 kHz span, say — the level is set against the median of the whole sweep
+      instead, and the log warns. Widen the band.
+    </p>
+
     <h2>What the views show</h2>
 
     <h3>Progress line</h3>
@@ -206,7 +272,8 @@ const { showPage } = useManual()
         <strong>Bandwidth reference</strong> — <strong>Passband median</strong> (the default) takes
         the median level over the reference band below. <strong>Peak</strong> uses the highest point
         of the curve — right only when the DUT's response <em>is</em> a peak, such as a bandpass
-        filter or a tweeter. See <em>Choosing the reference</em> below.
+        filter or a tweeter. See <em>Choosing the reference</em> below. The same reference is where
+        an output-referred generator level applies — see <em>Setting the level by output</em>.
       </li>
       <li>
         <strong>Reference from / to (Hz)</strong> — the band the passband median is taken over,

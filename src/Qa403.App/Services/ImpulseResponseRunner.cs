@@ -1011,7 +1011,9 @@ public sealed class ImpulseResponseRunner(
             var (probeLeft, _) = ResponseCaptureSupport.RequireBothChannels(
                 pipeline.LatestSnapshots(), probeFftSize, "impulse-response");
 
-            double gainDb = ResponseCaptureSupport.MedianGainDb(probeReference, probeLeft, probeFftSize, acquisition);
+            // At the acquisition's bandwidth reference, which for an impulse request is the default
+            // passband (200 Hz - 2 kHz): "0 dBV out" means 0 dBV there, not the whole-band median.
+            double gainDb = ResponseCaptureSupport.ProbeGainDb(probeReference, probeLeft, probeFftSize, acquisition, out _);
             if (double.IsNaN(gainDb))
                 throw new InvalidOperationException("The level probe measured no signal — check the DUT is connected and powered.");
 
@@ -1024,7 +1026,7 @@ public sealed class ImpulseResponseRunner(
             // the level it settled on, so a run that reached the generator's ceiling gives no clue
             // whether the DUT really is that quiet or one capture read as silence.
             logger.LogInformation(
-                "Level probe iteration {Pass}: generator {Amplitude:0.##} dBV, median gain {GainDb:0.##} dB, "
+                "Level probe iteration {Pass}: generator {Amplitude:0.##} dBV, passband gain {GainDb:0.##} dB, "
                     + "measured {MeasuredDbv:0.##} dBV against a target of {Target:0.##} dBV",
                 pass, amplitude, gainDb, measuredDbv, target);
 

@@ -147,6 +147,18 @@ const isPowerMode = computed(() => form.levelMode === 'OutputPower')
 /** Both output-referred modes solve the generator level by probing; only the direct one does not. */
 const solvesLevel = computed(() => form.levelMode !== 'GeneratorVoltage')
 
+// Where an output-referred target applies: the same bandwidth reference the Measurements panel
+// measures the corners from, so "0 dBV out" is 0 dBV where the corners are counted from. Shown
+// under the selector because the coupling is otherwise invisible — a phono stage driven to
+// "0 dBV" comes out 20 dB hotter at 20 Hz, and the only way to see what the probe aimed at is
+// to know which band it read.
+const levelReferenceHint = computed(() => {
+  if (!solvesLevel.value) return null
+  return bandwidthReference.value === 'Peak'
+    ? 'at the response peak (bandwidth reference)'
+    : `at ${bandwidthReferenceLowHz.value}–${bandwidthReferenceHighHz.value} Hz (bandwidth reference)`
+})
+
 const sampleRateHz = computed(() => form.frequencySpanHz * 2)
 
 /** The band boxes are only read — and so only validated and only shown — by the median reference. */
@@ -272,7 +284,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
   <CollapsibleSection title="Measurement settings">
     <label
       class="flex flex-col gap-1 text-xs"
-      title="Input voltage drives the generator at the level you enter. Output voltage and output power probe the DUT first and set the generator so this much comes back out — the power through the load below, V = sqrt(P x R)."
+      title="Input voltage drives the generator at the level you enter. Output voltage and output power probe the DUT first and set the generator so this much comes back out — the power through the load below, V = sqrt(P x R). The target applies at the bandwidth reference in the Measurements panel: the median over its band, or the peak."
     >
       Set generator by
       <select
@@ -282,6 +294,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       >
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
+      <span v-if="levelReferenceHint" class="text-[11px] text-neutral-500 dark:text-neutral-400">{{ levelReferenceHint }}</span>
     </label>
 
     <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">

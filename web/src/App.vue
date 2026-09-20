@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
@@ -1531,9 +1531,20 @@ const RANGE_STABILITY_FRAMES = 3
 let pendingRangeTarget: number | null = null
 let pendingRangeCount = 0
 
+//
+// And never while a measurement runner is up: every runner ranges for itself, and a range written
+// under it lands as a flush inside whatever it is capturing — the server refuses it with a 409 for
+// that reason, and this gate is what keeps that refusal from surfacing as an error banner on every
+// probe. Measured on the simulator's RIAA stage: this watcher stepped the range 30 -> 36 dBV on
+// the frequency-response probe's own meters frames, and in one run out of eight the step landed
+// on the capture the level probe was waiting for.
+const runnerActive = computed(
+  () => responseRunning.value || sweepRunning.value || impedanceRunning.value || impulseRunning.value,
+)
+
 watch(meters, (m) => {
   const hardwareAutoActive = status.value?.autoRangeEnabled !== null && status.value?.autoRangeEnabled !== undefined
-  if (!status.value?.acquiring || hardwareAutoActive) {
+  if (!status.value?.acquiring || hardwareAutoActive || runnerActive.value) {
     pendingRangeTarget = null
     pendingRangeCount = 0
     return

@@ -357,17 +357,61 @@ public sealed class FrequencyResponseRunner(
             // generator up, which clips harder still. Measured against a plain loopback asking for
             // 6 dBV out: the generator settled at 16.74 dBV, a 10.7 dB overshoot, and the same run
             // from a wide starting range lands on 6.01 dBV.
-            if (ownsInputRange && request.SolvesGeneratorLevel)
-                await ApplyInputRangeAsync(InputRangeSelector.For(session.Capabilities.InputRangesDbv, request.LevelDbv), ct);
+            //
+            // But the target names the DUT's *median* level, and a range predicted from it assumes
+            // the DUT's peak sits there too — true of a flat DUT and of nothing else. So the
+            // prediction is only where the level probe starts; the range the measurement runs on is
+            // measured afterwards, from the widest range, the way input-voltage mode always did it.
+            // Measured against the simulator's RIAA stage (+20 dB at 20 Hz over 1 kHz, its median
+            // some 27 dB below that again): a 0 dBV target predicted a 6 dBV range, the first pass
+            // came back flat-topped at 14 dB, and each continuous pass then re-ranged from a peak
+            // that was the range's clip level rather than the signal's — 6, 18, 30, 42 dBV, one step
+            // per pass, so the curve took four passes to appear and a SINGLE run never got there.
+            double generatorAmpDbv;
+            if (request.SolvesGeneratorLevel)
+            {
+                double predictedRangeDbv = InputRangeSelector.For(session.Capabilities.InputRangesDbv, request.LevelDbv);
+                if (ownsInputRange)
+                    await ApplyInputRangeAsync(predictedRangeDbv, ct);
 
-            double generatorAmpDbv = await ResolveGeneratorAmplitudeAsync(request, ct);
-            SetGeneratorAmpDbv(generatorAmpDbv);
+                generatorAmpDbv = await ResolveGeneratorAmplitudeAsync(request, ct);
+                SetGeneratorAmpDbv(generatorAmpDbv);
 
-            // Input voltage is the other way round: the generator level is given and nothing is known
-            // about what comes back, so it has to be measured — after the level is settled, because
-            // the probe plays at exactly that level.
-            if (ownsInputRange && !request.SolvesGeneratorLevel)
-                await ApplyInputRangeAsync(await ProbeInputRangeAsync(request, generatorAmpDbv, ct), ct);
+                if (ownsInputRange)
+                {
+                    double measuredRangeDbv = await ProbeInputRangeAsync(request, generatorAmpDbv, ct);
+
+                    // A DUT whose peak needs more range than its median was predicted to means the
+                    // level probe's own captures were clipped, and its answer is suspect. Settle it
+                    // again on the range the DUT actually needs, then range once more at the level
+                    // that produces — a flat DUT never enters here, so it costs the common case
+                    // nothing.
+                    if (measuredRangeDbv > predictedRangeDbv + RangeEpsilonDb)
+                    {
+                        logger.LogInformation(
+                            "The DUT's peak needs a {Measured:0.#} dBV input range where its median predicted {Predicted:0.#} dBV; "
+                                + "settling the generator level again on the wider range",
+                            measuredRangeDbv, predictedRangeDbv);
+
+                        await ApplyInputRangeAsync(measuredRangeDbv, ct);
+                        generatorAmpDbv = await ResolveGeneratorAmplitudeAsync(request, ct, startDbv: generatorAmpDbv);
+                        SetGeneratorAmpDbv(generatorAmpDbv);
+                        measuredRangeDbv = await ProbeInputRangeAsync(request, generatorAmpDbv, ct);
+                    }
+
+                    await ApplyInputRangeAsync(measuredRangeDbv, ct);
+                }
+            }
+            else
+            {
+                // Input voltage is the other way round: the generator level is given and nothing is
+                // known about what comes back, so it has to be measured — at exactly that level.
+                generatorAmpDbv = request.LevelDbv;
+                SetGeneratorAmpDbv(generatorAmpDbv);
+
+                if (ownsInputRange)
+                    await ApplyInputRangeAsync(await ProbeInputRangeAsync(request, generatorAmpDbv, ct), ct);
+            }
 
             SetPhase(FrequencyResponsePhase.Measuring);
 
@@ -391,8 +435,27 @@ public sealed class FrequencyResponseRunner(
                 // DetermineAttenuationFromLeftRightSeriesData at the bottom of its continuous loop.
                 // Only in continuous mode: a single run has nothing left to spend a new range on,
                 // and changing it after the fact would only cost the next measurement a settle.
+                //
+                // Downwards the peak is trusted: a level that fits inside the range is the signal's.
+                // Upwards it is not — a peak that wants a wider range may be the range's own clip
+                // level, and stepping from it walks up one rung per pass (see the probe above) when
+                // one short capture from the widest range lands on the answer directly. That capture
+                // reconfigures the generator, so the next pass re-arms with the throwaway record a
+                // stimulus change needs.
                 if (request.Continuous && ownsInputRange)
-                    await ApplyInputRangeAsync(InputRangeSelector.For(session.Capabilities.InputRangesDbv, peakDbv), ct);
+                {
+                    double wantedRangeDbv = InputRangeSelector.For(session.Capabilities.InputRangesDbv, peakDbv);
+                    if (wantedRangeDbv > session.InputRangeDbv + RangeEpsilonDb)
+                    {
+                        await ApplyInputRangeAsync(await ProbeInputRangeAsync(request, generatorAmpDbv, ct), ct);
+                        SetPhase(FrequencyResponsePhase.Measuring);
+                        generatorConfigured = false;
+                    }
+                    else
+                    {
+                        await ApplyInputRangeAsync(wantedRangeDbv, ct);
+                    }
+                }
 
                 lock (_stateLock)
                 {
@@ -693,7 +756,8 @@ public sealed class FrequencyResponseRunner(
     /// app did (<c>QaLibrary.DetermineGenAmplitudeByOutputAmplitudeWithChirp</c>): play a chirp,
     /// read the peak that comes back, correct the generator by the shortfall in dB, repeat.
     /// </summary>
-    private async Task<double> ResolveGeneratorAmplitudeAsync(FrequencyResponseRequest request, CancellationToken ct)
+    private async Task<double> ResolveGeneratorAmplitudeAsync(
+        FrequencyResponseRequest request, CancellationToken ct, double startDbv = ProbeStartDbv)
     {
         if (!request.SolvesGeneratorLevel)
             return request.LevelDbv;
@@ -701,7 +765,7 @@ public sealed class FrequencyResponseRunner(
         SetPhase(FrequencyResponsePhase.DeterminingLevel);
 
         double target = request.LevelDbv;
-        double amplitude = ProbeStartDbv;
+        double amplitude = startDbv;
 
         // A short record: the probe wants a peak level, not resolution, and at the full size each
         // pass would cost seconds.
@@ -722,9 +786,19 @@ public sealed class FrequencyResponseRunner(
             var probeReference = ResponseCaptureSupport.BuildReferenceSpectrum(_fft, request, amplitude, probeFftSize);
             var (probeLeft, _) = ResponseCaptureSupport.RequireBothChannels(pipeline.LatestSnapshots(), probeFftSize, "frequency-response");
 
-            double gainDb = ResponseCaptureSupport.MedianGainDb(probeReference, probeLeft, probeFftSize, request);
+            // The DUT's level at the bandwidth reference -- the passband median by default, the peak
+            // under that mode -- so the target names the level where the corners are measured from.
+            double gainDb = ResponseCaptureSupport.ProbeGainDb(probeReference, probeLeft, probeFftSize, request, out bool fellBack);
             if (double.IsNaN(gainDb))
                 throw new InvalidOperationException("The level probe measured no signal — check the DUT is connected and powered.");
+
+            if (fellBack && pass == 0)
+            {
+                logger.LogWarning(
+                    "The reference band {LowHz:0}-{HighHz:0} Hz holds no bin of the level probe's record; "
+                        + "the output level is being set against the whole-band median instead",
+                    request.BandwidthReferenceLowHz, request.BandwidthReferenceHighHz);
+            }
 
             // What a sine at the generator's level would produce at the DUT's output. Deconvolving
             // is what makes this a *level* rather than a bin: a chirp spreads its energy over
@@ -734,6 +808,11 @@ public sealed class FrequencyResponseRunner(
             // (The previous app read a peak bin and was right to, because the level it read came
             // back from the QA40x application already deconvolved.)
             double measuredDbv = amplitude + gainDb;
+
+            logger.LogInformation(
+                "Level probe iteration {Pass}: generator {Amplitude:0.##} dBV, gain at the {Reference} {GainDb:0.##} dB, "
+                    + "measured {MeasuredDbv:0.##} dBV against a target of {Target:0.##} dBV",
+                pass, amplitude, DescribeReference(request), gainDb, measuredDbv, target);
 
             double shortfall = target - measuredDbv;
             if (Math.Abs(shortfall) <= ProbeToleranceDb)
@@ -772,6 +851,11 @@ public sealed class FrequencyResponseRunner(
         pipeline.Options = pipeline.Options with { FftSize = request.FftSize };
         return amplitude;
     }
+
+    private static string DescribeReference(FrequencyResponseRequest request) =>
+        request.BandwidthReference == BandwidthReferenceMode.Peak
+            ? "peak"
+            : $"{request.BandwidthReferenceLowHz:0}-{request.BandwidthReferenceHighHz:0} Hz median";
 
     private async Task WaitForCaptureAsync(FrequencyResponseRequest request, int fftSize, CancellationToken ct)
     {

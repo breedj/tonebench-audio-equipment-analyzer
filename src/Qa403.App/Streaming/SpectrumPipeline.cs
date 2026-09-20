@@ -452,6 +452,14 @@ public sealed class SpectrumPipeline(
         //
         // Under _sampleSetLock, so this pass is atomic against Enqueue's own per-channel append loop
         // as well -- adjacent snapshot calls are not enough on their own, see that field.
+        // The flush generation every channel of this tick belongs to, read before any channel's
+        // window is copied out. ProcessChannel used to read it at its own start, after the
+        // snapshots below -- so a flush landing between channel 0's check and channel 1's start
+        // discarded the left record and committed the right one, both copied from the same
+        // pre-flush audio: a held right channel one record older than the left it was paired with,
+        // seen as an L/R seq mismatch on a frequency-response probe capture.
+        long generation = Interlocked.Read(ref _flushGeneration);
+
         var pending = new (double[] TimeBuf, long WrittenAtSnapshot)?[_channelCount];
         lock (_sampleSetLock)
         {
@@ -507,7 +515,7 @@ public sealed class SpectrumPipeline(
 
             try
             {
-                ProcessChannel(ch, options, p.Value.TimeBuf, p.Value.WrittenAtSnapshot, seq);
+                ProcessChannel(ch, options, p.Value.TimeBuf, p.Value.WrittenAtSnapshot, seq, generation);
             }
             finally
             {
@@ -543,15 +551,13 @@ public sealed class SpectrumPipeline(
     /// and <paramref name="writtenAtSnapshot"/> come from that channel's <see cref="SampleRingBuffer.SnapshotLatest"/>,
     /// taken with every other channel's before any channel's FFT ran, so that a multi-channel record
     /// actually describes one instant rather than one per channel. <paramref name="seq"/> identifies
-    /// that record and is shared by every channel of the tick.
+    /// that record and is shared by every channel of the tick. <paramref name="generation"/> is
+    /// the flush generation the snapshot was taken under: everything below describes the signal as
+    /// it was then, and if a Flush lands before the commit, that description is of the *old*
+    /// stimulus and must not be committed. See the check before the commit below.
     /// </summary>
-    private void ProcessChannel(int channelIndex, SpectrumPipelineOptions options, double[] timeBuf, long writtenAtSnapshot, uint seq)
+    private void ProcessChannel(int channelIndex, SpectrumPipelineOptions options, double[] timeBuf, long writtenAtSnapshot, uint seq, long generation)
     {
-        // The generation this record belongs to. Everything below describes the signal as it was
-        // when this line ran; if a Flush lands while the FFT is in flight, that description is of
-        // the *old* stimulus and must not be committed. See the check before the commit below.
-        long generation = Interlocked.Read(ref _flushGeneration);
-
         int n = options.FftSize;
         int specLen = (n / 2) + 1;
 

@@ -1,4 +1,4 @@
-using Qa403.App.Services;
+﻿using Qa403.App.Services;
 using Qa403.Device;
 using Qa403.Device.Simulation;
 
@@ -40,8 +40,21 @@ public static class DeviceEndpoints
                 caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount));
         });
 
-        group.MapPost("/input-range", async (InputRangeRequest request, DeviceSessionService session, CancellationToken ct) =>
+        group.MapPost("/input-range", async (
+            InputRangeRequest request, DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
         {
+            // A measurement's input range is its own while it runs. Every runner ranges for itself
+            // (a probe from the widest range, a prediction from the target, a per-point ratchet),
+            // and a range written under it from outside is a flush that lands inside whatever it is
+            // capturing — the level probe then reads an empty capture and the run fails with a
+            // message about the pipeline. That is how the browser's own live ranger, which does the
+            // simulator's ranging since the device has none, was found stepping the range mid-probe
+            // in one run out of eight. The session itself is an IMeasurementRun too (its acquiring
+            // state guards the project switch), and a plain FFT-screen acquisition is exactly what
+            // this endpoint is for, so it is excluded here.
+            if (runs.Any(run => !ReferenceEquals(run, session) && run.Running))
+                return Results.Conflict("A measurement is running and controls the input range; stop it first.");
+
             try
             {
                 await session.SetInputRangeAsync(request.Dbv, ct);

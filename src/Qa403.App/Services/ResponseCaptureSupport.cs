@@ -294,8 +294,13 @@ internal static class ResponseCaptureSupport
     ///
     /// <para>Median rather than mean: a mean in dB is pulled down hard by any null, and a mean of
     /// magnitudes is pulled up by any resonance, so either would make the probe converge to a level
-    /// that is wrong by the shape of the DUT's own response. The median is the level the response
-    /// actually sits at, which is what "output voltage" means.</para>
+    /// that is wrong by the shape of the DUT's own response.</para>
+    ///
+    /// <para>This is the whole-band figure; the level probe reads <see cref="ProbeGainDb"/>, which
+    /// takes the same median over the bandwidth reference band instead. Over the whole band the
+    /// median is weighted by linear bins toward the top of the span, so for a shaped DUT it lands
+    /// wherever the span happens to end — for a phono stage at a 96 kHz span, near 48 kHz, some
+    /// 27 dB below 1 kHz — and "0 dBV out" then names a level no one can point to on the curve.</para>
     /// </summary>
     public static double MedianGainDb(
         ReadOnlySpan<Complex> reference,
@@ -303,22 +308,79 @@ internal static class ResponseCaptureSupport
         int fftSize,
         FrequencyResponseRequest request)
     {
+        var gains = GainsPerBin(reference, response, fftSize, request);
+        return Median(gains.Select(g => g.GainDb));
+    }
+
+    /// <summary>
+    /// The gain the output-referred level probe corrects against: the DUT's level <b>at the
+    /// bandwidth reference</b>, so that "0 dBV out" means 0 dBV where the corners are measured
+    /// from — the passband by default, which is where every datasheet quotes a level, or the peak
+    /// under <see cref="BandwidthReferenceMode.Peak"/>. Before this the probe took the median over
+    /// the whole analysed band (<see cref="MedianGainDb"/>), and against the simulator's RIAA stage
+    /// two runs with reference bands of 50-100 Hz and 5-10 kHz drove the DUT identically — both to
+    /// the generator's 18 dBV ceiling, since the whole-band median sat 27 dB below 1 kHz.
+    ///
+    /// <para>The probe's record is short (a 16384-point chirp is 11.7 Hz per bin at 192 kHz), so a
+    /// narrow reference band may hold only a handful of bins; a median of a few bins is still the
+    /// right figure. A band with <b>no</b> bins inside the analysed range falls back to the
+    /// whole-band median and says so through <paramref name="fellBackToWholeBand"/>, the same way
+    /// the corner search falls back to the peak — rather than quoting a level against a band it
+    /// never measured.</para>
+    /// </summary>
+    public static double ProbeGainDb(
+        ReadOnlySpan<Complex> reference,
+        ReadOnlySpan<Complex> response,
+        int fftSize,
+        FrequencyResponseRequest request,
+        out bool fellBackToWholeBand)
+    {
+        fellBackToWholeBand = false;
+        var gains = GainsPerBin(reference, response, fftSize, request);
+        if (gains.Count == 0)
+            return double.NaN;
+
+        var spec = request.BandwidthReferenceSpec;
+        if (spec.Mode == BandwidthReferenceMode.Peak)
+            return gains.Max(g => g.GainDb);
+
+        double binHz = request.SampleRateHz / fftSize;
+        var inBand = gains.Where(g => g.Bin * binHz >= spec.LowHz && g.Bin * binHz <= spec.HighHz).Select(g => g.GainDb).ToList();
+        if (inBand.Count > 0)
+            return Median(inBand);
+
+        fellBackToWholeBand = true;
+        return Median(gains.Select(g => g.GainDb));
+    }
+
+    /// <summary>
+    /// The deconvolved gain at every analysed bin the sweep put energy into — the one H1 estimate
+    /// both probe figures are read from.
+    /// </summary>
+    private static List<(int Bin, double GainDb)> GainsPerBin(
+        ReadOnlySpan<Complex> reference,
+        ReadOnlySpan<Complex> response,
+        int fftSize,
+        FrequencyResponseRequest request)
+    {
+        var gains = new List<(int Bin, double GainDb)>();
+
         double binHz = request.SampleRateHz / fftSize;
         int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
         int lastBin = Math.Min(reference.Length - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
         if (lastBin <= firstBin)
-            return double.NaN;
+            return gains;
 
         double maxPower = 0.0;
         for (int k = firstBin; k <= lastBin; k++)
             maxPower = Math.Max(maxPower, (reference[k] * Complex.Conjugate(reference[k])).Real);
 
         if (maxPower <= 0.0)
-            return double.NaN;
+            return gains;
 
         double lambda = FrequencyResponseEstimator.RegularisationFraction * maxPower;
 
-        var gains = new List<double>(lastBin - firstBin + 1);
+        gains.Capacity = lastBin - firstBin + 1;
         for (int k = firstBin; k <= lastBin; k++)
         {
             double xx = (reference[k] * Complex.Conjugate(reference[k])).Real;
@@ -328,14 +390,20 @@ internal static class ResponseCaptureSupport
             if (xx < 1e-6 * maxPower)
                 continue;
 
-            gains.Add(FrequencyResponseEstimator.ToDb((response[k] * Complex.Conjugate(reference[k]) / (xx + lambda)).Magnitude));
+            gains.Add((k, FrequencyResponseEstimator.ToDb((response[k] * Complex.Conjugate(reference[k]) / (xx + lambda)).Magnitude)));
         }
 
-        if (gains.Count == 0)
+        return gains;
+    }
+
+    private static double Median(IEnumerable<double> values)
+    {
+        var sorted = values.ToList();
+        if (sorted.Count == 0)
             return double.NaN;
 
-        gains.Sort();
-        return gains[gains.Count / 2];
+        sorted.Sort();
+        return sorted[sorted.Count / 2];
     }
 
     /// <summary>

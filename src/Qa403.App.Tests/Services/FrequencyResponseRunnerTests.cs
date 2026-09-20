@@ -27,9 +27,11 @@ public class FrequencyResponseRunnerTests
         bool continuous = false,
         double chirpStartHz = FrequencyResponseRequest.DefaultChirpStartHz,
         double loadOhms = 8.0,
-        BandwidthReferenceMode bandwidthReference = BandwidthReferenceMode.BandMedian) =>
+        BandwidthReferenceMode bandwidthReference = BandwidthReferenceMode.BandMedian,
+        double bandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
+        double bandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz) =>
         new(spanHz, resolutionMultiplier, levelMode, levelValue, levelUnit, rightIsReference, smoothing, averages,
-            continuous, chirpStartHz, loadOhms, bandwidthReference);
+            continuous, chirpStartHz, loadOhms, bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz);
 
     private sealed record Harness(FrequencyResponseRunner Runner, DeviceSessionService Session, SpectrumPipeline Pipeline);
 
@@ -573,6 +575,146 @@ public class FrequencyResponseRunnerTests
             Assert.InRange(left.MagnitudeMaxDb[i], 5.0, 7.0);
     }
 
+    /// <summary>
+    /// The analog RIAA playback curve (3180, 318 and 75 us), in dB relative to 1 kHz — what the
+    /// simulator's <c>PhonoRiaa</c> model is built to reproduce, within 0.34 dB at 48 kHz.
+    /// </summary>
+    private static double RiaaDb(double freqHz)
+    {
+        static double Magnitude(double f)
+        {
+            var s = new System.Numerics.Complex(0.0, 2.0 * Math.PI * f);
+            return ((1.0 + (s * 318e-6)) / ((1.0 + (s * 3180e-6)) * (1.0 + (s * 75e-6)))).Magnitude;
+        }
+
+        return 20.0 * Math.Log10(Magnitude(freqHz) / Magnitude(1000.0));
+    }
+
+    private static double MagnitudeAt(FrequencyResponseTrace trace, double freqHz)
+    {
+        int column = 0;
+        for (int i = 1; i < trace.FreqHz.Length; i++)
+        {
+            if (Math.Abs(trace.FreqHz[i] - freqHz) < Math.Abs(trace.FreqHz[column] - freqHz))
+                column = i;
+        }
+
+        return trace.MagnitudeMaxDb[column];
+    }
+
+    [Fact]
+    public async Task OutputVoltageMode_AgainstADutWhosePeakSitsFarAboveItsMedian_IsRightOnTheFirstPass()
+    {
+        // The output-voltage target names the DUT's *median* level, and the input range predicted
+        // from it assumes the DUT's peak sits there too. A phono stage breaks that by 20 dB at the
+        // bottom of the band and by more against its median: with the range left at the prediction
+        // the first pass came back flat-topped at the range's clip level, and each continuous pass
+        // then re-ranged from that clipped peak — one rung of the ladder per pass, 6 → 18 → 30 →
+        // 42 dBV, so the curve took four passes to appear and a SINGLE run never got there. The
+        // range is measured from the widest setting after the level is settled, exactly as
+        // input-voltage mode does it, so a single run lands on it at once.
+        var device = CleanDevice();
+        device.SignalProfile = device.SignalProfile with { Dut = SimulatedDutModel.PhonoRiaa };
+        var harness = await CreateAsync(device);
+
+        // -5 dBV over the default 200 Hz - 2 kHz reference band puts the generator near -4 dBV and
+        // the DUT's 20 Hz output near +15 dBV, which needs the 24 dBV range where the target
+        // predicts 0 dBV.
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -5.0, rightIsReference: false),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(1, status.PassesCompleted);
+        Assert.InRange(harness.Session.InputRangeDbv, 18.0, 30.0);
+
+        // The shape is the RIAA curve, not the clip level: +19 dB at 20 Hz, unity at 1 kHz, -20 dB
+        // at 20 kHz. A clipped first pass reads within a few dB of flat across all three.
+        // Against the synthesised reference the Left trace is the output level in dBV, so the
+        // DUT's gain is that less the generator's level.
+        var left = Trace(status, FrequencyResponseTraceKind.Left);
+        foreach (double freqHz in new[] { 20.0, 100.0, 1000.0, 10_000.0, 20_000.0 })
+        {
+            double gainDb = MagnitudeAt(left, freqHz) - status.GeneratorAmpDbv;
+            Assert.InRange(gainDb, RiaaDb(freqHz) - 0.6, RiaaDb(freqHz) + 0.6);
+        }
+
+        // And the level was settled against an unclipped capture: the generator is where the
+        // median of that curve over the reference band says it should be, not pushed up by lost
+        // low-frequency energy.
+        double expectedGeneratorDbv = -5.0 - RiaaBandMedianDb(BandwidthReferenceSpec.DefaultLowHz, BandwidthReferenceSpec.DefaultHighHz);
+        Assert.InRange(status.GeneratorAmpDbv, expectedGeneratorDbv - 1.0, expectedGeneratorDbv + 1.0);
+    }
+
+    /// <summary>The analog RIAA curve's median over a band, in linear bins — what the probe's own median converges to.</summary>
+    private static double RiaaBandMedianDb(double lowHz, double highHz)
+    {
+        var gains = new List<double>();
+        for (double f = lowHz; f <= highHz; f += 1.0)
+            gains.Add(RiaaDb(f));
+        gains.Sort();
+        return gains[gains.Count / 2];
+    }
+
+    [Theory]
+    [InlineData(50.0, 100.0)]
+    [InlineData(5_000.0, 10_000.0)]
+    public async Task OutputVoltageMode_SetsTheLevelAtTheBandwidthReference(double lowHz, double highHz)
+    {
+        // "0 dBV out" of a phono stage is 0 dBV at 1 kHz to anyone reading its datasheet, and the
+        // Measurements panel's bandwidth reference is the app's way of saying where a DUT's nominal
+        // level sits — so the output-referred probe targets that same band. Before this the probe
+        // took the median over the whole analysed band, which linear bins weight toward the top of
+        // the span: against the RIAA at a 96 kHz span it sat near 48 kHz, 27 dB below 1 kHz, and
+        // Joost's two runs with reference bands of 50-100 Hz and 5-10 kHz drove the DUT identically
+        // (both to the 18 dBV ceiling). Here the two bands sit 27 dB apart on the curve, so the
+        // generator has to land 27 dB apart too, and the trace has to read the target at each band.
+        var device = CleanDevice();
+        device.SignalProfile = device.SignalProfile with { Dut = SimulatedDutModel.PhonoRiaa };
+        var harness = await CreateAsync(device);
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -20.0, rightIsReference: false,
+                bandwidthReferenceLowHz: lowHz, bandwidthReferenceHighHz: highHz),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+
+        double expectedGeneratorDbv = -20.0 - RiaaBandMedianDb(lowHz, highHz);
+        Assert.InRange(status.GeneratorAmpDbv, expectedGeneratorDbv - 1.0, expectedGeneratorDbv + 1.0);
+
+        // The trace is the output level in dBV against the synthesised reference, so at the band's
+        // median frequency it reads the target itself. The median of a monotone curve over a
+        // linear grid sits at the band's midpoint.
+        var left = Trace(status, FrequencyResponseTraceKind.Left);
+        double midHz = (lowHz + highHz) / 2.0;
+        Assert.InRange(MagnitudeAt(left, midHz), -20.0 - 1.0, -20.0 + 1.0);
+    }
+
+    [Fact]
+    public async Task OutputVoltageMode_UnderAPeakReference_SetsTheLevelAtThePeak()
+    {
+        // The other reading the Measurements panel offers: under Peak the corners are measured
+        // down from the trace's maximum, so the target is what the maximum should be. For the RIAA
+        // that is the bottom of the sweep, +19.7 dB over 1 kHz at 10 Hz.
+        var device = CleanDevice();
+        device.SignalProfile = device.SignalProfile with { Dut = SimulatedDutModel.PhonoRiaa };
+        var harness = await CreateAsync(device);
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -20.0, rightIsReference: false,
+                bandwidthReference: BandwidthReferenceMode.Peak),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+
+        var left = Trace(status, FrequencyResponseTraceKind.Left);
+        Assert.InRange(left.PeakDb, -20.0 - 1.0, -20.0 + 1.0);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -873,12 +1015,15 @@ public class FrequencyResponseRunnerTests
     public async Task OutputVoltageMode_AgainstALossyDut_DrivesItHarderThanTheTarget()
     {
         // The whole point of the mode: the generator is raised by whatever the DUT takes away, so
-        // the level asked for is the level that comes *out*. A low pass measured across the full
-        // band loses a lot of it, so the generator must end up well above the target.
-        var harness = await CreateAsync(new OnePoleLowPassDevice(CleanDevice(), cornerHz: 2_000.0));
+        // the level asked for is the level that comes *out* — at the bandwidth reference. A 2 kHz
+        // low pass loses 8-14 dB over a 5-10 kHz reference band, so the generator must end up well
+        // above the target, by the band's median loss.
+        const double cornerHz = 2_000.0;
+        var harness = await CreateAsync(new OnePoleLowPassDevice(CleanDevice(), cornerHz));
 
         await harness.Runner.StartAsync(
-            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -20.0),
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -20.0,
+                bandwidthReferenceLowHz: 5_000.0, bandwidthReferenceHighHz: 10_000.0),
             CancellationToken.None);
         var status = await AwaitCompletionAsync(harness.Runner);
 
@@ -886,6 +1031,13 @@ public class FrequencyResponseRunnerTests
         Assert.True(
             status.GeneratorAmpDbv > -20.0 + 3.0,
             $"expected the probe to compensate for the filter's loss, generator settled at {status.GeneratorAmpDbv:0.00} dBV");
+
+        var losses = new List<double>();
+        for (double f = 5_000.0; f <= 10_000.0; f += 1.0)
+            losses.Add(-10.0 * Math.Log10(1.0 + ((f / cornerHz) * (f / cornerHz))));
+        losses.Sort();
+        double expectedGeneratorDbv = -20.0 - losses[losses.Count / 2];
+        Assert.InRange(status.GeneratorAmpDbv, expectedGeneratorDbv - 1.0, expectedGeneratorDbv + 1.0);
     }
 
     [Fact]

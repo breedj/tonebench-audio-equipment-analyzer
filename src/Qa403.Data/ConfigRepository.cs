@@ -146,6 +146,25 @@ public sealed record CaptureDelayConfig(double CaptureDelayMs = 0.0)
 }
 
 /// <summary>
+/// One user weighting table, stored parsed: the QA40x-style "frequency, dB" file's rows, with the
+/// file's sign convention (positive = attenuation, see <see cref="Qa403.Dsp.WeightingPoint"/>).
+/// Stored as its points and not as a path, because the file is the user's and may move; the
+/// name and source path are for the panel to say where the table came from.
+/// </summary>
+/// <param name="Name">What the panel shows beside the slot — the file name without its extension.</param>
+/// <param name="SourcePath">Where it was imported from, informational only.</param>
+/// <param name="Points">The table itself, at least two rows.</param>
+/// <param name="ImportedUtc">When it was imported.</param>
+public sealed record UserWeightingTable(string Name, string? SourcePath, IReadOnlyList<Qa403.Dsp.WeightingPoint> Points, DateTimeOffset ImportedUtc)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(Name)
+        && Points is { Count: >= 2 }
+        && Points.All(p => double.IsFinite(p.FreqHz) && p.FreqHz > 0.0 && double.IsFinite(p.AttenuationDb));
+}
+
+/// <summary>
 /// Which elements a PDF report of a measurement includes, remembered per measurement kind — the
 /// vocabulary (<c>chart</c>, <c>description</c>, <c>settings</c>, <c>measurements</c>, ...) is the
 /// client's, and it only ever uses what it recognises, so the server stores the strings and checks
@@ -193,6 +212,14 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The capture delay's key. One document, see <see cref="CaptureDelayConfig"/>.</summary>
     public const string CaptureDelayKey = "acquisition.captureDelay";
+
+    /// <summary>A user weighting table's key, one document per slot (1 or 2) — see <see cref="UserWeightingTable"/>.</summary>
+    public static string UserWeightingKey(int slot)
+    {
+        if (slot is not (1 or 2))
+            throw new ArgumentOutOfRangeException(nameof(slot), slot, "User weighting slots are 1 and 2.");
+        return $"measurement.weighting.user{slot}";
+    }
 
     /// <summary>The report settings' key. One document, see <see cref="ReportSettingsConfig"/>.</summary>
     public const string ReportSettingsKey = "report.settings";

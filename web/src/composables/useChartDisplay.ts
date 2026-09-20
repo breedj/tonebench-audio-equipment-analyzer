@@ -1,4 +1,5 @@
 import { nextTick, ref, watch, type InjectionKey, type Ref } from 'vue'
+import { DEFAULT_SPECTRUM_UNIT, parseSpectrumUnit, type SpectrumUnit } from '../spectrumUnits'
 import { useProjects } from './useProjects'
 
 // Module-level singleton, same pattern as useMeasurements.ts / useSpectrumConfig.ts — the chart
@@ -33,6 +34,18 @@ const showOscilloscope = ref(true)
 const showHarmonics = ref(true)
 const showOtherPeaks = ref(true)
 
+// The chart's level unit (see spectrumUnits.ts) and the DUT gain the input-referred unit and the
+// "Noise in" tile divide by. The gain is edited beside Load Ω in GeneratorPanel rather than in the
+// display panel, but it lives here because it is a per-type setting with exactly this composable's
+// lifecycle: restored with the type, marking it dirty when edited. Both default to what a type saved
+// before they existed means -- dBV, and a DUT of unity gain.
+const spectrumUnit = ref<SpectrumUnit>(DEFAULT_SPECTRUM_UNIT)
+const dutGainDb = ref(0)
+// Draw the weighting in effect as a dashed curve over the spectrum -- shape only, hung from a fixed
+// level (see SpectrumChart's weightingCurvePlugin). Off by default: it is a teaching aid, and a
+// second line on a busy chart otherwise.
+const showWeightingCurve = ref(false)
+
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
 // stored params — loading is the opposite of an unsaved edit. Same pattern as
 // SweepConfigPanel.vue's own `restoring` flag.
@@ -45,7 +58,7 @@ let restoring = false
 // triggered by the ref changing rather than a function call.
 watch([
   yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold, autofitOnDone,
-  showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks,
+  showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
 ], () => {
   if (!restoring) useProjects().markDirty()
 })
@@ -89,6 +102,9 @@ export interface StoredSpectrumDisplay {
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
   chartShowOtherPeaks?: boolean | null
+  chartUnit?: string | null
+  dutGainDb?: number | null
+  chartShowWeightingCurve?: boolean | null
 }
 
 /**
@@ -108,6 +124,10 @@ export interface SpectrumDisplaySource {
   visibleR: Ref<boolean>
   showMinMax: Ref<boolean>
   showPeakHold: Ref<boolean>
+  /** The level unit the chart draws in, and the DUT gain its input-referred unit subtracts -- see spectrumUnits.ts. */
+  spectrumUnit: Ref<SpectrumUnit>
+  dutGainDb: Ref<number>
+  showWeightingCurve: Ref<boolean>
   activeXRange: Ref<{ min: number; max: number } | null>
   resetPeakHoldTrigger: Ref<number>
   autofitYTrigger: Ref<number>
@@ -147,6 +167,11 @@ export function createSpectrumDisplaySource(
     showMinMax: ref(loaded?.chartShowMinMax ?? true),
     // Never for a stored result: the peak-hold maps are the screen's own running state.
     showPeakHold: ref(false),
+    spectrumUnit: ref(parseSpectrumUnit(loaded?.chartUnit)),
+    dutGainDb: ref(loaded?.dutGainDb ?? 0),
+    // Never for a stored result: the curve is fetched for the *live* weighting, which need not be
+    // the one the result was captured under.
+    showWeightingCurve: ref(false),
     activeXRange: ref(null),
     resetPeakHoldTrigger: ref(0),
     autofitYTrigger: ref(0),
@@ -195,6 +220,9 @@ export function useChartDisplay() {
     showOscilloscope.value = loaded?.chartShowOscilloscope ?? true
     showHarmonics.value = loaded?.chartShowHarmonics ?? true
     showOtherPeaks.value = loaded?.chartShowOtherPeaks ?? true
+    spectrumUnit.value = parseSpectrumUnit(loaded?.chartUnit)
+    dutGainDb.value = loaded?.dutGainDb ?? 0
+    showWeightingCurve.value = loaded?.chartShowWeightingCurve ?? false
     void nextTick(() => {
       restoring = false
     })
@@ -228,6 +256,9 @@ export function useChartDisplay() {
     showOscilloscope,
     showHarmonics,
     showOtherPeaks,
+    spectrumUnit,
+    dutGainDb,
+    showWeightingCurve,
     activeXRange,
     resetPeakHoldTrigger,
     autofitYTrigger,

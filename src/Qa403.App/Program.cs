@@ -118,6 +118,8 @@ try
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<CaptureDelaySetting>();
+    builder.Services.AddSingleton<UserWeightingSetting>();
+    builder.Services.AddSingleton<UserWeightingService>();
     builder.Services.AddSingleton<DeviceSessionService>();
     builder.Services.AddSingleton<ThdSweepRunner>();
     builder.Services.AddSingleton<ImdSweepRunner>();
@@ -201,6 +203,10 @@ try
             (await ConfigEndpoints.ReadCaptureDelayAsync(
                 scope.ServiceProvider.GetRequiredService<ConfigRepository>(),
                 CancellationToken.None)).CaptureDelayMs;
+
+        // The user weighting tables, for the same reason: the pipeline reads them on its worker
+        // thread. A damaged document leaves its slot empty and is logged.
+        await scope.ServiceProvider.GetRequiredService<UserWeightingService>().LoadAllAsync(CancellationToken.None);
     }
 
     // A request that needs a project while none is open is a 409 with a message, from any endpoint.

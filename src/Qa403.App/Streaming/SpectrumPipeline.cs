@@ -1,6 +1,7 @@
 ﻿using System.Buffers;
 using System.Numerics;
 using Qa403.App.Diagnostics;
+using Qa403.App.Services;
 using Qa403.Device;
 using Qa403.Dsp;
 using Qa403.Dsp.Fft;
@@ -28,9 +29,17 @@ namespace Qa403.App.Streaming;
 /// keep doing so unchanged; DI always supplies the singleton, and every call below is null-guarded.
 /// </remarks>
 public sealed class SpectrumPipeline(
-    SpectrumBroadcastHub hub, ILogger<SpectrumPipeline> logger, DiagnosticRecorder? diagnostics = null)
+    SpectrumBroadcastHub hub, ILogger<SpectrumPipeline> logger, DiagnosticRecorder? diagnostics = null,
+    UserWeightingSetting? userWeighting = null)
 {
     private const int MaxChannels = 2;
+
+    // The per-bin power gain of the weighting in effect, built once per (spec, user tables, FFT
+    // size, bin size) and reused every tick -- evaluating six rational functions per bin at 20
+    // ticks a second on a 524288-point spectrum would be the most expensive thing in the tick.
+    // Touched only on the worker thread.
+    private (WeightingSpec Spec, int UserVersion, int SpecLen, double BinSizeHz)? _weightingKey;
+    private double[]? _weightingPowerGain;
 
     private readonly IFftBackend _fft = new MathNetBackend();
     private readonly SpectrumAverager[] _ampAveragers = [new(), new()];
@@ -113,10 +122,16 @@ public sealed class SpectrumPipeline(
             if (previous.FftSize != _options.FftSize || previous.AverageCount != _options.AverageCount)
             {
                 logger.LogInformation(
-                    "Spectrum analysis now {FftSize} points, {Window} window, {Averaging} x{AverageCount} at hop {Hop:0.##} "
-                        + "(was {PreviousFftSize} points x{PreviousAverageCount})",
+                    "Spectrum analysis now {FftSize} points, {Window} window, {Averaging} x{AverageCount} at hop {Hop:0.##}, "
+                        + "weighting {Weighting} (was {PreviousFftSize} points x{PreviousAverageCount})",
                     _options.FftSize, _options.Window, _options.Averaging, _options.AverageCount,
-                    _options.AverageHopFraction, previous.FftSize, previous.AverageCount);
+                    _options.AverageHopFraction, DescribeWeighting(_options.Weighting), previous.FftSize, previous.AverageCount);
+            }
+            else if (previous.Weighting != _options.Weighting)
+            {
+                logger.LogInformation(
+                    "Spectrum weighting now {Weighting} (was {PreviousWeighting})",
+                    DescribeWeighting(_options.Weighting), DescribeWeighting(previous.Weighting));
             }
         }
     }
@@ -297,7 +312,7 @@ public sealed class SpectrumPipeline(
                     ch == 0 ? StreamChannel.Left : StreamChannel.Right, retained.Seq, retained.CapturedUtc,
                     retained.SampleRateHz, retained.BinSizeHz, retained.FftSize,
                     retained.Window, retained.Sums, dbv, retained.Meters, retained.PreviewFft, retained.PreviewScope,
-                    retained.Complex));
+                    retained.Complex, retained.Noise, retained.Weighting));
             }
 
             return result?.ToArray() ?? [];
@@ -544,6 +559,7 @@ public sealed class SpectrumPipeline(
         Complex[] spec = ArrayPool<Complex>.Shared.Rent(specLen);
         double[] ampBuf = ArrayPool<double>.Shared.Rent(specLen);
         double[] psdBuf = ArrayPool<double>.Shared.Rent(specLen);
+        double[] psdWeightedBuf = ArrayPool<double>.Shared.Rent(specLen);
         try
         {
             var window = Window.Get(options.Window, n);
@@ -566,6 +582,26 @@ public sealed class SpectrumPipeline(
             Span<double> psdValues = psdBuf.AsSpan(0, specLen);
             _psdAveragers[channelIndex].Update(psdValues, options.Averaging, options.AverageCount);
             var psd = PsdSpectrum.FromValues(psdValues, _sampleRateHz, binSizeHz, window.Sums);
+
+            // Weighting, applied *after* the averagers. Both are per-bin linear so they commute,
+            // and keeping the averagers' history unweighted means a toggle takes effect on the next
+            // tick without ever blending weighted and unweighted records. The display trace
+            // (ampPower, which is also what the retained snapshot saves and the sweep preview
+            // reads) is weighted in place; the PSD is weighted into a *copy*, because only the
+            // noise integrals may read the weighted one -- the fundamental, the harmonics, the
+            // other-peaks list and IMD stay on `psd` so a weighting changes what "noise" means and
+            // nothing else. See SpectrumPipelineOptions.Weighting.
+            var psdWeighted = psd;
+            ReadOnlySpan<double> powerGain = ResolvePowerGain(options, specLen, binSizeHz);
+            if (!powerGain.IsEmpty)
+            {
+                for (int i = 0; i < specLen; i++)
+                    ampPower[i] *= powerGain[i];
+                var weightedValues = psdWeightedBuf.AsSpan(0, specLen);
+                for (int i = 0; i < specLen; i++)
+                    weightedValues[i] = psdValues[i] * powerGain[i];
+                psdWeighted = PsdSpectrum.FromValues(weightedValues, _sampleRateHz, binSizeHz, window.Sums);
+            }
 
             var channel = channelIndex == 0 ? StreamChannel.Left : StreamChannel.Right;
 
@@ -606,7 +642,8 @@ public sealed class SpectrumPipeline(
             Volatile.Write(ref _lastAverageWritten[channelIndex], writtenAtSnapshot);
 
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
-            var meters = ComputeMeters(psd, peakDbv, totalRmsDbv, options, averagesTaken);
+            var meters = ComputeMeters(psd, psdWeighted, peakDbv, totalRmsDbv, options, averagesTaken);
+            var noise = ComputeNoiseFigures(psdWeighted, meters, window.Sums.EnbwHz(_sampleRateHz), options);
 
             // Past the flush-generation check above, so a record that gets discarded is never logged
             // as though it had been displayed -- the log has to describe what the user actually saw.
@@ -634,7 +671,9 @@ public sealed class SpectrumPipeline(
                 ? specSpan
                 : ReadOnlySpan<Complex>.Empty;
 
-            UpdateRetainedSnapshot(channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, seq, previewFft, previewScope, retainedComplex);
+            UpdateRetainedSnapshot(
+                channelIndex, ampPower, binSizeHz, n, options.Window, window.Sums, meters, noise, options.Weighting,
+                seq, previewFft, previewScope, retainedComplex);
 
             // Only now, once the trace this signal refers to is actually retained. `held` is the
             // "your capture is ready" flag SingleShotComplete exposes, and ThdSweepRunner reads
@@ -644,6 +683,9 @@ public sealed class SpectrumPipeline(
             if (singleShotComplete)
                 Volatile.Write(ref _singleShotHeld[channelIndex], true);
 
+            // Ahead of the spectrum frame it describes: the client stamps each spectrum frame with
+            // the ENBW of the most recent noise frame, which is what converts it to dBV/sqrt(Hz).
+            hub.Broadcast(StreamFrame.EncodeNoiseFigures(channel, seq, noise, singleShotComplete));
             BroadcastSpectrumFrame(channel, seq, ampPower, binSizeHz, options);
             if (meters is not null)
             {
@@ -663,7 +705,68 @@ public sealed class SpectrumPipeline(
             ArrayPool<Complex>.Shared.Return(spec);
             ArrayPool<double>.Shared.Return(ampBuf);
             ArrayPool<double>.Shared.Return(psdBuf);
+            ArrayPool<double>.Shared.Return(psdWeightedBuf);
         }
+    }
+
+    /// <summary>
+    /// The per-bin power gain for the weighting in effect, or empty when nothing weighs anything
+    /// (no standard and no populated user slot) -- so the unweighted path costs nothing at all.
+    /// A user slot that is checked but empty resolves to flat, which the panel says out loud.
+    /// </summary>
+    private ReadOnlySpan<double> ResolvePowerGain(SpectrumPipelineOptions options, int specLen, double binSizeHz)
+    {
+        var spec = options.Weighting;
+        int userVersion = userWeighting?.Version ?? 0;
+        var key = (spec, userVersion, specLen, binSizeHz);
+        if (_weightingKey == key)
+            return _weightingPowerGain is null ? ReadOnlySpan<double>.Empty : _weightingPowerGain.AsSpan(0, specLen);
+
+        var curve = BuildCurve(spec, userWeighting);
+        _weightingKey = key;
+        if (curve is null)
+        {
+            _weightingPowerGain = null;
+            return ReadOnlySpan<double>.Empty;
+        }
+
+        if (_weightingPowerGain is null || _weightingPowerGain.Length != specLen)
+            _weightingPowerGain = new double[specLen];
+        WeightingTable.FillPowerGains(curve, binSizeHz, _weightingPowerGain);
+        return _weightingPowerGain;
+    }
+
+    /// <summary>The combined curve for <paramref name="spec"/>, or null when it weighs nothing.</summary>
+    internal static IWeightingCurve? BuildCurve(WeightingSpec spec, UserWeightingSetting? userWeighting)
+    {
+        var parts = new List<IWeightingCurve>(3);
+        if (spec.Standard != WeightingStandard.None)
+            parts.Add(StandardWeighting.For(spec.Standard));
+        if (spec.User1 && userWeighting?.CurveFor(1) is { } user1)
+            parts.Add(user1);
+        if (spec.User2 && userWeighting?.CurveFor(2) is { } user2)
+            parts.Add(user2);
+
+        return parts.Count switch
+        {
+            0 => null,
+            1 => parts[0],
+            _ => new CompositeWeighting([.. parts]),
+        };
+    }
+
+    private static string DescribeWeighting(WeightingSpec spec)
+    {
+        if (spec.IsNone)
+            return "none";
+        var parts = new List<string>(3);
+        if (spec.Standard != WeightingStandard.None)
+            parts.Add(spec.Standard.ToString());
+        if (spec.User1)
+            parts.Add("User1");
+        if (spec.User2)
+            parts.Add("User2");
+        return string.Join("+", parts);
     }
 
     /// <summary>
@@ -842,7 +945,8 @@ public sealed class SpectrumPipeline(
     /// separately. Returns <see langword="null"/> when no fundamental (and so no harmonics) could
     /// be found, matching the old inline logic's "nothing to broadcast this tick" behaviour.
     /// </summary>
-    private static SpectrumMeters? ComputeMeters(PsdSpectrum psd, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options, int averagesTaken)
+    private static SpectrumMeters? ComputeMeters(
+        PsdSpectrum psd, PsdSpectrum psdWeighted, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options, int averagesTaken)
     {
         int minSearchBin = Math.Max(1, (int)Math.Round(options.FundamentalMinSearchHz / psd.BinSizeHz));
         int fundamentalBin = FindGlobalPeakBin(psd.ValuesV2PerHz, minSearchBin);
@@ -873,8 +977,11 @@ public sealed class SpectrumPipeline(
 
         float fundamentalFreqHz = (float)(fundamentalBin * psd.BinSizeHz);
         float thdPercent = (float)(SpectrumMetrics.Thd(harmonics) * 100.0);
-        float thdNPercent = (float)(SpectrumMetrics.ThdPlusN(psd, fundamental, band, options.NotchOctaves) * 100.0);
-        float snrDb = (float)SpectrumMetrics.SnrDb(psd, harmonics, band, options.NotchOctaves);
+        // The two noise-integrated figures read the *weighted* PSD; their reference, the fundamental,
+        // was measured above on the unweighted one -- every standard curve is 0 dB at 1 kHz, but a
+        // tone elsewhere must still be reported at its true level.
+        float thdNPercent = (float)(SpectrumMetrics.ThdPlusN(psdWeighted, fundamental, band, options.NotchOctaves) * 100.0);
+        float snrDb = (float)SpectrumMetrics.SnrDb(psdWeighted, harmonics, band, options.NotchOctaves);
         float fundamentalDbv = (float)fundamental.AmplitudeDbv;
         float noiseFloorDbv = fundamentalDbv - snrDb;
 
@@ -896,6 +1003,31 @@ public sealed class SpectrumPipeline(
             fundamentalFreqHz, (float)psd.BinSizeHz, thdPercent, thdNPercent, snrDb,
             fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks, averagesTaken,
             intermodulation);
+    }
+
+    /// <summary>
+    /// The band RMS and the noise density, on the weighted PSD, whether or not a fundamental was
+    /// found -- <see cref="ComputeMeters"/> returns null without one and the meters frame is then not
+    /// sent at all, which is fine for THD and useless for a noise measurement with the generator
+    /// off. With meters, the density excludes what SNR excludes (the fundamental's notch and the
+    /// harmonics' lobes); without, it is the mean over the whole band. Never NaN: an empty band reads
+    /// as the floor of the float scale rather than poisoning a JSON body.
+    /// </summary>
+    private static NoiseFigures ComputeNoiseFigures(PsdSpectrum psdWeighted, SpectrumMeters? meters, double enbwHz, SpectrumPipelineOptions options)
+    {
+        var band = psdWeighted.BandOf(options.MeasurementLoFreqHz, options.MeasurementHiFreqHz);
+        double bandRmsVrms = SpectrumMetrics.BandRmsVrms(psdWeighted, band);
+        double densityV2PerHz = meters is { Harmonics.Length: > 0 }
+            ? SpectrumMetrics.NoiseDensityV2PerHz(psdWeighted, meters.Harmonics, band, options.NotchOctaves)
+            : SpectrumMetrics.NoiseDensityV2PerHz(psdWeighted, band);
+
+        return new NoiseFigures(
+            (float)(20.0 * Math.Log10(Math.Max(bandRmsVrms, double.Epsilon))),
+            (float)(10.0 * Math.Log10(Math.Max(densityV2PerHz, double.Epsilon))),
+            (float)enbwHz,
+            (float)options.MeasurementLoFreqHz,
+            (float)options.MeasurementHiFreqHz,
+            options.Weighting);
     }
 
     /// <summary>
@@ -945,7 +1077,7 @@ public sealed class SpectrumPipeline(
 
     private void UpdateRetainedSnapshot(
         int channelIndex, ReadOnlySpan<double> ampPower, double binSizeHz, int fftSize,
-        WindowType windowType, WindowSums sums, SpectrumMeters? meters, uint seq,
+        WindowType windowType, WindowSums sums, SpectrumMeters? meters, NoiseFigures noise, WeightingSpec weighting, uint seq,
         SweepPreviewSeries? previewFft, SweepPreviewSeries? previewScope,
         ReadOnlySpan<Complex> complexSpectrum)
     {
@@ -963,6 +1095,8 @@ public sealed class SpectrumPipeline(
             retained.Window = windowType;
             retained.Sums = sums;
             retained.Meters = meters;
+            retained.Noise = noise;
+            retained.Weighting = weighting;
             retained.Seq = seq;
             retained.PreviewFft = previewFft;
             retained.PreviewScope = previewScope;
@@ -1121,6 +1255,8 @@ public sealed class SpectrumPipeline(
         public WindowType Window;
         public WindowSums Sums;
         public SpectrumMeters? Meters;
+        public NoiseFigures? Noise;
+        public WeightingSpec Weighting = WeightingSpec.None;
         public uint Seq;
         public SweepPreviewSeries? PreviewFft;
         public SweepPreviewSeries? PreviewScope;

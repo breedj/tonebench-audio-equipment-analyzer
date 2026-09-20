@@ -25,7 +25,7 @@ function channelsOf(meters: Record<number, MetersFrame>): [number, MetersFrame][
 /** One key/value section per channel with the selected tiles — what the tiles above the chart show. */
 export function metricsSections(subject: ReportSubject): ReportSection[] {
   if (subject.data.kind !== 'spectrum') return []
-  const { meters, selectedMetrics, generatorTones, loadOhms } = subject.data
+  const { meters, selectedMetrics, generatorTones, loadOhms, noise, display } = subject.data
   const sections: ReportSection[] = []
 
   // The Gen tile is one tile for both channels on screen (GeneratorMetricsPanel); here it heads the
@@ -35,13 +35,21 @@ export function metricsSections(subject: ReportSubject): ReportSection[] {
       ? { label: 'Gen', value: generatorTones.map((t) => `${t.freqHz.toFixed(3)} Hz, ${t.ampDbv.toFixed(2)} dBV`).join(', ') }
       : null
 
-  for (const [channel, frame] of channelsOf(meters)) {
-    const byLabel = new Map(channelTiles(frame, generatorTones, loadOhms, subject.data.intermodulation[channel] ?? null).map((tile) => [tile.label, tile]))
+  // Every channel that has meters or a noise frame: a noise measurement with the generator off has
+  // the latter and not the former, and its three noise tiles are the whole point.
+  const channels = [...new Set([...Object.keys(meters), ...Object.keys(noise)].map(Number))].filter((c) => c === 0 || c === 1).sort((a, b) => a - b)
+  for (const channel of channels) {
+    const tiles = channelTiles(
+      meters[channel] ?? null, generatorTones, loadOhms, subject.data.intermodulation[channel] ?? null, false,
+      noise[channel] ?? null, display.dutGainDb.value,
+    )
+    const byLabel = new Map(tiles.map((tile) => [tile.label, tile]))
     const rows: ReportRow[] = []
     if (genRow && sections.length === 0) rows.push(genRow)
     for (const label of selectedMetrics) {
       const tile = byLabel.get(label)
-      if (tile) rows.push({ label: tile.label, value: tile.value.replace(/\n/g, ', ') })
+      // The weighting qualifier travels with the label, as it does on the tile.
+      if (tile) rows.push({ label: tile.qualifier ? `${tile.label} (${tile.qualifier})` : tile.label, value: tile.value.replace(/\n/g, ', ') })
     }
     if (rows.length > 0) sections.push({ kind: 'keyValues', title: `Metrics — ${CHANNEL_LABELS[channel]}`, rows })
   }

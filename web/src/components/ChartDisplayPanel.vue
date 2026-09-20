@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { useChartDisplay } from '../composables/useChartDisplay'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import { SPECTRUM_UNIT_OPTIONS } from '../spectrumUnits'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const {
@@ -20,6 +21,8 @@ const {
   showOscilloscope,
   showHarmonics,
   showOtherPeaks,
+  spectrumUnit,
+  showWeightingCurve,
   requestAutofitY,
   requestAutofitX,
   requestResetPeakHold,
@@ -46,6 +49,13 @@ function withCurrentValue(presets: number[], current: number): number[] {
 }
 const fromOptions = computed(() => withCurrentValue(FREQ_FROM_PRESETS, xFrom.value))
 const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
+
+// A unit switch moves every level on the chart by the same constant (about -6 dB for a 4 Hz ENBW,
+// -20 dB more for a DUT of 20 dB gain), so the window that fitted the old unit is wrong for the
+// new one. Refit rather than keep it; the user can still type a range afterwards.
+function onUnitChange() {
+  requestAutofitY()
+}
 </script>
 
 <template>
@@ -53,7 +63,17 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
        by MeasurementLayout's aside grid, so under the chart they flow two-wide like every other
        screen's display panel. The width is the shell's xl column, the same 16rem as every other screen. -->
   <div class="contents">
-    <CollapsibleSection title="dBV range" size="xs">
+    <CollapsibleSection title="Level range" size="xs">
+      <label class="flex flex-col gap-1 text-xs" title="dBV per bin, or a noise density in dBV/√Hz (the bin's power spread over the window's noise bandwidth), optionally referred to the DUT's input by its gain. See the manual's FFT analysis page.">
+        Units
+        <select
+          v-model="spectrumUnit"
+          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onUnitChange"
+        >
+          <option v-for="u in SPECTRUM_UNIT_OPTIONS" :key="u.value" :value="u.value">{{ u.label }}</option>
+        </select>
+      </label>
       <label class="flex flex-col gap-1 text-xs">
         Top
         <input
@@ -75,7 +95,7 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
       <button
         type="button"
         class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        title="Fits to the highest and lowest currently-plotted point, with 10 dBV of headroom on each side."
+        title="Fits to the highest and lowest currently-plotted point, with 10 dB of headroom on each side."
         @click="requestAutofitY"
       >
         Autofit
@@ -161,6 +181,13 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
         >
           Reset peak-hold
         </button>
+        <label
+          class="flex items-center gap-1.5"
+          title="Draws the weighting in effect as a dashed amber curve — shape only, hung 20 dB below the top of the level range. Nothing is drawn while the weighting is None."
+        >
+          <input v-model="showWeightingCurve" type="checkbox" />
+          Weighting curve
+        </label>
       </section>
 
       <!-- Which of the secondary panels the FFT screen draws at all. Unlike the toggles above,

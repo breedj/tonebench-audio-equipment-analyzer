@@ -624,6 +624,10 @@ public sealed class SteppedResponseRunner(
             ProcessRight = true,
             SingleShot = true,
             RetainComplexSpectrum = true,
+            // A runner measures unweighted whatever the FFT screen has selected: a sweep's noise
+            // and THD+N figures are defined over the plain band, and the weighting is restored
+            // with the rest of the saved options afterwards.
+            Weighting = WeightingSpec.None,
 
             // Nothing here reads a preview, and at these FFT sizes it is not free.
             CapturePreview = false,

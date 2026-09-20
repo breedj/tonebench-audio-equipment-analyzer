@@ -1007,6 +1007,7 @@ public sealed class ImpedanceRunner(
             SingleShot = true,
             RetainComplexSpectrum = true,
             CapturePreview = false,
+            Weighting = WeightingSpec.None,
         };
 
     /// <summary>
@@ -1085,6 +1086,7 @@ public sealed class ImpedanceRunner(
             SingleShot = true,
             RetainComplexSpectrum = true,
             CapturePreview = false,
+            Weighting = WeightingSpec.None,
         };
 
     private async Task WaitForCaptureAsync(ImpedanceRequest request, int fftSize, CancellationToken ct)

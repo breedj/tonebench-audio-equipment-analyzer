@@ -4,6 +4,7 @@ import {
   decodeImdSweepPointFrame,
   decodeIntermodulationFrame,
   decodeMetersFrame,
+  decodeNoiseFiguresFrame,
   decodeScopeFrame,
   decodeSpectrumFrame,
   decodeSweepPointFrame,
@@ -18,6 +19,7 @@ import {
   StreamMsgType,
   type IntermodulationFrame,
   type MetersFrame,
+  type NoiseFiguresFrame,
   type ScopeFrame,
   type SpectrumFrame,
 } from '../streaming/protocol'
@@ -43,6 +45,9 @@ export function useSpectrumStream() {
   // Per channel: an IMD spec is set but the pipeline could not resolve it this tick — see
   // STREAM_FLAG_IMD_UNRESOLVED. What the Intermodulation table's "FFT too small" message keys on.
   const imdUnresolved = shallowRef<Record<number, boolean>>({})
+  // Every tick, fundamental or not: the band RMS, the noise density, the window's ENBW and the
+  // weighting in effect. Cleared with `meters` by the owner for the same reason.
+  const noise = shallowRef<Record<number, NoiseFiguresFrame>>({})
   const scope = shallowRef<Record<number, ScopeFrame>>({})
   const connected = ref(false)
   const sweep = useSweep()
@@ -131,7 +136,13 @@ const impedance = useImpedance()
       const header = decodeHeader(event.data)
       if (header.msgType === StreamMsgType.Spectrum) {
         const frame = decodeSpectrumFrame(event.data)
+        // The noise frame of the same tick arrives first (the server sends it ahead of the
+        // spectrum), so its ENBW is the one that describes this frame's window.
+        const noiseFrame = noise.value[header.channel]
+        if (noiseFrame) frame.enbwHz = noiseFrame.enbwHz
         spectrum.value = { ...spectrum.value, [header.channel]: frame }
+      } else if (header.msgType === StreamMsgType.NoiseFigures) {
+        noise.value = { ...noise.value, [header.channel]: decodeNoiseFiguresFrame(event.data) }
       } else if (header.msgType === StreamMsgType.Meters) {
         const frame = decodeMetersFrame(event.data)
         meters.value = { ...meters.value, [header.channel]: frame }
@@ -190,5 +201,5 @@ const impedance = useImpedance()
     socket?.close()
   })
 
-  return { spectrum, meters, intermodulation, imdUnresolved, scope, connected, setViewport, clearScope }
+  return { spectrum, meters, intermodulation, imdUnresolved, noise, scope, connected, setViewport, clearScope }
 }

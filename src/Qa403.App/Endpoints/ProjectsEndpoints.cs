@@ -169,7 +169,9 @@ public sealed record StagedMeasurementConfig(
     bool? ChartAutofitOnDone = null,
     bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null,
     /// <summary>The generator panel's IMD template and analysis choice -- see <see cref="Qa403.Data.FftSpectrumParameters.ImdPreset"/>. The tones themselves ride in the generator config.</summary>
-    string? ImdPreset = null, string? ImdMethod = null, int? ImdMaxOrder = null);
+    string? ImdPreset = null, string? ImdMethod = null, int? ImdMaxOrder = null,
+    /// <summary>The DUT gain beside Load Ω and the chart's level unit -- see <see cref="Qa403.Data.FftSpectrumParameters.DutGainDb"/>.</summary>
+    double? DutGainDb = null, string? ChartUnit = null, bool? ChartShowWeightingCurve = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -209,4 +211,11 @@ public sealed record MeasurementTypeAppliedResponse(
     bool? ChartShowOtherPeaks,
     string? ImdPreset,
     string? ImdMethod,
-    int? ImdMaxOrder);
+    int? ImdMaxOrder,
+    /// <summary>The stored weighting, for the panel to show while a type is selected — see <see cref="Qa403.Data.FftSpectrumParameters.Weighting"/>.</summary>
+    string? Weighting = null,
+    bool? WeightingUser1 = null,
+    bool? WeightingUser2 = null,
+    double? DutGainDb = null,
+    string? ChartUnit = null,
+    bool? ChartShowWeightingCurve = null);

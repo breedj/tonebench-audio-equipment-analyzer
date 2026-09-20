@@ -56,6 +56,13 @@ export const StreamMsgType = {
   Intermodulation: 10,
   /** One finished IMD-vs-amplitude sweep point — see decodeImdSweepPointFrame. */
   ImdSweepPoint: 11,
+  /**
+   * One channel's band RMS, noise density and window ENBW for a tick, under the weighting in
+   * effect — sent every tick, *before* that tick's Spectrum frame, whether or not a fundamental was
+   * found (a Meters frame needs one; a noise measurement with the generator off has none). See
+   * decodeNoiseFiguresFrame.
+   */
+  NoiseFigures: 12,
 } as const
 export type StreamMsgType = (typeof StreamMsgType)[keyof typeof StreamMsgType]
 
@@ -153,6 +160,12 @@ export interface SpectrumFrame {
    * triples. Column i is at indices [i*3, i*3+1, i*3+2] = [freqHz, min, max].
    */
   columns: Float32Array
+  /**
+   * The window's equivalent noise bandwidth for this frame, stamped at ingest from the NoiseFigures
+   * frame that precedes it — what converts the columns' dBV to dBV/√Hz (see spectrumUnits.ts).
+   * Absent on a frame that arrived before any noise frame did.
+   */
+  enbwHz?: number
 }
 
 /** Decodes a spectrum/scope frame. Assumes the decimated (freqHz,min,max) layout this app always sends. */
@@ -285,6 +298,57 @@ export function decodeMetersFrame(buffer: ArrayBuffer): MetersFrame {
 }
 
 export type ImdMethodName = 'Smpte' | 'Ccif'
+
+/** The built-in weighting curves, as the server's WeightingStandard enum names them. Byte order on the wire. */
+export const WEIGHTING_STANDARDS = ['None', 'A', 'C', 'ItuR468', 'CcirArm', 'RiaaPlayback', 'RiaaRecord'] as const
+export type WeightingStandardName = (typeof WEIGHTING_STANDARDS)[number]
+
+/** Which weighting curves are in effect: one standard plus either user table, combined. */
+export interface WeightingSpec {
+  standard: WeightingStandardName
+  user1: boolean
+  user2: boolean
+}
+
+export interface NoiseFiguresFrame {
+  header: StreamFrameHeader
+  /** The measurement band the two figures were integrated over — the header's x0/dx. */
+  measurementLoHz: number
+  measurementHiHz: number
+  /** RMS of everything in the band (tone, distortion, noise), weighted. */
+  bandRmsDbv: number
+  /** Mean noise density over the band less the fundamental's notch and the harmonics' lobes, weighted. */
+  noiseDensityDbvPerRootHz: number
+  /** The window's equivalent noise bandwidth at this tick's sample rate and FFT size. */
+  enbwHz: number
+  weighting: WeightingSpec
+  held: boolean
+}
+
+/**
+ * NoiseFigures payload (offsets relative to the 20-byte header) — see EncodeNoiseFigures server-side:
+ * 20 f32 bandRmsDbv, 24 f32 noiseDensityDbvPerRootHz, 28 f32 enbwHz, 32 u8 standard, 33 u8 user mask
+ * (bit 0 = user 1, bit 1 = user 2), 34 u16 reserved.
+ */
+export function decodeNoiseFiguresFrame(buffer: ArrayBuffer): NoiseFiguresFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  const bandRmsDbv = view.getFloat32(HEADER_LENGTH, true)
+  const noiseDensityDbvPerRootHz = view.getFloat32(HEADER_LENGTH + 4, true)
+  const enbwHz = view.getFloat32(HEADER_LENGTH + 8, true)
+  const standard = WEIGHTING_STANDARDS[view.getUint8(HEADER_LENGTH + 12)] ?? 'None'
+  const userMask = view.getUint8(HEADER_LENGTH + 13)
+  return {
+    header,
+    measurementLoHz: header.x0,
+    measurementHiHz: header.dx,
+    bandRmsDbv,
+    noiseDensityDbvPerRootHz,
+    enbwHz,
+    weighting: { standard, user1: (userMask & 1) !== 0, user2: (userMask & 2) !== 0 },
+    held: (header.flags & STREAM_FLAG_HELD) !== 0,
+  }
+}
 
 /** One product as the server measured it — see IntermodulationProduct server-side for the (m, n) convention. */
 export interface IntermodulationProductFrame {

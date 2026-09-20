@@ -5,8 +5,10 @@ import {
   type IntermodulationFrame,
   type IntermodulationProductFrame,
   type MetersFrame,
+  type NoiseFiguresFrame,
   type SpectrumFrame,
   type StreamChannel,
+  type WeightingSpec,
 } from '../streaming/protocol'
 
 /**
@@ -100,6 +102,39 @@ export function storedMetersFrames(detail: MeasurementDetail): Record<number, Me
       harmonics,
       otherPeaks: [],
       averagesTaken: 0,
+      held: true,
+    }
+  }
+  return frames
+}
+
+/**
+ * A stored FFT result's `band_rms_dbv` / `noise_density_dbv_per_root_hz` rows as the noise frame
+ * the tiles read live, with the channel's own stored ENBW and the weighting from the result's
+ * params_json (passed in: the rows do not carry it). A result saved before the rows existed gets
+ * no frame, and so no noise tiles -- a figure it never measured is not back-filled.
+ */
+export function storedNoiseFrames(detail: MeasurementDetail, weighting: WeightingSpec, band: { loHz: number; hiHz: number }): Record<number, NoiseFiguresFrame> {
+  const frames: Record<number, NoiseFiguresFrame> = {}
+  for (const channel of detail.channelsData) {
+    const m = channel.metrics
+    if (typeof m.band_rms_dbv !== 'number' || typeof m.noise_density_dbv_per_root_hz !== 'number') continue
+    frames[channel.channel] = {
+      header: {
+        msgType: StreamMsgType.NoiseFigures,
+        channel: channel.channel as StreamChannel,
+        flags: 0,
+        seq: 0,
+        x0: band.loHz,
+        dx: band.hiHz,
+        nPoints: 0,
+      },
+      measurementLoHz: band.loHz,
+      measurementHiHz: band.hiHz,
+      bandRmsDbv: m.band_rms_dbv,
+      noiseDensityDbvPerRootHz: m.noise_density_dbv_per_root_hz,
+      enbwHz: channel.enbwHz ?? 0,
+      weighting,
       held: true,
     }
   }

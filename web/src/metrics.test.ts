@@ -8,16 +8,18 @@ import {
   formatAveraging,
   formatFftSize,
   formatVrms,
+  formatNvPerRootHz,
   formatWatts,
   generatorTile,
   multitoneToneCount,
+  noiseInputReferredNvPerRootHz,
   noteName,
   powerWatts,
   ratioPercentToDb,
   systemTiles,
   vrmsToDbv,
 } from './metrics'
-import type { IntermodulationFrame, MetersFrame } from './streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame } from './streaming/protocol'
 import type { GeneratorTone, MultitoneSettings, WhiteNoiseSettings } from './api/client'
 
 // Golden values below are cross-checked against the reference QA40x screenshot's own numbers
@@ -188,6 +190,58 @@ describe('channelTiles', () => {
   it('omits the IMD tiles entirely without one — no reading is not a reading', () => {
     const tiles = channelTiles(meters, [], 8)
     expect(tiles.some((t) => t.label.startsWith('IMD'))).toBe(false)
+  })
+
+  const noise: NoiseFiguresFrame = {
+    header: { msgType: 12, channel: 0, flags: 0, seq: 1, x0: 20, dx: 20000, nPoints: 0 },
+    measurementLoHz: 20,
+    measurementHiHz: 20000,
+    bandRmsDbv: -17.61,
+    noiseDensityDbvPerRootHz: -150,
+    enbwHz: 2.2,
+    weighting: { standard: 'None', user1: false, user2: false },
+    held: false,
+  }
+
+  it('adds the band RMS, density and input-referred noise tiles from the noise frame', () => {
+    const tiles = channelTiles(meters, [], 8, null, false, noise, 0)
+    expect(tiles.find((t) => t.label === 'RMS dBV(bw)')?.value).toBe('-17.61 dBV')
+    expect(tiles.find((t) => t.label === 'Noise dBV/√Hz')?.value).toBe('-150.00 dBV/√Hz')
+    expect(tiles.find((t) => t.label === 'Noise in nV/√Hz')?.value).toBe('31.6 nV/√Hz')
+    expect(channelTiles(meters, [], 8, null, false, noise, 20).find((t) => t.label === 'Noise in nV/√Hz')?.value).toBe('3.16 nV/√Hz')
+    for (const label of ['RMS dBV(bw)', 'Noise dBV/√Hz', 'Noise in nV/√Hz']) expect(AVAILABLE_METRIC_LABELS).toContain(label)
+  })
+
+  it('shows the noise tiles alone when there is no fundamental, and none without a noise frame', () => {
+    const alone = channelTiles(null, [], 8, null, false, noise, 0)
+    expect(alone.map((t) => t.label)).toEqual(['RMS dBV(bw)', 'Noise dBV/√Hz', 'Noise in nV/√Hz'])
+    expect(channelTiles(meters, [], 8).some((t) => t.label.startsWith('Noise'))).toBe(false)
+  })
+
+  it('qualifies only the noise-integrated tiles with the weighting', () => {
+    const weighted = { ...noise, weighting: { standard: 'A' as const, user1: true, user2: false } }
+    const tiles = channelTiles(meters, [], 8, null, false, weighted, 0)
+    const qualified = tiles.filter((t) => t.qualifier).map((t) => t.label)
+    expect(qualified).toEqual([
+      'THD+N %', 'THD+N dB', 'THD+N dBr', 'THD+N dBV', 'N+D dBr', 'N+D dBV', 'N-D dBr', 'N-D dBV', 'SNR dB', 'SNR dBr',
+      'RMS dBV(bw)', 'Noise dBV/√Hz', 'Noise in nV/√Hz',
+    ])
+    expect(tiles.find((t) => t.label === 'SNR dB')?.qualifier).toBe('A+U1')
+    expect(tiles.find((t) => t.label === 'THD %')?.qualifier).toBeUndefined()
+    expect(tiles.find((t) => t.label === 'RMS dBV')?.qualifier).toBeUndefined()
+    // Unweighted: no qualifier anywhere.
+    expect(channelTiles(meters, [], 8, null, false, noise, 0).some((t) => t.qualifier)).toBe(false)
+  })
+})
+
+describe('noise density helpers', () => {
+  it('refers the density to the input and formats it', () => {
+    expect(noiseInputReferredNvPerRootHz(-150, 0)).toBeCloseTo(31.62, 1)
+    expect(noiseInputReferredNvPerRootHz(-150, 20)).toBeCloseTo(3.162, 2)
+    expect(noiseInputReferredNvPerRootHz(-150, Number.NaN)).toBeCloseTo(31.62, 1)
+    expect(formatNvPerRootHz(31.62)).toBe('31.6 nV/√Hz')
+    expect(formatNvPerRootHz(3162)).toBe('3.16 µV/√Hz')
+    expect(formatNvPerRootHz(Number.NaN)).toBe('—')
   })
 })
 

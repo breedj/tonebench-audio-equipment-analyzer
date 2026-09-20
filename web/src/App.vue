@@ -12,6 +12,8 @@ import { useMetricSelection } from './composables/useMetricSelection'
 import { useLoadOhms } from './composables/useLoadOhms'
 import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useChartDisplay } from './composables/useChartDisplay'
+import { useUserWeighting } from './composables/useUserWeighting'
+import { weightingLabel } from './weighting'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
 import { useCaptureDelay } from './composables/useCaptureDelay'
 import { useAutosave } from './composables/useAutosave'
@@ -111,7 +113,7 @@ import {
 } from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
-const { spectrum, meters, intermodulation, imdUnresolved, scope, setViewport, clearScope } = useSpectrumStream()
+const { spectrum, meters, intermodulation, imdUnresolved, noise, scope, setViewport, clearScope } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
@@ -132,10 +134,39 @@ const {
   showOscilloscope: chartShowOscilloscope,
   showHarmonics: chartShowHarmonics,
   showOtherPeaks: chartShowOtherPeaks,
+  spectrumUnit: chartSpectrumUnit,
+  dutGainDb: chartDutGainDb,
+  showWeightingCurve: chartShowWeightingCurve,
   applyLoaded: applyLoadedChartDisplay,
   requestAutofitY: requestChartAutofitY,
   requestAutofitX: requestChartAutofitX,
+  requestResetPeakHold: requestChartResetPeakHold,
 } = useChartDisplay()
+
+// The user weighting tables' names, for the chart's annunciator and the report.
+const userWeighting = useUserWeighting()
+void userWeighting.load()
+const weightingAnnunciator = computed(() =>
+  weightingLabel(spectrumConfig.value?.weighting ?? null, userWeighting.user1.value?.name, userWeighting.user2.value?.name),
+)
+
+// A weighting or unit change redraws every level on the chart, so the histories the chart keeps --
+// the peak-hold maps and the waterfall's rows -- would mix two scales. Clear them. The DUT gain only
+// matters while the input-referred unit is selected.
+watch(
+  () => [
+    spectrumConfig.value?.weighting?.standard,
+    spectrumConfig.value?.weighting?.user1,
+    spectrumConfig.value?.weighting?.user2,
+    chartSpectrumUnit.value,
+    chartSpectrumUnit.value === 'dBVPerRootHzInput' ? chartDutGainDb.value : 0,
+  ],
+  (next, previous) => {
+    if (previous === undefined || next.every((v, i) => v === previous[i])) return
+    requestChartResetPeakHold()
+    waterfallChart.value?.clearHistory()
+  },
+)
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
 // fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
@@ -1244,6 +1275,7 @@ function runMeasurement(runConfig: RunConfig, singleShot = false) {
     meters.value = {}
     intermodulation.value = {}
     imdUnresolved.value = {}
+    noise.value = {}
     spectrum.value = {}
     clearScope()
 
@@ -1613,6 +1645,8 @@ function buildLiveSubject(): ReportSubject | null {
       spectrum: spectrum.value,
       meters: meters.value,
       intermodulation: intermodulation.value,
+      noise: noise.value,
+      weightingLabel: weightingAnnunciator.value,
       display: useChartDisplay(),
       selectedMetrics: selectedMetrics.value,
       generatorTones: status.value?.generatorLeft.tones ?? [],
@@ -1651,6 +1685,7 @@ function clearMeasurement() {
     await api.clearSpectrum()
     meters.value = {}
     intermodulation.value = {}
+    noise.value = {}
     spectrum.value = {}
     clearScope()
   })
@@ -1692,6 +1727,9 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     imdPreset: stimulusImd.preset,
     imdMethod: stimulusImd.method,
     imdMaxOrder: stimulusImd.maxOrder,
+    dutGainDb: chartDutGainDb.value,
+    chartUnit: chartSpectrumUnit.value,
+    chartShowWeightingCurve: chartShowWeightingCurve.value,
   }
 }
 
@@ -3279,6 +3317,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     :generator-tones="status?.generatorLeft.tones ?? []"
                     :imd="intermodulation[0] ?? null"
                     :imd-unresolved="imdUnresolved[0] ?? false"
+                    :noise="noise[0] ?? null"
                   />
                   <MetricsPanel
                     v-if="spectrumConfig?.processRight ?? true"
@@ -3287,6 +3326,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     :generator-tones="status?.generatorRight.tones ?? []"
                     :imd="intermodulation[1] ?? null"
                     :imd-unresolved="imdUnresolved[1] ?? false"
+                    :noise="noise[1] ?? null"
                   />
                 </div>
                 <button
@@ -3311,6 +3351,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 :spectrum="spectrum"
                 :meters="meters"
                 :overlays="overlays"
+                :weighting-label="weightingAnnunciator"
                 @viewport-change="setViewport"
               />
               <!-- v-show, not v-if: the waterfall's history is collected frame by frame by the

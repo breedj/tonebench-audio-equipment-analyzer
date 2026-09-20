@@ -25,7 +25,8 @@ public sealed class MeasurementSaveService(
     ImpedanceRunner impedanceRunner,
     ProjectRepository projectRepository,
     MeasurementRepository measurementRepository,
-    IOptions<JsonOptions> jsonOptions)
+    IOptions<JsonOptions> jsonOptions,
+    UserWeightingSetting? userWeighting = null)
 {
     // Reuses the app's own HTTP JSON options (JsonStringEnumConverter etc, configured once in
     // Program.cs) rather than a second, independently-drifting JsonSerializerOptions instance —
@@ -401,6 +402,23 @@ public sealed class MeasurementSaveService(
         // The pipeline knows the tones it measured with but not which template put them there;
         // the type does. Carried over only when the type's stored pair is the one that ran.
         parameters = parameters with { ImdPreset = await ResolveImdPresetNameAsync(measurementTypeId, parameters, ct) };
+        // The DUT gain and the chart unit are client-staged and reach the server only when the type
+        // is saved, so a result takes them from its type: the "Noise in nV/sqrt(Hz)" row a report
+        // recomputes needs the gain that was on screen, and the type's is the best record of it.
+        parameters = parameters with { DutGainDb = null, ChartUnit = null };
+        if (await ReadStoredTypeParametersAsync(measurementTypeId, ct) is { } typeParameters)
+            parameters = parameters with { DutGainDb = typeParameters.DutGainDb, ChartUnit = typeParameters.ChartUnit };
+
+        // The weighting a result records is the one the saved trace was produced under -- the
+        // snapshot's, not the live options', which may have changed since the capture. One
+        // weighting for both channels: the pipeline applies one spec to every channel of a tick.
+        if (snapshots[0].Weighting is { } snapshotWeighting)
+            parameters = parameters with
+            {
+                Weighting = snapshotWeighting.Standard.ToString(),
+                WeightingUser1 = snapshotWeighting.User1,
+                WeightingUser2 = snapshotWeighting.User2,
+            };
         string paramsJson = JsonSerializer.Serialize(parameters, SerializerOptions);
         string? genJson = JsonSerializer.Serialize(session.EffectiveGeneratorConfig, SerializerOptions);
 
@@ -412,6 +430,15 @@ public sealed class MeasurementSaveService(
         var metrics = new List<MeasurementMetric>();
         foreach (var snapshot in snapshots)
         {
+            // Ahead of the fundamental check: these two need none, and a noise measurement with
+            // the generator off is exactly the case where there is none.
+            if (snapshot.Noise is { } noise)
+            {
+                int noiseChannel = ChannelIndex(snapshot.Channel);
+                metrics.Add(new MeasurementMetric(noiseChannel, "band_rms_dbv", noise.BandRmsDbv, "dBV"));
+                metrics.Add(new MeasurementMetric(noiseChannel, "noise_density_dbv_per_root_hz", noise.NoiseDensityDbvPerRootHz, "dBV/√Hz"));
+            }
+
             // No fundamental found in band for this channel this tick — its spectrum is still
             // saved above (via `spectra`), just with no derived metric rows to go with it. See
             // SpectrumSnapshot.Meters.
@@ -1123,6 +1150,9 @@ public sealed class MeasurementSaveService(
             // Rebuilt from the stored fields, or cleared: a type without IMD must not inherit the
             // previous type's spec, or its single 1 kHz tone reads the noise floor as IMD.
             Intermodulation = IntermodulationSpecOf(parameters),
+            // Same rule: a type saved without a weighting (or by a build that had none) is
+            // unweighted, not "whatever the last type left behind".
+            Weighting = WeightingSpecOf(parameters),
         };
 
         return ToAppliedResponse(parameters);
@@ -1133,6 +1163,22 @@ public sealed class MeasurementSaveService(
     /// stored name when that type's pair is the pair that was measured, "Custom" otherwise (a pair
     /// typed by hand, or the tones edited since the type was saved).
     /// </summary>
+    /// <summary>The type's stored FFT parameters, or null for a missing type, another kind, or unreadable JSON.</summary>
+    private async Task<FftSpectrumParameters?> ReadStoredTypeParametersAsync(long measurementTypeId, CancellationToken ct)
+    {
+        var type = await projectRepository.GetTypeAsync(measurementTypeId, ct);
+        if (type is null || HasNoLiveConfiguration(type.Kind) || IsSweepKind(type.Kind))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<FftSpectrumParameters>(type.ParamsJson, SerializerOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private async Task<string?> ResolveImdPresetNameAsync(long measurementTypeId, FftSpectrumParameters parameters, CancellationToken ct)
     {
         if (parameters.ImdToneLowHz is not { } low || parameters.ImdToneHighHz is not { } high)
@@ -1155,6 +1201,15 @@ public sealed class MeasurementSaveService(
         bool samePair = stored?.ImdToneLowHz is { } storedLow && stored.ImdToneHighHz is { } storedHigh
             && Math.Abs(storedLow - low) < 1e-6 && Math.Abs(storedHigh - high) < 1e-6;
         return samePair && !string.IsNullOrEmpty(stored!.ImdPreset) ? stored.ImdPreset : "Custom";
+    }
+
+    /// <summary>The stored weighting, or <see cref="WeightingSpec.None"/> when the row predates weighting or names an unknown standard.</summary>
+    private static WeightingSpec WeightingSpecOf(FftSpectrumParameters parameters)
+    {
+        var standard = Enum.TryParse<WeightingStandard>(parameters.Weighting, ignoreCase: true, out var parsed)
+            ? parsed
+            : WeightingStandard.None;
+        return new WeightingSpec(standard, parameters.WeightingUser1 ?? false, parameters.WeightingUser2 ?? false);
     }
 
     private static IntermodulationSpec? IntermodulationSpecOf(FftSpectrumParameters parameters)
@@ -1197,7 +1252,13 @@ public sealed class MeasurementSaveService(
             parameters.ChartShowOtherPeaks,
             parameters.ImdPreset,
             parameters.ImdMethod,
-            parameters.ImdMaxOrder);
+            parameters.ImdMaxOrder,
+            parameters.Weighting,
+            parameters.WeightingUser1,
+            parameters.WeightingUser2,
+            parameters.DutGainDb,
+            parameters.ChartUnit,
+            parameters.ChartShowWeightingCurve);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -1249,6 +1310,16 @@ public sealed class MeasurementSaveService(
             ImdToneLowHz = options.Intermodulation?.ToneLowHz,
             ImdToneHighHz = options.Intermodulation?.ToneHighHz,
             ImdMaxProductFreqHz = options.Intermodulation?.MaxProductFreqHz,
+            // Live pipeline state, like the IMD spec; the user tables' names come from the setting
+            // so a result can say which file weighted it. Only recorded when the slot is in effect.
+            Weighting = options.Weighting.Standard.ToString(),
+            WeightingUser1 = options.Weighting.User1,
+            WeightingUser2 = options.Weighting.User2,
+            WeightingUser1Name = options.Weighting.User1 ? userWeighting?.Get(1)?.Name : null,
+            WeightingUser2Name = options.Weighting.User2 ? userWeighting?.Get(2)?.Name : null,
+            DutGainDb = staged?.DutGainDb,
+            ChartUnit = staged?.ChartUnit,
+            ChartShowWeightingCurve = staged?.ChartShowWeightingCurve,
         };
     }
 

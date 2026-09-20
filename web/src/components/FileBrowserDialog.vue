@@ -16,6 +16,10 @@ const props = defineProps<{
   startPath?: string | null
   /** Save mode: the file name to suggest when startPath has none. */
   suggestedName?: string
+  /** The file extension listed and selected, with its dot; the project file's by default. */
+  extension?: string
+  /** The dialog's title; a default per mode when omitted. */
+  title?: string
 }>()
 const emit = defineEmits<{ close: []; select: [path: string] }>()
 
@@ -27,7 +31,8 @@ const pathInput = ref('')
 const fileName = ref('')
 const selectedFile = ref<string | null>(null)
 
-const title = computed(() => (props.mode === 'open' ? 'Open project' : 'Save project file'))
+const title = computed(() => props.title ?? (props.mode === 'open' ? 'Open project' : 'Save project file'))
+const extension = computed(() => props.extension ?? PROJECT_EXTENSION)
 const separator = computed(() => listing.value?.separator ?? '/')
 
 const resultPath = computed<string | null>(() => {
@@ -41,7 +46,7 @@ async function browse(path: string | null) {
   loading.value = true
   error.value = null
   try {
-    listing.value = await api.browseFiles(path)
+    listing.value = await api.browseFiles(path, extension.value)
     pathInput.value = listing.value.path
     selectedFile.value = null
   } catch (e) {
@@ -57,7 +62,7 @@ watch(
     if (!open) return
     const start = props.startPath ?? null
     // A full file path starts in its folder, with its name in the box; anything else is a folder.
-    const looksLikeFile = start !== null && start.toLowerCase().endsWith(PROJECT_EXTENSION)
+    const looksLikeFile = start !== null && start.toLowerCase().endsWith(extension.value)
     fileName.value = looksLikeFile ? fileNameOf(start) : (props.suggestedName ?? '')
     void browse(looksLikeFile ? parentPath(start) : start)
   },
@@ -73,7 +78,7 @@ function onPathEnter() {
   // A file: select it outright in open mode, or take its name and folder in save mode. `.db` too,
   // so a database from before projects were one file each can be opened by typing its path — the
   // list shows only .qa403, and such a file opens fine when it holds a single project.
-  if (typed.toLowerCase().endsWith(PROJECT_EXTENSION) || typed.toLowerCase().endsWith('.db')) {
+  if (typed.toLowerCase().endsWith(extension.value) || (extension.value === PROJECT_EXTENSION && typed.toLowerCase().endsWith('.db'))) {
     if (props.mode === 'open') {
       emit('select', typed)
       return

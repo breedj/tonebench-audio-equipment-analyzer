@@ -82,7 +82,9 @@
       Each chart's display rail carries explicit <strong>Top/Bottom</strong> and
       <strong>From/To</strong> fields, with an <strong>Autofit</strong> button under each. Autofit
       fits the window to what is currently plotted — including any history overlays that are checked
-      on, so fitting with a comparison visible frames both runs.
+      on, so fitting with a comparison visible frames both runs. The FFT screen's level range also
+      has a <strong>Units</strong> choice (dBV, dBV/√Hz, or dBV/√Hz referred to the DUT's input);
+      switching it refits the range, since every level moves by the same constant.
     </p>
     <p>
       <strong>Autofit when measurement done</strong> does the same thing automatically at the end of

@@ -54,6 +54,14 @@ public enum StreamMsgType : byte
 
     /// <summary>One finished IMD-vs-amplitude sweep point — see <see cref="StreamFrame.EncodeImdSweepPoint"/>.</summary>
     ImdSweepPoint = 11,
+
+    /// <summary>
+    /// One channel's band RMS, noise density and window ENBW for a tick, under the weighting in
+    /// effect — sent every tick, <i>before</i> that tick's <see cref="Spectrum"/> frame, whether or
+    /// not a fundamental was found (a <see cref="Meters"/> frame needs one; a noise measurement with
+    /// the generator off has none). See <see cref="StreamFrame.EncodeNoiseFigures"/>.
+    /// </summary>
+    NoiseFigures = 12,
 }
 
 public enum StreamChannel : byte
@@ -858,6 +866,54 @@ public static class StreamFrame
     }
 
     /// <summary>
+    /// Encodes a <see cref="StreamMsgType.NoiseFigures"/> frame. Header: x0 = the measurement band's
+    /// low edge (Hz), dx = its high edge, nPoints = 0. Payload:
+    /// <code>
+    /// 20  f32  bandRmsDbv               -- RMS of everything in the band, weighted
+    /// 24  f32  noiseDensityDbvPerRootHz -- mean density over the band less the notch/harmonics, weighted
+    /// 28  f32  enbwHz                   -- the window's equivalent noise bandwidth at this fs and N
+    /// 32  u8   weighting standard       -- Qa403.Dsp.WeightingStandard
+    /// 33  u8   user mask                -- bit 0 = user table 1, bit 1 = user table 2
+    /// 34  u16  reserved
+    /// </code>
+    /// </summary>
+    public static byte[] EncodeNoiseFigures(StreamChannel channel, uint seq, NoiseFigures noise, bool held)
+    {
+        byte[] buffer = new byte[HeaderLength + (3 * sizeof(float)) + 4];
+        WriteHeader(
+            buffer, StreamMsgType.NoiseFigures, channel, held ? StreamFlags.Held : StreamFlags.None,
+            seq, noise.MeasurementLoFreqHz, noise.MeasurementHiFreqHz, 0);
+
+        int offset = HeaderLength;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), noise.BandRmsDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), noise.NoiseDensityDbvPerRootHz); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), noise.EnbwHz); offset += 4;
+        buffer[offset++] = (byte)noise.Weighting.Standard;
+        buffer[offset++] = (byte)((noise.Weighting.User1 ? 1 : 0) | (noise.Weighting.User2 ? 2 : 0));
+        return buffer;
+    }
+
+    /// <summary>Decodes a <see cref="StreamMsgType.NoiseFigures"/> frame — see <see cref="EncodeNoiseFigures"/> for the layout.</summary>
+    public static DecodedNoiseFigures DecodeNoiseFigures(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.NoiseFigures)
+            throw new ArgumentException("Frame is not a noise-figures frame.", nameof(frame));
+
+        int offset = HeaderLength;
+        float bandRmsDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float densityDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float enbwHz = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        var standard = (WeightingStandard)frame[offset++];
+        byte userMask = frame[offset++];
+
+        return new DecodedNoiseFigures(
+            header.Channel, header.Seq, header.X0, header.Dx, bandRmsDbv, densityDbv, enbwHz,
+            new WeightingSpec(standard, (userMask & 1) != 0, (userMask & 2) != 0),
+            (header.Flags & StreamFlags.Held) != 0);
+    }
+
+    /// <summary>
     /// The header-only <see cref="StreamMsgType.Intermodulation"/> frame carrying
     /// <see cref="StreamFlags.IntermodulationUnresolved"/> — see that flag for when it is sent.
     /// </summary>
@@ -1069,6 +1125,10 @@ public readonly record struct DecodedImdSweepPoint(
     SweepPreviewSeries? PreviewFft, SweepPreviewSeries? PreviewScope);
 
 public readonly record struct DecodedIntermodulationProduct(float FreqHz, float Dbv, float Dbc, int M, int N, int Order);
+
+public readonly record struct DecodedNoiseFigures(
+    StreamChannel Channel, uint Seq, float MeasurementLoFreqHz, float MeasurementHiFreqHz,
+    float BandRmsDbv, float NoiseDensityDbvPerRootHz, float EnbwHz, WeightingSpec Weighting, bool Held);
 
 public readonly record struct DecodedIntermodulation(
     float ToneLowHz, float ToneHighHz, IntermodulationMethod Method, int MaxOrder,

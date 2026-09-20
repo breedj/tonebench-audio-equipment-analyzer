@@ -32,6 +32,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(DiagnosticsEndpoints.DiagnosticsStatus))]
 [JsonSerializable(typeof(AcquisitionStartRequest))]
 [JsonSerializable(typeof(SpectrumConfigRequest))]
+[JsonSerializable(typeof(WeightingCurveResponse))]
 [JsonSerializable(typeof(SpectrumPipelineOptions))]
 [JsonSerializable(typeof(DeviceStatusResponse))]
 [JsonSerializable(typeof(DeviceRangesResponse))]
@@ -81,6 +82,11 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ImpedanceFixtureConfig))]
 [JsonSerializable(typeof(UiLayoutConfig))]
 [JsonSerializable(typeof(CaptureDelayConfig))]
+// The user weighting tables: the config document (a Qa403.Data record, registered by hand like the
+// others) and the endpoints' own DTOs.
+[JsonSerializable(typeof(UserWeightingTable))]
+[JsonSerializable(typeof(UserWeightingResponse))]
+[JsonSerializable(typeof(ImportWeightingRequest))]
 [JsonSerializable(typeof(StartupConfig))]
 [JsonSerializable(typeof(AutosaveConfig))]
 [JsonSerializable(typeof(RecentProjectsConfig))]

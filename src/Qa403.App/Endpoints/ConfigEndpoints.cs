@@ -12,6 +12,13 @@ namespace Qa403.App.Endpoints;
 /// </summary>
 public static class ConfigEndpoints
 {
+    private static UserWeightingSummary? Summarize(UserWeightingTable? table) =>
+        table is null
+            ? null
+            : new UserWeightingSummary(
+                table.Name, table.SourcePath, table.Points.Count,
+                table.Points.Min(p => p.FreqHz), table.Points.Max(p => p.FreqHz), table.ImportedUtc);
+
     /// <summary>
     /// The stored capture delay, or the default when nothing has been stored or the document cannot
     /// be read -- the same contract as the fixture and the layout. Shared with <c>Program</c>, which
@@ -145,6 +152,43 @@ public static class ConfigEndpoints
             return Results.Ok(config);
         });
 
+        // The two user weighting tables. The document is the durable copy and UserWeightingSetting
+        // the one the pipeline reads; an import is a path because the browser cannot read a local
+        // file, and the response is a summary rather than the points -- the panel only needs to say
+        // what is loaded, the pipeline already has the table.
+        group.MapGet("/weighting", (UserWeightingSetting setting) =>
+            Results.Ok(new UserWeightingResponse(Summarize(setting.Get(1)), Summarize(setting.Get(2)))));
+
+        group.MapPost("/weighting/{slot:int}/import", async (
+            int slot, ImportWeightingRequest request, UserWeightingService service, UserWeightingSetting setting, CancellationToken ct) =>
+        {
+            if (slot is not (1 or 2))
+                return Results.BadRequest("User weighting slots are 1 and 2.");
+            try
+            {
+                await service.ImportAsync(slot, request.Path, ct);
+            }
+            catch (FileNotFoundException)
+            {
+                return Results.NotFound($"No file at {request.Path}.");
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException or IOException or UnauthorizedAccessException)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+
+            return Results.Ok(new UserWeightingResponse(Summarize(setting.Get(1)), Summarize(setting.Get(2))));
+        });
+
+        group.MapDelete("/weighting/{slot:int}", async (
+            int slot, UserWeightingService service, UserWeightingSetting setting, CancellationToken ct) =>
+        {
+            if (slot is not (1 or 2))
+                return Results.BadRequest("User weighting slots are 1 and 2.");
+            await service.ClearAsync(slot, ct);
+            return Results.Ok(new UserWeightingResponse(Summarize(setting.Get(1)), Summarize(setting.Get(2))));
+        });
+
         // Whether to start on the welcome screen. Client-owned; the server-owned counterpart, which
         // project was open last, is written by ProjectSessionService and never by a PUT.
         group.MapGet("/startup", async (ProjectSessionService session, CancellationToken ct) =>
@@ -241,3 +285,12 @@ public static class ConfigEndpoints
         });
     }
 }
+
+/// <summary>What the FFT settings panel shows for a user weighting slot: the table's name and extent, not its rows.</summary>
+public sealed record UserWeightingSummary(string Name, string? SourcePath, int PointCount, double MinFreqHz, double MaxFreqHz, DateTimeOffset ImportedUtc);
+
+/// <summary>Both user weighting slots; a null slot is empty.</summary>
+public sealed record UserWeightingResponse(UserWeightingSummary? User1, UserWeightingSummary? User2);
+
+/// <summary>The file to import into a user weighting slot -- a path on the server's machine, from the in-app file listing.</summary>
+public sealed record ImportWeightingRequest(string Path);

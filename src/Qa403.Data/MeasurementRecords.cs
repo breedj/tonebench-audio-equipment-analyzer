@@ -86,7 +86,29 @@ public sealed record FftSpectrumParameters(
     int? ImdMaxOrder = null,
     double? ImdToneLowHz = null,
     double? ImdToneHighHz = null,
-    double? ImdMaxProductFreqHz = null);
+    double? ImdMaxProductFreqHz = null,
+    /// <summary>
+    /// The noise weighting (a <c>WeightingStandard</c> name) and which user tables were in effect.
+    /// On a result these come from the snapshot that was saved, not the live options, so a
+    /// weighting changed after the capture cannot relabel it. Null on a row an older build wrote,
+    /// which means unweighted. The user tables' names are recorded so a result can say which
+    /// file it was weighted by after the slot has been reloaded with another.
+    /// </summary>
+    string? Weighting = null,
+    bool? WeightingUser1 = null,
+    bool? WeightingUser2 = null,
+    string? WeightingUser1Name = null,
+    string? WeightingUser2Name = null,
+    /// <summary>
+    /// The DUT's gain in dB, entered beside Load Ω, used to refer the noise density to the DUT's
+    /// input ("Noise in nV/√Hz") and for the chart's input-referred unit. A type setting, saved
+    /// with the result that used it. Null means 0 dB.
+    /// </summary>
+    double? DutGainDb = null,
+    /// <summary>The chart's level unit: <c>dBV</c>, <c>dBVPerRootHz</c> or <c>dBVPerRootHzInput</c> (see the client's SpectrumUnit). Null means dBV.</summary>
+    string? ChartUnit = null,
+    /// <summary>Whether the chart draws the weighting curve in effect as a dashed overlay. Null means off.</summary>
+    bool? ChartShowWeightingCurve = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for

@@ -417,6 +417,29 @@ public class ThdSweepRunnerTests
     }
 
     [Fact]
+    public async Task Sweep_RunsUnweightedWhateverTheLiveWeightingIs_AndRestoresIt()
+    {
+        // A sweep's noise and THD+N figures are defined over the plain band: the FFT screen's
+        // weighting must not leak into a run, and must be back afterwards.
+        var harness = await CreateAsync();
+        var weighted = harness.Pipeline.Options with { Weighting = new WeightingSpec(WeightingStandard.A, User1: true) };
+        harness.Pipeline.Options = weighted;
+
+        var seen = new List<WeightingSpec>();
+        await harness.Runner.StartAsync(Request(startHz: 1000.0, endHz: 2000.0, stepsPerOctave: 1), CancellationToken.None);
+        while (harness.Runner.Running)
+        {
+            seen.Add(harness.Pipeline.Options.Weighting);
+            await Task.Delay(20);
+        }
+        await AwaitCompletionAsync(harness.Runner);
+
+        Assert.Contains(WeightingSpec.None, seen);
+        Assert.DoesNotContain(seen, w => w != WeightingSpec.None && w != weighted.Weighting);
+        Assert.Equal(weighted, harness.Pipeline.Options);
+    }
+
+    [Fact]
     public async Task Sweep_OutputPowerMode_ResolvesAGeneratorAmplitudeNearTheTarget()
     {
         // The simulated DUT has unity gain, so 1 W into 8 ohm (= 2.83 Vrms = 9.03 dBV) should be

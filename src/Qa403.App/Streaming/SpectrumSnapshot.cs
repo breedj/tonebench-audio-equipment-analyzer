@@ -75,4 +75,31 @@ public sealed record SpectrumSnapshot(
     SpectrumMeters? Meters,
     SweepPreviewSeries? PreviewFft = null,
     SweepPreviewSeries? PreviewScope = null,
-    Complex[]? Complex = null);
+    Complex[]? Complex = null,
+    /// <summary>
+    /// The band RMS and noise density of the tick that produced this trace, under the same
+    /// weighting -- present even when <see cref="Meters"/> is null, since neither needs a fundamental.
+    /// </summary>
+    NoiseFigures? Noise = null,
+    /// <summary>
+    /// The weighting the trace and the noise figures were produced under. Recorded on the snapshot
+    /// rather than read from the options at save time: a weighting changed while acquisition is
+    /// stopped must not relabel a trace that was captured under another.
+    /// </summary>
+    WeightingSpec? Weighting = null);
+
+/// <summary>
+/// The two noise figures that need no fundamental: the RMS of everything in the measurement band
+/// and the mean noise density over it (the fundamental's notch and the harmonics' lobes excluded
+/// when there is a fundamental), both under the tick's weighting. <see cref="EnbwHz"/> is the
+/// window's equivalent noise bandwidth at the tick's sample rate and FFT size, which is what turns
+/// a dBV trace into dBV/√Hz on the client. Broadcast every tick as its own frame
+/// (<see cref="StreamMsgType.NoiseFigures"/>), before the spectrum frame it describes.
+/// </summary>
+public sealed record NoiseFigures(
+    float BandRmsDbv,
+    float NoiseDensityDbvPerRootHz,
+    float EnbwHz,
+    float MeasurementLoFreqHz,
+    float MeasurementHiFreqHz,
+    WeightingSpec Weighting);

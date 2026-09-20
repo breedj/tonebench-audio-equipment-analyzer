@@ -110,12 +110,25 @@ public readonly ref struct PsdSpectrum
     /// worse than it really was (a 4.6 mV offset alone gives THD+N = -46.8 dB against a 1 V
     /// fundamental, versus -76.8 dB for the same trace with DC excluded).
     /// </summary>
-    public double IntegrateVrmsExcluding(ReadOnlySpan<BinRange> excludedRanges, BinRange band)
+    public double IntegrateVrmsExcluding(ReadOnlySpan<BinRange> excludedRanges, BinRange band) =>
+        Math.Sqrt(Math.Max(0.0, IntegrateExcluding(excludedRanges, band).PowerV2));
+
+    /// <summary>Σ PSD·Δf over <paramref name="band"/>, with the number of bins that went into it.</summary>
+    public BandIntegral Integrate(BinRange band) => IntegrateExcluding(ReadOnlySpan<BinRange>.Empty, band);
+
+    /// <summary>
+    /// Σ PSD·Δf over every bin of <paramref name="band"/> not covered by <paramref name="excludedRanges"/>,
+    /// with the count of bins summed — which is what a density needs: the mean PSD over the bins that
+    /// were actually included is unbiased by the notch, where power over the band's nominal width is
+    /// low by the notched fraction.
+    /// </summary>
+    public BandIntegral IntegrateExcluding(ReadOnlySpan<BinRange> excludedRanges, BinRange band)
     {
         int lo = Math.Max(0, band.LoBinInclusive);
         int hi = Math.Min(ValuesV2PerHz.Length - 1, band.HiBinInclusive);
 
         double power = 0.0;
+        int count = 0;
         for (int k = lo; k <= hi; k++)
         {
             bool excluded = false;
@@ -129,9 +142,15 @@ public readonly ref struct PsdSpectrum
             }
 
             if (!excluded)
+            {
                 power += ValuesV2PerHz[k] * BinSizeHz;
+                count++;
+            }
         }
 
-        return Math.Sqrt(Math.Max(0.0, power));
+        return new BandIntegral(power, count);
     }
 }
+
+/// <summary>A PSD integral: power in V² and how many bins were summed to get it.</summary>
+public readonly record struct BandIntegral(double PowerV2, int BinCount);

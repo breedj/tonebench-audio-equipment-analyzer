@@ -1202,9 +1202,46 @@ export interface SpectrumConfig {
   measurementHiFreqHz: number
   /** The two-tone IMD spec in force, or null when no IMD is measured — see IntermodulationConfigRequest. */
   intermodulation?: IntermodulationSpec | null
+  /** The noise weighting in effect — see WeightingConfigRequest. */
+  weighting: WeightingSpec
 }
 
 export type ImdMethodName = 'Smpte' | 'Ccif'
+
+import type { WeightingSpec, WeightingStandardName } from '../streaming/protocol'
+export type { WeightingSpec, WeightingStandardName }
+
+/**
+ * Patch value for SpectrumConfigRequest.weighting: every member is optional and an omitted one
+ * keeps the server's current value.
+ */
+export interface WeightingConfigRequest {
+  standard?: WeightingStandardName
+  user1?: boolean
+  user2?: boolean
+}
+
+/** What the FFT settings panel shows for a user weighting slot; null when the slot is empty. */
+export interface UserWeightingSummary {
+  name: string
+  sourcePath: string | null
+  pointCount: number
+  minFreqHz: number
+  maxFreqHz: number
+  importedUtc: string
+}
+
+export interface UserWeightingResponse {
+  user1: UserWeightingSummary | null
+  user2: UserWeightingSummary | null
+}
+
+/** The weighting in effect sampled as a curve (GET /api/acquisition/weighting-curve); empty arrays and `weighted: false` when nothing is selected. */
+export interface WeightingCurveResponse {
+  weighted: boolean
+  freqHz: number[]
+  gainDb: number[]
+}
 
 /** Mirrors Qa403.App.Streaming.IntermodulationSpec. */
 export interface IntermodulationSpec {
@@ -1230,6 +1267,7 @@ export interface IntermodulationConfigRequest {
 }
 
 export interface SpectrumConfigRequest {
+  weighting?: WeightingConfigRequest
   fftSize?: number
   window?: WindowType
   averaging?: AveragingMode
@@ -1368,6 +1406,14 @@ export interface MeasurementTypeAppliedResponse {
   imdPreset?: string | null
   imdMethod?: ImdMethodName | null
   imdMaxOrder?: number | null
+  /** The stored weighting (already applied to the pipeline by the server), for the settings panel to show. */
+  weighting?: WeightingStandardName | null
+  weightingUser1?: boolean | null
+  weightingUser2?: boolean | null
+  /** The DUT gain beside Load Ω and the chart's level unit — see useDutGainDb.ts and spectrumUnits.ts. */
+  dutGainDb?: number | null
+  chartUnit?: string | null
+  chartShowWeightingCurve?: boolean | null
 }
 
 /**
@@ -1407,6 +1453,10 @@ export interface StagedMeasurementConfig {
   imdPreset?: string | null
   imdMethod?: ImdMethodName | null
   imdMaxOrder?: number | null
+  /** The DUT gain beside Load Ω and the chart's level unit — see useDutGainDb.ts and spectrumUnits.ts. */
+  dutGainDb?: number | null
+  chartUnit?: string | null
+  chartShowWeightingCurve?: boolean | null
 }
 
 export interface SaveMeasurementTypeRequest {
@@ -1467,6 +1517,12 @@ export interface MeasurementChannel {
   columns: MeasurementColumn[]
   /** Metric name -> value, e.g. "thd_percent", "snr_db", "h2_hz", "h2_dbc". */
   metrics: Record<string, number>
+  /**
+   * The stored window's equivalent noise bandwidth — converts this channel's dBV columns to
+   * dBV/√Hz with *its own* window, which need not be the live one's. 0 on a row an older server
+   * sends (no such server exists, but the field defaults that way).
+   */
+  enbwHz?: number
 }
 
 export interface MeasurementDetail {
@@ -1985,9 +2041,17 @@ export const api = {
   setAutosaveConfig: (config: AutosaveConfig) =>
     request<AutosaveConfig>('/config/autosave', { method: 'PUT', body: JSON.stringify(config) }),
 
-  /** One directory of the server's file system, for the in-app file dialog. No path lists the default projects folder. */
-  browseFiles: (path: string | null) =>
-    request<FileBrowseResponse>(`/files/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  /**
+   * One directory of the server's file system, for the in-app file dialog. No path lists the
+   * default projects folder; `ext` filters the files shown (the server's default is `.qa403`).
+   */
+  browseFiles: (path: string | null, ext?: string) => {
+    const params = new URLSearchParams()
+    if (path) params.set('path', path)
+    if (ext) params.set('ext', ext)
+    const query = params.toString()
+    return request<FileBrowseResponse>(`/files/browse${query ? `?${query}` : ''}`)
+  },
 
   listMeasurementTypes: (projectId: number) => request<MeasurementType[]>(`/projects/${projectId}/measurement-types`),
 
@@ -2106,6 +2170,18 @@ export const api = {
     request<UiLayoutConfig>('/config/ui-layout', { method: 'PUT', body: JSON.stringify(layout) }),
 
   getCaptureDelay: () => request<CaptureDelayConfig>('/config/capture-delay'),
+
+  getUserWeighting: () => request<UserWeightingResponse>('/config/weighting'),
+
+  /** The combined weighting curve in effect, log-spaced over [loHz, hiHz] — for the chart's overlay. */
+  getWeightingCurve: (loHz: number, hiHz: number, points = 400) =>
+    request<WeightingCurveResponse>(`/acquisition/weighting-curve?loHz=${loHz}&hiHz=${hiHz}&points=${points}`),
+
+  /** Reads and parses a "frequency, dB" file on the server's machine into user weighting slot 1 or 2. */
+  importUserWeighting: (slot: 1 | 2, path: string) =>
+    request<UserWeightingResponse>(`/config/weighting/${slot}/import`, { method: 'POST', body: JSON.stringify({ path }) }),
+
+  clearUserWeighting: (slot: 1 | 2) => request<UserWeightingResponse>(`/config/weighting/${slot}`, { method: 'DELETE' }),
 
   setCaptureDelay: (config: CaptureDelayConfig) =>
     request<CaptureDelayConfig>('/config/capture-delay', { method: 'PUT', body: JSON.stringify(config) }),

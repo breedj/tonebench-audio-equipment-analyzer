@@ -24,8 +24,12 @@ const { showPage } = useManual()
     <p>
       The analyzer plays a stimulus of your choosing, captures both inputs continuously, and
       transforms one record at a time. Distortion figures are referred to the fundamental you asked
-      the generator for. Noise-based figures — THD+N, SNR, the noise floor — are integrated over the
-      metrics bandwidth set in the Configuration dialog, which also keeps DC out of the sum.
+      the generator for. Noise-based figures — THD+N, SNR, the noise floor, the band RMS and the
+      noise density — are integrated over the <strong>Bandwidth</strong> chosen in the FFT settings
+      panel, which also keeps DC out of the sum, and optionally through a <strong>Weighting</strong>
+      curve (A, C, ITU-R 468, CCIR/ARM, RIAA, or your own table). A weighting changes what "noise"
+      means and nothing else: the fundamental, the harmonics, THD, gain and peak are always measured
+      flat, and THD+N and SNR keep the unweighted fundamental as their reference.
     </p>
     <p>
       Levels are in <strong>dBV</strong> (0 dBV = 1 V rms) throughout. Watts appear wherever a load
@@ -67,7 +71,11 @@ const { showPage } = useManual()
     <p>
       Left and right play the <em>same</em> stimulus; the two checkboxes at the top only decide
       which outputs are actually driven. The <strong>Load</strong> in ohms is shared with every
-      other screen's power figures.
+      other screen's power figures. <strong>DUT gain</strong> in dB is the device's gain from its
+      input to the analyzer's input: the <strong>Noise in nV/√Hz</strong> tile divides the measured
+      noise density by it, and so does the chart's input-referred unit, so a preamp's output floor
+      reads as the noise at its input. Leave it at 0 for a loopback. It is saved with the
+      measurement, unlike the load.
     </p>
     <table>
       <thead>
@@ -197,6 +205,45 @@ const { showPage } = useManual()
             or the time constant of an Exponential one, in records.
           </td>
         </tr>
+        <tr>
+          <td>Bandwidth</td>
+          <td>
+            The measurement band every noise figure is integrated over: <strong>20 Hz – 20 kHz</strong>,
+            <strong>20 Hz – 80 kHz</strong> (only meaningful at 192 kHz, where Nyquist is 96 kHz), or
+            <strong>Custom</strong>, which is whatever the Configuration dialog's Metrics bandwidth
+            fields hold — choosing Custom changes nothing by itself. Note that the upper edge also
+            bounds which harmonics count toward THD and which intermodulation products are "in
+            band", so 80 kHz counts more of both.
+          </td>
+        </tr>
+        <tr>
+          <td>Weighting</td>
+          <td>
+            <strong>None</strong>, or a curve applied to the noise figures and the displayed
+            spectrum: <strong>A</strong> and <strong>C</strong> (IEC 61672), <strong>ITU-R 468</strong>
+            (the broadcast noise curve, +12.2 dB at 6.3 kHz), <strong>CCIR/ARM</strong> (468 re-zeroed
+            to 0 dB at 2 kHz, the Dolby convention: 5.6 dB more than 468 everywhere),
+            <strong>RIAA playback</strong> and <strong>RIAA record</strong> (its inverse — weighting
+            a phono stage's output by the record curve reports its noise as a flat chain would).
+            Every curve is 0 dB at 1 kHz except CCIR/ARM. Weighted tiles carry a small amber tag
+            naming the curve, and the chart shows the same name beside its title.
+          </td>
+        </tr>
+        <tr>
+          <td>User 1, User 2</td>
+          <td>
+            Two slots for your own weighting tables, each loaded from a text file with one
+            <code>frequency, dB</code> pair per line — the QA40x's format, where a <em>positive</em>
+            value is attenuation and a negative one is gain (the tutorial's ITU-R 468 file says
+            <code>6300, -12.2</code> for the curve's peak). Comma or whitespace separated; blank lines,
+            a header line and lines starting with <code>#</code> are ignored. Values are interpolated
+            linearly in dB over log frequency and held constant outside the table. The
+            <strong>…</strong> button picks a <code>.txt</code> file with the in-app file dialog,
+            <strong>✕</strong> clears the slot; the tables live in the configuration database, so
+            they survive a restart and are shared by every project. Ticking a slot combines it with
+            the standard curve (the two multiply), and a ticked slot with no table weighs nothing.
+          </td>
+        </tr>
       </tbody>
     </table>
 
@@ -213,6 +260,19 @@ const { showPage } = useManual()
       <strong>IMD %</strong> and <strong>IMD dB</strong> read only while two sine tones are staged —
       no reading is not a reading, so with any other stimulus the tiles are simply absent.
     </p>
+    <p>
+      Three tiles are for noise work. <strong>RMS dBV(bw)</strong> is the RMS of everything inside
+      the measurement band (the plain <strong>RMS dBV</strong> is the whole record, time domain, no
+      band and no weighting). <strong>Noise dBV/√Hz</strong> is the noise density: the mean over the
+      band with the fundamental's notch and the harmonics taken out, so it reads the same at every
+      FFT size — a −150 dBV/√Hz floor over 20 Hz – 20 kHz is −107 dBV of noise.
+      <strong>Noise in nV/√Hz</strong> is the same density referred to the DUT's input through the
+      DUT gain in the Generator panel: −150 dBV/√Hz is 31.6 nV/√Hz at 0 dB and 3.16 nV/√Hz through
+      20 dB. All three exist with the generator off, when there is no fundamental to report. When a
+      weighting is selected, the tiles it applies to — THD+N, N+D, N-D, SNR and these three — carry
+      an amber tag naming it (<code>A</code>, <code>468</code>, <code>A+U1</code>); the fundamental,
+      THD, gain, peak and RMS tiles never do, because nothing weights them.
+    </p>
 
     <h3>Spectrum</h3>
     <p>
@@ -223,6 +283,21 @@ const { showPage } = useManual()
       for why that band, and not the line above it, is the true noise floor.
       <strong>Peak-hold</strong> keeps the highest level seen per bin since it was last reset, which
       is how you catch an intermittent spur.
+    </p>
+    <p>
+      With a weighting selected the trace itself is weighted — the A curve's roll-off below 1 kHz is
+      visible on a flat noise floor — and an amber <strong>A-weighted</strong> (or
+      <strong>ITU-R 468</strong>, <strong>User 1 (name)</strong> …) tag sits beside the chart's title
+      so a weighted trace is never mistaken for a flat one. The harmonic markers are still placed at
+      the harmonics' unweighted levels, so on a weighted trace they can sit off the line by the
+      curve's value at that frequency. Peak-hold and the waterfall are cleared whenever the
+      weighting or the unit changes, since their history would otherwise mix two scales.
+      <strong>Weighting curve</strong> in the Display panel draws the curve in effect (the standard
+      one combined with any ticked user table) as a dashed amber line — its shape, not a level: a
+      weighting is a gain, so the line is hung with its 0 dB mark 20 dB below the top of the level
+      range, labelled at the left edge. Raise or lower the range's Top to move it. Nothing is drawn
+      while the weighting is None, and a saved result's report never draws it, since the curve is
+      whatever is selected now rather than what the result was captured under.
     </p>
 
     <h3>Waterfall</h3>
@@ -261,12 +336,19 @@ const { showPage } = useManual()
 
     <h2>Display panel</h2>
     <p>
-      <strong>dBV range</strong> and <strong>Frequency range</strong> set the spectrum's window,
+      <strong>Level range</strong> and <strong>Frequency range</strong> set the spectrum's window,
       each with its own Autofit. The frequency Autofit goes to 10 Hz and just past Nyquist for the
-      current sample rate. Below those: <strong>Thick lines</strong>,
+      current sample rate. <strong>Units</strong> picks what the level axis reads:
+      <strong>dBV</strong> per bin; <strong>dBV/√Hz</strong>, a noise density, which is the bin's
+      power spread over the window's equivalent noise bandwidth (dBV − 10·log₁₀ ENBW, about
+      −6.4 dB for Hann at 65536 points and 192 kHz) so a noise floor sits at the same height
+      whatever the FFT size — and a tone, which has no density, reads lower on a coarser grid;
+      or <strong>dBV/√Hz (input-referred)</strong>, the same less the DUT gain. Switching units
+      refits the range. A history overlay converts with its own window, so two results taken at
+      different FFT sizes compare correctly on the density axis. Below those: <strong>Thick lines</strong>,
       <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (on for a
-      newly created measurement), the <strong>Channels</strong> row, the Min/max and Peak-hold
-      toggles, and finally four checkboxes that show or hide the Waterfall, Oscilloscope, Harmonics
+      newly created measurement), the <strong>Channels</strong> row, the Min/max, Peak-hold and
+      Weighting curve toggles, and finally four checkboxes that show or hide the Waterfall, Oscilloscope, Harmonics
       and Other peaks panels — so a measurement that only needs the spectrum does not have to scroll
       past the rest. The waterfall and oscilloscope are only hidden: what they showed is still there
       when they are ticked back on.

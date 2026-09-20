@@ -189,6 +189,30 @@ public sealed record SpectrumPipelineOptions
     /// by more than that measures the noise floor and reports it as IMD.
     /// </summary>
     public IntermodulationSpec? Intermodulation { get; init; }
+
+    /// <summary>
+    /// The noise weighting in effect. Applied <b>after</b> averaging, to the displayed spectrum and
+    /// to a copy of the PSD that only the noise integrals read (THD+N, SNR, the noise floor, the
+    /// band RMS and the noise density) — the fundamental, the harmonics, THD, the other-peaks list
+    /// and IMD are all measured on the unweighted PSD, so a weighting changes what "noise" means
+    /// and nothing else. See <see cref="WeightingSpec"/>. Every sweep runner forces
+    /// <see cref="WeightingSpec.None"/> for its run.
+    /// </summary>
+    public WeightingSpec Weighting { get; init; } = WeightingSpec.None;
+}
+
+/// <summary>
+/// Which weighting curves are in effect: one built-in standard and either of the two user tables
+/// (<c>UserWeightingSetting</c>), which combine multiplicatively — the QA40x's own convention, so
+/// a standard curve plus a user table is the product of the two. A user slot that is checked but
+/// holds no table weighs nothing (flat 0 dB).
+/// </summary>
+public sealed record WeightingSpec(WeightingStandard Standard, bool User1 = false, bool User2 = false)
+{
+    public static readonly WeightingSpec None = new(WeightingStandard.None);
+
+    /// <summary>True when nothing is selected at all — not the same as "resolves to flat", which also covers empty user slots.</summary>
+    public bool IsNone => Standard == WeightingStandard.None && !User1 && !User2;
 }
 
 /// <summary>

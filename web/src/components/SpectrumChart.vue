@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, toRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type MetersFrame, type SpectrumFrame } from '../streaming/protocol'
@@ -23,7 +23,9 @@ import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { FFT_LIVE_COLOR, fftOverlayColor } from '../measurements/spectrumOverlayColors'
-import type { MeasurementChannel } from '../api/client'
+import { api, type MeasurementChannel, type WeightingCurveResponse } from '../api/client'
+import { unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
+import { useUserWeighting } from '../composables/useUserWeighting'
 
 const props = defineProps<{
   spectrum: Record<number, SpectrumFrame>
@@ -36,6 +38,12 @@ const props = defineProps<{
    * oneLineOfMetrics for how much of it is reserved.
    */
   fitAbove?: HTMLElement | null
+  /**
+   * The weighting in effect, as the annunciator names it ("A-weighted", "ITU-R 468 + User 1 (x)"),
+   * or null when the trace is unweighted. Shown in the header and in the PNG export's title, so a
+   * weighted trace is never mistaken for a flat one. See weighting.ts's weightingLabel.
+   */
+  weightingLabel?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -63,7 +71,8 @@ function channelEnabledOnScreen(ch: number): boolean {
 //
 // The screen's shared display state, or a stored measurement type's own when a report renders this
 // chart headless — see SPECTRUM_DISPLAY_KEY.
-const display: SpectrumDisplaySource = inject(SPECTRUM_DISPLAY_KEY, null) ?? useChartDisplay()
+const injectedDisplay = inject(SPECTRUM_DISPLAY_KEY, null)
+const display: SpectrumDisplaySource = injectedDisplay ?? useChartDisplay()
 const {
   yTop,
   yBottom,
@@ -75,6 +84,9 @@ const {
   visibleR,
   showMinMax,
   showPeakHold,
+  spectrumUnit,
+  dutGainDb,
+  showWeightingCurve,
   activeXRange,
   resetPeakHoldTrigger,
   autofitYTrigger,
@@ -82,6 +94,112 @@ const {
   resetYDefaults,
   resetXDefaults,
 } = display
+
+// The weighting curve overlay: the weighting in effect, fetched from the server (the curves and
+// the user tables live there — see /api/acquisition/weighting-curve) and drawn as a dashed line
+// with its 0 dB hung WEIGHTING_CURVE_ANCHOR_DB below the top of the level range. Shape only: a
+// weighting is a gain, not a level, so there is no right height for it, and a fixed one keeps it
+// out of the trace's way while the range is sensible. Only the screen's own chart fetches it (a
+// headless report render of a stored result would otherwise draw the *live* weighting next to a
+// trace captured under another).
+const WEIGHTING_CURVE_ANCHOR_DB = 20
+const WEIGHTING_CURVE_COLOR = 'rgba(245, 158, 11, 0.9)'
+const weightingCurve = shallowRef<WeightingCurveResponse | null>(null)
+const userWeighting = useUserWeighting()
+let weightingCurveRequest = 0
+
+async function refreshWeightingCurve() {
+  if (injectedDisplay !== null || !showWeightingCurve.value) {
+    weightingCurve.value = null
+    plot?.redraw()
+    return
+  }
+  const request = ++weightingCurveRequest
+  try {
+    const curve = await api.getWeightingCurve(5, 100_000)
+    if (request !== weightingCurveRequest) return
+    weightingCurve.value = curve.weighted ? curve : null
+  } catch {
+    if (request !== weightingCurveRequest) return
+    weightingCurve.value = null
+  }
+  plot?.redraw()
+}
+
+watch(
+  () => [
+    showWeightingCurve.value,
+    spectrumConfig.value?.weighting?.standard,
+    spectrumConfig.value?.weighting?.user1,
+    spectrumConfig.value?.weighting?.user2,
+    userWeighting.user1.value?.importedUtc,
+    userWeighting.user2.value?.importedUtc,
+  ],
+  // Not immediate: `plot` is declared further down and refreshWeightingCurve touches it, so the
+  // first fetch waits for onMounted.
+  () => void refreshWeightingCurve(),
+)
+
+function weightingCurvePlugin(): uPlot.Plugin {
+  return {
+    hooks: {
+      draw: [
+        (u) => {
+          const curve = weightingCurve.value
+          if (!showWeightingCurve.value || !curve) return
+          const anchorDb = yTop.value - WEIGHTING_CURVE_ANCHOR_DB
+          const ctx = u.ctx
+          ctx.save()
+          ctx.beginPath()
+          ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height)
+          ctx.clip()
+
+          ctx.strokeStyle = WEIGHTING_CURVE_COLOR
+          ctx.lineWidth = 1.5
+          ctx.setLineDash([6, 4])
+          ctx.beginPath()
+          let started = false
+          for (let i = 0; i < curve.freqHz.length; i++) {
+            const f = curve.freqHz[i]
+            if (!(f > 0)) continue
+            const x = u.valToPos(f, 'x', true)
+            const y = u.valToPos(anchorDb + curve.gainDb[i], 'y', true)
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+            if (started) ctx.lineTo(x, y)
+            else ctx.moveTo(x, y)
+            started = true
+          }
+          ctx.stroke()
+
+          // The anchor: a short tick and "0 dB" at the left edge, so the curve reads as a gain
+          // around that line rather than as a level.
+          ctx.setLineDash([])
+          const yAnchor = u.valToPos(anchorDb, 'y', true)
+          ctx.beginPath()
+          ctx.moveTo(u.bbox.left, yAnchor)
+          ctx.lineTo(u.bbox.left + 8, yAnchor)
+          ctx.stroke()
+          ctx.fillStyle = WEIGHTING_CURVE_COLOR
+          ctx.font = '10px ui-monospace, monospace'
+          ctx.fillText('0 dB', u.bbox.left + 11, yAnchor + 3)
+          ctx.restore()
+        },
+      ],
+    },
+  }
+}
+
+// The chart's unit is a per-frame constant added to every dBV value at draw time — see
+// spectrumUnits.ts. A live frame carries its tick's ENBW (stamped from the noise frame); a stored
+// channel carries its own, so an overlay recorded with a different window converts correctly.
+// Null means the value cannot be converted (no ENBW yet under a density unit): that frame is
+// skipped for the tick rather than drawn in the wrong unit.
+function frameOffset(frame: SpectrumFrame): number | null {
+  return unitOffsetDb(spectrumUnit.value, frame.enbwHz, dutGainDb.value)
+}
+function channelOffset(channel: MeasurementChannel): number | null {
+  return unitOffsetDb(spectrumUnit.value, channel.enbwHz, dutGainDb.value)
+}
 const channelEnabled = display.channelEnabled ?? channelEnabledOnScreen
 function channelVisible(ch: number): boolean {
   return channelEnabled(ch) && (ch === 0 ? visibleL.value : visibleR.value)
@@ -220,13 +338,15 @@ function minMaxBandPlugin(getSpectrum: () => Record<number, SpectrumFrame>): uPl
             if (!channelVisible(ch)) continue
             const frame = spectrum[ch]
             if (!frame) continue
+            const offset = frameOffset(frame)
+            if (offset === null) continue
 
             const path = new Path2D()
             const { columns, header } = frame
             for (let i = 0; i < header.nPoints; i++) {
               const freqHz = columns[i * 3]
-              const minDb = columns[i * 3 + 1]
-              const maxDb = columns[i * 3 + 2]
+              const minDb = columns[i * 3 + 1] + offset
+              const maxDb = columns[i * 3 + 2] + offset
               // Column 0 can sit at or below the log x-scale minimum, where valToPos is -Infinity.
               if (!(freqHz > 0)) continue
 
@@ -451,7 +571,7 @@ function buildOptions(
       {
         values: (_u, vals) => vals.map(formatDbTick),
         size: 50,
-        ...exportAxisLabel(interactive, 'Level (dBV)'),
+        ...exportAxisLabel(interactive, unitAxisLabel(spectrumUnit.value)),
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },
@@ -465,7 +585,7 @@ function buildOptions(
     // (live L/R) and the overlay list (each stored trace), both driving null-fill instead of
     // uPlot's `show`, so there's exactly one place that decides what's visible.
     legend: { show: false },
-    plugins: [minMaxBandPlugin(() => props.spectrum), harmonicMarkersPlugin(theme, interactive)],
+    plugins: [minMaxBandPlugin(() => props.spectrum), harmonicMarkersPlugin(theme, interactive), weightingCurvePlugin()],
   }
 }
 
@@ -482,9 +602,10 @@ function freqTrace(columns: Float32Array, nPoints: number): Float64Array {
   return out
 }
 
-function maxTrace(columns: Float32Array, nPoints: number): Float64Array {
+/** The column maxima in the chart's unit — `offset` is frameOffset's, already known to be non-null. */
+function maxTrace(columns: Float32Array, nPoints: number, offset: number): Float64Array {
   const out = new Float64Array(nPoints)
-  for (let i = 0; i < nPoints; i++) out[i] = columns[i * 3 + 2]
+  for (let i = 0; i < nPoints; i++) out[i] = columns[i * 3 + 2] + offset
   return out
 }
 
@@ -505,11 +626,13 @@ function updatePeakHold(map: Map<number, number>, frame: SpectrumFrame): void {
  * size) has no peak to interpolate from; it just stays null until this tick's updatePeakHold has
  * a chance to populate it.
  */
-function peakTrace(map: Map<number, number>, xs: Float64Array | number[]): (number | null)[] {
+function peakTrace(map: Map<number, number>, xs: Float64Array | number[], offset: number): (number | null)[] {
   const out = new Array<number | null>(xs.length)
   for (let i = 0; i < xs.length; i++) {
     const v = map.get(xs[i])
-    out[i] = v === undefined ? null : v
+    // The maps hold dBV (what the frames carry); the unit is applied on the way out, like the
+    // live trace's, so a unit switch does not need the maps rebuilt -- the owner clears them anyway.
+    out[i] = v === undefined ? null : v + offset
   }
   return out
 }
@@ -543,7 +666,8 @@ let pendingZoomRestore: { min: number; max: number } | null = null
 // has to go through the same destroy/recreate ensurePlot already does for those, not a setData.
 let plotStyleKey = ''
 function styleKey(): string {
-  return `${thickLines.value}|${showDataPoints.value}`
+  // The unit is in the axis label, which is baked into the options: a switch rebuilds the plot.
+  return `${thickLines.value}|${showDataPoints.value}|${spectrumUnit.value}`
 }
 
 function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
@@ -620,8 +744,8 @@ function channelFreqs(channel: MeasurementChannel): Float64Array {
  * (the max, not the full min/max band — minMaxBandPlugin stays live-only, see its own remarks;
  * a band per stored trace would make a four-trace comparison unreadable).
  */
-function toTrace(channel: MeasurementChannel) {
-  return { freqHz: channel.columns.map((c) => c.freqHz), value: channel.columns.map((c) => c.maxDbv) }
+function toTrace(channel: MeasurementChannel, offset: number) {
+  return { freqHz: channel.columns.map((c) => c.freqHz), value: channel.columns.map((c) => c.maxDbv + offset) }
 }
 
 /**
@@ -644,8 +768,10 @@ function computeYExtent(): { min: number; max: number } | null {
     if (!channelVisible(ch)) continue
     const frame = props.spectrum[ch]
     if (!frame) continue
+    const offset = frameOffset(frame)
+    if (offset === null) continue
     const { columns, header } = frame
-    for (let i = 0; i < header.nPoints; i++) consider(columns[i * 3 + 2])
+    for (let i = 0; i < header.nPoints; i++) consider(columns[i * 3 + 2] + offset)
   }
 
   for (const overlay of props.overlays) {
@@ -653,7 +779,9 @@ function computeYExtent(): { min: number; max: number } | null {
     for (const ch of [0, 1]) {
       const channel = channelByIndex(overlay.detail, ch)
       if (!channel) continue
-      for (const c of channel.columns) consider(c.maxDbv)
+      const offset = channelOffset(channel)
+      if (offset === null) continue
+      for (const c of channel.columns) consider(c.maxDbv + offset)
     }
   }
 
@@ -680,8 +808,10 @@ const outOfRange = computed(() => {
     if (!channelVisible(ch)) continue
     const frame = props.spectrum[ch]
     if (!frame) continue
+    const offset = frameOffset(frame)
+    if (offset === null) continue
     const { columns, header } = frame
-    for (let i = 0; i < header.nPoints; i++) consider(columns[i * 3], columns[i * 3 + 1], columns[i * 3 + 2])
+    for (let i = 0; i < header.nPoints; i++) consider(columns[i * 3], columns[i * 3 + 1] + offset, columns[i * 3 + 2] + offset)
   }
 
   for (const overlay of props.overlays) {
@@ -689,7 +819,9 @@ const outOfRange = computed(() => {
     for (const ch of [0, 1]) {
       const channel = channelByIndex(overlay.detail, ch)
       if (!channel) continue
-      for (const c of channel.columns) consider(c.freqHz, c.minDbv, c.maxDbv)
+      const offset = channelOffset(channel)
+      if (offset === null) continue
+      for (const c of channel.columns) consider(c.freqHz, c.minDbv + offset, c.maxDbv + offset)
     }
   }
 
@@ -782,16 +914,18 @@ function computeFrame(): FrameData | null {
   // for it never gets cleared — see useSpectrumStream.ts; hidden: this component's own L/R
   // checkboxes, see channelVisible). Everything else fills with null rather than being omitted:
   // the series themselves are always present (see buildOptions), only their data varies per tick.
-  const left = ch0 && channelVisible(0) ? maxTrace(ch0.columns, ch0.header.nPoints) : nullFill(nPoints)
+  const ch0Offset = ch0 ? frameOffset(ch0) : null
+  const ch1Offset = ch1 ? frameOffset(ch1) : null
+  const left = ch0 && channelVisible(0) && ch0Offset !== null ? maxTrace(ch0.columns, ch0.header.nPoints, ch0Offset) : nullFill(nPoints)
 
   // R can only be drawn when it was decimated over the same span as whatever xs came from (the
   // one frame after a zoom where L has already switched and R has not, is the case this guards).
   // When R is itself the primary (xs) source — L not being processed — it's trivially comparable
   // to itself, so the ch0 side of the check is skipped rather than required.
   const rComparable =
-    ch1 && channelVisible(1) && ch1.header.nPoints === nPoints &&
+    ch1 && channelVisible(1) && ch1.header.nPoints === nPoints && ch1Offset !== null &&
     (!ch0 || (ch1.header.flags & STREAM_FLAG_ZOOMED) === (ch0.header.flags & STREAM_FLAG_ZOOMED))
-  const right = rComparable ? maxTrace(ch1!.columns, ch1!.header.nPoints) : nullFill(nPoints)
+  const right = rComparable ? maxTrace(ch1!.columns, ch1!.header.nPoints, ch1Offset!) : nullFill(nPoints)
 
   // Peak-hold: fold this tick's columns into the running maps (only while enabled — leaving it off
   // is how a user keeps yesterday's peak run from bleeding into today's), then read the maps back
@@ -801,8 +935,8 @@ function computeFrame(): FrameData | null {
     if (ch0 && channelVisible(0)) updatePeakHold(peakHoldMaps[0], ch0)
     if (rComparable) updatePeakHold(peakHoldMaps[1], ch1!)
   }
-  const leftPeak = showPeakHold.value && ch0 && channelVisible(0) ? peakTrace(peakHoldMaps[0], xs) : nullFill(nPoints)
-  const rightPeak = showPeakHold.value && rComparable ? peakTrace(peakHoldMaps[1], xs) : nullFill(nPoints)
+  const leftPeak = showPeakHold.value && ch0 && channelVisible(0) && ch0Offset !== null ? peakTrace(peakHoldMaps[0], xs, ch0Offset) : nullFill(nPoints)
+  const rightPeak = showPeakHold.value && rComparable ? peakTrace(peakHoldMaps[1], xs, ch1Offset!) : nullFill(nPoints)
 
   // Passed to setData as a literal rather than being accumulated in a pre-typed local array:
   // uPlot's AlignedData permits a TypedArray x with y-series that are TypedArray *or*
@@ -818,9 +952,11 @@ function computeFrame(): FrameData | null {
   const overlayData = props.overlays.flatMap((overlay) => {
     const chL = channelByIndex(overlay.detail, 0)
     const chR = channelByIndex(overlay.detail, 1)
+    const offL = chL ? channelOffset(chL) : null
+    const offR = chR ? channelOffset(chR) : null
     return [
-      overlay.visible && chL ? resample(toTrace(chL), xs) : nullFill(nPoints),
-      overlay.visible && chR ? resample(toTrace(chR), xs) : nullFill(nPoints),
+      overlay.visible && chL && offL !== null ? resample(toTrace(chL, offL), xs) : nullFill(nPoints),
+      overlay.visible && chR && offR !== null ? resample(toTrace(chR, offR), xs) : nullFill(nPoints),
     ]
   })
   return { fullLoFreqHz: lo, fullHiFreqHz: hi, data: [xs, left, right, leftPeak, rightPeak, ...overlayData] }
@@ -895,6 +1031,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
     if (props.spectrum[0] && channelVisible(0)) legend.push({ label: own('L'), color: LIVE_COLOR })
     if (props.spectrum[1] && channelVisible(1)) legend.push({ label: own('R'), color: LIVE_COLOR, dash: [6, 3] })
     if (showPeakHold.value) legend.push({ label: own('Peak hold'), color: PEAK_HOLD_COLOR, dash: [2, 2] })
+    if (showWeightingCurve.value && weightingCurve.value) legend.push({ label: 'Weighting curve (0 dB at top − 20 dB)', color: WEIGHTING_CURVE_COLOR, dash: [6, 4] })
     for (const overlay of props.overlays) {
       if (!overlay.visible) continue
       legend.push({ label: overlay.detail.name, color: fftOverlayColor(props.overlays, overlay.id) })
@@ -905,7 +1042,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
       height,
       plotCanvas: u.ctx.canvas,
       headerHeight: header,
-      title: 'Spectrum (dBV)',
+      title: `Spectrum (${unitSuffix(spectrumUnit.value)})${props.weightingLabel ? ` · ${props.weightingLabel}` : ''}`,
       legend,
     })
   } finally {
@@ -922,6 +1059,8 @@ watch(visibleL, update)
 watch(visibleR, update)
 watch(showMinMax, update)
 watch(showPeakHold, update)
+watch(showWeightingCurve, () => plot?.redraw())
+watch(yTop, () => plot?.redraw())
 watch(thickLines, update)
 watch(showDataPoints, update)
 
@@ -971,6 +1110,7 @@ watch(isDark, handleThemeChange)
 onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
+  void refreshWeightingCurve()
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
@@ -988,11 +1128,27 @@ onBeforeUnmount(() => {
          the cursor was over the plot, and since the button is taller than a line of text the header
          shrank on every hover and the plot below jumped up by the difference. -->
     <div class="min-h-6 pr-7 flex items-center justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
-      <span class="shrink-0">Spectrum</span>
-      <span v-if="cursorReadout" class="min-w-0 truncate font-mono">
-        {{ cursorReadout.freqHz.toFixed(1) }} Hz · {{ cursorReadout.dbv.toFixed(1) }} dBV
+      <!-- Title and the weighting annunciator in one fixed group, and the middle slot always
+           flex-1 whatever it holds: with the chip as its own flex item and the readout/spacer
+           sized differently, justify-between redistributed the chip every time the cursor entered
+           the plot, so it slid sideways on hover. -->
+      <span class="flex shrink-0 items-center gap-2">
+        <span>Spectrum</span>
+        <!-- The weighting annunciator: a weighted trace and its noise figures read differently
+             from flat ones, and nothing else on the chart would say which it is. -->
+        <span
+          v-if="props.weightingLabel"
+          data-weighting-annunciator
+          class="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+          :title="`The trace and the noise figures are weighted: ${props.weightingLabel}. The fundamental, harmonics and THD are not.`"
+        >
+          {{ props.weightingLabel }}
+        </span>
       </span>
-      <span v-else-if="!spectrum[0] && !spectrum[1]" class="min-w-0 truncate">Waiting for data…</span>
+      <span v-if="cursorReadout" class="min-w-0 flex-1 truncate text-right font-mono">
+        {{ cursorReadout.freqHz.toFixed(1) }} Hz · {{ cursorReadout.dbv.toFixed(1) }} {{ unitSuffix(spectrumUnit) }}
+      </span>
+      <span v-else-if="!spectrum[0] && !spectrum[1]" class="min-w-0 flex-1 truncate text-right">Waiting for data…</span>
       <span v-else class="flex-1"></span>
       <!-- The only visible sign that the frequency axis is no longer showing the full data span —
            double-clicking does the same thing, but nothing else on screen would say so. -->

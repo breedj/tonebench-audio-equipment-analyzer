@@ -79,10 +79,11 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'Dark', label: 'Dark' },
 ]
 
-// The band THD+N / SNR / noise floor are integrated over — global (applies to whatever is
-// currently running, independent of which measurement type is selected), not part of any
-// measurement type's saved params. Staged locally like SpectrumConfigPanel's own form, applied on
-// change straight through the same live useSpectrumConfig() config this used to live next to.
+// The band THD+N / SNR / noise floor / band RMS / noise density are integrated over — live pipeline
+// state, applied on change straight through the same useSpectrumConfig() config as the FFT
+// settings panel, whose Bandwidth dropdown writes the same two fields (these are its "Custom"). It
+// IS part of an FFT measurement type's saved params (MeasurementSaveService.ApplyAsync restores
+// it); the earlier claim here that it was not had gone stale.
 const bandwidth = reactive({ loFreqHz: 20, hiFreqHz: 20000 })
 
 watch(

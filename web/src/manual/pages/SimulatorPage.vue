@@ -39,8 +39,11 @@ const { showPage } = useManual()
           <td>
             Adds a white noise floor of −150 dBV/√Hz, with a little 1/f texture below a few hundred
             hertz, downstream of the DUT. On an FFT screen at 192 kHz with 65536 points and a Hann
-            window that reads as a floor near −144 dBV per bin. Turn it off for a noise-free run —
-            which is what makes a simulated result exactly reproducible.
+            window that reads as a floor near −144 dBV per bin, and as −150 on the
+            <strong>Noise dBV/√Hz</strong> tile at any FFT size. Turn it off for a noise-free run —
+            which is what makes a simulated result exactly reproducible. With the generator off,
+            Noise on and Hum off, this is the easiest way to watch a weighting act: A-weighting takes
+            the flat floor down by about 2 dB over 20 Hz – 20 kHz, and the hum stack by about 22 dB.
           </td>
         </tr>
         <tr>

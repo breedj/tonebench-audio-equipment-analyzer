@@ -2,12 +2,19 @@
 // Kept free of Vue so every formula is directly unit-testable (see metrics.test.ts) — components
 // just call these and render the result.
 
-import type { IntermodulationFrame, MetersFrame } from './streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame } from './streaming/protocol'
 import type { AveragingMode, GeneratorKind, GeneratorTone, MultitoneSettings, WhiteNoiseSettings } from './api/client'
+import { weightingQualifier } from './weighting'
 
 export interface MetricTile {
   label: string
   value: string
+  /**
+   * The weighting the figure was integrated under ("A", "468", "A+U1"), on the noise-integrated
+   * tiles only -- THD+N, N+D, N-D, SNR and the three noise tiles. Absent when unweighted, and
+   * always absent on the fundamental, THD, Gain, Pk and RMS tiles, which no weighting touches.
+   */
+  qualifier?: string
 }
 
 /**
@@ -53,7 +60,26 @@ export const AVAILABLE_METRIC_LABELS = [
   'RMS dBu',
   'RMS Volts',
   'RMS Pwr',
+  'RMS dBV(bw)',
+  'Noise dBV/√Hz',
+  'Noise in nV/√Hz',
 ] as const
+
+/**
+ * The noise density referred to the DUT's input: density − gain, as volts. −150 dBV/√Hz at 0 dB
+ * is 31.6 nV/√Hz; through 20 dB of gain the same output floor is 3.16 nV/√Hz at the input.
+ */
+export function noiseInputReferredNvPerRootHz(noiseDensityDbvPerRootHz: number, dutGainDb: number): number {
+  const gain = Number.isFinite(dutGainDb) ? dutGainDb : 0
+  return Math.pow(10, (noiseDensityDbvPerRootHz - gain) / 20) * 1e9
+}
+
+/** "31.6 nV/√Hz", "3.16 µV/√Hz" above a thousand. */
+export function formatNvPerRootHz(nv: number): string {
+  if (!Number.isFinite(nv)) return '—'
+  if (nv >= 1000) return `${(nv / 1000).toPrecision(3)} µV/√Hz`
+  return `${nv.toPrecision(3)} nV/√Hz`
+}
 
 export function dbvToVrms(dbv: number): number {
   return Math.pow(10, dbv / 20)
@@ -151,8 +177,26 @@ export function channelTiles(
   imd: IntermodulationFrame | null = null,
   /** The pipeline has an IMD spec it could not resolve this tick (tones too close at this FFT size): the tiles show a dash rather than vanish. */
   imdUnresolved = false,
+  /**
+   * The channel's band RMS, noise density and the weighting in effect (see useSpectrumStream). It
+   * arrives every tick, fundamental or not, so the three noise tiles are shown even when `meters`
+   * is null -- a noise measurement with the generator off is exactly that case.
+   */
+  noise: NoiseFiguresFrame | null = null,
+  /** The DUT gain the input-referred noise tile divides by, in dB. */
+  dutGainDb = 0,
 ): MetricTile[] {
-  if (!meters) return []
+  const qualifier = weightingQualifier(noise?.weighting) ?? undefined
+  const weighted = (tile: MetricTile): MetricTile => (qualifier ? { ...tile, qualifier } : tile)
+  const noiseTiles: MetricTile[] = noise
+    ? [
+        weighted({ label: 'RMS dBV(bw)', value: `${noise.bandRmsDbv.toFixed(2)} dBV` }),
+        weighted({ label: 'Noise dBV/√Hz', value: `${noise.noiseDensityDbvPerRootHz.toFixed(2)} dBV/√Hz` }),
+        weighted({ label: 'Noise in nV/√Hz', value: formatNvPerRootHz(noiseInputReferredNvPerRootHz(noise.noiseDensityDbvPerRootHz, dutGainDb)) }),
+      ]
+    : []
+
+  if (!meters) return noiseTiles
   const m = meters
 
   const thdDb = ratioPercentToDb(m.thdPercent)
@@ -190,17 +234,17 @@ export function channelTiles(
           ]
         : []),
 
-    { label: 'THD+N %', value: `${m.thdNPercent.toFixed(5)} %` },
-    { label: 'THD+N dB', value: `${thdNDb.toFixed(2)} dB` },
-    { label: 'THD+N dBr', value: `${thdNDbv.toFixed(2)} dBr` },
-    { label: 'THD+N dBV', value: `${thdNDbv.toFixed(2)} dBV` },
-    { label: 'N+D dBr', value: `${thdNDbv.toFixed(2)} dBr` },
-    { label: 'N+D dBV', value: `${thdNDbv.toFixed(2)} dBV` },
+    weighted({ label: 'THD+N %', value: `${m.thdNPercent.toFixed(5)} %` }),
+    weighted({ label: 'THD+N dB', value: `${thdNDb.toFixed(2)} dB` }),
+    weighted({ label: 'THD+N dBr', value: `${thdNDbv.toFixed(2)} dBr` }),
+    weighted({ label: 'THD+N dBV', value: `${thdNDbv.toFixed(2)} dBV` }),
+    weighted({ label: 'N+D dBr', value: `${thdNDbv.toFixed(2)} dBr` }),
+    weighted({ label: 'N+D dBV', value: `${thdNDbv.toFixed(2)} dBV` }),
 
-    { label: 'N-D dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` },
-    { label: 'N-D dBV', value: `${noiseOnlyDbv.toFixed(2)} dBV` },
-    { label: 'SNR dB', value: `${m.snrDb.toFixed(2)} dB` },
-    { label: 'SNR dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` },
+    weighted({ label: 'N-D dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` }),
+    weighted({ label: 'N-D dBV', value: `${noiseOnlyDbv.toFixed(2)} dBV` }),
+    weighted({ label: 'SNR dB', value: `${m.snrDb.toFixed(2)} dB` }),
+    weighted({ label: 'SNR dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` }),
 
     { label: 'Pk dBr', value: `${m.peakDbv.toFixed(2)} dBr` },
     { label: 'Pk dBV', value: `${m.peakDbv.toFixed(2)} dBV` },
@@ -212,6 +256,8 @@ export function channelTiles(
     { label: 'RMS dBu', value: `${dbvToDbu(m.totalRmsDbv).toFixed(2)} dBu` },
     { label: 'RMS Volts', value: formatVrms(rmsVrms) },
     { label: 'RMS Pwr', value: formatWatts(powerWatts(rmsVrms, loadOhms), loadOhms) },
+
+    ...noiseTiles,
   ]
 
   return tiles

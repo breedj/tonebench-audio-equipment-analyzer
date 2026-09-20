@@ -356,6 +356,10 @@ public sealed class ImdSweepRunner(
             ProcessRight = request.ProcessRight,
             SingleShot = true,
             CapturePreview = true,
+            // A runner measures unweighted whatever the FFT screen has selected: a sweep's noise
+            // and THD+N figures are defined over the plain band, and the weighting is restored
+            // with the rest of the saved options afterwards.
+            Weighting = WeightingSpec.None,
             HarmonicMaxFreqHz = request.SampleRateHz / 2.0,
             AverageHopFraction = AverageHopFraction,
             FundamentalMinSearchHz = Math.Min(current.FundamentalMinSearchHz, first.LowHz / 2.0),

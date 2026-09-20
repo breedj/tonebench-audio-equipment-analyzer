@@ -368,6 +368,41 @@ public class StreamFrameTests
         ]);
 
     [Fact]
+    public void NoiseFigures_frame_round_trips_figures_enbw_and_weighting()
+    {
+        var noise = new NoiseFigures(-106.9f, -150.2f, 8.79f, 20f, 20000f, new WeightingSpec(WeightingStandard.ItuR468, User1: false, User2: true));
+
+        byte[] frame = StreamFrame.EncodeNoiseFigures(StreamChannel.Right, seq: 7, noise, held: true);
+        var header = StreamFrame.DecodeHeader(frame);
+        var decoded = StreamFrame.DecodeNoiseFigures(frame);
+
+        Assert.Equal(StreamMsgType.NoiseFigures, header.MsgType);
+        Assert.Equal(StreamChannel.Right, header.Channel);
+        Assert.Equal(StreamFlags.Held, header.Flags);
+        Assert.Equal(7u, header.Seq);
+        Assert.Equal(0u, header.NPoints);
+        Assert.Equal(20f, decoded.MeasurementLoFreqHz);
+        Assert.Equal(20000f, decoded.MeasurementHiFreqHz);
+        Assert.Equal(-106.9f, decoded.BandRmsDbv);
+        Assert.Equal(-150.2f, decoded.NoiseDensityDbvPerRootHz);
+        Assert.Equal(8.79f, decoded.EnbwHz);
+        Assert.Equal(new WeightingSpec(WeightingStandard.ItuR468, false, true), decoded.Weighting);
+        Assert.True(decoded.Held);
+        Assert.Equal(StreamFrame.HeaderLength + (3 * 4) + 4, frame.Length);
+    }
+
+    [Fact]
+    public void NoiseFigures_frame_with_no_weighting_decodes_as_none()
+    {
+        var noise = new NoiseFigures(-100f, -140f, 1f, 20f, 80000f, WeightingSpec.None);
+        var decoded = StreamFrame.DecodeNoiseFigures(StreamFrame.EncodeNoiseFigures(StreamChannel.Left, 1, noise, held: false));
+
+        Assert.Equal(WeightingSpec.None, decoded.Weighting);
+        Assert.True(decoded.Weighting.IsNone);
+        Assert.False(decoded.Held);
+    }
+
+    [Fact]
     public void Intermodulation_frame_round_trips_tones_orders_and_products()
     {
         var imd = SampleIntermodulation();

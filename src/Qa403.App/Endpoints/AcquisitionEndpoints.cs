@@ -91,9 +91,13 @@ public static class AcquisitionEndpoints
                 }
             }
 
+            if (!TryMergeWeighting(current.Weighting, request.Weighting, out var weighting, out var weightingError))
+                return Results.BadRequest(weightingError);
+
             pipeline.Options = current with
             {
                 Intermodulation = intermodulation,
+                Weighting = weighting,
                 MeasurementLoFreqHz = measurementLoHz,
                 MeasurementHiFreqHz = measurementHiHz,
                 FftSize = fftSize,
@@ -116,6 +120,21 @@ public static class AcquisitionEndpoints
 
         group.MapGet("/spectrum-config", (SpectrumPipeline pipeline) => Results.Ok(pipeline.Options));
 
+        // The weighting in effect as a curve, for the chart's "Weighting curve" overlay. Sampled here
+        // rather than ported to the client: the curves and the user tables live server-side, and one
+        // source of truth is the whole point of a curve drawn next to the trace it weights.
+        group.MapGet("/weighting-curve", (
+            SpectrumPipeline pipeline, UserWeightingSetting userWeighting, double? loHz, double? hiHz, int? points) =>
+        {
+            double lo = loHz ?? WeightingCurveResponse.DefaultLoHz;
+            double hi = hiHz ?? WeightingCurveResponse.DefaultHiHz;
+            int count = Math.Clamp(points ?? WeightingCurveResponse.DefaultPoints, 2, 4096);
+            if (!(lo > 0.0) || !(hi > lo))
+                return Results.BadRequest("loHz must be positive and hiHz greater than loHz.");
+
+            return Results.Ok(WeightingCurveResponse.Sample(pipeline.Options.Weighting, userWeighting, lo, hi, count));
+        });
+
         // Backs the "Clear" button next to Save measurement result: discards the retained (stopped)
         // spectrum so the chart goes back to "Waiting for data..." and Save measurement result has
         // nothing stale left to save. Meaningful only while stopped -- the client disables the
@@ -125,6 +144,25 @@ public static class AcquisitionEndpoints
             pipeline.Flush();
             return Results.Ok();
         });
+    }
+
+    /// <summary>
+    /// Patch semantics for the weighting, like every other field of the config request: a null
+    /// <paramref name="patch"/> keeps <paramref name="current"/>, and within it a null member keeps
+    /// that member. Static and internal so a test can pin it without an HTTP round trip.
+    /// </summary>
+    internal static bool TryMergeWeighting(WeightingSpec current, WeightingConfigRequest? patch, out WeightingSpec merged, out string error)
+    {
+        merged = current;
+        error = "";
+        if (patch is null)
+            return true;
+
+        if (!EnumParsing.TryParse<WeightingStandard>(patch.Standard, current.Standard, out var standard, out error))
+            return false;
+
+        merged = new WeightingSpec(standard, patch.User1 ?? current.User1, patch.User2 ?? current.User2);
+        return true;
     }
 }
 
@@ -140,7 +178,51 @@ public sealed record SpectrumConfigRequest(
     /// <summary>Measurement bandwidth for THD+N/SNR/noise — see <see cref="SpectrumPipelineOptions.MeasurementLoFreqHz"/>.</summary>
     double? MeasurementLoFreqHz = null, double? MeasurementHiFreqHz = null,
     /// <summary>Null leaves the current IMD spec alone; see <see cref="IntermodulationConfigRequest"/>.</summary>
-    IntermodulationConfigRequest? Intermodulation = null);
+    IntermodulationConfigRequest? Intermodulation = null,
+    /// <summary>Null leaves the weighting alone; see <see cref="WeightingConfigRequest"/>.</summary>
+    WeightingConfigRequest? Weighting = null);
+
+/// <summary>
+/// The combined weighting curve, log-spaced from <see cref="DefaultLoHz"/> to <see cref="DefaultHiHz"/>
+/// by default. <paramref name="Weighted"/> false means nothing is selected (or only empty user slots)
+/// and the arrays are empty. A gain of minus infinity (A, C and 468 at DC) is clamped to
+/// <see cref="FloorDb"/> so the document stays JSON.
+/// </summary>
+public sealed record WeightingCurveResponse(bool Weighted, double[] FreqHz, double[] GainDb)
+{
+    public const double DefaultLoHz = 5.0;
+    public const double DefaultHiHz = 100_000.0;
+    public const int DefaultPoints = 400;
+    public const double FloorDb = -200.0;
+
+    public static WeightingCurveResponse Sample(WeightingSpec spec, UserWeightingSetting? userWeighting, double loHz, double hiHz, int points)
+    {
+        var curve = SpectrumPipeline.BuildCurve(spec, userWeighting);
+        if (curve is null)
+            return new WeightingCurveResponse(false, [], []);
+
+        var freqHz = new double[points];
+        var gainDb = new double[points];
+        double logLo = Math.Log10(loHz);
+        double step = (Math.Log10(hiHz) - logLo) / (points - 1);
+        for (int i = 0; i < points; i++)
+        {
+            freqHz[i] = Math.Pow(10.0, logLo + (i * step));
+            double db = curve.GainDb(freqHz[i]);
+            gainDb[i] = double.IsFinite(db) ? Math.Max(db, FloorDb) : FloorDb;
+        }
+
+        return new WeightingCurveResponse(true, freqHz, gainDb);
+    }
+}
+
+/// <summary>
+/// The noise weighting patch — see <see cref="SpectrumPipelineOptions.Weighting"/>. Every member is
+/// optional and a null one keeps the current value: <paramref name="Standard"/> is a
+/// <see cref="WeightingStandard"/> name, <paramref name="User1"/>/<paramref name="User2"/> whether
+/// the user tables are in effect.
+/// </summary>
+public sealed record WeightingConfigRequest(string? Standard = null, bool? User1 = null, bool? User2 = null);
 
 /// <summary>
 /// The two-tone intermodulation spec the FFT screen derives from its staged stimulus — see

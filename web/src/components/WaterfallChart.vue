@@ -5,6 +5,7 @@ import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type SpectrumFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useChartDisplay } from '../composables/useChartDisplay'
+import { unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useAppTheme } from '../composables/useAppTheme'
 // Shared with SpectrumChart.vue — the two charts sit on one x span and must label it identically.
 import { freqAxis } from '../freqAxis'
@@ -26,7 +27,7 @@ function channelEnabled(ch: number): boolean {
 // The spectrum chart's live x span (see useChartDisplay.ts) — this chart deliberately has no zoom
 // of its own: it is stacked directly under the spectrum and the two are only readable together if
 // a column means the same frequency in both.
-const { activeXRange } = useChartDisplay()
+const { activeXRange, spectrumUnit, dutGainDb } = useChartDisplay()
 const { isDark } = useAppTheme()
 
 const CHANNEL_LABELS = ['L', 'R']
@@ -349,12 +350,17 @@ function percentile10(values: Float32Array): number {
 }
 
 function pushRow(frame: SpectrumFrame) {
+  // Rows are stored in the chart's unit (see spectrumUnits.ts), converted at ingest: the history
+  // is one picture, and App.vue clears it when the unit changes. A frame that cannot be converted
+  // yet (no ENBW under a density unit) is not a row.
+  const offset = unitOffsetDb(spectrumUnit.value, frame.enbwHz, dutGainDb.value)
+  if (offset === null) return
   const n = frame.header.nPoints
   const freqs = new Float32Array(n)
   const values = new Float32Array(n)
   for (let i = 0; i < n; i++) {
     freqs[i] = frame.columns[i * 3]
-    values[i] = frame.columns[i * 3 + 2]
+    values[i] = frame.columns[i * 3 + 2] + offset
   }
 
   let hiDb = -Infinity
@@ -423,7 +429,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
     gridKey = ''
 
     const seconds = historySeconds()
-    const title = `Waterfall — ${CHANNEL_LABELS[selectedChannel.value]}, ${rows.length} spectra over ${seconds.toFixed(1)} s, ${bottomDb.value} to ${topDb.value} dBV`
+    const title = `Waterfall — ${CHANNEL_LABELS[selectedChannel.value]}, ${rows.length} spectra over ${seconds.toFixed(1)} s, ${bottomDb.value} to ${topDb.value} ${unitSuffix(spectrumUnit.value)}`
     return await composeChartPng({ width, height, plotCanvas: u.ctx.canvas, headerHeight: header, title, legend: [] })
   } finally {
     u?.destroy()
@@ -432,7 +438,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
   }
 }
 
-defineExpose({ exportPng })
+defineExpose({ exportPng, clearHistory })
 
 function update() {
   // App.vue empties the whole spectrum record when a run starts — history from the previous run
@@ -574,7 +580,7 @@ onBeforeUnmount(() => {
           step="10"
           :disabled="autoLevels"
           class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800"
-          title="dBV mapped to the coldest colour."
+          title="Level mapped to the coldest colour, in the chart's unit."
         />
         <span class="h-3 w-24 rounded-sm" :style="{ background: legendGradient }" aria-hidden="true"></span>
         <input
@@ -583,9 +589,9 @@ onBeforeUnmount(() => {
           step="10"
           :disabled="autoLevels"
           class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800"
-          title="dBV mapped to the hottest colour."
+          title="Level mapped to the hottest colour, in the chart's unit."
         />
-        <span>dBV</span>
+        <span>{{ unitSuffix(spectrumUnit) }}</span>
       </div>
 
       <button

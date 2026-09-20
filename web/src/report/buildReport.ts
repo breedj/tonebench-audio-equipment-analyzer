@@ -31,7 +31,9 @@ import { chapterSections } from './builders'
 import { blobToBase64 } from './download'
 import type { ReportElementId } from './elements'
 import { renderExtraCharts, renderView, viewIsCombinable, type RenderedChart } from './render'
-import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedSpectrumFrames } from './spectrumFrames'
+import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedNoiseFrames, storedSpectrumFrames } from './spectrumFrames'
+import type { WeightingSpec } from '../streaming/protocol'
+import { NO_WEIGHTING, weightingFromStored, weightingLabel } from '../weighting'
 import { subjectLabel, type ReportPlan, type ReportSubject, type ReportSubjectData } from './types'
 import { reportViewsForKind } from './views'
 
@@ -70,6 +72,41 @@ function storedImdAnalysis(paramsJson: string | null | undefined): { method: 'Sm
   }
 }
 
+/** The weighting and the measurement band a stored FFT result was measured under, from its params_json; unweighted and 20 Hz-20 kHz when it says nothing. */
+function storedNoiseContext(paramsJson: string | null | undefined): { weighting: WeightingSpec; band: { loHz: number; hiHz: number } } {
+  try {
+    const parsed = paramsJson
+      ? (JSON.parse(paramsJson) as { weighting?: unknown; weightingUser1?: unknown; weightingUser2?: unknown; measurementLoFreqHz?: unknown; measurementHiFreqHz?: unknown })
+      : null
+    return {
+      weighting: weightingFromStored(
+        typeof parsed?.weighting === 'string' ? parsed.weighting : null,
+        typeof parsed?.weightingUser1 === 'boolean' ? parsed.weightingUser1 : null,
+        typeof parsed?.weightingUser2 === 'boolean' ? parsed.weightingUser2 : null,
+      ),
+      band: {
+        loHz: typeof parsed?.measurementLoFreqHz === 'number' ? parsed.measurementLoFreqHz : 20,
+        hiHz: typeof parsed?.measurementHiFreqHz === 'number' ? parsed.measurementHiFreqHz : 20000,
+      },
+    }
+  } catch {
+    return { weighting: NO_WEIGHTING, band: { loHz: 20, hiHz: 20000 } }
+  }
+}
+
+/** The user tables' names a stored result records (`weightingUser1Name`/`weightingUser2Name`), for the annunciator. */
+function storedUserTableNames(paramsJson: string | null | undefined): { user1: string | null; user2: string | null } {
+  try {
+    const parsed = paramsJson ? (JSON.parse(paramsJson) as { weightingUser1Name?: unknown; weightingUser2Name?: unknown }) : null
+    return {
+      user1: typeof parsed?.weightingUser1Name === 'string' ? parsed.weightingUser1Name : null,
+      user2: typeof parsed?.weightingUser2Name === 'string' ? parsed.weightingUser2Name : null,
+    }
+  } catch {
+    return { user1: null, user2: null }
+  }
+}
+
 function parseStoredDisplay(paramsJson: string | null | undefined): StoredSpectrumDisplay | null {
   if (!paramsJson) return null
   try {
@@ -102,11 +139,15 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
   if (detail.kind === FFT_SPECTRUM_KIND) {
     const stored = parseStoredDisplay(displayParams)
     const selected = (stored as { selectedMetrics?: unknown } | null)?.selectedMetrics
+    const noiseContext = storedNoiseContext(detail.paramsJson)
+    const tableNames = storedUserTableNames(detail.paramsJson)
     return {
       kind: 'spectrum',
       spectrum: storedSpectrumFrames(detail),
       meters: storedMetersFrames(detail),
       intermodulation: storedIntermodulationFrames(detail, storedImdAnalysis(detail.paramsJson)),
+      noise: storedNoiseFrames(detail, noiseContext.weighting, noiseContext.band),
+      weightingLabel: weightingLabel(noiseContext.weighting, tableNames.user1, tableNames.user2),
       display: createSpectrumDisplaySource(
         stored,
         detail.channelsData.map((c) => c.channel),

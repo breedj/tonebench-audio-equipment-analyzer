@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { IntermodulationFrame, MetersFrame } from '../streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame } from '../streaming/protocol'
 import type { GeneratorTone } from '../api/client'
 import { channelTiles, type MetricTile } from '../metrics'
+import { useChartDisplay } from '../composables/useChartDisplay'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useMetricSelection } from '../composables/useMetricSelection'
 
@@ -14,13 +15,19 @@ const props = defineProps<{
   imd?: IntermodulationFrame | null
   /** The pipeline has an IMD spec but could not resolve it at this FFT size — the tiles show a dash. */
   imdUnresolved?: boolean
+  /** This channel's band RMS / noise density / weighting frame — adds the noise tiles and the weighting qualifier. */
+  noise?: NoiseFiguresFrame | null
 }>()
 
-// Shared with the other channel — see useLoadOhms.ts. Edited in the Generator pane, not here.
+// Shared with the other channel — see useLoadOhms.ts. Edited in the Generator pane, not here; the
+// DUT gain likewise (useChartDisplay, beside Load Ω).
 const { loadOhms } = useLoadOhms()
+const { dutGainDb } = useChartDisplay()
 const { selectedMetrics, removeMetric } = useMetricSelection()
 
-const allTiles = computed(() => channelTiles(props.meters, props.generatorTones, loadOhms.value, props.imd ?? null, props.imdUnresolved ?? false))
+const allTiles = computed(() =>
+  channelTiles(props.meters, props.generatorTones, loadOhms.value, props.imd ?? null, props.imdUnresolved ?? false, props.noise ?? null, dutGainDb.value),
+)
 
 // Selected fixed metrics, in the order they were picked — see metrics.ts's AVAILABLE_METRIC_LABELS.
 // The generator summary is a separate, channel-independent tile now (see GeneratorMetricsPanel.vue).
@@ -47,7 +54,10 @@ const accentClass = computed(() =>
       class="min-w-[9rem] rounded-xl border border-neutral-200 bg-white px-3 py-2 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
     >
       <div class="mb-1 flex items-center justify-between gap-3">
-        <span class="text-xs text-neutral-500 dark:text-neutral-400">{{ channelLabel }}: {{ tile.label }}</span>
+        <span class="text-xs text-neutral-500 dark:text-neutral-400">
+          {{ channelLabel }}: {{ tile.label }}
+          <span v-if="tile.qualifier" class="ml-1 rounded bg-amber-100 px-1 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" :title="`Weighted: ${tile.qualifier}`">{{ tile.qualifier }}</span>
+        </span>
         <button
           type="button"
           class="shrink-0 text-neutral-400 hover:text-red-500 dark:text-neutral-600 dark:hover:text-red-400"
@@ -64,6 +74,6 @@ const accentClass = computed(() =>
     </div>
   </div>
   <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">
-    {{ props.meters ? 'No metrics selected — add some with the metrics button.' : 'Waiting for data…' }}
+    {{ props.meters || props.noise ? 'No metrics selected — add some with the metrics button.' : 'Waiting for data…' }}
   </div>
 </template>

@@ -592,6 +592,10 @@ public sealed class ThdSweepRunner(
             ProcessRight = request.ProcessRight,
             SingleShot = true,
             CapturePreview = true,
+            // A runner measures unweighted whatever the FFT screen has selected: a sweep's noise
+            // and THD+N figures are defined over the plain band, and the weighting is restored
+            // with the rest of the saved options afterwards.
+            Weighting = WeightingSpec.None,
             HarmonicMaxFreqHz = request.EffectiveSampleRateHz / 2.0,
 
             // Averaging paced by fresh signal rather than by the display tick. Without this the

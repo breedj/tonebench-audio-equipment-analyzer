@@ -139,7 +139,7 @@ public static class MeasurementsEndpoints
 
             var columns = DecimateForDisplay(spectrum, options.DisplayLoFreqHz, options.DisplayColumns);
             var metrics = detail.MetricsByChannel.TryGetValue(channel, out var m) ? m : new Dictionary<string, double>();
-            channels.Add(new MeasurementChannelResponse(channel, columns, metrics));
+            channels.Add(new MeasurementChannelResponse(channel, columns, metrics, spectrum.EnbwHz));
         }
 
         return new MeasurementDetailResponse(
@@ -202,6 +202,7 @@ public sealed record MeasurementDetailResponse(
     double? InRangeDbv, double? OutRangeDbv, string? GenJson,
     MeasurementChannelResponse[] ChannelsData);
 
-public sealed record MeasurementChannelResponse(int Channel, MeasurementColumnResponse[] Columns, IReadOnlyDictionary<string, double> Metrics);
+/// <param name="EnbwHz">The stored window's equivalent noise bandwidth at the capture's sample rate and FFT size — what converts the columns' dBV to dBV/√Hz on the client, per result, since an overlay's window need not match the live one's.</param>
+public sealed record MeasurementChannelResponse(int Channel, MeasurementColumnResponse[] Columns, IReadOnlyDictionary<string, double> Metrics, double EnbwHz = 0.0);
 
 public sealed record MeasurementColumnResponse(float FreqHz, float MinDbv, float MaxDbv);

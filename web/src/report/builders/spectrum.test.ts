@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { MeasurementDetail } from '../../api/client'
 import { createSpectrumDisplaySource } from '../../composables/useChartDisplay'
 import { defaultReportElements, reportElementsForKind } from '../elements'
-import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames } from '../spectrumFrames'
+import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedNoiseFrames } from '../spectrumFrames'
+import { NO_WEIGHTING } from '../../weighting'
 import type { ReportSubject } from '../types'
 import { chapterSections } from './index'
 import { harmonicsSections, metricsSections } from './spectrum'
@@ -43,7 +44,10 @@ const detail: MeasurementDetail = {
         h2_dbc: -101.2,
         h3_hz: 3001.47,
         h3_dbc: -110.5,
+        band_rms_dbv: -18.04,
+        noise_density_dbv_per_root_hz: -149.5,
       },
+      enbwHz: 2.197,
     },
     // A channel saved without a fundamental has no metric rows and gets no frame.
     { channel: 1, columns: [], metrics: {} },
@@ -71,6 +75,8 @@ function subjectOf(selectedMetrics: string[]): ReportSubject {
       spectrum: {},
       meters: storedMetersFrames(detail),
       intermodulation: storedIntermodulationFrames(detail, { method: 'Smpte', maxOrder: 5 }),
+      noise: storedNoiseFrames(detail, { standard: 'A', user1: false, user2: false }, { loHz: 20, hiHz: 20000 }),
+      weightingLabel: 'A-weighted',
       display: createSpectrumDisplaySource(null, [0, 1]),
       selectedMetrics,
       generatorTones: storedGeneratorTones(detail.genJson),
@@ -112,6 +118,18 @@ describe('storedMetersFrames', () => {
   })
 })
 
+describe('storedNoiseFrames', () => {
+  it('repacks the two noise rows with the channel ENBW and the given weighting, for channels that have them', () => {
+    const frames = storedNoiseFrames(detail, NO_WEIGHTING, { loHz: 20, hiHz: 80000 })
+    expect(Object.keys(frames)).toEqual(['0'])
+    expect(frames[0].bandRmsDbv).toBe(-18.04)
+    expect(frames[0].noiseDensityDbvPerRootHz).toBe(-149.5)
+    expect(frames[0].enbwHz).toBe(2.197)
+    expect(frames[0].measurementHiHz).toBe(80000)
+    expect(frames[0].weighting).toEqual(NO_WEIGHTING)
+  })
+})
+
 describe('storedGeneratorTones', () => {
   it('reads the left channel tones, and survives no JSON at all', () => {
     expect(storedGeneratorTones(detail.genJson)).toEqual([{ freqHz: 1000.49, ampDbv: -18 }])
@@ -131,6 +149,16 @@ describe('spectrum report sections', () => {
       { label: 'THD %', value: '0.00100 %' },
       // Gain is the fundamental against the generator's own tone.
       { label: 'Gain dB', value: '-0.05 dB' },
+    ])
+  })
+
+  it('prints the noise tiles and carries the weighting qualifier on the label', () => {
+    const sections = metricsSections(subjectOf(['SNR dB', 'THD %', 'Noise dBV/√Hz', 'Noise in nV/√Hz']))
+    expect(sections[0].rows).toEqual([
+      { label: 'SNR dB (A)', value: '110.00 dB' },
+      { label: 'THD %', value: '0.00100 %' },
+      { label: 'Noise dBV/√Hz (A)', value: '-149.50 dBV/√Hz' },
+      { label: 'Noise in nV/√Hz (A)', value: '33.5 nV/√Hz' },
     ])
   })
 

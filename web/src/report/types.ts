@@ -16,7 +16,7 @@ import type { ImpulseDisplay } from '../measurements/impulseDisplay'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
 import type { SweepTraceFamily } from '../sweep/points'
-import type { IntermodulationFrame, MetersFrame, ScopeFrame, SpectrumFrame } from '../streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, ScopeFrame, SpectrumFrame } from '../streaming/protocol'
 import type { SpectrumDisplaySource } from '../composables/useChartDisplay'
 import type { ReportElementId } from './elements'
 import type { ExportableChart } from './renderChart'
@@ -74,6 +74,10 @@ export type ReportSubjectData =
       meters: Record<number, MetersFrame>
       /** The two-tone IMD figure per channel, when one was measured — live frames, or a stored result's `imd_*` rows (storedIntermodulationFrames). */
       intermodulation: Record<number, IntermodulationFrame>
+      /** The band RMS / noise density / weighting per channel — live frames, or a stored result's two noise rows (storedNoiseFrames). */
+      noise: Record<number, NoiseFiguresFrame>
+      /** The weighting annunciator's text, or null when unweighted — the chart's title carries it. */
+      weightingLabel: string | null
       /** The chart's display state — the screen's singleton, or a stored type's own (see SPECTRUM_DISPLAY_KEY). */
       display: SpectrumDisplaySource
       /** The metric tiles' labels in their order: the screen's selection, or the stored type's. */

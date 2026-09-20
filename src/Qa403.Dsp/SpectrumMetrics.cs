@@ -147,6 +147,45 @@ public static class SpectrumMetrics
     public static double BandNoiseFloorVrms(PsdSpectrum psd, double frequencyLoHz, double frequencyHiHz) =>
         psd.IntegrateVrms(frequencyLoHz, frequencyHiHz);
 
+    /// <summary>
+    /// The RMS of everything in <paramref name="band"/> — tone, distortion and noise alike — by
+    /// Parseval over the PSD. The band-limited counterpart of the time-domain total RMS, and the
+    /// figure a weighted PSD turns into "weighted RMS".
+    /// </summary>
+    public static double BandRmsVrms(PsdSpectrum psd, BinRange band) =>
+        Math.Sqrt(Math.Max(0.0, psd.Integrate(band).PowerV2));
+
+    /// <summary>
+    /// Noise density in V²/Hz: the mean PSD over the bins of <paramref name="band"/> that SNR's
+    /// exclusions leave in — the fundamental's octave notch and each harmonic's lobe removed, exactly
+    /// <see cref="Snr"/>'s set. A mean over the included bins rather than power over the band's
+    /// nominal width, because the notch is a sizeable fraction of a narrow band and the pipeline
+    /// finds a "fundamental" in every record, generator on or off. Zero when nothing was included.
+    /// </summary>
+    public static double NoiseDensityV2PerHz(
+        PsdSpectrum psd,
+        ReadOnlySpan<Harmonic> harmonics,
+        BinRange band,
+        double notchOctaves = DefaultNotchOctaves,
+        int harmonicHalfWidthBins = HarmonicAnalyzer.DefaultSkirtHalfWidthBins)
+    {
+        RequireFundamentalFirst(harmonics);
+
+        Span<BinRange> excluded = harmonics.Length <= 32 ? stackalloc BinRange[harmonics.Length] : new BinRange[harmonics.Length];
+        excluded[0] = FundamentalNotch(psd, harmonics[0], notchOctaves, harmonicHalfWidthBins);
+        for (int i = 1; i < harmonics.Length; i++)
+            excluded[i] = new BinRange(harmonics[i].Bin - harmonicHalfWidthBins, harmonics[i].Bin + harmonicHalfWidthBins);
+
+        return DensityOf(psd.IntegrateExcluding(excluded, band), psd.BinSizeHz);
+    }
+
+    /// <summary>Noise density over the whole of <paramref name="band"/>, for a record with no fundamental to notch.</summary>
+    public static double NoiseDensityV2PerHz(PsdSpectrum psd, BinRange band) =>
+        DensityOf(psd.Integrate(band), psd.BinSizeHz);
+
+    private static double DensityOf(BandIntegral integral, double binSizeHz) =>
+        integral.BinCount == 0 ? 0.0 : Math.Max(0.0, integral.PowerV2) / (integral.BinCount * binSizeHz);
+
     private static void RequireFundamentalFirst(ReadOnlySpan<Harmonic> harmonics)
     {
         if (harmonics.Length < 1)

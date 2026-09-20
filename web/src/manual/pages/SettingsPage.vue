@@ -41,9 +41,12 @@
         <tr>
           <td>Metrics bandwidth (Hz)</td>
           <td>
-            The band THD+N, SNR and the noise floor are integrated over, and what keeps DC out of
-            that integration. 20 Hz–20 kHz gives audio-band figures; widening it includes noise the
-            ear cannot hear and makes every noise-based number look worse.
+            The band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated
+            over, and what keeps DC out of that integration. This is the <strong>Custom</strong>
+            choice of the FFT settings panel's Bandwidth dropdown, whose two presets (20 Hz–20 kHz
+            and 20 Hz–80 kHz) write these same fields. 20 Hz–20 kHz gives audio-band figures;
+            widening it includes noise the ear cannot hear and makes every noise-based number look
+            worse. It is saved with the FFT measurement.
           </td>
         </tr>
         <tr>

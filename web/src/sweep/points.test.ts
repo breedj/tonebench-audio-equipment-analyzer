@@ -9,6 +9,7 @@ import {
   mergePreviewSeries,
   nearestSweepPoint,
   percentToDb,
+  sweepTraceLabel,
 } from './points'
 
 describe('logPerOctave', () => {
@@ -207,5 +208,24 @@ describe('estimateDurationSeconds', () => {
 
     const recordSeconds = 32768 / 48000
     expect(stepped - sweep).toBeCloseTo(10 * recordSeconds, 6)
+  })
+})
+
+describe('sweepTraceLabel', () => {
+  it('names the THD family by harmonic, with an n prefix under the normalized method', () => {
+    expect(sweepTraceLabel('thd', 'Conventional')).toBe('THD')
+    expect(sweepTraceLabel('d2', 'Conventional')).toBe('D2')
+    expect(sweepTraceLabel('d6plus', 'FrequencyNormalized')).toBe('nD6+')
+    expect(sweepTraceLabel('magnitude', 'FrequencyNormalized')).toBe('Magn')
+  })
+
+  it('names the IMD family by order, and never with an n prefix', () => {
+    expect(sweepTraceLabel('thd', 'Conventional', 'imd')).toBe('IMD')
+    expect(sweepTraceLabel('d2', 'Conventional', 'imd')).toBe('IM2')
+    expect(sweepTraceLabel('d5', 'Conventional', 'imd')).toBe('IM5')
+    expect(sweepTraceLabel('d6plus', 'Conventional', 'imd')).toBe('IM6+')
+    expect(sweepTraceLabel('d3', 'FrequencyNormalized', 'imd')).toBe('IM3')
+    expect(sweepTraceLabel('noise', 'Conventional', 'imd')).toBe('Noise')
+    expect(sweepTraceLabel('magnitude', 'Conventional', 'imd')).toBe('Magn')
   })
 })

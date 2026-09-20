@@ -13,6 +13,9 @@ export const THD_VS_FREQUENCY_KIND = 'ThdVsFrequency'
 /** Mirrors MeasurementSaveService.ThdVsAmplitudeKind — a sweep of drive levels at one frequency. */
 export const THD_VS_AMPLITUDE_KIND = 'ThdVsAmplitude'
 
+/** Mirrors MeasurementSaveService.ImdVsAmplitudeKind — a two-tone pair stepped through drive levels, plotting intermodulation. */
+export const IMD_VS_AMPLITUDE_KIND = 'ImdVsAmplitude'
+
 /** Mirrors MeasurementSaveService.FrequencyResponseKind — a chirp-driven frequency response. */
 export const FREQUENCY_RESPONSE_KIND = 'FrequencyResponse'
 
@@ -35,7 +38,24 @@ export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
  * `getStoredSweep`, and draw a dashed run marker in the history checklist.
  */
 export function isSweepKind(kind: string | null | undefined): boolean {
-  return kind === THD_VS_FREQUENCY_KIND || kind === THD_VS_AMPLITUDE_KIND
+  return kind === THD_VS_FREQUENCY_KIND || kind === THD_VS_AMPLITUDE_KIND || kind === IMD_VS_AMPLITUDE_KIND
+}
+
+/**
+ * Whether this sweep is the two-tone IMD one — its own runner, store and endpoints, and a chart
+ * whose traces are IMD and IM2..IM5 rather than THD and D2..D5 (see imd/points.ts). Everything
+ * else about it (the result shape, the history overlay, the report) is a sweep's.
+ */
+export function isImdSweepKind(kind: string | null | undefined): boolean {
+  return kind === IMD_VS_AMPLITUDE_KIND
+}
+
+/**
+ * Whether a sweep's x axis is a drive level rather than a frequency — the THD and IMD amplitude
+ * sweeps both offer output V / output W / input V, and share the chart's level-axis handling.
+ */
+export function isAmplitudeSweepKind(kind: string | null | undefined): boolean {
+  return kind === THD_VS_AMPLITUDE_KIND || kind === IMD_VS_AMPLITUDE_KIND
 }
 
 /**
@@ -98,6 +118,12 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     label: 'THD vs amplitude',
     description:
       'Steps the generator level at one fixed frequency and plots THD, D2–D5 and D6+ against output voltage, output power or input voltage.',
+  },
+  {
+    kind: IMD_VS_AMPLITUDE_KIND,
+    label: 'IMD vs amplitude',
+    description:
+      'Plays a two-tone pair (SMPTE, DIN or CCIF) and steps the drive level, plotting intermodulation distortion and its 2nd–5th order products against output voltage, output power or input voltage.',
   },
   {
     kind: FREQUENCY_RESPONSE_KIND,

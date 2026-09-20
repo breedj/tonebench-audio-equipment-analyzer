@@ -50,7 +50,9 @@ public class MeasurementSaveServiceTests
             var steppedRunner = new SteppedResponseRunner(
                 session, pipeline, new SpectrumBroadcastHub(), NullLogger<SteppedResponseRunner>.Instance);
             var saveService = new MeasurementSaveService(
-                session, pipeline, sweepRunner, responseRunner, steppedRunner,
+                session, pipeline, sweepRunner,
+                new ImdSweepRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImdSweepRunner>.Instance),
+                responseRunner, steppedRunner,
                 new ImpulseResponseRunner(
                     session, pipeline, new InMemoryLoopbackReferenceStore(),
                     NullLogger<ImpulseResponseRunner>.Instance),
@@ -113,7 +115,9 @@ public class MeasurementSaveServiceTests
             var steppedRunner = new SteppedResponseRunner(
                 session, pipeline, new SpectrumBroadcastHub(), NullLogger<SteppedResponseRunner>.Instance);
             var saveService = new MeasurementSaveService(
-                session, pipeline, sweepRunner, responseRunner, steppedRunner,
+                session, pipeline, sweepRunner,
+                new ImdSweepRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImdSweepRunner>.Instance),
+                responseRunner, steppedRunner,
                 new ImpulseResponseRunner(
                     session, pipeline, new InMemoryLoopbackReferenceStore(),
                     NullLogger<ImpulseResponseRunner>.Instance),

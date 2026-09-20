@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { MetersFrame } from '../streaming/protocol'
+import type { IntermodulationFrame, MetersFrame } from '../streaming/protocol'
 import type { GeneratorTone } from '../api/client'
 import { channelTiles, type MetricTile } from '../metrics'
 import { useLoadOhms } from '../composables/useLoadOhms'
@@ -10,13 +10,17 @@ const props = defineProps<{
   channelLabel: 'L' | 'R'
   meters: MetersFrame | null
   generatorTones: GeneratorTone[]
+  /** This channel's two-tone IMD figure, when the pipeline is measuring one — adds the IMD tiles. */
+  imd?: IntermodulationFrame | null
+  /** The pipeline has an IMD spec but could not resolve it at this FFT size — the tiles show a dash. */
+  imdUnresolved?: boolean
 }>()
 
 // Shared with the other channel — see useLoadOhms.ts. Edited in the Generator pane, not here.
 const { loadOhms } = useLoadOhms()
 const { selectedMetrics, removeMetric } = useMetricSelection()
 
-const allTiles = computed(() => channelTiles(props.meters, props.generatorTones, loadOhms.value))
+const allTiles = computed(() => channelTiles(props.meters, props.generatorTones, loadOhms.value, props.imd ?? null, props.imdUnresolved ?? false))
 
 // Selected fixed metrics, in the order they were picked — see metrics.ts's AVAILABLE_METRIC_LABELS.
 // The generator summary is a separate, channel-independent tile now (see GeneratorMetricsPanel.vue).

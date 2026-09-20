@@ -86,10 +86,35 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>IMD preset</td>
+          <td>
+            Sine tones only. A standard two-tone intermodulation test — <strong>SMPTE 60 Hz + 7 kHz
+            (4:1)</strong>, <strong>DIN 250 Hz + 8 kHz (4:1)</strong>, <strong>CCIF/ITU-R 19 kHz +
+            20 kHz (1:1)</strong> or <strong>CCIF 18.5 + 19.5 kHz (1:1)</strong> — sets both tones up
+            from one <strong>Level</strong> in dBV: the <em>sine-equivalent</em> level, i.e. the level
+            of a single sine whose peak equals the pair's peak (a 4:1 pair sits 1.94 and 13.98 dB
+            below it, a 1:1 pair 6.02 dB below). Picking a preset also turns the IMD reading on and
+            adds the <strong>IMD %</strong> and <strong>IMD dB</strong> tiles. <strong>Custom</strong>
+            frees the tone rows again; any two tones still get a reading.
+          </td>
+        </tr>
+        <tr>
+          <td>IMD method, Max order</td>
+          <td>
+            Shown whenever exactly two tones are staged. <strong>SMPTE / DIN</strong> counts the
+            sidebands f2 ± n·f1 relative to the HF carrier; <strong>CCIF / ITU-R</strong> counts the
+            difference products |m·f1 − n·f2| relative to the RMS sum of both tones. Max order is the
+            highest product order counted (SMPTE 5, CCIF 3 by default). See
+            <button type="button" class="manual-link" @click="showPage('imd-vs-amplitude')">IMD vs amplitude</button>
+            for the conventions in full.
+          </td>
+        </tr>
+        <tr>
           <td>Tone rows</td>
           <td>
             Frequency in Hz and amplitude in dBV per tone. <strong>+ Tone</strong> adds another; the
-            bin icon removes one. Two tones is the usual intermodulation test.
+            bin icon removes one. Read-only while a preset is active. Two tones is the usual
+            intermodulation test.
           </td>
         </tr>
         <tr>
@@ -185,6 +210,8 @@ const { showPage } = useManual()
       include level in several conventions (<code>dBV</code>, <code>dBu</code>, <code>Vrms</code>,
       watts), distortion as a percentage or in dB, THD+N, SNR, peak and RMS, the measured
       fundamental frequency and its nearest musical note, and gain relative to the generator.
+      <strong>IMD %</strong> and <strong>IMD dB</strong> read only while two sine tones are staged —
+      no reading is not a reading, so with any other stimulus the tiles are simply absent.
     </p>
 
     <h3>Spectrum</h3>
@@ -216,10 +243,16 @@ const { showPage } = useManual()
       of periods, it shows fewer and says so.
     </p>
 
-    <h3>Harmonics and Other peaks</h3>
+    <h3>Harmonics, Intermodulation and Other peaks</h3>
     <p>
       <strong>Harmonics</strong> lists the fundamental and each harmonic with its frequency, level
       in dBV and level relative to the fundamental in dBc.
+      <strong>Intermodulation</strong> appears next to it while two sine tones are staged: both
+      tones, then every counted product (labelled IM2, IM3 … with its combination, e.g. f2 − 2·f1)
+      with frequency, level and dBc against the method's reference, and underneath the IMD total,
+      each order's figure, the pair's sine-equivalent level and its true RMS. If the FFT is too
+      small to separate the tones (they need to be at least 8 bins apart), the table says so
+      instead of showing a number.
       <strong>Other peaks</strong> lists everything that is neither — mains hum and its harmonics,
       intermodulation products, spurs — largest first, as many as you ask for. Both tables need a
       single fundamental to refer to, so neither appears for Multitone or White noise. Other peaks

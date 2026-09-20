@@ -67,8 +67,33 @@ public static class AcquisitionEndpoints
             if (measurementLoHz < 0.0 || measurementHiHz <= measurementLoHz)
                 return Results.BadRequest("MeasurementHiFreqHz must be greater than MeasurementLoFreqHz, and neither may be negative.");
 
+            // Null leaves the IMD spec alone (patch semantics like every other field); Enabled=false clears it.
+            IntermodulationSpec? intermodulation = current.Intermodulation;
+            if (request.Intermodulation is { } imd)
+            {
+                if (!imd.Enabled)
+                {
+                    intermodulation = null;
+                }
+                else
+                {
+                    if (!EnumParsing.TryParse<IntermodulationMethod>(imd.Method, IntermodulationMethod.Smpte, out var method, out var methodError))
+                        return Results.BadRequest(methodError);
+                    int maxOrder = imd.MaxOrder ?? IntermodulationPresets.DefaultMaxOrder(method);
+                    if (maxOrder < 2 || maxOrder > 12)
+                        return Results.BadRequest("Intermodulation MaxOrder must be between 2 and 12.");
+                    if (!(imd.ToneLowHz > 0.0) || !(imd.ToneHighHz > imd.ToneLowHz))
+                        return Results.BadRequest("Intermodulation tones must satisfy 0 < ToneLowHz < ToneHighHz.");
+                    if (imd.MaxProductFreqHz is { } maxProduct && !(maxProduct > 0.0))
+                        return Results.BadRequest("Intermodulation MaxProductFreqHz must be positive when given.");
+
+                    intermodulation = new IntermodulationSpec(imd.ToneLowHz, imd.ToneHighHz, method, maxOrder, imd.MaxProductFreqHz);
+                }
+            }
+
             pipeline.Options = current with
             {
+                Intermodulation = intermodulation,
                 MeasurementLoFreqHz = measurementLoHz,
                 MeasurementHiFreqHz = measurementHiHz,
                 FftSize = fftSize,
@@ -113,4 +138,16 @@ public sealed record SpectrumConfigRequest(
     int? FftSize, string? Window, string? Averaging, int? AverageCount, int? TargetFrameRateHz, int? OtherPeaksCount,
     bool? ProcessLeft, bool? ProcessRight,
     /// <summary>Measurement bandwidth for THD+N/SNR/noise — see <see cref="SpectrumPipelineOptions.MeasurementLoFreqHz"/>.</summary>
-    double? MeasurementLoFreqHz = null, double? MeasurementHiFreqHz = null);
+    double? MeasurementLoFreqHz = null, double? MeasurementHiFreqHz = null,
+    /// <summary>Null leaves the current IMD spec alone; see <see cref="IntermodulationConfigRequest"/>.</summary>
+    IntermodulationConfigRequest? Intermodulation = null);
+
+/// <summary>
+/// The two-tone intermodulation spec the FFT screen derives from its staged stimulus — see
+/// <see cref="SpectrumPipelineOptions.Intermodulation"/>. <paramref name="Enabled"/> false clears
+/// the spec (the other fields are then ignored); <paramref name="Method"/> is an
+/// <see cref="IntermodulationMethod"/> name, <paramref name="MaxOrder"/> defaults to the method's
+/// own, and a null <paramref name="MaxProductFreqHz"/> means the measurement band's upper edge.
+/// </summary>
+public sealed record IntermodulationConfigRequest(
+    bool Enabled, double ToneLowHz = 0.0, double ToneHighHz = 0.0, string? Method = null, int? MaxOrder = null, double? MaxProductFreqHz = null);

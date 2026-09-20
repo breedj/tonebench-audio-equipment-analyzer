@@ -1,5 +1,5 @@
 import type { ThdVsAmplitudeParameters, ThdVsFrequencyParameters } from '../api/client'
-import { THD_VS_AMPLITUDE_KIND } from '../measurements/kinds'
+import { isAmplitudeSweepKind } from '../measurements/kinds'
 import type { SweepXAxis } from './xAxis'
 
 /**
@@ -117,7 +117,7 @@ export function sweepDisplayFromParams(paramsJson: string | null | undefined, ba
 
 /** The chart's x axis and window for a kind: the amplitude screen's choice, or plain frequency in hertz. */
 export function sweepChartWindow(display: SweepDisplay, kind: string): { xAxis: SweepXAxis; xFrom: number; xTo: number } {
-  if (kind === THD_VS_AMPLITUDE_KIND) {
+  if (isAmplitudeSweepKind(kind)) {
     const bounds = display.amplitudeBounds[display.amplitudeXAxis] ?? { from: 0.001, to: 10 }
     return { xAxis: display.amplitudeXAxis, xFrom: bounds.from, xTo: bounds.to }
   }

@@ -18,6 +18,7 @@ public sealed class MeasurementSaveService(
     DeviceSessionService session,
     SpectrumPipeline spectrumPipeline,
     ThdSweepRunner sweepRunner,
+    ImdSweepRunner imdSweepRunner,
     FrequencyResponseRunner responseRunner,
     SteppedResponseRunner steppedResponseRunner,
     ImpulseResponseRunner impulseRunner,
@@ -37,13 +38,16 @@ public sealed class MeasurementSaveService(
     /// <summary>The <c>measurement_type.kind</c> value for a THD-vs-amplitude sweep. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string ThdVsAmplitudeKind = "ThdVsAmplitude";
 
+    /// <summary>The <c>measurement_type.kind</c> value for an IMD-vs-amplitude sweep. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string ImdVsAmplitudeKind = "ImdVsAmplitude";
+
     /// <summary>
     /// Whether a kind's result is a run of sweep points rather than a single spectrum. The
     /// distinction, not the individual kind, is what every branch here actually cares about: a
     /// sweep type has no live server state to snapshot, its params_json is not an
     /// <see cref="FftSpectrumParameters"/>, and its result rows carry no spectra.
     /// </summary>
-    public static bool IsSweepKind(string kind) => kind is ThdVsFrequencyKind or ThdVsAmplitudeKind;
+    public static bool IsSweepKind(string kind) => kind is ThdVsFrequencyKind or ThdVsAmplitudeKind or ImdVsAmplitudeKind;
 
     /// <summary>The <c>measurement_type.kind</c> value for a chirp frequency response. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string FrequencyResponseKind = "FrequencyResponse";
@@ -155,6 +159,35 @@ public sealed class MeasurementSaveService(
             SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
             MeasureNoiseFloor: true,
             ChartAutofitOnDone: true), SerializerOptions);
+
+    /// <summary>
+    /// A brand-new IMD-vs-amplitude type's <c>params_json</c>, on the same terms as
+    /// <see cref="DefaultAmplitudeSweepParametersJson"/> and kept in step with
+    /// <c>ImdSweepConfigPanel.vue</c>'s own defaults: the SMPTE pair, the QA40x's order default.
+    /// </summary>
+    public string DefaultImdSweepParametersJson()
+    {
+        var smpte = IntermodulationPresets.Resolve(IntermodulationPreset.Smpte);
+        return JsonSerializer.Serialize(new ImdVsAmplitudeParameters(
+            Preset: nameof(IntermodulationPreset.Smpte),
+            ToneLowHz: smpte.LowHz,
+            ToneHighHz: smpte.HighHz,
+            LowToHighRatio: smpte.LowToHighRatio,
+            Method: smpte.Method.ToString(),
+            MaxOrder: smpte.DefaultMaxOrder,
+            StartLevelVolt: 0.001,
+            EndLevelVolt: 1.0,
+            StepsPerOctave: 5,
+            LoadOhms: 8.0,
+            ProcessLeft: true,
+            ProcessRight: false,
+            FftSize: ThdSweepRequest.AmplitudeSweepFftSize,
+            Window: ImdSweepRequest.Window,
+            AverageCount: 4,
+            SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
+            MeasureNoiseFloor: true,
+            ChartAutofitOnDone: true), SerializerOptions);
+    }
 
     /// <summary>
     /// A brand-new frequency-response type's <c>params_json</c>, on the same terms as
@@ -328,6 +361,11 @@ public sealed class MeasurementSaveService(
         if (IsFrequencyResponseKind(kind))
             return existingParamsJson ?? DefaultFrequencyResponseParametersJson();
 
+        // Before the generic sweep arm: it is a sweep kind (same result shape), but its defaults are
+        // its own, and the THD amplitude sweep's JSON would deserialize into a request with no tones.
+        if (kind == ImdVsAmplitudeKind)
+            return existingParamsJson ?? DefaultImdSweepParametersJson();
+
         if (IsSweepKind(kind))
         {
             return existingParamsJson
@@ -360,6 +398,9 @@ public sealed class MeasurementSaveService(
         // The settle time is a run record, set here and not in BuildParameters: that method also
         // writes a type's own params_json, where the field has to stay null.
         var parameters = BuildParameters() with { CaptureDelayMs = session.LastAppliedCaptureDelayMs };
+        // The pipeline knows the tones it measured with but not which template put them there;
+        // the type does. Carried over only when the type's stored pair is the one that ran.
+        parameters = parameters with { ImdPreset = await ResolveImdPresetNameAsync(measurementTypeId, parameters, ct) };
         string paramsJson = JsonSerializer.Serialize(parameters, SerializerOptions);
         string? genJson = JsonSerializer.Serialize(session.EffectiveGeneratorConfig, SerializerOptions);
 
@@ -393,6 +434,9 @@ public sealed class MeasurementSaveService(
                 metrics.Add(new MeasurementMetric(channel, $"h{harmonic.Order}_hz", harmonic.Bin * snapshot.BinSizeHz, "Hz"));
                 metrics.Add(new MeasurementMetric(channel, $"h{harmonic.Order}_dbc", harmonic.Dbc, "dBc"));
             }
+
+            if (m.Intermodulation is { } imd)
+                metrics.AddRange(IntermodulationMetrics(channel, imd));
         }
 
         var info = session.Info;
@@ -476,6 +520,120 @@ public sealed class MeasurementSaveService(
             captures);
 
         return await measurementRepository.SaveSweepResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
+    /// Saves the IMD sweep currently on screen as one measurement result -- <see cref="SaveSweepAsync"/>'s
+    /// shape (one capture per level, metric rows per channel, the previews) so the stored result reads
+    /// back through the same <c>GetSweepPointsAsync</c> path. Reads <see cref="ImdSweepRunner.Status"/>
+    /// for the same reason that method reads its runner's.
+    /// </summary>
+    public async Task<long> SaveImdSweepAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = imdSweepRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the sweep to finish (or cancel it) before saving.");
+        if (status.Points.Count == 0)
+            throw new InvalidOperationException("No IMD sweep has been run yet.");
+
+        var request = imdSweepRunner.LastRequest
+            ?? throw new InvalidOperationException("No IMD sweep has been run yet.");
+
+        string paramsJson = JsonSerializer.Serialize(
+            new ImdVsAmplitudeParameters(
+                request.Preset.ToString(), request.ToneLowHz, request.ToneHighHz, request.LowToHighRatio,
+                request.Method.ToString(), request.MaxOrder,
+                request.StartLevelVolt, request.EndLevelVolt, request.StepsPerOctave, request.LoadOhms,
+                request.ProcessLeft, request.ProcessRight,
+                request.FftSize, ImdSweepRequest.Window, request.AverageCount, request.SampleRateHz,
+                request.MeasureNoiseFloor, request.MaxProductFreqHz,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+            SerializerOptions);
+
+        // Grouped by the level, which is the axis; capture.freq_hz carries the low tone, which is
+        // true and keeps GetSweepPointsAsync's fundamental_hz recovery working unchanged.
+        var captures = status.Points
+            .GroupBy(p => p.GeneratorSineEquivalentDbv)
+            .OrderBy(g => g.Key)
+            .Select((group, index) => new SweepCaptureInput(
+                index,
+                group.First().ToneLowHz,
+                BuildImdSweepMetrics(group),
+                BuildImdSweepPreviews(group)))
+            .ToList();
+
+        var info = session.Info;
+        var saveRequest = new SweepSaveRequest(
+            measurementTypeId, name, notes,
+            paramsJson,
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            request.SampleRateHz, request.FftSize,
+            (request.ProcessLeft ? 1 : 0) + (request.ProcessRight ? 1 : 0),
+            session.InputRangeDbv, session.OutputRangeDbv,
+            captures);
+
+        return await measurementRepository.SaveSweepResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
+    /// One level's metrics, per channel. <c>fundamental_hz</c> (the low tone) keeps
+    /// <c>GetSweepPointsAsync</c>'s frequency recovery working; <c>generator_dbv</c>/<c>generator_volt</c>
+    /// vary from point to point, which is what marks the result level-stepped for the CSV exporter and
+    /// the headline picker; <c>fundamental_dbv</c> is the sine-equivalent output so the history headline
+    /// reads a level. Deliberately no <c>thd_percent</c>: nothing must mistake this for a THD result.
+    /// </summary>
+    private static List<MeasurementMetric> BuildImdSweepMetrics(IEnumerable<ImdSweepPoint> pointsAtOneLevel)
+    {
+        var metrics = new List<MeasurementMetric>();
+        foreach (var point in pointsAtOneLevel)
+        {
+            int ch = point.Channel;
+            metrics.Add(new MeasurementMetric(ch, "fundamental_hz", point.ToneLowHz, "Hz"));
+            metrics.Add(new MeasurementMetric(ch, "fundamental_dbv", point.SineEquivalentDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(ch, "gain_db", point.GainDb, "dB"));
+            metrics.Add(new MeasurementMetric(ch, "power_watt", point.PowerWatt, "W"));
+            metrics.Add(new MeasurementMetric(ch, "noise_percent", point.NoisePercent, "%"));
+            metrics.Add(new MeasurementMetric(ch, "generator_dbv", point.GeneratorSineEquivalentDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(ch, "generator_volt", Math.Pow(10.0, point.GeneratorSineEquivalentDbv / 20.0), "V"));
+            metrics.Add(new MeasurementMetric(ch, "imd_percent", point.ImdPercent, "%"));
+            metrics.Add(new MeasurementMetric(ch, "imd_tone_low_hz", point.ToneLowHz, "Hz"));
+            metrics.Add(new MeasurementMetric(ch, "imd_tone_high_hz", point.ToneHighHz, "Hz"));
+            metrics.Add(new MeasurementMetric(ch, "imd_tone_low_dbv", point.ToneLowDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(ch, "imd_tone_high_dbv", point.ToneHighDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(ch, "imd_sine_equivalent_dbv", point.SineEquivalentDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(ch, "imd_combined_rms_dbv", point.CombinedRmsDbv, "dBV"));
+
+            for (int i = 0; i < point.OrderPercent.Count; i++)
+                metrics.Add(new MeasurementMetric(ch, $"im{i + 2}_percent", point.OrderPercent[i], "%"));
+        }
+
+        return metrics;
+    }
+
+    private static List<CapturePreviewInput> BuildImdSweepPreviews(IEnumerable<ImdSweepPoint> pointsAtOneLevel)
+    {
+        var previews = new List<CapturePreviewInput>();
+        foreach (var point in pointsAtOneLevel)
+        {
+            if (point.PreviewFft is { } fft)
+                previews.Add(new CapturePreviewInput(point.Channel, CapturePreviewKind.Fft, fft.X, fft.Min, fft.Max));
+            if (point.PreviewScope is { } scope)
+                previews.Add(new CapturePreviewInput(point.Channel, CapturePreviewKind.Scope, scope.X, scope.Min, scope.Max));
+        }
+
+        // Same guard as BuildSweepPreviews: one point per channel per level, or the UNIQUE constraint
+        // on capture_preview would phrase the runner's bug as a 500.
+        var duplicate = previews.GroupBy(p => (p.Channel, p.Kind)).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+        {
+            var first = pointsAtOneLevel.FirstOrDefault();
+            throw new InvalidOperationException(
+                $"The IMD sweep produced {duplicate.Count()} '{duplicate.Key.Kind}' previews for channel {duplicate.Key.Channel} "
+                + $"at {first?.GeneratorSineEquivalentDbv ?? double.NaN:0.##} dBV, but a sweep point may only be measured once per channel. "
+                + "Re-run the sweep before saving; if this repeats, restart the app and report it.");
+        }
+
+        return previews;
     }
 
     /// <summary>
@@ -894,6 +1052,40 @@ public sealed class MeasurementSaveService(
     /// presses Run (see AcquisitionPanel.vue's run/stop and App.vue's runMeasurement).
     /// Throws <see cref="KeyNotFoundException"/> if the type doesn't exist.
     /// </summary>
+    /// <summary>
+    /// The metric rows one channel's intermodulation result becomes: the headline figure, both
+    /// tones, the two level conventions, each order's figure and every product (frequency, level,
+    /// dBc and its (m, n) combination). Method and max order are in params_json, not repeated here.
+    /// Shared by the FFT save and the IMD sweep so a stored FFT capture and a stored sweep point
+    /// spell the same names.
+    /// </summary>
+    internal static IEnumerable<MeasurementMetric> IntermodulationMetrics(int channel, IntermodulationResult imd)
+    {
+        yield return new MeasurementMetric(channel, "imd_percent", imd.ImdPercent, "%");
+        yield return new MeasurementMetric(channel, "imd_db", imd.ImdDb, "dB");
+        yield return new MeasurementMetric(channel, "imd_tone_low_hz", imd.ToneLowFreqHz, "Hz");
+        yield return new MeasurementMetric(channel, "imd_tone_high_hz", imd.ToneHighFreqHz, "Hz");
+        yield return new MeasurementMetric(channel, "imd_tone_low_dbv", imd.ToneLowDbv, "dBV");
+        yield return new MeasurementMetric(channel, "imd_tone_high_dbv", imd.ToneHighDbv, "dBV");
+        yield return new MeasurementMetric(channel, "imd_sine_equivalent_dbv", imd.SineEquivalentDbv, "dBV");
+        yield return new MeasurementMetric(channel, "imd_combined_rms_dbv", imd.CombinedRmsDbv, "dBV");
+        yield return new MeasurementMetric(channel, "imd_reference_dbv", imd.ReferenceDbv, "dBV");
+
+        foreach (var (order, ratio) in imd.PerOrder)
+            yield return new MeasurementMetric(channel, $"im{order}_percent", ratio * 100.0, "%");
+
+        for (int i = 0; i < imd.Products.Count; i++)
+        {
+            var product = imd.Products[i];
+            yield return new MeasurementMetric(channel, $"imd_p{i}_hz", product.FrequencyHz, "Hz");
+            yield return new MeasurementMetric(channel, $"imd_p{i}_dbv", product.AmplitudeDbv, "dBV");
+            yield return new MeasurementMetric(channel, $"imd_p{i}_dbc", product.Dbc, "dBc");
+            yield return new MeasurementMetric(channel, $"imd_p{i}_order", product.Order, null);
+            yield return new MeasurementMetric(channel, $"imd_p{i}_m", product.M, null);
+            yield return new MeasurementMetric(channel, $"imd_p{i}_n", product.N, null);
+        }
+    }
+
     public async Task<MeasurementTypeAppliedResponse> ApplyAsync(long measurementTypeId, CancellationToken ct)
     {
         var type = await projectRepository.GetTypeAsync(measurementTypeId, ct)
@@ -928,9 +1120,53 @@ public sealed class MeasurementSaveService(
             OtherPeaksCount = parameters.OtherPeaksCount,
             ProcessLeft = parameters.ProcessLeft,
             ProcessRight = parameters.ProcessRight,
+            // Rebuilt from the stored fields, or cleared: a type without IMD must not inherit the
+            // previous type's spec, or its single 1 kHz tone reads the noise floor as IMD.
+            Intermodulation = IntermodulationSpecOf(parameters),
         };
 
         return ToAppliedResponse(parameters);
+    }
+
+    /// <summary>
+    /// The IMD template name a saved FFT result records: null without a spec, the owning type's
+    /// stored name when that type's pair is the pair that was measured, "Custom" otherwise (a pair
+    /// typed by hand, or the tones edited since the type was saved).
+    /// </summary>
+    private async Task<string?> ResolveImdPresetNameAsync(long measurementTypeId, FftSpectrumParameters parameters, CancellationToken ct)
+    {
+        if (parameters.ImdToneLowHz is not { } low || parameters.ImdToneHighHz is not { } high)
+            return null;
+
+        var type = await projectRepository.GetTypeAsync(measurementTypeId, ct);
+        if (type is null || HasNoLiveConfiguration(type.Kind))
+            return "Custom";
+
+        FftSpectrumParameters? stored;
+        try
+        {
+            stored = JsonSerializer.Deserialize<FftSpectrumParameters>(type.ParamsJson, SerializerOptions);
+        }
+        catch (JsonException)
+        {
+            return "Custom";
+        }
+
+        bool samePair = stored?.ImdToneLowHz is { } storedLow && stored.ImdToneHighHz is { } storedHigh
+            && Math.Abs(storedLow - low) < 1e-6 && Math.Abs(storedHigh - high) < 1e-6;
+        return samePair && !string.IsNullOrEmpty(stored!.ImdPreset) ? stored.ImdPreset : "Custom";
+    }
+
+    private static IntermodulationSpec? IntermodulationSpecOf(FftSpectrumParameters parameters)
+    {
+        if (parameters.ImdToneLowHz is not { } low || parameters.ImdToneHighHz is not { } high)
+            return null;
+        if (!Enum.TryParse<IntermodulationMethod>(parameters.ImdMethod, ignoreCase: true, out var method))
+            return null;
+        if (!(low > 0.0) || !(high > low))
+            return null;
+
+        return new IntermodulationSpec(low, high, method, parameters.ImdMaxOrder ?? IntermodulationPresets.DefaultMaxOrder(method), parameters.ImdMaxProductFreqHz);
     }
 
     private static MeasurementTypeAppliedResponse ToAppliedResponse(FftSpectrumParameters parameters) =>
@@ -958,7 +1194,10 @@ public sealed class MeasurementSaveService(
             parameters.ChartShowWaterfall,
             parameters.ChartShowOscilloscope,
             parameters.ChartShowHarmonics,
-            parameters.ChartShowOtherPeaks);
+            parameters.ChartShowOtherPeaks,
+            parameters.ImdPreset,
+            parameters.ImdMethod,
+            parameters.ImdMaxOrder);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -999,7 +1238,18 @@ public sealed class MeasurementSaveService(
             staged?.ChartYTopDbv, staged?.ChartYBottomDbv, staged?.ChartXFromHz, staged?.ChartXToHz,
             staged?.ChartThickLines, staged?.ChartShowDataPoints, staged?.ChartShowMinMax, staged?.ChartShowPeakHold,
             staged?.ChartAutofitOnDone,
-            staged?.ChartShowWaterfall, staged?.ChartShowOscilloscope, staged?.ChartShowHarmonics, staged?.ChartShowOtherPeaks);
+            staged?.ChartShowWaterfall, staged?.ChartShowOscilloscope, staged?.ChartShowHarmonics, staged?.ChartShowOtherPeaks)
+        {
+            // The spec itself is live pipeline state (the FFT screen pushes it through
+            // spectrum-config the moment the stimulus changes), so it is read from the options like
+            // FftSize; only the template name is a staged, client-side notion.
+            ImdPreset = options.Intermodulation is null ? null : staged?.ImdPreset ?? "Custom",
+            ImdMethod = options.Intermodulation?.Method.ToString(),
+            ImdMaxOrder = options.Intermodulation?.MaxOrder,
+            ImdToneLowHz = options.Intermodulation?.ToneLowHz,
+            ImdToneHighHz = options.Intermodulation?.ToneHighHz,
+            ImdMaxProductFreqHz = options.Intermodulation?.MaxProductFreqHz,
+        };
     }
 
     public string BuildCurrentParametersJson(StagedMeasurementConfig? staged = null) =>

@@ -115,4 +115,24 @@ public class HarmonicAnalyzerTests
 
         Assert.IsType<ArgumentException>(caught);
     }
+
+    [Fact]
+    public void MeasureTone_MatchesAnalyzeForTheFundamental()
+    {
+        // Analyze is defined as MeasureTone applied per order, so the two must agree bin for bin
+        // and volt for volt — IntermodulationAnalyzer relies on it.
+        var (spectrum, sums) = ForwardWindowed(WindowType.Hann, (1.0, 27), (0.01, 54));
+        var psdBuffer = new double[spectrum.Length];
+        var psd = PsdSpectrum.Compute(spectrum, SampleRateHz, sums, psdBuffer);
+
+        Span<Harmonic> harmonics = stackalloc Harmonic[2];
+        HarmonicAnalyzer.Analyze(psd, fundamentalBin: 25, harmonicCount: 2, harmonics);
+        var tone = HarmonicAnalyzer.MeasureTone(psd, expectedBin: 25);
+        var second = HarmonicAnalyzer.MeasureTone(psd, expectedBin: 50);
+
+        Assert.Equal(harmonics[0].Bin, tone.Bin);
+        Assert.Equal(harmonics[0].AmplitudeVrms, tone.AmplitudeVrms);
+        Assert.Equal(harmonics[1].Bin, second.Bin);
+        Assert.Equal(harmonics[1].AmplitudeVrms, second.AmplitudeVrms);
+    }
 }

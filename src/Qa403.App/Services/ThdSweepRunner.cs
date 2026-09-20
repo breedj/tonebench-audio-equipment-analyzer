@@ -59,9 +59,6 @@ public sealed class ThdSweepRunner(
     /// <summary>Headroom left above the expected level when picking an input range, in dB — see <see cref="InputRangeSelector.HeadroomDb"/>, which owns the ladder this and the device's own ranger share.</summary>
     private const double InputRangeHeadroomDb = InputRangeSelector.HeadroomDb;
 
-    /// <summary>How often <see cref="WaitForCaptureAsync"/> re-checks. Short against the 20 Hz pipeline tick, so it costs a poll or two per average.</summary>
-    private static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(20);
-
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateLock = new();
 
@@ -848,51 +845,12 @@ public sealed class ThdSweepRunner(
         return pipeline.LatestSnapshots();
     }
 
-    private async Task WaitForCaptureAsync(ThdSweepRequest request, int fftSize, CancellationToken ct)
-    {
-        var timeout = CaptureTimeout(request, fftSize);
-        long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+    private Task WaitForCaptureAsync(ThdSweepRequest request, int fftSize, CancellationToken ct) =>
+        SweepCaptureSupport.WaitForSingleShotAsync(pipeline, CaptureTimeout(request, fftSize), ct);
 
-        while (!pipeline.SingleShotComplete)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (Environment.TickCount64 > deadline)
-            {
-                throw new TimeoutException(
-                    $"A sweep point did not complete within {timeout.TotalSeconds:0.0} s. The device may have stopped streaming.");
-            }
-
-            await Task.Delay(CapturePollInterval, ct).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// How long one point may take: the time to refill the FFT window after the flush (including
-    /// the discarded in-flight audio), plus one pipeline tick per average, times three for slack.
-    /// Generous on purpose — this exists to notice a wedged device, not to police timing.
-    /// </summary>
-    private TimeSpan CaptureTimeout(ThdSweepRequest request, int fftSize)
-    {
-        // The stimulus latency the flush discards is ~65 ms at every sample rate (see
-        // Qa40xUsbDevice.StimulusLatencyFrames); 100 ms is a deliberately loose stand-in rather than
-        // widening DeviceSessionService's surface for a timeout estimate.
-        const double StimulusLatencySeconds = 0.1;
-
-        // The settle time the session discards on top of the latency at every stimulus change --
-        // a user's number, so it has to be in the budget or a long settle reads as a wedged device.
-        double settleSeconds = session.CaptureDelayMs / 1000.0;
-
-        double recordSeconds = fftSize / request.EffectiveSampleRateHz;
-        double fillSeconds = recordSeconds + StimulusLatencySeconds + settleSeconds;
-
-        // Averages are now paced by fresh signal, not by the display tick, so the budget has to be
-        // too: AverageCount averages at AverageHopFraction cost (1 + (n-1)*hop) records. Timing this
-        // against the old tick-rate figure would abort a large-FFT point long before it could
-        // legitimately finish.
-        double averageSeconds = (1.0 + ((Math.Max(1, request.AverageCount) - 1) * AverageHopFraction)) * recordSeconds;
-        return TimeSpan.FromSeconds(((fillSeconds + averageSeconds) * 3.0) + 2.0);
-    }
+    /// <summary>How long one point may take — see <see cref="SweepCaptureSupport.CaptureTimeout"/>; the settle time is the session's.</summary>
+    private TimeSpan CaptureTimeout(ThdSweepRequest request, int fftSize) =>
+        SweepCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, AverageHopFraction, session.CaptureDelayMs);
 
     /// <summary>
     /// The FFT size the noise floor is captured at — the largest the sweep's sample rate allows, in
@@ -917,34 +875,9 @@ public sealed class ThdSweepRunner(
         };
     }
 
-    private static double MeasuredFundamentalDbv(SpectrumSnapshot[] snapshots)
-    {
-        double best = double.NegativeInfinity;
-        foreach (var snapshot in snapshots)
-        {
-            if (snapshot.Meters is { } meters)
-                best = Math.Max(best, meters.FundamentalDbv);
-        }
+    private static double MeasuredFundamentalDbv(SpectrumSnapshot[] snapshots) => SweepCaptureSupport.MeasuredFundamentalDbv(snapshots);
 
-        return best;
-    }
-
-    /// <summary>
-    /// The largest time-domain peak level any measured channel saw, in the same "Pk dBV"
-    /// (peak volts / sqrt(2)) convention <c>Qa40xAutoRanger</c> compares against — one input range
-    /// serves both channels, so the louder one decides. Negative infinity when nothing was measured.
-    /// </summary>
-    private static double MeasuredPeakDbv(SpectrumSnapshot[] snapshots)
-    {
-        double best = double.NegativeInfinity;
-        foreach (var snapshot in snapshots)
-        {
-            if (snapshot.Meters is { } meters)
-                best = Math.Max(best, meters.PeakDbv);
-        }
-
-        return best;
-    }
+    private static double MeasuredPeakDbv(SpectrumSnapshot[] snapshots) => SweepCaptureSupport.MeasuredPeakDbv(snapshots);
 
     private static IEnumerable<ThdSweepPoint> BuildPoints(
         double freqHz, double generatorAmpDbv, ThdSweepRequest request, SpectrumSnapshot[] snapshots, double[] noiseVrms)
@@ -995,27 +928,8 @@ public sealed class ThdSweepRunner(
         }
     }
 
-    /// <summary>
-    /// Mean per-bin Vrms over [loHz, hiHz] of a retained dBV trace. The snapshot carries dBV per
-    /// bin, so convert back to volts first.
-    ///
-    /// The mean of the amplitudes, matching the previous app, not the RMS of them: for
-    /// Rayleigh-distributed noise bins those differ by 1 dB, which is not worth a difference from
-    /// the reading this is meant to be comparable with.
-    /// </summary>
-    private static double MeanBandBinVrms(SpectrumSnapshot snapshot, double loHz, double hiHz)
-    {
-        int loBin = Math.Max(1, (int)Math.Round(loHz / snapshot.BinSizeHz));
-        int hiBin = Math.Min(snapshot.Dbv.Length - 1, (int)Math.Round(hiHz / snapshot.BinSizeHz));
-        if (hiBin < loBin)
-            return 0.0;
-
-        double sum = 0.0;
-        for (int k = loBin; k <= hiBin; k++)
-            sum += Math.Pow(10.0, snapshot.Dbv[k] / 20.0);
-
-        return sum / (hiBin - loBin + 1);
-    }
+    private static double MeanBandBinVrms(SpectrumSnapshot snapshot, double loHz, double hiHz) =>
+        SweepCaptureSupport.MeanBandBinVrms(snapshot, loHz, hiHz);
 
     private void AddPoint(ThdSweepPoint point)
     {
@@ -1131,9 +1045,9 @@ public sealed class ThdSweepRunner(
     private static double ProgressX(ThdSweepRequest request, double freqHz, double ampDbv) =>
         request.Axis == SweepAxis.Amplitude ? DbvToVolt(ampDbv) : freqHz;
 
-    private static double DbvToVolt(double dbv) => Math.Pow(10.0, dbv / 20.0);
+    private static double DbvToVolt(double dbv) => SweepCaptureSupport.DbvToVolt(dbv);
 
-    private static double VoltToDbv(double volt) => 20.0 * Math.Log10(Math.Max(volt, double.Epsilon));
+    private static double VoltToDbv(double volt) => SweepCaptureSupport.VoltToDbv(volt);
 
     private void SetGeneratorAmpDbv(double ampDbv)
     {

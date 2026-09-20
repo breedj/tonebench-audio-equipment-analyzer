@@ -16,6 +16,12 @@ defineProps<{ kind: string }>()
     <path d="M3 3v18h18" />
     <path d="M6 17h8c2 0 3-4 4-8" />
   </svg>
+  <!-- The amplitude knee again, with two tone marks standing on the baseline: a two-tone pair stepped through the levels. -->
+  <svg v-else-if="kind === 'ImdVsAmplitude'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v18h18" />
+    <path d="M6 17h8c2 0 3-4 4-8" />
+    <path d="M8 17v-4M11 17v-6" />
+  </svg>
   <!-- A flat passband rolling off at both ends: a frequency response with its bandwidth. -->
   <svg v-else-if="kind === 'FrequencyResponse'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 3v18h18" />

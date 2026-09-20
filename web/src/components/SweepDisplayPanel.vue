@@ -18,12 +18,23 @@
  */
 
 import { computed, watch } from 'vue'
+import { useImdSweep } from '../composables/useImdSweep'
 import { useSweep } from '../composables/useSweep'
 import { useMeasurements } from '../composables/useMeasurements'
-import { percentToDb, sweepTraceValue, type SweepTraceKey } from '../sweep/points'
+import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
 import { AMPLITUDE_X_AXES, sweepXLabel, sweepXUnit, sweepXValue, type SweepXAxis } from '../sweep/xAxis'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
 import CollapsibleSection from './CollapsibleSection.vue'
+
+const props = defineProps<{
+  /** Which sweep this panel serves — decides the trace checkbox names (THD/D2.. or IMD/IM2..) and which store Autofit reads. Defaults to the THD family. */
+  traceFamily?: SweepTraceFamily
+}>()
+
+const family = computed(() => props.traceFamily ?? 'thd')
+
+/** The checkbox names: THD/D2… or IMD/IM2…, never the normalized "n" prefix — the checkbox is the trace, whichever way the run is read. */
+const t = (key: SweepTraceKey) => sweepTraceLabel(key, 'Conventional', family.value)
 
 const unit = defineModel<'percent' | 'db'>('unit', { required: true })
 const showMagnitude = defineModel<boolean>('showMagnitude', { required: true })
@@ -132,7 +143,14 @@ function onBottomDbChange(event: Event) {
  * encloses the data, not compute an arbitrary bound. The dB axis has no such list (a free-typed
  * field, step 10), so it rounds out to the nearest 10 dB instead, the same convention as Spectrum's.
  */
-const { points: sweepPoints, running, thdMethod, requestedEndFreqHz } = useSweep()
+// The live run Autofit fits: the THD store's or the IMD store's, by family. Both keep their points
+// in the chart's shape (imd/points.ts), so everything below reads them alike.
+const thdSweep = useSweep()
+const imdSweep = useImdSweep()
+const sweepPoints = computed(() => (family.value === 'imd' ? imdSweep.points.value : thdSweep.points.value))
+const running = computed(() => (family.value === 'imd' ? imdSweep.running.value : thdSweep.running.value))
+const thdMethod = computed<ThdMethodName>(() => (family.value === 'imd' ? 'Conventional' : thdSweep.thdMethod.value))
+const requestedEndFreqHz = computed(() => (family.value === 'imd' ? null : thdSweep.requestedEndFreqHz.value))
 const { overlays } = useMeasurements()
 
 /**
@@ -522,27 +540,27 @@ function onXToChange(event: Event) {
       </label>
       <label class="flex items-center gap-1.5">
         <input v-model="showThd" type="checkbox" />
-        THD
+        {{ t('thd') }}
       </label>
       <label class="flex items-center gap-1.5">
         <input v-model="showD2" type="checkbox" />
-        D2
+        {{ t('d2') }}
       </label>
       <label class="flex items-center gap-1.5">
         <input v-model="showD3" type="checkbox" />
-        D3
+        {{ t('d3') }}
       </label>
       <label class="flex items-center gap-1.5">
         <input v-model="showD4" type="checkbox" />
-        D4
+        {{ t('d4') }}
       </label>
       <label class="flex items-center gap-1.5">
         <input v-model="showD5" type="checkbox" />
-        D5
+        {{ t('d5') }}
       </label>
       <label class="flex items-center gap-1.5">
         <input v-model="showD6Plus" type="checkbox" />
-        D6+
+        {{ t('d6plus') }}
       </label>
       <label class="flex items-center gap-1.5" title="The generator-off residual, as a share of each point's fundamental.">
         <input v-model="showNoiseFloor" type="checkbox" />

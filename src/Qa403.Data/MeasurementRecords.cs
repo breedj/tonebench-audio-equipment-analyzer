@@ -72,7 +72,21 @@ public sealed record FftSpectrumParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The two-tone intermodulation analysis in force, if any -- see
+    /// <c>SpectrumPipelineOptions.Intermodulation</c>. All null (the default, and every row saved
+    /// before this existed) means no IMD figure. <paramref name="ImdPreset"/> is the generator
+    /// panel's template name (an <c>IntermodulationPreset</c> enum name, "Custom" for a typed pair)
+    /// and purely a UI convenience; the tones, method, order and product band limit are what the
+    /// pipeline actually measured with, so a stored result can say what produced its figure.
+    /// </summary>
+    string? ImdPreset = null,
+    string? ImdMethod = null,
+    int? ImdMaxOrder = null,
+    double? ImdToneLowHz = null,
+    double? ImdToneHighHz = null,
+    double? ImdMaxProductFreqHz = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
@@ -262,6 +276,64 @@ public sealed record ThdVsAmplitudeParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
+    double? CaptureDelayMs = null);
+
+/// <summary>
+/// Configured or as-run parameters for the 'ImdVsAmplitude' measurement kind: a two-tone pair
+/// stepped through a ladder of generator levels. The level fields are sine-equivalent volts (the
+/// single sine whose peak equals the pair's peak -- see <c>Qa403.Dsp.IntermodulationPresets</c>).
+/// <see cref="Preset"/> and <see cref="Method"/> are enum names (<c>IntermodulationPreset</c>,
+/// <c>IntermodulationMethod</c>) so the JSON reads.
+///
+/// The chart display fields reuse <see cref="ThdVsAmplitudeParameters"/>' names on purpose: the
+/// IMD sweep is drawn by the same chart, and <c>ChartShowThd</c>/<c>ChartShowD2..D5</c>/
+/// <c>ChartShowD6Plus</c> there mean the IMD total, the IM2..IM5 orders and IM6+ (see
+/// <c>web/src/imd/points.ts</c>). Renaming them would cost the client a second display record for
+/// no information.
+/// </summary>
+public sealed record ImdVsAmplitudeParameters(
+    string Preset,
+    double ToneLowHz,
+    double ToneHighHz,
+    /// <summary>Amplitude ratio low:high -- 4 for SMPTE/DIN, 1 for CCIF.</summary>
+    double LowToHighRatio,
+    string Method,
+    int MaxOrder,
+    double StartLevelVolt,
+    double EndLevelVolt,
+    int StepsPerOctave,
+    double LoadOhms,
+    bool ProcessLeft,
+    bool ProcessRight,
+    int FftSize,
+    WindowType Window,
+    int AverageCount,
+    double SampleRateHz,
+    bool MeasureNoiseFloor = true,
+    /// <summary>Highest product frequency counted; null means the measurement band's upper edge (in-band products only).</summary>
+    double? MaxProductFreqHz = null,
+    string? ChartXAxis = null,
+    string? ChartUnit = null,
+    bool? ChartShowNoiseFloor = null,
+    bool? ChartShowMagnitude = null,
+    bool? ChartShowThd = null,
+    bool? ChartShowD2 = null,
+    bool? ChartShowD3 = null,
+    bool? ChartShowD4 = null,
+    bool? ChartShowD5 = null,
+    bool? ChartShowD6Plus = null,
+    bool? ChartShowLeft = null,
+    bool? ChartShowRight = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    double? ChartYMaxPercent = null,
+    double? ChartYMinPercent = null,
+    double? ChartXFrom = null,
+    double? ChartXTo = null,
+    double? ChartYTopDb = null,
+    double? ChartYBottomDb = null,
+    bool? ChartAutofitOnDone = null,
+    /// <summary>The settle time the run discarded after each stimulus change, in ms -- a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>

@@ -26,7 +26,13 @@ public sealed record SpectrumMeters(
     /// at the configured target — see <see cref="Qa403.Dsp.SpectrumAverager.Count"/>. 0 when
     /// averaging is off.
     /// </summary>
-    int AveragesTaken);
+    int AveragesTaken,
+    /// <summary>
+    /// Two-tone intermodulation, present only when <see cref="SpectrumPipelineOptions.Intermodulation"/>
+    /// was set for this tick and the tones were resolvable (see
+    /// <see cref="IntermodulationAnalyzer.Analyze"/> for when it is null even then).
+    /// </summary>
+    IntermodulationResult? Intermodulation = null);
 
 /// <summary>
 /// A signal decimated to at most a few hundred points for a small preview chart -- never the

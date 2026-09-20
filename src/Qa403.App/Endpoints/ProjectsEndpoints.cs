@@ -167,7 +167,9 @@ public sealed record StagedMeasurementConfig(
     double? ChartYTopDbv = null, double? ChartYBottomDbv = null, double? ChartXFromHz = null, double? ChartXToHz = null,
     bool? ChartThickLines = null, bool? ChartShowDataPoints = null, bool? ChartShowMinMax = null, bool? ChartShowPeakHold = null,
     bool? ChartAutofitOnDone = null,
-    bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null);
+    bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null,
+    /// <summary>The generator panel's IMD template and analysis choice -- see <see cref="Qa403.Data.FftSpectrumParameters.ImdPreset"/>. The tones themselves ride in the generator config.</summary>
+    string? ImdPreset = null, string? ImdMethod = null, int? ImdMaxOrder = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -204,4 +206,7 @@ public sealed record MeasurementTypeAppliedResponse(
     bool? ChartShowWaterfall,
     bool? ChartShowOscilloscope,
     bool? ChartShowHarmonics,
-    bool? ChartShowOtherPeaks);
+    bool? ChartShowOtherPeaks,
+    string? ImdPreset,
+    string? ImdMethod,
+    int? ImdMaxOrder);

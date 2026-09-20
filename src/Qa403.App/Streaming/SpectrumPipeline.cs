@@ -646,7 +646,15 @@ public sealed class SpectrumPipeline(
 
             BroadcastSpectrumFrame(channel, seq, ampPower, binSizeHz, options);
             if (meters is not null)
+            {
                 BroadcastMetersFrame(channel, seq, meters, singleShotComplete);
+                // Its own frame rather than a meters-frame extension, so the meters layout (and
+                // every client that decodes it) is untouched when no IMD is configured.
+                if (meters.Intermodulation is { } intermodulation)
+                    hub.Broadcast(StreamFrame.EncodeIntermodulation(channel, seq, intermodulation, singleShotComplete));
+                else if (options.Intermodulation is not null)
+                    hub.Broadcast(StreamFrame.EncodeIntermodulationUnresolved(channel, seq));
+            }
             BroadcastScopeFrame(channel, seq, timeBuf.AsSpan(0, n), _sampleRateHz);
         }
         finally
@@ -872,9 +880,22 @@ public sealed class SpectrumPipeline(
 
         var otherPeaks = FindOtherPeaks(psd, harmonics, fundamentalDbv, options);
 
+        IntermodulationResult? intermodulation = null;
+        if (options.Intermodulation is { } imdSpec)
+        {
+            // Products above the band limit are omitted, not zero — see IntermodulationSpec.
+            int maxProductBin = imdSpec.MaxProductFreqHz is { } maxProductHz
+                ? Math.Min(psd.ValuesV2PerHz.Length - 1, psd.BinOfFrequency(maxProductHz))
+                : band.HiBinInclusive;
+            intermodulation = IntermodulationAnalyzer.Analyze(
+                psd, psd.BinOfFrequency(imdSpec.ToneLowHz), psd.BinOfFrequency(imdSpec.ToneHighHz),
+                imdSpec.Method, imdSpec.MaxOrder, maxProductBin);
+        }
+
         return new SpectrumMeters(
             fundamentalFreqHz, (float)psd.BinSizeHz, thdPercent, thdNPercent, snrDb,
-            fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks, averagesTaken);
+            fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks, averagesTaken,
+            intermodulation);
     }
 
     /// <summary>

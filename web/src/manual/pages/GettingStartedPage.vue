@@ -92,6 +92,10 @@ const { showPage } = useManual()
           <td>How distortion changes with level at one frequency — where clipping starts.</td>
         </tr>
         <tr>
+          <td>IMD vs amplitude</td>
+          <td>Two-tone intermodulation (SMPTE, DIN or CCIF) against level — the distortion test that still works past a class-D output filter.</td>
+        </tr>
+        <tr>
           <td>Frequency response</td>
           <td>Gain and phase across the band, measured fast with a chirp.</td>
         </tr>

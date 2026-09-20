@@ -15,7 +15,8 @@ import type { ImpedanceDisplay } from '../impedance/display'
 import type { ImpulseDisplay } from '../measurements/impulseDisplay'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
-import type { MetersFrame, ScopeFrame, SpectrumFrame } from '../streaming/protocol'
+import type { SweepTraceFamily } from '../sweep/points'
+import type { IntermodulationFrame, MetersFrame, ScopeFrame, SpectrumFrame } from '../streaming/protocol'
 import type { SpectrumDisplaySource } from '../composables/useChartDisplay'
 import type { ReportElementId } from './elements'
 import type { ExportableChart } from './renderChart'
@@ -71,6 +72,8 @@ export type ReportSubjectData =
       spectrum: Record<number, SpectrumFrame>
       /** The meters per channel — live frames, or a stored result's metric rows repacked (storedMetersFrames). */
       meters: Record<number, MetersFrame>
+      /** The two-tone IMD figure per channel, when one was measured — live frames, or a stored result's `imd_*` rows (storedIntermodulationFrames). */
+      intermodulation: Record<number, IntermodulationFrame>
       /** The chart's display state — the screen's singleton, or a stored type's own (see SPECTRUM_DISPLAY_KEY). */
       display: SpectrumDisplaySource
       /** The metric tiles' labels in their order: the screen's selection, or the stored type's. */
@@ -89,6 +92,8 @@ export type ReportSubjectData =
       kind: 'sweep'
       points: ThdSweepPoint[]
       method: ThdMethodName
+      /** THD/D2.. or IMD/IM2.. — which measurement the points are, for the chart's labels (see imd/points.ts). */
+      family: SweepTraceFamily
       display: SweepDisplay
     }
   | {

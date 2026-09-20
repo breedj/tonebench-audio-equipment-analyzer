@@ -4,7 +4,7 @@ import Modal from './Modal.vue'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
 import { isFrequencyResponseKind, isImpedanceKind,
-  isImpulseResponseKind, isSweepKind } from '../measurements/kinds'
+  isImpulseResponseKind, isImdSweepKind, isSweepKind } from '../measurements/kinds'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -14,7 +14,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 // selected (see App.vue), so currentTypeId is never null here. Same currentType lookup App.vue
 // itself does; the project is the one the server has open.
 const { currentProject, types, currentTypeId, typeNotes } = useProjects()
-const { save, saveSweep, saveResponse, saveImpulse,
+const { save, saveSweep, saveImdSweep, saveResponse, saveImpulse,
     saveImpedance, error } = useMeasurements()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
@@ -57,6 +57,8 @@ async function onSave() {
   if (isImpedanceKind(currentType.value.kind)) await saveImpedance(req)
   else if (isImpulseResponseKind(currentType.value.kind)) await saveImpulse(req)
   else if (isFrequencyResponseKind(currentType.value.kind)) await saveResponse(req, currentType.value.kind)
+  // The IMD sweep before the generic sweep arm: it is a sweep kind, but its own runner holds the points.
+  else if (isImdSweepKind(currentType.value.kind)) await saveImdSweep(req)
   else if (isSweepKind(currentType.value.kind)) await saveSweep(req)
   else await save(req)
   emit('saved')

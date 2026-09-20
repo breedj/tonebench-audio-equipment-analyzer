@@ -9,6 +9,7 @@ import { defineAsyncComponent, h } from 'vue'
 import {
   FFT_SPECTRUM_KIND,
   FREQUENCY_RESPONSE_KIND,
+  IMD_VS_AMPLITUDE_KIND,
   IMPEDANCE_KIND,
   IMPULSE_RESPONSE_KIND,
   STEPPED_RESPONSE_KIND,
@@ -114,6 +115,14 @@ export const MANUAL_PAGES: ManualPage[] = [
     kind: THD_VS_AMPLITUDE_KIND,
     group: 'Measurements',
     component: manualPage(() => import('./pages/ThdVsAmplitudePage.vue')),
+  },
+  {
+    id: 'imd-vs-amplitude',
+    title: 'IMD vs amplitude',
+    summary: 'Two-tone intermodulation (SMPTE, DIN, CCIF) against level.',
+    kind: IMD_VS_AMPLITUDE_KIND,
+    group: 'Measurements',
+    component: manualPage(() => import('./pages/ImdVsAmplitudePage.vue')),
   },
   {
     id: 'frequency-response',

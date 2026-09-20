@@ -16,7 +16,7 @@ import ToolbarIcon from './ToolbarIcon.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
-import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceKey } from '../sweep/points'
+import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
 import {
   decadeOrFallbackSplits,
   formatSweepX,
@@ -109,7 +109,20 @@ const props = defineProps<{
    * of only being compared as a line on the chart.
    */
   overlaySelections: { id: number; name: string; left: ThdSweepPoint | null; right: ThdSweepPoint | null }[]
+  /**
+   * Which measurement the live points came from — only the trace *labels* depend on it (THD/D2..
+   * or IMD/IM2..); the IMD sweep maps its figures onto the same point slots (imd/points.ts) so
+   * everything else here is shared. Defaults to the THD family for the two THD screens.
+   */
+  traceFamily?: SweepTraceFamily
 }>()
+
+const family = computed(() => props.traceFamily ?? 'thd')
+
+/** An overlay's own family, off its stored kind — a stored IMD sweep reads IM2 whichever screen draws it. */
+function familyOf(overlay: OverlayEntry): SweepTraceFamily {
+  return overlay.sweepFamily ?? 'thd'
+}
 
 /**
  * The x value under the pointer, or null once it leaves the plot area — App.vue uses this to drive
@@ -401,7 +414,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
   for (const ch of activeChannels.value) {
     for (const trace of activeTraces.value) {
       series.push({
-        label: `${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, thdMethod.value)}`,
+        label: `${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, thdMethod.value, family.value)}`,
         ...styleOf(0, ch, trace, dark),
         points,
         scale: 'y',
@@ -422,7 +435,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
     for (const ch of activeChannels.value) {
       for (const trace of activeTraces.value) {
         series.push({
-          label: `${overlay.detail.name} ${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, methodOf(overlay))}`,
+          label: `${overlay.detail.name} ${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, methodOf(overlay), familyOf(overlay))}`,
           ...styleOf(overlayIdx + 1, ch, trace, dark),
           points,
           scale: 'y',
@@ -598,8 +611,8 @@ function formatPower(watt: number): string {
  * frequency-normalized run reads nTHD/nD2… while a conventional one overlaid on it reads THD/D2…,
  * and the header is the only place that difference is stated.
  */
-function metricColumns(method: ThdMethodName): string[] {
-  const t = (key: SweepTraceKey) => sweepTraceLabel(key, method)
+function metricColumns(method: ThdMethodName, traceFamily: SweepTraceFamily = family.value): string[] {
+  const t = (key: SweepTraceKey) => sweepTraceLabel(key, method, traceFamily)
   return [
     sweepXLabel(props.xAxis), t('thd'), 'Magnitude', t('d2'), t('d3'), t('d4'), t('d5'), t('d6plus'), 'Power', 'Noise floor',
   ]
@@ -636,20 +649,20 @@ const metricGroups = computed(() => {
     rows: { key: string; label: string; colorClass: string; values: string[] }[]
   }[] = []
 
-  function add(key: string, name: string | null, method: ThdMethodName, left: ThdSweepPoint | null, right: ThdSweepPoint | null) {
+  function add(key: string, name: string | null, method: ThdMethodName, left: ThdSweepPoint | null, right: ThdSweepPoint | null, traceFamily: SweepTraceFamily) {
     const rows = [
       { key: `${key}-L`, label: 'Left channel', colorClass: 'text-blue-600 dark:text-blue-400', point: left },
       { key: `${key}-R`, label: 'Right channel', colorClass: 'text-red-600 dark:text-red-400', point: right },
     ]
       .filter((r) => r.point !== null)
       .map((r) => ({ key: r.key, label: r.label, colorClass: r.colorClass, values: metricsFor(r.point!, method) }))
-    if (rows.length > 0) groups.push({ key, name, columns: metricColumns(method), rows })
+    if (rows.length > 0) groups.push({ key, name, columns: metricColumns(method, traceFamily), rows })
   }
 
-  add('live', null, thdMethod.value, props.selectedLeft, props.selectedRight)
+  add('live', null, thdMethod.value, props.selectedLeft, props.selectedRight, family.value)
   for (const sel of props.overlaySelections) {
     const overlay = activeOverlays.value.find((o) => o.id === sel.id)
-    add(`o${sel.id}`, sel.name, overlay ? methodOf(overlay) : 'Conventional', sel.left, sel.right)
+    add(`o${sel.id}`, sel.name, overlay ? methodOf(overlay) : 'Conventional', sel.left, sel.right, overlay ? familyOf(overlay) : family.value)
   }
   return groups
 })
@@ -661,9 +674,9 @@ const metricGroups = computed(() => {
  * heading names it.
  */
 function legendGroupsFor(dark: boolean) {
-  const groups = [{ key: 'live', name: 'Live sweep', runIdx: 0, method: thdMethod.value }]
+  const groups = [{ key: 'live', name: 'Live sweep', runIdx: 0, method: thdMethod.value, family: family.value }]
   activeOverlays.value.forEach((overlay, i) =>
-    groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: i + 1, method: methodOf(overlay) }),
+    groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: i + 1, method: methodOf(overlay), family: familyOf(overlay) }),
   )
 
   return groups.map((group) => ({
@@ -673,7 +686,7 @@ function legendGroupsFor(dark: boolean) {
         const style = styleOf(group.runIdx, ch, trace, dark)
         // nTHD, nD2 … on a frequency-normalized run: the figures are a different measurement
         // from a conventional run's, and the legend is where the two are told apart.
-        const label = sweepTraceLabel(trace.key, group.method)
+        const label = sweepTraceLabel(trace.key, group.method, group.family)
         return {
           key: `${group.key}-${ch}-${trace.key}`,
           // Only worth naming the channel when both are drawn — a mono sweep's legend would

@@ -1,5 +1,13 @@
 import type { GeneratorTone, MeasurementDetail } from '../api/client'
-import { StreamMsgType, type HarmonicMarker, type MetersFrame, type SpectrumFrame, type StreamChannel } from '../streaming/protocol'
+import {
+  StreamMsgType,
+  type HarmonicMarker,
+  type IntermodulationFrame,
+  type IntermodulationProductFrame,
+  type MetersFrame,
+  type SpectrumFrame,
+  type StreamChannel,
+} from '../streaming/protocol'
 
 /**
  * A stored FFT result's channels as the frames SpectrumChart draws live — so a report of a stored
@@ -92,6 +100,69 @@ export function storedMetersFrames(detail: MeasurementDetail): Record<number, Me
       harmonics,
       otherPeaks: [],
       averagesTaken: 0,
+      held: true,
+    }
+  }
+  return frames
+}
+
+/**
+ * A stored FFT result's `imd_*` metric rows as the intermodulation frame the IMD tiles and the
+ * Intermodulation table read live — see MeasurementSaveService.IntermodulationMetrics for the
+ * names. A channel saved without an IMD figure (no two-tone spec at the time) has no `imd_percent`
+ * row and gets no frame. The method and max order are in the result's params_json
+ * (`imdMethod`/`imdMaxOrder`), not in the rows, so they are passed in.
+ */
+export function storedIntermodulationFrames(
+  detail: MeasurementDetail,
+  analysis: { method: 'Smpte' | 'Ccif'; maxOrder: number },
+): Record<number, IntermodulationFrame> {
+  const frames: Record<number, IntermodulationFrame> = {}
+
+  for (const channel of detail.channelsData) {
+    const m = channel.metrics
+    if (typeof m.imd_percent !== 'number' || typeof m.imd_tone_low_hz !== 'number' || typeof m.imd_tone_high_hz !== 'number') continue
+
+    const perOrder = Object.keys(m)
+      .map((key) => /^im(\d+)_percent$/.exec(key))
+      .filter((match): match is RegExpExecArray => match !== null)
+      .map((match) => ({ order: Number(match[1]), percent: m[match[0]] }))
+      .sort((a, b) => a.order - b.order)
+
+    const products: IntermodulationProductFrame[] = []
+    for (let i = 0; typeof m[`imd_p${i}_hz`] === 'number'; i++) {
+      products.push({
+        freqHz: m[`imd_p${i}_hz`],
+        dbv: m[`imd_p${i}_dbv`] ?? 0,
+        dbc: m[`imd_p${i}_dbc`] ?? 0,
+        m: m[`imd_p${i}_m`] ?? 0,
+        n: m[`imd_p${i}_n`] ?? 0,
+        order: m[`imd_p${i}_order`] ?? 0,
+      })
+    }
+
+    frames[channel.channel] = {
+      header: {
+        msgType: StreamMsgType.Intermodulation,
+        channel: channel.channel as StreamChannel,
+        flags: 0,
+        seq: 0,
+        x0: m.imd_tone_low_hz,
+        dx: m.imd_tone_high_hz,
+        nPoints: products.length,
+      },
+      toneLowHz: m.imd_tone_low_hz,
+      toneHighHz: m.imd_tone_high_hz,
+      method: analysis.method,
+      maxOrder: analysis.maxOrder,
+      toneLowDbv: m.imd_tone_low_dbv ?? 0,
+      toneHighDbv: m.imd_tone_high_dbv ?? 0,
+      imdPercent: m.imd_percent,
+      sineEquivalentDbv: m.imd_sine_equivalent_dbv ?? 0,
+      combinedRmsDbv: m.imd_combined_rms_dbv ?? 0,
+      referenceDbv: m.imd_reference_dbv ?? 0,
+      perOrder,
+      products,
       held: true,
     }
   }

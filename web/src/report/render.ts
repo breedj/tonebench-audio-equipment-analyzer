@@ -52,6 +52,7 @@ export function toOverlayEntry(subject: ReportSubject): OverlayEntry | null {
     visible: true,
     sweepPoints: data.kind === 'sweep' ? data.points : undefined,
     sweepMethod: data.kind === 'sweep' ? data.method : undefined,
+    sweepFamily: data.kind === 'sweep' ? data.family : undefined,
     sweepEndFreqHz: data.kind === 'sweep' ? sweepEndFreqHzFromParams(subject.paramsJson) : undefined,
     responseTraces: data.kind === 'response' || data.kind === 'impulse' ? data.traces : undefined,
     impedanceTraces: data.kind === 'impedance' ? data.traces : undefined,
@@ -219,11 +220,13 @@ export async function renderView(
           selectedLeft: null,
           selectedRight: null,
           overlaySelections: [],
+          traceFamily: data.family,
         },
         options,
         [provision],
       )
-      return { png, caption: `Distortion against ${sweepXLabel(window.xAxis).toLowerCase()}` }
+      const what = data.family === 'imd' ? 'Intermodulation distortion' : 'Distortion'
+      return { png, caption: `${what} against ${sweepXLabel(window.xAxis).toLowerCase()}` }
     }
 
     case 'impulse': {

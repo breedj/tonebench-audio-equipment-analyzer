@@ -100,6 +100,27 @@ public static class CsvExporter
     ];
 
     /// <summary>
+    /// The IMD-vs-amplitude column set (see <c>MeasurementSaveService.BuildImdSweepMetrics</c>):
+    /// the output on both level conventions, the power, the IMD total and each order to five, the
+    /// noise. Selected by <see cref="ImdMarkerMetric"/> being present, which no other sweep writes.
+    /// </summary>
+    private static readonly (string Metric, string Column)[] ImdSweepColumns =
+    [
+        ("imd_sine_equivalent_dbv", "output_sine_eq_dbv"),
+        ("imd_combined_rms_dbv", "output_rms_dbv"),
+        ("power_watt", "power_w"),
+        ("gain_db", "magnitude_db"),
+        ("imd_percent", "imd_percent"),
+        ("im2_percent", "im2_percent"),
+        ("im3_percent", "im3_percent"),
+        ("im4_percent", "im4_percent"),
+        ("im5_percent", "im5_percent"),
+        ("noise_percent", "noise_percent"),
+    ];
+
+    private const string ImdMarkerMetric = "imd_percent";
+
+    /// <summary>
     /// A frequency-response result as CSV: one row per display column, the curves side by side.
     ///
     /// <para>Its own renderer for the same reason <see cref="ExportSweep"/> is: a response stores
@@ -356,7 +377,8 @@ public static class CsvExporter
             .Distinct()
             .Count() > 1;
         bool normalized = points.Any(p => p.MetricsByChannel.Values.Any(m => m.ContainsKey(NormalizedMarkerMetric)));
-        var columns = amplitudeAxis ? AmplitudeSweepColumns : SweepColumns;
+        bool imd = points.Any(p => p.MetricsByChannel.Values.Any(m => m.ContainsKey(ImdMarkerMetric)));
+        var columns = imd ? ImdSweepColumns : amplitudeAxis ? AmplitudeSweepColumns : SweepColumns;
         if (normalized)
             columns = [.. columns, .. NormalizedSweepColumns];
 
@@ -372,8 +394,21 @@ public static class CsvExporter
         WriteComment(sb, "point_count", points.Count.ToString(CultureInfo.InvariantCulture));
         WriteComment(sb, "params_json", detail.ParamsJson);
 
-        if (amplitudeAxis)
+        if (imd)
+        {
+            // Both tones, from the first point that has them; the leading column is the sine-equivalent
+            // generator level in volts, as for the THD amplitude sweep.
+            var first = points[0].MetricsByChannel.Values.FirstOrDefault(m => m.ContainsKey("imd_tone_high_hz"));
+            if (first is not null)
+            {
+                WriteComment(sb, "tone_low_hz", first["imd_tone_low_hz"].ToString("F6", CultureInfo.InvariantCulture));
+                WriteComment(sb, "tone_high_hz", first["imd_tone_high_hz"].ToString("F6", CultureInfo.InvariantCulture));
+            }
+        }
+        else if (amplitudeAxis)
+        {
             WriteComment(sb, "freq_hz", points[0].FreqHz.ToString("F6", CultureInfo.InvariantCulture));
+        }
 
         sb.Append(amplitudeAxis ? "generator_volt" : "freq_hz");
         foreach (int channel in channels)

@@ -1,5 +1,6 @@
 import { reactive, ref } from 'vue'
-import type { GeneratorKind, GeneratorTone, MultitoneSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
+import type { GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
+import type { ImdPresetId } from '../imd/presets'
 
 // Module-level singleton (same pattern as useLoadOhms.ts / useSpectrumConfig.ts): the *staged*
 // generator form — what's typed into GeneratorChannelPanel, not what DeviceStatus reports. Left
@@ -18,6 +19,16 @@ const chirp = reactive<EchoChirpSettings>({
   smoothing: 'None' as SmoothingOctaves,
 })
 
+// The two-tone IMD template and analysis choice that go with the tone list — see
+// GeneratorChannelPanel.vue's "IMD preset" and imd/presets.ts. Staged like the tones (saved with
+// the measurement type, restored by App.vue's loadedParams watcher); the analysis itself reaches
+// the pipeline through spectrum-config whenever exactly two sine tones are staged.
+const imd = reactive<{ preset: ImdPresetId; method: ImdMethodName; maxOrder: number }>({
+  preset: 'Custom',
+  method: 'Smpte',
+  maxOrder: 5,
+})
+
 export function useGeneratorStimulus() {
-  return { kind, tones, multitone, noise, chirp }
+  return { kind, tones, multitone, noise, chirp, imd }
 }

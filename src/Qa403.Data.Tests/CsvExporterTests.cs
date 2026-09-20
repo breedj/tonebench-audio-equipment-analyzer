@@ -222,6 +222,57 @@ public class CsvExporterTests
         Assert.Throws<ArgumentException>(() => CsvExporter.ExportSweep(BuildSweepDetail(), []));
     }
 
+
+    /// <summary>
+    /// An IMD sweep is level-stepped like the THD amplitude sweep (its leading column is the
+    /// sine-equivalent generator level) but its columns are its own -- the two output conventions,
+    /// the IMD total and the orders -- selected by the <c>imd_percent</c> row no other sweep writes.
+    /// </summary>
+    [Fact]
+    public void ExportSweep_ImdSweep_UsesTheImdColumnsAndLeadsWithTheSineEquivalentLevel()
+    {
+        var detail = BuildSweepDetail();
+        StoredSweepPoint At(int seq, double generatorVolt)
+        {
+            var metrics = new Dictionary<string, double>
+            {
+                ["fundamental_hz"] = 60.0,
+                ["fundamental_dbv"] = 20.0 * Math.Log10(generatorVolt),
+                ["gain_db"] = 0.0,
+                ["power_watt"] = generatorVolt * generatorVolt / 8.0,
+                ["noise_percent"] = 0.001,
+                ["generator_dbv"] = 20.0 * Math.Log10(generatorVolt),
+                ["generator_volt"] = generatorVolt,
+                ["imd_percent"] = 0.02,
+                ["imd_tone_low_hz"] = 58.59,
+                ["imd_tone_high_hz"] = 7001.95,
+                ["imd_tone_low_dbv"] = -1.94,
+                ["imd_tone_high_dbv"] = -13.98,
+                ["imd_sine_equivalent_dbv"] = 20.0 * Math.Log10(generatorVolt),
+                ["imd_combined_rms_dbv"] = 20.0 * Math.Log10(generatorVolt) - 2.28,
+                ["im2_percent"] = 0.015,
+                ["im3_percent"] = 0.013,
+            };
+            return new StoredSweepPoint(seq, 60.0, new Dictionary<int, IReadOnlyDictionary<string, double>> { [0] = metrics });
+        }
+
+        string csv = CsvExporter.ExportSweep(detail, [At(0, 0.1), At(1, 0.2)]);
+        var lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var dataLines = lines.Where(l => !l.StartsWith('#')).ToArray();
+
+        Assert.Contains("# tone_low_hz: 58.590000", csv);
+        Assert.Contains("# tone_high_hz: 7001.950000", csv);
+        Assert.Equal(
+            "generator_volt,ch0_output_sine_eq_dbv,ch0_output_rms_dbv,ch0_power_w,ch0_magnitude_db,ch0_imd_percent,"
+                + "ch0_im2_percent,ch0_im3_percent,ch0_im4_percent,ch0_im5_percent,ch0_noise_percent",
+            dataLines[0]);
+        Assert.StartsWith("0.100000,", dataLines[1]);
+        Assert.StartsWith("0.200000,", dataLines[2]);
+        var fields = dataLines[1].Split(',');
+        Assert.Equal("0.020000", fields[5]);
+        Assert.Equal("", fields[8]); // im4 absent, not zero
+    }
+
     private static StoredSweepPoint SweepPoint(int seqIndex, double freqHz) =>
         new(seqIndex, freqHz, new Dictionary<int, IReadOnlyDictionary<string, double>> { [0] = SweepMetrics(-1.0) });
 

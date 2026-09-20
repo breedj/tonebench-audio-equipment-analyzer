@@ -1,6 +1,8 @@
 import { onUnmounted, ref, shallowRef } from 'vue'
 import {
   decodeHeader,
+  decodeImdSweepPointFrame,
+  decodeIntermodulationFrame,
   decodeMetersFrame,
   decodeScopeFrame,
   decodeSpectrumFrame,
@@ -11,12 +13,16 @@ import {
   decodeImpedanceFrame,
   decodeImpedanceProgressFrame,
   encodeSetViewport,
+  STREAM_FLAG_IMD_SWEEP,
+  STREAM_FLAG_IMD_UNRESOLVED,
   StreamMsgType,
+  type IntermodulationFrame,
   type MetersFrame,
   type ScopeFrame,
   type SpectrumFrame,
 } from '../streaming/protocol'
 import { useFrequencyResponse } from './useFrequencyResponse'
+import { useImdSweep } from './useImdSweep'
 import { useImpedance } from './useImpedance'
 import { useSweep } from './useSweep'
 
@@ -30,9 +36,17 @@ const RECONNECT_DELAY_MS = 1000
 export function useSpectrumStream() {
   const spectrum = shallowRef<Record<number, SpectrumFrame>>({})
   const meters = shallowRef<Record<number, MetersFrame>>({})
+  // Present only while the pipeline has a two-tone IMD spec; keyed by channel like `meters`. The
+  // owner clears it together with `meters` (App.vue's run/clear paths) — a stale IMD tile after
+  // the tones changed would read as a measurement of the new stimulus.
+  const intermodulation = shallowRef<Record<number, IntermodulationFrame>>({})
+  // Per channel: an IMD spec is set but the pipeline could not resolve it this tick — see
+  // STREAM_FLAG_IMD_UNRESOLVED. What the Intermodulation table's "FFT too small" message keys on.
+  const imdUnresolved = shallowRef<Record<number, boolean>>({})
   const scope = shallowRef<Record<number, ScopeFrame>>({})
   const connected = ref(false)
   const sweep = useSweep()
+  const imdSweep = useImdSweep()
   const response = useFrequencyResponse()
 const impedance = useImpedance()
 
@@ -121,6 +135,15 @@ const impedance = useImpedance()
       } else if (header.msgType === StreamMsgType.Meters) {
         const frame = decodeMetersFrame(event.data)
         meters.value = { ...meters.value, [header.channel]: frame }
+      } else if (header.msgType === StreamMsgType.Intermodulation) {
+        if (header.flags & STREAM_FLAG_IMD_UNRESOLVED) {
+          const { [header.channel]: _dropped, ...rest } = intermodulation.value
+          intermodulation.value = rest
+          imdUnresolved.value = { ...imdUnresolved.value, [header.channel]: true }
+        } else {
+          intermodulation.value = { ...intermodulation.value, [header.channel]: decodeIntermodulationFrame(event.data) }
+          imdUnresolved.value = { ...imdUnresolved.value, [header.channel]: false }
+        }
       } else if (header.msgType === StreamMsgType.Scope) {
         ingestScopeFrame(header.seq, header.channel, decodeScopeFrame(event.data))
       } else if (header.msgType === StreamMsgType.SweepPoint) {
@@ -129,7 +152,12 @@ const impedance = useImpedance()
         // per-subscriber display state like the three refs above.
         sweep.ingestPoint(decodeSweepPointFrame(event.data))
       } else if (header.msgType === StreamMsgType.SweepProgress) {
-        sweep.ingestProgress(decodeSweepProgressFrame(event.data))
+        // Two runners share the progress frame; the flag says whose it is (see
+        // StreamFlags.IntermodulationSweep), so a running IMD sweep never paints the THD screen.
+        if (header.flags & STREAM_FLAG_IMD_SWEEP) imdSweep.ingestProgress(decodeSweepProgressFrame(event.data))
+        else sweep.ingestProgress(decodeSweepProgressFrame(event.data))
+      } else if (header.msgType === StreamMsgType.ImdSweepPoint) {
+        imdSweep.ingestPoint(decodeImdSweepPointFrame(event.data))
       } else if (header.msgType === StreamMsgType.FrequencyResponse) {
         // Same reasoning as the sweep frames above: one server-side run shared by every component
         // looking at it, so it goes into useFrequencyResponse's singleton rather than a local ref.
@@ -162,5 +190,5 @@ const impedance = useImpedance()
     socket?.close()
   })
 
-  return { spectrum, meters, scope, connected, setViewport, clearScope }
+  return { spectrum, meters, intermodulation, imdUnresolved, scope, connected, setViewport, clearScope }
 }

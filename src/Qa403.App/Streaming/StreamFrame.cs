@@ -43,6 +43,17 @@ public enum StreamMsgType : byte
 
     /// <summary>How far a running impedance measurement has got — see <see cref="StreamFrame.EncodeImpedanceProgress"/>.</summary>
     ImpedanceProgress = 9,
+
+    /// <summary>
+    /// One channel's two-tone intermodulation figure for a tick, sent right after that tick's
+    /// <see cref="Meters"/> frame whenever <see cref="SpectrumPipelineOptions.Intermodulation"/>
+    /// is set. Its own type rather than a meters-frame extension so the meters layout stays
+    /// byte-identical for every measurement that has no IMD. See <see cref="StreamFrame.EncodeIntermodulation"/>.
+    /// </summary>
+    Intermodulation = 10,
+
+    /// <summary>One finished IMD-vs-amplitude sweep point — see <see cref="StreamFrame.EncodeImdSweepPoint"/>.</summary>
+    ImdSweepPoint = 11,
 }
 
 public enum StreamChannel : byte
@@ -106,6 +117,23 @@ public enum StreamFlags : ushort
     /// chirp's frames are byte-identical to what they were before this existed.</para>
     /// </summary>
     SteppedResponse = 1 << 4,
+
+    /// <summary>
+    /// Progress-frame-only: this <see cref="StreamMsgType.SweepProgress"/> came from
+    /// <see cref="Qa403.App.Services.ImdSweepRunner"/> rather than the THD sweep runner. Same
+    /// reasoning as <see cref="SteppedResponse"/>: the two runners keep separate client state, and a
+    /// frame with no origin lands on whichever sweep screen is open.
+    /// </summary>
+    IntermodulationSweep = 1 << 5,
+
+    /// <summary>
+    /// Intermodulation-frame-only: an IMD spec is set but this tick could not resolve it — the two
+    /// tones are closer than <see cref="Qa403.Dsp.IntermodulationAnalyzer.MinToneSpacingBins"/>
+    /// at the current FFT size, or one of them has no measurable amplitude. The frame has no
+    /// payload. Sent rather than nothing, because a client that receives no IMD frame keeps
+    /// showing the last one it got — and the last one was measured at a different FFT size.
+    /// </summary>
+    IntermodulationUnresolved = 1 << 6,
 }
 
 /// <summary>
@@ -343,6 +371,99 @@ public static class StreamFrame
     /// <summary>Orders 2..5 in the normalized trailer — <see cref="Qa403.Dsp.NormalizedDistortion.IndividualOrders"/>.</summary>
     private const int NormalizedHarmonicSlots = Qa403.Dsp.NormalizedDistortion.IndividualOrders;
 
+    /// <summary>
+    /// Encodes one finished IMD-vs-amplitude sweep point. Header: x0 = the low tone (Hz), dx = the
+    /// high tone (Hz), nPoints = the per-order count, seq = the point's index in the sweep, channel
+    /// = the input channel. Payload, all little-endian:
+    /// <code>
+    /// 20  f32  generatorSineEquivalentDbv   -- the x coordinate: the generator's sine-equivalent level
+    /// 24  f32  toneLowDbv
+    /// 28  f32  toneHighDbv
+    /// 32  f32  sineEquivalentDbv            -- the measured output, 20·log10(V1 + V2)
+    /// 36  f32  combinedRmsDbv
+    /// 40  f32  gainDb
+    /// 44  f32  powerWatt
+    /// 48  f32  imdPercent
+    /// 52  f32  noisePercent
+    /// 56  u32  orderCount
+    /// 60  f32[orderCount]                   -- per-order percent, index 0 = order 2, contiguous
+    /// ..  u32 fftCount, (f32 x, f32 min, f32 max) * fftCount      -- FFT preview, 0 = absent
+    /// ..  u32 scopeCount, (f32 x, f32 min, f32 max) * scopeCount  -- scope preview, 0 = absent
+    /// </code>
+    /// </summary>
+    public static byte[] EncodeImdSweepPoint(ImdSweepPoint point, uint pointIndex)
+    {
+        const int scalarsAndCountLength = (9 * sizeof(float)) + sizeof(uint);
+        int orderCount = point.OrderPercent.Count;
+        int fftCount = point.PreviewFft?.X.Length ?? 0;
+        int scopeCount = point.PreviewScope?.X.Length ?? 0;
+
+        int length = HeaderLength + scalarsAndCountLength + (orderCount * sizeof(float))
+            + sizeof(uint) + (fftCount * 3 * sizeof(float))
+            + sizeof(uint) + (scopeCount * 3 * sizeof(float));
+        byte[] buffer = new byte[length];
+
+        var channel = point.Channel == 0 ? StreamChannel.Left : StreamChannel.Right;
+        WriteHeader(buffer, StreamMsgType.ImdSweepPoint, channel, StreamFlags.None, pointIndex, (float)point.ToneLowHz, (float)point.ToneHighHz, (uint)orderCount);
+
+        int offset = HeaderLength;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.GeneratorSineEquivalentDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.ToneLowDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.ToneHighDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.SineEquivalentDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.CombinedRmsDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.GainDb); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.PowerWatt); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.ImdPercent); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)point.NoisePercent); offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)orderCount); offset += 4;
+
+        foreach (double percent in point.OrderPercent)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)percent);
+            offset += 4;
+        }
+
+        offset = WriteSweepPreview(buffer, offset, point.PreviewFft);
+        WriteSweepPreview(buffer, offset, point.PreviewScope);
+
+        return buffer;
+    }
+
+    /// <summary>Decodes an <see cref="StreamMsgType.ImdSweepPoint"/> frame — see <see cref="EncodeImdSweepPoint"/> for the layout.</summary>
+    public static DecodedImdSweepPoint DecodeImdSweepPoint(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.ImdSweepPoint)
+            throw new ArgumentException("Frame is not an IMD sweep point frame.", nameof(frame));
+
+        int offset = HeaderLength;
+        float generatorSineEqDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float toneLowDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float toneHighDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float sineEqDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float combinedRmsDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float gainDb = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float powerWatt = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float imdPercent = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float noisePercent = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        uint orderCount = BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+
+        var orderPercent = new float[orderCount];
+        for (int i = 0; i < orderCount; i++)
+        {
+            orderPercent[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4));
+            offset += 4;
+        }
+
+        var previewFft = ReadSweepPreview(frame, ref offset);
+        var previewScope = ReadSweepPreview(frame, ref offset);
+
+        return new DecodedImdSweepPoint(
+            header.Channel, header.Seq, header.X0, header.Dx, generatorSineEqDbv, toneLowDbv, toneHighDbv, sineEqDbv, combinedRmsDbv,
+            gainDb, powerWatt, imdPercent, noisePercent, orderPercent, previewFft, previewScope);
+    }
+
     private static float NanIfAbsent(double? value) => value is { } v ? (float)v : float.NaN;
 
     private static float? NullIfNan(float value) => float.IsNaN(value) ? null : value;
@@ -377,12 +498,76 @@ public static class StreamFrame
     /// enumeration, not a set of independent bits — a sweep is determining its level, or measuring
     /// the noise floor, or sweeping, never two at once.
     /// </summary>
-    public static byte[] EncodeSweepProgress(int index, int total, double currentX, ThdSweepPhase phase)
+    public static byte[] EncodeSweepProgress(int index, int total, double currentX, ThdSweepPhase phase, StreamFlags flags = StreamFlags.None)
     {
         byte[] buffer = new byte[HeaderLength];
         WriteHeader(
-            buffer, StreamMsgType.SweepProgress, StreamChannel.Left, StreamFlags.None,
+            buffer, StreamMsgType.SweepProgress, StreamChannel.Left, flags,
             (uint)phase, (float)currentX, total, (uint)Math.Max(0, index));
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// Encodes one channel's intermodulation result. Header: x0 = the located low tone (Hz),
+    /// dx = the located high tone (Hz), nPoints = product count, <paramref name="held"/> sets
+    /// <see cref="StreamFlags.Held"/> exactly as the meters frame it follows. Payload, all
+    /// little-endian:
+    /// <code>
+    /// 20  u8   method            -- IntermodulationMethod ordinal (0 SMPTE, 1 CCIF)
+    /// 21  u8   maxOrder
+    /// 22  u16  (padding)
+    /// 24  f32  toneLowDbv
+    /// 28  f32  toneHighDbv
+    /// 32  f32  imdPercent
+    /// 36  f32  sineEquivalentDbv -- 20·log10(V1 + V2), the pair's peak as a sine level
+    /// 40  f32  combinedRmsDbv    -- 20·log10(sqrt(V1² + V2²)), the pair's true RMS
+    /// 44  f32  referenceDbv      -- what every dBc below is relative to
+    /// 48  u32  orderCount
+    /// 52  (u32 order, f32 percent) * orderCount     -- per-order figures, ascending order
+    /// ..  (f32 freqHz, f32 dbv, f32 dbc, i32 m, i32 n, u32 order) * nPoints   -- every product
+    /// </code>
+    /// IMD in dB is derived client-side from the percentage, as THD dB is.
+    /// </summary>
+    public static byte[] EncodeIntermodulation(StreamChannel channel, uint seq, IntermodulationResult imd, bool held)
+    {
+        const int scalarsLength = 4 + (6 * sizeof(float)) + sizeof(uint);
+        int orderCount = imd.PerOrder.Count;
+        int productCount = imd.Products.Count;
+        int length = HeaderLength + scalarsLength + (orderCount * 8) + (productCount * 24);
+        byte[] buffer = new byte[length];
+
+        WriteHeader(
+            buffer, StreamMsgType.Intermodulation, channel, held ? StreamFlags.Held : StreamFlags.None,
+            seq, (float)imd.ToneLowFreqHz, (float)imd.ToneHighFreqHz, (uint)productCount);
+
+        int offset = HeaderLength;
+        buffer[offset++] = (byte)imd.Method;
+        buffer[offset++] = (byte)imd.MaxOrder;
+        offset += 2;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)imd.ToneLowDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)imd.ToneHighDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)imd.ImdPercent); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)imd.SineEquivalentDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)imd.CombinedRmsDbv); offset += 4;
+        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)imd.ReferenceDbv); offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)orderCount); offset += 4;
+
+        foreach (var (order, ratio) in imd.PerOrder)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)order); offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)(ratio * 100.0)); offset += 4;
+        }
+
+        foreach (var product in imd.Products)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)product.FrequencyHz); offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)product.AmplitudeDbv); offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)product.Dbc); offset += 4;
+            BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset, 4), product.M); offset += 4;
+            BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset, 4), product.N); offset += 4;
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)product.Order); offset += 4;
+        }
 
         return buffer;
     }
@@ -672,6 +857,64 @@ public static class StreamFrame
             harmonics, otherPeaks, averagesTaken);
     }
 
+    /// <summary>
+    /// The header-only <see cref="StreamMsgType.Intermodulation"/> frame carrying
+    /// <see cref="StreamFlags.IntermodulationUnresolved"/> — see that flag for when it is sent.
+    /// </summary>
+    public static byte[] EncodeIntermodulationUnresolved(StreamChannel channel, uint seq)
+    {
+        byte[] buffer = new byte[HeaderLength];
+        WriteHeader(buffer, StreamMsgType.Intermodulation, channel, StreamFlags.IntermodulationUnresolved, seq, 0f, 0f, 0);
+        return buffer;
+    }
+
+    /// <summary>Decodes an <see cref="StreamMsgType.Intermodulation"/> frame — see <see cref="EncodeIntermodulation"/> for the layout.</summary>
+    /// <exception cref="ArgumentException">The frame is the header-only unresolved one (check its flags first).</exception>
+    public static DecodedIntermodulation DecodeIntermodulation(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.Intermodulation)
+            throw new ArgumentException("Frame is not an intermodulation frame.", nameof(frame));
+        if ((header.Flags & StreamFlags.IntermodulationUnresolved) != 0)
+            throw new ArgumentException("Frame is an unresolved intermodulation marker and has no payload.", nameof(frame));
+
+        int offset = HeaderLength;
+        var method = (IntermodulationMethod)frame[offset++];
+        int maxOrder = frame[offset++];
+        offset += 2;
+        float toneLowDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float toneHighDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float imdPercent = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float sineEquivalentDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float combinedRmsDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        float referenceDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+        uint orderCount = BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+
+        var perOrder = new (int Order, float Percent)[orderCount];
+        for (int i = 0; i < orderCount; i++)
+        {
+            int order = (int)BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+            float percent = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            perOrder[i] = (order, percent);
+        }
+
+        var products = new DecodedIntermodulationProduct[header.NPoints];
+        for (int i = 0; i < header.NPoints; i++)
+        {
+            float freqHz = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            float dbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            float dbc = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            int m = BinaryPrimitives.ReadInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+            int n = BinaryPrimitives.ReadInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+            int order = (int)BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+            products[i] = new DecodedIntermodulationProduct(freqHz, dbv, dbc, m, n, order);
+        }
+
+        return new DecodedIntermodulation(
+            header.X0, header.Dx, method, maxOrder, toneLowDbv, toneHighDbv, imdPercent, sineEquivalentDbv, combinedRmsDbv,
+            referenceDbv, perOrder, products, (header.Flags & StreamFlags.Held) != 0);
+    }
+
     /// <summary>Decodes a <see cref="StreamMsgType.SweepPoint"/> frame — see <see cref="EncodeSweepPoint"/> for the layout.</summary>
     public static DecodedSweepPoint DecodeSweepPoint(ReadOnlySpan<byte> frame)
     {
@@ -818,6 +1061,19 @@ public readonly record struct StreamFrameHeader(
     StreamMsgType MsgType, StreamChannel Channel, StreamFlags Flags, uint Seq, float X0, float Dx, uint NPoints);
 
 public readonly record struct SpectrumColumn(float FreqHz, MinMax Value);
+
+public readonly record struct DecodedImdSweepPoint(
+    StreamChannel Channel, uint PointIndex, float ToneLowHz, float ToneHighHz,
+    float GeneratorSineEquivalentDbv, float ToneLowDbv, float ToneHighDbv, float SineEquivalentDbv, float CombinedRmsDbv,
+    float GainDb, float PowerWatt, float ImdPercent, float NoisePercent, float[] OrderPercent,
+    SweepPreviewSeries? PreviewFft, SweepPreviewSeries? PreviewScope);
+
+public readonly record struct DecodedIntermodulationProduct(float FreqHz, float Dbv, float Dbc, int M, int N, int Order);
+
+public readonly record struct DecodedIntermodulation(
+    float ToneLowHz, float ToneHighHz, IntermodulationMethod Method, int MaxOrder,
+    float ToneLowDbv, float ToneHighDbv, float ImdPercent, float SineEquivalentDbv, float CombinedRmsDbv, float ReferenceDbv,
+    (int Order, float Percent)[] PerOrder, DecodedIntermodulationProduct[] Products, bool Held);
 
 public readonly record struct DecodedMeters(
     float FundamentalFreqHz, float BinSizeHz, float ThdPercent, float ThdNPercent, float SnrDb, float FundamentalDbv,

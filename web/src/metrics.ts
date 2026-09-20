@@ -2,7 +2,7 @@
 // Kept free of Vue so every formula is directly unit-testable (see metrics.test.ts) — components
 // just call these and render the result.
 
-import type { MetersFrame } from './streaming/protocol'
+import type { IntermodulationFrame, MetersFrame } from './streaming/protocol'
 import type { AveragingMode, GeneratorKind, GeneratorTone, MultitoneSettings, WhiteNoiseSettings } from './api/client'
 
 export interface MetricTile {
@@ -32,6 +32,8 @@ export const AVAILABLE_METRIC_LABELS = [
   'THD dB',
   'THD dBr',
   'THD dBV',
+  'IMD %',
+  'IMD dB',
   'THD+N %',
   'THD+N dB',
   'THD+N dBr',
@@ -138,7 +140,18 @@ export function noteName(freqHz: number): string {
  * calculation here; the generator summary shown to the user is a single tile independent of
  * channel, see generatorTile() below.
  */
-export function channelTiles(meters: MetersFrame | null, generatorTones: GeneratorTone[], loadOhms: number): MetricTile[] {
+export function channelTiles(
+  meters: MetersFrame | null,
+  generatorTones: GeneratorTone[],
+  loadOhms: number,
+  /**
+   * The channel's two-tone IMD figure, present only while the pipeline has an IMD spec (see
+   * useSpectrumStream). Null adds no IMD tiles at all rather than "0 %" — no reading is not a reading.
+   */
+  imd: IntermodulationFrame | null = null,
+  /** The pipeline has an IMD spec it could not resolve this tick (tones too close at this FFT size): the tiles show a dash rather than vanish. */
+  imdUnresolved = false,
+): MetricTile[] {
   if (!meters) return []
   const m = meters
 
@@ -164,6 +177,18 @@ export function channelTiles(meters: MetersFrame | null, generatorTones: Generat
     { label: 'THD dB', value: `${thdDb.toFixed(2)} dB` },
     { label: 'THD dBr', value: `${thdDbv.toFixed(2)} dBr` },
     { label: 'THD dBV', value: `${thdDbv.toFixed(2)} dBV` },
+
+    ...(imd
+      ? [
+          { label: 'IMD %', value: `${imd.imdPercent.toFixed(5)} %` },
+          { label: 'IMD dB', value: `${ratioPercentToDb(imd.imdPercent).toFixed(2)} dB` },
+        ]
+      : imdUnresolved
+        ? [
+            { label: 'IMD %', value: '—' },
+            { label: 'IMD dB', value: '—' },
+          ]
+        : []),
 
     { label: 'THD+N %', value: `${m.thdNPercent.toFixed(5)} %` },
     { label: 'THD+N dB', value: `${thdNDb.toFixed(2)} dB` },

@@ -354,4 +354,118 @@ public class StreamFrameTests
 
         Assert.Equal(0.0f, decoded.GeneratorAmpDbv);
     }
+
+    private static IntermodulationResult SampleIntermodulation() => new(
+        IntermodulationMethod.Smpte, MaxOrder: 3,
+        new ToneMeasurement(10, 0.7071, 1e-12), new ToneMeasurement(700, 0.1768, 1e-12),
+        ToneLowFreqHz: 60.0, ToneHighFreqHz: 7000.0, ReferenceVrms: 0.1768, Imd: 0.002,
+        [(2, 0.0014), (3, 0.0014)],
+        [
+            new IntermodulationProduct(2, -1, 1, 694, 6940.0, 1.77e-4, -75.0, -60.0),
+            new IntermodulationProduct(2, +1, 1, 706, 7060.0, 1.77e-4, -75.0, -60.0),
+            new IntermodulationProduct(3, -1, 2, 688, 6880.0, 1.77e-4, -75.0, -60.0),
+            new IntermodulationProduct(3, +1, 2, 712, 7120.0, 1.77e-4, -75.0, -60.0),
+        ]);
+
+    [Fact]
+    public void Intermodulation_frame_round_trips_tones_orders_and_products()
+    {
+        var imd = SampleIntermodulation();
+
+        byte[] frame = StreamFrame.EncodeIntermodulation(StreamChannel.Right, seq: 9, imd, held: false);
+        var header = StreamFrame.DecodeHeader(frame);
+        var decoded = StreamFrame.DecodeIntermodulation(frame);
+
+        Assert.Equal(StreamMsgType.Intermodulation, header.MsgType);
+        Assert.Equal(StreamChannel.Right, header.Channel);
+        Assert.Equal(StreamFlags.None, header.Flags);
+        Assert.Equal(9u, header.Seq);
+        Assert.Equal(4u, header.NPoints);
+        Assert.Equal(60f, decoded.ToneLowHz);
+        Assert.Equal(7000f, decoded.ToneHighHz);
+        Assert.Equal(IntermodulationMethod.Smpte, decoded.Method);
+        Assert.Equal(3, decoded.MaxOrder);
+        Assert.Equal((float)imd.ToneLowDbv, decoded.ToneLowDbv);
+        Assert.Equal((float)imd.ToneHighDbv, decoded.ToneHighDbv);
+        Assert.Equal(0.2f, decoded.ImdPercent, precision: 5);
+        Assert.Equal((float)imd.SineEquivalentDbv, decoded.SineEquivalentDbv);
+        Assert.Equal((float)imd.CombinedRmsDbv, decoded.CombinedRmsDbv);
+        Assert.Equal((float)imd.ReferenceDbv, decoded.ReferenceDbv);
+        Assert.Equal([(2, 0.14f), (3, 0.14f)], decoded.PerOrder.Select(o => (o.Order, MathF.Round(o.Percent, 4))));
+        Assert.Equal(4, decoded.Products.Length);
+        Assert.Equal(new DecodedIntermodulationProduct(6880f, -75f, -60f, -1, 2, 3), decoded.Products[2]);
+        Assert.False(decoded.Held);
+        Assert.Equal(StreamFrame.HeaderLength + 4 + (6 * 4) + 4 + (2 * 8) + (4 * 24), frame.Length);
+    }
+
+    [Fact]
+    public void Intermodulation_frame_carries_held_flag()
+    {
+        byte[] frame = StreamFrame.EncodeIntermodulation(StreamChannel.Left, seq: 1, SampleIntermodulation(), held: true);
+
+        Assert.Equal(StreamFlags.Held, StreamFrame.DecodeHeader(frame).Flags);
+        Assert.True(StreamFrame.DecodeIntermodulation(frame).Held);
+    }
+
+    [Fact]
+    public void Intermodulation_unresolved_marker_is_header_only_and_refuses_to_decode()
+    {
+        byte[] frame = StreamFrame.EncodeIntermodulationUnresolved(StreamChannel.Left, seq: 5);
+        var header = StreamFrame.DecodeHeader(frame);
+
+        Assert.Equal(StreamFrame.HeaderLength, frame.Length);
+        Assert.Equal(StreamMsgType.Intermodulation, header.MsgType);
+        Assert.Equal(StreamFlags.IntermodulationUnresolved, header.Flags);
+        Assert.Equal(5u, header.Seq);
+        Assert.Equal(0u, header.NPoints);
+        Assert.Throws<ArgumentException>(() => StreamFrame.DecodeIntermodulation(frame));
+    }
+
+    [Fact]
+    public void SweepProgress_frame_carries_the_intermodulation_flag_only_when_asked()
+    {
+        byte[] plain = StreamFrame.EncodeSweepProgress(3, 10, 0.5, ThdSweepPhase.Sweeping);
+        byte[] flagged = StreamFrame.EncodeSweepProgress(3, 10, 0.5, ThdSweepPhase.Sweeping, StreamFlags.IntermodulationSweep);
+
+        Assert.Equal(StreamFlags.None, StreamFrame.DecodeHeader(plain).Flags);
+        Assert.Equal(StreamFlags.IntermodulationSweep, StreamFrame.DecodeHeader(flagged).Flags);
+        Assert.Equal(plain.AsSpan(4).ToArray(), flagged.AsSpan(4).ToArray());
+    }
+
+    [Fact]
+    public void ImdSweepPoint_frame_round_trips_orders_and_previews()
+    {
+        var previewFft = new SweepPreviewSeries([100f, 200f, 300f], [-90f, -80f, -70f], [-85f, -75f, -65f]);
+        var point = new ImdSweepPoint(
+            Channel: 1, GeneratorSineEquivalentDbv: -20.0, ToneLowDbv: -21.94, ToneHighDbv: -33.98,
+            SineEquivalentDbv: -19.98, CombinedRmsDbv: -22.26, GainDb: 0.02, PowerWatt: 0.00125,
+            ImdPercent: 0.02, OrderPercent: [0.015, 0.013, 0.002], NoisePercent: 0.001,
+            ToneLowHz: 58.59, ToneHighHz: 7001.95, PreviewFft: previewFft, PreviewScope: null);
+
+        byte[] frame = StreamFrame.EncodeImdSweepPoint(point, pointIndex: 4);
+        var header = StreamFrame.DecodeHeader(frame);
+        var decoded = StreamFrame.DecodeImdSweepPoint(frame);
+
+        Assert.Equal(StreamMsgType.ImdSweepPoint, header.MsgType);
+        Assert.Equal(StreamChannel.Right, header.Channel);
+        Assert.Equal(4u, header.Seq);
+        Assert.Equal(3u, header.NPoints);
+        Assert.Equal(58.59f, decoded.ToneLowHz);
+        Assert.Equal(7001.95f, decoded.ToneHighHz);
+        Assert.Equal(-20f, decoded.GeneratorSineEquivalentDbv);
+        Assert.Equal(-21.94f, decoded.ToneLowDbv);
+        Assert.Equal(-33.98f, decoded.ToneHighDbv);
+        Assert.Equal(-19.98f, decoded.SineEquivalentDbv);
+        Assert.Equal(-22.26f, decoded.CombinedRmsDbv);
+        Assert.Equal(0.02f, decoded.GainDb);
+        Assert.Equal(0.00125f, decoded.PowerWatt);
+        Assert.Equal(0.02f, decoded.ImdPercent);
+        Assert.Equal(0.001f, decoded.NoisePercent);
+        Assert.Equal([0.015f, 0.013f, 0.002f], decoded.OrderPercent);
+        Assert.NotNull(decoded.PreviewFft);
+        Assert.Equal(previewFft.X, decoded.PreviewFft.X);
+        Assert.Equal(previewFft.Max, decoded.PreviewFft.Max);
+        Assert.Null(decoded.PreviewScope);
+        Assert.Equal(StreamFrame.HeaderLength + (9 * 4) + 4 + (3 * 4) + 4 + (3 * 3 * 4) + 4, frame.Length);
+    }
 }

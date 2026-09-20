@@ -110,6 +110,46 @@ public class SweepTypeParamsTests
         });
     }
 
+    /// <summary>
+    /// The IMD sweep is a sweep kind (same result shape) but its parameters are its own: the SMPTE
+    /// pair by default, the tutorial's order defaults, and none of the THD amplitude sweep's fields.
+    /// The arm has to come before the generic sweep one, or a new IMD type would be seeded with a
+    /// THD amplitude sweep's JSON and start with no tones at all.
+    /// </summary>
+    [Fact]
+    public async Task NewImdSweepType_SeedsItsOwnParametersNotTheThdSweeps()
+    {
+        await WithSaveServiceAsync(saveService =>
+        {
+            string resolved = saveService.ResolveTypeParamsJson(
+                requestedJson: null,
+                kind: MeasurementSaveService.ImdVsAmplitudeKind,
+                existingParamsJson: null,
+                staged: null);
+
+            using var document = JsonDocument.Parse(resolved);
+            var root = document.RootElement;
+
+            Assert.Equal("Smpte", root.GetProperty("preset").GetString());
+            Assert.Equal("Smpte", root.GetProperty("method").GetString());
+            Assert.Equal(60.0, root.GetProperty("toneLowHz").GetDouble());
+            Assert.Equal(7000.0, root.GetProperty("toneHighHz").GetDouble());
+            Assert.Equal(4.0, root.GetProperty("lowToHighRatio").GetDouble());
+            Assert.Equal(5, root.GetProperty("maxOrder").GetInt32());
+            Assert.Equal(0.001, root.GetProperty("startLevelVolt").GetDouble());
+            Assert.Equal(1.0, root.GetProperty("endLevelVolt").GetDouble());
+            Assert.Equal("Hann", root.GetProperty("window").GetString());
+            Assert.True(root.GetProperty("chartAutofitOnDone").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, root.GetProperty("maxProductFreqHz").ValueKind);
+
+            Assert.False(root.TryGetProperty("fixedFreqHz", out _), $"IMD params carry a THD amplitude sweep's fields: {resolved}");
+            Assert.False(root.TryGetProperty("startAmplitudeVolt", out _));
+
+            // And an existing IMD type keeps what it had.
+            Assert.Equal("""{"preset":"Din"}""", saveService.ResolveTypeParamsJson(null, MeasurementSaveService.ImdVsAmplitudeKind, """{"preset":"Din"}""", null));
+        });
+    }
+
     [Fact]
     public async Task ExplicitParams_AreWrittenThroughUnchanged()
     {
@@ -182,7 +222,9 @@ public class SweepTypeParamsTests
             var steppedRunner = new SteppedResponseRunner(
                 session, pipeline, new SpectrumBroadcastHub(), NullLogger<SteppedResponseRunner>.Instance);
             var saveService = new MeasurementSaveService(
-                session, pipeline, sweepRunner, responseRunner, steppedRunner,
+                session, pipeline, sweepRunner,
+                new ImdSweepRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImdSweepRunner>.Instance),
+                responseRunner, steppedRunner,
                 new ImpulseResponseRunner(
                     session, pipeline, new InMemoryLoopbackReferenceStore(),
                     NullLogger<ImpulseResponseRunner>.Instance),

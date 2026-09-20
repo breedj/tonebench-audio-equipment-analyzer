@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
+import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
 import { useDevice } from './composables/useDevice'
 import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
@@ -33,6 +34,7 @@ import OscilloscopeChart from './components/OscilloscopeChart.vue'
 import MetricsPanel from './components/MetricsPanel.vue'
 import GeneratorMetricsPanel from './components/GeneratorMetricsPanel.vue'
 import HarmonicsTable from './components/HarmonicsTable.vue'
+import ImdProductsTable from './components/ImdProductsTable.vue'
 import OtherPeaksTable from './components/OtherPeaksTable.vue'
 import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
 import MeasurementNotesPanel from './components/MeasurementNotesPanel.vue'
@@ -49,6 +51,7 @@ import { useManual } from './manual/useManual'
 import UpdateBanner from './components/UpdateBanner.vue'
 import SweepConfigPanel from './components/SweepConfigPanel.vue'
 import AmplitudeSweepConfigPanel from './components/AmplitudeSweepConfigPanel.vue'
+import ImdSweepConfigPanel from './components/ImdSweepConfigPanel.vue'
 import SweepDisplayPanel from './components/SweepDisplayPanel.vue'
 import ThdSweepChart from './components/ThdSweepChart.vue'
 import SweepFftPreviewChart from './components/SweepFftPreviewChart.vue'
@@ -93,12 +96,14 @@ import {
   DECAY_DISPLAY_COLUMNS,
   defaultCsdAnalysis,
 } from './measurements/decay'
-import { useSweep } from './composables/useSweep'
+import { SWEEP_POINTS_KEY, useSweep } from './composables/useSweep'
+import { useImdSweep } from './composables/useImdSweep'
 import { nearestSweepPoint } from './sweep/points'
 import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
 import {
-  THD_VS_AMPLITUDE_KIND,
+  isAmplitudeSweepKind,
   isFrequencyResponseKind,
+  isImdSweepKind,
   isSteppedResponseKind,
   isImpulseResponseKind,
   isSweepKind as isSweepKindName,
@@ -106,7 +111,7 @@ import {
 } from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
-const { spectrum, meters, scope, setViewport, clearScope } = useSpectrumStream()
+const { spectrum, meters, intermodulation, imdUnresolved, scope, setViewport, clearScope } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
@@ -134,8 +139,41 @@ const {
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
 // fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
-const { kind: stimulusKind } = useGeneratorStimulus()
+const { kind: stimulusKind, tones: stimulusTones, imd: stimulusImd } = useGeneratorStimulus()
 const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
+
+// Whether the pipeline is measuring two-tone IMD right now — what the Intermodulation table
+// needs to tell "no frame yet" from "nothing configured".
+const imdConfigured = computed(() => (spectrumConfig.value?.intermodulation ?? null) !== null)
+
+// The IMD analysis follows the staged stimulus: exactly two sine tones make a spec, anything else
+// clears it (see imd/presets.ts). Pushed straight to the pipeline like FFT size — it is pure
+// analysis state, nothing reaches the device — but *without* marking the type dirty here: a user
+// edit already dirties it through the generator panel's own change event, and this watcher also
+// fires when a type is loaded, where dirtying would put a red dot on an untouched measurement.
+// Loading a type is also why the push is skipped when the server already has this spec: the
+// server applied the stored one itself (MeasurementSaveService.ApplyAsync).
+watch(
+  () => imdSpecFromStimulus(stimulusKind.value, stimulusTones, stimulusImd),
+  async (spec) => {
+    const current = spectrumConfig.value?.intermodulation ?? null
+    const same = spec.enabled
+      ? current !== null &&
+        current.toneLowHz === spec.toneLowHz &&
+        current.toneHighHz === spec.toneHighHz &&
+        current.method === spec.method &&
+        current.maxOrder === spec.maxOrder
+      : current === null
+    if (!spec.enabled) intermodulation.value = {}
+    if (same) return
+    try {
+      spectrumConfig.value = await api.setSpectrumConfig({ intermodulation: spec })
+    } catch (e) {
+      error.value = (e as Error).message
+    }
+  },
+  { deep: true },
+)
 // Loaded at startup so the sweep panels' time estimates already include it; the value itself is
 // applied server-side (see useCaptureDelay).
 const { load: loadCaptureDelay } = useCaptureDelay()
@@ -183,6 +221,13 @@ watch(
     applyLoadedMetrics(params?.selectedMetrics)
     applyLoadedScopePeriods(params?.scopePeriods)
     applyLoadedChartDisplay(params)
+    // The IMD template/analysis choice is staged with the tones (see useGeneratorStimulus.ts);
+    // a type without one is Custom, i.e. whatever its tone list says.
+    Object.assign(stimulusImd, {
+      preset: (params?.imdPreset as ImdPresetId | null | undefined) ?? 'Custom',
+      method: params?.imdMethod ?? 'Smpte',
+      maxOrder: params?.imdMaxOrder ?? 5,
+    })
   },
   { immediate: true },
 )
@@ -222,12 +267,12 @@ const currentType = computed(() => types.value.find((t) => t.id === currentTypeI
 // THD vs frequency
 // ---------------------------------------------------------------------------
 const {
-  running: sweepRunning,
-  progressLabel: sweepProgressLabel,
+  running: thdSweepRunning,
+  progressLabel: thdSweepProgressLabel,
   generatorAmpDbv: sweepGeneratorAmpDbv,
-  error: sweepError,
-  points: sweepPoints,
-  thdMethod: sweepThdMethod,
+  error: thdSweepError,
+  points: thdSweepPoints,
+  thdMethod: thdSweepMethod,
   viewAxis: sweepViewAxis,
   start: startSweep,
   startAmplitude: startAmplitudeSweep,
@@ -235,6 +280,23 @@ const {
   clear: clearSweepRun,
   refresh: refreshSweep,
 } = useSweep()
+
+// The IMD sweep: its own runner and store, drawn by the same sweep screen. Everything the screen
+// reads about "the sweep" — running, points, progress, error, method — comes through the
+// kind-switched computeds below, so the chart, the toolbar and the report see whichever runner
+// the open type belongs to and never the other one's leftovers.
+const imdSweep = useImdSweep()
+const isImdSweep = computed(() => isImdSweepKind(currentType.value?.kind))
+const sweepRunning = computed(() => (isImdSweep.value ? imdSweep.running.value : thdSweepRunning.value))
+const sweepProgressLabel = computed(() => (isImdSweep.value ? imdSweep.progressLabel.value : thdSweepProgressLabel.value))
+const sweepError = computed(() => (isImdSweep.value ? imdSweep.error.value : thdSweepError.value))
+const sweepPoints = computed(() => (isImdSweep.value ? imdSweep.points.value : thdSweepPoints.value))
+const sweepThdMethod = computed<import('./api/client').ThdMethodName>(() => (isImdSweep.value ? 'Conventional' : thdSweepMethod.value))
+/** THD/D2.. or IMD/IM2.. on the chart, the display panel and the report — see sweep/points.ts. */
+const sweepTraceFamily = computed<import('./sweep/points').SweepTraceFamily>(() => (isImdSweep.value ? 'imd' : 'thd'))
+// ThdSweepChart falls back to useSweep() without this; providing the switched source is what
+// puts the IMD runner's points on the chart. A report's headless render provides its own.
+provide(SWEEP_POINTS_KEY, { points: sweepPoints, thdMethod: sweepThdMethod })
 
 const {
   running: responseRunning,
@@ -299,7 +361,7 @@ const {
 // identical layout, identical chart, identical history and preview rail — and differ only in which
 // config panel is mounted and what the chart's x axis plots.
 const isSweepKind = computed(() => isSweepKindName(currentType.value?.kind))
-const isAmplitudeSweep = computed(() => currentType.value?.kind === THD_VS_AMPLITUDE_KIND)
+const isAmplitudeSweep = computed(() => isAmplitudeSweepKind(currentType.value?.kind))
 
 // The frequency response is a third screen rather than a variant of the sweep one: it shares the
 // three-column layout but nothing else — its own runner, its own endpoints, and a readout table the
@@ -625,8 +687,9 @@ const impedanceConfigPanel = ref<InstanceType<typeof ImpedanceConfigPanel> | nul
 const steppedResponseConfigPanel = ref<InstanceType<typeof SteppedResponseConfigPanel> | null>(null)
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
 const amplitudeSweepConfigPanel = ref<InstanceType<typeof AmplitudeSweepConfigPanel> | null>(null)
+const imdSweepConfigPanel = ref<InstanceType<typeof ImdSweepConfigPanel> | null>(null)
 const activeSweepPanel = computed(() =>
-  isAmplitudeSweep.value ? amplitudeSweepConfigPanel.value : sweepConfigPanel.value,
+  isImdSweep.value ? imdSweepConfigPanel.value : isAmplitudeSweep.value ? amplitudeSweepConfigPanel.value : sweepConfigPanel.value,
 )
 
 // The same arrangement on the response screen: one ref per panel because only one of the two is
@@ -1042,9 +1105,18 @@ function runAmplitudeSweep(request: import('./api/client').ThdAmplitudeSweepStar
   })
 }
 
+function runImdSweep(request: import('./api/client').ImdSweepStartRequest) {
+  sweepShowLeft.value = request.processLeft
+  sweepShowRight.value = request.processRight
+  return withErrorReporting(async () => {
+    await imdSweep.start(request)
+  })
+}
+
 function cancelSweep() {
   return withErrorReporting(async () => {
-    await cancelSweepRun()
+    if (isImdSweep.value) await imdSweep.cancel()
+    else await cancelSweepRun()
   })
 }
 
@@ -1053,15 +1125,20 @@ function cancelSweep() {
 // FFT/scope preview charts pointing at the last thing hovered on the chart that was just emptied.
 function clearSweep() {
   return withErrorReporting(async () => {
-    await clearSweepRun()
+    if (isImdSweep.value) await imdSweep.clear()
+    else await clearSweepRun()
     hoveredSweepX.value = null
   })
 }
 
 // A sweep runs server-side, so a reload (or opening a second tab) mid-sweep has to re-attach
-// rather than start from an empty chart.
+// rather than start from an empty chart. Both runners are refreshed: which one the screen shows
+// is the open type's, and switching between the two sweep kinds does not pass through false.
 watch(isSweepKind, (isSweep) => {
-  if (isSweep) void refreshSweep().catch(() => undefined)
+  if (isSweep) {
+    void refreshSweep().catch(() => undefined)
+    void imdSweep.refresh().catch(() => undefined)
+  }
 })
 
 const isCurrentTypeDirty = computed(() => currentTypeId.value !== null && dirtyTypeIds.value.has(currentTypeId.value))
@@ -1165,6 +1242,8 @@ function runMeasurement(runConfig: RunConfig, singleShot = false) {
     // earlier Single capture — otherwise the auto-stop watcher below could see stale held=true
     // meters left over from before this run even produces its first fresh frame.
     meters.value = {}
+    intermodulation.value = {}
+    imdUnresolved.value = {}
     spectrum.value = {}
     clearScope()
 
@@ -1504,6 +1583,7 @@ function buildLiveSubject(): ReportSubject | null {
       kind: 'sweep',
       points: sweepPoints.value,
       method: sweepThdMethod.value,
+      family: sweepTraceFamily.value,
       display: currentSweepDisplay(),
     }
   } else if (isImpulseResponse.value) {
@@ -1532,6 +1612,7 @@ function buildLiveSubject(): ReportSubject | null {
       kind: 'spectrum',
       spectrum: spectrum.value,
       meters: meters.value,
+      intermodulation: intermodulation.value,
       display: useChartDisplay(),
       selectedMetrics: selectedMetrics.value,
       generatorTones: status.value?.generatorLeft.tones ?? [],
@@ -1569,6 +1650,7 @@ function clearMeasurement() {
   return withErrorReporting(async () => {
     await api.clearSpectrum()
     meters.value = {}
+    intermodulation.value = {}
     spectrum.value = {}
     clearScope()
   })
@@ -1607,6 +1689,9 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowOscilloscope: chartShowOscilloscope.value,
     chartShowHarmonics: chartShowHarmonics.value,
     chartShowOtherPeaks: chartShowOtherPeaks.value,
+    imdPreset: stimulusImd.preset,
+    imdMethod: stimulusImd.method,
+    imdMaxOrder: stimulusImd.maxOrder,
   }
 }
 
@@ -2993,9 +3078,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     :disabled="!!activeSweepPanel?.invalid"
                     :title="
                       activeSweepPanel?.invalid ??
-                      (isAmplitudeSweep
-                        ? 'Steps the generator across the configured voltage range at one frequency and records the harmonics at each point.'
-                        : 'Steps the generator across the configured frequency range and records the harmonics at each point.')
+                      (isImdSweep
+                        ? 'Plays the two-tone pair at each level of the configured range and records the intermodulation products at each point.'
+                        : isAmplitudeSweep
+                          ? 'Steps the generator across the configured voltage range at one frequency and records the harmonics at each point.'
+                          : 'Steps the generator across the configured frequency range and records the harmonics at each point.')
                     "
                     @click="activeSweepPanel?.run()"
                   >
@@ -3014,8 +3101,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   </button>
                 </div>
 
+                <ImdSweepConfigPanel v-if="isImdSweep" ref="imdSweepConfigPanel" :running="sweepRunning" @run="runImdSweep" />
                 <AmplitudeSweepConfigPanel
-                  v-if="isAmplitudeSweep"
+                  v-else-if="isAmplitudeSweep"
                   ref="amplitudeSweepConfigPanel"
                   :running="sweepRunning"
                   @run="runAmplitudeSweep"
@@ -3082,6 +3170,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :selected-left="sweepSelectedLeft"
                   :selected-right="sweepSelectedRight"
                   :overlay-selections="sweepOverlaySelections"
+                  :trace-family="sweepTraceFamily"
                   @cursor-x="onSweepCursorX"
                 />
 
@@ -3091,6 +3180,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
               <template #aside>
                 <SweepDisplayPanel
+                  :trace-family="sweepTraceFamily"
                   v-model:unit="sweepUnit"
                   v-model:show-noise-floor="sweepShowNoiseFloor"
                   v-model:show-magnitude="sweepShowMagnitude"
@@ -3187,12 +3277,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     channel-label="L"
                     :meters="meters[0] ?? null"
                     :generator-tones="status?.generatorLeft.tones ?? []"
+                    :imd="intermodulation[0] ?? null"
+                    :imd-unresolved="imdUnresolved[0] ?? false"
                   />
                   <MetricsPanel
                     v-if="spectrumConfig?.processRight ?? true"
                     channel-label="R"
                     :meters="meters[1] ?? null"
                     :generator-tones="status?.generatorRight.tones ?? []"
+                    :imd="intermodulation[1] ?? null"
+                    :imd-unresolved="imdUnresolved[1] ?? false"
                   />
                 </div>
                 <button
@@ -3249,10 +3343,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
           >
             <div class="flex flex-col gap-4">
               <HarmonicsTable v-if="chartShowHarmonics" :meters="meters" :channel="0" channel-label="L" />
+              <ImdProductsTable v-if="chartShowHarmonics && imdConfigured" :imd="intermodulation" :channel="0" channel-label="L" :configured="imdConfigured" :unresolved="imdUnresolved[0] ?? false" />
               <OtherPeaksTable v-if="chartShowOtherPeaks" :meters="meters" :channel="0" channel-label="L" />
             </div>
             <div class="flex flex-col gap-4">
               <HarmonicsTable v-if="chartShowHarmonics" :meters="meters" :channel="1" channel-label="R" />
+              <ImdProductsTable v-if="chartShowHarmonics && imdConfigured" :imd="intermodulation" :channel="1" channel-label="R" :configured="imdConfigured" :unresolved="imdUnresolved[1] ?? false" />
               <OtherPeaksTable v-if="chartShowOtherPeaks" :meters="meters" :channel="1" channel-label="R" />
             </div>
           </div>

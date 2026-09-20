@@ -120,6 +120,7 @@ try
     builder.Services.AddSingleton<CaptureDelaySetting>();
     builder.Services.AddSingleton<DeviceSessionService>();
     builder.Services.AddSingleton<ThdSweepRunner>();
+    builder.Services.AddSingleton<ImdSweepRunner>();
     builder.Services.AddSingleton<FrequencyResponseRunner>();
     builder.Services.AddSingleton<SteppedResponseRunner>();
     builder.Services.AddSingleton<ILoopbackReferenceStore, SqliteLoopbackReferenceStore>();
@@ -159,6 +160,7 @@ try
     // Everything that must be stopped before the project file may change — see IMeasurementRun.
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<DeviceSessionService>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ThdSweepRunner>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ImdSweepRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<FrequencyResponseRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SteppedResponseRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ImpulseResponseRunner>());
@@ -221,6 +223,7 @@ try
     app.MapAcquisitionEndpoints();
     app.MapDiagnosticsEndpoints();
     app.MapSweepEndpoints();
+    app.MapImdSweepEndpoints();
     app.MapFrequencyResponseEndpoints();
     app.MapImpulseResponseEndpoints();
     app.MapSteppedResponseEndpoints();

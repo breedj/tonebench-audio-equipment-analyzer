@@ -174,4 +174,33 @@ public sealed record SpectrumPipelineOptions
     /// depends on.</para>
     /// </summary>
     public bool RetainComplexSpectrum { get; init; } = false;
+
+    /// <summary>
+    /// When set, every tick also measures two-tone intermodulation between these tones (see
+    /// <see cref="IntermodulationAnalyzer"/>) and carries the result on
+    /// <see cref="SpectrumMeters.Intermodulation"/> and its own stream frame. Null (the default)
+    /// means no IMD figure at all — not zero, nothing.
+    ///
+    /// The FFT screen sets this through <c>POST /api/acquisition/spectrum-config</c> from its
+    /// staged stimulus whenever exactly two tones are configured, so the reading follows the
+    /// generator; <c>ImdSweepRunner</c> sets it directly for the run and restores whatever was here
+    /// afterwards. The tone frequencies are the <b>snapped</b> generator frequencies — the analyzer
+    /// still peak-searches ±2 bins, so a bin of drift is tolerated, but a frequency that is off
+    /// by more than that measures the noise floor and reports it as IMD.
+    /// </summary>
+    public IntermodulationSpec? Intermodulation { get; init; }
 }
+
+/// <summary>
+/// The two tones an intermodulation figure is measured between, and how. <see cref="ToneLowHz"/>
+/// is the lower frequency (SMPTE's modulating tone, CCIF's f1), <see cref="ToneHighHz"/> the upper.
+/// <see cref="MaxProductFreqHz"/> bounds which products count; null means the pipeline's
+/// <see cref="SpectrumPipelineOptions.MeasurementHiFreqHz"/>, i.e. "in-band products only" —
+/// the tutorial's convention, under which CCIF 19 + 20 kHz counts 18 kHz and omits 21 kHz.
+/// </summary>
+public sealed record IntermodulationSpec(
+    double ToneLowHz,
+    double ToneHighHz,
+    IntermodulationMethod Method,
+    int MaxOrder,
+    double? MaxProductFreqHz = null);

@@ -1,6 +1,7 @@
 import type { ReportRow, ReportSection } from '../../api/client'
 import { channelTiles, GEN_METRIC_LABEL } from '../../metrics'
-import type { MetersFrame } from '../../streaming/protocol'
+import type { IntermodulationFrame, MetersFrame } from '../../streaming/protocol'
+import { imdProductLabel } from '../../imd/products'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { descriptionSections, genericSettingsSection } from './generic'
@@ -35,7 +36,7 @@ export function metricsSections(subject: ReportSubject): ReportSection[] {
       : null
 
   for (const [channel, frame] of channelsOf(meters)) {
-    const byLabel = new Map(channelTiles(frame, generatorTones, loadOhms).map((tile) => [tile.label, tile]))
+    const byLabel = new Map(channelTiles(frame, generatorTones, loadOhms, subject.data.intermodulation[channel] ?? null).map((tile) => [tile.label, tile]))
     const rows: ReportRow[] = []
     if (genRow && sections.length === 0) rows.push(genRow)
     for (const label of selectedMetrics) {
@@ -77,6 +78,53 @@ export function harmonicsSections(subject: ReportSubject): ReportSection[] {
 
   if (sections.length === 0) {
     sections.push({ kind: 'paragraph', title: 'Harmonics', text: 'No fundamental was found, so there are no harmonics.' })
+  }
+  sections.push(...intermodulationSections(subject.data.intermodulation))
+  return sections
+}
+
+/**
+ * The Intermodulation table per channel, when the measurement had one: both tones, every product
+ * with its combination, and the totals (IMD, per order, both level conventions) as the screen's
+ * ImdProductsTable lays them out. Nothing at all without an IMD figure — a single-tone measurement
+ * has no "no intermodulation" paragraph to print.
+ */
+export function intermodulationSections(intermodulation: Record<number, IntermodulationFrame>): ReportSection[] {
+  const sections: ReportSection[] = []
+  const entries = Object.entries(intermodulation)
+    .map(([channel, frame]) => [Number(channel), frame] as [number, IntermodulationFrame])
+    .filter(([channel]) => channel === 0 || channel === 1)
+    .sort(([a], [b]) => a - b)
+
+  for (const [channel, f] of entries) {
+    const method = f.method === 'Smpte' ? 'SMPTE' : 'CCIF'
+    const reference = f.method === 'Smpte' ? 'the HF carrier' : 'the RMS sum of both tones'
+    const db = (percent: number) => (20 * Math.log10(Math.max(percent, Number.EPSILON) / 100)).toFixed(2)
+    sections.push({
+      kind: 'table',
+      title: `Intermodulation (${method}) — ${CHANNEL_LABELS[channel]}`,
+      headers: ['Product', 'Frequency', 'Level', `dBc re ${reference}`],
+      cells: [
+        ['Tone f1', `${f.toneLowHz.toFixed(1)} Hz`, `${f.toneLowDbv.toFixed(2)} dBV`, '—'],
+        ['Tone f2', `${f.toneHighHz.toFixed(1)} Hz`, `${f.toneHighDbv.toFixed(2)} dBV`, '—'],
+        ...f.products.map((p) => [
+          `IM${p.order} (${imdProductLabel(f.method, p, f)})`,
+          `${p.freqHz.toFixed(1)} Hz`,
+          `${p.dbv.toFixed(2)} dBV`,
+          `${p.dbc.toFixed(1)} dB`,
+        ]),
+      ],
+    })
+    sections.push({
+      kind: 'keyValues',
+      title: `IMD — ${CHANNEL_LABELS[channel]}`,
+      rows: [
+        { label: `IMD (${method})`, value: `${f.imdPercent.toFixed(5)} %, ${db(f.imdPercent)} dB` },
+        ...f.perOrder.map((o) => ({ label: `IM${o.order}`, value: `${o.percent.toFixed(5)} %, ${db(o.percent)} dB` })),
+        { label: 'Sine-equivalent level', value: `${f.sineEquivalentDbv.toFixed(2)} dBV` },
+        { label: 'Combined RMS', value: `${f.combinedRmsDbv.toFixed(2)} dBV` },
+      ],
+    })
   }
   return sections
 }

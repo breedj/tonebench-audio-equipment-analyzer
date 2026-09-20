@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
-import type { GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, SmoothingOctaves } from '../api/client'
+import { computed, reactive, watch } from 'vue'
+import type { GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, ImdMethodName, SmoothingOctaves } from '../api/client'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useMetricSelection } from '../composables/useMetricSelection'
+import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, presetTones, sineEquivalentDbv } from '../imd/presets'
 
 const props = defineProps<{
   /**
@@ -46,7 +48,60 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
 // it's a silent no-op for Multitone/WhiteNoise) and with GeneratorMetricsPanel.vue, which needs this
 // staged config reactively even after Stop silences DeviceStatus.generatorLeft/Right — see
 // useGeneratorStimulus.ts.
-const { kind, tones, multitone, noise, chirp } = useGeneratorStimulus()
+const { kind, tones, multitone, noise, chirp, imd } = useGeneratorStimulus()
+const { selectedMetrics, setSelectedMetrics } = useMetricSelection()
+
+const IMD_METHODS: { value: ImdMethodName; label: string }[] = [
+  { value: 'Smpte', label: 'SMPTE / DIN (sidebands re carrier)' },
+  { value: 'Ccif', label: 'CCIF / ITU-R (difference tones)' },
+]
+
+// A preset owns the tone list: its two frequencies are fixed and both levels follow one
+// "sine-equivalent level" (see imd/presets.ts), so the per-tone inputs are read-only under it.
+// Custom leaves the list free; with exactly two tones it still gets an IMD reading, with the
+// method and order chosen here.
+const presetActive = computed(() => kind.value === 'Tones' && imd.preset !== 'Custom')
+
+// A preset's tone fields are read-only, so their spinner arrows do nothing but hide the last
+// digit of "19000" and "-12.02" in a 4rem box; they are dropped while the preset holds the field.
+const NO_SPINNER = '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+const twoTones = computed(() => kind.value === 'Tones' && tones.length === 2)
+const presetLevelDbv = computed(() => {
+  const level = sineEquivalentDbv(tones)
+  return level === null ? -6 : Math.round(level * 100) / 100
+})
+
+function applyPreset(levelDbv: number) {
+  const preset = imdPreset(imd.preset)
+  tones.splice(0, tones.length, ...presetTones(preset, levelDbv))
+  actualFreqHz.splice(0, actualFreqHz.length, null, null)
+}
+
+function onPresetChange() {
+  if (imd.preset !== 'Custom') {
+    const preset = imdPreset(imd.preset)
+    applyPreset(presetLevelDbv.value)
+    imd.method = preset.method
+    imd.maxOrder = preset.defaultMaxOrder
+    // Picking an IMD test is asking for the reading: surface the tiles once, the way a user
+    // would have to via the metric picker otherwise. A later removal is respected.
+    const missing = ['IMD %', 'IMD dB'].filter((label) => !selectedMetrics.value.includes(label))
+    if (missing.length) setSelectedMetrics([...selectedMetrics.value, ...missing])
+  }
+  emit('change')
+}
+
+function onPresetLevelChange(event: Event) {
+  const value = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  applyPreset(value)
+  emit('change')
+}
+
+function onMethodChange() {
+  imd.maxOrder = IMD_DEFAULT_MAX_ORDER[imd.method]
+  emit('change')
+}
 
 // What the device is actually playing per tone, in parallel with `tones` — kept separate so
 // syncFromStatus (below) can report the real, possibly-snapped bin frequency without overwriting
@@ -81,6 +136,13 @@ function addTone() {
 function removeTone(index: number) {
   tones.splice(index, 1)
   actualFreqHz.splice(index, 1)
+  emit('change')
+}
+
+// A hand edit of a tone under a preset would silently leave the preset's name on a pair it no
+// longer describes, so the inputs are disabled there; a change to the list's length under Custom
+// is what turns the IMD analysis on (two tones) or off.
+function onToneEdit() {
   emit('change')
 }
 
@@ -130,15 +192,40 @@ defineExpose({ currentConfig, syncFromStatus })
     </label>
 
     <div v-if="kind === 'Tones'">
+      <label class="mb-3 flex flex-col gap-1 text-sm" title="A standard two-tone intermodulation test: sets both tones up from one sine-equivalent level (the pair's peak equals that sine's peak) and turns the IMD reading on.">
+        IMD preset
+        <select
+          v-model="imd.preset"
+          class="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onPresetChange"
+        >
+          <option v-for="p in IMD_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
+        </select>
+      </label>
+
+      <label v-if="presetActive" class="mb-3 flex items-center gap-2 text-sm" title="The level of a single sine whose peak equals the two-tone pair's peak. 4:1 puts the tones 1.94 and 13.98 dB below it, 1:1 puts both 6.02 dB below.">
+        Level
+        <input
+          type="number"
+          step="0.5"
+          :value="presetLevelDbv"
+          class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          @change="onPresetLevelChange"
+        />
+        <span class="text-neutral-500">dBV sine-eq.</span>
+      </label>
+
       <div class="space-y-2">
         <div v-for="(tone, i) in tones" :key="i" class="flex items-start gap-2 text-sm">
           <div class="flex flex-col gap-0.5">
             <input
               type="number"
               v-model.number="tone.freqHz"
-              class="w-16 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              :disabled="presetActive"
+              class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
+              :class="{ [NO_SPINNER]: presetActive }"
               placeholder="Freq (Hz)"
-              @change="emit('change')"
+              @change="onToneEdit"
             />
             <!-- No unit of its own: the "Hz @" beside the field already names it, and at w-16 the
                  unit wrapped onto a second line. -->
@@ -154,12 +241,14 @@ defineExpose({ currentConfig, syncFromStatus })
           <input
             type="number"
             v-model.number="tone.ampDbv"
-            class="w-12 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            :disabled="presetActive"
+            class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
+            :class="{ [NO_SPINNER]: presetActive }"
             placeholder="Amp (dBV)"
-            @change="emit('change')"
+            @change="onToneEdit"
           />
           <span class="pt-1.5 text-neutral-500">dBV</span>
-          <button type="button" class="pt-1.5 text-neutral-400 hover:text-red-500" title="Remove tone" @click="removeTone(i)">
+          <button v-if="!presetActive" type="button" class="pt-1.5 text-neutral-400 hover:text-red-500" title="Remove tone" @click="removeTone(i)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z" />
             </svg>
@@ -168,12 +257,40 @@ defineExpose({ currentConfig, syncFromStatus })
       </div>
 
       <button
+        v-if="!presetActive"
         type="button"
         class="mt-3 rounded border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
         @click="addTone"
       >
         + Tone
       </button>
+
+      <!-- Two tones are an IMD test whether or not a preset put them there; the analysis needs to
+           know which convention to count products by. Hidden with any other tone count, where no
+           IMD is measured at all. -->
+      <div v-if="twoTones" class="mt-3 flex flex-wrap items-end gap-3 text-sm">
+        <label class="flex flex-col gap-1" title="SMPTE/DIN: sidebands f2 ± n·f1, relative to the HF carrier. CCIF: difference products |m·f1 − n·f2|, relative to the RMS sum of both tones.">
+          IMD method
+          <select
+            v-model="imd.method"
+            class="w-full rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+            @change="onMethodChange"
+          >
+            <option v-for="m in IMD_METHODS" :key="m.value" :value="m.value">{{ m.label }}</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1" title="Highest product order counted. SMPTE 5 = four sideband pairs; CCIF 3 = the 2nd-order difference tone plus both 3rd-order products.">
+          Max order
+          <input
+            type="number"
+            min="2"
+            max="12"
+            v-model.number="imd.maxOrder"
+            class="w-16 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            @change="emit('change')"
+          />
+        </label>
+      </div>
     </div>
 
     <div v-else-if="kind === 'Multitone'" class="space-y-2 text-sm">

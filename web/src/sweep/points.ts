@@ -372,7 +372,7 @@ export function sweepTraceValue(point: ThdSweepPoint, key: SweepTraceKey, method
  * (nTHD, nD2 …) so a normalized run overlaid on a conventional one reads as two different
  * measurements, which it is. Magnitude and Noise keep their names — see sweepTraceValue.
  */
-export function sweepTraceLabel(key: SweepTraceKey, method: ThdMethodName): string {
+export function sweepTraceLabel(key: SweepTraceKey, method: ThdMethodName, family: SweepTraceFamily = 'thd'): string {
   const base: Record<SweepTraceKey, string> = {
     magnitude: 'Magn',
     thd: 'THD',
@@ -383,10 +383,28 @@ export function sweepTraceLabel(key: SweepTraceKey, method: ThdMethodName): stri
     d6plus: 'D6+',
     noise: 'Noise',
   }
-  const label = base[key]
-  if (method !== 'FrequencyNormalized') return label
+  // The IMD sweep draws its figures through the same trace slots (see imd/points.ts), so only
+  // the names differ: the total and the orders, never the magnitude or the noise.
+  const imd: Record<SweepTraceKey, string> = {
+    ...base,
+    thd: 'IMD',
+    d2: 'IM2',
+    d3: 'IM3',
+    d4: 'IM4',
+    d5: 'IM5',
+    d6plus: 'IM6+',
+  }
+  const label = (family === 'imd' ? imd : base)[key]
+  if (method !== 'FrequencyNormalized' || family === 'imd') return label
   return key === 'magnitude' || key === 'noise' ? label : `n${label}`
 }
+
+/**
+ * Which measurement a set of sweep points came from: a THD sweep (the figures are THD and
+ * harmonics D2..D5) or the IMD sweep (IMD and its orders IM2..IM5, mapped onto the same slots by
+ * imd/points.ts). Only labels depend on it; the chart, the alignment and the export do not.
+ */
+export type SweepTraceFamily = 'thd' | 'imd'
 
 /**
  * The method a stored sweep ran with, read off its as-run `params_json`

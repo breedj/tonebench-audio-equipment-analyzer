@@ -13,12 +13,14 @@ import {
 } from '../api/client'
 import {
   isFrequencyResponseKind,
+  isImdSweepKind,
   isImpedanceKind,
   isImpulseResponseKind,
   isSteppedResponseKind,
   isSweepKind,
 } from '../measurements/kinds'
-import { sweepEndFreqHzFromParams, sweepMethodFromParams } from '../sweep/points'
+import { toImdSweepPoints } from '../imd/points'
+import { sweepEndFreqHzFromParams, sweepMethodFromParams, type SweepTraceFamily } from '../sweep/points'
 import type { ResponseTrace } from './useFrequencyResponse'
 import type { ImpedanceTrace } from './useImpedance'
 
@@ -51,6 +53,9 @@ export interface OverlayEntry {
    * method existed. Only meaningful alongside `sweepPoints`.
    */
   sweepMethod?: ThdMethodName
+
+  /** Which sweep a stored run is — decides its trace labels on the chart (THD/D2.. or IMD/IM2..). See imd/points.ts. */
+  sweepFamily?: SweepTraceFamily
 
   /** The end frequency a stored sweep was asked for, or null when its params_json does not say. A normalized sweep measured past it. */
   sweepEndFreqHz?: number | null
@@ -281,6 +286,19 @@ export function useMeasurements() {
     }
   }
 
+  /** The IMD sweep's counterpart of saveSweep — its own runner, so its own endpoint; the same result list. */
+  async function saveImdSweep(req: { measurementTypeId: number; name: string; notes: string | null }) {
+    try {
+      const result = await api.saveImdSweep(req)
+      await load()
+      error.value = null
+      return result
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   /**
    * A frequency-response result is built from the response runner's own curves, not from the
    * pipeline's retained spectrum, so it saves through its own endpoint — the same split as
@@ -381,9 +399,14 @@ export function useMeasurements() {
       const detail = await api.getMeasurement(resultId)
       // A sweep result carries no spectra, so its trace has to be fetched separately — see
       // SweepSaveRequest on why only the scalars are stored.
-      const sweepPoints = isSweepKind(detail.kind)
-        ? toSweepPoints((await api.getStoredSweep(resultId)).points)
-        : undefined
+      // The IMD sweep's rows carry imd_percent/im{k}_percent rather than thd_percent/h{k}_percent
+      // and are mapped onto the same point shape by imd/points.ts.
+      const sweepPoints = isImdSweepKind(detail.kind)
+        ? toImdSweepPoints((await api.getStoredSweep(resultId)).points)
+        : isSweepKind(detail.kind)
+          ? toSweepPoints((await api.getStoredSweep(resultId)).points)
+          : undefined
+      const sweepFamily: SweepTraceFamily | undefined = sweepPoints ? (isImdSweepKind(detail.kind) ? 'imd' : 'thd') : undefined
       // Which figures that sweep is about, and how far it was asked to go: both live only in the
       // as-run params_json the save wrote, so they are read once here rather than parsed by every
       // consumer.
@@ -405,7 +428,7 @@ export function useMeasurements() {
         : undefined
       overlays.value = [
         ...overlays.value,
-        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepEndFreqHz, responseTraces, impedanceTraces },
+        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepFamily, sweepEndFreqHz, responseTraces, impedanceTraces },
       ]
       error.value = null
     } catch (e) {
@@ -437,7 +460,7 @@ export function useMeasurements() {
   // with nothing to show it on. MeasurementHistoryPanel loads on mount and on every type change,
   // which covers every screen the list is shown on.
 
-  return { items, filter, overlays, error, load, save, saveSweep, saveResponse, saveImpulse, saveImpedance,
+  return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance,
     update, remove,
     addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
 }

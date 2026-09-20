@@ -11,6 +11,7 @@ import {
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { toImpedanceTraces, toResponseTraces, toSweepPoints } from '../composables/useMeasurements'
+import { toImdSweepPoints } from '../imd/points'
 import { DEFAULT_SELECTED_METRICS } from '../composables/useMetricSelection'
 import { impedanceDisplayFromParams } from '../impedance/display'
 import { defaultImpulseDisplay, impulseDisplayFromParams } from '../measurements/impulseDisplay'
@@ -21,6 +22,7 @@ import {
   isImpulseResponseKind,
   isSweepKind,
   MEASUREMENT_KINDS,
+  isImdSweepKind,
 } from '../measurements/kinds'
 import { responseDisplayFromParams, responsePhaseKindFromParams, responseRightChannelIsReferenceFromParams } from '../response/display'
 import { sweepDisplayFromParams } from '../sweep/display'
@@ -29,7 +31,7 @@ import { chapterSections } from './builders'
 import { blobToBase64 } from './download'
 import type { ReportElementId } from './elements'
 import { renderExtraCharts, renderView, viewIsCombinable, type RenderedChart } from './render'
-import { storedGeneratorTones, storedMetersFrames, storedSpectrumFrames } from './spectrumFrames'
+import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedSpectrumFrames } from './spectrumFrames'
 import { subjectLabel, type ReportPlan, type ReportSubject, type ReportSubjectData } from './types'
 import { reportViewsForKind } from './views'
 
@@ -53,6 +55,19 @@ function formatTimestamp(subject: ReportSubject): string {
 
 export function formatRangeDbv(dbv: number | null | undefined): string | null {
   return typeof dbv === 'number' ? `${dbv} dBV` : null
+}
+
+/** The IMD convention a stored FFT result was measured under, from its own params_json (`imdMethod`/`imdMaxOrder`); SMPTE/5 when it says nothing, which only matters for a row that has IMD figures at all. */
+function storedImdAnalysis(paramsJson: string | null | undefined): { method: 'Smpte' | 'Ccif'; maxOrder: number } {
+  try {
+    const parsed = paramsJson ? (JSON.parse(paramsJson) as { imdMethod?: unknown; imdMaxOrder?: unknown }) : null
+    return {
+      method: parsed?.imdMethod === 'Ccif' ? 'Ccif' : 'Smpte',
+      maxOrder: typeof parsed?.imdMaxOrder === 'number' ? parsed.imdMaxOrder : 5,
+    }
+  } catch {
+    return { method: 'Smpte', maxOrder: 5 }
+  }
 }
 
 function parseStoredDisplay(paramsJson: string | null | undefined): StoredSpectrumDisplay | null {
@@ -91,6 +106,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       kind: 'spectrum',
       spectrum: storedSpectrumFrames(detail),
       meters: storedMetersFrames(detail),
+      intermodulation: storedIntermodulationFrames(detail, storedImdAnalysis(detail.paramsJson)),
       display: createSpectrumDisplaySource(
         stored,
         detail.channelsData.map((c) => c.channel),
@@ -108,10 +124,13 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
   }
 
   if (isSweepKind(detail.kind)) {
+    const imd = isImdSweepKind(detail.kind)
+    const stored = (await api.getStoredSweep(detail.resultId)).points
     return {
       kind: 'sweep',
-      points: toSweepPoints((await api.getStoredSweep(detail.resultId)).points),
+      points: imd ? toImdSweepPoints(stored) : toSweepPoints(stored),
       method: sweepMethodFromParams(detail.paramsJson),
+      family: imd ? 'imd' : 'thd',
       display: sweepDisplayFromParams(displayParams),
     }
   }

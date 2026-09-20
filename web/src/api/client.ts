@@ -1200,6 +1200,33 @@ export interface SpectrumConfig {
    */
   measurementLoFreqHz: number
   measurementHiFreqHz: number
+  /** The two-tone IMD spec in force, or null when no IMD is measured — see IntermodulationConfigRequest. */
+  intermodulation?: IntermodulationSpec | null
+}
+
+export type ImdMethodName = 'Smpte' | 'Ccif'
+
+/** Mirrors Qa403.App.Streaming.IntermodulationSpec. */
+export interface IntermodulationSpec {
+  toneLowHz: number
+  toneHighHz: number
+  method: ImdMethodName
+  maxOrder: number
+  maxProductFreqHz: number | null
+}
+
+/**
+ * Patch value for SpectrumConfigRequest.intermodulation: `enabled: false` clears the spec (the
+ * other fields are ignored); omitted altogether leaves the server's spec as it is. A null
+ * maxProductFreqHz means "the measurement band's upper edge" — in-band products only.
+ */
+export interface IntermodulationConfigRequest {
+  enabled: boolean
+  toneLowHz?: number
+  toneHighHz?: number
+  method?: ImdMethodName
+  maxOrder?: number
+  maxProductFreqHz?: number | null
 }
 
 export interface SpectrumConfigRequest {
@@ -1213,6 +1240,7 @@ export interface SpectrumConfigRequest {
   processRight?: boolean
   measurementLoFreqHz?: number
   measurementHiFreqHz?: number
+  intermodulation?: IntermodulationConfigRequest
 }
 
 // Projects / measurement-types / measurements — mirrors Qa403.App/Endpoints/ProjectsEndpoints.cs,
@@ -1336,6 +1364,10 @@ export interface MeasurementTypeAppliedResponse {
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
   chartShowOtherPeaks?: boolean | null
+  /** This type's stored IMD template and analysis choice — null for a type without two-tone IMD. See useGeneratorStimulus.ts. */
+  imdPreset?: string | null
+  imdMethod?: ImdMethodName | null
+  imdMaxOrder?: number | null
 }
 
 /**
@@ -1371,6 +1403,10 @@ export interface StagedMeasurementConfig {
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
   chartShowOtherPeaks?: boolean | null
+  /** The generator panel's IMD template and analysis choice — see useGeneratorStimulus.ts. */
+  imdPreset?: string | null
+  imdMethod?: ImdMethodName | null
+  imdMaxOrder?: number | null
 }
 
 export interface SaveMeasurementTypeRequest {
@@ -1728,6 +1764,116 @@ export interface ThdSweepPoint {
   normalizedD6PlusPercent: number | null
 }
 
+// The IMD-vs-amplitude sweep — mirrors Qa403.App/Endpoints/ImdSweepEndpoints.cs and
+// Services/ImdSweepModels.cs. Levels are sine-equivalent volts: the single sine whose peak equals
+// the two-tone pair's peak (see imd/presets.ts).
+
+export interface ImdSweepStartRequest {
+  /** An ImdPresetId; 'Custom' for a typed pair. Kept for the record — the tones below are what run. */
+  preset: string
+  toneLowHz: number
+  toneHighHz: number
+  /** Amplitude ratio low:high — 4 for SMPTE/DIN, 1 for CCIF. */
+  lowToHighRatio: number
+  method: ImdMethodName
+  maxOrder: number
+  startLevelVolt: number
+  endLevelVolt: number
+  stepsPerOctave: number
+  loadOhms: number
+  processLeft: boolean
+  processRight: boolean
+  averageCount: number
+  measureNoiseFloor: boolean
+  /** Highest product frequency counted; null means the measurement band's upper edge (in-band products only). */
+  maxProductFreqHz: number | null
+}
+
+export interface ImdSweepStarted {
+  pointCount: number
+  levelsVolt: number[]
+}
+
+/** Mirrors Qa403.App.Services.ImdSweepPoint. */
+export interface ImdSweepPoint {
+  channel: number
+  generatorSineEquivalentDbv: number
+  toneLowDbv: number
+  toneHighDbv: number
+  sineEquivalentDbv: number
+  combinedRmsDbv: number
+  gainDb: number
+  powerWatt: number
+  imdPercent: number
+  /** Per-order figure, index 0 = order 2, contiguous up to the last order with any product in band. */
+  orderPercent: number[]
+  noisePercent: number
+  toneLowHz: number
+  toneHighHz: number
+  previewFft: SweepPreviewSeries | null
+  previewScope: SweepPreviewSeries | null
+}
+
+export interface ImdSweepStatus {
+  running: boolean
+  phase: SweepPhaseName
+  index: number
+  total: number
+  currentLevelVolt: number
+  error: string | null
+  points: ImdSweepPoint[]
+  method: ImdMethodName
+  maxOrder: number
+}
+
+/**
+ * Mirrors Qa403.Data.ImdVsAmplitudeParameters. The chart display fields reuse the THD amplitude
+ * sweep's names (chartShowThd is the IMD total, chartShowD2..D5 the IM2..IM5 orders, chartShowD6Plus
+ * IM6+), so sweep/display.ts reads both records alike.
+ */
+export interface ImdVsAmplitudeParameters {
+  preset: string
+  toneLowHz: number
+  toneHighHz: number
+  lowToHighRatio: number
+  method: ImdMethodName
+  maxOrder: number
+  startLevelVolt: number
+  endLevelVolt: number
+  stepsPerOctave: number
+  loadOhms: number
+  processLeft: boolean
+  processRight: boolean
+  fftSize: number
+  window: WindowType
+  averageCount: number
+  sampleRateHz: number
+  measureNoiseFloor: boolean
+  maxProductFreqHz: number | null
+  chartXAxis?: string | null
+  chartUnit?: string | null
+  chartShowNoiseFloor?: boolean | null
+  chartShowMagnitude?: boolean | null
+  chartShowThd?: boolean | null
+  chartShowD2?: boolean | null
+  chartShowD3?: boolean | null
+  chartShowD4?: boolean | null
+  chartShowD5?: boolean | null
+  chartShowD6Plus?: boolean | null
+  chartShowLeft?: boolean | null
+  chartShowRight?: boolean | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartYMaxPercent?: number | null
+  chartYMinPercent?: number | null
+  chartXFrom?: number | null
+  chartXTo?: number | null
+  chartYTopDb?: number | null
+  chartYBottomDb?: number | null
+  chartAutofitOnDone?: boolean | null
+  captureDelayMs?: number | null
+}
+
 export interface StoredSweepPoint {
   seqIndex: number
   freqHz: number
@@ -1905,6 +2051,16 @@ export const api = {
     request<{ id: number }>('/sweep/save', { method: 'POST', body: JSON.stringify(req) }),
 
   getStoredSweep: (measurementId: number) => request<StoredSweepResponse>(`/measurements/${measurementId}/sweep-points`),
+
+  // The IMD-vs-amplitude sweep: its own runner, so its own five verbs. A stored result reads back
+  // through getStoredSweep like any sweep (see imd/points.ts for the metric names).
+  startImdSweep: (req: ImdSweepStartRequest) =>
+    request<ImdSweepStarted>('/imd-sweep/start', { method: 'POST', body: JSON.stringify(req) }),
+  cancelImdSweep: () => request<ImdSweepStatus>('/imd-sweep/cancel', { method: 'POST' }),
+  clearImdSweep: () => request<ImdSweepStatus>('/imd-sweep/clear', { method: 'POST' }),
+  getImdSweepStatus: () => request<ImdSweepStatus>('/imd-sweep/status'),
+  saveImdSweep: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/imd-sweep/save', { method: 'POST', body: JSON.stringify(req) }),
 
   // The impedance measurement. The same five verbs as every other runner; a stored result is read
   // back through getResponseTraces, because impedance stores its curves in the same response_trace

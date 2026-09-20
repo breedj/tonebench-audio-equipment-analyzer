@@ -48,6 +48,14 @@ export const StreamMsgType = {
   Impedance: 8,
   /** How far a running impedance measurement has got — see decodeImpedanceProgressFrame. */
   ImpedanceProgress: 9,
+  /**
+   * One channel's two-tone intermodulation figure, sent right after that tick's Meters frame
+   * whenever the pipeline has an IMD spec. Its own type so the meters layout is untouched when
+   * there is no IMD — see decodeIntermodulationFrame.
+   */
+  Intermodulation: 10,
+  /** One finished IMD-vs-amplitude sweep point — see decodeImdSweepPointFrame. */
+  ImdSweepPoint: 11,
 } as const
 export type StreamMsgType = (typeof StreamMsgType)[keyof typeof StreamMsgType]
 
@@ -82,6 +90,17 @@ export const STREAM_FLAG_HELD = 1 << 3
  * StreamFlags.SteppedResponse server-side.
  */
 export const STREAM_FLAG_STEPPED_RESPONSE = 1 << 4
+/**
+ * SweepProgress-frame-only: this progress came from the IMD sweep runner, not the THD one. Same
+ * reasoning as STREAM_FLAG_STEPPED_RESPONSE — the two runners keep separate client state.
+ */
+export const STREAM_FLAG_IMD_SWEEP = 1 << 5
+/**
+ * Intermodulation-frame-only: an IMD spec is set but this tick could not resolve it (the tones are
+ * closer than the analyzer's 8-bin minimum at the current FFT size). Header only, no payload — sent
+ * so a client drops the last reading instead of keeping one measured at a different FFT size.
+ */
+export const STREAM_FLAG_IMD_UNRESOLVED = 1 << 6
 
 /** Client -> server control message kinds. Everything else is REST. */
 export const ClientControlType = {
@@ -262,6 +281,208 @@ export function decodeMetersFrame(buffer: ArrayBuffer): MetersFrame {
     otherPeaks,
     averagesTaken,
     held: (header.flags & STREAM_FLAG_HELD) !== 0,
+  }
+}
+
+export type ImdMethodName = 'Smpte' | 'Ccif'
+
+/** One product as the server measured it — see IntermodulationProduct server-side for the (m, n) convention. */
+export interface IntermodulationProductFrame {
+  freqHz: number
+  dbv: number
+  /** Relative to the method's reference (SMPTE: the HF carrier; CCIF: the RMS sum of both tones). */
+  dbc: number
+  m: number
+  n: number
+  order: number
+}
+
+export interface IntermodulationFrame {
+  header: StreamFrameHeader
+  /** The located tones (Hz) — carried in the header's x0/dx. */
+  toneLowHz: number
+  toneHighHz: number
+  method: ImdMethodName
+  maxOrder: number
+  toneLowDbv: number
+  toneHighDbv: number
+  imdPercent: number
+  /** 20·log10(V1 + V2): the sine whose peak equals the pair's peak. */
+  sineEquivalentDbv: number
+  /** 20·log10(sqrt(V1² + V2²)): the pair's true RMS. */
+  combinedRmsDbv: number
+  /** What every dBc in `products` is relative to. */
+  referenceDbv: number
+  /** Per-order figures, ascending; an order with no in-band products is absent. */
+  perOrder: { order: number; percent: number }[]
+  products: IntermodulationProductFrame[]
+  held: boolean
+}
+
+/**
+ * Intermodulation payload (offsets relative to the 20-byte header) — see EncodeIntermodulation
+ * server-side:
+ * 20 u8  method, 21 u8 maxOrder, 22 u16 pad, 24 f32 toneLowDbv, 28 f32 toneHighDbv, 32 f32 imdPercent,
+ * 36 f32 sineEquivalentDbv, 40 f32 combinedRmsDbv, 44 f32 referenceDbv, 48 u32 orderCount,
+ * 52 (u32 order, f32 percent) * orderCount, then (f32 freqHz, f32 dbv, f32 dbc, i32 m, i32 n, u32 order) * nPoints.
+ */
+export function decodeIntermodulationFrame(buffer: ArrayBuffer): IntermodulationFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  let offset = HEADER_LENGTH
+
+  const method: ImdMethodName = view.getUint8(offset) === 1 ? 'Ccif' : 'Smpte'
+  const maxOrder = view.getUint8(offset + 1)
+  offset += 4
+  const toneLowDbv = view.getFloat32(offset, true)
+  offset += 4
+  const toneHighDbv = view.getFloat32(offset, true)
+  offset += 4
+  const imdPercent = view.getFloat32(offset, true)
+  offset += 4
+  const sineEquivalentDbv = view.getFloat32(offset, true)
+  offset += 4
+  const combinedRmsDbv = view.getFloat32(offset, true)
+  offset += 4
+  const referenceDbv = view.getFloat32(offset, true)
+  offset += 4
+  const orderCount = view.getUint32(offset, true)
+  offset += 4
+
+  const perOrder: { order: number; percent: number }[] = new Array(orderCount)
+  for (let i = 0; i < orderCount; i++) {
+    const order = view.getUint32(offset, true)
+    offset += 4
+    const percent = view.getFloat32(offset, true)
+    offset += 4
+    perOrder[i] = { order, percent }
+  }
+
+  const products: IntermodulationProductFrame[] = new Array(header.nPoints)
+  for (let i = 0; i < header.nPoints; i++) {
+    const freqHz = view.getFloat32(offset, true)
+    offset += 4
+    const dbv = view.getFloat32(offset, true)
+    offset += 4
+    const dbc = view.getFloat32(offset, true)
+    offset += 4
+    const m = view.getInt32(offset, true)
+    offset += 4
+    const n = view.getInt32(offset, true)
+    offset += 4
+    const order = view.getUint32(offset, true)
+    offset += 4
+    products[i] = { freqHz, dbv, dbc, m, n, order }
+  }
+
+  return {
+    header,
+    toneLowHz: header.x0,
+    toneHighHz: header.dx,
+    method,
+    maxOrder,
+    toneLowDbv,
+    toneHighDbv,
+    imdPercent,
+    sineEquivalentDbv,
+    combinedRmsDbv,
+    referenceDbv,
+    perOrder,
+    products,
+    held: (header.flags & STREAM_FLAG_HELD) !== 0,
+  }
+}
+
+/** One finished IMD-vs-amplitude sweep point — see EncodeImdSweepPoint server-side for the layout. */
+export interface ImdSweepPointFrame {
+  header: StreamFrameHeader
+  channel: StreamChannel
+  pointIndex: number
+  toneLowHz: number
+  toneHighHz: number
+  generatorSineEquivalentDbv: number
+  toneLowDbv: number
+  toneHighDbv: number
+  sineEquivalentDbv: number
+  combinedRmsDbv: number
+  gainDb: number
+  powerWatt: number
+  imdPercent: number
+  noisePercent: number
+  /** Per-order percent, index 0 = order 2, contiguous. */
+  orderPercent: number[]
+  previewFft: SweepPreviewSeries | null
+  previewScope: SweepPreviewSeries | null
+}
+
+/**
+ * ImdSweepPoint payload (offsets relative to the 20-byte header): nine f32 scalars
+ * (generatorSineEquivalentDbv, toneLowDbv, toneHighDbv, sineEquivalentDbv, combinedRmsDbv, gainDb,
+ * powerWatt, imdPercent, noisePercent), u32 orderCount, f32[orderCount], then the two previews as
+ * u32 count + (x, min, max) triples each. Header: x0 = low tone Hz, dx = high tone Hz, seq = point index.
+ */
+export function decodeImdSweepPointFrame(buffer: ArrayBuffer): ImdSweepPointFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  let offset = HEADER_LENGTH
+  const f32 = () => {
+    const v = view.getFloat32(offset, true)
+    offset += 4
+    return v
+  }
+  const u32 = () => {
+    const v = view.getUint32(offset, true)
+    offset += 4
+    return v
+  }
+
+  const generatorSineEquivalentDbv = f32()
+  const toneLowDbv = f32()
+  const toneHighDbv = f32()
+  const sineEquivalentDbv = f32()
+  const combinedRmsDbv = f32()
+  const gainDb = f32()
+  const powerWatt = f32()
+  const imdPercent = f32()
+  const noisePercent = f32()
+  const orderCount = u32()
+  const orderPercent: number[] = new Array(orderCount)
+  for (let i = 0; i < orderCount; i++) orderPercent[i] = f32()
+
+  const readPreview = (): SweepPreviewSeries | null => {
+    const count = u32()
+    if (count === 0) return null
+    const x = new Array<number>(count)
+    const min = new Array<number>(count)
+    const max = new Array<number>(count)
+    for (let i = 0; i < count; i++) {
+      x[i] = f32()
+      min[i] = f32()
+      max[i] = f32()
+    }
+    return { x, min, max }
+  }
+  const previewFft = readPreview()
+  const previewScope = readPreview()
+
+  return {
+    header,
+    channel: header.channel,
+    pointIndex: header.seq,
+    toneLowHz: header.x0,
+    toneHighHz: header.dx,
+    generatorSineEquivalentDbv,
+    toneLowDbv,
+    toneHighDbv,
+    sineEquivalentDbv,
+    combinedRmsDbv,
+    gainDb,
+    powerWatt,
+    imdPercent,
+    noisePercent,
+    orderPercent,
+    previewFft,
+    previewScope,
   }
 }
 

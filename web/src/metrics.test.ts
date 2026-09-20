@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   absoluteLevelDbv,
+  AVAILABLE_METRIC_LABELS,
   channelTiles,
   dbvToDbu,
   dbvToVrms,
@@ -16,7 +17,7 @@ import {
   systemTiles,
   vrmsToDbv,
 } from './metrics'
-import type { MetersFrame } from './streaming/protocol'
+import type { IntermodulationFrame, MetersFrame } from './streaming/protocol'
 import type { GeneratorTone, MultitoneSettings, WhiteNoiseSettings } from './api/client'
 
 // Golden values below are cross-checked against the reference QA40x screenshot's own numbers
@@ -157,6 +158,36 @@ describe('channelTiles', () => {
     const tones: GeneratorTone[] = [{ freqHz: 1000, ampDbv: -6 }]
     const tiles = channelTiles(meters, tones, 8)
     expect(tiles.some((t) => /^Gen/.test(t.label))).toBe(false)
+  })
+
+  const imd: IntermodulationFrame = {
+    header: { msgType: 10, channel: 0, flags: 0, seq: 1, x0: 58.59, dx: 7001.95, nPoints: 0 },
+    toneLowHz: 58.59,
+    toneHighHz: 7001.95,
+    method: 'Smpte',
+    maxOrder: 5,
+    toneLowDbv: -1.94,
+    toneHighDbv: -13.98,
+    imdPercent: 0.01,
+    sineEquivalentDbv: 0,
+    combinedRmsDbv: -2.28,
+    referenceDbv: -13.98,
+    perOrder: [],
+    products: [],
+    held: false,
+  }
+
+  it('adds IMD % and IMD dB tiles when an intermodulation frame is present', () => {
+    const tiles = channelTiles(meters, [], 8, imd)
+    expect(tiles.find((t) => t.label === 'IMD %')?.value).toBe('0.01000 %')
+    expect(tiles.find((t) => t.label === 'IMD dB')?.value).toBe('-80.00 dB')
+    expect(AVAILABLE_METRIC_LABELS).toContain('IMD %')
+    expect(AVAILABLE_METRIC_LABELS).toContain('IMD dB')
+  })
+
+  it('omits the IMD tiles entirely without one — no reading is not a reading', () => {
+    const tiles = channelTiles(meters, [], 8)
+    expect(tiles.some((t) => t.label.startsWith('IMD'))).toBe(false)
   })
 })
 

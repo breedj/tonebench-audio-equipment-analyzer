@@ -85,13 +85,8 @@ public static class HarmonicAnalyzer
             if (expectedBin >= psd.ValuesV2PerHz.Length || expectedBin > maxBinInclusive)
                 break;
 
-            double noiseDensity = subtractNoiseFloor ? LocalNoiseDensity(psd, expectedBin, skirtHalfWidthBins) : 0.0;
-
-            int peak = FindPeakBin(psd.ValuesV2PerHz, expectedBin, peakSearchSpanBins);
-            if (noiseDensity > 0.0 && psd.ValuesV2PerHz[peak] < noiseDensity * PeakAcceptanceFactor)
-                peak = expectedBin;   // nothing here but noise — don't let max-picking invent a peak
-
-            double vrms = HarmonicVrms(psd, peak, skirtHalfWidthBins, noiseDensity);
+            var tone = MeasureTone(psd, expectedBin, peakSearchSpanBins, skirtHalfWidthBins, subtractNoiseFloor);
+            double vrms = tone.AmplitudeVrms;
             double dbv = 20.0 * Math.Log10(Math.Max(vrms, double.Epsilon));
 
             if (order == 1)
@@ -99,10 +94,38 @@ public static class HarmonicAnalyzer
 
             double dbc = 20.0 * Math.Log10(Math.Max(vrms, double.Epsilon) / fundamentalVrms);
 
-            destination[written++] = new Harmonic(order, peak, vrms, dbv, dbc);
+            destination[written++] = new Harmonic(order, tone.Bin, vrms, dbv, dbc);
         }
 
         return written;
+    }
+
+    /// <summary>
+    /// Measures one tone expected at <paramref name="expectedBin"/>: locates the peak within
+    /// ±<paramref name="peakSearchSpanBins"/>, sums the PSD over ±<paramref name="skirtHalfWidthBins"/>
+    /// around it and removes the local noise floor. This is the per-harmonic block of
+    /// <see cref="Analyze"/>, public so that <see cref="IntermodulationAnalyzer"/> measures its
+    /// tones and products by exactly the same rule — two analyzers with their own copies of the
+    /// skirt sum and the floor subtraction would disagree about the same bin.
+    /// </summary>
+    public static ToneMeasurement MeasureTone(
+        PsdSpectrum psd,
+        int expectedBin,
+        int peakSearchSpanBins = DefaultPeakSearchSpanBins,
+        int skirtHalfWidthBins = DefaultSkirtHalfWidthBins,
+        bool subtractNoiseFloor = true)
+    {
+        if (expectedBin < 0 || expectedBin >= psd.ValuesV2PerHz.Length)
+            throw new ArgumentOutOfRangeException(nameof(expectedBin), expectedBin, "Expected bin lies outside the spectrum.");
+
+        double noiseDensity = subtractNoiseFloor ? LocalNoiseDensity(psd, expectedBin, skirtHalfWidthBins) : 0.0;
+
+        int peak = FindPeakBin(psd.ValuesV2PerHz, expectedBin, peakSearchSpanBins);
+        if (noiseDensity > 0.0 && psd.ValuesV2PerHz[peak] < noiseDensity * PeakAcceptanceFactor)
+            peak = expectedBin;   // nothing here but noise — don't let max-picking invent a peak
+
+        double vrms = HarmonicVrms(psd, peak, skirtHalfWidthBins, noiseDensity);
+        return new ToneMeasurement(peak, vrms, noiseDensity);
     }
 
     /// <summary>

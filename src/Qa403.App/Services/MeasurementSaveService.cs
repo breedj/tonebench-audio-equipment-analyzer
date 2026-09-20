@@ -21,6 +21,7 @@ public sealed class MeasurementSaveService(
     ImdSweepRunner imdSweepRunner,
     FrequencyResponseRunner responseRunner,
     SteppedResponseRunner steppedResponseRunner,
+    CrosstalkRunner crosstalkRunner,
     ImpulseResponseRunner impulseRunner,
     ImpedanceRunner impedanceRunner,
     ProjectRepository projectRepository,
@@ -72,6 +73,17 @@ public sealed class MeasurementSaveService(
     /// </summary>
     public static bool IsFrequencyResponseKind(string kind) => kind is FrequencyResponseKind or SteppedResponseKind;
 
+    /// <summary>The <c>measurement_type.kind</c> value for a crosstalk measurement. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string CrosstalkKind = "Crosstalk";
+
+    /// <summary>
+    /// Whether a kind's result is a crosstalk curve. Its own predicate rather than a third arm of
+    /// <see cref="IsFrequencyResponseKind"/>, for the impedance reason: it stores its curves in the
+    /// <c>response_trace</c> rows, but the start endpoint, the settings record and the report
+    /// sections are its own. What it shares is the storage and the chart.
+    /// </summary>
+    public static bool IsCrosstalkKind(string kind) => kind is CrosstalkKind;
+
     /// <summary>The <c>measurement_type.kind</c> value for a swept-sine impulse response. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string ImpulseResponseKind = "ImpulseResponse";
 
@@ -103,7 +115,7 @@ public sealed class MeasurementSaveService(
 
     /// <summary>Whether a kind's configuration lives only in its panel, with nothing live to snapshot — see <see cref="ResolveTypeParamsJson"/>.</summary>
     public static bool HasNoLiveConfiguration(string kind) =>
-        IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind) || IsImpedanceKind(kind);
+        IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind) || IsImpedanceKind(kind) || IsCrosstalkKind(kind);
 
     /// <summary>
     /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
@@ -272,6 +284,28 @@ public sealed class MeasurementSaveService(
             BandwidthReferenceHighHz: BandwidthReferenceSpec.DefaultHighHz), SerializerOptions);
 
     /// <summary>
+    /// A brand-new crosstalk type's <c>params_json</c>, kept in step with
+    /// <c>CrosstalkConfigPanel.vue</c>'s own defaults: the tutorial's grid (log steps, 20 Hz–20 kHz),
+    /// both directions, and a generator level rather than an output-referred one — the safe
+    /// default against an amplifier whose gain is not yet known.
+    /// </summary>
+    public string DefaultCrosstalkParametersJson() =>
+        JsonSerializer.Serialize(new CrosstalkParameters(
+            StartFreqHz: 20.0,
+            EndFreqHz: 20000.0,
+            StepsPerOctave: 5,
+            Direction: nameof(CrosstalkDirection.Both),
+            LevelMode: nameof(ThdSweepLevelMode.GeneratorVoltage),
+            LevelValue: -20.0,
+            LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
+            LoadOhms: 8.0,
+            FftSize: CrosstalkRequest.DefaultFftSize,
+            Window: WindowType.Hann,
+            AverageCount: 1,
+            SampleRateHz: CrosstalkRequest.DefaultSampleRateHz,
+            AdaptiveResolution: true), SerializerOptions);
+
+    /// <summary>
     /// A brand-new impedance type's <c>params_json</c>, kept in step with
     /// <c>ImpedanceConfigPanel.vue</c>'s own defaults.
     ///
@@ -352,6 +386,9 @@ public sealed class MeasurementSaveService(
         // cannot run.
         if (kind == SteppedResponseKind)
             return existingParamsJson ?? DefaultSteppedResponseParametersJson();
+
+        if (IsCrosstalkKind(kind))
+            return existingParamsJson ?? DefaultCrosstalkParametersJson();
 
         if (IsImpedanceKind(kind))
             return existingParamsJson ?? DefaultImpedanceParametersJson(globalCalibrationAvailable);
@@ -709,6 +746,48 @@ public sealed class MeasurementSaveService(
     }
 
     /// <summary>
+    /// Saves the crosstalk traces the runner holds — one <c>response_trace</c> row per direction
+    /// measured, with the as-run generator level of each pass in <c>params_json</c>.
+    /// </summary>
+    public async Task<long> SaveCrosstalkAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = crosstalkRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before saving.");
+        if (status.Traces.Count == 0)
+            throw new InvalidOperationException("No crosstalk has been measured yet.");
+
+        var request = crosstalkRunner.LastRequest
+            ?? throw new InvalidOperationException("No crosstalk has been measured yet.");
+        var levels = crosstalkRunner.GeneratorAmpDbvByKind;
+
+        string paramsJson = JsonSerializer.Serialize(
+            new CrosstalkParameters(
+                request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave,
+                request.Direction.ToString(),
+                request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
+                request.LoadOhms,
+                request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
+                request.AdaptiveResolution,
+                GeneratorAmpDbvLeftToRight: levels.TryGetValue(FrequencyResponseTraceKind.CrosstalkLeftToRight, out double l2r) ? l2r : null,
+                GeneratorAmpDbvRightToLeft: levels.TryGetValue(FrequencyResponseTraceKind.CrosstalkRightToLeft, out double r2l) ? r2l : null,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+            SerializerOptions);
+
+        var info = session.Info;
+        var saveRequest = new ResponseSaveRequest(
+            measurementTypeId, name, notes,
+            paramsJson,
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            status.SampleRateHz, status.FftSize,
+            Channels: 2,
+            session.InputRangeDbv, session.OutputRangeDbv,
+            [.. status.Traces.Select(ToTraceInput)]);
+
+        return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
     /// Saves the stepped-sine curves currently on screen as one measurement result.
     ///
     /// <para>Everything below the parameters record is shared with
@@ -973,6 +1052,8 @@ public sealed class MeasurementSaveService(
         FrequencyResponseTraceKind.Left => ResponseTraceKind.Left,
         FrequencyResponseTraceKind.Right => ResponseTraceKind.Right,
         FrequencyResponseTraceKind.Gain => ResponseTraceKind.Gain,
+        FrequencyResponseTraceKind.CrosstalkLeftToRight => ResponseTraceKind.CrosstalkLeftToRight,
+        FrequencyResponseTraceKind.CrosstalkRightToLeft => ResponseTraceKind.CrosstalkRightToLeft,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown response trace kind."),
     };
 

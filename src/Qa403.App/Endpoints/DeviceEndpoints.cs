@@ -128,7 +128,7 @@ public static class DeviceEndpoints
                 dut = parsed;
             }
 
-            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled, request.HarmonicsEnabled, dut))
+            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled, request.HarmonicsEnabled, dut, request.CrosstalkEnabled))
                 return Results.BadRequest("The connected device is not the simulator, so it has no signal-profile switches.");
 
             return Results.Ok(session.GetStatus());
@@ -204,7 +204,9 @@ public sealed record DeviceStatusResponse(
     /// <see cref="Qa403.App.Services.DatabaseHealth"/>. Set by the endpoint, not by the session, which
     /// knows nothing about storage.
     /// </summary>
-    string? DatabaseProblem = null);
+    string? DatabaseProblem = null,
+    /// <summary>Whether the simulator couples its channels (<see cref="Qa403.Device.Simulation.SimulatedCrosstalk"/>), or null when the device isn't the simulator.</summary>
+    bool? SimulatedCrosstalkEnabled = null);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);
@@ -247,7 +249,7 @@ public sealed record AutoRangeStepDownDelayRequest(double DelayMs);
 /// Which simulated device under test to patch in. Omitted leaves it alone, same as the two
 /// switches — see <see cref="Qa403.Device.Simulation.SimulatedDutModel"/>.
 /// </param>
-public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled, bool? HarmonicsEnabled = null, string? Dut = null);
+public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled, bool? HarmonicsEnabled = null, string? Dut = null, bool? CrosstalkEnabled = null);
 
 /// <param name="Kind">"Hardware" or "Simulated" — see <see cref="Qa403.App.Services.DeviceKind"/>.</param>
 public sealed record DeviceKindRequest(string? Kind);

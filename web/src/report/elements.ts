@@ -1,4 +1,4 @@
-import { FFT_SPECTRUM_KIND, isFrequencyResponseKind } from '../measurements/kinds'
+import { FFT_SPECTRUM_KIND, isCrosstalkKind, isFrequencyResponseKind } from '../measurements/kinds'
 
 /**
  * The elements a report of a measurement can include, by measurement kind.
@@ -49,6 +49,12 @@ const MEASUREMENTS: ReportElement = {
   hint: 'The ±1 dB and −3 dB corners, the peak and the reference — the Measurements panel.',
 }
 
+const CROSSTALK_MEASUREMENTS: ReportElement = {
+  id: 'measurements',
+  label: 'Measurements',
+  hint: 'Each direction at 1 kHz, its worst point and the band ends — the Measurements panel.',
+}
+
 const METRICS: ReportElement = {
   id: 'metrics',
   label: 'Metrics',
@@ -78,6 +84,7 @@ export const GENERIC_REPORT_ELEMENTS: readonly ReportElement[] = [CHART, DESCRIP
 
 export function reportElementsForKind(kind: string | null | undefined): readonly ReportElement[] {
   if (isFrequencyResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, MEASUREMENTS]
+  if (isCrosstalkKind(kind)) return [CHART, DESCRIPTION, SETTINGS, CROSSTALK_MEASUREMENTS]
   if (kind === FFT_SPECTRUM_KIND) return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, OSCILLOSCOPE, WATERFALL]
   return GENERIC_REPORT_ELEMENTS
 }

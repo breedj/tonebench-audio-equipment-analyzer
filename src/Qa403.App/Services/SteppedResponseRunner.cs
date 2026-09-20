@@ -31,46 +31,6 @@ public sealed class SteppedResponseRunner(
     SpectrumBroadcastHub hub,
     ILogger<SteppedResponseRunner> logger) : IMeasurementRun
 {
-    /// <summary>Where the level probe starts, and the level below which it gives up. Both from the previous app.</summary>
-    private const double ProbeStartDbv = -40.0;
-
-    /// <summary>Most passes the probe will make. Each is a full capture, so this is a real time cost.</summary>
-    private const int MaxProbeIterations = 5;
-
-    /// <summary>How close to the requested level the probe has to get before it stops.</summary>
-    private const double ProbeToleranceDb = 0.5;
-
-    private const double ProbeFrequencyHz = 1000.0;
-
-    /// <summary>Longest record either probe will use. Both want a level, not resolution, and at the sweep's own sizes each pass would cost seconds.</summary>
-    private const int MaxProbeFftSize = 16384;
-
-    /// <summary>
-    /// Below this the probe is not measuring a quiet DUT, it is measuring nothing.
-    ///
-    /// <para>The analyzer's own residual is about −161 dBV per root hertz at its most sensitive
-    /// input range, which integrates to far more than this across any band, so a reading under
-    /// −120 dBV means the signal path is broken — nothing connected, the DUT unpowered, the wrong
-    /// channel — and not that the DUT is very quiet. Worth a hard stop rather than a correction,
-    /// because the correction is what makes it dangerous: an output-referred probe that reads
-    /// silence computes an enormous shortfall and winds the generator all the way to the DAC's
-    /// ceiling, which is full scale into whatever <em>is</em> connected.</para>
-    /// </summary>
-    private const double ProbeSilenceDbv = -120.0;
-
-    /// <summary>
-    /// Fresh signal between two averages, as a fraction of one record — Welch's 50 %, exactly as
-    /// <see cref="ThdSweepRunner"/> uses it. Here as there, an average that adds nothing is time
-    /// added to every single point.
-    /// </summary>
-    private const double AverageHopFraction = 0.5;
-
-    /// <summary>How often <see cref="WaitForCaptureAsync"/> re-checks. Short against the 20 Hz pipeline tick.</summary>
-    private static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(20);
-
-    /// <summary>Ranges closer than this count as the same one — the ladder is 6 dB apart, so this only absorbs float noise.</summary>
-    private const double RangeEpsilonDb = 0.01;
-
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateLock = new();
 
@@ -178,7 +138,7 @@ public sealed class SteppedResponseRunner(
                 _pointsMeasured = 0;
                 _pointCount = steps.Length;
                 _averageCount = request.AverageCount;
-                _generatorAmpDbv = request.SolvesGeneratorLevel ? ProbeStartDbv : request.LevelDbv;
+                _generatorAmpDbv = request.SolvesGeneratorLevel ? SteppedCaptureSupport.ProbeStartDbv : request.LevelDbv;
                 _sampleRateHz = request.EffectiveSampleRateHz;
                 _fftSize = steps[0].FftSize;
                 _binHz = request.EffectiveSampleRateHz / steps[0].FftSize;
@@ -339,7 +299,8 @@ public sealed class SteppedResponseRunner(
                 request.AverageCount, request.LevelValue, request.LevelUnit, request.LevelMode,
                 request.RightChannelIsReference);
 
-            pipeline.Options = BuildOptions(savedOptions, request);
+            pipeline.Options = SteppedCaptureSupport.BuildSteppedOptions(
+                savedOptions, request.FftSize, request.Window, request.AverageCount, request.StartFreqHz, request.EffectiveSampleRateHz);
 
             if (!session.Acquiring)
             {
@@ -431,7 +392,7 @@ public sealed class SteppedResponseRunner(
                 {
                     double predicted = InputRangeSelector.For(session.Capabilities.InputRangesDbv, predictorPeakDbv);
                     rangeRatchetDbv = Math.Max(predicted, rangeRatchetDbv);
-                    await ApplyInputRangeAsync(rangeRatchetDbv, ct);
+                    await SteppedCaptureSupport.ApplyInputRangeAsync(session, rangeRatchetDbv, ct);
                 }
 
                 // Bracketed around the capture, not sampled at the end. A hole in the sample stream
@@ -448,8 +409,8 @@ public sealed class SteppedResponseRunner(
                 // predictor that is not tracking, which is worth being able to see afterwards.
                 double inputRangeBefore = session.InputRangeDbv;
 
-                var snapshots = await CaptureWithStimulusAsync(
-                    ToneConfig(step.FrequencyHz, generatorAmpDbv, request), request, step.FftSize, ct);
+                var snapshots = await SteppedCaptureSupport.CaptureWithStimulusAsync(
+                    session, pipeline, ToneConfig(step.FrequencyHz, generatorAmpDbv, request), step.FftSize, CaptureTimeout(request, step.FftSize), ct);
 
                 long dropsDuring = session.DroppedRxChunks - dropsBefore;
                 if (dropsDuring > 0)
@@ -461,7 +422,7 @@ public sealed class SteppedResponseRunner(
                 }
 
                 double inputRangeAfter = session.InputRangeDbv;
-                if (Math.Abs(inputRangeAfter - inputRangeBefore) > RangeEpsilonDb)
+                if (Math.Abs(inputRangeAfter - inputRangeBefore) > SteppedCaptureSupport.RangeEpsilonDb)
                 {
                     logger.LogInformation(
                         "Stepped response point {Index}/{Total} at {FreqHz:0.##} Hz: the input range moved "
@@ -482,7 +443,7 @@ public sealed class SteppedResponseRunner(
                 // peak-to-RMS-equivalent "Pk dBV" quantity Qa40xAutoRanger evaluates, so prediction
                 // and the backstop that catches its mistakes agree on what "too hot" means. Both
                 // channels, because one input range serves both and the louder one decides.
-                double pointPeakDbv = MeasuredPeakDbv(snapshots);
+                double pointPeakDbv = SweepCaptureSupport.MeasuredPeakDbv(snapshots);
                 if (!double.IsNegativeInfinity(pointPeakDbv))
                 {
                     predictorPeakDbv = pointPeakDbv;
@@ -564,100 +525,19 @@ public sealed class SteppedResponseRunner(
         }
     }
 
-    /// <summary>
-    /// The points this run will measure, in order: a log-spaced grid, each frequency snapped onto a
-    /// coherent bin of the size it will be analyzed at, de-duplicated where the spacing is finer
-    /// than the bins.
-    /// </summary>
-    private static SteppedStepPlan[] BuildSteps(SteppedResponseRequest request)
-    {
-        double sampleRateHz = request.EffectiveSampleRateHz;
-        double maxHz = request.MaxFrequencyHz;
-        var desired = SweepPoints.LogPerOctave(request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave);
-
-        SteppedStepPlan[] steps = request.AdaptiveResolution
-            ? [.. SweepPoints.SnapAndDedupeAdaptive(desired, sampleRateHz, request.FftSizeAt, maxHz)
-                .Select(s => new SteppedStepPlan(s.FrequencyHz, BinOf(s.FrequencyHz, s.FftSize, sampleRateHz), s.FftSize))]
-            : [.. SweepPoints.SnapAndDedupe(desired, sampleRateHz, request.FftSize, maxHz)
-                .Select(t => new SteppedStepPlan(t.FrequencyHz, t.Bin, request.FftSize))];
-
-        if (steps.Length < 2)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(request),
-                $"A response needs at least two distinct points below {maxHz:0} Hz; this grid produced {steps.Length}.");
-        }
-
-        return steps;
-    }
-
-    /// <summary>
-    /// The bin a snapped tone sits on. Exact by construction — <see cref="SweepPoints"/> already
-    /// rounded the frequency onto a bin centre for this size — and it is deliberately this rather
-    /// than the peak the analyzer located: a peak search can lock onto mains hum or a DUT's own
-    /// oscillation, and reading the level off the wrong bin is invisible in the result.
-    /// </summary>
-    private static int BinOf(double freqHz, int fftSize, double sampleRateHz) =>
-        (int)Math.Round(freqHz * fftSize / sampleRateHz);
-
-    /// <summary>
-    /// The pipeline settings for a stepped-response capture. Two differ from
-    /// <c>ThdSweepRunner.BuildSweepOptions</c> and both are load-bearing:
-    /// <see cref="SpectrumPipelineOptions.RetainComplexSpectrum"/>, because the phase is read off the
-    /// complex bin, and both channels always processed, because the gain trace is a ratio between
-    /// them and the two have to come from the same tick.
-    ///
-    /// <para><c>Averaging</c> follows the same rule the sweep uses: a single average is "no
-    /// averaging", not "Linear with count 1". <see cref="SpectrumAverager"/> treats count ≤ 1 as
-    /// <see cref="AveragingMode.Off"/> and leaves its Count at 0, so asking for Linear would leave
-    /// the single-shot completion check false forever and every point would time out waiting for a
-    /// capture that can never complete.</para>
-    /// </summary>
-    private static SpectrumPipelineOptions BuildOptions(SpectrumPipelineOptions current, SteppedResponseRequest request) =>
-        current with
-        {
-            FftSize = request.FftSize,
-            Window = request.Window,
-            Averaging = request.AverageCount > 1 ? AveragingMode.Linear : AveragingMode.Off,
-            AverageCount = request.AverageCount,
-            ProcessLeft = true,
-            ProcessRight = true,
-            SingleShot = true,
-            RetainComplexSpectrum = true,
-            // A runner measures unweighted whatever the FFT screen has selected: a sweep's noise
-            // and THD+N figures are defined over the plain band, and the weighting is restored
-            // with the rest of the saved options afterwards.
-            Weighting = WeightingSpec.None,
-
-            // Nothing here reads a preview, and at these FFT sizes it is not free.
-            CapturePreview = false,
-
-            AverageHopFraction = AverageHopFraction,
-
-            // The meters are only read for their peak (the ranging predictor), but the peak comes
-            // with a located fundamental, and the default 200 Hz search floor exists to keep mains
-            // hum from being mistaken for one. A run starting at 20 Hz would otherwise fail to
-            // locate its own tone for the whole bottom decade and lose its range predictor with it.
-            FundamentalMinSearchHz = Math.Min(current.FundamentalMinSearchHz, request.StartFreqHz / 2.0),
-            HarmonicMaxFreqHz = request.EffectiveSampleRateHz / 2.0,
-        };
+    /// <summary>The run's grid — see <see cref="SteppedCaptureSupport.BuildSteps"/>.</summary>
+    private static SteppedStepPlan[] BuildSteps(SteppedResponseRequest request) =>
+        SteppedCaptureSupport.BuildSteps(
+            request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave, request.EffectiveSampleRateHz,
+            request.MaxFrequencyHz, request.AdaptiveResolution, request.FftSize, request.FftSizeAt);
 
     /// <summary>
     /// The generator amplitude to measure at. Direct for <see cref="ThdSweepLevelMode.GeneratorVoltage"/>;
-    /// for the output-referred modes it is solved by probing at 1 kHz: measure what comes back,
-    /// correct the generator by the shortfall, repeat.
-    ///
-    /// <para>Reads the <b>left</b> channel only, unlike <c>ThdSweepRunner</c>'s equivalent which
-    /// takes the loudest of the two. Here the right input is (usually) the reference, carrying the
-    /// stimulus at the generator's own level — taking the maximum would lock the probe onto that
-    /// reference and solve for the generator level rather than for the DUT's output, silently
-    /// turning "1 W into 8 Ω" into "the generator at 2.83 V".</para>
-    ///
-    /// <para>The input range is set from the <b>target</b> before the first probe pass, not after
-    /// it. That ordering is load-bearing: the probe measures the DUT's gain from its own captures,
-    /// so a leftover range too sensitive for the target clips them, the probe reads the loss as
-    /// missing gain and pushes the generator up, which clips harder still — measured on the chirp
-    /// path as a 10.7 dB overshoot against a plain loopback.</para>
+    /// for the output-referred modes it is solved by probing at 1 kHz — see
+    /// <see cref="SteppedCaptureSupport.ProbeGeneratorLevelAsync"/>, which reads the <b>left</b>
+    /// channel here: the right input is (usually) the reference, carrying the stimulus at the
+    /// generator's own level, and solving against it would turn "1 W into 8 Ω" into "the generator
+    /// at 2.83 V". The crosstalk runner passes its aggressor channel instead.
     /// </summary>
     private async Task<(double GenDbv, double PeakDbv, double PeakAtGenDbv)> ResolveGeneratorAmplitudeAsync(
         SteppedResponseRequest request, CancellationToken ct)
@@ -668,291 +548,61 @@ public sealed class SteppedResponseRunner(
             return (request.LevelDbv, double.NegativeInfinity, request.LevelDbv);
 
         SetPhase(FrequencyResponsePhase.DeterminingLevel);
-        BroadcastProgress(0, MaxProbeIterations, FrequencyResponsePhase.DeterminingLevel);
 
-        double wantedOutDbv = request.LevelDbv;
-        double maxGenDbv = session.Capabilities.OutputRangesDbv.Count > 0
-            ? session.Capabilities.OutputRangesDbv.Max()
-            : 18.0;
-
-        if (session.AutoRangeEnabled != false)
-            await SetInputRangeForAsync(wantedOutDbv, ct);
-
-        int probeFftSize = request.FftSizeAt(ProbeFrequencyHz);
-        var probeTone = CoherentFrequency.Nearest(ProbeFrequencyHz, request.EffectiveSampleRateHz, probeFftSize);
-        double genDbv = ProbeStartDbv;
-
-        // Tracked as a pair: the peak, and the generator level it was measured at. The loop can exit
-        // having just applied an unmeasured correction, and a peak paired with the wrong generator
-        // level is a constant offset on every prediction the run then makes.
-        double peakDbv = double.NegativeInfinity;
-        double peakAtGenDbv = genDbv;
-
-        for (int i = 0; i < MaxProbeIterations; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            SetGeneratorAmpDbv(genDbv);
-            BroadcastProgress(i, MaxProbeIterations, FrequencyResponsePhase.DeterminingLevel);
-
-            var snapshots = await CaptureWithStimulusAsync(
-                ToneConfig(probeTone.FrequencyHz, genDbv, request), request, probeFftSize, ct);
-
-            peakDbv = MeasuredPeakDbv(snapshots);
-            peakAtGenDbv = genDbv;
-
-            double measuredDbv = ResponseCaptureSupport.LevelAt(snapshots, StreamChannel.Left, probeTone.Bin);
-            if (double.IsNaN(measuredDbv) || measuredDbv < ProbeSilenceDbv)
+        int probeFftSize = request.FftSizeAt(SteppedCaptureSupport.ProbeFrequencyHz);
+        var result = await SteppedCaptureSupport.ProbeGeneratorLevelAsync(
+            session, pipeline, StreamChannel.Left, request.LevelDbv, request.EffectiveSampleRateHz, probeFftSize,
+            request.GenerateLeft, request.GenerateRight, CaptureTimeout(request, probeFftSize),
+            (phase, done, total, genDbv) =>
             {
-                throw new InvalidOperationException(
-                    $"No signal came back on the left input at {genDbv:0.##} dBV generator while determining the drive level "
-                        + "— check that the DUT is connected and powered, and that its output reaches the left input.");
-            }
+                SetGeneratorAmpDbv(genDbv);
+                BroadcastProgress(done, total, phase);
+            },
+            ct);
 
-            double errorDb = wantedOutDbv - measuredDbv;
-
-            // Measured at the level asked for: genDbv is right and has been verified, not just
-            // calculated. Stop here rather than applying one more unmeasured correction.
-            if (Math.Abs(errorDb) <= ProbeToleranceDb)
-                break;
-
-            // Already at the DAC's ceiling and still short — another pass would only re-clamp.
-            if (genDbv >= maxGenDbv && errorDb > 0.0)
-                break;
-
-            genDbv += errorDb;
-
-            if (genDbv <= ProbeStartDbv)
-            {
-                throw new InvalidOperationException(
-                    $"Could not reach the requested output level — the generator would need to go below {ProbeStartDbv:0} dBV. "
-                        + "Check that the DUT is connected and powered.");
-            }
-
-            genDbv = Math.Min(genDbv, maxGenDbv);
-        }
-
-        SetGeneratorAmpDbv(genDbv);
-        return (genDbv, peakDbv, peakAtGenDbv);
+        SetGeneratorAmpDbv(result.GenDbv);
+        return result;
     }
 
     /// <summary>
     /// Measures the input range this DUT needs before the sweep starts, for the directly-specified
-    /// generator level where nothing else has measured it: park on the least sensitive range, play
-    /// one tone at the real generator level, capture, and pick the range from the peak. Returns that
-    /// peak, so it also seeds the per-point predictor.
-    ///
-    /// <para>This is <see cref="FrequencyResponseRunner"/>'s own input-range probe, ported for the
-    /// same reason it exists there: without it the run starts on whatever range the previous
-    /// measurement left behind and lets the device's own ranger walk to the right one. That works --
-    /// an autorange step announces itself in-band and the point re-captures -- but every step costs a
-    /// ~110 ms hole and a re-captured record, and with the predictor unseeded the first point cannot
-    /// suppress step-down either, so the ranger hunts freely through the start of the sweep. Arriving
-    /// on the right range costs one short capture instead.</para>
-    ///
-    /// <para>Least sensitive range first, and for the same reason as there: an unknown DUT can be
-    /// doing anything, and a probe that clips reads a peak that is a property of the range rather
-    /// than of the signal -- which would then choose that same range again and stay wrong.</para>
-    ///
-    /// <para>The probe tone is 1 kHz <b>clamped into the swept band</b>. Ranging at a frequency the
-    /// sweep never visits would range for a level the run never sees, which on a DUT with any
-    /// response at all is a different level.</para>
+    /// generator level where nothing else has measured it — see
+    /// <see cref="SteppedCaptureSupport.ProbeInputRangeAsync"/>. The probe tone is 1 kHz
+    /// <b>clamped into the swept band</b>: ranging at a frequency the sweep never visits would range
+    /// for a level the run never sees, which on a DUT with any response at all is a different level.
     /// </summary>
     private async Task<double> ProbeInputRangeAsync(
         SteppedResponseRequest request, double generatorAmpDbv, CancellationToken ct)
     {
-        var ranges = session.Capabilities.InputRangesDbv;
-        if (ranges.Count == 0)
+        if (session.Capabilities.InputRangesDbv.Count == 0)
             return double.NegativeInfinity;
 
         SetPhase(FrequencyResponsePhase.DeterminingRange);
         BroadcastProgress(0, 1, FrequencyResponsePhase.DeterminingRange);
 
         double probeFreqHz = Math.Clamp(
-            ProbeFrequencyHz, request.StartFreqHz, Math.Min(request.EndFreqHz, request.MaxFrequencyHz));
-        int probeFftSize = Math.Min(request.FftSizeAt(probeFreqHz), MaxProbeFftSize);
+            SteppedCaptureSupport.ProbeFrequencyHz, request.StartFreqHz, Math.Min(request.EndFreqHz, request.MaxFrequencyHz));
+        int probeFftSize = Math.Min(request.FftSizeAt(probeFreqHz), SteppedCaptureSupport.MaxProbeFftSize);
         var probeTone = CoherentFrequency.Nearest(probeFreqHz, request.EffectiveSampleRateHz, probeFftSize);
 
-        await ApplyInputRangeAsync(ranges.Max(), ct);
-
-        var snapshots = await CaptureWithStimulusAsync(
-            ToneConfig(probeTone.FrequencyHz, generatorAmpDbv, request), request, probeFftSize, ct);
-
-        double peakDbv = MeasuredPeakDbv(snapshots);
-        if (double.IsNegativeInfinity(peakDbv))
-        {
-            // Nothing came back. Leave the range where the probe parked it -- the widest, which is
-            // the safe place to start a sweep of a DUT we know nothing about -- and let the first
-            // point seed the predictor the way it used to.
-            logger.LogWarning(
-                "The input-range probe measured nothing at {FreqHz:0.##} Hz; leaving the range at {RangeDbv:0.#} dBV "
-                    + "and letting the first sweep point find it",
-                probeTone.FrequencyHz, session.InputRangeDbv);
-            return double.NegativeInfinity;
-        }
-
-        double selected = InputRangeSelector.For(ranges, peakDbv);
-        logger.LogInformation(
-            "Input-range probe measured a peak of {PeakDbv:0.##} dBV at {FreqHz:0.##} Hz / {GenDbv:0.##} dBV generator; "
-                + "input range {RangeDbv:0.#} dBV",
-            peakDbv, probeTone.FrequencyHz, generatorAmpDbv, selected);
-
-        await ApplyInputRangeAsync(selected, ct);
-        return peakDbv;
+        return await SteppedCaptureSupport.ProbeInputRangeAsync(
+            session, pipeline, ToneConfig(probeTone.FrequencyHz, generatorAmpDbv, request), probeTone.FrequencyHz,
+            generatorAmpDbv, probeFftSize, CaptureTimeout(request, probeFftSize), logger, ct);
     }
 
-    /// <summary>
-    /// Programs the smallest input range that still leaves <see cref="InputRangeSelector.HeadroomDb"/>
-    /// above <paramref name="expectedLevelDbv"/>, out of whatever this device actually offers. One
-    /// ladder decides every input range in this app — see <see cref="InputRangeSelector"/>.
-    /// </summary>
-    private async Task SetInputRangeForAsync(double expectedLevelDbv, CancellationToken ct)
-    {
-        var ranges = session.Capabilities.InputRangesDbv;
-        if (ranges.Count == 0)
-            return;
-
-        await ApplyInputRangeAsync(InputRangeSelector.For(ranges, expectedLevelDbv), ct);
-    }
-
-    /// <summary>
-    /// Goes through <see cref="DeviceSessionService.SetInputRangeAsync"/> so a mid-stream change is
-    /// applied on the transfer pump rather than written to EP1 with EP2 transfers in flight.
-    /// </summary>
-    private async Task ApplyInputRangeAsync(double rangeDbv, CancellationToken ct)
-    {
-        if (Math.Abs(rangeDbv - session.InputRangeDbv) <= RangeEpsilonDb)
-            return;
-
-        await session.SetInputRangeAsync(rangeDbv, ct);
-    }
-
-    /// <summary>
-    /// Applies a stimulus and returns the analysis of a record that holds <em>only</em> that
-    /// stimulus.
-    ///
-    /// <para><b>The record armed by the stimulus change is thrown away, not measured</b> — the same
-    /// rule, for the same reason, as <see cref="FrequencyResponseRunner.MeasureOnceAsync"/>.
-    /// <see cref="DeviceSessionService.ConfigureGeneratorAsync"/> discards the audio already queued
-    /// for the DAC, but that is the <i>play</i> latency, not the round trip back through the DUT and
-    /// the ADC, so some pre-change audio still reaches the front of the next record. A record that is
-    /// part old tone and part new one reads the new tone's bin low by whatever fraction of the record
-    /// the old tone occupied.</para>
-    ///
-    /// <para><see cref="ThdSweepRunner"/> tolerates exactly this, and is right to: THD is a ratio of
-    /// harmonics to the fundamental <i>within one record</i>, so a level error common to both cancels.
-    /// This measurement reads an absolute level, so nothing cancels.</para>
-    ///
-    /// <para>The residue is a fixed number of frames, so the damage scales as 1/<paramref name="fftSize"/>
-    /// — which is why it showed up as "spikes only with adaptive resolution on". A fixed 192 kHz /
-    /// 131072 run gives every point a 683 ms record and the residue is a per-cent of it; adaptive
-    /// sizing takes the top of the band down to 4096 points (21 ms at 192 kHz), where the same
-    /// residue is most of the record. Measured on the simulator before this: 6.0 dB low at 996 Hz /
-    /// 8192, and a total miss (−205 dBV) at 2836 Hz / 4096, on a plain loopback.</para>
-    ///
-    /// <para>Waiting one whole record is the only bound available that does not depend on a latency
-    /// figure the app never measures. It costs one extra record per point.</para>
-    /// </summary>
-    private async Task<SpectrumSnapshot[]> CaptureWithStimulusAsync(
-        GeneratorConfig generator, SteppedResponseRequest request, int fftSize, CancellationToken ct)
-    {
-        // Strictly before ConfigureGeneratorAsync, which is what flushes. Changing FftSize makes the
-        // acquisition thread allocate replacement ring buffers, and doing that after the flush would
-        // discard the flush's own state — the buffers it emptied are not the buffers the next record
-        // fills.
-        if (pipeline.Options.FftSize != fftSize)
-            pipeline.Options = pipeline.Options with { FftSize = fftSize };
-
-        // The throwaway is one *record*, not one averaged capture: all it has to do is carry the ring
-        // past the samples that still hold the previous tone, and averaging it would pay the whole
-        // average count twice per point. Averaging off makes SingleShotComplete fire on the first
-        // completed record instead.
-        var measurementOptions = pipeline.Options;
-        pipeline.Options = measurementOptions with { Averaging = AveragingMode.Off, AverageCount = 1 };
-
-        // Arms the throwaway. Do NOT add a pipeline.Flush(0) straight after this call:
-        // SampleRingBuffer.Reset(0) would clear the pending in-flight discard counter, and the step
-        // would land back inside the very record the flush existed to protect.
-        await session.ConfigureGeneratorAsync(generator, ct);
-        await WaitForCaptureAsync(request, fftSize, ct);
-
-        // Restored before the flush, which is what resets the averagers — the measured capture has
-        // to start its averaging from empty, and from the settings the run asked for.
-        pipeline.Options = measurementOptions;
-
-        // Buffers emptied, nothing discarded: the stimulus has not changed since the throwaway
-        // above, so there is no pre-change audio left in flight and a non-zero discard would throw
-        // away good samples for nothing.
-        pipeline.Flush(0);
-        await WaitForCaptureAsync(request, fftSize, ct);
-
-        return pipeline.LatestSnapshots();
-    }
-
-    private async Task WaitForCaptureAsync(SteppedResponseRequest request, int fftSize, CancellationToken ct)
-    {
-        var timeout = CaptureTimeout(request, fftSize);
-        long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
-
-        while (!pipeline.SingleShotComplete)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (Environment.TickCount64 > deadline)
-            {
-                throw new TimeoutException(
-                    $"A stepped response point did not complete within {timeout.TotalSeconds:0.0} s. The device may have stopped streaming.");
-            }
-
-            await Task.Delay(CapturePollInterval, ct).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// How long one point may take: the time to refill the FFT window after the flush (including the
-    /// discarded in-flight audio), plus the averages, times three for slack. Generous on purpose —
-    /// this exists to notice a wedged device, not to police timing.
-    /// </summary>
+    /// <summary>How long one point may take — see <see cref="SteppedCaptureSupport.CaptureTimeout"/>.</summary>
     private TimeSpan CaptureTimeout(SteppedResponseRequest request, int fftSize) =>
-        TimeSpan.FromSeconds((PointSeconds(request, fftSize, session.CaptureDelayMs / 1000.0) * 3.0) + 2.0);
-
-    /// <summary>
-    /// How long one point is expected to take: the in-flight audio the flush discards, the throwaway
-    /// record that follows the stimulus change (see <see cref="CaptureWithStimulusAsync"/>), one
-    /// record to refill the window after its flush, then <c>AverageCount</c> averages at
-    /// <see cref="AverageHopFraction"/> — <c>1 + (n-1)·hop</c> records rather than <c>n</c>.
-    /// </summary>
-    private static double PointSeconds(SteppedResponseRequest request, int fftSize, double settleSeconds)
-    {
-        // ~65 ms at every sample rate (Qa40xUsbDevice.StimulusLatencyFrames); 100 ms is a
-        // deliberately loose stand-in rather than widening DeviceSessionService's surface for it.
-        // The settle time is the user's own number (DeviceSessionService.CaptureDelayMs), discarded
-        // on top of it at every stimulus change.
-        const double StimulusLatencySeconds = 0.1;
-
-        double recordSeconds = fftSize / request.EffectiveSampleRateHz;
-        double averageSeconds = (1.0 + ((Math.Max(1, request.AverageCount) - 1) * AverageHopFraction)) * recordSeconds;
-        return (2.0 * recordSeconds) + StimulusLatencySeconds + settleSeconds + averageSeconds;
-    }
+        SteppedCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0);
 
     /// <summary>
     /// What the whole run should take, for the UI's estimate. The level probe is not counted: it is
-    /// at most <see cref="MaxProbeIterations"/> short captures and usually two.
+    /// at most <see cref="SteppedCaptureSupport.MaxProbeIterations"/> short captures and usually two.
     /// </summary>
     private double EstimateSeconds(SteppedResponseRequest request, SteppedStepPlan[] steps) =>
-        steps.Sum(s => PointSeconds(request, s.FftSize, session.CaptureDelayMs / 1000.0));
+        steps.Sum(s => SteppedCaptureSupport.PointSeconds(s.FftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0));
 
-    private static GeneratorConfig ToneConfig(double freqHz, double ampDbv, SteppedResponseRequest request)
-    {
-        var tone = new ChannelGeneratorConfig(true, [new GeneratorTone(freqHz, ampDbv)]) { Kind = GeneratorKind.Tones };
-        return new GeneratorConfig(
-            request.GenerateLeft ? tone : ChannelGeneratorConfig.Off,
-            request.GenerateRight ? tone : ChannelGeneratorConfig.Off)
-        {
-            // The frequency is already coherent; snapping again is idempotent and keeps the device's
-            // reported tone identical to the one this run recorded.
-            SnapToBin = true,
-        };
-    }
+    private static GeneratorConfig ToneConfig(double freqHz, double ampDbv, SteppedResponseRequest request) =>
+        SteppedCaptureSupport.ToneConfig(freqHz, ampDbv, request.GenerateLeft, request.GenerateRight);
 
     /// <summary>
     /// One measured point, read off both channels of a single capture.
@@ -1015,23 +665,6 @@ public sealed class SteppedResponseRunner(
     }
 
     /// <summary>
-    /// The largest time-domain peak any channel saw, in the same "Pk dBV" (peak volts / √2)
-    /// convention <c>Qa40xAutoRanger</c> compares against — one input range serves both channels, so
-    /// the louder one decides. Negative infinity when nothing was measured.
-    /// </summary>
-    private static double MeasuredPeakDbv(SpectrumSnapshot[] snapshots)
-    {
-        double best = double.NegativeInfinity;
-        foreach (var snapshot in snapshots)
-        {
-            if (snapshot.Meters is { } meters)
-                best = Math.Max(best, meters.PeakDbv);
-        }
-
-        return best;
-    }
-
-    /// <summary>
     /// Rebuilds the three curves from everything measured so far and pushes them out.
     ///
     /// <para>Per point rather than once at the end, and that is not a nicety: a fifty-point run is
@@ -1054,7 +687,7 @@ public sealed class SteppedResponseRunner(
         }
 
         foreach (var trace in traces)
-            hub.Broadcast(StreamFrame.EncodeFrequencyResponse(trace, stepped: true));
+            hub.Broadcast(StreamFrame.EncodeFrequencyResponse(trace, StreamFlags.SteppedResponse));
     }
 
     /// <summary>
@@ -1087,68 +720,10 @@ public sealed class SteppedResponseRunner(
 
         return
         [
-            BuildTrace(request, FrequencyResponseTraceKind.Left, freqHz, leftDb, noPhase),
-            BuildTrace(request, FrequencyResponseTraceKind.Right, freqHz, rightDb, noPhase),
-            BuildTrace(request, FrequencyResponseTraceKind.Gain, freqHz, gainDb, phaseDeg),
+            SteppedCaptureSupport.BuildPointTrace(FrequencyResponseTraceKind.Left, freqHz, leftDb, noPhase, request.BandwidthReferenceSpec),
+            SteppedCaptureSupport.BuildPointTrace(FrequencyResponseTraceKind.Right, freqHz, rightDb, noPhase, request.BandwidthReferenceSpec),
+            SteppedCaptureSupport.BuildPointTrace(FrequencyResponseTraceKind.Gain, freqHz, gainDb, phaseDeg, request.BandwidthReferenceSpec),
         ];
-    }
-
-    /// <summary>
-    /// One curve. Nothing is decimated and nothing is smoothed: every sample here <i>is</i> a
-    /// measurement, so the min and the max of a "column" are the same number, and there is no
-    /// fractional-octave smoothing to apply to a grid already coarser than the narrowest smoothing
-    /// the chirp offers. Coherence is 1.0 for the same reason — one deterministic capture per point
-    /// has no cross-record variance to report, and reporting a fabricated figure would be worse than
-    /// reporting none.
-    /// </summary>
-    private static FrequencyResponseTrace BuildTrace(
-        SteppedResponseRequest request,
-        FrequencyResponseTraceKind kind,
-        double[] freqHz,
-        double[] magnitudeDb,
-        double[] phaseDeg)
-    {
-        var peak = BandwidthAnalyzer.FindPeak(magnitudeDb, freqHz);
-
-        // Same reference and the same two questions as the chirp path -- see
-        // ResponseCaptureSupport.BuildTrace. A stepped sweep is the measurement most likely to be
-        // pointed at an amplifier's low end, where a peak reference is at its most misleading.
-        var reference = BandwidthAnalyzer.FindReference(magnitudeDb, freqHz, request.BandwidthReferenceSpec);
-        var oneDb = BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 1.0, reference, symmetric: true);
-        var threeDb = BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 3.0, reference, symmetric: false);
-
-        int n = freqHz.Length;
-        var freq = new float[n];
-        var mag = new float[n];
-        var phase = new float[n];
-        var coherence = new float[n];
-
-        for (int i = 0; i < n; i++)
-        {
-            freq[i] = (float)freqHz[i];
-            mag[i] = (float)magnitudeDb[i];
-            phase[i] = (float)phaseDeg[i];
-            coherence[i] = 1.0f;
-        }
-
-        // The same array for min and max: the chart draws the max as the line and the min as a band
-        // beneath it, and here there is nothing between them to draw.
-        return new FrequencyResponseTrace(
-            kind,
-            freqHz[0],
-            freqHz[^1],
-            freq,
-            mag,
-            (float[])mag.Clone(),
-            phase,
-            coherence,
-            BandwidthReading.From(oneDb),
-            BandwidthReading.From(threeDb),
-            peak.LevelDb,
-            peak.FreqHz,
-            reference.LevelDb,
-            reference.Mode,
-            reference.FellBackToPeak);
     }
 
     private void SetPhase(FrequencyResponsePhase phase, string? error = null)
@@ -1178,11 +753,8 @@ public sealed class SteppedResponseRunner(
         lock (_stateLock)
             generatorAmpDbv = _generatorAmpDbv;
 
-        hub.Broadcast(StreamFrame.EncodeFrequencyResponseProgress(done, total, phase, generatorAmpDbv, stepped: true));
+        hub.Broadcast(StreamFrame.EncodeFrequencyResponseProgress(done, total, phase, generatorAmpDbv, StreamFlags.SteppedResponse));
     }
-
-    /// <summary>One planned point: the coherent tone to play, the bin it lands on, and the size it is coherent for.</summary>
-    private readonly record struct SteppedStepPlan(double FrequencyHz, int Bin, int FftSize);
 
     /// <summary>One measured point, before it becomes three parallel curves.</summary>
     private readonly record struct SteppedPoint(

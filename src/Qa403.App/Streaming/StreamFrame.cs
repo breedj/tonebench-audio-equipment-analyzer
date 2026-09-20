@@ -142,6 +142,13 @@ public enum StreamFlags : ushort
     /// showing the last one it got — and the last one was measured at a different FFT size.
     /// </summary>
     IntermodulationUnresolved = 1 << 6,
+
+    /// <summary>
+    /// Response-frame-only: this frame came from <see cref="Qa403.App.Services.CrosstalkRunner"/>,
+    /// the third runner to speak the response frame — same reasoning as <see cref="SteppedResponse"/>,
+    /// and the trace kinds it carries (crosstalk left-to-right / right-to-left) are its own.
+    /// </summary>
+    Crosstalk = 1 << 7,
 }
 
 /// <summary>
@@ -620,8 +627,9 @@ public static class StreamFrame
     /// the top of its own ripple — the same aggregation bias the spectrum path's min/max band exists
     /// to avoid.
     /// </summary>
-    public static byte[] EncodeFrequencyResponse(FrequencyResponseTrace trace, bool stepped = false)
+    public static byte[] EncodeFrequencyResponse(FrequencyResponseTrace trace, StreamFlags origin = StreamFlags.None)
     {
+        RequireOriginFlag(origin);
         int columns = trace.FreqHz.Length;
         if (trace.MagnitudeMinDb.Length != columns || trace.MagnitudeMaxDb.Length != columns
             || trace.PhaseDeg.Length != columns || trace.Coherence.Length != columns)
@@ -636,7 +644,7 @@ public static class StreamFrame
         byte[] buffer = new byte[HeaderLength + (columns * perColumn) + (2 * perBandwidth) + trailer];
         WriteHeader(
             buffer, StreamMsgType.FrequencyResponse, (byte)trace.Kind,
-            StreamFlags.Decimated | StreamFlags.LogSpaced | (stepped ? StreamFlags.SteppedResponse : StreamFlags.None),
+            StreamFlags.Decimated | StreamFlags.LogSpaced | origin,
             seq: 0,
             (float)trace.StartFreqHz, (float)trace.EndFreqHz, (uint)columns);
 
@@ -676,15 +684,28 @@ public static class StreamFrame
     /// the previous run had settled on.</para>
     /// </summary>
     public static byte[] EncodeFrequencyResponseProgress(
-        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv, bool stepped = false)
+        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv, StreamFlags origin = StreamFlags.None)
     {
+        RequireOriginFlag(origin);
         byte[] buffer = new byte[HeaderLength];
         WriteHeader(
             buffer, StreamMsgType.FrequencyResponseProgress, (byte)StreamChannel.Left,
-            stepped ? StreamFlags.SteppedResponse : StreamFlags.None,
+            origin,
             (uint)phase, (float)generatorAmpDbv, total, (uint)Math.Max(0, taken));
 
         return buffer;
+    }
+
+    /// <summary>
+    /// The only bits a response frame's origin may carry: none (the chirp), <see cref="StreamFlags.SteppedResponse"/>
+    /// or <see cref="StreamFlags.Crosstalk"/>. Anything else in the argument is a caller passing the
+    /// wrong flag, which would silently route the frame to the wrong screen.
+    /// </summary>
+    private static void RequireOriginFlag(StreamFlags origin)
+    {
+        const StreamFlags allowed = StreamFlags.SteppedResponse | StreamFlags.Crosstalk;
+        if ((origin & ~allowed) != 0 || origin == allowed)
+            throw new ArgumentOutOfRangeException(nameof(origin), origin, "A response frame's origin is none, SteppedResponse or Crosstalk.");
     }
 
     /// <summary>

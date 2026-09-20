@@ -417,6 +417,38 @@ public class CsvExporterTests
     public void ExportImpedance_NoTraces_Throws() =>
         Assert.Throws<ArgumentException>(() => CsvExporter.ExportImpedance(BuildImpedanceDetail(), []));
 
+    /// <summary>
+    /// A crosstalk result is response rows under its own kinds and goes through the response
+    /// renderer unchanged: the magnitude columns are the crosstalk in dB, one curve per direction,
+    /// and the (meaningless, zero) bandwidth comments are carried like any response trace's.
+    /// </summary>
+    [Fact]
+    public void ExportResponse_WithCrosstalkKinds_EmitsXtalkColumns()
+    {
+        var detail = BuildDetail() with { Kind = "Crosstalk", MeasurementTypeName = "Crosstalk", ParamsJson = """{"direction":"Both"}""" };
+        string csv = CsvExporter.ExportResponse(detail, [BuildCrosstalkTrace(ResponseTraceKind.CrosstalkLeftToRight, -70f), BuildCrosstalkTrace(ResponseTraceKind.CrosstalkRightToLeft, -80f)]);
+        string[] lines = csv.Split('\n');
+
+        string header = lines.Single(l => l.StartsWith("freq_hz"));
+        Assert.Equal(
+            "freq_hz,xtalk_l2r_min_db,xtalk_l2r_max_db,xtalk_l2r_phase_deg,xtalk_l2r_coherence,xtalk_r2l_min_db,xtalk_r2l_max_db,xtalk_r2l_phase_deg,xtalk_r2l_coherence",
+            header);
+        Assert.Equal(-70.0, Field(lines, "100.", header, "xtalk_l2r_max_db"), 3);
+        Assert.Equal(-80.0, Field(lines, "100.", header, "xtalk_r2l_max_db"), 3);
+        Assert.Contains("# xtalk_l2r_peak_db: -70.0000", csv);
+        Assert.Contains("# kind: Crosstalk", csv);
+    }
+
+    private static StoredResponseTrace BuildCrosstalkTrace(string kind, float db) =>
+        new(kind, StartHz: 100.0, EndHz: 200.0,
+            PeakDb: db, PeakHz: 100.0,
+            new ResponseBandwidth(0, 0, false, false), new ResponseBandwidth(0, 0, false, false),
+            FreqHz: [100.0f, 200.0f],
+            MagnitudeMinDb: [db, db],
+            MagnitudeMaxDb: [db, db],
+            PhaseDeg: [0.0f, 0.0f],
+            Coherence: [1.0f, 1.0f]);
+
     /// <summary>One named column of the row starting with <paramref name="rowPrefix"/>, by header position.</summary>
     private static double Field(string[] lines, string rowPrefix, string header, string column)
     {

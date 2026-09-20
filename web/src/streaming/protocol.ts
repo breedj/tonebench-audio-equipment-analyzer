@@ -103,6 +103,11 @@ export const STREAM_FLAG_STEPPED_RESPONSE = 1 << 4
  */
 export const STREAM_FLAG_IMD_SWEEP = 1 << 5
 /**
+ * Response-frame-only: this frame came from the crosstalk runner — the third runner to speak the
+ * response frame, with its own client state. Mirrors StreamFlags.Crosstalk server-side.
+ */
+export const STREAM_FLAG_CROSSTALK = 1 << 7
+/**
  * Intermodulation-frame-only: an IMD spec is set but this tick could not resolve it (the tones are
  * closer than the analyzer's 8-bin minimum at the current FFT size). Header only, no payload — sent
  * so a client drops the last reading instead of keeping one measured at a different FFT size.
@@ -754,6 +759,10 @@ export const ResponseTraceKind = {
   Left: 0,
   Right: 1,
   Gain: 2,
+  /** Crosstalk, left channel driven: the right input relative to the left, dB. */
+  CrosstalkLeftToRight: 3,
+  /** Crosstalk, right channel driven: the left input relative to the right, dB. */
+  CrosstalkRightToLeft: 4,
 } as const
 export type ResponseTraceKind = (typeof ResponseTraceKind)[keyof typeof ResponseTraceKind]
 

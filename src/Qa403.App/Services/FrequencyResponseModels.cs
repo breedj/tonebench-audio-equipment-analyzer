@@ -19,6 +19,16 @@ public enum FrequencyResponseTraceKind
     /// relative to the synthesised stimulus.
     /// </summary>
     Gain = 2,
+
+    /// <summary>
+    /// Crosstalk with the left channel driven, dB: the right input relative to the left. Values are
+    /// wire bytes, never renumbered; these two are appended rather than interleaved for that reason.
+    /// See <see cref="CrosstalkRunner"/>.
+    /// </summary>
+    CrosstalkLeftToRight = 3,
+
+    /// <summary>Crosstalk with the right channel driven, dB: the left input relative to the right.</summary>
+    CrosstalkRightToLeft = 4,
 }
 
 /// <summary>

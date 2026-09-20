@@ -7,6 +7,7 @@
 import type { Component } from 'vue'
 import { defineAsyncComponent, h } from 'vue'
 import {
+  CROSSTALK_KIND,
   FFT_SPECTRUM_KIND,
   FREQUENCY_RESPONSE_KIND,
   IMD_VS_AMPLITUDE_KIND,
@@ -147,6 +148,14 @@ export const MANUAL_PAGES: ManualPage[] = [
     kind: STEPPED_RESPONSE_KIND,
     group: 'Measurements',
     component: manualPage(() => import('./pages/SteppedResponsePage.vue')),
+  },
+  {
+    id: 'crosstalk',
+    title: 'Crosstalk',
+    summary: 'How much one channel leaks into the other, in dB against frequency, one direction or both.',
+    kind: CROSSTALK_KIND,
+    group: 'Measurements',
+    component: manualPage(() => import('./pages/CrosstalkPage.vue')),
   },
   {
     id: 'impulse-response',

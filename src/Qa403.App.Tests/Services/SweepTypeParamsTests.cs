@@ -225,6 +225,7 @@ public class SweepTypeParamsTests
                 session, pipeline, sweepRunner,
                 new ImdSweepRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<ImdSweepRunner>.Instance),
                 responseRunner, steppedRunner,
+                new CrosstalkRunner(session, pipeline, new SpectrumBroadcastHub(), NullLogger<CrosstalkRunner>.Instance),
                 new ImpulseResponseRunner(
                     session, pipeline, new InMemoryLoopbackReferenceStore(),
                     NullLogger<ImpulseResponseRunner>.Instance),

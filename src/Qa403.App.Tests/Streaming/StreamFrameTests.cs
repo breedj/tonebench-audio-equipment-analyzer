@@ -312,6 +312,8 @@ public class StreamFrameTests
     [InlineData(FrequencyResponseTraceKind.Left)]
     [InlineData(FrequencyResponseTraceKind.Right)]
     [InlineData(FrequencyResponseTraceKind.Gain)]
+    [InlineData(FrequencyResponseTraceKind.CrosstalkLeftToRight)]
+    [InlineData(FrequencyResponseTraceKind.CrosstalkRightToLeft)]
     public void FrequencyResponse_CarriesTheTraceKindInTheChannelByte(FrequencyResponseTraceKind kind)
     {
         // Gain belongs to no input channel, which is why the byte holds a trace kind here rather

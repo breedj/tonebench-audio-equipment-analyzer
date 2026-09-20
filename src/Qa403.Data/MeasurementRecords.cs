@@ -527,7 +527,52 @@ public static class ResponseTraceKind
 
     /// <summary>The short standard, likewise.</summary>
     public const string ImpedanceShort = "z_short";
+
+    /// <summary>
+    /// A crosstalk curve with the left channel driven: the right input relative to the left, in dB.
+    /// The same rows as a response for the same reason impedance uses them; the bandwidth columns
+    /// are zero and the reference is the peak, since a crosstalk trace has no corners to report.
+    /// </summary>
+    public const string CrosstalkLeftToRight = "xtalk_l2r";
+
+    /// <summary>A crosstalk curve with the right channel driven: the left input relative to the right, in dB.</summary>
+    public const string CrosstalkRightToLeft = "xtalk_r2l";
 }
+
+/// <summary>
+/// A crosstalk measurement type's <c>params_json</c>: the stepped grid and level of
+/// <see cref="SteppedResponseParameters"/> minus what a crosstalk run has no use for (a reference
+/// channel, a phase, a bandwidth reference), plus which channel is the aggressor. Run settings are
+/// required; the <c>Chart*</c> fields and the as-run levels are nullable for the same reasons as
+/// on the other kinds.
+/// </summary>
+/// <param name="Direction">"LeftToRight", "RightToLeft" or "Both".</param>
+/// <param name="GeneratorAmpDbvLeftToRight">The generator level the left-driven pass actually used — solved by probing in the output-referred modes, so only known after the fact, and per pass. Null on a type's own params_json and for a pass the run did not make.</param>
+public sealed record CrosstalkParameters(
+    double StartFreqHz,
+    double EndFreqHz,
+    int StepsPerOctave,
+    string Direction,
+    string LevelMode,
+    double LevelValue,
+    string LevelUnit,
+    double LoadOhms,
+    int FftSize,
+    WindowType Window,
+    int AverageCount,
+    double SampleRateHz,
+    bool AdaptiveResolution,
+    double? GeneratorAmpDbvLeftToRight = null,
+    double? GeneratorAmpDbvRightToLeft = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    double? ChartYTopDb = null,
+    double? ChartYBottomDb = null,
+    double? ChartXFromHz = null,
+    double? ChartXToHz = null,
+    bool? ChartAutofitOnDone = null,
+    /// <summary>The settle time the run discarded after each stimulus change, in ms — a run record, null on a type's own params_json.</summary>
+    double? CaptureDelayMs = null);
 
 /// <summary>
 /// An impedance measurement type's <c>params_json</c>.

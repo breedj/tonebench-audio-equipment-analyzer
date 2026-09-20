@@ -28,6 +28,9 @@ export const IMPULSE_RESPONSE_KIND = 'ImpulseResponse'
 /** Mirrors MeasurementSaveService.ImpedanceKind — impedance against frequency through a reference resistor. */
 export const IMPEDANCE_KIND = 'Impedance'
 
+/** Mirrors MeasurementSaveService.CrosstalkKind — one channel driven with a stepped sine, the other input read. */
+export const CROSSTALK_KIND = 'Crosstalk'
+
 /** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
 export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
 
@@ -76,6 +79,15 @@ export function isFrequencyResponseKind(kind: string | null | undefined): boolea
 /** Whether this response is stepped rather than chirp-driven — which config panel to mount, and which endpoints to drive. */
 export function isSteppedResponseKind(kind: string | null | undefined): boolean {
   return kind === STEPPED_RESPONSE_KIND
+}
+
+/**
+ * Whether a kind's result is a crosstalk curve. Its own predicate rather than a third arm of
+ * `isFrequencyResponseKind`, the impedance reasoning: the rows and the chart are the response's,
+ * but the panel, the endpoints, the settings record and the report sections are its own.
+ */
+export function isCrosstalkKind(kind: string | null | undefined): boolean {
+  return kind === CROSSTALK_KIND
 }
 
 /**
@@ -148,5 +160,11 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     label: 'Stepped sine response',
     description:
       'Steps one tone at a time across the band and plots the same level, gain and phase curves — slower than the chirp, but nothing else is playing while each point is measured.',
+  },
+  {
+    kind: CROSSTALK_KIND,
+    label: 'Crosstalk',
+    description:
+      'Drives one channel with a stepped sine and reads how much of it reaches the other input, in dB against frequency — left to right, right to left, or both in one run.',
   },
 ]

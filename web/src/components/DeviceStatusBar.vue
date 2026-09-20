@@ -182,6 +182,10 @@ function onSimulatedHarmonicsChange(e: Event) {
   emit('setSimulatedProfile', { harmonicsEnabled: (e.target as HTMLInputElement).checked })
 }
 
+function onSimulatedCrosstalkChange(e: Event) {
+  emit('setSimulatedProfile', { crosstalkEnabled: (e.target as HTMLInputElement).checked })
+}
+
 /**
  * The four nonlinear amplifier models carry their own distortion and switch the generator's
  * harmonic stack off whatever the profile says, so the checkbox is shown but disabled under one of
@@ -274,6 +278,13 @@ function onSimulatedDutChange(e: Event) {
             @change="onSimulatedHarmonicsChange"
           />
           Harmonics
+        </label>
+        <label
+          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
+          title="Simulated inter-channel coupling: each channel leaks into the other at −70 dB through the audio band, rising 6 dB per octave above 6 kHz (≈ −59 dB at 20 kHz sampled at 192 kHz, −53 dB at 48 kHz) — a capacitive coupling. Off, the channels are perfectly separate."
+        >
+          <input type="checkbox" :checked="status.simulatedCrosstalkEnabled ?? false" @change="onSimulatedCrosstalkChange" />
+          Crosstalk
         </label>
         <label
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"

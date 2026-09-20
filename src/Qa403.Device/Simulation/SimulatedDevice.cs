@@ -168,6 +168,9 @@ public sealed class SimulatedDevice : IAnalyzerDevice
         // filters are stateful, and a chain rebuilt every block would restart from rest 40 times a
         // second and never produce a decay at all.
         var dut = SimulatedDut.For(_profile.Dut, config.SampleRateHz);
+        // Built per stream, at this stream's rate, and only while the knob is on: the unweighted
+        // default path must not pay for a filter it never uses.
+        SimulatedCrosstalk? crosstalk = _profile.CrosstalkEnabled ? new SimulatedCrosstalk(config.SampleRateHz) : null;
 
         var period = TimeSpan.FromSeconds(config.BlockFrameCount / config.SampleRateHz);
         using var timer = new PeriodicTimer(period);
@@ -201,6 +204,9 @@ public sealed class SimulatedDevice : IAnalyzerDevice
             if (dut?.Model != profile.Dut)
                 dut = SimulatedDut.For(profile.Dut, config.SampleRateHz);
 
+            if (profile.CrosstalkEnabled != (crosstalk is not null))
+                crosstalk = profile.CrosstalkEnabled ? new SimulatedCrosstalk(config.SampleRateHz) : null;
+
             // A DUT that distorts on its own is measured on its own: the fixed harmonic stack the
             // synthesizer otherwise adds to the generator is level-independent, and under it every
             // level-dependent curve the nonlinear models exist to draw is a flat line at -46 dBc.
@@ -223,6 +229,8 @@ public sealed class SimulatedDevice : IAnalyzerDevice
             int sampleCount = config.BlockFrameCount * config.ChannelCount;
             float[] buffer = ArrayPool<float>.Shared.Rent(sampleCount);
 
+            Span<double> generatedByChannel = stackalloc double[Math.Max(2, config.ChannelCount)];
+
             for (int frame = 0; frame < config.BlockFrameCount; frame++)
             {
                 long absoluteFrame = frameIndex + frame;
@@ -232,6 +240,8 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                 // only the generator tones differ per channel (see ComputeChannelSample).
                 double sharedAdditive = synthesizer.ComputeSharedAdditive(profile, t, config.SampleRateHz);
 
+                // Every channel's own output first, then the mix: the crosstalk model needs the
+                // *other* channel's post-DUT output, which does not exist yet inside a single pass.
                 for (int ch = 0; ch < config.ChannelCount; ch++)
                 {
                     // Signal chain order matters: the generator's output is hard-clipped at the
@@ -251,6 +261,22 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                     // back out.
                     if (dut is not null && ch == dut.Model.MeasuredChannel())
                         generated = dut.Process(generated);
+
+                    generatedByChannel[ch] = generated;
+                }
+
+                for (int ch = 0; ch < config.ChannelCount; ch++)
+                {
+                    double generated = generatedByChannel[ch];
+
+                    // After the DUT (the victim carries a copy of the aggressor's *output*) and
+                    // before the additive (the coupling is not a source of hum or noise). Two
+                    // channels only; a mono stream has nothing to couple from.
+                    if (crosstalk is not null && config.ChannelCount >= 2)
+                    {
+                        int other = ch == 0 ? 1 : 0;
+                        generated += crosstalk.Couple(other, generatedByChannel[other]);
+                    }
 
                     double sample = SignalSynthesizer.SoftClip(generated + sharedAdditive, inputClipPeakV);
                     buffer[(frame * config.ChannelCount) + ch] = (float)sample;

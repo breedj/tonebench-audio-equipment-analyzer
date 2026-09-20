@@ -11,7 +11,7 @@ namespace Qa403.App.Services;
 internal static class SweepCaptureSupport
 {
     /// <summary>How often <see cref="WaitForSingleShotAsync"/> re-checks. Short against the 20 Hz pipeline tick, so it costs a poll or two per average.</summary>
-    private static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(20);
+    public static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(20);
 
     /// <summary>
     /// The stimulus latency the flush discards is ~65 ms at every sample rate (see

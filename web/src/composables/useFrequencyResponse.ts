@@ -8,11 +8,13 @@ import {
   type ResponseReferenceModeName,
   type ResponseTraceKindName,
   type SteppedResponseStartRequest,
+  type CrosstalkStartRequest,
 } from '../api/client'
 import {
   ResponsePhase,
   ResponseReferenceMode,
   ResponseTraceKind,
+  STREAM_FLAG_CROSSTALK,
   STREAM_FLAG_STEPPED_RESPONSE,
   type FrequencyResponseFrame,
   type FrequencyResponseProgressFrame,
@@ -77,7 +79,7 @@ export interface ResponseBandwidthView {
 }
 
 /** Which measurement these verbs drive. Set from App.vue's selected measurement kind. */
-export type ResponseTarget = 'Chirp' | 'Stepped'
+export type ResponseTarget = 'Chirp' | 'Stepped' | 'Crosstalk'
 
 interface ResponseState {
   running: Ref<boolean>
@@ -97,6 +99,8 @@ interface ResponseState {
   traces: Ref<ResponseTrace[]>
   phaseKind: Ref<ResponsePhaseKindName>
   rightChannelIsReference: Ref<boolean>
+  /** Crosstalk only: how many passes the run makes (1 or 2), for the progress line. */
+  passCount: Ref<number>
 }
 
 function createResponseState(): ResponseState {
@@ -127,12 +131,16 @@ function createResponseState(): ResponseState {
     // that predates the field reads as the behaviour that build had.
     phaseKind: ref<ResponsePhaseKindName>('PerTrace'),
     rightChannelIsReference: ref(false),
+    passCount: ref(1),
   }
 }
 
 const states: Record<ResponseTarget, ResponseState> = {
   Chirp: createResponseState(),
   Stepped: createResponseState(),
+  // Identical shape: the crosstalk runner reports a FrequencyResponseStatus and speaks the response
+  // frames, with its own origin flag. Its own entry so a run in progress stays off the other screens.
+  Crosstalk: createResponseState(),
 }
 
 const target = ref<ResponseTarget>('Chirp')
@@ -202,6 +210,8 @@ const traceKindNames: Record<ResponseTraceKind, ResponseTraceKindName> = {
   [ResponseTraceKind.Left]: 'Left',
   [ResponseTraceKind.Right]: 'Right',
   [ResponseTraceKind.Gain]: 'Gain',
+  [ResponseTraceKind.CrosstalkLeftToRight]: 'CrosstalkLeftToRight',
+  [ResponseTraceKind.CrosstalkRightToLeft]: 'CrosstalkRightToLeft',
 }
 
 const progressLabel = computed(() => {
@@ -212,9 +222,18 @@ const progressLabel = computed(() => {
   // changes for minutes and looks frozen.
   if (phase.value === ResponsePhase.Sweeping) {
     const average = averageCount.value > 1 ? ` · ${averageCount.value} averages` : ''
-    return pointCount.value > 0
-      ? `Point ${Math.min(pointsMeasured.value + 1, pointCount.value)} of ${pointCount.value}${average}`
-      : 'Sweeping'
+    if (pointCount.value <= 0) return 'Sweeping'
+    // A two-pass crosstalk run counts points over both passes; the pass prefix says which channel
+    // is the aggressor right now.
+    const passes = active.value.passCount.value
+    if (target.value === 'Crosstalk' && passes > 1) {
+      const perPass = pointCount.value / passes
+      const passIndex = Math.min(Math.floor(pointsMeasured.value / perPass), passes - 1)
+      const label = passIndex === 0 ? 'L→R' : 'R→L'
+      const pointInPass = Math.min(pointsMeasured.value - passIndex * perPass + 1, perPass)
+      return `Pass ${passIndex + 1} of ${passes} (${label}) · point ${pointInPass} of ${perPass}${average}`
+    }
+    return `Point ${Math.min(pointsMeasured.value + 1, pointCount.value)} of ${pointCount.value}${average}`
   }
 
   if (phase.value === ResponsePhase.Measuring) {
@@ -289,6 +308,7 @@ function fromFrame(frame: FrequencyResponseFrame): ResponseTrace {
  * the fact instead. See StreamFlags.SteppedResponse.
  */
 function stateForFrame(flags: number): ResponseState {
+  if ((flags & STREAM_FLAG_CROSSTALK) !== 0) return states.Crosstalk
   return (flags & STREAM_FLAG_STEPPED_RESPONSE) !== 0 ? states.Stepped : states.Chirp
 }
 
@@ -332,7 +352,8 @@ function ingestTrace(frame: FrequencyResponseFrame) {
 
 function ingestProgress(frame: FrequencyResponseProgressFrame) {
   const state = stateForFrame(frame.header.flags)
-  const stepped = state === states.Stepped
+  // Everything but the chirp counts points: a stepped response or a crosstalk pass.
+  const stepped = state !== states.Chirp
 
   state.phase.value = frame.phase
   state.generatorAmpDbv.value = frame.generatorAmpDbv
@@ -400,12 +421,7 @@ export function useFrequencyResponse() {
     },
 
     async refresh() {
-      applyStatus(
-        active.value,
-        target.value === 'Stepped'
-          ? await api.getSteppedResponseStatus()
-          : await api.getFrequencyResponseStatus(),
-      )
+      applyStatus(active.value, await statusFor(target.value))
     },
 
     /**
@@ -486,22 +502,78 @@ export function useFrequencyResponse() {
       }
     },
 
+    /**
+     * Starts a crosstalk run — the stepped verb's shape, on the crosstalk state. The point count is
+     * the total over every pass, which is what the progress frames count in.
+     */
+    async startCrosstalk(req: CrosstalkStartRequest) {
+      const state = states.Crosstalk
+      state.error.value = null
+      state.traces.value = []
+      state.continuous.value = false
+      state.passesCompleted.value = 0
+      state.pointsMeasured.value = 0
+      state.pointCount.value = 0
+      state.passCount.value = req.direction === 'Both' ? 2 : 1
+      state.running.value = true
+      state.phase.value = ResponsePhase.Sweeping
+      state.phaseKind.value = 'None'
+      state.rightChannelIsReference.value = false
+
+      try {
+        const started = await api.startCrosstalk(req)
+        state.sampleRateHz.value = started.sampleRateHz
+        state.averageCount.value = started.averageCount
+        state.passCount.value = started.passCount
+        state.pointCount.value = started.pointCount * started.passCount
+        return started
+      } catch (e) {
+        state.running.value = false
+        state.phase.value = ResponsePhase.Failed
+        state.error.value = e instanceof Error ? e.message : String(e)
+        throw e
+      }
+    },
+
     async cancel() {
-      applyStatus(
-        active.value,
-        target.value === 'Stepped'
-          ? await api.cancelSteppedResponse()
-          : await api.cancelFrequencyResponse(),
-      )
+      applyStatus(active.value, await cancelFor(target.value))
     },
 
     async clear() {
-      applyStatus(
-        active.value,
-        target.value === 'Stepped'
-          ? await api.clearSteppedResponse()
-          : await api.clearFrequencyResponse(),
-      )
+      applyStatus(active.value, await clearFor(target.value))
     },
+  }
+}
+
+function statusFor(t: ResponseTarget) {
+  switch (t) {
+    case 'Stepped':
+      return api.getSteppedResponseStatus()
+    case 'Crosstalk':
+      return api.getCrosstalkStatus()
+    default:
+      return api.getFrequencyResponseStatus()
+  }
+}
+
+function cancelFor(t: ResponseTarget) {
+  switch (t) {
+    case 'Stepped':
+      return api.cancelSteppedResponse()
+    case 'Crosstalk':
+      return api.cancelCrosstalk()
+    default:
+      return api.cancelFrequencyResponse()
+  }
+}
+
+function clearFor(t: ResponseTarget) {
+  switch (t) {
+    case 'Stepped':
+      return api.clearSteppedResponse()
+    case 'Crosstalk':
+      return api.clearCrosstalk()
+    default:
+      return api.clearFrequencyResponse()
   }
 }

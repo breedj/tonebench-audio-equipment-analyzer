@@ -102,6 +102,14 @@ const { showPage } = useManual()
         fixtures attenuate, since a voltage divider never reads unity.
       </li>
       <li>
+        <strong>The channels are perfectly separate until Crosstalk is ticked.</strong> With it on,
+        each channel leaks into the other at −70 dB through the audio band, rising 6 dB per octave
+        above 6 kHz — about −59 dB at 20 kHz sampled at 192 kHz, −53 dB at 48 kHz, as the filters
+        are not pre-warped — a capacitive coupling, the same both ways. It is
+        applied to what leaves the DUT and before hum and noise, so a crosstalk sweep against the
+        simulator draws the model and nothing else; off, it draws the noise floor.
+      </li>
+      <li>
         <strong>Hum and noise are added after the DUT</strong>, and the whole thing then meets the
         ADC's soft clip at the selected input range. The simulator has <strong>no autoranging</strong>
         of its own: a screen that ranges — the frequency-response and stepped-sine screens do — is

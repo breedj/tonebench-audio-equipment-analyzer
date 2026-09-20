@@ -36,6 +36,15 @@ defineProps<{ kind: string }>()
     <circle cx="16.5" cy="9.5" r="1.1" fill="currentColor" stroke="none" />
     <circle cx="20" cy="15" r="1.1" fill="currentColor" stroke="none" />
   </svg>
+  <!-- Crosstalk: a loud trace above, a faint one below rising towards the top at the right, and an
+       arrow between them — one channel leaking into the other. -->
+  <svg v-else-if="kind === 'Crosstalk'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v18h18" />
+    <path d="M6 7h14" />
+    <path d="M6 18h7c2 0 3.5-1 6-4" />
+    <path d="M12 9.5v4.5" />
+    <path d="M10.5 12.5 12 14l1.5-1.5" />
+  </svg>
   <!-- A spike with a decaying tail on a baseline: an impulse response. -->
   <!-- Impedance: a resonance peak over a baseline, which is what a driver's impedance curve looks
        like and the shape this measurement exists to show. -->

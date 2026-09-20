@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_IMPEDANCE_DISPLAY, impedanceDisplayFromParams } from '../impedance/display'
+import { crosstalkDisplayFromParams, crosstalkDisplayToParams, DEFAULT_CROSSTALK_DISPLAY } from '../crosstalk/display'
 import { DEFAULT_IMPULSE_DISPLAY, defaultImpulseDisplay, impulseDisplayFromParams } from '../measurements/impulseDisplay'
 import { defaultSweepDisplay, sweepChartWindow, sweepDisplayFromParams } from '../sweep/display'
 
@@ -27,6 +28,26 @@ describe('sweepDisplayFromParams', () => {
     display.amplitudeBounds.outputVolt.from = 5
     expect(base.amplitudeBounds.outputVolt.from).toBe(0.001)
     expect(sweepDisplayFromParams(null)).toEqual(defaultSweepDisplay())
+  })
+})
+
+describe('crosstalkDisplayFromParams', () => {
+  it('restores the chart fields, guards the frequency window and round-trips through toParams', () => {
+    const display = crosstalkDisplayFromParams(
+      JSON.stringify({ chartThickLines: false, chartYTopDb: -20, chartYBottomDb: -100, chartXFromHz: 0, chartXToHz: 20000, chartAutofitOnDone: false }),
+    )
+    expect(display.thickLines).toBe(false)
+    expect(display.yTopDb).toBe(-20)
+    expect(display.yBottomDb).toBe(-100)
+    expect(display.xFromHz).toBe(DEFAULT_CROSSTALK_DISPLAY.xFromHz)
+    expect(display.xToHz).toBe(20000)
+    expect(display.autofitOnDone).toBe(false)
+    expect(crosstalkDisplayFromParams(JSON.stringify(crosstalkDisplayToParams(display)))).toEqual(display)
+  })
+
+  it('restores the defaults from nothing and from bad JSON', () => {
+    expect(crosstalkDisplayFromParams(null)).toEqual(DEFAULT_CROSSTALK_DISPLAY)
+    expect(crosstalkDisplayFromParams('{')).toEqual(DEFAULT_CROSSTALK_DISPLAY)
   })
 })
 

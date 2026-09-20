@@ -1,7 +1,8 @@
 import type { ReportSection } from '../../api/client'
-import { FFT_SPECTRUM_KIND, isFrequencyResponseKind } from '../../measurements/kinds'
+import { FFT_SPECTRUM_KIND, isCrosstalkKind, isFrequencyResponseKind } from '../../measurements/kinds'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
+import { crosstalkSections } from './crosstalk'
 import { frequencyResponseSections } from './frequencyResponse'
 import { descriptionSections, genericSettingsSection } from './generic'
 import { spectrumSections } from './spectrum'
@@ -14,6 +15,7 @@ import { spectrumSections } from './spectrum'
  */
 export function chapterSections(subject: ReportSubject, elements: readonly ReportElementId[]): ReportSection[] {
   if (isFrequencyResponseKind(subject.kind)) return frequencyResponseSections(subject, elements)
+  if (isCrosstalkKind(subject.kind)) return crosstalkSections(subject, elements)
   if (subject.kind === FFT_SPECTRUM_KIND) return spectrumSections(subject, elements)
 
   const sections: ReportSection[] = []

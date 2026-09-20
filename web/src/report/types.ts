@@ -12,6 +12,7 @@ import type {
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import type { ImpedanceTrace } from '../composables/useImpedance'
 import type { ImpedanceDisplay } from '../impedance/display'
+import type { CrosstalkDisplay } from '../crosstalk/display'
 import type { ImpulseDisplay } from '../measurements/impulseDisplay'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
@@ -112,6 +113,12 @@ export type ReportSubjectData =
       kind: 'impedance'
       traces: ImpedanceTrace[]
       display: ImpedanceDisplay
+    }
+  | {
+      kind: 'crosstalk'
+      /** The crosstalk trace(s), one per direction measured — response traces of the crosstalk kinds. */
+      traces: ResponseTrace[]
+      display: CrosstalkDisplay
     }
   | { kind: 'none' }
 

@@ -168,6 +168,8 @@ describe('decodeFrequencyResponseFrame', () => {
     [ResponseTraceKind.Left],
     [ResponseTraceKind.Right],
     [ResponseTraceKind.Gain],
+    [ResponseTraceKind.CrosstalkLeftToRight],
+    [ResponseTraceKind.CrosstalkRightToLeft],
   ])('reads the trace kind out of the channel byte (%i)', (kind) => {
     // On these frames the channel byte is a trace kind, not a StreamChannel — Gain is 2, which is
     // not a channel at all, so a client keying off it as left/right would mislabel that curve.

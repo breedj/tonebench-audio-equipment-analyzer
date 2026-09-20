@@ -30,18 +30,44 @@ public class ResponseFrameOriginTests
     [Fact]
     public void ASteppedTraceFrame_SaysSo()
     {
-        Assert.True(FlagsOf(StreamFrame.EncodeFrequencyResponse(Trace(), stepped: true)).HasFlag(StreamFlags.SteppedResponse));
+        Assert.True(FlagsOf(StreamFrame.EncodeFrequencyResponse(Trace(), StreamFlags.SteppedResponse)).HasFlag(StreamFlags.SteppedResponse));
         Assert.False(FlagsOf(StreamFrame.EncodeFrequencyResponse(Trace())).HasFlag(StreamFlags.SteppedResponse));
     }
 
     [Fact]
     public void ASteppedProgressFrame_SaysSo()
     {
-        var stepped = StreamFrame.EncodeFrequencyResponseProgress(3, 50, FrequencyResponsePhase.Sweeping, -20.0, stepped: true);
+        var stepped = StreamFrame.EncodeFrequencyResponseProgress(3, 50, FrequencyResponsePhase.Sweeping, -20.0, StreamFlags.SteppedResponse);
         var chirp = StreamFrame.EncodeFrequencyResponseProgress(3, 50, FrequencyResponsePhase.Measuring, -20.0);
 
         Assert.True(FlagsOf(stepped).HasFlag(StreamFlags.SteppedResponse));
         Assert.False(FlagsOf(chirp).HasFlag(StreamFlags.SteppedResponse));
+    }
+
+    [Fact]
+    public void ACrosstalkTraceFrame_SaysSo_AndCarriesItsOwnKind()
+    {
+        var trace = Trace() with { Kind = FrequencyResponseTraceKind.CrosstalkRightToLeft };
+        var frame = StreamFrame.EncodeFrequencyResponse(trace, StreamFlags.Crosstalk);
+
+        Assert.True(FlagsOf(frame).HasFlag(StreamFlags.Crosstalk));
+        Assert.False(FlagsOf(frame).HasFlag(StreamFlags.SteppedResponse));
+        Assert.Equal(FrequencyResponseTraceKind.CrosstalkRightToLeft, StreamFrame.DecodeFrequencyResponse(frame).Kind);
+    }
+
+    [Fact]
+    public void ACrosstalkProgressFrame_SaysSo()
+    {
+        var frame = StreamFrame.EncodeFrequencyResponseProgress(3, 50, FrequencyResponsePhase.Sweeping, -20.0, StreamFlags.Crosstalk);
+        Assert.Equal(StreamFlags.Crosstalk, FlagsOf(frame));
+    }
+
+    [Fact]
+    public void AnOriginThatIsNotOne_IsRejected()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => StreamFrame.EncodeFrequencyResponse(Trace(), StreamFlags.Held));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            StreamFrame.EncodeFrequencyResponse(Trace(), StreamFlags.SteppedResponse | StreamFlags.Crosstalk));
     }
 
     [Fact]
@@ -63,7 +89,7 @@ public class ResponseFrameOriginTests
         // A stepped frame has to decode to the same numbers as a chirp one — the marker rides in the
         // header's spare bits, so the payload is byte-for-byte identical.
         var chirp = StreamFrame.EncodeFrequencyResponse(Trace());
-        var stepped = StreamFrame.EncodeFrequencyResponse(Trace(), stepped: true);
+        var stepped = StreamFrame.EncodeFrequencyResponse(Trace(), StreamFlags.SteppedResponse);
 
         Assert.Equal(chirp.Length, stepped.Length);
         Assert.Equal(chirp[4..], stepped[4..]);

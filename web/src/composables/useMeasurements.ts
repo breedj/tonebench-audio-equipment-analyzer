@@ -12,6 +12,7 @@ import {
   type UpdateMeasurementRequest,
 } from '../api/client'
 import {
+  isCrosstalkKind,
   isFrequencyResponseKind,
   isImdSweepKind,
   isImpedanceKind,
@@ -82,10 +83,23 @@ export interface OverlayEntry {
  * names, so this is where the two conventions meet — one place rather than at every read site.
  */
 export function toResponseTraces(stored: StoredResponseTrace[]): ResponseTrace[] {
-  const kinds: Record<string, ResponseTrace['kind']> = { left: 'Left', right: 'Right', gain: 'Gain' }
+  function kindOf(stored: string): ResponseTrace['kind'] {
+    const kind = kinds[stored]
+    if (!kind) throw new Error(`Unknown response trace kind '${stored}'.`)
+    return kind
+  }
+  const kinds: Record<string, ResponseTrace['kind']> = {
+    left: 'Left',
+    right: 'Right',
+    gain: 'Gain',
+    xtalk_l2r: 'CrosstalkLeftToRight',
+    xtalk_r2l: 'CrosstalkRightToLeft',
+  }
 
   return stored.map((trace) => ({
-    kind: kinds[trace.kind] ?? 'Gain',
+    // No fallback: a row of a kind this table does not know would otherwise be drawn as gain —
+    // which is exactly what a crosstalk row would have become before its kinds were added here.
+    kind: kindOf(trace.kind),
     startFreqHz: trace.startHz,
     endFreqHz: trace.endHz,
     freqHz: trace.freqHz,
@@ -330,6 +344,19 @@ export function useMeasurements() {
    * `saveResponse`: an impulse result writes the same `response_trace` rows plus two tables of its
    * own, so it goes through its own endpoint even though the curves are identical.
    */
+  /** Saves the crosstalk curves on screen — the crosstalk runner's own rows, through its own endpoint. */
+  async function saveCrosstalk(req: { measurementTypeId: number; name: string; notes: string | null }) {
+    try {
+      const result = await api.saveCrosstalk(req)
+      await load()
+      error.value = null
+      return result
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   async function saveImpedance(req: { measurementTypeId: number; name: string; notes: string | null }) {
     try {
       const result = await api.saveImpedance(req)
@@ -417,8 +444,10 @@ export function useMeasurements() {
       // come back through the same reader and overlay onto the same chart. The impulse itself and
       // the harmonic curves are not overlaid — they are read through their own endpoint by the
       // screen that draws them.
+      // A crosstalk result's rows are response traces too (under their own kinds), and its chart
+      // is the response chart, so they overlay through the same field.
       const responseTraces =
-        isFrequencyResponseKind(detail.kind) || isImpulseResponseKind(detail.kind)
+        isFrequencyResponseKind(detail.kind) || isImpulseResponseKind(detail.kind) || isCrosstalkKind(detail.kind)
           ? toResponseTraces((await api.getStoredResponse(resultId)).traces)
           : undefined
       // Impedance comes back through the same reader, since it shares the rows — but into its own
@@ -460,7 +489,7 @@ export function useMeasurements() {
   // with nothing to show it on. MeasurementHistoryPanel loads on mount and on every type change,
   // which covers every screen the list is shown on.
 
-  return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance,
+  return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk,
     update, remove,
     addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
 }

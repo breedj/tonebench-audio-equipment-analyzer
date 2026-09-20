@@ -5,6 +5,7 @@ import {
   ResponsePhase,
   ResponseReferenceMode,
   ResponseTraceKind,
+  STREAM_FLAG_CROSSTALK,
   STREAM_FLAG_STEPPED_RESPONSE,
   StreamChannel,
   StreamMsgType,
@@ -49,13 +50,13 @@ function emptyStatus(): FrequencyResponseStatus {
  */
 function progress(
   fields: Omit<FrequencyResponseProgressFrame, 'header'>,
-  stepped = false,
+  stepped: boolean | 'crosstalk' = false,
 ): FrequencyResponseProgressFrame {
   return {
     header: {
       msgType: StreamMsgType.FrequencyResponseProgress,
       channel: StreamChannel.Left,
-      flags: stepped ? STREAM_FLAG_STEPPED_RESPONSE : 0,
+      flags: originFlag(stepped),
       seq: fields.phase,
       x0: fields.generatorAmpDbv,
       dx: fields.total,
@@ -65,8 +66,13 @@ function progress(
   }
 }
 
+function originFlag(origin: boolean | 'crosstalk'): number {
+  if (origin === 'crosstalk') return STREAM_FLAG_CROSSTALK
+  return origin ? STREAM_FLAG_STEPPED_RESPONSE : 0
+}
+
 /** One live curve, with the same origin flag on its header. */
-function traceFrame(kind: ResponseTraceKind, peakDb: number, stepped = false): FrequencyResponseFrame {
+function traceFrame(kind: ResponseTraceKind, peakDb: number, stepped: boolean | 'crosstalk' = false): FrequencyResponseFrame {
   const bandwidth = {
     dropDb: 3,
     lowerHz: 20,
@@ -80,7 +86,7 @@ function traceFrame(kind: ResponseTraceKind, peakDb: number, stepped = false): F
     header: {
       msgType: StreamMsgType.FrequencyResponse,
       channel: kind as unknown as StreamChannel,
-      flags: stepped ? STREAM_FLAG_STEPPED_RESPONSE : 0,
+      flags: originFlag(stepped),
       seq: 0,
       x0: 20,
       dx: 20000,
@@ -113,6 +119,9 @@ describe('useFrequencyResponse', () => {
 
     vi.spyOn(api, 'getFrequencyResponseStatus').mockResolvedValue(status())
     vi.spyOn(api, 'getSteppedResponseStatus').mockResolvedValue(status())
+    vi.spyOn(api, 'getCrosstalkStatus').mockResolvedValue(status())
+    response.setTarget('Crosstalk')
+    await response.refresh()
     response.setTarget('Stepped')
     await response.refresh()
     response.setTarget('Chirp')
@@ -185,6 +194,80 @@ describe('useFrequencyResponse', () => {
     expect(response.traces.value.map((t) => t.peakDb)).toEqual([-2.5])
     expect(response.pointsMeasured.value).toBe(9)
     expect(response.running.value).toBe(true)
+  })
+
+  it('lands a crosstalk-flagged frame in the crosstalk state and nowhere else', () => {
+    const response = useFrequencyResponse()
+    response.setTarget('Stepped')
+
+    response.ingestTrace(traceFrame(ResponseTraceKind.CrosstalkLeftToRight, -64, 'crosstalk'))
+    response.ingestProgress(progress({ taken: 5, total: 80, phase: ResponsePhase.Sweeping, generatorAmpDbv: -20 }, 'crosstalk'))
+
+    expect(response.traces.value).toEqual([])
+    expect(response.running.value).toBe(false)
+    response.setTarget('Chirp')
+    expect(response.traces.value).toEqual([])
+
+    response.setTarget('Crosstalk')
+    expect(response.traces.value.map((t) => t.kind)).toEqual(['CrosstalkLeftToRight'])
+    expect(response.pointsMeasured.value).toBe(5)
+    expect(response.pointCount.value).toBe(80)
+    expect(response.running.value).toBe(true)
+  })
+
+  it('routes the crosstalk verbs to the crosstalk runner', async () => {
+    const statusSpy = vi.spyOn(api, 'getCrosstalkStatus').mockResolvedValue(status())
+    const cancel = vi.spyOn(api, 'cancelCrosstalk').mockResolvedValue(status())
+    const clear = vi.spyOn(api, 'clearCrosstalk').mockResolvedValue(status())
+    const stepped = vi.spyOn(api, 'cancelSteppedResponse').mockResolvedValue(status())
+
+    const response = useFrequencyResponse()
+    response.setTarget('Crosstalk')
+    await response.refresh()
+    await response.cancel()
+    await response.clear()
+
+    expect(statusSpy).toHaveBeenCalledTimes(1)
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(clear).toHaveBeenCalledTimes(1)
+    expect(stepped).not.toHaveBeenCalled()
+  })
+
+  it('counts a two-pass crosstalk run over both passes and names the pass in the label', async () => {
+    vi.spyOn(api, 'startCrosstalk').mockResolvedValue({
+      passCount: 2,
+      pointCount: 40,
+      frequenciesHz: [],
+      sampleRateHz: 192000,
+      averageCount: 1,
+      estimatedSeconds: 100,
+    })
+
+    const response = useFrequencyResponse()
+    response.setTarget('Crosstalk')
+    await response.startCrosstalk({
+      startFreqHz: 20,
+      endFreqHz: 20000,
+      stepsPerOctave: 4,
+      direction: 'Both',
+      levelMode: 'GeneratorVoltage',
+      levelValue: -20,
+      levelUnit: 'Dbv',
+      loadOhms: 8,
+      averageCount: 1,
+      adaptiveResolution: true,
+    })
+    expect(response.pointCount.value).toBe(80)
+    expect(response.running.value).toBe(true)
+
+    response.ingestProgress(progress({ taken: 2, total: 80, phase: ResponsePhase.Sweeping, generatorAmpDbv: -20 }, 'crosstalk'))
+    expect(response.progressLabel.value).toBe('Pass 1 of 2 (L→R) · point 3 of 40')
+
+    response.ingestProgress(progress({ taken: 40, total: 80, phase: ResponsePhase.Sweeping, generatorAmpDbv: -20 }, 'crosstalk'))
+    expect(response.progressLabel.value).toBe('Pass 2 of 2 (R→L) · point 1 of 40')
+
+    response.ingestProgress(progress({ taken: 80, total: 80, phase: ResponsePhase.Sweeping, generatorAmpDbv: -20 }, 'crosstalk'))
+    expect(response.progressLabel.value).toBe('Pass 2 of 2 (R→L) · point 40 of 40')
   })
 
   it('applies a status to the targeted measurement alone', async () => {

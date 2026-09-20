@@ -70,6 +70,13 @@ public sealed record SimulatedSignalProfile
     /// </summary>
     public bool PinkNoiseEnabled { get; init; } = true;
 
+    /// <summary>
+    /// Couples each channel's output into the other through <see cref="SimulatedCrosstalk"/> — a
+    /// −70 dB floor rising 6 dB per octave above 6 kHz, symmetric. Off by default: every ratio
+    /// measurement that reads the two inputs against each other would otherwise carry it.
+    /// </summary>
+    public bool CrosstalkEnabled { get; init; } = false;
+
     public IntermodulationMode Intermodulation { get; init; } = IntermodulationMode.None;
 
     /// <summary>Total two-tone amplitude (both tones combined), dBV referenced to 1 Vrms. Only used when <see cref="Intermodulation"/> is not <see cref="IntermodulationMode.None"/>.</summary>

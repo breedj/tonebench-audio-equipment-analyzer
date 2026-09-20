@@ -65,6 +65,9 @@ import ImpedanceChart from './components/ImpedanceChart.vue'
 import ImpedancePlaneChart from './components/ImpedancePlaneChart.vue'
 import ImpedanceReadoutPanel from './components/ImpedanceReadoutPanel.vue'
 import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.vue'
+import CrosstalkConfigPanel from './components/CrosstalkConfigPanel.vue'
+import CrosstalkDisplayPanel from './components/CrosstalkDisplayPanel.vue'
+import CrosstalkMeasurementsPanel from './components/CrosstalkMeasurementsPanel.vue'
 import FrequencyResponseDisplayPanel from './components/FrequencyResponseDisplayPanel.vue'
 import FrequencyResponseChart from './components/FrequencyResponseChart.vue'
 import ImpulseResponseConfigPanel from './components/ImpulseResponseConfigPanel.vue'
@@ -84,6 +87,7 @@ import ScreenshotDialog from './components/ScreenshotDialog.vue'
 import { responseDisplayFromParams, type ResponseDisplay } from './response/display'
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
+import { crosstalkDisplayFromParams, crosstalkDisplayToParams, DEFAULT_CROSSTALK_DISPLAY, type CrosstalkDisplay } from './crosstalk/display'
 import { impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
 import { monochromeChartPng } from './charts/exportChart'
 import { copyPngToClipboard, frameChartPng, screenshotFrameLayout, type ScreenshotSettings } from './screenshot'
@@ -113,6 +117,7 @@ import {
   isImpulseResponseKind,
   isSweepKind as isSweepKindName,
   isImpedanceKind,
+  isCrosstalkKind,
 } from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
@@ -343,6 +348,7 @@ const {
   sampleRateHz: responseSampleRateHz,
   start: startResponse,
   startStepped: startSteppedResponse,
+  startCrosstalk,
   cancel: cancelResponseRun,
   clear: clearResponseRun,
   refresh: refreshResponse,
@@ -419,6 +425,12 @@ const isImpulseResponse = computed(() => isImpulseResponseKind(currentType.value
 // ohms rather than a gain and it has a fixture calibration of its own, so like the impulse screen it
 // keys off its own flag rather than becoming a third arm of isFrequencyResponse.
 const isImpedance = computed(() => isImpedanceKind(currentType.value?.kind))
+
+// A sixth screen. It runs the stepped sine's mechanics with one generator channel off and draws its
+// curves with the response chart, but it reports a channel ratio rather than a gain, has no phase,
+// no reference and no bandwidth, and runs through its own endpoints — so, like impedance, it keys
+// off its own flag rather than becoming a third arm of isFrequencyResponse.
+const isCrosstalk = computed(() => isCrosstalkKind(currentType.value?.kind))
 
 /**
  * A stepped-sine impedance run is single-shot, so the continuous RUN button goes away and the
@@ -719,6 +731,7 @@ watch(
 const responseConfigPanel = ref<InstanceType<typeof FrequencyResponseConfigPanel> | null>(null)
 const impedanceConfigPanel = ref<InstanceType<typeof ImpedanceConfigPanel> | null>(null)
 const steppedResponseConfigPanel = ref<InstanceType<typeof SteppedResponseConfigPanel> | null>(null)
+const crosstalkConfigPanel = ref<InstanceType<typeof CrosstalkConfigPanel> | null>(null)
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
 const amplitudeSweepConfigPanel = ref<InstanceType<typeof AmplitudeSweepConfigPanel> | null>(null)
 const imdSweepConfigPanel = ref<InstanceType<typeof ImdSweepConfigPanel> | null>(null)
@@ -1019,6 +1032,61 @@ watch(isImpedance, (selected) => {
   if (selected) void refreshImpedance().catch(() => undefined)
 }, { immediate: true })
 
+// Crosstalk chart display preferences — the same arrangement as the impedance screen's, through
+// crosstalk/display.ts so the report restores a stored type the way the screen does.
+const crosstalkThickLines = ref(DEFAULT_CROSSTALK_DISPLAY.thickLines)
+const crosstalkShowDataPoints = ref(DEFAULT_CROSSTALK_DISPLAY.showDataPoints)
+const crosstalkYTopDb = ref(DEFAULT_CROSSTALK_DISPLAY.yTopDb)
+const crosstalkYBottomDb = ref(DEFAULT_CROSSTALK_DISPLAY.yBottomDb)
+const crosstalkXFromHz = ref(DEFAULT_CROSSTALK_DISPLAY.xFromHz)
+const crosstalkXToHz = ref(DEFAULT_CROSSTALK_DISPLAY.xToHz)
+const crosstalkAutofitOnDone = ref(DEFAULT_CROSSTALK_DISPLAY.autofitOnDone)
+
+let crosstalkDisplayRestoring = false
+
+function currentCrosstalkDisplay(): CrosstalkDisplay {
+  return {
+    thickLines: crosstalkThickLines.value,
+    showDataPoints: crosstalkShowDataPoints.value,
+    yTopDb: crosstalkYTopDb.value,
+    yBottomDb: crosstalkYBottomDb.value,
+    xFromHz: crosstalkXFromHz.value,
+    xToHz: crosstalkXToHz.value,
+    autofitOnDone: crosstalkAutofitOnDone.value,
+  }
+}
+
+function applyStoredCrosstalkDisplay(paramsJson: string) {
+  crosstalkDisplayRestoring = true
+  const display = crosstalkDisplayFromParams(paramsJson, currentCrosstalkDisplay())
+  crosstalkThickLines.value = display.thickLines
+  crosstalkShowDataPoints.value = display.showDataPoints
+  crosstalkYTopDb.value = display.yTopDb
+  crosstalkYBottomDb.value = display.yBottomDb
+  crosstalkXFromHz.value = display.xFromHz
+  crosstalkXToHz.value = display.xToHz
+  crosstalkAutofitOnDone.value = display.autofitOnDone
+  void nextTick(() => {
+    crosstalkDisplayRestoring = false
+  })
+}
+
+// Kind-gated like the impedance watcher above, and for the same reason.
+watch(
+  () => (isCrosstalk.value ? currentType.value?.paramsJson : undefined),
+  (paramsJson) => {
+    if (paramsJson) applyStoredCrosstalkDisplay(paramsJson)
+  },
+  { immediate: true },
+)
+
+watch(
+  [crosstalkThickLines, crosstalkShowDataPoints, crosstalkYTopDb, crosstalkYBottomDb, crosstalkXFromHz, crosstalkXToHz, crosstalkAutofitOnDone],
+  () => {
+    if (!crosstalkDisplayRestoring && isCrosstalk.value) markDirty()
+  },
+)
+
 function runImpedance(continuous: boolean) {
   const request = impedanceConfigPanel.value?.buildRequest(continuous)
   if (!request) return
@@ -1099,6 +1167,15 @@ function runSteppedResponse(request: import('./api/client').SteppedResponseStart
   })
 }
 
+/**
+ * The crosstalk sweep: the stepped sine's single RUN SWEEP model, from the panel's own `run` emit.
+ */
+function runCrosstalk(request: import('./api/client').CrosstalkStartRequest) {
+  return withErrorReporting(async () => {
+    await startCrosstalk(request)
+  })
+}
+
 // The store keeps one state per measurement and this is what says which of them the screen is
 // showing — set from the selected kind rather than at call time, and before the re-attach below,
 // since every verb reads it.
@@ -1107,10 +1184,10 @@ function runSteppedResponse(request: import('./api/client').SteppedResponseStart
 // true for *both* response kinds, so switching from one to the other never changes it and never
 // fired. That is what left the previous kind's curves on screen.
 watch(
-  isSteppedResponse,
-  (stepped) => {
-    setResponseTarget(stepped ? 'Stepped' : 'Chirp')
-    if (isFrequencyResponse.value) void refreshResponse().catch(() => undefined)
+  [isSteppedResponse, isCrosstalk],
+  ([stepped, crosstalk]) => {
+    setResponseTarget(crosstalk ? 'Crosstalk' : stepped ? 'Stepped' : 'Chirp')
+    if (isFrequencyResponse.value || crosstalk) void refreshResponse().catch(() => undefined)
   },
   { immediate: true },
 )
@@ -1511,6 +1588,7 @@ const waterfallChart = ref<InstanceType<typeof WaterfallChart> | null>(null)
 /** The chart on screen — whichever view or projection the screen is showing. */
 function chartOnScreen() {
   if (isFrequencyResponse.value) return activeResponseProjection.value === 'Bode' ? responseChart.value : responsePolarChart.value
+  if (isCrosstalk.value) return responseChart.value
   if (isSweepKind.value) return sweepChart.value
   if (isImpulseResponse.value) {
     switch (impulseView.value) {
@@ -1530,7 +1608,7 @@ function chartOnScreen() {
 
 /** Whether the chart on screen has something to draw. */
 const screenshotAvailable = computed(() => {
-  if (isFrequencyResponse.value) return responseTraces.value.length > 0
+  if (isFrequencyResponse.value || isCrosstalk.value) return responseTraces.value.length > 0
   if (isSweepKind.value) return sweepPoints.value.length > 0
   if (isImpulseResponse.value) {
     switch (impulseView.value) {
@@ -1639,6 +1717,11 @@ function buildLiveSubject(): ReportSubject | null {
       rightChannelIsReference: responseRightChannelIsReference.value,
       latencySamples: responseLatencySamples.value,
     }
+  } else if (isCrosstalk.value) {
+    subject.sampleRateHz = responseSampleRateHz.value
+    if (responseSampleRateHz.value > 0) facts.push({ label: 'Sample rate', value: `${responseSampleRateHz.value} Hz` })
+    if (responseTraces.value.length > 0) facts.push({ label: 'Generator level', value: `${responseGeneratorAmpDbv.value.toFixed(2)} dBV` })
+    subject.data = { kind: 'crosstalk', traces: responseTraces.value, display: currentCrosstalkDisplay() }
   } else if (isSweepKind.value) {
     if (sweepPoints.value.length > 0) facts.push({ label: 'Points', value: String(sweepPoints.value.length) })
     subject.data = {
@@ -2181,6 +2264,12 @@ function buildTypeParamsJson(): string | undefined {
     })
   }
 
+  if (isCrosstalk.value) {
+    const base = crosstalkConfigPanel.value?.buildParamsJson()
+    if (!base) return undefined
+    return JSON.stringify({ ...JSON.parse(base), ...crosstalkDisplayToParams(currentCrosstalkDisplay()) })
+  }
+
   if (isFrequencyResponse.value) {
     const base = activeResponsePanel.value?.buildParamsJson()
     if (!base) return undefined
@@ -2429,7 +2518,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               Save as…
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk"
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -2440,7 +2529,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               Save measurement result
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk"
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -2462,15 +2551,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               Save sweep result
             </button>
             <button
-              v-if="isFrequencyResponse"
+              v-if="isFrequencyResponse || isCrosstalk"
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
-              title="Saves the curves on screen as a new measurement result, with their bandwidth readings."
+              :title="isCrosstalk ? 'Saves the crosstalk curves on screen as a new measurement result.' : 'Saves the curves on screen as a new measurement result, with their bandwidth readings.'"
               @click="openSaveDialog"
             >
               <ToolbarIcon name="save-result" />
-              Save response result
+              {{ isCrosstalk ? 'Save crosstalk result' : 'Save response result' }}
             </button>
             <button
               v-if="isImpedance"
@@ -2517,7 +2606,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               Clear
             </button>
             <button
-              v-if="isFrequencyResponse"
+              v-if="isFrequencyResponse || isCrosstalk"
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
@@ -2988,6 +3077,107 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:phase-top-deg="responsePhaseTopDeg"
                   v-model:phase-bottom-deg="responsePhaseBottomDeg"
                   v-model:autofit-on-done="responseAutofitOnDone"
+                />
+
+                <MeasurementChecklist @error="reportError" />
+              </template>
+            </MeasurementLayout>
+          </template>
+
+          <template v-else-if="isCrosstalk">
+            <MeasurementLayout>
+              <template #rail>
+                <!-- RUN SWEEP / STOP — the stepped-sine response's pair, since this is the same kind
+                     of run: minutes long, single-shot. -->
+                <div class="flex gap-3">
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    :disabled="responseRunning || !!crosstalkConfigPanel?.invalid"
+                    :title="
+                      crosstalkConfigPanel?.invalid ??
+                      'Drives one channel with a tone stepped across the band and reads what leaks into the other.'
+                    "
+                    @click="crosstalkConfigPanel?.run()"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    RUN SWEEP
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
+                    :class="responseRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    :disabled="!responseRunning"
+                    title="Stops the measurement and silences the generator. Every point measured so far stays on screen."
+                    @click="cancelFrequencyResponse"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
+                    STOP
+                  </button>
+                </div>
+
+                <CrosstalkConfigPanel
+                  ref="crosstalkConfigPanel"
+                  :running="responseRunning"
+                  @run="runCrosstalk"
+                />
+
+                <CrosstalkMeasurementsPanel
+                  :traces="responseTraces"
+                  :generator-amp-dbv="responseGeneratorAmpDbv"
+                />
+              </template>
+
+              <template #default>
+                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  <span>{{ responseProgressLabel || 'Idle' }}</span>
+                  <span v-if="Number.isFinite(responseGeneratorAmpDbv) && responseTraces.length">
+                    · gen {{ responseGeneratorAmpDbv.toFixed(2) }} dBV
+                  </span>
+                </div>
+                <p v-if="responseError" class="text-xs text-red-600 dark:text-red-400">{{ responseError }}</p>
+
+                <!-- The response chart in its Crosstalk view: only the crosstalk traces, no phase,
+                     no coherence, no bandwidth markers. The dBV window and the phase window are
+                     handed constants because that view never reads them. -->
+                <FrequencyResponseChart
+                  ref="responseChart"
+                  run-label="RUN SWEEP"
+                  :traces="responseTraces"
+                  :overlays="visibleResponseOverlays"
+                  view="Crosstalk"
+                  :show-left="true"
+                  :show-right="true"
+                  :show-phase="false"
+                  phase-kind="None"
+                  :show-coherence="false"
+                  :show-one-db="false"
+                  :show-three-db="false"
+                  :thick-lines="crosstalkThickLines"
+                  :show-data-points="crosstalkShowDataPoints"
+                  :y-top-db="crosstalkYTopDb"
+                  :y-bottom-db="crosstalkYBottomDb"
+                  :y-top-dbv="20"
+                  :y-bottom-dbv="-140"
+                  :x-from-hz="crosstalkXFromHz"
+                  :x-to-hz="crosstalkXToHz"
+                  :phase-top-deg="180"
+                  :phase-bottom-deg="-180"
+                />
+
+                <MeasurementNotesPanel />
+                <MeasurementHistoryPanel @error="reportError" @report="openReport" />
+              </template>
+
+              <template #aside>
+                <CrosstalkDisplayPanel
+                  v-model:y-top-db="crosstalkYTopDb"
+                  v-model:y-bottom-db="crosstalkYBottomDb"
+                  v-model:x-from-hz="crosstalkXFromHz"
+                  v-model:x-to-hz="crosstalkXToHz"
+                  v-model:thick-lines="crosstalkThickLines"
+                  v-model:show-data-points="crosstalkShowDataPoints"
+                  v-model:autofit-on-done="crosstalkAutofitOnDone"
                 />
 
                 <MeasurementChecklist @error="reportError" />

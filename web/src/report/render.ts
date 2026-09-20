@@ -54,7 +54,7 @@ export function toOverlayEntry(subject: ReportSubject): OverlayEntry | null {
     sweepMethod: data.kind === 'sweep' ? data.method : undefined,
     sweepFamily: data.kind === 'sweep' ? data.family : undefined,
     sweepEndFreqHz: data.kind === 'sweep' ? sweepEndFreqHzFromParams(subject.paramsJson) : undefined,
-    responseTraces: data.kind === 'response' || data.kind === 'impulse' ? data.traces : undefined,
+    responseTraces: data.kind === 'response' || data.kind === 'impulse' || data.kind === 'crosstalk' ? data.traces : undefined,
     impedanceTraces: data.kind === 'impedance' ? data.traces : undefined,
   }
 }
@@ -72,6 +72,8 @@ export function subjectHasChartData(subject: ReportSubject): boolean {
     case 'impulse':
       return data.impulse !== null || data.traces.length > 0
     case 'impedance':
+      return data.traces.length > 0
+    case 'crosstalk':
       return data.traces.length > 0
     default:
       return false
@@ -357,6 +359,40 @@ export async function renderView(
         return { png, caption: 'Impedance locus' }
       }
       return null
+    }
+
+    case 'crosstalk': {
+      if (data.traces.length === 0 || view !== 'Crosstalk') return null
+      const { traces, display } = data
+      // The response chart in its Crosstalk view, with the same constants App.vue hands the windows
+      // that view never reads.
+      const png = await renderChartPng(
+        FrequencyResponseChart,
+        {
+          traces,
+          overlays: overlayEntries,
+          view: 'Crosstalk',
+          showLeft: true,
+          showRight: true,
+          showPhase: false,
+          showCoherence: false,
+          showOneDb: false,
+          showThreeDb: false,
+          thickLines: display.thickLines,
+          showDataPoints: display.showDataPoints,
+          yTopDb: display.yTopDb,
+          yBottomDb: display.yBottomDb,
+          yTopDbv: 20,
+          yBottomDbv: -140,
+          xFromHz: display.xFromHz,
+          xToHz: display.xToHz,
+          phaseTopDeg: 180,
+          phaseBottomDeg: -180,
+          phaseKind: 'None',
+        },
+        options,
+      )
+      return { png, caption: 'Crosstalk against frequency' }
     }
 
     default:

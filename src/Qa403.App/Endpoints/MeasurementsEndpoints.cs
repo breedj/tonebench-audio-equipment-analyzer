@@ -79,8 +79,10 @@ public static class MeasurementsEndpoints
 
                 csv = CsvExporter.ExportImpedance(detail, traces);
             }
-            else if (MeasurementSaveService.IsFrequencyResponseKind(detail.Kind))
+            else if (MeasurementSaveService.IsFrequencyResponseKind(detail.Kind) || MeasurementSaveService.IsCrosstalkKind(detail.Kind))
             {
+                // Crosstalk rows are response rows in plain dB, so the generic per-kind columns
+                // (xtalk_l2r_min_db, ...) are exactly right for them.
                 var traces = await repo.GetResponseTracesAsync(detail.ResultId, ct);
                 if (traces.Count == 0)
                     return Results.NotFound();

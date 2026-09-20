@@ -28,6 +28,12 @@ export interface DeviceStatus {
    */
   simulatedDut: SimulatedDutModel | null
   /**
+   * The simulator's inter-channel coupling (−70 dB, rising above 6 kHz) on/off; same null
+   * convention. Off, the simulated channels are perfectly separate and a crosstalk sweep reads the
+   * noise floor.
+   */
+  simulatedCrosstalkEnabled: boolean | null
+  /**
    * Which analyzer the session is talking to. Separate from `isSimulated`, which describes a
    * *connected* device and so reads false while the simulator is selected but not yet up.
    */
@@ -102,6 +108,7 @@ export interface SimulatedProfileRequest {
   humEnabled?: boolean
   harmonicsEnabled?: boolean
   dut?: SimulatedDutModel
+  crosstalkEnabled?: boolean
 }
 
 /** Mirrors Qa403.Device.GeneratorKind — exactly one stimulus is active per channel. */
@@ -152,7 +159,10 @@ export interface GeneratorChannelState {
 // ---------------------------------------------------------------------------
 
 /** Mirrors Qa403.App.Services.FrequencyResponseTraceKind. */
-export type ResponseTraceKindName = 'Left' | 'Right' | 'Gain'
+export type ResponseTraceKindName = 'Left' | 'Right' | 'Gain' | 'CrosstalkLeftToRight' | 'CrosstalkRightToLeft'
+
+/** Which amplifier channel is the crosstalk aggressor; 'Both' runs the two directions back to back. */
+export type CrosstalkDirection = 'LeftToRight' | 'RightToLeft' | 'Both'
 
 /**
  * Mirrors Qa403.App.Services.ResponsePhaseKind — what phase a run measured, and so what the UI may
@@ -685,6 +695,63 @@ export interface SteppedResponseStarted {
 }
 
 /**
+ * Wire shape for starting a crosstalk run — the stepped sweep's grid and level modes, one driven
+ * channel at a time. The level modes probe the *driven* channel. See CrosstalkRequest server-side.
+ */
+export interface CrosstalkStartRequest {
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  direction: CrosstalkDirection
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  loadOhms: number
+  averageCount: number
+  adaptiveResolution: boolean
+}
+
+export interface CrosstalkStarted {
+  /** 1 for a single direction, 2 for Both. */
+  passCount: number
+  /** Points per pass; the status's pointCount is the total over every pass. */
+  pointCount: number
+  frequenciesHz: number[]
+  sampleRateHz: number
+  averageCount: number
+  /** For every pass together. */
+  estimatedSeconds: number
+}
+
+/** A crosstalk type's stored settings — see CrosstalkParameters server-side. */
+export interface CrosstalkParameters {
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  direction: CrosstalkDirection
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  loadOhms: number
+  fftSize: number
+  window: WindowType
+  averageCount: number
+  sampleRateHz: number
+  adaptiveResolution: boolean
+  /** The generator level each pass ran at — solved by probing in the output-referred modes, so only known after the fact. */
+  generatorAmpDbvLeftToRight?: number | null
+  generatorAmpDbvRightToLeft?: number | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartYTopDb?: number | null
+  chartYBottomDb?: number | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartAutofitOnDone?: boolean | null
+  captureDelayMs?: number | null
+}
+
+/**
  * A stepped-sine response type's stored settings. Its own shape rather than more optional fields on
  * FrequencyResponseParameters, for the same reason the two sweep kinds have separate records: a
  * chirp is described by a span and a resolution multiplier, a stepped sweep by a frequency range and
@@ -1099,7 +1166,8 @@ export interface StoredImpulseResult {
 
 /** One stored curve, as `GET /api/measurements/{id}/response-traces` returns it. */
 export interface StoredResponseTrace {
-  kind: 'left' | 'right' | 'gain'
+  /** The row's kind as stored (`response_trace.kind`): the response kinds, the crosstalk kinds, or an impedance kind (`z`, `z_open`, `z_short`). */
+  kind: 'left' | 'right' | 'gain' | 'xtalk_l2r' | 'xtalk_r2l' | 'z' | 'z_open' | 'z_short'
   startHz: number
   endHz: number
   peakDb: number
@@ -2266,6 +2334,20 @@ export const api = {
 
   setSteppedResponseBandwidthReference: (req: BandwidthReferenceRequest) =>
     request<FrequencyResponseStatus>('/stepped-response/bandwidth-reference', { method: 'PUT', body: JSON.stringify(req) }),
+
+  // Crosstalk: the stepped sweep's mechanics with one output muted, so the same status payload and
+  // the same store — its own endpoints because it is its own runner (two passes, two traces).
+  startCrosstalk: (req: CrosstalkStartRequest) =>
+    request<CrosstalkStarted>('/crosstalk/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelCrosstalk: () => request<FrequencyResponseStatus>('/crosstalk/cancel', { method: 'POST' }),
+
+  clearCrosstalk: () => request<FrequencyResponseStatus>('/crosstalk/clear', { method: 'POST' }),
+
+  getCrosstalkStatus: () => request<FrequencyResponseStatus>('/crosstalk/status'),
+
+  saveCrosstalk: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/crosstalk/save', { method: 'POST', body: JSON.stringify(req) }),
 
   // The impulse response. The same five verbs as the two response measurements above, plus the
   // loopback calibration sub-resource — capturing one has a physical precondition (patch the

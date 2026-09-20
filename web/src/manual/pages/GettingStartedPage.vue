@@ -103,6 +103,10 @@ const { showPage } = useManual()
           <td>Stepped sine response</td>
           <td>The same curves, one tone at a time — slower, but nothing else is playing.</td>
         </tr>
+        <tr>
+          <td>Crosstalk</td>
+          <td>How much one channel leaks into the other, in dB against frequency, one direction or both.</td>
+        </tr>
       </tbody>
     </table>
     <p>

@@ -26,8 +26,12 @@ const props = defineProps<{
   traces: ResponseTrace[]
   /** Stored measurements checked on in the History list, drawn dashed behind the live curves. */
   overlays: OverlayEntry[]
-  /** 'Dbv' shows each input's own level; 'Gain' shows left relative to the reference. */
-  view: 'Dbv' | 'Gain'
+  /**
+   * 'Dbv' shows each input's own level; 'Gain' shows left relative to the reference; 'Crosstalk'
+   * shows the crosstalk trace(s) — victim relative to aggressor, one per direction measured — on
+   * the Gain (dB) window, with no bandwidth markers (a crosstalk curve has no corners).
+   */
+  view: 'Dbv' | 'Gain' | 'Crosstalk'
   showLeft: boolean
   showRight: boolean
   showPhase: boolean
@@ -83,7 +87,27 @@ const TRACE_COLORS = {
   Gain: ['#111827', '#f3f4f6'],
   Left: ['#2563eb', '#60a5fa'],
   Right: ['#ea580c', '#fb923c'],
+  // Coloured by the *aggressor*: blue when the left channel drives, orange when the right does —
+  // the same L/R hues, read as "which channel was playing".
+  CrosstalkLeftToRight: ['#2563eb', '#60a5fa'],
+  CrosstalkRightToLeft: ['#ea580c', '#fb923c'],
 } as const
+
+/** What a curve is called in the legend and the readout. */
+function traceLabel(kind: ResponseTrace['kind']): string {
+  switch (kind) {
+    case 'CrosstalkLeftToRight':
+      return 'L→R'
+    case 'CrosstalkRightToLeft':
+      return 'R→L'
+    default:
+      return kind
+  }
+}
+
+function isCrosstalkTrace(kind: ResponseTrace['kind']): boolean {
+  return kind === 'CrosstalkLeftToRight' || kind === 'CrosstalkRightToLeft'
+}
 
 const PHASE_COLOR = ['#7c3aed', '#a78bfa'] as const
 const COHERENCE_COLOR = ['#059669', '#34d399'] as const
@@ -110,6 +134,7 @@ const rightTrace = computed(() => props.traces.find((t) => t.kind === 'Right') ?
  * there are the two inputs, subject to their checkboxes.
  */
 const visibleTraces = computed<ResponseTrace[]>(() => {
+  if (props.view === 'Crosstalk') return props.traces.filter((t) => isCrosstalkTrace(t.kind))
   if (props.view === 'Gain') return gainTrace.value ? [gainTrace.value] : []
 
   const shown: ResponseTrace[] = []
@@ -123,18 +148,32 @@ const visibleTraces = computed<ResponseTrace[]>(() => {
  * gain curve belongs under the live gain curve, not under the dBV one. Dash pattern comes from the
  * shared overlay styling, so a run is identified the same way here as on the sweep screen.
  */
-const overlayCurves = computed(() =>
-  props.overlays
+const overlayCurves = computed(() => {
+  // A stored crosstalk result may hold both directions; each is its own curve, coloured by its
+  // kind and dashed by the overlay, so two stored runs of both directions are still four
+  // distinguishable lines.
+  if (props.view === 'Crosstalk') {
+    return props.overlays.flatMap((overlay) =>
+      (overlay.responseTraces ?? [])
+        .filter((t) => isCrosstalkTrace(t.kind))
+        .map((trace) => ({ id: overlay.id, name: `${overlay.detail.name} ${traceLabel(trace.kind)}`, trace })),
+    )
+  }
+  return props.overlays
     .map((overlay) => {
       const wanted: ResponseTrace['kind'] = props.view === 'Gain' ? 'Gain' : props.showLeft ? 'Left' : 'Right'
       const trace = overlay.responseTraces?.find((t) => t.kind === wanted)
       return trace ? { id: overlay.id, name: overlay.detail.name, trace } : null
     })
-    .filter((entry): entry is { id: number; name: string; trace: ResponseTrace } => entry !== null),
-)
+    .filter((entry): entry is { id: number; name: string; trace: ResponseTrace } => entry !== null)
+})
 
-/** The curve the bandwidth markers and the readout table describe — whichever one the view is about. */
+/**
+ * The curve the bandwidth markers and the readout table describe — whichever one the view is about.
+ * Null in the crosstalk view: nothing there has corners, and a primary would only draw arrows.
+ */
 const primaryTrace = computed<ResponseTrace | null>(() => {
+  if (props.view === 'Crosstalk') return null
   if (props.view === 'Gain') return gainTrace.value
   return (props.showLeft ? leftTrace.value : null) ?? rightTrace.value ?? leftTrace.value
 })
@@ -407,7 +446,7 @@ function buildSeries(p: Palette): uPlot.Series[] {
 
   for (const trace of visibleTraces.value) {
     series.push({
-      label: trace.kind === 'Gain' ? 'Gain' : trace.kind,
+      label: traceLabel(trace.kind),
       stroke: p.color(TRACE_COLORS[trace.kind]),
       width,
       points,
@@ -439,7 +478,9 @@ function buildSeries(p: Palette): uPlot.Series[] {
   for (const overlay of overlayCurves.value) {
     series.push({
       label: overlay.name,
-      stroke: p.color(TRACE_COLORS.Gain),
+      // In the crosstalk view a stored curve keeps its direction's colour, so an overlay's L→R
+      // reads as an L→R; elsewhere overlays are the neutral gain colour and told apart by dash.
+      stroke: p.color(props.view === 'Crosstalk' ? TRACE_COLORS[overlay.trace.kind] : TRACE_COLORS.Gain),
       width: 1,
       dash: sweepOverlayDash(props.overlays, overlay.id) ?? [6, 3],
       points: { show: false },
@@ -471,13 +512,13 @@ function buildReadoutSeries(p: Palette): ReadoutSeries[] {
   // In gain view the one curve is a ratio; in dBV view the curves are absolute input levels. The
   // axis does not say which, because it is the same numbers either way — the readout is the only
   // place the distinction is written down.
-  const magnitudeUnit = props.view === 'Gain' ? 'dB' : 'dBV'
+  const magnitudeUnit = props.view === 'Dbv' ? 'dBV' : 'dB'
   const entries: ReadoutSeries[] = []
 
   for (const trace of visibleTraces.value) {
     entries.push({
       key: `live-${trace.kind}`,
-      label: trace.kind,
+      label: traceLabel(trace.kind),
       color: p.color(TRACE_COLORS[trace.kind]),
       unit: magnitudeUnit,
       digits: 2,
@@ -494,9 +535,9 @@ function buildReadoutSeries(p: Palette): ReadoutSeries[] {
 
   for (const overlay of overlayCurves.value) {
     entries.push({
-      key: `overlay-${overlay.id}`,
+      key: `overlay-${overlay.id}-${overlay.trace.kind}`,
       label: overlay.name,
-      color: p.color(TRACE_COLORS.Gain),
+      color: p.color(props.view === 'Crosstalk' ? TRACE_COLORS[overlay.trace.kind] : TRACE_COLORS.Gain),
       unit: magnitudeUnit,
       digits: 2,
     })
@@ -669,7 +710,7 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
       },
       {
         size: 50,
-        ...axisLabel(props.axisTitles ?? false, interactive, props.view === 'Gain' ? 'Gain (dB)' : 'Level (dBV)'),
+        ...axisLabel(props.axisTitles ?? false, interactive, magnitudeAxisLabel()),
         stroke: p.axis,
         grid: { stroke: p.grid, width: 1 },
         ticks: { stroke: p.grid, width: 1 },
@@ -756,9 +797,21 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
   }
 }
 
+/** The magnitude axis title, by view. */
+function magnitudeAxisLabel(): string {
+  switch (props.view) {
+    case 'Gain':
+      return 'Gain (dB)'
+    case 'Crosstalk':
+      return 'Crosstalk (dB)'
+    default:
+      return 'Level (dBV)'
+  }
+}
+
 /** What the export's header line calls the plot — which y quantity it shows. */
 function exportTitle(): string {
-  return props.view === 'Gain' ? 'Gain (dB) vs frequency' : 'Level (dBV) vs frequency'
+  return `${magnitudeAxisLabel()} vs frequency`
 }
 
 /**
@@ -950,7 +1003,7 @@ watch(phaseRange, () => refresh())
       </div>
     </div>
     <p v-if="traces.length === 0 && overlays.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">
-      No frequency response measured yet. Press {{ props.runLabel ?? 'RUN' }}.
+      No {{ props.view === 'Crosstalk' ? 'crosstalk' : 'frequency response' }} measured yet. Press {{ props.runLabel ?? 'RUN' }}.
     </p>
   </div>
 </template>

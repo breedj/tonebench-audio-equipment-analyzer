@@ -160,6 +160,26 @@ public class DeviceSessionServiceTests
     }
 
     [Fact]
+    public async Task TrySetSimulatedProfile_PatchesCrosstalk_AndLeavesTheRestAlone()
+    {
+        var session = CreateService();
+        await session.ConnectAsync(CancellationToken.None);
+
+        // Off out of the box: every ratio measurement would otherwise carry it.
+        Assert.False(session.SimulatedCrosstalkEnabled);
+        Assert.False(session.GetStatus().SimulatedCrosstalkEnabled);
+
+        Assert.True(session.TrySetSimulatedProfile(noiseEnabled: null, humEnabled: null, crosstalkEnabled: true));
+
+        Assert.True(session.SimulatedCrosstalkEnabled);
+        Assert.True(session.GetStatus().SimulatedCrosstalkEnabled);
+        // The other three switches are untouched.
+        Assert.True(session.SimulatedNoiseEnabled);
+        Assert.True(session.SimulatedHumEnabled);
+        Assert.True(session.SimulatedHarmonicsEnabled);
+    }
+
+    [Fact]
     public async Task TrySetSimulatedProfile_LeavesOmittedSettingsAlone()
     {
         // Patch semantics: the UI's three checkboxes each send only their own field, so toggling one

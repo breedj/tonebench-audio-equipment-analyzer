@@ -37,6 +37,12 @@ public class RunnerPhaseCoverageTests
             FrequencyResponsePhase.DeterminingRange,
             FrequencyResponsePhase.Sweeping,
         ],
+        [typeof(CrosstalkRunner)] =
+        [
+            FrequencyResponsePhase.DeterminingLevel,
+            FrequencyResponsePhase.DeterminingRange,
+            FrequencyResponsePhase.Sweeping,
+        ],
         [typeof(ImpulseResponseRunner)] =
         [
             FrequencyResponsePhase.DeterminingLevel,

@@ -15,9 +15,11 @@ import { toImpedanceTraces, toResponseTraces, toSweepPoints } from '../composabl
 import { toImdSweepPoints } from '../imd/points'
 import { DEFAULT_SELECTED_METRICS } from '../composables/useMetricSelection'
 import { impedanceDisplayFromParams } from '../impedance/display'
+import { crosstalkDisplayFromParams } from '../crosstalk/display'
 import { defaultImpulseDisplay, impulseDisplayFromParams } from '../measurements/impulseDisplay'
 import {
   FFT_SPECTRUM_KIND,
+  isCrosstalkKind,
   isFrequencyResponseKind,
   isImpedanceKind,
   isImpulseResponseKind,
@@ -198,6 +200,14 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       kind: 'impedance',
       traces: toImpedanceTraces((await api.getStoredResponse(detail.resultId)).traces),
       display: impedanceDisplayFromParams(displayParams),
+    }
+  }
+
+  if (isCrosstalkKind(detail.kind)) {
+    return {
+      kind: 'crosstalk',
+      traces: toResponseTraces((await api.getStoredResponse(detail.resultId)).traces),
+      display: crosstalkDisplayFromParams(displayParams),
     }
   }
 

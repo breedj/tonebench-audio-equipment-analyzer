@@ -124,6 +124,10 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(SteppedResponseStartRequest))]
 [JsonSerializable(typeof(SteppedResponseStarted))]
 [JsonSerializable(typeof(SteppedResponseParameters))]
+// The crosstalk measurement: its status is the already-registered FrequencyResponseStatus.
+[JsonSerializable(typeof(CrosstalkStartRequest))]
+[JsonSerializable(typeof(CrosstalkStarted))]
+[JsonSerializable(typeof(CrosstalkParameters))]
 [JsonSerializable(typeof(ImpulseResponseStartRequest))]
 [JsonSerializable(typeof(ImpulseResponseStarted))]
 [JsonSerializable(typeof(ImpulseResponseStatus))]

@@ -3,7 +3,7 @@ import { computed, reactive, watch } from 'vue'
 import Modal from './Modal.vue'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
-import { isFrequencyResponseKind, isImpedanceKind,
+import { isCrosstalkKind, isFrequencyResponseKind, isImpedanceKind,
   isImpulseResponseKind, isImdSweepKind, isSweepKind } from '../measurements/kinds'
 
 const props = defineProps<{ open: boolean }>()
@@ -15,7 +15,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 // itself does; the project is the one the server has open.
 const { currentProject, types, currentTypeId, typeNotes } = useProjects()
 const { save, saveSweep, saveImdSweep, saveResponse, saveImpulse,
-    saveImpedance, error } = useMeasurements()
+    saveImpedance, saveCrosstalk, error } = useMeasurements()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 
@@ -55,6 +55,7 @@ async function onSave() {
   // spectrum. Same dialog either way — the name/notes it collects are all the difference the user
   // cares about.
   if (isImpedanceKind(currentType.value.kind)) await saveImpedance(req)
+  else if (isCrosstalkKind(currentType.value.kind)) await saveCrosstalk(req)
   else if (isImpulseResponseKind(currentType.value.kind)) await saveImpulse(req)
   else if (isFrequencyResponseKind(currentType.value.kind)) await saveResponse(req, currentType.value.kind)
   // The IMD sweep before the generic sweep arm: it is a sweep kind, but its own runner holds the points.

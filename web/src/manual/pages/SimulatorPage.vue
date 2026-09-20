@@ -24,7 +24,7 @@ const { showPage } = useManual()
       unavailable while a measurement is running — stop first. Starting the app with
       <code>--simulate</code> (or <code>run-simulator.bat</code>) only picks which analyzer it
       <em>starts</em> on. With the simulator selected the status bar shows <strong>Simulated</strong>
-      and three controls beside it:
+      and a row of controls beside it:
     </p>
     <table>
       <thead>
@@ -60,13 +60,49 @@ const { showPage } = useManual()
             Which device or fixture the simulator pretends is in the path. The default,
             <strong>Straight wire</strong>, is nothing at all. The models are listed below, and each
             has a page of its own saying what it is, what it is for and what every measurement should
-            read against it.
+            read against it. A DUT model is the device's <em>open-circuit</em> behaviour — its
+            response, or its distortion — and has no output impedance of its own; that is the next
+            two controls.
+          </td>
+        </tr>
+        <tr>
+          <td>Harmonics</td>
+          <td>
+            Gives every generator tone a fixed harmonic stack — H2 at −46 dBc, H3 at −60 dBc, then 12 dB
+            further down per order — standing in for a distorting source. See <em>How it is wired</em>
+            below; the four nonlinear amplifier models grey it out and switch it off.
+          </td>
+        </tr>
+        <tr>
+          <td>Crosstalk</td>
+          <td>
+            Couples each channel into the other at −70 dB through the audio band, rising above 6 kHz.
+            Off, the channels are perfectly separate. See below.
+          </td>
+        </tr>
+        <tr>
+          <td>Zout</td>
+          <td>
+            The output impedance the simulated amplifier presents at its terminals:
+            <strong>None</strong> (an ideal source, the default), <strong>0.03 Ω + 1.5 µH</strong>
+            (a solid-state output with its coil) or <strong>2 Ω + 0.3 mH</strong> (a tube amplifier's
+            output-transformer leakage). A property of the amplifier separate from the DUT model,
+            and it only does anything once a load is connected.
+          </td>
+        </tr>
+        <tr>
+          <td>Load</td>
+          <td>
+            What hangs on the amplifier's terminals: <strong>Open</strong> (the default), 8 Ω or
+            4 Ω. With a Zout set, the two form a voltage divider that every measurement sees.
+            Swap it between the two passes of an output-impedance run, the way you would swap the
+            resistor on a bench.
           </td>
         </tr>
       </tbody>
     </table>
     <p>
-      All three take effect immediately, even mid-run: changing the DUT while a live spectrum is on
+      All of them take effect immediately, even mid-run: changing the DUT while a live spectrum is on
       screen shows the difference at once, which is the clearest thing the simulator can demonstrate.
       Changing one part-way through a <em>sweep</em> quietly gives you a result measured under two
       different conditions, so don't.
@@ -102,13 +138,25 @@ const { showPage } = useManual()
         fixtures attenuate, since a voltage divider never reads unity.
       </li>
       <li>
-        <strong>The amplifier is an ideal source until Output says otherwise.</strong> The status
-        bar's Output dropdown gives the simulated amplifier an output impedance — Solid state is
-        0.028 Ω + 1.5 µH, Tube amp 2 Ω + 0.3 mH — and Load is what hangs on it: Open, 8 Ω or 4 Ω.
-        The divider they form is applied to the left channel right after the DUT model, before the
-        crosstalk and the noise, and only while both knobs say so; at Ideal or Open it is not there
-        at all. Swap the load between the two passes of an output-impedance run (8 Ω, then 4 Ω) to
-        demonstrate it.
+        <strong>The amplifier is an ideal source until Zout says otherwise.</strong> Every DUT model
+        describes an amplifier's <em>open-circuit</em> behaviour — what its terminals do with nothing
+        connected — and none of them has an output impedance, so on its own a DUT model drives any
+        load exactly as it drives none. The status bar's <strong>Zout</strong> dropdown is a separate
+        property of the same amplifier: the impedance its terminals present, <strong>None</strong>,
+        <strong>0.03 Ω + 1.5 µH</strong> (a solid-state output with its coil — the BC-1 of the
+        QuantAsylum tutorial, DF 286) or <strong>2 Ω + 0.3 mH</strong> (a tube amplifier's
+        output-transformer leakage, DF 4). <strong>Load</strong> is what hangs on the terminals:
+        Open, 8 Ω or 4 Ω. The two form a voltage divider that is applied to the left channel right
+        after the DUT model and before the crosstalk and the noise, so the three compose —
+        <em>DUT: Tube amp, Zout: 2 Ω + 0.3 mH, Load: 8 Ω</em> is the transformer's response
+        <em>and</em> the 2 Ω + 0.3 mH into 8 Ω (about 1.9 dB of loss with a pole near 4 kHz), the way
+        a real tube amplifier behaves into a real speaker.
+        The divider is only there while <em>both</em> knobs say so; at None or Open the stream is
+        exactly what it was without it. It is not tied to the output-impedance screen: once it is
+        on, every measurement sees it — an FFT, a THD sweep, a frequency response — which is what
+        makes it a model rather than a demonstration. Set Zout back to None when you do not want it
+        in other measurements. Swap the load between the two passes of an output-impedance run (8 Ω,
+        then 4 Ω) to demonstrate that measurement.
       </li>
       <li>
         <strong>The channels are perfectly separate until Crosstalk is ticked.</strong> With it on,

@@ -190,23 +190,26 @@ const { showPage } = useManual()
 
     <h2>Against the simulator</h2>
     <p>
-      The simulator's amplifier is an ideal source until the status bar's <strong>Output</strong>
-      dropdown says otherwise: <strong>Solid state</strong> is 0.028 Ω + 1.5 µH (the BC-1 — DF 286 at
-      low frequencies, its coil dominating at 20 kHz), <strong>Tube amp</strong> 2 Ω + 0.3 mH (DF 4).
-      The <strong>Load</strong> dropdown is the resistor: set it to 8 Ω, run, and when the banner
-      appears set it to 4 Ω (or Open, for the open method) and press CONTINUE — the same swap a bench
-      needs. With the Output dropdown at <em>Ideal</em> the amplifier has no output impedance at all,
-      and the run reads exactly that: nothing on the chart and dashes in the panel, which is correct
-      rather than broken. Run Solid state both
+      The simulator's amplifier is an ideal source until the status bar's <strong>Zout</strong>
+      dropdown says otherwise: <strong>0.03 Ω + 1.5 µH</strong> is a solid-state output (the BC-1 —
+      DF 286 at low frequencies, its coil dominating at 20 kHz), <strong>2 Ω + 0.3 mH</strong> a tube
+      amplifier's transformer leakage (DF 4). This is separate from the <strong>DUT</strong> dropdown:
+      a DUT model is the amplifier's open-circuit response and has no output impedance of its own, so
+      the two compose — pick the DUT for the frequency response you want to see and Zout for the
+      damping factor. The <strong>Load</strong> dropdown is the resistor: set it to 8 Ω, run, and when
+      the banner appears set it to 4 Ω (or Open, for the open method) and press CONTINUE — the same
+      swap a bench needs. With Zout at <em>None</em> the amplifier has no output impedance at all, and
+      the run reads exactly that: nothing on the chart and dashes in the panel, which is correct rather
+      than broken. Run 0.03 Ω + 1.5 µH both
       ways to see the two methods disagree at the top of the band: with adaptive resolution (48 kHz
       for a 20 kHz run) magnitude-only reads about 0.046 Ω at 20 kHz while the referenced run reads
       about 0.54 Ω at +87°, and 28 mΩ at DF 286 through the middle of the band either way. The coil
       reads larger than its 0.19 Ω analog figure at 48 kHz because the simulator's filters are not
       pre-warped, so the top of the band leans on the sample rate (see
       <button type="button" class="manual-link" @click="showPage('simulator')">Simulator</button>);
-      at 192 kHz it lands on 0.19 Ω. The stage is applied after the DUT model and before the
-      crosstalk and the noise, and with Output at Ideal or Load at Open it does nothing at all, so no
-      other measurement sees it.
+      at 192 kHz it lands on 0.19 Ω. The divider is applied after the DUT model and before the
+      crosstalk and the noise, and with Zout at None or Load at Open it does nothing at all. While
+      both are set it is part of the simulated amplifier and every other measurement sees it too.
     </p>
 
     <div class="manual-note">

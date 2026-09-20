@@ -79,7 +79,7 @@ function hz(f: number): string {
       <p v-if="warning" class="mt-2 text-[11px] text-amber-600 dark:text-amber-500">{{ warning }}</p>
       <p v-if="readings.worst.ohms <= MIN_MEASURABLE_OHMS" class="mt-2 text-[11px] text-amber-600 dark:text-amber-500">
         Every point read no output impedance at all — an ideal source, so there is no curve to draw. On the
-        simulator that is the status bar's Output dropdown at Ideal; set it to Solid state or Tube amp.
+        simulator that is the status bar's Zout dropdown at None; pick one of its two impedances and a load.
       </p>
     </template>
     <p v-else class="text-xs text-neutral-400 dark:text-neutral-600">No output impedance measured yet.</p>

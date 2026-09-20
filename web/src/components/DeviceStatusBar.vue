@@ -186,11 +186,16 @@ function onSimulatedCrosstalkChange(e: Event) {
   emit('setSimulatedProfile', { crosstalkEnabled: (e.target as HTMLInputElement).checked })
 }
 
-/** The simulated amplifier's output stage and what hangs on it — the two knobs the load-step measurement is demonstrated with. */
+/**
+ * The simulated amplifier's output impedance and what hangs on it — the two knobs the load-step
+ * measurement is demonstrated with. The options are named by their figures, not by an amplifier
+ * type, so nothing here duplicates a DUT model's name: the DUT dropdown says what kind of device it
+ * is, this one says what impedance its terminals present. The enum values keep the type names.
+ */
 const OUTPUT_STAGES: { value: SimulatedOutputStageModel; label: string; title: string }[] = [
-  { value: 'None', label: 'Ideal', title: 'An ideal voltage source: no output impedance, so the load makes no difference. The default — every other measurement is untouched.' },
-  { value: 'SolidState', label: 'Solid state', title: '0.028 Ω in series with a 1.5 µH output coil — the tutorial\u2019s BC-1: DF 286 at low frequencies, the coil dominating by 20 kHz.' },
-  { value: 'TubeAmp', label: 'Tube amp', title: '2 Ω in series with 0.3 mH of transformer leakage inductance — DF 4 at low frequencies.' },
+  { value: 'None', label: 'None', title: 'An ideal voltage source: no output impedance, so the load makes no difference. The default — every other measurement is untouched.' },
+  { value: 'SolidState', label: '0.03 Ω + 1.5 µH', title: 'A solid-state amplifier: 0.028 Ω in series with a 1.5 µH output coil — the tutorial’s BC-1. DF 286 at low frequencies, the coil dominating by 20 kHz.' },
+  { value: 'TubeAmp', label: '2 Ω + 0.3 mH', title: 'A tube amplifier: 2 Ω in series with 0.3 mH of output-transformer leakage inductance. DF 4 at low frequencies.' },
 ]
 
 const LOADS: { value: SimulatedLoad; label: string }[] = [
@@ -309,9 +314,9 @@ function onSimulatedDutChange(e: Event) {
         </label>
         <label
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          title="The output impedance the simulated amplifier presents at its terminals. Ideal by default; the other two only take effect once a load is connected below."
+          title="The output impedance the simulated amplifier presents at its terminals — a property of the amplifier, separate from the DUT model, which is its open-circuit behaviour. None by default; the other two only take effect once a load is connected below, and then on every measurement, not only the output-impedance one."
         >
-          Output
+          Zout
           <select
             class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
             :value="status.simulatedOutputStage ?? 'None'"

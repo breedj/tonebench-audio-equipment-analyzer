@@ -16,10 +16,12 @@ import { toImdSweepPoints } from '../imd/points'
 import { DEFAULT_SELECTED_METRICS } from '../composables/useMetricSelection'
 import { impedanceDisplayFromParams } from '../impedance/display'
 import { crosstalkDisplayFromParams } from '../crosstalk/display'
+import { outputImpedanceDisplayFromParams } from '../outputImpedance/display'
 import { defaultImpulseDisplay, impulseDisplayFromParams } from '../measurements/impulseDisplay'
 import {
   FFT_SPECTRUM_KIND,
   isCrosstalkKind,
+  isOutputImpedanceKind,
   isFrequencyResponseKind,
   isImpedanceKind,
   isImpulseResponseKind,
@@ -211,7 +213,33 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
     }
   }
 
+  if (isOutputImpedanceKind(detail.kind)) {
+    // The nominal impedance and the method come from the result's own params_json — they describe
+    // the run, not the screen — while the chart window is the type's, like every other kind's.
+    const run = outputImpedanceRunFromParams(detail.paramsJson)
+    return {
+      kind: 'outputImpedance',
+      trace: toImpedanceTraces((await api.getStoredResponse(detail.resultId)).traces).find((t) => t.kind === 'Impedance') ?? null,
+      display: outputImpedanceDisplayFromParams(displayParams),
+      nominalOhms: run.nominalOhms,
+      rightChannelIsReference: run.rightChannelIsReference,
+    }
+  }
+
   return { kind: 'none' }
+}
+
+/** The two run facts an output-impedance chapter needs beside its curve, read off a result's `params_json`. */
+function outputImpedanceRunFromParams(paramsJson: string): { nominalOhms: number; rightChannelIsReference: boolean } {
+  try {
+    const params = JSON.parse(paramsJson) as { nominalOhms?: unknown; rightChannelIsReference?: unknown }
+    return {
+      nominalOhms: typeof params.nominalOhms === 'number' && params.nominalOhms > 0 ? params.nominalOhms : 8,
+      rightChannelIsReference: params.rightChannelIsReference === true,
+    }
+  } catch {
+    return { nominalOhms: 8, rightChannelIsReference: false }
+  }
 }
 
 /**

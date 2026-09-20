@@ -539,14 +539,14 @@ const { showPage } = useManual()
       an amplifier is the usual DUT and the ripple was first measured.
     </p>
 
-    <h2>What is not here yet</h2>
+    <h2>An amplifier's output impedance</h2>
     <p>
       This screen measures impedance through a series reference resistor, which covers passive loads
-      and an amplifier's <em>input</em> impedance. An amplifier's <em>output</em> impedance needs a
-      different method — measuring the same amplifier into two different load resistances and
-      solving for the source impedance behind them — because you cannot drive a generator through a
-      resistor into a live amplifier output. That method, and the damping factor it yields, are not
-      implemented yet.
+      and an amplifier's <em>input</em> impedance. It can also back-drive an amplifier's
+      <em>output</em> from the generator through a 100 Ω reference resistor, with the amplifier on
+      and its input shorted — the tutorial's manual method. The measurement built for that job,
+      with the damping factor and the load-step method the QA40x automates, is
+      <button type="button" class="manual-link" @click="showPage('output-impedance')">Output impedance and damping factor</button>.
     </p>
   </div>
 </template>

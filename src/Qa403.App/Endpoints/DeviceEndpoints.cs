@@ -141,7 +141,25 @@ public static class DeviceEndpoints
                 dut = parsed;
             }
 
-            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled, request.HarmonicsEnabled, dut, request.CrosstalkEnabled))
+            SimulatedOutputStageModel? outputStage = null;
+            if (request.OutputStage is not null)
+            {
+                if (!EnumParsing.TryParse(request.OutputStage, SimulatedOutputStageModel.None, out SimulatedOutputStageModel parsedStage, out var stageError))
+                    return Results.BadRequest(stageError);
+
+                outputStage = parsedStage;
+            }
+
+            SimulatedLoad? load = null;
+            if (request.Load is not null)
+            {
+                if (!EnumParsing.TryParse(request.Load, SimulatedLoad.Open, out SimulatedLoad parsedLoad, out var loadError))
+                    return Results.BadRequest(loadError);
+
+                load = parsedLoad;
+            }
+
+            if (!session.TrySetSimulatedProfile(request.NoiseEnabled, request.HumEnabled, request.HarmonicsEnabled, dut, request.CrosstalkEnabled, outputStage, load))
                 return Results.BadRequest("The connected device is not the simulator, so it has no signal-profile switches.");
 
             return Results.Ok(session.GetStatus());
@@ -219,7 +237,11 @@ public sealed record DeviceStatusResponse(
     /// </summary>
     string? DatabaseProblem = null,
     /// <summary>Whether the simulator couples its channels (<see cref="Qa403.Device.Simulation.SimulatedCrosstalk"/>), or null when the device isn't the simulator.</summary>
-    bool? SimulatedCrosstalkEnabled = null);
+    bool? SimulatedCrosstalkEnabled = null,
+    /// <summary>The simulated amplifier's output stage (<see cref="Qa403.Device.Simulation.SimulatedOutputStageModel"/> name), or null when the device isn't the simulator.</summary>
+    string? SimulatedOutputStage = null,
+    /// <summary>What hangs on the simulated amplifier's output (<see cref="Qa403.Device.Simulation.SimulatedLoad"/> name), or null when the device isn't the simulator.</summary>
+    string? SimulatedLoad = null);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);
@@ -262,7 +284,9 @@ public sealed record AutoRangeStepDownDelayRequest(double DelayMs);
 /// Which simulated device under test to patch in. Omitted leaves it alone, same as the two
 /// switches — see <see cref="Qa403.Device.Simulation.SimulatedDutModel"/>.
 /// </param>
-public sealed record SimulatedProfileRequest(bool? NoiseEnabled, bool? HumEnabled, bool? HarmonicsEnabled = null, string? Dut = null, bool? CrosstalkEnabled = null);
+public sealed record SimulatedProfileRequest(
+    bool? NoiseEnabled, bool? HumEnabled, bool? HarmonicsEnabled = null, string? Dut = null, bool? CrosstalkEnabled = null,
+    string? OutputStage = null, string? Load = null);
 
 /// <param name="Kind">"Hardware" or "Simulated" — see <see cref="Qa403.App.Services.DeviceKind"/>.</param>
 public sealed record DeviceKindRequest(string? Kind);

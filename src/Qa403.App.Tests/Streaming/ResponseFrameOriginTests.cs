@@ -63,6 +63,29 @@ public class ResponseFrameOriginTests
     }
 
     [Fact]
+    public void AnOutputImpedanceFrame_SaysSo_OnTheImpedanceFrames()
+    {
+        var trace = new ImpedanceTrace(
+            ImpedanceTraceKind.Impedance, 20.0, 20_000.0,
+            [20.0f, 20_000.0f], [-30.0f, -14.0f], [-30.0f, -14.0f], [0.0f, 80.0f], [1.0f, 1.0f],
+            PeakDbOhms: -14.0, PeakFreqHz: 20_000.0);
+
+        var frame = StreamFrame.EncodeImpedance(trace, StreamFlags.OutputImpedance);
+        Assert.True(FlagsOf(frame).HasFlag(StreamFlags.OutputImpedance));
+        Assert.True(FlagsOf(frame).HasFlag(StreamFlags.Decimated));
+        var header = StreamFrame.DecodeHeader(frame);
+        Assert.Equal(StreamMsgType.Impedance, header.MsgType);
+        Assert.Equal((StreamChannel)ImpedanceTraceKind.Impedance, header.Channel);
+
+        var progress = StreamFrame.EncodeImpedanceProgress(3, 50, FrequencyResponsePhase.WaitingForLoadChange, -20.0, StreamFlags.OutputImpedance);
+        Assert.Equal(StreamFlags.OutputImpedance, FlagsOf(progress));
+
+        // The impedance runner's own frames carry no origin bit, as before.
+        Assert.False(FlagsOf(StreamFrame.EncodeImpedance(trace)).HasFlag(StreamFlags.OutputImpedance));
+        Assert.Throws<ArgumentOutOfRangeException>(() => StreamFrame.EncodeImpedance(trace, StreamFlags.Crosstalk | StreamFlags.OutputImpedance));
+    }
+
+    [Fact]
     public void AnOriginThatIsNotOne_IsRejected()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => StreamFrame.EncodeFrequencyResponse(Trace(), StreamFlags.Held));

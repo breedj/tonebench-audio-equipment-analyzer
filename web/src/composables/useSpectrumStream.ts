@@ -16,6 +16,7 @@ import {
   encodeSetViewport,
   STREAM_FLAG_IMD_SWEEP,
   STREAM_FLAG_IMD_UNRESOLVED,
+  STREAM_FLAG_OUTPUT_IMPEDANCE,
   StreamMsgType,
   type IntermodulationFrame,
   type MetersFrame,
@@ -26,6 +27,7 @@ import {
 import { useFrequencyResponse } from './useFrequencyResponse'
 import { useImdSweep } from './useImdSweep'
 import { useImpedance } from './useImpedance'
+import { useOutputImpedance } from './useOutputImpedance'
 import { useSweep } from './useSweep'
 
 const RECONNECT_DELAY_MS = 1000
@@ -54,6 +56,7 @@ export function useSpectrumStream() {
   const imdSweep = useImdSweep()
   const response = useFrequencyResponse()
 const impedance = useImpedance()
+const outputImpedance = useOutputImpedance()
 
   let socket: WebSocket | null = null
   let reconnectHandle: ReturnType<typeof setTimeout> | undefined
@@ -178,9 +181,13 @@ const impedance = useImpedance()
       } else if (header.msgType === StreamMsgType.Impedance) {
         // Its own message type rather than a flagged frequency-response frame: the payload really is
         // different, since an impedance curve has no bandwidth blocks. See StreamMsgType.Impedance.
-        impedance.ingestTrace(decodeImpedanceFrame(event.data))
+        // The output-impedance runner speaks the same frame with its own origin bit, and its curve
+        // belongs to its own store — the response frame's stepped/crosstalk arrangement.
+        if ((header.flags & STREAM_FLAG_OUTPUT_IMPEDANCE) !== 0) outputImpedance.ingestTrace(decodeImpedanceFrame(event.data))
+        else impedance.ingestTrace(decodeImpedanceFrame(event.data))
       } else if (header.msgType === StreamMsgType.ImpedanceProgress) {
-        impedance.ingestProgress(decodeImpedanceProgressFrame(event.data))
+        if ((header.flags & STREAM_FLAG_OUTPUT_IMPEDANCE) !== 0) outputImpedance.ingestProgress(decodeImpedanceProgressFrame(event.data))
+        else impedance.ingestProgress(decodeImpedanceProgressFrame(event.data))
       }
     }
 

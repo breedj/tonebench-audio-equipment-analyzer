@@ -319,7 +319,7 @@ public static class CsvExporter
     }
 
     /// <summary>Whether a stored trace holds ohms rather than a plain ratio.</summary>
-    private static bool IsImpedanceCurve(string kind) => kind == ResponseTraceKind.Impedance;
+    private static bool IsImpedanceCurve(string kind) => kind is ResponseTraceKind.Impedance or ResponseTraceKind.OutputImpedance;
 
     private static double ToOhms(double dbOhms) => Math.Pow(10.0, dbOhms / 20.0);
 

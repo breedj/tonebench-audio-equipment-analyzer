@@ -191,6 +191,7 @@ const phaseLabel: Record<ResponsePhase, string> = {
   [ResponsePhase.Sweeping]: 'Sweeping',
   [ResponsePhase.Analyzing]: 'Analyzing',
   [ResponsePhase.Calibrating]: 'Calibrating',
+  [ResponsePhase.WaitingForLoadChange]: 'Waiting for the load to be changed',
 }
 
 const phaseNames: Record<string, ResponsePhase> = {
@@ -204,6 +205,7 @@ const phaseNames: Record<string, ResponsePhase> = {
   Sweeping: ResponsePhase.Sweeping,
   Analyzing: ResponsePhase.Analyzing,
   Calibrating: ResponsePhase.Calibrating,
+  WaitingForLoadChange: ResponsePhase.WaitingForLoadChange,
 }
 
 const traceKindNames: Record<ResponseTraceKind, ResponseTraceKindName> = {

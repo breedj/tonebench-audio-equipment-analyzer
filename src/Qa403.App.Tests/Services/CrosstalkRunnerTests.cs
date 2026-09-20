@@ -395,6 +395,7 @@ public class CrosstalkRunnerTests
                 new FrequencyResponseRunner(harness.Session, harness.Pipeline, new SpectrumBroadcastHub(), NullLogger<FrequencyResponseRunner>.Instance),
                 new SteppedResponseRunner(harness.Session, harness.Pipeline, new SpectrumBroadcastHub(), NullLogger<SteppedResponseRunner>.Instance),
                 harness.Runner,
+                new OutputImpedanceRunner(harness.Session, harness.Pipeline, new SpectrumBroadcastHub(), NullLogger<OutputImpedanceRunner>.Instance),
                 new ImpulseResponseRunner(harness.Session, harness.Pipeline, new InMemoryLoopbackReferenceStore(), NullLogger<ImpulseResponseRunner>.Instance),
                 new ImpedanceRunner(harness.Session, harness.Pipeline, new SpectrumBroadcastHub(), NullLogger<ImpedanceRunner>.Instance),
                 projects, measurements, Microsoft.Extensions.Options.Options.Create(jsonOptions));

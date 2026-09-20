@@ -33,6 +33,10 @@ export interface DeviceStatus {
    * noise floor.
    */
   simulatedCrosstalkEnabled: boolean | null
+  /** The simulated amplifier's output stage — None (an ideal source), SolidState or TubeAmp; null when the device isn't the simulator. */
+  simulatedOutputStage: SimulatedOutputStageModel | null
+  /** What hangs on the simulated amplifier's output; null when the device isn't the simulator. */
+  simulatedLoad: SimulatedLoad | null
   /**
    * Which analyzer the session is talking to. Separate from `isSimulated`, which describes a
    * *connected* device and so reads false while the simulator is selected but not yet up.
@@ -109,7 +113,15 @@ export interface SimulatedProfileRequest {
   harmonicsEnabled?: boolean
   dut?: SimulatedDutModel
   crosstalkEnabled?: boolean
+  outputStage?: SimulatedOutputStageModel
+  load?: SimulatedLoad
 }
+
+/** Mirrors Qa403.Device.Simulation.SimulatedOutputStageModel. */
+export type SimulatedOutputStageModel = 'None' | 'SolidState' | 'TubeAmp'
+
+/** Mirrors Qa403.Device.Simulation.SimulatedLoad. */
+export type SimulatedLoad = 'Open' | 'EightOhms' | 'FourOhms'
 
 /** Mirrors Qa403.Device.GeneratorKind — exactly one stimulus is active per channel. */
 export type GeneratorKind = 'Off' | 'Tones' | 'Multitone' | 'WhiteNoise' | 'EchoChirp'
@@ -182,6 +194,10 @@ export type ResponsePhaseName =
   | 'Finished'
   | 'Cancelled'
   | 'Failed'
+  | 'Analyzing'
+  | 'Calibrating'
+  /** An output-impedance run waiting for the user to change the load between its two passes. */
+  | 'WaitingForLoadChange'
 
 /** The three spans the UI offers, in Hz. These are Nyquist values — the sample rate is twice each. */
 export const RESPONSE_SPANS_HZ = [24000, 48000, 96000] as const
@@ -723,6 +739,99 @@ export interface CrosstalkStarted {
   estimatedSeconds: number
 }
 
+/** Starts an output-impedance (damping factor) run — see OutputImpedanceStartRequest server-side. */
+export interface OutputImpedanceStartRequest {
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  /** The resistor connected for the first pass — also what a power target converts through. */
+  loadOhms: number
+  /** The resistor connected for the second pass, or null for an open output (the tutorial's way — never for a tube amplifier). */
+  secondLoadOhms: number | null
+  /** What the damping factor is quoted against; 8 Ω on every specification sheet. */
+  nominalOhms: number
+  /** Loop the right output to the right input in both passes and measure Zout as a complex value. */
+  rightChannelIsReference: boolean
+  averageCount: number
+  adaptiveResolution: boolean
+}
+
+export interface OutputImpedanceStarted {
+  passCount: number
+  /** Per pass; the status's pointCount is the total over both. */
+  pointCount: number
+  frequenciesHz: number[]
+  sampleRateHz: number
+  averageCount: number
+  estimatedSeconds: number
+}
+
+/** Mirrors Qa403.App.Services.OutputImpedanceStatus. Every reading is null until measured — never NaN. */
+export interface OutputImpedanceStatus {
+  running: boolean
+  phase: ResponsePhaseName
+  passesCompleted: number
+  pointsMeasured: number
+  /** Over both passes. */
+  pointCount: number
+  generatorAmpDbv: number
+  /** The one input range both passes were read at. */
+  inputRangeDbv: number | null
+  binHz: number
+  sampleRateHz: number
+  fftSize: number
+  loadOhms: number
+  secondLoadOhms: number | null
+  nominalOhms: number
+  rightChannelIsReference: boolean
+  error: string | null
+  warning: string | null
+  /** The Zout curve — an impedance trace in every respect; null until the second pass has two points. */
+  trace: ImpedanceTraceJson | null
+  medianOhms: number | null
+  zoutAt1kOhms: number | null
+  dampingFactorAt1k: number | null
+  firstGainAt1kDb: number | null
+  secondGainAt1kDb: number | null
+}
+
+/** An output-impedance type's stored settings — see OutputImpedanceParameters server-side. */
+export interface OutputImpedanceParameters {
+  startFreqHz: number
+  endFreqHz: number
+  stepsPerOctave: number
+  levelMode: SweepLevelMode
+  levelValue: number
+  levelUnit: SweepLevelUnit
+  loadOhms: number
+  secondLoadOhms?: number | null
+  nominalOhms: number
+  rightChannelIsReference: boolean
+  fftSize: number
+  window: WindowType
+  averageCount: number
+  sampleRateHz: number
+  adaptiveResolution: boolean
+  generatorAmpDbv?: number | null
+  inputRangeDbv?: number | null
+  chartZTopOhms?: number | null
+  chartZBottomOhms?: number | null
+  chartZScale?: ImpedanceZScale | null
+  chartShowDampingFactor?: boolean | null
+  chartShowPhase?: boolean | null
+  chartXFromHz?: number | null
+  chartXToHz?: number | null
+  chartPhaseTopDeg?: number | null
+  chartPhaseBottomDeg?: number | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartAutofitOnDone?: boolean | null
+  captureDelayMs?: number | null
+}
+
 /** A crosstalk type's stored settings — see CrosstalkParameters server-side. */
 export interface CrosstalkParameters {
   startFreqHz: number
@@ -1167,7 +1276,7 @@ export interface StoredImpulseResult {
 /** One stored curve, as `GET /api/measurements/{id}/response-traces` returns it. */
 export interface StoredResponseTrace {
   /** The row's kind as stored (`response_trace.kind`): the response kinds, the crosstalk kinds, or an impedance kind (`z`, `z_open`, `z_short`). */
-  kind: 'left' | 'right' | 'gain' | 'xtalk_l2r' | 'xtalk_r2l' | 'z' | 'z_open' | 'z_short'
+  kind: 'left' | 'right' | 'gain' | 'xtalk_l2r' | 'xtalk_r2l' | 'z' | 'z_open' | 'z_short' | 'zout' | 'gain_load1' | 'gain_load2'
   startHz: number
   endHz: number
   peakDb: number
@@ -2294,6 +2403,22 @@ export const api = {
 
   saveImpedance: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/impedance/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  // Output impedance / damping factor — mirrors Qa403.App/Endpoints/OutputImpedanceEndpoints.cs.
+  startOutputImpedance: (req: OutputImpedanceStartRequest) =>
+    request<OutputImpedanceStarted>('/output-impedance/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  /** Resumes a run waiting for the load to be changed — the CONTINUE button. A 409 at any other time. */
+  continueOutputImpedance: () => request<OutputImpedanceStatus>('/output-impedance/continue', { method: 'POST' }),
+
+  cancelOutputImpedance: () => request<OutputImpedanceStatus>('/output-impedance/cancel', { method: 'POST' }),
+
+  clearOutputImpedance: () => request<OutputImpedanceStatus>('/output-impedance/clear', { method: 'POST' }),
+
+  getOutputImpedanceStatus: () => request<OutputImpedanceStatus>('/output-impedance/status'),
+
+  saveOutputImpedance: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+    request<{ id: number }>('/output-impedance/save', { method: 'POST', body: JSON.stringify(req) }),
 
   startFrequencyResponse: (req: FrequencyResponseStartRequest) =>
     request<FrequencyResponseStarted>('/frequency-response/start', { method: 'POST', body: JSON.stringify(req) }),

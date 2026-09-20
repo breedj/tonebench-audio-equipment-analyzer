@@ -537,6 +537,19 @@ public static class ResponseTraceKind
 
     /// <summary>A crosstalk curve with the right channel driven: the left input relative to the right, in dB.</summary>
     public const string CrosstalkRightToLeft = "xtalk_r2l";
+
+    /// <summary>
+    /// An amplifier's output impedance from the load-step measurement, dB relative to 1 ohm like
+    /// <see cref="Impedance"/> — it is an impedance curve and the CSV exporter and the chart treat
+    /// it as one; the result's kind (OutputImpedance) says what it is of.
+    /// </summary>
+    public const string OutputImpedance = "zout";
+
+    /// <summary>The output-impedance run's gain into its first load, dB. Kept beside <see cref="OutputImpedance"/> so a stored result carries what it was derived from.</summary>
+    public const string GainLoad1 = "gain_load1";
+
+    /// <summary>The output-impedance run's gain into its second load (or open), dB. See <see cref="GainLoad1"/>.</summary>
+    public const string GainLoad2 = "gain_load2";
 }
 
 /// <summary>
@@ -570,6 +583,49 @@ public sealed record CrosstalkParameters(
     double? ChartYBottomDb = null,
     double? ChartXFromHz = null,
     double? ChartXToHz = null,
+    bool? ChartAutofitOnDone = null,
+    /// <summary>The settle time the run discarded after each stimulus change, in ms — a run record, null on a type's own params_json.</summary>
+    double? CaptureDelayMs = null);
+
+/// <summary>
+/// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the
+/// panel edits, the two run records (<see cref="GeneratorAmpDbv"/>, <see cref="InputRangeDbv"/> —
+/// the one range both passes were read at, which is what makes a 0.03 dB gain difference a
+/// measurement), and the chart state. <see cref="LoadOhms"/> is the resistor connected for the
+/// first pass — it is also what a power target converts through — <see cref="SecondLoadOhms"/>
+/// the one for the second pass (null: the output left open, the tutorial's way, which a tube
+/// amplifier must not be asked for), and <see cref="NominalOhms"/> is what the damping factor is
+/// quoted against, since a specification sheet always says 8 Ω whatever tap or load was used.
+/// </summary>
+public sealed record OutputImpedanceParameters(
+    double StartFreqHz,
+    double EndFreqHz,
+    int StepsPerOctave,
+    string LevelMode,
+    double LevelValue,
+    string LevelUnit,
+    double LoadOhms,
+    double? SecondLoadOhms,
+    double NominalOhms,
+    bool RightChannelIsReference,
+    int FftSize,
+    WindowType Window,
+    int AverageCount,
+    double SampleRateHz,
+    bool AdaptiveResolution,
+    double? GeneratorAmpDbv = null,
+    double? InputRangeDbv = null,
+    double? ChartZTopOhms = null,
+    double? ChartZBottomOhms = null,
+    string? ChartZScale = null,
+    bool? ChartShowDampingFactor = null,
+    bool? ChartShowPhase = null,
+    double? ChartXFromHz = null,
+    double? ChartXToHz = null,
+    double? ChartPhaseTopDeg = null,
+    double? ChartPhaseBottomDeg = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
     bool? ChartAutofitOnDone = null,
     /// <summary>The settle time the run discarded after each stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null);

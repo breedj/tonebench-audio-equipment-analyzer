@@ -102,6 +102,15 @@ const { showPage } = useManual()
         fixtures attenuate, since a voltage divider never reads unity.
       </li>
       <li>
+        <strong>The amplifier is an ideal source until Output says otherwise.</strong> The status
+        bar's Output dropdown gives the simulated amplifier an output impedance — Solid state is
+        0.028 Ω + 1.5 µH, Tube amp 2 Ω + 0.3 mH — and Load is what hangs on it: Open, 8 Ω or 4 Ω.
+        The divider they form is applied to the left channel right after the DUT model, before the
+        crosstalk and the noise, and only while both knobs say so; at Ideal or Open it is not there
+        at all. Swap the load between the two passes of an output-impedance run (8 Ω, then 4 Ω) to
+        demonstrate it.
+      </li>
+      <li>
         <strong>The channels are perfectly separate until Crosstalk is ticked.</strong> With it on,
         each channel leaks into the other at −70 dB through the audio band, rising 6 dB per octave
         above 6 kHz — about −59 dB at 20 kHz sampled at 192 kHz, −53 dB at 48 kHz, as the filters

@@ -1,0 +1,256 @@
+<script setup lang="ts">
+import { computed, watch } from 'vue'
+import type { ImpedanceZScale } from '../api/client'
+import type { ImpedanceTrace } from '../composables/useImpedance'
+import { useMeasurements } from '../composables/useMeasurements'
+import { useOutputImpedance } from '../composables/useOutputImpedance'
+import { dbOhmsToOhms } from '../impedance/equivalent'
+import CollapsibleSection from './CollapsibleSection.vue'
+
+/**
+ * The output-impedance chart's display rail: the ohms window and scale, the damping-factor and
+ * phase toggles, a phase window, a frequency window and the style toggles. Its own small panel
+ * rather than a flag on ImpedanceDisplayPanel — that one carries a Nyquist view, a short standard
+ * and a coherence toggle, none of which this screen has, and the damping-factor axis is this
+ * screen's alone.
+ */
+const props = defineProps<{
+  traces: ImpedanceTrace[]
+  /** Whether the run on screen measured a phase — the toggle is inert otherwise. */
+  phaseAvailable: boolean
+}>()
+
+const zTopOhms = defineModel<number>('zTopOhms', { required: true })
+const zBottomOhms = defineModel<number>('zBottomOhms', { required: true })
+const zScale = defineModel<ImpedanceZScale>('zScale', { required: true })
+const showDampingFactor = defineModel<boolean>('showDampingFactor', { required: true })
+const showPhase = defineModel<boolean>('showPhase', { required: true })
+const xFromHz = defineModel<number>('xFromHz', { required: true })
+const xToHz = defineModel<number>('xToHz', { required: true })
+const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
+const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
+const thickLines = defineModel<boolean>('thickLines', { required: true })
+const showDataPoints = defineModel<boolean>('showDataPoints', { required: true })
+const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
+
+const { running } = useOutputImpedance()
+const { overlays } = useMeasurements()
+
+const PHASE_MIN = -1440
+const PHASE_MAX = 1440
+const PHASE_TICK_DEG = 45
+const PHASE_MIN_SPAN = PHASE_TICK_DEG * 2
+
+/** A logarithmic axis cannot reach zero; a linear one may start there. Milliohms are the whole point here, so the floor is low. */
+const Z_LOG_MIN = 0.0001
+const Z_MAX = 1e6
+const zMin = computed(() => (zScale.value === 'Log' ? Z_LOG_MIN : 0))
+
+const X_FROM_OPTIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+
+/** See ImpedanceDisplayPanel.commitBoundedNumber for why `:value` + `@change`. */
+function commitBoundedNumber(event: Event, current: number, lo: number, hi: number): number {
+  const el = event.target as HTMLInputElement
+  const typed = Number(el.value)
+  const next = Number.isFinite(typed) && el.value.trim() !== '' ? Math.min(hi, Math.max(lo, typed)) : current
+  el.value = String(next)
+  return next
+}
+
+function onTopZChange(event: Event) {
+  zTopOhms.value = commitBoundedNumber(event, zTopOhms.value, Math.max(zBottomOhms.value * 1.1, zBottomOhms.value + 0.0001), Z_MAX)
+}
+
+function onBottomZChange(event: Event) {
+  zBottomOhms.value = commitBoundedNumber(event, zBottomOhms.value, zMin.value, Math.min(zTopOhms.value / 1.1, zTopOhms.value - 0.0001))
+}
+
+watch(zScale, (scale) => {
+  if (scale === 'Log' && zBottomOhms.value < Z_LOG_MIN) zBottomOhms.value = Z_LOG_MIN
+})
+
+function onTopPhaseChange(event: Event) {
+  phaseTopDeg.value = commitBoundedNumber(event, phaseTopDeg.value, phaseBottomDeg.value + PHASE_MIN_SPAN, PHASE_MAX)
+}
+
+function onBottomPhaseChange(event: Event) {
+  phaseBottomDeg.value = commitBoundedNumber(event, phaseBottomDeg.value, PHASE_MIN, phaseTopDeg.value - PHASE_MIN_SPAN)
+}
+
+/** Every Zout curve on the chart: live plus checked-on history. */
+const fitTraces = computed<ImpedanceTrace[]>(() => [
+  ...props.traces.filter((t) => t.kind === 'Impedance'),
+  ...overlays.value.filter((o) => o.visible).flatMap((o) => (o.impedanceTraces ?? []).filter((t) => t.kind === 'Impedance')),
+])
+
+function roundDown125(v: number): number {
+  const magnitude = Math.pow(10, Math.floor(Math.log10(v)))
+  const m = v / magnitude
+  return (m >= 5 ? 5 : m >= 2 ? 2 : 1) * magnitude
+}
+
+function roundUp125(v: number): number {
+  const magnitude = Math.pow(10, Math.floor(Math.log10(v)))
+  const m = v / magnitude
+  return (m > 5 ? 10 : m > 2 ? 5 : m > 1 ? 2 : 1) * magnitude
+}
+
+/**
+ * The ohms window from every curve on the chart, rounded outward to a 1/2/5 step. A magnitude-only
+ * run can hold exact zeros (a point read as no impedance at all), which are no bound on a log axis
+ * and are skipped; a linear window still starts at zero, the ImpedanceDisplayPanel rule.
+ */
+function autofitZ() {
+  let min = Infinity
+  let max = -Infinity
+  for (const t of fitTraces.value) {
+    for (let i = 0; i < t.freqHz.length; i++) {
+      if (t.freqHz[i] < xFromHz.value || t.freqHz[i] > xToHz.value) continue
+      const lo = dbOhmsToOhms(t.magnitudeMinDbOhms[i])
+      const hi = dbOhmsToOhms(t.magnitudeMaxDbOhms[i])
+      if (hi > Z_LOG_MIN) max = Math.max(max, hi)
+      if (lo > Z_LOG_MIN) min = Math.min(min, lo)
+    }
+  }
+  if (!Number.isFinite(max) || !(max > 0)) return
+  if (!Number.isFinite(min)) min = max / 10
+
+  zBottomOhms.value = zScale.value === 'Log' ? Math.max(Z_LOG_MIN, roundDown125(min)) : 0
+  zTopOhms.value = Math.min(Z_MAX, roundUp125(max))
+}
+
+function autofitPhase() {
+  let min = Infinity
+  let max = -Infinity
+  for (const t of fitTraces.value) {
+    for (let i = 0; i < t.phaseDeg.length; i++) {
+      if (t.freqHz[i] < xFromHz.value || t.freqHz[i] > xToHz.value) continue
+      min = Math.min(min, t.phaseDeg[i])
+      max = Math.max(max, t.phaseDeg[i])
+    }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return
+
+  const bottom = Math.floor(min / PHASE_TICK_DEG) * PHASE_TICK_DEG
+  let top = Math.ceil(max / PHASE_TICK_DEG) * PHASE_TICK_DEG
+  if (top - bottom < PHASE_MIN_SPAN) top = bottom + PHASE_MIN_SPAN
+  phaseBottomDeg.value = Math.max(PHASE_MIN, bottom)
+  phaseTopDeg.value = Math.min(PHASE_MAX, top)
+}
+
+function autofitX() {
+  const list = fitTraces.value.filter((t) => t.freqHz.length > 0)
+  if (list.length === 0) return
+  const from = Math.min(...list.map((t) => t.startFreqHz))
+  const to = Math.max(...list.map((t) => t.endFreqHz))
+  xFromHz.value = [...X_FROM_OPTIONS].reverse().find((v) => v <= from) ?? X_FROM_OPTIONS[0]
+  xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
+}
+
+watch(running, (isRunning, wasRunning) => {
+  if (wasRunning && !isRunning && autofitOnDone.value) {
+    autofitX()
+    autofitZ()
+    if (props.phaseAvailable) autofitPhase()
+  }
+})
+</script>
+
+<template>
+  <CollapsibleSection title="Impedance axis" size="xs">
+    <label
+      class="flex flex-col gap-1 text-xs"
+      title="Logarithmic is the one scale that fits a solid-state amplifier's milliohms and a tube amplifier's ohms in one window, and puts the damping-factor curve on a mirrored axis. Linear reads a flat Zout as flat."
+    >
+      Scale
+      <select v-model="zScale" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+        <option value="Linear">Linear</option>
+        <option value="Log">Logarithmic</option>
+      </select>
+    </label>
+    <div class="grid grid-cols-2 gap-2 text-xs">
+      <label class="flex flex-col gap-1">
+        Top (Ω)
+        <input :value="zTopOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onTopZChange" />
+      </label>
+      <label class="flex flex-col gap-1">
+        Bottom (Ω)
+        <input :value="zBottomOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onBottomZChange" />
+      </label>
+    </div>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      title="Fits the window to every Zout curve on the chart, live and history. The damping-factor axis follows: it is this window inverted."
+      @click="autofitZ"
+    >
+      Autofit
+    </button>
+    <label class="flex items-center gap-1.5 text-xs" title="The damping factor — nominal over |Zout| — on a right-hand axis that mirrors the ohms axis.">
+      <input v-model="showDampingFactor" type="checkbox" />
+      Show damping factor
+    </label>
+    <label
+      class="flex items-center gap-1.5 text-xs"
+      :class="{ 'opacity-50': !phaseAvailable }"
+      :title="phaseAvailable ? 'The phase of Zout: positive is inductive (an output coil), near zero resistive.' : 'Only a run with the right channel as reference measures a phase.'"
+    >
+      <input v-model="showPhase" type="checkbox" :disabled="!phaseAvailable" />
+      Show phase
+    </label>
+  </CollapsibleSection>
+
+  <CollapsibleSection v-if="showPhase && phaseAvailable" title="Phase axis" size="xs">
+    <div class="grid grid-cols-2 gap-2 text-xs">
+      <label class="flex flex-col gap-1">
+        Top (°)
+        <input :value="phaseTopDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onTopPhaseChange" />
+      </label>
+      <label class="flex flex-col gap-1">
+        Bottom (°)
+        <input :value="phaseBottomDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onBottomPhaseChange" />
+      </label>
+    </div>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      @click="autofitPhase"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Frequency range (Hz)" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      From
+      <select v-model.number="xFromHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+        <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+      </select>
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      To
+      <select v-model.number="xToHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+        <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+      </select>
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      @click="autofitX"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Display">
+    <label class="flex items-center gap-1.5 text-xs">
+      <input v-model="autofitOnDone" type="checkbox" /> Autofit when measurement done
+    </label>
+    <div class="flex flex-col gap-1 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">Style</span>
+      <label class="flex items-center gap-1.5"><input v-model="thickLines" type="checkbox" /> Thick lines</label>
+      <label class="flex items-center gap-1.5"><input v-model="showDataPoints" type="checkbox" /> Show data points</label>
+    </div>
+  </CollapsibleSection>
+</template>

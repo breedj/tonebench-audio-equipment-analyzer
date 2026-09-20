@@ -180,6 +180,29 @@ public class DeviceSessionServiceTests
     }
 
     [Fact]
+    public async Task TrySetSimulatedProfile_PatchesTheOutputStageAndLoad_AndLeavesTheRestAlone()
+    {
+        var session = CreateService();
+        await session.ConnectAsync(CancellationToken.None);
+
+        // An ideal source with nothing on it out of the box: no existing measurement sees a divider.
+        Assert.Equal(SimulatedOutputStageModel.None, session.SimulatedOutputStage);
+        Assert.Equal(SimulatedLoad.Open, session.SimulatedLoad);
+        Assert.Equal("None", session.GetStatus().SimulatedOutputStage);
+        Assert.Equal("Open", session.GetStatus().SimulatedLoad);
+
+        Assert.True(session.TrySetSimulatedProfile(noiseEnabled: null, humEnabled: null, outputStage: SimulatedOutputStageModel.SolidState));
+        Assert.Equal(SimulatedOutputStageModel.SolidState, session.SimulatedOutputStage);
+        Assert.Equal(SimulatedLoad.Open, session.SimulatedLoad);
+
+        Assert.True(session.TrySetSimulatedProfile(noiseEnabled: null, humEnabled: null, load: SimulatedLoad.EightOhms));
+        Assert.Equal(SimulatedOutputStageModel.SolidState, session.SimulatedOutputStage);
+        Assert.Equal("EightOhms", session.GetStatus().SimulatedLoad);
+        Assert.True(session.SimulatedNoiseEnabled);
+        Assert.False(session.SimulatedCrosstalkEnabled);
+    }
+
+    [Fact]
     public async Task TrySetSimulatedProfile_LeavesOmittedSettingsAlone()
     {
         // Patch semantics: the UI's three checkboxes each send only their own field, so toggling one

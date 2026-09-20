@@ -31,6 +31,9 @@ export const IMPEDANCE_KIND = 'Impedance'
 /** Mirrors MeasurementSaveService.CrosstalkKind — one channel driven with a stepped sine, the other input read. */
 export const CROSSTALK_KIND = 'Crosstalk'
 
+/** Mirrors MeasurementSaveService.OutputImpedanceKind — an amplifier's output impedance and damping factor by the load-step method. */
+export const OUTPUT_IMPEDANCE_KIND = 'OutputImpedance'
+
 /** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
 export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
 
@@ -88,6 +91,15 @@ export function isSteppedResponseKind(kind: string | null | undefined): boolean 
  */
 export function isCrosstalkKind(kind: string | null | undefined): boolean {
   return kind === CROSSTALK_KIND
+}
+
+/**
+ * Whether a kind's result is an output-impedance (damping factor) run. Its own predicate like
+ * `isImpedanceKind`: the result's Zout row is an impedance curve, drawn by the impedance chart, but
+ * it has its own runner, panel, store and report sections.
+ */
+export function isOutputImpedanceKind(kind: string | null | undefined): boolean {
+  return kind === OUTPUT_IMPEDANCE_KIND
 }
 
 /**
@@ -166,5 +178,11 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     label: 'Crosstalk',
     description:
       'Drives one channel with a stepped sine and reads how much of it reaches the other input, in dB against frequency — left to right, right to left, or both in one run.',
+  },
+  {
+    kind: OUTPUT_IMPEDANCE_KIND,
+    label: 'Output impedance / damping factor',
+    description:
+      'Measures an amplifier\u2019s gain with the load connected and again with it removed, and plots its output impedance in ohms and damping factor against frequency.',
   },
 ]

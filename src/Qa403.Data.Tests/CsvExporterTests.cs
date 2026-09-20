@@ -377,6 +377,35 @@ public class CsvExporterTests
     }
 
     /// <summary>
+    /// An output-impedance result goes through the impedance exporter: its <c>zout</c> row is an
+    /// impedance curve (ohms, R/X columns) and its two gain rows are plain dB, like a calibration
+    /// standard's — so the file says what Zout was derived from.
+    /// </summary>
+    [Fact]
+    public void ExportImpedance_WithZoutKind_EmitsOhmsColumns_AndTheGainRowsInDb()
+    {
+        var detail = BuildDetail() with { Kind = "OutputImpedance", MeasurementTypeName = "Damping factor", ParamsJson = """{"nominalOhms":8}""" };
+        // -30 dB relative to 1 ohm is 0.0316 ohm.
+        var zout = BuildImpedanceTrace() with { Kind = ResponseTraceKind.OutputImpedance, MagnitudeMinDb = [-30.0f, -30.0f], MagnitudeMaxDb = [-30.0f, -30.0f], PeakDb = -30.0 };
+        var loaded = BuildOpenCalTrace() with { Kind = ResponseTraceKind.GainLoad1, MagnitudeMinDb = [28.0f, 28.0f], MagnitudeMaxDb = [28.0f, 28.0f] };
+        var open = BuildOpenCalTrace() with { Kind = ResponseTraceKind.GainLoad2, MagnitudeMinDb = [28.034f, 28.034f], MagnitudeMaxDb = [28.034f, 28.034f] };
+
+        string csv = CsvExporter.ExportImpedance(detail, [zout, loaded, open]);
+        string[] lines = csv.Split('\n');
+        string header = lines.Single(l => l.StartsWith("freq_hz"));
+
+        Assert.Contains("zout_min_ohms", header);
+        Assert.Contains("zout_resistance_ohms", header);
+        Assert.Contains("gain_load1_min_db", header);
+        Assert.Contains("gain_load2_max_db", header);
+        Assert.DoesNotContain("gain_load1_min_ohms", header);
+        Assert.Equal(0.0316, Field(lines, "100.", header, "zout_max_ohms"), 3);
+        Assert.Equal(28.034, Field(lines, "100.", header, "gain_load2_max_db"), 3);
+        Assert.Contains("# zout_peak_ohms: 0.031623", csv);
+        Assert.Contains("# kind: OutputImpedance", csv);
+    }
+
+    /// <summary>
     /// The peak is a resonance, so it is a comment in ohms rather than the dB a response's peak is.
     /// </summary>
     [Fact]

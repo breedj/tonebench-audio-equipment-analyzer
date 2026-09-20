@@ -149,6 +149,15 @@ public enum StreamFlags : ushort
     /// and the trace kinds it carries (crosstalk left-to-right / right-to-left) are its own.
     /// </summary>
     Crosstalk = 1 << 7,
+
+    /// <summary>
+    /// Impedance-frame-only: this frame came from <see cref="Qa403.App.Services.OutputImpedanceRunner"/>
+    /// rather than the impedance runner. The curve is an impedance curve in every respect (ohms in dB,
+    /// phase, the impedance chart draws it), but it belongs to another screen's store, and the client
+    /// routes on this bit — the same arrangement <see cref="SteppedResponse"/> and <see cref="Crosstalk"/>
+    /// make for the response frame.
+    /// </summary>
+    OutputImpedance = 1 << 8,
 }
 
 /// <summary>
@@ -703,9 +712,9 @@ public static class StreamFrame
     /// </summary>
     private static void RequireOriginFlag(StreamFlags origin)
     {
-        const StreamFlags allowed = StreamFlags.SteppedResponse | StreamFlags.Crosstalk;
-        if ((origin & ~allowed) != 0 || origin == allowed)
-            throw new ArgumentOutOfRangeException(nameof(origin), origin, "A response frame's origin is none, SteppedResponse or Crosstalk.");
+        const StreamFlags allowed = StreamFlags.SteppedResponse | StreamFlags.Crosstalk | StreamFlags.OutputImpedance;
+        if ((origin & ~allowed) != 0 || System.Numerics.BitOperations.PopCount((uint)origin) > 1)
+            throw new ArgumentOutOfRangeException(nameof(origin), origin, "A frame's origin is none, SteppedResponse, Crosstalk or OutputImpedance.");
     }
 
     /// <summary>
@@ -717,8 +726,10 @@ public static class StreamFrame
     /// The trailing peak is the largest |Z| in the analysed band -- a driver's resonance -- rather
     /// than a response maximum.</para>
     /// </summary>
-    public static byte[] EncodeImpedance(ImpedanceTrace trace)
+    /// <param name="origin">None for the impedance runner, <see cref="StreamFlags.OutputImpedance"/> for the output-impedance runner's curve.</param>
+    public static byte[] EncodeImpedance(ImpedanceTrace trace, StreamFlags origin = StreamFlags.None)
     {
+        RequireOriginFlag(origin);
         int columns = trace.FreqHz.Length;
         if (trace.MagnitudeMinDbOhms.Length != columns || trace.MagnitudeMaxDbOhms.Length != columns
             || trace.PhaseDeg.Length != columns || trace.Coherence.Length != columns)
@@ -732,7 +743,7 @@ public static class StreamFrame
         byte[] buffer = new byte[HeaderLength + (columns * perColumn) + trailer];
         WriteHeader(
             buffer, StreamMsgType.Impedance, (byte)trace.Kind,
-            StreamFlags.Decimated | StreamFlags.LogSpaced,
+            StreamFlags.Decimated | StreamFlags.LogSpaced | origin,
             seq: 0,
             (float)trace.StartFreqHz, (float)trace.EndFreqHz, (uint)columns);
 
@@ -755,11 +766,12 @@ public static class StreamFrame
 
     /// <summary>Where a running impedance measurement has got. Header only, laid out exactly as the frequency response's.</summary>
     public static byte[] EncodeImpedanceProgress(
-        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv)
+        int taken, int total, FrequencyResponsePhase phase, double generatorAmpDbv, StreamFlags origin = StreamFlags.None)
     {
+        RequireOriginFlag(origin);
         byte[] buffer = new byte[HeaderLength];
         WriteHeader(
-            buffer, StreamMsgType.ImpedanceProgress, (byte)StreamChannel.Left, StreamFlags.None,
+            buffer, StreamMsgType.ImpedanceProgress, (byte)StreamChannel.Left, origin,
             (uint)phase, (float)generatorAmpDbv, total, (uint)Math.Max(0, taken));
 
         return buffer;

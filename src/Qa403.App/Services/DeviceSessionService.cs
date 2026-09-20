@@ -230,13 +230,20 @@ public sealed class DeviceSessionService(
     /// <summary>Whether the simulator couples its channels — see <see cref="SimulatedCrosstalk"/>; null when the device isn't the simulator.</summary>
     public bool? SimulatedCrosstalkEnabled => (_device as SimulatedDevice)?.SignalProfile.CrosstalkEnabled;
 
+    /// <summary>The simulated amplifier's output stage — see <see cref="SimulatedOutputStage"/>; null when the device isn't the simulator.</summary>
+    public SimulatedOutputStageModel? SimulatedOutputStage => (_device as SimulatedDevice)?.SignalProfile.OutputStage;
+
+    /// <summary>What hangs on the simulated amplifier's output; null when the device isn't the simulator.</summary>
+    public SimulatedLoad? SimulatedLoad => (_device as SimulatedDevice)?.SignalProfile.Load;
+
     /// <summary>
     /// Patches the simulated DUT's signal profile; <c>null</c> leaves a setting alone. Returns
     /// false when the device isn't the simulator, so the caller can answer with a 400 rather than
     /// silently accepting a setting that does nothing.
     /// </summary>
     public bool TrySetSimulatedProfile(
-        bool? noiseEnabled, bool? humEnabled, bool? harmonicsEnabled = null, SimulatedDutModel? dut = null, bool? crosstalkEnabled = null)
+        bool? noiseEnabled, bool? humEnabled, bool? harmonicsEnabled = null, SimulatedDutModel? dut = null, bool? crosstalkEnabled = null,
+        SimulatedOutputStageModel? outputStage = null, SimulatedLoad? load = null)
     {
         if (_device is not SimulatedDevice simulated)
             return false;
@@ -251,6 +258,8 @@ public sealed class DeviceSessionService(
             HarmonicsEnabled = harmonicsEnabled ?? profile.HarmonicsEnabled,
             Dut = dut ?? profile.Dut,
             CrosstalkEnabled = crosstalkEnabled ?? profile.CrosstalkEnabled,
+            OutputStage = outputStage ?? profile.OutputStage,
+            Load = load ?? profile.Load,
         };
 
         return true;
@@ -515,14 +524,16 @@ public sealed class DeviceSessionService(
                 false, "", "", "", false, 0, 0, false, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled, SimulatedHarmonicsEnabled,
                 SimulatedDut?.ToString(), _kind.ToString(),
                 _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks,
-                SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled);
+                SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled,
+                SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString());
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
             _device.InputRangeDbv, _outputRangeDbv, Acquiring, left, right, SimulatedNoiseEnabled, SimulatedHumEnabled, SimulatedHarmonicsEnabled,
             SimulatedDut?.ToString(), _kind.ToString(),
             _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks,
-            SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled);
+            SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled,
+            SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString());
     }
 
     /// <summary>

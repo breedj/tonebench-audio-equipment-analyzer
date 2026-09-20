@@ -77,6 +77,16 @@ public sealed record SimulatedSignalProfile
     /// </summary>
     public bool CrosstalkEnabled { get; init; } = false;
 
+    /// <summary>
+    /// The output impedance the simulated amplifier presents — see <see cref="SimulatedOutputStage"/>.
+    /// <see cref="SimulatedOutputStageModel.None"/> by default: an ideal source, so every existing
+    /// measurement is untouched until both this and <see cref="Load"/> say otherwise.
+    /// </summary>
+    public SimulatedOutputStageModel OutputStage { get; init; } = SimulatedOutputStageModel.None;
+
+    /// <summary>What hangs on the simulated amplifier's output. <see cref="SimulatedLoad.Open"/> by default.</summary>
+    public SimulatedLoad Load { get; init; } = SimulatedLoad.Open;
+
     public IntermodulationMode Intermodulation { get; init; } = IntermodulationMode.None;
 
     /// <summary>Total two-tone amplitude (both tones combined), dBV referenced to 1 Vrms. Only used when <see cref="Intermodulation"/> is not <see cref="IntermodulationMode.None"/>.</summary>

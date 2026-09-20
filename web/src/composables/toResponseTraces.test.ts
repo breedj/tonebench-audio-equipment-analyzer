@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StoredResponseTrace } from '../api/client'
-import { toResponseTraces } from './useMeasurements'
+import { toImpedanceTraces, toResponseTraces } from './useMeasurements'
 
 function stored(kind: string): StoredResponseTrace {
   return {
@@ -28,6 +28,12 @@ describe('toResponseTraces', () => {
       'CrosstalkRightToLeft',
       'Gain',
     ])
+  })
+
+  it('reads a stored Zout row as an impedance curve and leaves the gain rows to the response reader', () => {
+    const impedance = toImpedanceTraces([stored('zout'), stored('gain_load1'), stored('gain_load2')])
+    expect(impedance.map((t) => t.kind)).toEqual(['Impedance'])
+    expect(impedance[0].magnitudeMaxDbOhms).toEqual([-70, -59])
   })
 
   it('refuses a kind it does not know rather than drawing it as gain', () => {

@@ -29,6 +29,15 @@ public enum FrequencyResponseTraceKind
 
     /// <summary>Crosstalk with the right channel driven, dB: the left input relative to the right.</summary>
     CrosstalkRightToLeft = 4,
+
+    /// <summary>
+    /// The output-impedance run's gain into its first load, dB. Stored beside the Zout curve so a
+    /// saved result keeps what it was derived from; never broadcast.
+    /// </summary>
+    GainLoad1 = 5,
+
+    /// <summary>The output-impedance run's gain into its second load (or open), dB. See <see cref="GainLoad1"/>.</summary>
+    GainLoad2 = 6,
 }
 
 /// <summary>
@@ -108,6 +117,17 @@ public enum FrequencyResponsePhase
     /// <see cref="DeterminingRange"/> is.
     /// </summary>
     Calibrating = 9,
+
+    /// <summary>
+    /// Waiting for the user to change the load between the two passes of an output-impedance run —
+    /// <c>OutputImpedanceRunner</c> only. The generator is off and the acquisition is still up; the
+    /// run resumes on <c>POST /api/output-impedance/continue</c> or ends on cancel. It is a busy
+    /// phase — the run owns the session, the pipeline options and the input range throughout —
+    /// so it must be in that runner's <c>Running</c>, which is also what keeps a project switch
+    /// refused while the bench is mid-measurement. Appended with an explicit ordinal for the same
+    /// reason <see cref="DeterminingRange"/> is.
+    /// </summary>
+    WaitingForLoadChange = 10,
 }
 
 /// <summary>

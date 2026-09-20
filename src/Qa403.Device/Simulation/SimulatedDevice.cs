@@ -171,6 +171,8 @@ public sealed class SimulatedDevice : IAnalyzerDevice
         // Built per stream, at this stream's rate, and only while the knob is on: the unweighted
         // default path must not pay for a filter it never uses.
         SimulatedCrosstalk? crosstalk = _profile.CrosstalkEnabled ? new SimulatedCrosstalk(config.SampleRateHz) : null;
+        // Likewise per stream: a divider whose state must carry across blocks, rebuilt only when a knob moves.
+        var outputStage = new SimulatedOutputStage(_profile.OutputStage, _profile.Load, config.SampleRateHz);
 
         var period = TimeSpan.FromSeconds(config.BlockFrameCount / config.SampleRateHz);
         using var timer = new PeriodicTimer(period);
@@ -206,6 +208,11 @@ public sealed class SimulatedDevice : IAnalyzerDevice
 
             if (profile.CrosstalkEnabled != (crosstalk is not null))
                 crosstalk = profile.CrosstalkEnabled ? new SimulatedCrosstalk(config.SampleRateHz) : null;
+
+            // A load changed mid-acquisition is exactly what the load-step measurement asks for,
+            // between its two passes; the new divider starts from rest like a rebuilt DUT does.
+            if (outputStage.Model != profile.OutputStage || outputStage.Load != profile.Load)
+                outputStage = new SimulatedOutputStage(profile.OutputStage, profile.Load, config.SampleRateHz);
 
             // A DUT that distorts on its own is measured on its own: the fixed harmonic stack the
             // synthesizer otherwise adds to the generator is level-independent, and under it every
@@ -261,6 +268,13 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                     // back out.
                     if (dut is not null && ch == dut.Model.MeasuredChannel())
                         generated = dut.Process(generated);
+
+                    // The amplifier's output terminals are the left channel: what the DUT model
+                    // produced is the open-circuit output, and the load hangs on it here — after
+                    // the DUT, before the coupling and the additive, which are not the stage's.
+                    // Unity unless both knobs say otherwise, so this costs nothing by default.
+                    if (ch == 0 && !outputStage.IsUnity)
+                        generated = outputStage.Process(generated);
 
                     generatedByChannel[ch] = generated;
                 }

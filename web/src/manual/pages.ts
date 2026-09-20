@@ -8,6 +8,7 @@ import type { Component } from 'vue'
 import { defineAsyncComponent, h } from 'vue'
 import {
   CROSSTALK_KIND,
+  OUTPUT_IMPEDANCE_KIND,
   FFT_SPECTRUM_KIND,
   FREQUENCY_RESPONSE_KIND,
   IMD_VS_AMPLITUDE_KIND,
@@ -156,6 +157,14 @@ export const MANUAL_PAGES: ManualPage[] = [
     kind: CROSSTALK_KIND,
     group: 'Measurements',
     component: manualPage(() => import('./pages/CrosstalkPage.vue')),
+  },
+  {
+    id: 'output-impedance',
+    title: 'Output impedance and damping factor',
+    summary: 'An amplifier\u2019s output impedance in ohms and its damping factor, from its gain with and without the load.',
+    kind: OUTPUT_IMPEDANCE_KIND,
+    group: 'Measurements',
+    component: manualPage(() => import('./pages/OutputImpedancePage.vue')),
   },
   {
     id: 'impulse-response',

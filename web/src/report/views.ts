@@ -1,4 +1,12 @@
-import { FFT_SPECTRUM_KIND, isCrosstalkKind, isFrequencyResponseKind, isImpedanceKind, isImpulseResponseKind, isSweepKind } from '../measurements/kinds'
+import {
+  FFT_SPECTRUM_KIND,
+  isCrosstalkKind,
+  isFrequencyResponseKind,
+  isImpedanceKind,
+  isImpulseResponseKind,
+  isOutputImpedanceKind,
+  isSweepKind,
+} from '../measurements/kinds'
 
 /**
  * The chart views a report of a kind can carry — the screen's own projections and views, by the
@@ -34,6 +42,7 @@ const IMPEDANCE_VIEWS: ReportView[] = [
   { id: 'Nyquist', label: 'Nyquist', combinable: false },
 ]
 const CROSSTALK_VIEWS: ReportView[] = [{ id: 'Crosstalk', label: 'Crosstalk', combinable: true }]
+const OUTPUT_IMPEDANCE_VIEWS: ReportView[] = [{ id: 'Bode', label: 'Output impedance', combinable: true }]
 
 export function reportViewsForKind(kind: string | null | undefined): readonly ReportView[] {
   if (kind === FFT_SPECTRUM_KIND) return SPECTRUM_VIEWS
@@ -42,6 +51,7 @@ export function reportViewsForKind(kind: string | null | undefined): readonly Re
   if (isImpulseResponseKind(kind)) return IMPULSE_VIEWS
   if (isImpedanceKind(kind)) return IMPEDANCE_VIEWS
   if (isCrosstalkKind(kind)) return CROSSTALK_VIEWS
+  if (isOutputImpedanceKind(kind)) return OUTPUT_IMPEDANCE_VIEWS
   return []
 }
 

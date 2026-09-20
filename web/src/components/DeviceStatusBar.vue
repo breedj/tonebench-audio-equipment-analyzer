@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { DeviceKindName, DeviceStatus, SimulatedDutModel, SimulatedProfileRequest } from '../api/client'
+import type { DeviceKindName, DeviceStatus, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
 
 const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
   { value: 'Hardware', label: 'QA403' },
@@ -186,6 +186,27 @@ function onSimulatedCrosstalkChange(e: Event) {
   emit('setSimulatedProfile', { crosstalkEnabled: (e.target as HTMLInputElement).checked })
 }
 
+/** The simulated amplifier's output stage and what hangs on it — the two knobs the load-step measurement is demonstrated with. */
+const OUTPUT_STAGES: { value: SimulatedOutputStageModel; label: string; title: string }[] = [
+  { value: 'None', label: 'Ideal', title: 'An ideal voltage source: no output impedance, so the load makes no difference. The default — every other measurement is untouched.' },
+  { value: 'SolidState', label: 'Solid state', title: '0.028 Ω in series with a 1.5 µH output coil — the tutorial\u2019s BC-1: DF 286 at low frequencies, the coil dominating by 20 kHz.' },
+  { value: 'TubeAmp', label: 'Tube amp', title: '2 Ω in series with 0.3 mH of transformer leakage inductance — DF 4 at low frequencies.' },
+]
+
+const LOADS: { value: SimulatedLoad; label: string }[] = [
+  { value: 'Open', label: 'Open' },
+  { value: 'EightOhms', label: '8 Ω' },
+  { value: 'FourOhms', label: '4 Ω' },
+]
+
+function onSimulatedOutputStageChange(e: Event) {
+  emit('setSimulatedProfile', { outputStage: (e.target as HTMLSelectElement).value as SimulatedOutputStageModel })
+}
+
+function onSimulatedLoadChange(e: Event) {
+  emit('setSimulatedProfile', { load: (e.target as HTMLSelectElement).value as SimulatedLoad })
+}
+
 /**
  * The four nonlinear amplifier models carry their own distortion and switch the generator's
  * harmonic stack off whatever the profile says, so the checkbox is shown but disabled under one of
@@ -285,6 +306,32 @@ function onSimulatedDutChange(e: Event) {
         >
           <input type="checkbox" :checked="status.simulatedCrosstalkEnabled ?? false" @change="onSimulatedCrosstalkChange" />
           Crosstalk
+        </label>
+        <label
+          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
+          title="The output impedance the simulated amplifier presents at its terminals. Ideal by default; the other two only take effect once a load is connected below."
+        >
+          Output
+          <select
+            class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
+            :value="status.simulatedOutputStage ?? 'None'"
+            @change="onSimulatedOutputStageChange"
+          >
+            <option v-for="stage in OUTPUT_STAGES" :key="stage.value" :value="stage.value" :title="stage.title">{{ stage.label }}</option>
+          </select>
+        </label>
+        <label
+          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
+          title="What hangs on the simulated amplifier's output. Change it between the two passes of an output-impedance run, the way you would swap the resistor on a bench."
+        >
+          Load
+          <select
+            class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
+            :value="status.simulatedLoad ?? 'Open'"
+            @change="onSimulatedLoadChange"
+          >
+            <option v-for="load in LOADS" :key="load.value" :value="load.value">{{ load.label }}</option>
+          </select>
         </label>
         <label
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"

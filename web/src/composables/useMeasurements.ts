@@ -14,6 +14,7 @@ import {
 import {
   isCrosstalkKind,
   isFrequencyResponseKind,
+  isOutputImpedanceKind,
   isImdSweepKind,
   isImpedanceKind,
   isImpulseResponseKind,
@@ -240,6 +241,9 @@ export function toImpedanceTraces(traces: StoredResponseTrace[]): ImpedanceTrace
     z: 'Impedance',
     z_open: 'OpenCal',
     z_short: 'ShortCal',
+    // An output-impedance result's Zout row: an impedance curve to draw and read (ohms in dB); the
+    // result's own kind says what it is of. Its gain rows are response rows and are not overlaid.
+    zout: 'Impedance',
   }
 
   return traces
@@ -344,6 +348,19 @@ export function useMeasurements() {
    * `saveResponse`: an impulse result writes the same `response_trace` rows plus two tables of its
    * own, so it goes through its own endpoint even though the curves are identical.
    */
+  /** Saves the output-impedance run on screen — its Zout row and the two gain rows, through its own endpoint. */
+  async function saveOutputImpedance(req: { measurementTypeId: number; name: string; notes: string | null }) {
+    try {
+      const result = await api.saveOutputImpedance(req)
+      await load()
+      error.value = null
+      return result
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   /** Saves the crosstalk curves on screen — the crosstalk runner's own rows, through its own endpoint. */
   async function saveCrosstalk(req: { measurementTypeId: number; name: string; notes: string | null }) {
     try {
@@ -452,7 +469,7 @@ export function useMeasurements() {
           : undefined
       // Impedance comes back through the same reader, since it shares the rows — but into its own
       // field, because its magnitudes are ohms in dB rather than a gain.
-      const impedanceTraces = isImpedanceKind(detail.kind)
+      const impedanceTraces = isImpedanceKind(detail.kind) || isOutputImpedanceKind(detail.kind)
         ? toImpedanceTraces((await api.getStoredResponse(resultId)).traces)
         : undefined
       overlays.value = [
@@ -489,7 +506,7 @@ export function useMeasurements() {
   // with nothing to show it on. MeasurementHistoryPanel loads on mount and on every type change,
   // which covers every screen the list is shown on.
 
-  return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk,
+  return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOutputImpedance,
     update, remove,
     addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
 }

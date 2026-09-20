@@ -68,6 +68,9 @@ import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.
 import CrosstalkConfigPanel from './components/CrosstalkConfigPanel.vue'
 import CrosstalkDisplayPanel from './components/CrosstalkDisplayPanel.vue'
 import CrosstalkMeasurementsPanel from './components/CrosstalkMeasurementsPanel.vue'
+import OutputImpedanceConfigPanel from './components/OutputImpedanceConfigPanel.vue'
+import OutputImpedanceDisplayPanel from './components/OutputImpedanceDisplayPanel.vue'
+import OutputImpedanceReadoutPanel from './components/OutputImpedanceReadoutPanel.vue'
 import FrequencyResponseDisplayPanel from './components/FrequencyResponseDisplayPanel.vue'
 import FrequencyResponseChart from './components/FrequencyResponseChart.vue'
 import ImpulseResponseConfigPanel from './components/ImpulseResponseConfigPanel.vue'
@@ -88,6 +91,14 @@ import { responseDisplayFromParams, type ResponseDisplay } from './response/disp
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
 import { crosstalkDisplayFromParams, crosstalkDisplayToParams, DEFAULT_CROSSTALK_DISPLAY, type CrosstalkDisplay } from './crosstalk/display'
+import {
+  DEFAULT_OUTPUT_IMPEDANCE_DISPLAY,
+  outputImpedanceDisplayFromParams,
+  outputImpedanceDisplayToParams,
+  type OutputImpedanceDisplay,
+} from './outputImpedance/display'
+import { useOutputImpedance } from './composables/useOutputImpedance'
+import { formatOhms } from './impedance/equivalent'
 import { impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
 import { monochromeChartPng } from './charts/exportChart'
 import { copyPngToClipboard, frameChartPng, screenshotFrameLayout, type ScreenshotSettings } from './screenshot'
@@ -118,6 +129,7 @@ import {
   isSweepKind as isSweepKindName,
   isImpedanceKind,
   isCrosstalkKind,
+  isOutputImpedanceKind,
 } from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
@@ -432,6 +444,35 @@ const isImpedance = computed(() => isImpedanceKind(currentType.value?.kind))
 // off its own flag rather than becoming a third arm of isFrequencyResponse.
 const isCrosstalk = computed(() => isCrosstalkKind(currentType.value?.kind))
 
+// A seventh screen. Its Zout curve is an impedance curve drawn by the impedance chart, but the
+// runner, the two-pass flow with its pause, the readings and the settings are its own — so, like
+// impedance and crosstalk, it keys off its own flag.
+const isOutputImpedance = computed(() => isOutputImpedanceKind(currentType.value?.kind))
+
+const {
+  running: outputImpedanceRunning,
+  waiting: outputImpedanceWaiting,
+  trace: outputImpedanceTrace,
+  traces: outputImpedanceTraces,
+  error: outputImpedanceError,
+  warning: outputImpedanceWarning,
+  generatorAmpDbv: outputImpedanceGeneratorAmpDbv,
+  inputRangeDbv: outputImpedanceInputRangeDbv,
+  sampleRateHz: outputImpedanceSampleRateHz,
+  loadOhms: outputImpedanceLoadOhms,
+  secondLoadOhms: outputImpedanceSecondLoadOhms,
+  nominalOhms: outputImpedanceNominalOhms,
+  rightChannelIsReference: outputImpedanceReferenced,
+  firstGainAt1kDb: outputImpedanceFirstGainAt1kDb,
+  secondGainAt1kDb: outputImpedanceSecondGainAt1kDb,
+  progressLabel: outputImpedanceProgressLabel,
+  start: startOutputImpedance,
+  continueRun: continueOutputImpedanceRun,
+  cancel: cancelOutputImpedanceRun,
+  clear: clearOutputImpedanceRun,
+  refresh: refreshOutputImpedance,
+} = useOutputImpedance()
+
 /**
  * A stepped-sine impedance run is single-shot, so the continuous RUN button goes away and the
  * remaining one carries the whole width — the stepped-sine response screen's model, and for its
@@ -732,6 +773,7 @@ const responseConfigPanel = ref<InstanceType<typeof FrequencyResponseConfigPanel
 const impedanceConfigPanel = ref<InstanceType<typeof ImpedanceConfigPanel> | null>(null)
 const steppedResponseConfigPanel = ref<InstanceType<typeof SteppedResponseConfigPanel> | null>(null)
 const crosstalkConfigPanel = ref<InstanceType<typeof CrosstalkConfigPanel> | null>(null)
+const outputImpedanceConfigPanel = ref<InstanceType<typeof OutputImpedanceConfigPanel> | null>(null)
 const sweepConfigPanel = ref<InstanceType<typeof SweepConfigPanel> | null>(null)
 const amplitudeSweepConfigPanel = ref<InstanceType<typeof AmplitudeSweepConfigPanel> | null>(null)
 const imdSweepConfigPanel = ref<InstanceType<typeof ImdSweepConfigPanel> | null>(null)
@@ -1087,6 +1129,84 @@ watch(
   },
 )
 
+// Output-impedance chart display preferences — the crosstalk arrangement, through
+// outputImpedance/display.ts so the report restores a stored type the way the screen does.
+const outputImpedanceZTopOhms = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.zTopOhms)
+const outputImpedanceZBottomOhms = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.zBottomOhms)
+const outputImpedanceZScale = ref<import('./api/client').ImpedanceZScale>(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.zScale)
+const outputImpedanceShowDampingFactor = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.showDampingFactor)
+const outputImpedanceShowPhase = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.showPhase)
+const outputImpedanceXFromHz = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.xFromHz)
+const outputImpedanceXToHz = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.xToHz)
+const outputImpedancePhaseTopDeg = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.phaseTopDeg)
+const outputImpedancePhaseBottomDeg = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.phaseBottomDeg)
+const outputImpedanceThickLines = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.thickLines)
+const outputImpedanceShowDataPoints = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.showDataPoints)
+const outputImpedanceAutofitOnDone = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.autofitOnDone)
+
+let outputImpedanceDisplayRestoring = false
+
+function currentOutputImpedanceDisplay(): OutputImpedanceDisplay {
+  return {
+    zTopOhms: outputImpedanceZTopOhms.value,
+    zBottomOhms: outputImpedanceZBottomOhms.value,
+    zScale: outputImpedanceZScale.value,
+    showDampingFactor: outputImpedanceShowDampingFactor.value,
+    showPhase: outputImpedanceShowPhase.value,
+    xFromHz: outputImpedanceXFromHz.value,
+    xToHz: outputImpedanceXToHz.value,
+    phaseTopDeg: outputImpedancePhaseTopDeg.value,
+    phaseBottomDeg: outputImpedancePhaseBottomDeg.value,
+    thickLines: outputImpedanceThickLines.value,
+    showDataPoints: outputImpedanceShowDataPoints.value,
+    autofitOnDone: outputImpedanceAutofitOnDone.value,
+  }
+}
+
+function applyStoredOutputImpedanceDisplay(paramsJson: string) {
+  outputImpedanceDisplayRestoring = true
+  const display = outputImpedanceDisplayFromParams(paramsJson, currentOutputImpedanceDisplay())
+  outputImpedanceZTopOhms.value = display.zTopOhms
+  outputImpedanceZBottomOhms.value = display.zBottomOhms
+  outputImpedanceZScale.value = display.zScale
+  outputImpedanceShowDampingFactor.value = display.showDampingFactor
+  outputImpedanceShowPhase.value = display.showPhase
+  outputImpedanceXFromHz.value = display.xFromHz
+  outputImpedanceXToHz.value = display.xToHz
+  outputImpedancePhaseTopDeg.value = display.phaseTopDeg
+  outputImpedancePhaseBottomDeg.value = display.phaseBottomDeg
+  outputImpedanceThickLines.value = display.thickLines
+  outputImpedanceShowDataPoints.value = display.showDataPoints
+  outputImpedanceAutofitOnDone.value = display.autofitOnDone
+  void nextTick(() => {
+    outputImpedanceDisplayRestoring = false
+  })
+}
+
+watch(
+  () => (isOutputImpedance.value ? currentType.value?.paramsJson : undefined),
+  (paramsJson) => {
+    if (paramsJson) applyStoredOutputImpedanceDisplay(paramsJson)
+  },
+  { immediate: true },
+)
+
+watch(
+  [
+    outputImpedanceZTopOhms, outputImpedanceZBottomOhms, outputImpedanceZScale, outputImpedanceShowDampingFactor,
+    outputImpedanceShowPhase, outputImpedanceXFromHz, outputImpedanceXToHz, outputImpedancePhaseTopDeg,
+    outputImpedancePhaseBottomDeg, outputImpedanceThickLines, outputImpedanceShowDataPoints, outputImpedanceAutofitOnDone,
+  ],
+  () => {
+    if (!outputImpedanceDisplayRestoring && isOutputImpedance.value) markDirty()
+  },
+)
+
+// A run — or its pause — survives a reload, so arriving on the screen re-attaches.
+watch(isOutputImpedance, (selected) => {
+  if (selected) void refreshOutputImpedance().catch(() => undefined)
+}, { immediate: true })
+
 function runImpedance(continuous: boolean) {
   const request = impedanceConfigPanel.value?.buildRequest(continuous)
   if (!request) return
@@ -1165,6 +1285,25 @@ function runSteppedResponse(request: import('./api/client').SteppedResponseStart
   return withErrorReporting(async () => {
     await startSteppedResponse(request)
   })
+}
+
+/** The output-impedance run: RUN SWEEP starts the first load's pass; CONTINUE, at the pause, the second's. */
+function runOutputImpedance(request: import('./api/client').OutputImpedanceStartRequest) {
+  return withErrorReporting(async () => {
+    await startOutputImpedance(request)
+  })
+}
+
+function continueOutputImpedance() {
+  return withErrorReporting(() => continueOutputImpedanceRun())
+}
+
+function cancelOutputImpedance() {
+  return withErrorReporting(() => cancelOutputImpedanceRun())
+}
+
+function clearOutputImpedance() {
+  return withErrorReporting(() => clearOutputImpedanceRun())
 }
 
 /**
@@ -1539,7 +1678,7 @@ let pendingRangeCount = 0
 // the frequency-response probe's own meters frames, and in one run out of eight the step landed
 // on the capture the level probe was waiting for.
 const runnerActive = computed(
-  () => responseRunning.value || sweepRunning.value || impedanceRunning.value || impulseRunning.value,
+  () => responseRunning.value || sweepRunning.value || impedanceRunning.value || impulseRunning.value || outputImpedanceRunning.value,
 )
 
 watch(meters, (m) => {
@@ -1591,6 +1730,7 @@ const impulseResponseChart = ref<InstanceType<typeof FrequencyResponseChart> | n
 const impulseHarmonicsChart = ref<InstanceType<typeof ImpulseHarmonicsChart> | null>(null)
 const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(null)
 const impedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
+const outputImpedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const impedancePlaneChart = ref<InstanceType<typeof ImpedancePlaneChart> | null>(null)
 // The FFT screen's waterfall, for the report's Waterfall element (not the Screenshot, which takes
 // the main chart): mounted only while the display panel shows it, null otherwise.
@@ -1600,6 +1740,7 @@ const waterfallChart = ref<InstanceType<typeof WaterfallChart> | null>(null)
 function chartOnScreen() {
   if (isFrequencyResponse.value) return activeResponseProjection.value === 'Bode' ? responseChart.value : responsePolarChart.value
   if (isCrosstalk.value) return responseChart.value
+  if (isOutputImpedance.value) return outputImpedanceChart.value
   if (isSweepKind.value) return sweepChart.value
   if (isImpulseResponse.value) {
     switch (impulseView.value) {
@@ -1620,6 +1761,7 @@ function chartOnScreen() {
 /** Whether the chart on screen has something to draw. */
 const screenshotAvailable = computed(() => {
   if (isFrequencyResponse.value || isCrosstalk.value) return responseTraces.value.length > 0
+  if (isOutputImpedance.value) return outputImpedanceTrace.value !== null
   if (isSweepKind.value) return sweepPoints.value.length > 0
   if (isImpulseResponse.value) {
     switch (impulseView.value) {
@@ -1733,6 +1875,18 @@ function buildLiveSubject(): ReportSubject | null {
     if (responseSampleRateHz.value > 0) facts.push({ label: 'Sample rate', value: `${responseSampleRateHz.value} Hz` })
     if (responseTraces.value.length > 0) facts.push({ label: 'Generator level', value: `${responseGeneratorAmpDbv.value.toFixed(2)} dBV` })
     subject.data = { kind: 'crosstalk', traces: responseTraces.value, display: currentCrosstalkDisplay() }
+  } else if (isOutputImpedance.value) {
+    subject.sampleRateHz = outputImpedanceSampleRateHz.value
+    if (outputImpedanceSampleRateHz.value > 0) facts.push({ label: 'Sample rate', value: `${outputImpedanceSampleRateHz.value} Hz` })
+    facts.push({ label: 'Load', value: `${outputImpedanceLoadOhms.value} Ω` })
+    if (outputImpedanceTrace.value) facts.push({ label: 'Generator level', value: `${outputImpedanceGeneratorAmpDbv.value.toFixed(2)} dBV` })
+    subject.data = {
+      kind: 'outputImpedance',
+      trace: outputImpedanceTrace.value,
+      display: currentOutputImpedanceDisplay(),
+      nominalOhms: outputImpedanceNominalOhms.value,
+      rightChannelIsReference: outputImpedanceReferenced.value,
+    }
   } else if (isSweepKind.value) {
     if (sweepPoints.value.length > 0) facts.push({ label: 'Points', value: String(sweepPoints.value.length) })
     subject.data = {
@@ -2275,6 +2429,12 @@ function buildTypeParamsJson(): string | undefined {
     })
   }
 
+  if (isOutputImpedance.value) {
+    const base = outputImpedanceConfigPanel.value?.buildParamsJson()
+    if (!base) return undefined
+    return JSON.stringify({ ...JSON.parse(base), ...outputImpedanceDisplayToParams(currentOutputImpedanceDisplay()) })
+  }
+
   if (isCrosstalk.value) {
     const base = crosstalkConfigPanel.value?.buildParamsJson()
     if (!base) return undefined
@@ -2529,7 +2689,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               Save as…
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -2540,7 +2700,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               Save measurement result
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -2590,6 +2750,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               :disabled="impedanceRunning || impedanceTraces.length === 0"
               title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings and the calibration alone."
               @click="clearImpedance"
+            >
+              <ToolbarIcon name="clear" />
+              Clear
+            </button>
+            <button
+              v-if="isOutputImpedance"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="outputImpedanceRunning || !outputImpedanceTrace"
+              title="Saves the output-impedance curve on screen as a new measurement result, with the two gain passes it was derived from."
+              @click="openSaveDialog"
+            >
+              <ToolbarIcon name="save-result" />
+              Save output impedance result
+            </button>
+            <button
+              v-if="isOutputImpedance"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              :disabled="outputImpedanceRunning || !outputImpedanceTrace"
+              title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
+              @click="clearOutputImpedance"
             >
               <ToolbarIcon name="clear" />
               Clear
@@ -2660,7 +2842,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
-              :disabled="!currentType || responseRunning || sweepRunning || impedanceRunning || impulseRunning"
+              :disabled="!currentType || responseRunning || sweepRunning || impedanceRunning || impulseRunning || outputImpedanceRunning"
               title="A PDF report of what is on screen: chart, notes, settings and readings, as chosen. Stored results have their own Report button in History details."
               @click="openReport(null)"
             >
@@ -3189,6 +3371,145 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:thick-lines="crosstalkThickLines"
                   v-model:show-data-points="crosstalkShowDataPoints"
                   v-model:autofit-on-done="crosstalkAutofitOnDone"
+                />
+
+                <MeasurementChecklist @error="reportError" />
+              </template>
+            </MeasurementLayout>
+          </template>
+
+          <template v-else-if="isOutputImpedance">
+            <MeasurementLayout>
+              <template #rail>
+                <!-- RUN SWEEP / CONTINUE / STOP. CONTINUE exists only while the run is paused for the
+                     load change, and takes RUN SWEEP's slot then — one green button at a time. -->
+                <div class="flex gap-3">
+                  <button
+                    v-if="!outputImpedanceWaiting"
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    :disabled="outputImpedanceRunning || !!outputImpedanceConfigPanel?.invalid"
+                    :title="
+                      outputImpedanceConfigPanel?.invalid ??
+                      'Measures the gain with the load connected, pauses for you to remove it, then measures again.'
+                    "
+                    @click="outputImpedanceConfigPanel?.run()"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    RUN SWEEP
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="flex flex-1 animate-pulse items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 dark:ring-offset-neutral-950"
+                    title="The first pass is done and the generator is silent. Change the load — leave the amplifier on — then press to measure the second pass."
+                    @click="continueOutputImpedance"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 4l10 8-10 8V4zM17 4h2v16h-2z" /></svg>
+                    CONTINUE
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
+                    :class="outputImpedanceRunning && !outputImpedanceWaiting ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    :disabled="!outputImpedanceRunning"
+                    title="Stops the measurement and silences the generator. A run stopped before the second pass has no Zout to keep; one stopped during it keeps the pairs measured so far."
+                    @click="cancelOutputImpedance"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
+                    STOP
+                  </button>
+                </div>
+
+                <OutputImpedanceConfigPanel
+                  ref="outputImpedanceConfigPanel"
+                  :running="outputImpedanceRunning"
+                  @run="runOutputImpedance"
+                />
+
+                <OutputImpedanceReadoutPanel
+                  :trace="outputImpedanceTrace"
+                  :nominal-ohms="outputImpedanceNominalOhms"
+                  :load-ohms="outputImpedanceLoadOhms"
+                  :second-load-ohms="outputImpedanceSecondLoadOhms"
+                  :right-channel-is-reference="outputImpedanceReferenced"
+                  :generator-amp-dbv="outputImpedanceGeneratorAmpDbv"
+                  :input-range-dbv="outputImpedanceInputRangeDbv"
+                  :first-gain-at1k-db="outputImpedanceFirstGainAt1kDb"
+                  :second-gain-at1k-db="outputImpedanceSecondGainAt1kDb"
+                  :warning="outputImpedanceWarning"
+                />
+              </template>
+
+              <template #default>
+                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  <span>{{ outputImpedanceProgressLabel || 'Idle' }}</span>
+                  <span v-if="Number.isFinite(outputImpedanceGeneratorAmpDbv) && outputImpedanceTrace">
+                    · gen {{ outputImpedanceGeneratorAmpDbv.toFixed(2) }} dBV
+                  </span>
+                </div>
+                <p v-if="outputImpedanceError" class="text-xs text-red-600 dark:text-red-400">{{ outputImpedanceError }}</p>
+
+                <!-- The pause, made impossible to miss: the run is holding the bench and nothing
+                     happens until the load has been changed and CONTINUE pressed. -->
+                <div
+                  v-if="outputImpedanceWaiting"
+                  class="rounded-lg border border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-200"
+                  data-output-impedance-waiting
+                >
+                  <strong>First pass done.</strong> The generator is silent.
+                  <template v-if="outputImpedanceSecondLoadOhms === null">
+                    Disconnect the {{ formatOhms(outputImpedanceLoadOhms) }} load from the amplifier's output
+                  </template>
+                  <template v-else>
+                    Replace the {{ formatOhms(outputImpedanceLoadOhms) }} load on the amplifier's output with the
+                    {{ formatOhms(outputImpedanceSecondLoadOhms) }} one
+                  </template>
+                  — leave the amplifier on and everything else as it is — then press <strong>CONTINUE</strong> for the second pass.
+                </div>
+
+                <!-- The impedance chart with its damping-factor axis: Zout is an impedance curve in
+                     every respect, so the ohms axis, the log scale and the phase axis are its. -->
+                <ImpedanceChart
+                  ref="outputImpedanceChart"
+                  :traces="outputImpedanceTraces"
+                  :overlays="visibleImpedanceOverlays"
+                  :show-phase="outputImpedanceReferenced && outputImpedanceShowPhase"
+                  :show-coherence="false"
+                  :show-short-cal="false"
+                  :thick-lines="outputImpedanceThickLines"
+                  :show-data-points="outputImpedanceShowDataPoints"
+                  :z-top-ohms="outputImpedanceZTopOhms"
+                  :z-bottom-ohms="outputImpedanceZBottomOhms"
+                  :z-scale="outputImpedanceZScale"
+                  :x-from-hz="outputImpedanceXFromHz"
+                  :x-to-hz="outputImpedanceXToHz"
+                  :phase-top-deg="outputImpedancePhaseTopDeg"
+                  :phase-bottom-deg="outputImpedancePhaseBottomDeg"
+                  :show-damping-factor="outputImpedanceShowDampingFactor"
+                  :damping-factor-nominal-ohms="outputImpedanceNominalOhms"
+                />
+
+                <MeasurementNotesPanel />
+                <MeasurementHistoryPanel @error="reportError" @report="openReport" />
+              </template>
+
+              <template #aside>
+                <OutputImpedanceDisplayPanel
+                  :traces="outputImpedanceTraces"
+                  :phase-available="outputImpedanceReferenced"
+                  v-model:z-top-ohms="outputImpedanceZTopOhms"
+                  v-model:z-bottom-ohms="outputImpedanceZBottomOhms"
+                  v-model:z-scale="outputImpedanceZScale"
+                  v-model:show-damping-factor="outputImpedanceShowDampingFactor"
+                  v-model:show-phase="outputImpedanceShowPhase"
+                  v-model:x-from-hz="outputImpedanceXFromHz"
+                  v-model:x-to-hz="outputImpedanceXToHz"
+                  v-model:phase-top-deg="outputImpedancePhaseTopDeg"
+                  v-model:phase-bottom-deg="outputImpedancePhaseBottomDeg"
+                  v-model:thick-lines="outputImpedanceThickLines"
+                  v-model:show-data-points="outputImpedanceShowDataPoints"
+                  v-model:autofit-on-done="outputImpedanceAutofitOnDone"
                 />
 
                 <MeasurementChecklist @error="reportError" />

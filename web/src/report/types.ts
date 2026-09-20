@@ -13,6 +13,7 @@ import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import type { ImpedanceTrace } from '../composables/useImpedance'
 import type { ImpedanceDisplay } from '../impedance/display'
 import type { CrosstalkDisplay } from '../crosstalk/display'
+import type { OutputImpedanceDisplay } from '../outputImpedance/display'
 import type { ImpulseDisplay } from '../measurements/impulseDisplay'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
@@ -113,6 +114,15 @@ export type ReportSubjectData =
       kind: 'impedance'
       traces: ImpedanceTrace[]
       display: ImpedanceDisplay
+    }
+  | {
+      kind: 'outputImpedance'
+      /** The Zout curve — an impedance trace; null when nothing was measured. */
+      trace: ImpedanceTrace | null
+      display: OutputImpedanceDisplay
+      /** What the damping factor is quoted against. */
+      nominalOhms: number
+      rightChannelIsReference: boolean
     }
   | {
       kind: 'crosstalk'

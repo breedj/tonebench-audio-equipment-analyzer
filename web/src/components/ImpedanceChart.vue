@@ -23,6 +23,7 @@ import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
 import { ohmAxis } from '../impedance/ohmAxis'
 import { dbOhmsToOhms, formatOhms } from '../impedance/equivalent'
+import { MIN_MEASURABLE_OHMS } from '../outputImpedance/readings'
 import { standardOnGrid } from '../impedance/standard'
 
 /**
@@ -67,6 +68,14 @@ const props = defineProps<{
   /** The phase axis' own window, in degrees. A passive one-port stays inside ±90°, but a bad calibration will not. */
   phaseTopDeg: number
   phaseBottomDeg: number
+  /**
+   * The output-impedance screen's second reading: a damping-factor curve, `nominal / |Z|`, on a
+   * right-hand axis whose window is the ohms window inverted — so the two curves mirror each other
+   * and a reader can take either. Derived at draw time from the same trace; nothing is stored twice.
+   */
+  showDampingFactor?: boolean
+  /** What the damping factor is quoted against, in ohms. Required for `showDampingFactor`; also retitles the export. */
+  dampingFactorNominalOhms?: number
 }>()
 
 const { isDark } = useAppTheme()
@@ -84,6 +93,7 @@ const IMPEDANCE_COLOR = ['#111827', '#f3f4f6'] as const
 const SHORT_CAL_COLOR = ['#c2410c', '#fb923c'] as const
 const PHASE_COLOR = ['#7c3aed', '#a78bfa'] as const
 const COHERENCE_COLOR = ['#059669', '#34d399'] as const
+const DAMPING_FACTOR_COLOR = ['#2563eb', '#60a5fa'] as const
 
 /** The screen's palette, following the app theme; the export builds its own light one. See charts/palette.ts. */
 const palette = computed(() => makeChartPalette(isDark.value))
@@ -317,7 +327,25 @@ function buildData(): uPlot.AlignedData {
   if (shortCalPhase.value) series.push(shortCalPhase.value)
   if (props.showCoherence) series.push(padToGrid(t?.coherence, t?.freqHz, x))
 
+  if (dampingFactorOn.value) {
+    series.push(toDampingFactor(series[0]))
+    for (let i = 0; i < overlayCurves.value.length; i++) series.push(toDampingFactor(series[1 + i]))
+  }
+
   return [x, ...series] as uPlot.AlignedData
+}
+
+const dampingFactorOn = computed(() => props.showDampingFactor === true && (props.dampingFactorNominalOhms ?? 0) > 0)
+
+/** `nominal / |Z|` per column; null where |Z| is null or zero (an ideal source has no finite damping factor). */
+function toDampingFactor(ohms: Float64Array | (number | null)[]): (number | null)[] {
+  const nominal = props.dampingFactorNominalOhms ?? 0
+  const out = new Array<number | null>(ohms.length)
+  for (let i = 0; i < ohms.length; i++) {
+    const z = ohms[i]
+    out[i] = z == null || !(z > MIN_MEASURABLE_OHMS) ? null : nominal / z
+  }
+  return out
 }
 
 /**
@@ -331,7 +359,7 @@ type PlottedSeries = {
   key: string
   label: string
   color: string
-  unit: 'ohms' | 'deg' | 'ratio'
+  unit: 'ohms' | 'deg' | 'ratio' | 'df'
   width: number
   /** uPlot's dash pattern, reused verbatim for the legend swatch so the two cannot disagree. */
   dash?: number[]
@@ -451,6 +479,32 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
     })
   }
 
+  if (dampingFactorOn.value) {
+    entries.push({
+      key: 'df',
+      label: 'Damping factor',
+      color: color(DAMPING_FACTOR_COLOR),
+      pair: DAMPING_FACTOR_COLOR,
+      unit: 'df',
+      width,
+      scale: 'df',
+      points: props.showDataPoints,
+    })
+    for (const overlay of overlayCurves.value) {
+      entries.push({
+        key: `o${overlay.id}df`,
+        label: `${overlay.name} DF`,
+        color: color(DAMPING_FACTOR_COLOR),
+        pair: DAMPING_FACTOR_COLOR,
+        unit: 'df',
+        width: 1,
+        dash: impedanceOverlayDash(props.overlays, overlay.id) ?? undefined,
+        scale: 'df',
+        points: false,
+      })
+    }
+  }
+
   return entries
 })
 
@@ -493,6 +547,14 @@ function buildSeries(p: ChartPalette): uPlot.Series[] {
 
 const phaseRange = computed<[number, number]>(() => [props.phaseBottomDeg, props.phaseTopDeg])
 
+/** The damping-factor window: the ohms window inverted, with a linear window's zero floor kept off the denominator. */
+const dampingFactorRange = computed<[number, number]>(() => {
+  const nominal = props.dampingFactorNominalOhms ?? 8
+  const top = yTop.value
+  const bottom = Math.max(yBottom.value, top / 1000)
+  return [nominal / top, nominal / bottom]
+})
+
 const logZ = computed(() => props.zScale === 'Log')
 
 /** Guarded: a log axis cannot show zero or a negative, and a bound of 0 would blank the whole plot. A linear one may sit on zero. */
@@ -513,6 +575,7 @@ const legendEntries = computed<(PlottedSeries & { text?: string })[]>(
 function formatReading(value: number, series: PlottedSeries): string {
   if (series.unit === 'ohms') return formatOhms(value)
   if (series.unit === 'deg') return `${value.toFixed(1)}°`
+  if (series.unit === 'df') return value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2)
   return value.toFixed(3)
 }
 
@@ -551,6 +614,8 @@ const signature = computed(() =>
   [
     props.showPhase,
     props.showCoherence,
+    dampingFactorOn.value,
+    props.dampingFactorNominalOhms,
     shortCalOhms.value !== null,
     shortCalPhase.value !== null,
     overlayCurves.value.map((o) => o.id).join(','),
@@ -628,6 +693,14 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
       // the ohms one turns the plot into graph paper.
       phase: { range: () => phaseRange.value },
       coh: { range: () => [0, 1] as [number, number] },
+      // The ohms window inverted, on the same distribution, so the DF curve is the |Z| curve's
+      // mirror when both are log and reads against a sensible window when both are linear.
+      df: {
+        distr: logZ.value ? 3 : 1,
+        log: 10,
+        auto: false,
+        range: () => dampingFactorRange.value,
+      },
     },
     axes: [
       {
@@ -658,13 +731,27 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
         ticks: { stroke: p.color(PHASE_COLOR), width: 1 },
       },
       {
+        scale: 'df',
+        side: 1,
+        show: dampingFactorOn.value,
+        size: 50,
+        ...exportAxisLabel(interactive, 'Damping factor'),
+        // Null-guarded: on a log scale uPlot hands a null for every minor split it does not label,
+        // and a formatter that dereferences it throws inside uPlot's draw — the whole plot then
+        // stays at 0 × 0, which reads as "no chart" rather than as an error.
+        values: (_u, vals) => vals.map((v) => (v == null ? '' : v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2))),
+        stroke: p.color(DAMPING_FACTOR_COLOR),
+        grid: { show: false },
+        ticks: { stroke: p.color(DAMPING_FACTOR_COLOR), width: 1 },
+      },
+      {
         scale: 'coh',
         side: 1,
         show: props.showCoherence,
         size: 44,
         ...exportAxisLabel(interactive, 'Coherence'),
         incrs: [0.1, 0.2, 0.25, 0.5],
-        values: (_u, vals) => vals.map((v) => v.toFixed(1)),
+        values: (_u, vals) => vals.map((v) => (v == null ? '' : v.toFixed(1))),
         stroke: p.color(COHERENCE_COLOR),
         grid: { show: false },
         ticks: { stroke: p.color(COHERENCE_COLOR), width: 1 },
@@ -749,7 +836,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
       height,
       plotCanvas: u.ctx.canvas,
       headerHeight: header,
-      title: `Impedance vs frequency${logZ.value ? ' (log Ω)' : ''}`,
+      title: `${dampingFactorOn.value ? 'Output impedance' : 'Impedance'} vs frequency${logZ.value ? ' (log Ω)' : ''}`,
       legend,
     })
   } finally {
@@ -910,7 +997,7 @@ const outOfRange = computed(() => {
       v-if="traces.length === 0 && overlays.length === 0 && !shortCalOhms"
       class="text-xs text-neutral-500 dark:text-neutral-400"
     >
-      No impedance measured yet. Press RUN.
+      No {{ dampingFactorOn ? 'output impedance' : 'impedance' }} measured yet. Press {{ dampingFactorOn ? 'RUN SWEEP' : 'RUN' }}.
     </p>
   </div>
 </template>

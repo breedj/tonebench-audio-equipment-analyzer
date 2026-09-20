@@ -632,7 +632,7 @@ public sealed class ImpedanceRunner(
         }
 
         foreach (var trace in pass.Traces)
-            hub.Broadcast(StreamFrame.EncodeImpedance(trace));
+            hub.Broadcast(StreamFrame.EncodeImpedance(trace, StreamFlags.None));
     }
 
     /// <summary>
@@ -720,7 +720,7 @@ public sealed class ImpedanceRunner(
                 lock (_stateLock)
                     _traces = [partial];
 
-                hub.Broadcast(StreamFrame.EncodeImpedance(partial));
+                hub.Broadcast(StreamFrame.EncodeImpedance(partial, StreamFlags.None));
             }
         }
 
@@ -757,7 +757,7 @@ public sealed class ImpedanceRunner(
             _warning = warning;
         }
 
-        hub.Broadcast(StreamFrame.EncodeImpedance(trace));
+        hub.Broadcast(StreamFrame.EncodeImpedance(trace, StreamFlags.None));
         BroadcastProgress(measured, steps.Length, phase);
 
         if (request.IsCalibration)
@@ -1115,7 +1115,7 @@ public sealed class ImpedanceRunner(
         lock (_stateLock)
             generatorAmpDbv = _generatorAmpDbv;
 
-        hub.Broadcast(StreamFrame.EncodeImpedanceProgress(taken, total, phase, generatorAmpDbv));
+        hub.Broadcast(StreamFrame.EncodeImpedanceProgress(taken, total, phase, generatorAmpDbv, StreamFlags.None));
     }
 
     private void SetPhase(FrequencyResponsePhase phase, string? error = null)

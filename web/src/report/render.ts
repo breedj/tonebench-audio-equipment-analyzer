@@ -55,7 +55,7 @@ export function toOverlayEntry(subject: ReportSubject): OverlayEntry | null {
     sweepFamily: data.kind === 'sweep' ? data.family : undefined,
     sweepEndFreqHz: data.kind === 'sweep' ? sweepEndFreqHzFromParams(subject.paramsJson) : undefined,
     responseTraces: data.kind === 'response' || data.kind === 'impulse' || data.kind === 'crosstalk' ? data.traces : undefined,
-    impedanceTraces: data.kind === 'impedance' ? data.traces : undefined,
+    impedanceTraces: data.kind === 'impedance' ? data.traces : data.kind === 'outputImpedance' && data.trace ? [data.trace] : undefined,
   }
 }
 
@@ -75,6 +75,8 @@ export function subjectHasChartData(subject: ReportSubject): boolean {
       return data.traces.length > 0
     case 'crosstalk':
       return data.traces.length > 0
+    case 'outputImpedance':
+      return data.trace !== null
     default:
       return false
   }
@@ -359,6 +361,34 @@ export async function renderView(
         return { png, caption: 'Impedance locus' }
       }
       return null
+    }
+
+    case 'outputImpedance': {
+      if (data.trace === null || view !== 'Bode') return null
+      const { trace, display } = data
+      const png = await renderChartPng(
+        ImpedanceChart,
+        {
+          traces: [trace],
+          overlays: overlayEntries,
+          showPhase: data.rightChannelIsReference && display.showPhase,
+          showCoherence: false,
+          showShortCal: false,
+          thickLines: display.thickLines,
+          showDataPoints: display.showDataPoints,
+          zTopOhms: display.zTopOhms,
+          zBottomOhms: display.zBottomOhms,
+          zScale: display.zScale,
+          xFromHz: display.xFromHz,
+          xToHz: display.xToHz,
+          phaseTopDeg: display.phaseTopDeg,
+          phaseBottomDeg: display.phaseBottomDeg,
+          showDampingFactor: display.showDampingFactor,
+          dampingFactorNominalOhms: data.nominalOhms,
+        },
+        options,
+      )
+      return { png, caption: 'Output impedance and damping factor against frequency' }
     }
 
     case 'crosstalk': {

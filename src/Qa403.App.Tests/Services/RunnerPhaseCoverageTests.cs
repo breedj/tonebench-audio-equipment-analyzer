@@ -43,6 +43,16 @@ public class RunnerPhaseCoverageTests
             FrequencyResponsePhase.DeterminingRange,
             FrequencyResponsePhase.Sweeping,
         ],
+        [typeof(OutputImpedanceRunner)] =
+        [
+            FrequencyResponsePhase.DeterminingLevel,
+            FrequencyResponsePhase.DeterminingRange,
+            FrequencyResponsePhase.Sweeping,
+
+            // The pause between the loaded and the open pass: the run still owns the session, the
+            // pipeline options and the input range, so it is busy until CONTINUE or a cancel.
+            FrequencyResponsePhase.WaitingForLoadChange,
+        ],
         [typeof(ImpulseResponseRunner)] =
         [
             FrequencyResponsePhase.DeterminingLevel,

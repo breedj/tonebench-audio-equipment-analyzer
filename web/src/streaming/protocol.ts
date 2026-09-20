@@ -108,6 +108,11 @@ export const STREAM_FLAG_IMD_SWEEP = 1 << 5
  */
 export const STREAM_FLAG_CROSSTALK = 1 << 7
 /**
+ * Impedance-frame-only: this curve (and this progress) came from the output-impedance runner, not
+ * the impedance runner — same curve shape, another screen's store. Mirrors StreamFlags.OutputImpedance.
+ */
+export const STREAM_FLAG_OUTPUT_IMPEDANCE = 1 << 8
+/**
  * Intermodulation-frame-only: an IMD spec is set but this tick could not resolve it (the tones are
  * closer than the analyzer's 8-bin minimum at the current FFT size). Header only, no payload — sent
  * so a client drops the last reading instead of keeping one measured at a different FFT size.
@@ -782,6 +787,8 @@ export const ResponsePhase = {
   Analyzing: 8,
   /** Capturing an impedance fixture's open or short standard. */
   Calibrating: 9,
+  /** An output-impedance run waiting for the user to change the load between its two passes. */
+  WaitingForLoadChange: 10,
 } as const
 export type ResponsePhase = (typeof ResponsePhase)[keyof typeof ResponsePhase]
 

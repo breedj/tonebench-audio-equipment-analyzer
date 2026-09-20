@@ -36,6 +36,15 @@ defineProps<{ kind: string }>()
     <circle cx="16.5" cy="9.5" r="1.1" fill="currentColor" stroke="none" />
     <circle cx="20" cy="15" r="1.1" fill="currentColor" stroke="none" />
   </svg>
+  <!-- Output impedance: an amplifier's output with a load resistor hanging on it — a source, a
+       series element and the load to ground. -->
+  <svg v-else-if="kind === 'OutputImpedance'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 12h3" />
+    <path d="M6 12l1.5-3 3 6 3-6 3 6 1.5-3H21" />
+    <path d="M18 12v3" />
+    <rect x="16" y="15" width="4" height="5" />
+    <path d="M18 20v2" />
+  </svg>
   <!-- Crosstalk: a loud trace above, a faint one below rising towards the top at the right, and an
        arrow between them — one channel leaking into the other. -->
   <svg v-else-if="kind === 'Crosstalk'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

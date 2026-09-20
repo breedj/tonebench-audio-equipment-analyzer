@@ -22,6 +22,7 @@ public sealed class MeasurementSaveService(
     FrequencyResponseRunner responseRunner,
     SteppedResponseRunner steppedResponseRunner,
     CrosstalkRunner crosstalkRunner,
+    OutputImpedanceRunner outputImpedanceRunner,
     ImpulseResponseRunner impulseRunner,
     ImpedanceRunner impedanceRunner,
     ProjectRepository projectRepository,
@@ -76,6 +77,9 @@ public sealed class MeasurementSaveService(
     /// <summary>The <c>measurement_type.kind</c> value for a crosstalk measurement. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string CrosstalkKind = "Crosstalk";
 
+    /// <summary>An amplifier's output impedance and damping factor by the load-step method — <see cref="OutputImpedanceRunner"/>.</summary>
+    public const string OutputImpedanceKind = "OutputImpedance";
+
     /// <summary>
     /// Whether a kind's result is a crosstalk curve. Its own predicate rather than a third arm of
     /// <see cref="IsFrequencyResponseKind"/>, for the impedance reason: it stores its curves in the
@@ -83,6 +87,13 @@ public sealed class MeasurementSaveService(
     /// sections are its own. What it shares is the storage and the chart.
     /// </summary>
     public static bool IsCrosstalkKind(string kind) => kind is CrosstalkKind;
+
+    /// <summary>
+    /// Its own predicate, like <see cref="IsImpedanceKind"/>: the result's Zout row is an impedance
+    /// curve (ohms in dB) and its gain rows are response curves, so it needs its own arm wherever
+    /// either family branches.
+    /// </summary>
+    public static bool IsOutputImpedanceKind(string kind) => kind is OutputImpedanceKind;
 
     /// <summary>The <c>measurement_type.kind</c> value for a swept-sine impulse response. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string ImpulseResponseKind = "ImpulseResponse";
@@ -115,7 +126,8 @@ public sealed class MeasurementSaveService(
 
     /// <summary>Whether a kind's configuration lives only in its panel, with nothing live to snapshot — see <see cref="ResolveTypeParamsJson"/>.</summary>
     public static bool HasNoLiveConfiguration(string kind) =>
-        IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind) || IsImpedanceKind(kind) || IsCrosstalkKind(kind);
+        IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind) || IsImpedanceKind(kind) || IsCrosstalkKind(kind)
+        || IsOutputImpedanceKind(kind);
 
     /// <summary>
     /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
@@ -284,6 +296,31 @@ public sealed class MeasurementSaveService(
             BandwidthReferenceHighHz: BandwidthReferenceSpec.DefaultHighHz), SerializerOptions);
 
     /// <summary>
+    /// A brand-new output-impedance type's <c>params_json</c>, kept in step with
+    /// <c>OutputImpedanceConfigPanel.vue</c>'s own defaults: the tutorial's run — 20 Hz–20 kHz at 3
+    /// points per octave, 1 W into 8 Ω, the damping factor against 8 Ω — with 4 Ω as the second load
+    /// rather than the tutorial's open circuit (safe for a tube amplifier), and magnitude only, since
+    /// the referenced method needs a second cable the bench may not have.
+    /// </summary>
+    public string DefaultOutputImpedanceParametersJson() =>
+        JsonSerializer.Serialize(new OutputImpedanceParameters(
+            StartFreqHz: 20.0,
+            EndFreqHz: 20000.0,
+            StepsPerOctave: 3,
+            LevelMode: nameof(ThdSweepLevelMode.OutputPower),
+            LevelValue: 1.0,
+            LevelUnit: nameof(ThdSweepLevelUnit.Watt),
+            LoadOhms: 8.0,
+            SecondLoadOhms: 4.0,
+            NominalOhms: 8.0,
+            RightChannelIsReference: false,
+            FftSize: OutputImpedanceRequest.DefaultFftSize,
+            Window: WindowType.Hann,
+            AverageCount: 1,
+            SampleRateHz: OutputImpedanceRequest.DefaultSampleRateHz,
+            AdaptiveResolution: true), SerializerOptions);
+
+    /// <summary>
     /// A brand-new crosstalk type's <c>params_json</c>, kept in step with
     /// <c>CrosstalkConfigPanel.vue</c>'s own defaults: the tutorial's grid (log steps, 20 Hz–20 kHz),
     /// both directions, and a generator level rather than an output-referred one — the safe
@@ -389,6 +426,9 @@ public sealed class MeasurementSaveService(
 
         if (IsCrosstalkKind(kind))
             return existingParamsJson ?? DefaultCrosstalkParametersJson();
+
+        if (IsOutputImpedanceKind(kind))
+            return existingParamsJson ?? DefaultOutputImpedanceParametersJson();
 
         if (IsImpedanceKind(kind))
             return existingParamsJson ?? DefaultImpedanceParametersJson(globalCalibrationAvailable);
@@ -788,6 +828,55 @@ public sealed class MeasurementSaveService(
     }
 
     /// <summary>
+    /// Saves the output-impedance run on screen as one measurement result: the Zout curve as a
+    /// <c>zout</c> row in the impedance units, and the two gain passes it was derived from as
+    /// <c>gain_load1</c> / <c>gain_load2</c> rows in plain dB — so a stored result can still say what
+    /// the two gains were, and the range both were read at is on its parameters.
+    /// </summary>
+    public async Task<long> SaveOutputImpedanceAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    {
+        var status = outputImpedanceRunner.Status;
+        if (status.Running)
+            throw new InvalidOperationException("Wait for the measurement to finish (or cancel it) before saving.");
+        if (status.Trace is null)
+            throw new InvalidOperationException("No output impedance has been measured yet.");
+
+        var request = outputImpedanceRunner.LastRequest
+            ?? throw new InvalidOperationException("No output impedance has been measured yet.");
+        var (firstGain, secondGain) = outputImpedanceRunner.GainTraces;
+
+        string paramsJson = JsonSerializer.Serialize(
+            new OutputImpedanceParameters(
+                request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave,
+                request.LevelMode.ToString(), request.LevelValue, request.LevelUnit.ToString(),
+                request.LoadOhms, request.SecondLoadOhms, request.NominalOhms, request.RightChannelIsReference,
+                request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
+                request.AdaptiveResolution,
+                GeneratorAmpDbv: status.GeneratorAmpDbv,
+                InputRangeDbv: status.InputRangeDbv,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+            SerializerOptions);
+
+        var traces = new List<ResponseTraceInput> { ToImpedanceTraceInput(status.Trace, ResponseTraceKind.OutputImpedance) };
+        if (firstGain is not null)
+            traces.Add(ToTraceInput(firstGain));
+        if (secondGain is not null)
+            traces.Add(ToTraceInput(secondGain));
+
+        var info = session.Info;
+        var saveRequest = new ResponseSaveRequest(
+            measurementTypeId, name, notes,
+            paramsJson,
+            info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false,
+            status.SampleRateHz, status.FftSize,
+            Channels: 2,
+            session.InputRangeDbv, session.OutputRangeDbv,
+            traces);
+
+        return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
     /// Saves the stepped-sine curves currently on screen as one measurement result.
     ///
     /// <para>Everything below the parameters record is shared with
@@ -1008,8 +1097,12 @@ public sealed class MeasurementSaveService(
     /// impedance <i>is</i> meaningful, is the resonance.</para>
     /// </summary>
     private static ResponseTraceInput ToImpedanceTraceInput(ImpedanceTrace trace) =>
+        ToImpedanceTraceInput(trace, ImpedanceTraceKindName(trace.Kind));
+
+    /// <param name="kindName">The stored kind — the trace's own for an impedance result, <see cref="ResponseTraceKind.OutputImpedance"/> for a Zout curve, which is an impedance trace on the wire.</param>
+    private static ResponseTraceInput ToImpedanceTraceInput(ImpedanceTrace trace, string kindName) =>
         new(
-            ImpedanceTraceKindName(trace.Kind),
+            kindName,
             trace.StartFreqHz,
             trace.EndFreqHz,
             trace.PeakDbOhms,
@@ -1054,6 +1147,8 @@ public sealed class MeasurementSaveService(
         FrequencyResponseTraceKind.Gain => ResponseTraceKind.Gain,
         FrequencyResponseTraceKind.CrosstalkLeftToRight => ResponseTraceKind.CrosstalkLeftToRight,
         FrequencyResponseTraceKind.CrosstalkRightToLeft => ResponseTraceKind.CrosstalkRightToLeft,
+        FrequencyResponseTraceKind.GainLoad1 => ResponseTraceKind.GainLoad1,
+        FrequencyResponseTraceKind.GainLoad2 => ResponseTraceKind.GainLoad2,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown response trace kind."),
     };
 

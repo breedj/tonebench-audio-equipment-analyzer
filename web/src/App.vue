@@ -1909,7 +1909,14 @@ function buildLiveSubject(): ReportSubject | null {
   } else if (isImpedance.value) {
     facts.push({ label: 'Reference resistor', value: `${impedanceReferenceOhms.value} Ω` })
     if (impedanceTraces.value.length > 0) facts.push({ label: 'Generator level', value: `${impedanceGeneratorAmpDbv.value.toFixed(2)} dBV` })
-    subject.data = { kind: 'impedance', traces: impedanceTraces.value, display: currentImpedanceDisplay() }
+    subject.data = {
+      kind: 'impedance',
+      traces: impedanceTraces.value,
+      display: currentImpedanceDisplay(),
+      dutType: impedanceDutType.value,
+      referenceOhms: impedanceReferenceOhms.value,
+      generatorAmpDbv: impedanceTraces.value.length > 0 && Number.isFinite(impedanceGeneratorAmpDbv.value) ? impedanceGeneratorAmpDbv.value : null,
+    }
   } else {
     if (spectrumConfig.value) {
       facts.push({ label: 'FFT size', value: String(spectrumConfig.value.fftSize) })

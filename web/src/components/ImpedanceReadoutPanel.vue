@@ -19,6 +19,18 @@ import {
   analyseInductor,
   type DutType,
 } from '../impedance/component'
+import {
+  CAPACITOR_DISSIPATION_NOTE,
+  CAPACITOR_NO_SRF_NOTE,
+  CAPACITOR_NOT_CAPACITIVE_NOTE,
+  INDUCTOR_DCR_NOTE,
+  LOUDSPEAKER_NO_Q_NOTE,
+  LOUDSPEAKER_NO_RESONANCE_NOTE,
+  LOUDSPEAKER_NOTE,
+  formatBand,
+  formatQ,
+  formatRatio,
+} from '../impedance/readings'
 
 /**
  * The numbers an impedance curve is actually read for: where it peaks, what it sits at, and — at one
@@ -27,7 +39,9 @@ import {
  * <p>The equivalent-component readout is the point of this panel. A trace tells you the impedance is
  * 8.5 ohms at 45 degrees; what a person wants to know is that it is 6 ohms in series with a
  * millihenry, which is a component they can reason about. The arithmetic lives in
- * `impedance/equivalent.ts` so it can be tested — nothing in a .vue file is.</p>
+ * `impedance/equivalent.ts` so it can be tested — nothing in a .vue file is — and the formatting of
+ * the component block and its notes in `impedance/readings.ts`, which the report's impedance
+ * chapter prints from too.</p>
  */
 const dutType = defineModel<DutType>('dutType', { required: true })
 
@@ -99,20 +113,6 @@ const inductor = computed(() => {
   const ohms = curveOhms.value
   return t && ohms ? analyseInductor(t.freqHz, ohms, t.phaseDeg) : null
 })
-
-/** "1.2 kHz–48 kHz", so a fitted value is never quoted without the band it came from. */
-function formatBand(fit: { fromHz: number; toHz: number } | null): string {
-  return fit ? `${formatHz(fit.fromHz)}–${formatHz(fit.toHz)}` : '—'
-}
-
-function formatRatio(value: number | null): string {
-  if (value === null) return '—'
-  return value < 0.01 ? value.toExponential(1) : value.toFixed(3)
-}
-
-function formatQ(q: number | null): string {
-  return q === null ? '—' : q.toFixed(2)
-}
 
 /** The measured column nearest the chosen frequency, as ohms and degrees. */
 const atCursor = computed(() => {
@@ -259,18 +259,13 @@ const componentLabel = computed(() => {
       v-if="capacitor && capacitor.dissipationFactor !== null && !capacitor.dissipationTrustworthy"
       class="text-xs text-amber-600 dark:text-amber-400"
     >
-      D is below what this fixture can resolve, so treat it as calibration residue rather than a
-      measurement: a tenth of a degree of leftover channel phase is more invented loss than a good
-      capacitor has. ESR at self-resonance is the number to trust.
+      {{ CAPACITOR_DISSIPATION_NOTE }}
     </p>
     <p v-else-if="capacitor && !capacitor.capacitance" class="text-xs text-neutral-500 dark:text-neutral-400">
-      Nothing in this sweep is clearly capacitive — the phase never goes far enough below zero for
-      the reactance to dominate the loss — so there is no capacitance to report. Either this is not a
-      capacitor, or the sweep is above its self-resonance.
+      {{ CAPACITOR_NOT_CAPACITIVE_NOTE }}
     </p>
     <p v-else-if="capacitor && capacitor.srfHz === null" class="text-xs text-neutral-500 dark:text-neutral-400">
-      The sweep never reaches self-resonance, so there is no ESR or ESL to report — only C, which is
-      the dominant term and is measured well. Raise the top of the sweep to reach them.
+      {{ CAPACITOR_NO_SRF_NOTE }}
     </p>
 
     <!-- Inductor -->
@@ -307,9 +302,7 @@ const componentLabel = computed(() => {
     </table>
 
     <p v-if="inductor && inductor.dcrOhms !== null && !inductor.dcrTrustworthy" class="text-xs text-amber-600 dark:text-amber-400">
-      The sweep never gets down to where the resistance dominates — the curve is still clearly
-      inductive at its lowest point — so DCR is a small real part read out of a large reactance and
-      any residual phase lands straight on it. Start the sweep lower.
+      {{ INDUCTOR_DCR_NOTE }}
     </p>
 
     <!-- Loudspeaker -->
@@ -351,18 +344,14 @@ const componentLabel = computed(() => {
     </table>
 
     <p v-if="resonance && resonance.qms === null" class="text-xs text-amber-600 dark:text-amber-400">
-      The sweep does not reach far enough past resonance on one side to find where the curve falls to
-      its half-power point, so there is no width to read a Q from. Widen the sweep.
+      {{ LOUDSPEAKER_NO_Q_NOTE }}
     </p>
     <p v-else-if="resonance" class="text-xs text-neutral-500 dark:text-neutral-400">
-      Vas, Bl and Mms need a second run with a known added mass or a sealed box, so they are not
-      derivable from this one and are deliberately not shown. Smoothing blunts Zmax and widens the
-      skirts, so measure with none if these numbers matter.
+      {{ LOUDSPEAKER_NOTE }}
     </p>
 
     <p v-if="dutType === 'Loudspeaker' && !resonance" class="text-xs text-neutral-500 dark:text-neutral-400">
-      No motional resonance found: the curve is flat, still rising at the top of the sweep, or its
-      peak is under half again its baseline. Nothing here is reported from a shape that is not there.
+      {{ LOUDSPEAKER_NO_RESONANCE_NOTE }}
     </p>
   </CollapsibleSection>
 

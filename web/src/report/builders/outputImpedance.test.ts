@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ImpedanceTrace } from '../../composables/useImpedance'
-import { ohmsToDbOhms } from '../../impedance/equivalent'
+import { impedanceTestTrace as trace } from '../../impedance/testTrace'
 import { DEFAULT_OUTPUT_IMPEDANCE_DISPLAY } from '../../outputImpedance/display'
 import type { ReportSubject } from '../types'
 import { chapterSections } from './index'
@@ -30,22 +29,6 @@ const params = JSON.stringify({
 
 function rowsToObject(rows: { label: string; value: string }[]) {
   return Object.fromEntries(rows.map((r) => [r.label, r.value]))
-}
-
-function trace(freqHz: number[], ohms: number[], phaseDeg: number[]): ImpedanceTrace {
-  const db = ohms.map(ohmsToDbOhms)
-  return {
-    kind: 'Impedance',
-    startFreqHz: freqHz[0],
-    endFreqHz: freqHz[freqHz.length - 1],
-    freqHz,
-    magnitudeMinDbOhms: db,
-    magnitudeMaxDbOhms: [...db],
-    phaseDeg,
-    coherence: freqHz.map(() => 1),
-    peakDbOhms: Math.max(...db),
-    peakFreqHz: freqHz[db.indexOf(Math.max(...db))],
-  }
 }
 
 const zout = trace([20, 1000, 20000], [0.028, 0.028, 0.19], [0, 0, 81.5])

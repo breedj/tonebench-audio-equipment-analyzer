@@ -1,12 +1,21 @@
 import type { ReportSection } from '../../api/client'
-import { FFT_SPECTRUM_KIND, isCrosstalkKind, isFrequencyResponseKind, isOutputImpedanceKind } from '../../measurements/kinds'
+import {
+  FFT_SPECTRUM_KIND,
+  isCrosstalkKind,
+  isFrequencyResponseKind,
+  isImpedanceKind,
+  isOutputImpedanceKind,
+  isSweepKind,
+} from '../../measurements/kinds'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { crosstalkSections } from './crosstalk'
 import { outputImpedanceSections } from './outputImpedance'
 import { frequencyResponseSections } from './frequencyResponse'
 import { descriptionSections, genericSettingsSection } from './generic'
+import { impedanceSections } from './impedance'
 import { spectrumSections } from './spectrum'
+import { sweepSections } from './sweep'
 
 /**
  * The chapter's sections for a subject of any kind, chart excluded — the chart is an image the
@@ -18,6 +27,8 @@ export function chapterSections(subject: ReportSubject, elements: readonly Repor
   if (isFrequencyResponseKind(subject.kind)) return frequencyResponseSections(subject, elements)
   if (isCrosstalkKind(subject.kind)) return crosstalkSections(subject, elements)
   if (isOutputImpedanceKind(subject.kind)) return outputImpedanceSections(subject, elements)
+  if (isSweepKind(subject.kind)) return sweepSections(subject, elements)
+  if (isImpedanceKind(subject.kind)) return impedanceSections(subject, elements)
   if (subject.kind === FFT_SPECTRUM_KIND) return spectrumSections(subject, elements)
 
   const sections: ReportSection[] = []

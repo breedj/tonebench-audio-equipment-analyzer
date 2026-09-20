@@ -179,7 +179,14 @@ const { showPage } = useManual()
         a time (the impulse, the harmonics, the decays, the impedance locus) is drawn once per
         measurement even in a combined report. Then the elements: the chart, the description (the
         notes on the result and on the measurement), the settings it ran with, and its readings —
-        the Measurements panel for a response; for an FFT the <strong>Metrics</strong> tiles chosen
+        the Measurements panel for a response, a crosstalk or a damping-factor run; for the three
+        sweeps (THD vs frequency, THD vs amplitude, IMD vs amplitude) the worst and best figure per
+        channel and where they sit, then every point in the chart's own metrics table, in the unit
+        the display panel is set to; for an impedance run the peak, minimum and median |Z|, the drive
+        current and the reference resistor, then the component fit for whatever the
+        <strong>Device under test</strong> dropdown says is on the fixture — the capacitor's C, ESR
+        and ESL, the inductor's L and DCR, or the loudspeaker's Thiele-Small numbers — with the same
+        caveats the readout panel shows. For an FFT the <strong>Metrics</strong> tiles chosen
         with the Metrics button, the <strong>Harmonics table</strong>, and the
         <strong>Oscilloscope</strong> and <strong>Waterfall</strong> under the spectrum. Those last
         two exist only for the measurement on screen (a stored result keeps no waveform and no

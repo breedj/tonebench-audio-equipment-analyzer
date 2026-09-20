@@ -1,4 +1,11 @@
-import { FFT_SPECTRUM_KIND, isCrosstalkKind, isFrequencyResponseKind, isOutputImpedanceKind } from '../measurements/kinds'
+import {
+  FFT_SPECTRUM_KIND,
+  isCrosstalkKind,
+  isFrequencyResponseKind,
+  isImpedanceKind,
+  isOutputImpedanceKind,
+  isSweepKind,
+} from '../measurements/kinds'
 
 /**
  * The elements a report of a measurement can include, by measurement kind.
@@ -61,6 +68,18 @@ const OUTPUT_IMPEDANCE_MEASUREMENTS: ReportElement = {
   hint: 'Zout and damping factor at 20 Hz, 1 kHz and 20 kHz, the worst point and the median — the Measurements panel.',
 }
 
+const SWEEP_MEASUREMENTS: ReportElement = {
+  id: 'measurements',
+  label: 'Measurements',
+  hint: "Per channel: the worst and best THD or IMD and where they occur, then every point's metrics — the chart's own table.",
+}
+
+const IMPEDANCE_MEASUREMENTS: ReportElement = {
+  id: 'measurements',
+  label: 'Measurements',
+  hint: 'Peak, minimum and median |Z|, the drive current and, for the Component the screen selects, its capacitor, inductor or Thiele-Small fit.',
+}
+
 const METRICS: ReportElement = {
   id: 'metrics',
   label: 'Metrics',
@@ -92,6 +111,8 @@ export function reportElementsForKind(kind: string | null | undefined): readonly
   if (isFrequencyResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, MEASUREMENTS]
   if (isCrosstalkKind(kind)) return [CHART, DESCRIPTION, SETTINGS, CROSSTALK_MEASUREMENTS]
   if (isOutputImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, OUTPUT_IMPEDANCE_MEASUREMENTS]
+  if (isSweepKind(kind)) return [CHART, DESCRIPTION, SETTINGS, SWEEP_MEASUREMENTS]
+  if (isImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPEDANCE_MEASUREMENTS]
   if (kind === FFT_SPECTRUM_KIND) return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, OSCILLOSCOPE, WATERFALL]
   return GENERIC_REPORT_ELEMENTS
 }

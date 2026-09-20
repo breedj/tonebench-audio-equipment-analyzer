@@ -17,9 +17,9 @@ import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
 import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
+import { sweepMetricColumns, sweepMetricRow } from '../sweep/readings'
 import {
   decadeOrFallbackSplits,
-  formatSweepX,
   logMinorGridAxis,
   sweepXAxis,
   sweepXLabel,
@@ -577,62 +577,17 @@ function formatYTick(v: number): string {
 }
 
 /**
- * A distortion/noise percentage as the metrics pane's active unit wants it — the same
- * percentToDb conversion the chart itself plots with, so a row's numbers always match wherever
- * the corresponding trace actually sits on screen. Unlike toY (which the chart uses), this never
- * returns null for a non-positive value: the pane reports a real reading, not a gap in a line.
- */
-function formatDistortion(percent: number): string {
-  if (!Number.isFinite(percent)) return '—'
-  if (props.unit === 'db') return `${percentToDb(percent).toFixed(2)} dB`
-  if (!(percent > 0)) return '0%'
-  const decimals = percent >= 1 ? 2 : Math.min(6, Math.max(0, Math.ceil(-Math.log10(percent)) + 1))
-  return `${percent.toFixed(decimals)}%`
-}
-
-/** Magnitude is a gain in dB on both unit modes — see TRACES' own remarks on why it has no percent form. */
-function formatMagnitude(gainDb: number): string {
-  return Number.isFinite(gainDb) ? `${gainDb.toFixed(2)} dB` : '—'
-}
-
-/** "1 mW (8 Ω)" — the load a sweep's Power figure was computed against, from the same field SweepConfigPanel's own load input edits. */
-function formatPower(watt: number): string {
-  if (!Number.isFinite(watt)) return '—'
-  const mw = watt * 1000
-  const value = mw >= 100 ? mw.toFixed(0) : mw >= 10 ? mw.toFixed(1) : mw.toFixed(2)
-  return `${value} mW (${loadOhms.value} Ω)`
-}
-
-/**
- * The metrics table's columns, in order, for one run's method. One list rather than a label
- * carried alongside every value: the header is written once per block and the rows underneath it
- * are bare values, so the two only line up if they come from the same order — see metricsFor,
- * which returns exactly this many strings. Per run rather than one global list because a
- * frequency-normalized run reads nTHD/nD2… while a conventional one overlaid on it reads THD/D2…,
- * and the header is the only place that difference is stated.
+ * The metrics table's columns and rows come from sweep/readings.ts — the same functions the
+ * report's sweep chapter tabulates every point with, so a figure on paper is the figure on screen.
+ * The load a Power cell is quoted against is the shared one SweepConfigPanel's own load input edits.
  */
 function metricColumns(method: ThdMethodName, traceFamily: SweepTraceFamily = family.value): string[] {
-  const t = (key: SweepTraceKey) => sweepTraceLabel(key, method, traceFamily)
-  return [
-    sweepXLabel(props.xAxis), t('thd'), 'Magnitude', t('d2'), t('d3'), t('d4'), t('d5'), t('d6plus'), 'Power', 'Noise floor',
-  ]
+  return sweepMetricColumns(method, traceFamily, props.xAxis)
 }
 
 /** One channel's row of values for the metrics table, in metricColumns order, under its run's method. */
 function metricsFor(point: ThdSweepPoint, method: ThdMethodName): string[] {
-  const v = (key: SweepTraceKey) => valueOf(point, key, method)
-  return [
-    formatSweepX(xOf(point), props.xAxis),
-    formatDistortion(v('thd')),
-    formatMagnitude(point.gainDb),
-    formatDistortion(v('d2')),
-    formatDistortion(v('d3')),
-    formatDistortion(v('d4')),
-    formatDistortion(v('d5')),
-    formatDistortion(v('d6plus')),
-    formatPower(point.powerWatt),
-    formatDistortion(v('noise')),
-  ]
+  return sweepMetricRow(point, method, props.xAxis, props.unit, loadOhms.value)
 }
 
 /**

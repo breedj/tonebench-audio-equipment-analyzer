@@ -14,6 +14,7 @@ import { useLoadOhms } from '../composables/useLoadOhms'
 import { toImpedanceTraces, toResponseTraces, toSweepPoints } from '../composables/useMeasurements'
 import { toImdSweepPoints } from '../imd/points'
 import { DEFAULT_SELECTED_METRICS } from '../composables/useMetricSelection'
+import { isDutType, type DutType } from '../impedance/component'
 import { impedanceDisplayFromParams } from '../impedance/display'
 import { crosstalkDisplayFromParams } from '../crosstalk/display'
 import { outputImpedanceDisplayFromParams } from '../outputImpedance/display'
@@ -198,10 +199,15 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
   }
 
   if (isImpedanceKind(detail.kind)) {
+    const run = impedanceRunFromParams(detail.paramsJson)
     return {
       kind: 'impedance',
       traces: toImpedanceTraces((await api.getStoredResponse(detail.resultId)).traces),
       display: impedanceDisplayFromParams(displayParams),
+      // The component is a screen setting, stored with the display on the type — not with the run.
+      dutType: impedanceDutTypeFromParams(displayParams),
+      referenceOhms: run.referenceOhms,
+      generatorAmpDbv: run.generatorAmpDbv,
     }
   }
 
@@ -227,6 +233,25 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
   }
 
   return { kind: 'none' }
+}
+
+/** The two run facts an impedance chapter needs beside its curve, read off a result's `params_json`. */
+function impedanceRunFromParams(paramsJson: string): { referenceOhms: number; generatorAmpDbv: number | null } {
+  try {
+    const params = JSON.parse(paramsJson) as { referenceOhms?: unknown; generatorAmpDbv?: unknown }
+    return {
+      referenceOhms: typeof params.referenceOhms === 'number' && params.referenceOhms > 0 ? params.referenceOhms : 0,
+      generatorAmpDbv: typeof params.generatorAmpDbv === 'number' ? params.generatorAmpDbv : null,
+    }
+  } catch {
+    return { referenceOhms: 0, generatorAmpDbv: null }
+  }
+}
+
+/** What the type's Component dropdown says is on the fixture; None for a type that never chose, or none at all. */
+function impedanceDutTypeFromParams(paramsJson: string | null | undefined): DutType {
+  const stored = parseStoredDisplay(paramsJson) as { chartDutType?: unknown } | null
+  return isDutType(stored?.chartDutType) ? stored.chartDutType : 'None'
 }
 
 /** The two run facts an output-impedance chapter needs beside its curve, read off a result's `params_json`. */

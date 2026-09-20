@@ -166,8 +166,9 @@ describe('frequencyResponseSections / chapterSections', () => {
   it('routes a response kind to its builder and anything else to the generic one', () => {
     expect(chapterSections(subject, ['settings'])[0].rows!.map((r) => r.label)).toContain('Bandwidth reference')
 
-    const other = chapterSections({ ...subject, kind: 'Impedance', paramsJson: JSON.stringify({ referenceOhms: 100, chartView: 'x' }) }, ['settings'])
-    expect(other).toEqual([{ kind: 'keyValues', title: 'Settings', rows: [{ label: 'Reference ohms', value: '100' }] }])
+    // The impulse response is the one kind still without a builder of its own.
+    const other = chapterSections({ ...subject, kind: 'ImpulseResponse', paramsJson: JSON.stringify({ frequencySpanHz: 24000, chartView: 'x' }) }, ['settings'])
+    expect(other).toEqual([{ kind: 'keyValues', title: 'Settings', rows: [{ label: 'Frequency span hz', value: '24000' }] }])
   })
 })
 

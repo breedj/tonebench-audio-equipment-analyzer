@@ -11,6 +11,7 @@ import type {
 } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import type { ImpedanceTrace } from '../composables/useImpedance'
+import type { DutType } from '../impedance/component'
 import type { ImpedanceDisplay } from '../impedance/display'
 import type { CrosstalkDisplay } from '../crosstalk/display'
 import type { OutputImpedanceDisplay } from '../outputImpedance/display'
@@ -114,6 +115,12 @@ export type ReportSubjectData =
       kind: 'impedance'
       traces: ImpedanceTrace[]
       display: ImpedanceDisplay
+      /** What the type's Component dropdown says is on the fixture — which component fit the chapter prints. */
+      dutType: DutType
+      /** The series resistor the run was measured through. */
+      referenceOhms: number
+      /** The generator level the run used, for the drive current; null when the run did not record one. */
+      generatorAmpDbv: number | null
     }
   | {
       kind: 'outputImpedance'

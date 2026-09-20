@@ -203,7 +203,9 @@ describe('report element defaults', () => {
   it('includes everything a kind offers except the settings until the user chooses', () => {
     expect(defaultReportElements('FFTSpectrum')).toEqual(['chart', 'description', 'metrics', 'harmonics', 'oscilloscope', 'waterfall'])
     expect(defaultReportElements('FrequencyResponse')).toEqual(['chart', 'description', 'measurements'])
-    expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description'])
+    expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description', 'measurements'])
+    expect(defaultReportElements('Impedance')).toEqual(['chart', 'description', 'measurements'])
+    expect(defaultReportElements('ImpulseResponse')).toEqual(['chart', 'description'])
   })
 })
 

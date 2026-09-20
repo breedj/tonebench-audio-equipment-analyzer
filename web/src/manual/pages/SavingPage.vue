@@ -127,16 +127,41 @@ const { showPage } = useManual()
     </p>
     <ul>
       <li>
-        <strong>Screenshot</strong> downloads the chart on screen as a PNG, after one question:
-        <strong>Colour</strong> or <strong>Black and white</strong>. Black and white is for a
-        monochrome printer — every hue becomes its grey, while the line styles that tell a history
-        overlay from a live curve are kept. The picture is always the same size — 1600 × 900 pixels
-        — and always in the light colour scheme, whatever the window and the theme are doing, so a
-        series of screenshots lines up in a document. It shows the window on screen, zoom included,
-        with a title line and a legend above the plot, and the axes carry their units. Every view and
-        projection exports — the spectrum, the distortion sweep, the Bode, Nyquist and Nichols
-        responses, the impulse screen's five views, the impedance curve and its locus — and the
-        history items ticked on in the checklist come along.
+        <strong>Screenshot</strong> makes a PNG of the chart on screen, after a short dialog. It is
+        always in the light colour scheme, whatever the window and the theme are doing, and shows the
+        window on screen, zoom included, with the measurement's name and a legend above the plot and
+        units on the axes. Every view and projection exports — the spectrum, the distortion sweep,
+        the Bode, Nyquist and Nichols responses, the impulse screen's five views, the impedance
+        curve and its locus — and the history items ticked on in the checklist come along. The
+        dialog's answers are remembered for the next screenshot:
+        <ul>
+          <li>
+            <strong>Title</strong> — printed centred above the chart; empty for none.
+            <strong>Save text</strong> keeps it for the next screenshot, so a caption need not be
+            retyped for every chart of a session; unticked, the box starts empty next time.
+          </li>
+          <li>
+            <strong>Add date</strong> prints the date and time at the bottom right, in the format
+            chosen under Configuration ▸ General ▸ <strong>Date and time format</strong>.
+          </li>
+          <li>
+            <strong>Image size</strong>, from Smallest (500 pixels wide) to XXX Large (2000), in steps
+            of 250, and <strong>Aspect ratio</strong> 3 : 2 or 2 : 1 — the picture's size,
+            title and date included, so a series of screenshots lines up in a document. The chart
+            is drawn at that size rather than scaled, so a small picture has large labels relative
+            to its plot and a large one fine ones.
+          </li>
+          <li>
+            <strong>Destination</strong> — copy to the clipboard, save to a file (a download,
+            named after the measurement), or both. The clipboard copy needs the browser window to
+            be the active one.
+          </li>
+          <li>
+            <strong>Colour</strong> or <strong>Black and white</strong>. Black and white is for a
+            monochrome printer — every hue becomes its grey, while the line styles that tell a
+            history overlay from a live curve are kept.
+          </li>
+        </ul>
       </li>
       <li>
         <strong>Report…</strong> makes a PDF of the measurement that is open. The dialog lists the

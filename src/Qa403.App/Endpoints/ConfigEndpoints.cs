@@ -238,6 +238,76 @@ public static class ConfigEndpoints
             return Results.Ok(config);
         });
 
+        // How dates are written on screenshots and reports. Client-owned vocabulary, like the report
+        // settings: the server keeps an id and the client decides what it means.
+        group.MapGet("/date-time-format", async (
+            ConfigRepository repo, CancellationToken ct) =>
+        {
+            string? stored = await repo.GetAsync(ConfigRepository.DateTimeFormatKey, ct);
+            if (string.IsNullOrWhiteSpace(stored))
+                return Results.Ok(DateTimeFormatConfig.Default);
+
+            try
+            {
+                var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.DateTimeFormatConfig);
+                return Results.Ok(config is { IsValid: true } ? config : DateTimeFormatConfig.Default);
+            }
+            catch (JsonException)
+            {
+                return Results.Ok(DateTimeFormatConfig.Default);
+            }
+        });
+
+        group.MapPut("/date-time-format", async (
+            DateTimeFormatConfig config, ConfigRepository repo, CancellationToken ct) =>
+        {
+            if (!config.IsValid)
+                return Results.BadRequest("A date/time format id must be a non-empty string.");
+
+            await repo.SetAsync(
+                ConfigRepository.DateTimeFormatKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.DateTimeFormatConfig),
+                ct);
+
+            return Results.Ok(config);
+        });
+
+        // The Screenshot dialog's remembered answers -- size, aspect ratio, destination, and the
+        // title when the dialog was told to keep it. Same contract as the rest: defaults rather than
+        // 404, and an unreadable document is the defaults.
+        group.MapGet("/screenshot-settings", async (
+            ConfigRepository repo, CancellationToken ct) =>
+        {
+            string? stored = await repo.GetAsync(ConfigRepository.ScreenshotSettingsKey, ct);
+            if (string.IsNullOrWhiteSpace(stored))
+                return Results.Ok(ScreenshotSettingsConfig.Default);
+
+            try
+            {
+                var settings = JsonSerializer.Deserialize(stored, AppJsonContext.Default.ScreenshotSettingsConfig);
+                return Results.Ok(settings is { IsValid: true } ? settings : ScreenshotSettingsConfig.Default);
+            }
+            catch (JsonException)
+            {
+                return Results.Ok(ScreenshotSettingsConfig.Default);
+            }
+        });
+
+        group.MapPut("/screenshot-settings", async (
+            ScreenshotSettingsConfig settings, ConfigRepository repo, CancellationToken ct) =>
+        {
+            if (!settings.IsValid)
+                return Results.BadRequest(
+                    $"A screenshot width must be {ScreenshotSettingsConfig.MinWidthPx}-{ScreenshotSettingsConfig.MaxWidthPx} px, and the aspect ratio and destination must be named.");
+
+            await repo.SetAsync(
+                ConfigRepository.ScreenshotSettingsKey,
+                JsonSerializer.Serialize(settings, AppJsonContext.Default.ScreenshotSettingsConfig),
+                ct);
+
+            return Results.Ok(settings);
+        });
+
         group.MapPut("/ui-layout", async (
             UiLayoutConfig layout, ConfigRepository repo, CancellationToken ct) =>
         {

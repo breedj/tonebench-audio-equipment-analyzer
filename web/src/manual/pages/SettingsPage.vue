@@ -59,6 +59,19 @@
           </td>
         </tr>
         <tr>
+          <td>Date and time format</td>
+          <td>
+            How a date and time are written wherever the app puts one on paper: the Screenshot
+            dialog's <strong>Add date</strong> line, and a report's <strong>Taken</strong> row and
+            <strong>Generated</strong> line. <strong>System</strong> follows this PC's region settings,
+            as the app always did; the fixed formats (ISO <code>2026-09-20 14:05</code>,
+            day-month-year, month/day/year with AM/PM, and two with the month spelt) read the same
+            wherever the document ends up, which is the point of choosing one — a report sent
+            abroad should not need its reader to guess whether 09/10 is September or October. Each
+            row of the dropdown shows the current time in that format.
+          </td>
+        </tr>
+        <tr>
           <td>Check for updates</td>
           <td>
             Periodically checks for a newer release and shows a dismissible banner. It never

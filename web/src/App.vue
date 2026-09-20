@@ -85,7 +85,10 @@ import { responseDisplayFromParams, type ResponseDisplay } from './response/disp
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
 import { impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
-import { CHART_EXPORT_HEIGHT_PX, CHART_EXPORT_WIDTH_PX, monochromeChartPng } from './charts/exportChart'
+import { monochromeChartPng } from './charts/exportChart'
+import { copyPngToClipboard, frameChartPng, screenshotFrameLayout, type ScreenshotSettings } from './screenshot'
+import { useScreenshotSettings } from './composables/useScreenshotSettings'
+import { useDateTimeFormat } from './composables/useDateTimeFormat'
 import { downloadBlob, safeFileName } from './report/download'
 import { reportHasChart } from './report/elements'
 import type { ReportSubject } from './report/types'
@@ -1548,20 +1551,47 @@ const screenshotAvailable = computed(() => {
 })
 
 /**
- * The chart as a PNG of a fixed size, in the light palette, at the zoom on screen — in colour or in
- * black and white, which the Screenshot dialog asks first. The chart draws it itself (see
- * FrequencyResponseChart.exportPng and its siblings), so what is in the file is what is on screen —
- * only the size and the colours are pinned.
+ * The chart as a PNG, in the light palette, at the zoom on screen — at the size, ratio and colours
+ * the Screenshot dialog asks, inside a frame carrying its title and date, to the clipboard, a file,
+ * or both. The chart draws itself (see FrequencyResponseChart.exportPng and its siblings) at the
+ * frame's chart area, so what is in the file is what is on screen; the frame and the greys are
+ * post-processes (screenshot.ts, monochromeChartPng). The answers are remembered by
+ * useScreenshotSettings for the next screenshot.
  */
 const screenshotDialogOpen = ref(false)
+const { remember: rememberScreenshotSettings } = useScreenshotSettings()
+const { format: formatDateTimePreference, load: loadDateTimeFormat } = useDateTimeFormat()
+void loadDateTimeFormat()
 
-async function screenshotChart(monochrome: boolean) {
+async function screenshotChart(settings: ScreenshotSettings) {
   screenshotDialogOpen.value = false
+  void rememberScreenshotSettings(settings)
   const chart = chartOnScreen()
   if (!chart) return
   try {
-    const png = await chart.exportPng({ width: CHART_EXPORT_WIDTH_PX, height: CHART_EXPORT_HEIGHT_PX, captureZoom: true })
-    downloadBlob(monochrome ? await monochromeChartPng(png) : png, `${safeFileName(currentType.value?.name ?? 'chart')}.png`)
+    const layout = screenshotFrameLayout(settings.widthPx, settings.aspectRatio, settings.title, settings.addDate)
+    const chartPng = await chart.exportPng({ width: layout.chartWidth, height: layout.chartHeight, captureZoom: true })
+    const framed = await frameChartPng({
+      chart: chartPng,
+      layout,
+      title: settings.title,
+      date: settings.addDate ? formatDateTimePreference(new Date()) : '',
+    })
+    const png = settings.monochrome ? await monochromeChartPng(framed) : framed
+
+    if (settings.destination !== 'clipboard') {
+      downloadBlob(png, `${safeFileName(currentType.value?.name ?? 'chart')}.png`)
+    }
+    if (settings.destination !== 'file') {
+      try {
+        await copyPngToClipboard(png)
+      } catch (e) {
+        // The browser's own sentence ("Write permission denied") says nothing about what was
+        // asked or what still happened; a file already saved is worth saying.
+        const saved = settings.destination === 'both' ? ' The file was saved.' : ''
+        throw new Error(`Could not copy the screenshot to the clipboard: ${(e as Error).message}${saved}`)
+      }
+    }
   } catch (e) {
     reportError((e as Error).message)
   }
@@ -2521,7 +2551,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               type="button"
               class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="!screenshotAvailable"
-              title="Downloads the chart on screen — whichever view or projection is showing — as a PNG of a fixed size (1600×900) in the light colour scheme, at the zoom shown."
+              title="The chart on screen — whichever view or projection is showing — as a PNG in the light colour scheme, at the zoom shown: to the clipboard or a file, at a chosen size, with a title and the date if wanted."
               @click="screenshotDialogOpen = true"
             >
               <ToolbarIcon name="screenshot" />

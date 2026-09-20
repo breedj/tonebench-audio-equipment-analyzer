@@ -89,6 +89,8 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ImportWeightingRequest))]
 [JsonSerializable(typeof(StartupConfig))]
 [JsonSerializable(typeof(AutosaveConfig))]
+[JsonSerializable(typeof(DateTimeFormatConfig))]
+[JsonSerializable(typeof(ScreenshotSettingsConfig))]
 [JsonSerializable(typeof(RecentProjectsConfig))]
 [JsonSerializable(typeof(LastOpenedProjectConfig))]
 // The project session: the open file, its dialogs' requests, the recent list and the file browser.

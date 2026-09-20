@@ -5,11 +5,13 @@ import { api } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
 import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
+import { useDateTimeFormat } from '../composables/useDateTimeFormat'
 import { useDevice } from '../composables/useDevice'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useStartupConfig } from '../composables/useStartupConfig'
 import { useUpdateCheck } from '../composables/useUpdateCheck'
+import { DATE_TIME_FORMATS, formatDateTime, type DateTimeFormatId } from '../dateTime'
 import { formatOhms } from '../impedance/equivalent'
 import { formatHz } from '../response/format'
 
@@ -25,6 +27,8 @@ const { showWelcomeOnStartup, load: loadStartupConfig, setShowWelcomeOnStartup }
 void loadStartupConfig()
 const { autosaveEnabled, load: loadAutosave, setAutosaveEnabled } = useAutosave()
 void loadAutosave()
+const { dateTimeFormat, load: loadDateTimeFormat, setDateTimeFormat } = useDateTimeFormat()
+void loadDateTimeFormat()
 const { fixture, hasCalibration, error: fixtureError, load: loadFixture, save: saveFixture, clear: clearFixture } =
   useImpedanceFixture()
 
@@ -72,6 +76,19 @@ async function onCaptureDelayChange(event: Event) {
   await setCaptureDelay(Number.isFinite(ms) && ms >= 0 ? Math.min(ms, 10000) : 0)
   input.value = String(captureDelayMs.value)
 }
+
+// The dropdown's rows carry a live example of "now" in each format, taken once per open: the
+// pattern alone ("DD-MM-YYYY") reads as a puzzle, the date itself does not.
+const dateFormatExampleAt = ref(new Date())
+watch(
+  () => props.open,
+  (open) => {
+    if (open) dateFormatExampleAt.value = new Date()
+  },
+)
+const dateFormatOptions = computed(() =>
+  DATE_TIME_FORMATS.map((f) => ({ id: f.id, label: `${formatDateTime(dateFormatExampleAt.value, f.id)}  —  ${f.label}` })),
+)
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'Auto', label: 'Auto' },
@@ -172,6 +189,20 @@ async function clearStoredCalibration() {
               class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             >
               <option v-for="o in THEME_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+          </label>
+
+          <label
+            class="flex flex-col gap-1"
+            title="How the date and time are written on a screenshot's date line and in a report's Taken and Generated lines. System follows this PC's region settings; the fixed formats read the same wherever the document ends up."
+          >
+            Date and time format
+            <select
+              :value="dateTimeFormat"
+              class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              @change="setDateTimeFormat(($event.target as HTMLSelectElement).value as DateTimeFormatId)"
+            >
+              <option v-for="o in dateFormatOptions" :key="o.id" :value="o.id">{{ o.label }}</option>
             </select>
           </label>
 

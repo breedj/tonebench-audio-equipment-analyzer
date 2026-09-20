@@ -9,6 +9,7 @@ import {
   type ReportSection,
 } from '../api/client'
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
+import { formatWithPreference } from '../composables/useDateTimeFormat'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { toImpedanceTraces, toResponseTraces, toSweepPoints } from '../composables/useMeasurements'
 import { toImdSweepPoints } from '../imd/points'
@@ -51,8 +52,9 @@ export function kindLabel(kind: string): string {
 
 function formatTimestamp(subject: ReportSubject): string {
   if (!subject.timestampUtc) return subject.data.kind === 'none' ? 'Not measured — settings and notes only' : 'On screen — not saved'
+  // Configuration ▸ General ▸ Date and time format — the same choice the Screenshot's date line follows.
   const date = new Date(subject.timestampUtc)
-  return Number.isNaN(date.getTime()) ? subject.timestampUtc : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? subject.timestampUtc : formatWithPreference(date)
 }
 
 export function formatRangeDbv(dbv: number | null | undefined): string | null {
@@ -381,7 +383,7 @@ export async function buildMeasurementReport(plan: ReportPlan, onProgress?: (mes
   return {
     title: plan.subjects.length === 1 ? chapters[0].title : first.typeName,
     subtitle: first.projectName,
-    generated: new Date().toLocaleString(),
+    generated: formatWithPreference(new Date()),
     notes: null,
     chapters,
   }
@@ -412,7 +414,7 @@ export async function buildProjectReport(
   return {
     title: project.name,
     subtitle: 'Project report',
-    generated: new Date().toLocaleString(),
+    generated: formatWithPreference(new Date()),
     notes: includeProjectNotes ? project.notes : null,
     chapters,
   }

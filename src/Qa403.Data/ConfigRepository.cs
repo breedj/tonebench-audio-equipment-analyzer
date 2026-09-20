@@ -108,6 +108,50 @@ public sealed record AutosaveConfig(bool Enabled = true)
 }
 
 /// <summary>
+/// How a date and time is written wherever the app puts one on paper -- the Screenshot's date
+/// line, a report's "Taken" row and its "Generated" line. The vocabulary is the client's
+/// (<c>web/src/dateTime.ts</c>): the server keeps the id and checks only that it is a non-empty
+/// string, so a build that adds a format needs no server change, and an id this build's client
+/// does not know falls back to the system locale on the way out.
+/// </summary>
+public sealed record DateTimeFormatConfig(string Format = "system")
+{
+    public static DateTimeFormatConfig Default { get; } = new();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid => !string.IsNullOrWhiteSpace(Format) && Format.Length <= 64;
+}
+
+/// <summary>
+/// The Screenshot dialog's answers, kept so the next screenshot needs none of them asked again.
+/// The title rides along only while <paramref name="SaveText"/> is on -- unticked, the client
+/// sends it as null and a reopened dialog starts blank. The size is a pixel width, the aspect
+/// ratio and destination are the client's own ids (<c>web/src/screenshot.ts</c>), validated no
+/// further than "present", for the same reason as <see cref="DateTimeFormatConfig"/>.
+/// </summary>
+public sealed record ScreenshotSettingsConfig(
+    string? Title = null,
+    bool SaveText = false,
+    bool AddDate = false,
+    int WidthPx = 1500,
+    string AspectRatio = "3:2",
+    string Destination = "file",
+    bool Monochrome = false)
+{
+    public const int MinWidthPx = 500;
+    public const int MaxWidthPx = 2000;
+
+    public static ScreenshotSettingsConfig Default { get; } = new();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid =>
+        WidthPx >= MinWidthPx && WidthPx <= MaxWidthPx
+        && !string.IsNullOrWhiteSpace(AspectRatio) && AspectRatio.Length <= 16
+        && !string.IsNullOrWhiteSpace(Destination) && Destination.Length <= 32
+        && (Title is null || Title.Length <= 500);
+}
+
+/// <summary>
 /// The project file that was open most recently — what <see cref="StartupConfig"/> reopens. Server-owned:
 /// written by the project session on every open, never by the client, and distinct from the recent
 /// list's head because Close leaves it alone (the user closed the project, not their preference for
@@ -232,6 +276,12 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The autosave preference's key. One document, see <see cref="AutosaveConfig"/>.</summary>
     public const string AutosaveKey = "projects.autosave";
+
+    /// <summary>The date/time format's key. One document, see <see cref="DateTimeFormatConfig"/>.</summary>
+    public const string DateTimeFormatKey = "ui.dateTimeFormat";
+
+    /// <summary>The Screenshot dialog's remembered answers. One document, see <see cref="ScreenshotSettingsConfig"/>.</summary>
+    public const string ScreenshotSettingsKey = "screenshot.settings";
 
     /// <summary>The last opened project's key. One document, see <see cref="LastOpenedProjectConfig"/>.</summary>
     public const string LastOpenedProjectKey = "projects.lastOpened";

@@ -1334,6 +1334,25 @@ export interface AutosaveConfig {
   enabled: boolean
 }
 
+/** Configuration ▸ General ▸ Date and time format: an id from `dateTime.ts`; the server keeps the string. */
+export interface DateTimeFormatConfig {
+  format: string
+}
+
+/**
+ * The Screenshot dialog's remembered answers (`screenshot.settings`). `title` is null unless
+ * `saveText` was on; the ids are `screenshot.ts`'s and the server only checks they are present.
+ */
+export interface ScreenshotSettingsConfig {
+  title: string | null
+  saveText: boolean
+  addDate: boolean
+  widthPx: number
+  aspectRatio: string
+  destination: string
+  monochrome: boolean
+}
+
 export interface FileBrowseEntry {
   name: string
   path: string
@@ -2040,6 +2059,16 @@ export const api = {
 
   setAutosaveConfig: (config: AutosaveConfig) =>
     request<AutosaveConfig>('/config/autosave', { method: 'PUT', body: JSON.stringify(config) }),
+
+  getDateTimeFormatConfig: () => request<DateTimeFormatConfig>('/config/date-time-format'),
+
+  setDateTimeFormatConfig: (config: DateTimeFormatConfig) =>
+    request<DateTimeFormatConfig>('/config/date-time-format', { method: 'PUT', body: JSON.stringify(config) }),
+
+  getScreenshotSettings: () => request<ScreenshotSettingsConfig>('/config/screenshot-settings'),
+
+  setScreenshotSettings: (settings: ScreenshotSettingsConfig) =>
+    request<ScreenshotSettingsConfig>('/config/screenshot-settings', { method: 'PUT', body: JSON.stringify(settings) }),
 
   /**
    * One directory of the server's file system, for the in-app file dialog. No path lists the

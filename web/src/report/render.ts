@@ -109,7 +109,7 @@ export async function renderExtraCharts(
   const options = exportOptions(null, monochrome)
 
   if (elements.includes('oscilloscope') && Object.keys(data.scope).length > 0) {
-    const png = await renderChartPng(OscilloscopeChart, { scope: data.scope, status: data.status }, options)
+    const png = await renderChartPng(OscilloscopeChart, { scope: data.scope, residual: data.scopeResidual ?? {}, status: data.status }, options)
     charts.push({ png, caption: 'Oscilloscope' })
   }
 
@@ -182,7 +182,7 @@ export async function renderView(
       const provision: ChartProvision = { key: SPECTRUM_DISPLAY_KEY, value: data.display }
       const png = await renderChartPng(
         SpectrumChart,
-        { spectrum: data.spectrum, meters: data.meters, overlays: overlayEntries },
+        { spectrum: data.spectrum, meters: data.meters, multitone: data.multitone ?? {}, overlays: overlayEntries },
         options,
         [provision],
       )
@@ -277,6 +277,9 @@ export async function renderView(
               xToHz: display.freqToHz,
               phaseTopDeg: display.phaseTopDeg,
               phaseBottomDeg: display.phaseBottomDeg,
+              delayView: display.delayView,
+              delayTopUs: display.delayTopUs,
+              delayBottomUs: display.delayBottomUs,
               phaseKind: 'PerTrace',
             },
             options,

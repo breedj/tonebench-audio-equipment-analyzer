@@ -37,7 +37,7 @@ import { chapterSections } from './builders'
 import { blobToBase64 } from './download'
 import type { ReportElementId } from './elements'
 import { renderExtraCharts, renderView, viewIsCombinable, type RenderedChart } from './render'
-import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedNoiseFrames, storedSpectrumFrames } from './spectrumFrames'
+import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedNoiseFrames, storedSpectrumFrames, storedMultitoneFrames } from './spectrumFrames'
 import type { WeightingSpec } from '../streaming/protocol'
 import { NO_WEIGHTING, weightingFromStored, weightingLabel } from '../weighting'
 import { subjectLabel, type ReportPlan, type ReportSubject, type ReportSubjectData } from './types'
@@ -153,6 +153,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       spectrum: storedSpectrumFrames(detail),
       meters: storedMetersFrames(detail),
       intermodulation: storedIntermodulationFrames(detail, storedImdAnalysis(detail.paramsJson)),
+      multitone: storedMultitoneFrames(detail),
       noise: storedNoiseFrames(detail, noiseContext.weighting, noiseContext.band),
       weightingLabel: weightingLabel(noiseContext.weighting, tableNames.user1, tableNames.user2),
       display: createSpectrumDisplaySource(

@@ -264,6 +264,8 @@ public class StreamFrameTests
             MagnitudeMaxDb: [-3.0f, 0.1f, 0.2f],
             PhaseDeg: [-12.0f, -1.0f, 0.5f],
             Coherence: [0.4f, 0.99f, 1.0f],
+            GroupDelayS: [2.08e-3f, 12.5e-6f, -3.1e-6f],
+            PhaseDelayS: [2.10e-3f, 12.4e-6f, 0.0f],
             OneDb: new BandwidthReading(1.0, true, 8.8, 63200.0, 63191.2, false, false),
             ThreeDb: new BandwidthReading(3.0, false, 4.4, 90800.0, 90795.6, false, true),
             PeakDb: 34.49,
@@ -285,10 +287,24 @@ public class StreamFrameTests
         Assert.Equal(trace.MagnitudeMaxDb, decoded.MagnitudeMaxDb);
         Assert.Equal(trace.PhaseDeg, decoded.PhaseDeg);
         Assert.Equal(trace.Coherence, decoded.Coherence);
+        Assert.Equal(trace.GroupDelayS, decoded.GroupDelayS);
+        Assert.Equal(trace.PhaseDelayS, decoded.PhaseDelayS);
         Assert.Equal(trace.StartFreqHz, decoded.StartFreqHz, 3);
         Assert.Equal(trace.EndFreqHz, decoded.EndFreqHz, 3);
         Assert.Equal(trace.PeakDb, decoded.PeakDb, 3);
         Assert.Equal(trace.PeakFreqHz, decoded.PeakFreqHz, 2);
+    }
+
+    [Fact]
+    public void FrequencyResponse_RejectsRaggedDelayArrays()
+    {
+        // A column is a fixed stride, so a delay array one short would put every later column's
+        // fields in the wrong slots -- better refused at the encoder than decoded as garbage.
+        var trace = SampleTrace() with { GroupDelayS = [1e-6f, 2e-6f] };
+        Assert.Throws<ArgumentException>(() => StreamFrame.EncodeFrequencyResponse(trace));
+
+        trace = SampleTrace() with { PhaseDelayS = [1e-6f] };
+        Assert.Throws<ArgumentException>(() => StreamFrame.EncodeFrequencyResponse(trace));
     }
 
     [Fact]
@@ -368,6 +384,42 @@ public class StreamFrameTests
             new IntermodulationProduct(3, -1, 2, 688, 6880.0, 1.77e-4, -75.0, -60.0),
             new IntermodulationProduct(3, +1, 2, 712, 7120.0, 1.77e-4, -75.0, -60.0),
         ]);
+
+    [Fact]
+    public void Multitone_frame_round_trips_tones_bands_and_the_unresolved_flag()
+    {
+        var result = new MultitoneResult(
+            [new MultitoneTone(100, 1000.0, 0.25, -12.04), new MultitoneTone(104, 1040.0, 0.25, -12.04), new MultitoneTone(200, 2000.0, 0.2, -13.98)],
+            [
+                new MultitoneBand(0, 104, 100, false, 0, 0.0, double.NegativeInfinity, double.NegativeInfinity, 0.0, double.NegativeInfinity),
+                new MultitoneBand(1, 108, 196, true, 150, 1500.0, -72.0, -60.9, 0.0004, -58.9),
+            ],
+            CombVrms: 0.4062, Tdn: 0.00112, ResolvedBands: 1);
+
+        byte[] frame = StreamFrame.EncodeMultitone(StreamChannel.Right, seq: 9, result, held: true);
+        var header = StreamFrame.DecodeHeader(frame);
+        var decoded = StreamFrame.DecodeMultitone(frame);
+
+        Assert.Equal(StreamMsgType.Multitone, header.MsgType);
+        Assert.Equal(StreamChannel.Right, header.Channel);
+        Assert.Equal(9u, header.Seq);
+        Assert.Equal(3u, header.NPoints);
+        Assert.True(decoded.Held);
+        Assert.Equal((float)result.CombDbv, decoded.CombDbv);
+        Assert.Equal(0.00112f, decoded.Tdn, 6);
+        Assert.Equal(1, decoded.ResolvedBands);
+        Assert.Equal(3, decoded.Tones.Length);
+        Assert.Equal(1040f, decoded.Tones[1].FreqHz);
+        Assert.Equal(-13.98f, decoded.Tones[2].Dbv, 3);
+        Assert.Equal(2, decoded.Bands.Length);
+        Assert.False(decoded.Bands[0].Resolved);
+        Assert.Equal(0f, decoded.Bands[0].HighestDbr);
+        Assert.True(decoded.Bands[1].Resolved);
+        Assert.Equal(1500f, decoded.Bands[1].HighestFreqHz);
+        Assert.Equal(-60.9f, decoded.Bands[1].HighestDbr, 3);
+        Assert.Equal(-58.9f, decoded.Bands[1].DnDbr, 3);
+        Assert.Equal(-72f, decoded.Bands[1].HighestDbv, 3);
+    }
 
     [Fact]
     public void NoiseFigures_frame_round_trips_figures_enbw_and_weighting()

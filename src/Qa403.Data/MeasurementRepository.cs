@@ -238,13 +238,13 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                      bw1_lower_hz, bw1_upper_hz, bw1_lower_clamped, bw1_upper_clamped,
                      bw3_lower_hz, bw3_upper_hz, bw3_lower_clamped, bw3_upper_clamped,
                      freq_hz, mag_min_db, mag_max_db, phase_deg, coherence,
-                     reference_db, reference_mode)
+                     reference_db, reference_mode, group_delay_s, phase_delay_s)
                 VALUES
                     (@CaptureId, @Kind, @StartHz, @EndHz, @PeakDb, @PeakHz,
                      @Bw1LowerHz, @Bw1UpperHz, @Bw1LowerClamped, @Bw1UpperClamped,
                      @Bw3LowerHz, @Bw3UpperHz, @Bw3LowerClamped, @Bw3UpperClamped,
                      @FreqHz, @MagMinDb, @MagMaxDb, @PhaseDeg, @Coherence,
-                     @ReferenceDb, @ReferenceMode);
+                     @ReferenceDb, @ReferenceMode, @GroupDelayS, @PhaseDelayS);
                 """,
                 new
                 {
@@ -269,6 +269,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                     Coherence = PreviewCodec.Encode(trace.Coherence),
                     trace.ReferenceDb,
                     trace.ReferenceMode,
+                    GroupDelayS = trace.GroupDelayS is null ? null : PreviewCodec.Encode(trace.GroupDelayS),
+                    PhaseDelayS = trace.PhaseDelayS is null ? null : PreviewCodec.Encode(trace.PhaseDelayS),
                 },
                 transaction);
         }
@@ -292,7 +294,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                    rt.bw3_lower_clamped AS Bw3LowerClamped, rt.bw3_upper_clamped AS Bw3UpperClamped,
                    rt.freq_hz AS FreqHz, rt.mag_min_db AS MagMinDb, rt.mag_max_db AS MagMaxDb,
                    rt.phase_deg AS PhaseDeg, rt.coherence AS Coherence,
-                   rt.reference_db AS ReferenceDb, rt.reference_mode AS ReferenceMode
+                   rt.reference_db AS ReferenceDb, rt.reference_mode AS ReferenceMode,
+                   rt.group_delay_s AS GroupDelayS, rt.phase_delay_s AS PhaseDelayS
             FROM response_trace rt
             JOIN capture c ON c.id = rt.capture_id
             WHERE c.measurement_result_id = @ResultId
@@ -316,7 +319,9 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                 PreviewCodec.Decode(row.PhaseDeg),
                 PreviewCodec.Decode(row.Coherence),
                 row.ReferenceDb,
-                row.ReferenceMode)),
+                row.ReferenceMode,
+                row.GroupDelayS is null ? null : PreviewCodec.Decode(row.GroupDelayS),
+                row.PhaseDelayS is null ? null : PreviewCodec.Decode(row.PhaseDelayS))),
         ];
     }
 
@@ -347,6 +352,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         public byte[] MagMaxDb { get; set; } = [];
         public byte[] PhaseDeg { get; set; } = [];
         public byte[] Coherence { get; set; } = [];
+        public byte[]? GroupDelayS { get; set; }
+        public byte[]? PhaseDelayS { get; set; }
     }
 
     /// <summary>
@@ -412,13 +419,13 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                      bw1_lower_hz, bw1_upper_hz, bw1_lower_clamped, bw1_upper_clamped,
                      bw3_lower_hz, bw3_upper_hz, bw3_lower_clamped, bw3_upper_clamped,
                      freq_hz, mag_min_db, mag_max_db, phase_deg, coherence,
-                     reference_db, reference_mode)
+                     reference_db, reference_mode, group_delay_s, phase_delay_s)
                 VALUES
                     (@CaptureId, @Kind, @StartHz, @EndHz, @PeakDb, @PeakHz,
                      @Bw1LowerHz, @Bw1UpperHz, @Bw1LowerClamped, @Bw1UpperClamped,
                      @Bw3LowerHz, @Bw3UpperHz, @Bw3LowerClamped, @Bw3UpperClamped,
                      @FreqHz, @MagMinDb, @MagMaxDb, @PhaseDeg, @Coherence,
-                     @ReferenceDb, @ReferenceMode);
+                     @ReferenceDb, @ReferenceMode, @GroupDelayS, @PhaseDelayS);
                 """,
                 new
                 {
@@ -443,6 +450,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                     Coherence = PreviewCodec.Encode(trace.Coherence),
                     trace.ReferenceDb,
                     trace.ReferenceMode,
+                    GroupDelayS = trace.GroupDelayS is null ? null : PreviewCodec.Encode(trace.GroupDelayS),
+                    PhaseDelayS = trace.PhaseDelayS is null ? null : PreviewCodec.Encode(trace.PhaseDelayS),
                 },
                 transaction);
         }

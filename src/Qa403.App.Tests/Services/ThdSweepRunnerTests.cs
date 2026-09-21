@@ -63,14 +63,14 @@ public class ThdSweepRunnerTests
 
     private static Task<Harness> CreateAsync() => CreateAsync(new SimulatedDevice(randomSeed: 1));
 
-    private static async Task<Harness> CreateAsync(IAnalyzerDevice device)
+    private static async Task<Harness> CreateAsync(IAnalyzerDevice device, ExternalGainSetting? externalGain = null)
     {
         var hub = new SpectrumBroadcastHub();
-        var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
+        var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance, externalGain: externalGain)
         {
             Options = new SpectrumPipelineOptions { FftSize = FastFftSize, TargetFrameRateHz = 100, DisplayColumns = 200 },
         };
-        var session = new DeviceSessionService(device, pipeline, NullLogger<DeviceSessionService>.Instance);
+        var session = new DeviceSessionService(device, pipeline, new CaptureDelaySetting(), NullLogger<DeviceSessionService>.Instance, externalGain);
         await session.ConnectAsync(CancellationToken.None);
 
         return new Harness(new ThdSweepRunner(session, pipeline, hub, NullLogger<ThdSweepRunner>.Instance), session, pipeline);
@@ -904,5 +904,123 @@ public class ThdSweepRunnerTests
 
         Assert.Empty(device.InputRangeWrites);
         Assert.Empty(device.StepDownWrites);
+    }
+
+    /// <summary>
+    /// The simulator's solid-state model: distortionless below its 1 V peak rail and a wall above
+    /// it, so a sweep past ~0.7 Vrms crosses any sensible threshold at a known point.
+    /// </summary>
+    private static SimulatedDevice ClippingDut()
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        device.SignalProfile = device.SignalProfile with
+        {
+            Dut = SimulatedDutModel.SolidStateClipping,
+            NoiseEnabled = false,
+            HumEnabled = false,
+        };
+
+        return device;
+    }
+
+    [Fact]
+    public async Task AmplitudeSweep_WithAThdStopThreshold_EndsAtTheFirstPointOverIt_AndKeepsThatPoint()
+    {
+        var harness = await CreateAsync(ClippingDut());
+        var request = AmplitudeRequest(startVolt: 0.01, endVolt: 3.0, stepsPerOctave: 1) with { StopThdPercent = 1.0 };
+
+        var started = await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.True(status.Points.Count < started.PointCount, $"expected fewer than {started.PointCount} points, got {status.Points.Count}");
+        Assert.True(status.Points[^1].ThdPercent > 1.0, $"the last point should be the one over the threshold, read {status.Points[^1].ThdPercent:0.###} %");
+        Assert.All(status.Points.SkipLast(1), p => Assert.True(p.ThdPercent <= 1.0, $"a point before the stop read {p.ThdPercent:0.###} %"));
+        Assert.NotNull(status.StopReason);
+        Assert.Contains("exceeded 1 %", status.StopReason);
+        Assert.Equal(started.PointCount, status.Total);
+        Assert.Equal(started.PointCount, status.Index);
+    }
+
+    [Fact]
+    public async Task AmplitudeSweep_WithoutAThdStopThreshold_RunsToTheEnd()
+    {
+        var harness = await CreateAsync(ClippingDut());
+        var request = AmplitudeRequest(startVolt: 0.01, endVolt: 3.0, stepsPerOctave: 1);
+
+        var started = await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(started.PointCount, status.Points.Count);
+        Assert.Null(status.StopReason);
+        Assert.True(status.Points[^1].ThdPercent > 1.0, "the clipping model should be well over 1 % at 3 Vrms");
+    }
+
+    [Fact]
+    public async Task AmplitudeSweep_RejectsAThresholdAtOrBelowZero()
+    {
+        var harness = await CreateAsync();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => harness.Runner.StartAsync(AmplitudeRequest() with { StopThdPercent = 0.0 }, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task FrequencySweep_RejectsAThdStopThreshold()
+    {
+        var harness = await CreateAsync();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => harness.Runner.StartAsync(Request() with { StopThdPercent = 1.0 }, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// The external input gain's two halves, on the one runner that both probes an output-referred
+    /// level and ranges from a target. Through a 20 dB divider on the left input, "0 dBV out" has
+    /// to settle the generator 20 dB lower than in loopback -- the pipeline reads the DUT's volts --
+    /// while the input range must follow what reaches the analyzer, not the DUT-referred reading.
+    /// A gain that leaked into ranging would park the divider run one or more rungs wide; one that
+    /// missed the level probe would drive the DUT 20 dB too hard.
+    /// </summary>
+    [Fact]
+    public async Task OutputVoltageMode_ThroughAnExternalDivider_DrivesTheDutToTheSameOutput_AndRangesForTheAnalyzer()
+    {
+        var plainDevice = new RangeRecordingDevice();
+        var plain = await CreateAsync(plainDevice);
+        var dividedDevice = new RangeRecordingDevice();
+        var divided = await CreateAsync(dividedDevice, new ExternalGainSetting { LeftDb = -20.0 });
+        plainDevice.InputRangeWrites.Clear();
+        dividedDevice.InputRangeWrites.Clear();
+
+        var request = Request(startHz: 1000.0, endHz: 2000.0, stepsPerOctave: 1, levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: 0.0);
+
+        await plain.Runner.StartAsync(request, CancellationToken.None);
+        var plainStatus = await AwaitCompletionAsync(plain.Runner);
+        await divided.Runner.StartAsync(request, CancellationToken.None);
+        var dividedStatus = await AwaitCompletionAsync(divided.Runner);
+
+        AssertFinished(plainStatus);
+        AssertFinished(dividedStatus);
+
+        // Loopback: 0 dBV out is 0 dBV generator. Through the divider the pipeline reads the DUT's
+        // side, which is the generator plus 20 dB, so the probe settles 20 dB lower.
+        Assert.InRange(plainStatus.GeneratorAmpDbv, -0.5, 0.5);
+        Assert.InRange(dividedStatus.GeneratorAmpDbv, -20.5, -19.5);
+
+        // Both report the DUT's output at the requested level.
+        Assert.All(plainStatus.Points, p => Assert.InRange(p.FundamentalDbv, -0.6, 0.6));
+        Assert.All(dividedStatus.Points, p => Assert.InRange(p.FundamentalDbv, -0.6, 0.6));
+
+        // Ranging is analyzer-referred at both of its seams. From the target first: the wider of
+        // the two gains (the right input's 0 dB) decides, so both runs start on the range a 0 dBV
+        // tone needs. Then from what was measured: the simulator has no real divider, so the
+        // analyzer actually saw the generator's −20 dBV and the divided run steps *down* to the
+        // 0 dBV range -- a DUT-referred peak would have asked for the 24 dBV rung for a signal that
+        // was never there.
+        Assert.Equal(plainDevice.InputRangeWrites[0], dividedDevice.InputRangeWrites[0]);
+        Assert.InRange(plain.Session.InputRangeDbv, 6.0, 6.0);
+        Assert.InRange(divided.Session.InputRangeDbv, 0.0, 0.0);
+        Assert.All(dividedDevice.InputRangeWrites, dbv => Assert.True(dbv <= 6.0, $"the divided run ranged to {dbv} dBV"));
     }
 }

@@ -43,7 +43,7 @@ public static class CrosstalkEndpoints
             {
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/cancel", async (CrosstalkRunner runner) =>
         {

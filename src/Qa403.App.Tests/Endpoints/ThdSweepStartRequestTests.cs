@@ -63,20 +63,20 @@ public class ThdSweepStartRequestTests
 
     /// <summary>
     /// Fails the moment a parameter is added to either record, because the assertions above cannot
-    /// know about a field nobody told them about. The runner's request carries four more than the
+    /// know about a field nobody told them about. The runner's request carries five more than the
     /// wire one: the amplitude axis' own settings, which arrive through the other endpoint.
     /// </summary>
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
         Assert.Equal(16, ConstructorParameterCount(typeof(ThdSweepStartRequest)));
-        Assert.Equal(20, ConstructorParameterCount(typeof(ThdSweepRequest)));
+        Assert.Equal(21, ConstructorParameterCount(typeof(ThdSweepRequest)));
     }
 
     /// <summary>
     /// The saved parameters are the third place a setting has to reach. A field the run used but
     /// <c>params_json</c> never recorded leaves a stored result that cannot say what produced it.
-    /// The four amplitude-axis settings are exempt: they live on <c>ThdVsAmplitudeParameters</c>.
+    /// The five amplitude-axis settings are exempt: they live on <c>ThdVsAmplitudeParameters</c>.
     /// </summary>
     [Fact]
     public void TheSavedParametersRecordCarriesEveryFrequencySweepSetting()
@@ -85,6 +85,7 @@ public class ThdSweepStartRequestTests
         [
             nameof(ThdSweepRequest.Axis), nameof(ThdSweepRequest.FixedFreqHz),
             nameof(ThdSweepRequest.StartAmplitudeVolt), nameof(ThdSweepRequest.EndAmplitudeVolt),
+            nameof(ThdSweepRequest.StopThdPercent),
         ];
 
         var runSettings = typeof(ThdSweepRequest)

@@ -35,7 +35,7 @@ public static class ImdSweepEndpoints
             {
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/cancel", async (ImdSweepRunner runner) =>
         {

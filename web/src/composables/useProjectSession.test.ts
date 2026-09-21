@@ -24,6 +24,7 @@ describe('useProjectSession', () => {
     vi.spyOn(api, 'getProjectSession').mockImplementation(async () => current)
     vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([])
     vi.spyOn(api, 'listRecentProjects').mockResolvedValue([])
+    vi.spyOn(api, 'cancelRuns').mockResolvedValue(undefined as never)
     vi.spyOn(api, 'stopAcquisition').mockResolvedValue(undefined as never)
     vi.spyOn(api, 'setGenerator').mockResolvedValue(undefined as never)
     await useProjects().refreshSession()
@@ -80,6 +81,8 @@ describe('useProjectSession', () => {
     ])
     await useProjects().refreshSession()
     useProjects().currentTypeId.value = 7
+    // As selectType would have left it: a type only counts as dirty once its settings loaded.
+    useProjects().appliedTypeId.value = 7
     useProjects().markDirty()
     const close = vi.spyOn(api, 'closeProject').mockResolvedValue(undefined)
 

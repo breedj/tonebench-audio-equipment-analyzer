@@ -240,6 +240,23 @@ const { showPage } = useManual()
         shows the DUT's own phase behaviour rather than a straight slope from cable length.
       </li>
       <li>
+        <strong>Delay</strong> — <strong>Group delay</strong> or <strong>Phase delay</strong>, one at
+        a time, on a fourth axis at the right that reads in µs or ms as its window's size calls for.
+        Group delay is −dφ/df, the time a narrow band around each frequency takes to pass through the
+        DUT; phase delay is −φ/(360·f), the time a single tone at that frequency is shifted by. Both
+        are computed from the full-resolution phase before the curve is decimated for display, so
+        they are the same measurement whatever the frequency window. Two things about them are
+        conventions, not defects. The group delay is a straight-line fit of the phase over the
+        <strong>Smoothing</strong> setting's window — with smoothing <em>None</em> it is a bin-to-bin
+        difference and reads as noise; pick 1/12 or wider to read it. And against the generated
+        sweep the bulk delay went out with the record's arbitrary start point, so the Left and Right
+        traces — and Gain without a measured reference — show <em>excess</em> delay only, the part
+        that varies with frequency; with <strong>Right channel is reference</strong> on, the measured
+        DUT delay is put back and the Gain trace's curve is the physical delay. Phase delay is
+        referenced so that the phase at the bandwidth reference sits inside ±180°, which means an
+        inverting DUT reads half a period rather than zero.
+      </li>
+      <li>
         <strong>Coherence</strong>, 0 to 1, how repeatable each bin was across the averaged records.
         It falls where noise or too little stimulus energy makes a bin untrustworthy, which is
         typically the extreme bottom of the sweep. Read the response only where coherence is high.
@@ -259,6 +276,16 @@ const { showPage } = useManual()
       with <strong>&lt;</strong> or <strong>&gt;</strong> was never reached inside the measured band —
       that is where the search stopped, not where the response rolls off. Widen the sweep before
       quoting it.
+    </p>
+    <p>
+      Below those, the delay readings: <strong>Group delay @ ref</strong> and <strong>Phase delay @
+      ref</strong> are the median over the same reference band the corners use (or the value at the
+      peak under a Peak reference), and <strong>Group delay min</strong> / <strong>max</strong> are
+      the extremes over the whole measured band with the frequency each sits at — on an amplifier
+      the maximum is at the low-frequency corner, where a 10 Hz high-pass alone is worth some 15 ms.
+      They read from the same curve the chart's Delay trace is drawn from, so they mean physical
+      delay only where that curve does. A result saved before the delay curves existed shows dashes
+      here and draws no delay curve; measure it again to get them.
     </p>
     <p>
       At the top of the panel is what those corners are measured down from, and it can be changed
@@ -368,11 +395,15 @@ const { showPage } = useManual()
     <p>
       The axis windows come first, each with its own Autofit, laid out the way the FFT screen's are:
       <strong>Gain range</strong> (or <strong>dBV range</strong>, whichever view is showing — each
-      remembers its own), <strong>Frequency range (Hz)</strong>, and <strong>Phase range (°)</strong>
-      while the Phase trace is on. Under them, <strong>Display</strong>: <strong>Projection</strong>
-      chooses Bode, Nyquist or Nichols, and under Bode <strong>View</strong> switches FR (dBV)
-      against Gain (dB); then the channel checkboxes, the bandwidth markers and the extra traces.
-      <strong>Autofit when measurement done</strong> refits at the end of every pass.
+      remembers its own), <strong>Frequency range (Hz)</strong>, <strong>Phase range (°)</strong>
+      while the Phase trace is on, and <strong>Delay range</strong> (in µs or ms, following the
+      window's size) while a delay trace is selected. Under them, <strong>Display</strong>:
+      <strong>Projection</strong> chooses Bode, Nyquist or Nichols, and under Bode
+      <strong>View</strong> switches FR (dBV) against Gain (dB); then the channel checkboxes, the
+      bandwidth markers and the extra traces — the Phase and Coherence checkboxes and the
+      <strong>Delay</strong> selector (None, Group delay, Phase delay).
+      <strong>Autofit when measurement done</strong> refits at the end of every pass, the delay
+      window included.
     </p>
 
     <h2>Zooming</h2>

@@ -2,7 +2,7 @@
 // Kept free of Vue so every formula is directly unit-testable (see metrics.test.ts) — components
 // just call these and render the result.
 
-import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame } from './streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, MultitoneFrame } from './streaming/protocol'
 import type { AveragingMode, GeneratorKind, GeneratorTone, MultitoneSettings, WhiteNoiseSettings } from './api/client'
 import { weightingQualifier } from './weighting'
 
@@ -41,6 +41,8 @@ export const AVAILABLE_METRIC_LABELS = [
   'THD dBV',
   'IMD %',
   'IMD dB',
+  'TD+N %',
+  'TD+N dB',
   'THD+N %',
   'THD+N dB',
   'THD+N dBr',
@@ -185,6 +187,11 @@ export function channelTiles(
   noise: NoiseFiguresFrame | null = null,
   /** The DUT gain the input-referred noise tile divides by, in dB. */
   dutGainDb = 0,
+  /**
+   * The channel's multitone figure, present only while the generator plays a comb (see
+   * useSpectrumStream). Null adds no TD+N tiles at all, the IMD rule.
+   */
+  multitone: MultitoneFrame | null = null,
 ): MetricTile[] {
   const qualifier = weightingQualifier(noise?.weighting) ?? undefined
   const weighted = (tile: MetricTile): MetricTile => (qualifier ? { ...tile, qualifier } : tile)
@@ -233,6 +240,13 @@ export function channelTiles(
             { label: 'IMD dB', value: '—' },
           ]
         : []),
+
+    ...(multitone
+      ? [
+          { label: 'TD+N %', value: `${(multitone.tdn * 100).toFixed(5)} %` },
+          { label: 'TD+N dB', value: `${ratioPercentToDb(multitone.tdn * 100).toFixed(2)} dB` },
+        ]
+      : []),
 
     weighted({ label: 'THD+N %', value: `${m.thdNPercent.toFixed(5)} %` }),
     weighted({ label: 'THD+N dB', value: `${thdNDb.toFixed(2)} dB` }),

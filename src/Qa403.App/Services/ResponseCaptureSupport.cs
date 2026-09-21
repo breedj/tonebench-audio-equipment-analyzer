@@ -99,13 +99,15 @@ internal static class ResponseCaptureSupport
     /// </summary>
     public static double PeakDbv(SpectrumSnapshot[] snapshots)
     {
+        // The analyzer's peak, with any external input gain put back -- this only ever feeds
+        // InputRangeSelector, whose ladder is in the analyzer's dBV. See SweepCaptureSupport.MeasuredPeakDbv.
         double peak = double.NaN;
         foreach (var snapshot in snapshots)
         {
             if (snapshot.Meters is not { } meters)
                 continue;
 
-            peak = double.IsNaN(peak) ? meters.PeakDbv : Math.Max(peak, meters.PeakDbv);
+            peak = double.IsNaN(peak) ? meters.AnalyzerPeakDbv : Math.Max(peak, meters.AnalyzerPeakDbv);
         }
 
         return peak;
@@ -431,24 +433,39 @@ internal static class ResponseCaptureSupport
             // A channel's own response is reported as the level it would produce, in dBV, if driven
             // by a sine at the generator's amplitude -- which is what makes the "FR (dBV)" view read
             // in the same units as the FFT screen rather than as a bare ratio.
-            BuildTrace(request, displayColumns, FrequencyResponseTraceKind.Left, leftResult, generatorAmpDbv),
-            BuildTrace(request, displayColumns, FrequencyResponseTraceKind.Right, rightResult, generatorAmpDbv),
+            //
+            // No delay is put back on either: against the synthesised chirp the rotation the
+            // estimator removed was the record's arbitrary start point in the periodic stimulus,
+            // not a delay, so these carry excess delay only.
+            BuildTrace(request, displayColumns, FrequencyResponseTraceKind.Left, leftResult, generatorAmpDbv, addBackDelayS: 0.0),
+            BuildTrace(request, displayColumns, FrequencyResponseTraceKind.Right, rightResult, generatorAmpDbv, addBackDelayS: 0.0),
         ];
 
         // With the right input as the reference, gain is the true L/R transfer function. Without it,
         // there is nothing to compare against but the stimulus, so gain is the left channel's own
         // response as a ratio -- the same curve as the dBV one, shifted by the drive level.
-        traces.Add(BuildTrace(request, displayColumns, FrequencyResponseTraceKind.Gain, gainResult ?? leftResult, offsetDb: 0.0));
+        //
+        // Only the gain estimator's LatencySamples is a real delay -- both of its spectra come from
+        // one capture, so the rotation cancels and what it removed is the DUT's -- and that is the
+        // one case where the delay curves get it back and read as physical delay.
+        double gainDelayS = gainResult is null ? 0.0 : gainResult.LatencySamples / request.SampleRateHz;
+        traces.Add(BuildTrace(request, displayColumns, FrequencyResponseTraceKind.Gain, gainResult ?? leftResult, offsetDb: 0.0, gainDelayS));
 
         return traces;
     }
 
+    /// <param name="addBackDelayS">
+    /// Added to every group- and phase-delay sample inside the analysed band: the delay the
+    /// estimator removed from <paramref name="result"/>'s phase, when — and only when — that
+    /// removal was of a real delay rather than of the record's arbitrary rotation.
+    /// </param>
     public static FrequencyResponseTrace BuildTrace(
         FrequencyResponseRequest request,
         int displayColumns,
         FrequencyResponseTraceKind kind,
         FrequencyResponseResult result,
-        double offsetDb)
+        double offsetDb,
+        double addBackDelayS)
     {
         double binHz = request.BinHz;
         int binCount = result.Magnitude.Length;
@@ -477,6 +494,21 @@ internal static class ResponseCaptureSupport
         var oneDb = BandwidthAnalyzer.Find(traceDb, binHz, dropDb: 1.0, reference, symmetric: true, firstBin, lastBin);
         var threeDb = BandwidthAnalyzer.Find(traceDb, binHz, dropDb: 3.0, reference, symmetric: false, firstBin, lastBin);
 
+        // Both delay curves at full resolution, before decimation, for the same reason the corners
+        // are: a derivative of the column-sampled phase is aliased wherever columns are finer than
+        // bins. The group delay's regression window is the smoothing setting's, clamped to the
+        // analysed band; the phase delay's arbitrary whole turns (the unwrapper starts at DC and
+        // walks through the sub-band junk) are anchored at the bandwidth reference *before* the
+        // measured delay is put back -- anchoring after would be ambiguous by construction, since
+        // a delayed DUT's physical phase runs through many turns in the passband.
+        var groupDelayS = GroupDelay.FromUniformPhase(result.PhaseDeg, binHz, request.SmoothingDenominator, firstBin, lastBin);
+        var phaseDelayS = GroupDelay.PhaseDelayUniform(result.PhaseDeg, binHz, firstBin, lastBin, anchorBin: reference.Index);
+        for (int k = firstBin; k <= lastBin; k++)
+        {
+            groupDelayS[k] += addBackDelayS;
+            phaseDelayS[k] += addBackDelayS;
+        }
+
         int columns = Math.Min(displayColumns, lastBin - firstBin + 1);
         var minMax = new MinMax[columns];
         var centerBins = new double[columns];
@@ -487,6 +519,8 @@ internal static class ResponseCaptureSupport
         var magMax = new float[columns];
         var phaseDeg = new float[columns];
         var coherence = new float[columns];
+        var groupDelay = new float[columns];
+        var phaseDelay = new float[columns];
 
         for (int c = 0; c < columns; c++)
         {
@@ -494,13 +528,16 @@ internal static class ResponseCaptureSupport
             magMin[c] = (float)minMax[c].Min;
             magMax[c] = (float)minMax[c].Max;
 
-            // Phase and coherence are sampled at the column's centre rather than min/max'd: the
-            // min/max rule exists so a single-bin spike survives decimation, and neither of these
-            // has spikes worth preserving -- a min/max band on an unwrapped phase would just be the
-            // column's slope drawn as noise.
+            // Phase, coherence and the delays are sampled at the column's centre rather than
+            // min/max'd: the min/max rule exists so a single-bin spike survives decimation, and none
+            // of these has spikes worth preserving -- a min/max band on an unwrapped phase would just
+            // be the column's slope drawn as noise, and the group delay has already been integrated
+            // over its window.
             int centre = Math.Clamp((int)Math.Round(centerBins[c]), 0, result.PhaseDeg.Length - 1);
             phaseDeg[c] = (float)result.PhaseDeg[centre];
             coherence[c] = (float)result.Coherence[centre];
+            groupDelay[c] = (float)groupDelayS[centre];
+            phaseDelay[c] = (float)phaseDelayS[centre];
         }
 
         return new FrequencyResponseTrace(
@@ -512,6 +549,8 @@ internal static class ResponseCaptureSupport
             magMax,
             phaseDeg,
             coherence,
+            groupDelay,
+            phaseDelay,
             BandwidthReading.From(oneDb),
             BandwidthReading.From(threeDb),
             peak.LevelDb,

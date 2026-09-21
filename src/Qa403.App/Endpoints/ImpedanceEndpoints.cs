@@ -47,7 +47,7 @@ public static class ImpedanceEndpoints
                 // Already running, or no device — same convention as every other runner's start.
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/cancel", async (ImpedanceRunner runner) =>
         {

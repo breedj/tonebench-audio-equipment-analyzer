@@ -25,6 +25,7 @@
 // DOM node in every state and a collapse is a layout change the charts' ResizeObservers see, not
 // a remount.
 import { useUiLayout } from '../composables/useUiLayout'
+import SimulatorHint from './SimulatorHint.vue'
 
 const {
   settingsRailCollapsed,
@@ -74,6 +75,9 @@ const STRIP =
     </div>
 
     <div class="flex min-w-0 flex-col gap-3">
+      <!-- Simulated mode only: what the status-bar knobs have to say for this measurement to show
+           anything, when they do not. Here rather than in each screen so no screen can forget it. -->
+      <SimulatorHint />
       <slot />
     </div>
 

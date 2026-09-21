@@ -14,7 +14,10 @@ let loadPromise: Promise<void> | null = null
 export function useSpectrumConfig() {
   async function load() {
     // Coalesce concurrent callers (several components mount in the same tick, each wanting the
-    // config before it's fetched once) into the single in-flight request.
+    // config before it's fetched once) into the single in-flight request. Also what re-reads the
+    // config after a measurement type is applied server-side (App.vue's loadedParams watcher):
+    // ApplyAsync rewrites the pipeline options, and everything reading `config` -- the FFT panel's
+    // form, the oscilloscope's Residual box -- would otherwise show the previous type's.
     if (loadPromise) return loadPromise
 
     loadPromise = (async () => {

@@ -534,7 +534,10 @@ public sealed class ImpulseResponseRunner(
             // FrequencyResponseRunner's — a range left too sensitive for the target clips the level
             // probe's own captures, which reads as missing gain and drives the generator up.
             if (ownsInputRange && request.SolvesGeneratorLevel)
-                await ApplyInputRangeAsync(InputRangeSelector.For(session.Capabilities.InputRangesDbv, request.LevelDbv), ct);
+            {
+                await ApplyInputRangeAsync(
+                    InputRangeSelector.For(session.Capabilities.InputRangesDbv, session.ToAnalyzerDbv(request.LevelDbv, StreamChannel.Left)), ct);
+            }
 
             double generatorAmpDbv = await ResolveGeneratorAmplitudeAsync(request, ct);
             SetGeneratorAmpDbv(generatorAmpDbv);

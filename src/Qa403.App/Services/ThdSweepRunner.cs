@@ -73,6 +73,7 @@ public sealed class ThdSweepRunner(
     private double _currentAmplitudeVolt;
     private double _generatorAmpDbv;
     private string? _error;
+    private string? _stopReason;
     private List<ThdSweepPoint> _points = [];
     private ThdMethod _thdMethod = ThdMethod.Conventional;
     private ThdSweepRequest? _lastRequest;
@@ -103,7 +104,7 @@ public sealed class ThdSweepRunner(
             {
                 return new ThdSweepStatus(
                     Running, _phase, _index, _total, _currentFreqHz, _generatorAmpDbv, _error, [.. _points],
-                    _axis, _currentAmplitudeVolt, _thdMethod);
+                    _axis, _currentAmplitudeVolt, _thdMethod, _stopReason);
             }
         }
     }
@@ -142,6 +143,7 @@ public sealed class ThdSweepRunner(
                     ? steps[0].GeneratorDbv
                     : request.LevelMode == ThdSweepLevelMode.GeneratorVoltage ? request.LevelDbv : ProbeStartDbv;
                 _error = null;
+                _stopReason = null;
                 _points = [];
                 _thdMethod = request.ThdMethod;
             }
@@ -224,6 +226,7 @@ public sealed class ThdSweepRunner(
             _currentAmplitudeVolt = 0;
             _generatorAmpDbv = 0;
             _error = null;
+            _stopReason = null;
             _thdMethod = ThdMethod.Conventional;
 
             return Status;
@@ -427,14 +430,33 @@ public sealed class ThdSweepRunner(
                         rangeRatchetDbv = Math.Max(rangeRatchetDbv, inputRangeAfter);
                 }
 
+                ThdSweepPoint? overThreshold = null;
                 foreach (var point in BuildPoints(step.FrequencyHz, stepAmpDbv, request, snapshots, noiseVrms))
                 {
                     AddPoint(point);
                     hub.Broadcast(StreamFrame.EncodeSweepPoint(point, (uint)i));
+                    if (request.StopThdPercent is { } stopThd && double.IsFinite(point.ThdPercent) && point.ThdPercent > stopThd
+                        && (overThreshold is null || point.ThdPercent > overThreshold.ThdPercent))
+                    {
+                        overThreshold = point;
+                    }
                 }
 
                 if (request.ThdMethod == ThdMethod.FrequencyNormalized)
                     NormalizeNewlyReferencedPoints(step.FrequencyHz, snapshots, i);
+
+                // The point that crossed the threshold stays -- it is the one that says where the
+                // DUT gave up -- and the sweep ends here as Finished, not as a phase of its own.
+                if (overThreshold is { } stopPoint)
+                {
+                    string channelName = stopPoint.Channel == 0 ? "L" : "R";
+                    lock (_stateLock)
+                    {
+                        _stopReason =
+                            $"Stopped at {DbvToVolt(stepAmpDbv):0.###} Vrms: THD {stopPoint.ThdPercent:0.###} % on {channelName} exceeded {request.StopThdPercent:0.###} %.";
+                    }
+                    break;
+                }
             }
 
             SetProgress(steps.Length, 0.0, 0.0);
@@ -635,7 +657,9 @@ public sealed class ThdSweepRunner(
         // asked. Only the output-referred modes can do this; with a fixed generator amplitude the
         // DUT's output is unknown until something has been measured, so the user's own range (or the
         // device's autoranging) stands.
-        await SetInputRangeForAsync(wantedOutDbv, ct);
+        // The target is the DUT's level; the range ladder is the analyzer's, so an external input
+        // gain is put back first. No single measured channel here, so the wider of the two decides.
+        await SetInputRangeForAsync(session.ToAnalyzerDbv(wantedOutDbv), ct);
 
         // The probe is its own capture at its own frequency, so under adaptive resolution it gets
         // the size 1 kHz would be swept at -- and must be snapped against that same size, or the

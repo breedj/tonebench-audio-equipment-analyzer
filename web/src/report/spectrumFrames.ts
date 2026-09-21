@@ -5,6 +5,8 @@ import {
   type IntermodulationFrame,
   type IntermodulationProductFrame,
   type MetersFrame,
+  type MultitoneBandFrame,
+  type MultitoneFrame,
   type NoiseFiguresFrame,
   type SpectrumFrame,
   type StreamChannel,
@@ -198,6 +200,60 @@ export function storedIntermodulationFrames(
       referenceDbv: m.imd_reference_dbv ?? 0,
       perOrder,
       products,
+      held: true,
+    }
+  }
+  return frames
+}
+
+/**
+ * A stored FFT result's `mt_*` / `tdn_*` metric rows as the multitone frame the TD+N tiles and the
+ * Multitone table read live — see MeasurementSaveService.MultitoneMetrics for the names. A channel
+ * saved without a comb playing has no `tdn_percent` row and gets no frame. A gap with no `mt_b{i}_*`
+ * rows was unresolved when saved (the save writes none for those), and reads back that way.
+ */
+export function storedMultitoneFrames(detail: MeasurementDetail): Record<number, MultitoneFrame> {
+  const frames: Record<number, MultitoneFrame> = {}
+
+  for (const channel of detail.channelsData) {
+    const m = channel.metrics
+    if (typeof m.tdn_percent !== 'number' || typeof m.mt_tone_count !== 'number') continue
+
+    const tones: { freqHz: number; dbv: number }[] = []
+    for (let i = 0; i < m.mt_tone_count && typeof m[`mt_t${i}_hz`] === 'number'; i++) {
+      tones.push({ freqHz: m[`mt_t${i}_hz`], dbv: m[`mt_t${i}_dbv`] ?? 0 })
+    }
+
+    const bandCount = typeof m.mt_band_count === 'number' ? m.mt_band_count : Math.max(0, tones.length - 1)
+    const bands: MultitoneBandFrame[] = []
+    for (let i = 0; i < bandCount; i++) {
+      const resolved = typeof m[`mt_b${i}_hz`] === 'number'
+      bands.push({
+        resolved,
+        highestFreqHz: resolved ? m[`mt_b${i}_hz`] : 0,
+        highestDbv: resolved ? (m[`mt_b${i}_dbv`] ?? 0) : 0,
+        highestDbr: resolved ? (m[`mt_b${i}_dbr`] ?? 0) : 0,
+        dnDbr: resolved ? (m[`mt_b${i}_dn_dbr`] ?? 0) : 0,
+      })
+    }
+
+    const combDbv = typeof m.mt_comb_dbv === 'number' ? m.mt_comb_dbv : 0
+    const tdn = m.tdn_percent / 100
+    frames[channel.channel] = {
+      header: {
+        msgType: StreamMsgType.Multitone,
+        channel: channel.channel as StreamChannel,
+        flags: 0,
+        seq: 0,
+        x0: combDbv,
+        dx: tdn,
+        nPoints: tones.length,
+      },
+      combDbv,
+      tdn,
+      resolvedBands: typeof m.mt_resolved_bands === 'number' ? m.mt_resolved_bands : bands.filter((b) => b.resolved).length,
+      tones,
+      bands,
       held: true,
     }
   }

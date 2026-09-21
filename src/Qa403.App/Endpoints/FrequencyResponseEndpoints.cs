@@ -42,7 +42,7 @@ public static class FrequencyResponseEndpoints
                 // /api/sweep/*/start and /api/acquisition/start.
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/cancel", async (FrequencyResponseRunner runner) =>
         {

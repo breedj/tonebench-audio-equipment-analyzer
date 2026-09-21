@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Qa403.App.Json;
 using Qa403.App.Services;
+using Qa403.App.Streaming;
 using Qa403.Data;
 using Qa403.Dsp;
 
@@ -39,6 +40,25 @@ public static class ConfigEndpoints
         catch (JsonException)
         {
             return CaptureDelayConfig.Default;
+        }
+    }
+
+    /// <summary>The stored external input gain, or the default -- the same contract as the capture delay.</summary>
+    public static async Task<ExternalGainConfig> ReadExternalGainAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? stored = await repo.GetAsync(ConfigRepository.ExternalGainKey, ct);
+        if (string.IsNullOrWhiteSpace(stored))
+            return ExternalGainConfig.Default;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.ExternalGainConfig);
+            return config is { IsValid: true } ? config : ExternalGainConfig.Default;
+        }
+        catch (JsonException)
+        {
+            return ExternalGainConfig.Default;
         }
     }
 
@@ -148,6 +168,33 @@ public static class ConfigEndpoints
                 JsonSerializer.Serialize(config, AppJsonContext.Default.CaptureDelayConfig),
                 ct);
             setting.Ms = config.CaptureDelayMs;
+
+            return Results.Ok(config);
+        });
+
+        // The external input gain: what sits between the DUT and each input. The document is the
+        // durable copy; ExternalGainSetting is what the pipeline divides by. The PUT flushes the
+        // pipeline as well, because a scale step landing mid-record is a broadband smear across
+        // one whole FFT -- the same cost as any other configuration change, and a re-arm for a
+        // held single shot, like any bare flush.
+        group.MapGet("/external-gain", async (
+            ConfigRepository repo, CancellationToken ct) =>
+            Results.Ok(await ReadExternalGainAsync(repo, ct)));
+
+        group.MapPut("/external-gain", async (
+            ExternalGainConfig config, ConfigRepository repo, ExternalGainSetting setting,
+            SpectrumPipeline pipeline, CancellationToken ct) =>
+        {
+            if (!config.IsValid)
+                return Results.BadRequest($"An external gain must be within ±{ExternalGainConfig.MaxAbsDb:0} dB per input.");
+
+            await repo.SetAsync(
+                ConfigRepository.ExternalGainKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.ExternalGainConfig),
+                ct);
+            setting.LeftDb = config.LeftDb;
+            setting.RightDb = config.RightDb;
+            pipeline.Flush(0);
 
             return Results.Ok(config);
         });

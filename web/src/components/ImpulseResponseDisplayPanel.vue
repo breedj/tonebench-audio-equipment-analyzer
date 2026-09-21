@@ -6,10 +6,12 @@ import type {
   DecayChartMode,
   DecayPalette,
   ImpulseView,
+  ResponseDelayView,
 } from '../api/client'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
 import { CSD_FFT_LENGTHS, csdSpanMs, describeCsdFftLength, PALETTE_NAMES } from '../measurements/decay'
+import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const view = defineModel<ImpulseView>('view', { required: true })
@@ -26,6 +28,29 @@ const freqFromHz = defineModel<number>('freqFromHz', { required: true })
 const freqToHz = defineModel<number>('freqToHz', { required: true })
 const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
 const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
+const delayView = defineModel<ResponseDelayView>('delayView', { required: true })
+const delayTopUs = defineModel<number>('delayTopUs', { required: true })
+const delayBottomUs = defineModel<number>('delayBottomUs', { required: true })
+
+/** Same convention as the response screen: held in µs, edited and drawn in the unit the window's size calls for. */
+const delayUnit = computed(() => chooseDelayUnit(delayTopUs.value, delayBottomUs.value))
+const delayTopInUnit = computed({
+  get: () => usToUnit(delayTopUs.value, delayUnit.value),
+  set: (v: number) => {
+    if (Number.isFinite(v)) delayTopUs.value = unitToUs(v, delayUnit.value)
+  },
+})
+const delayBottomInUnit = computed({
+  get: () => usToUnit(delayBottomUs.value, delayUnit.value),
+  set: (v: number) => {
+    if (Number.isFinite(v)) delayBottomUs.value = unitToUs(v, delayUnit.value)
+  },
+})
+const DELAY_VIEWS: { value: ResponseDelayView; label: string }[] = [
+  { value: 'None', label: 'None' },
+  { value: 'Group', label: 'Group delay' },
+  { value: 'Phase', label: 'Phase delay' },
+]
 
 // The two decay surfaces. How they are drawn is shared; what is analysed is per measurement.
 const decayMode = defineModel<DecayChartMode>('decayMode', { required: true })
@@ -178,6 +203,24 @@ function autofit() {
         phaseBottomDeg.value = phase.bottom
       }
     }
+
+    if (delayView.value !== 'None') {
+      const curve = delayValuesOf(gain, delayView.value)
+      if (curve) {
+        const us = curve.map((v) => v * 1e6)
+        const inBand: number[] = []
+        for (let i = 0; i < us.length; i++) {
+          if (gain.freqHz[i] >= freqFromHz.value && gain.freqHz[i] <= freqToHz.value && Number.isFinite(us[i])) inBand.push(us[i])
+        }
+        const values = inBand.length > 0 ? inBand : us
+        const step = delayFitStepUs(Math.max(...values) - Math.min(...values))
+        const delay = autofitRange(values, { step, minSpan: step * 2, pad: 0.05 })
+        if (delay) {
+          delayTopUs.value = delay.top
+          delayBottomUs.value = delay.bottom
+        }
+      }
+    }
     return
   }
 
@@ -291,6 +334,42 @@ const referenceLabel = computed(() => {
             v-model.number="phaseBottomDeg"
             type="number"
             step="45"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          />
+        </label>
+      </div>
+
+      <!-- The gated response's delay curves, on their own axis: physical delay only with the right
+           input as the reference, excess delay against the generated sweep otherwise. -->
+      <label
+        class="flex flex-col gap-1 text-xs"
+        title="Group delay is −dφ/df, phase delay −φ/(360·f), of the gated response on their own axis at the right. With the right input as reference these are the DUT's physical delay; against the generated sweep the bulk delay went out with the record's arbitrary start point and only the excess remains."
+      >
+        Delay
+        <select
+          v-model="delayView"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="option in DELAY_VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+
+      <div v-if="delayView !== 'None'" class="grid grid-cols-2 gap-2 text-xs">
+        <label class="flex flex-col gap-1">
+          Delay top ({{ delayUnit }})
+          <input
+            v-model.number="delayTopInUnit"
+            type="number"
+            :step="delayUnit === 'ms' ? 0.1 : 10"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          />
+        </label>
+        <label class="flex flex-col gap-1">
+          Delay bottom ({{ delayUnit }})
+          <input
+            v-model.number="delayBottomInUnit"
+            type="number"
+            :step="delayUnit === 'ms' ? 0.1 : 10"
             class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
           />
         </label>

@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, toRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { STREAM_FLAG_ZOOMED, type MetersFrame, type SpectrumFrame } from '../streaming/protocol'
+import { STREAM_FLAG_ZOOMED, type MetersFrame, type MultitoneFrame, type SpectrumFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { SPECTRUM_DISPLAY_KEY, useChartDisplay, type SpectrumDisplaySource } from '../composables/useChartDisplay'
 import {
@@ -30,6 +30,8 @@ import { useUserWeighting } from '../composables/useUserWeighting'
 const props = defineProps<{
   spectrum: Record<number, SpectrumFrame>
   meters: Record<number, MetersFrame>
+  /** Each channel's multitone figure while a comb plays — its resolved gaps' highest lines are marked, the way harmonics are for a sine. */
+  multitone?: Record<number, MultitoneFrame>
   /** Stored measurements loaded onto the chart, in add order — see useMeasurements.ts. */
   overlays: OverlayEntry[]
   /**
@@ -405,8 +407,52 @@ function reportViewport(u: uPlot) {
   )
 }
 
+/**
+ * The multitone markers: a short tick at the highest line of every resolved gap of the first drawn
+ * channel, labelled with its level re the comb. Ticks from the bottom rather than full-height lines
+ * — a 60-tone comb has 59 gaps, and 59 full lines would be a curtain over the trace.
+ */
+function drawMultitoneMarkers(u: uPlot, theme: Theme) {
+  const frame = props.multitone?.[0] ?? props.multitone?.[1]
+  if (!frame) return
+
+  const ctx = u.ctx
+  ctx.save()
+  ctx.strokeStyle = theme.markerLine
+  ctx.fillStyle = theme.markerText
+  ctx.font = '10px ui-monospace, monospace'
+  ctx.lineWidth = 1
+  const bottom = u.bbox.top + u.bbox.height
+  const tickHeight = Math.min(28, u.bbox.height * 0.12)
+
+  let lastLabelX = -Infinity
+  for (const band of frame.bands) {
+    if (!band.resolved || band.highestFreqHz <= 0) continue
+    const x = u.valToPos(band.highestFreqHz, 'x', true)
+    if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) continue
+
+    ctx.beginPath()
+    ctx.moveTo(x, bottom)
+    ctx.lineTo(x, bottom - tickHeight)
+    ctx.stroke()
+    // Labels only where they fit: adjacent gaps at the low end are a few pixels apart on a log axis.
+    if (x - lastLabelX >= 34) {
+      ctx.fillText(`${band.highestDbr.toFixed(0)}`, x + 2, bottom - tickHeight - 3)
+      lastLabelX = x
+    }
+  }
+
+  ctx.restore()
+}
+
 function harmonicMarkersPlugin(theme: Theme, interactive: boolean): uPlot.Plugin {
   const drawHook = (u: uPlot) => {
+    // A comb has no single fundamental to hang harmonics on; its markers are the highest line of
+    // each resolved gap between tones, labelled in dBr — the multitone table's "highest above".
+    if (stimulusKind.value === 'Multitone') {
+      drawMultitoneMarkers(u, theme)
+      return
+    }
     if (stimulusKind.value !== 'Tones') return
     const ch0 = props.meters[0]
     if (!ch0 || ch0.harmonics.length === 0) return

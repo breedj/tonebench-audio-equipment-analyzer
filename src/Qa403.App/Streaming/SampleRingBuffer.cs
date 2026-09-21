@@ -98,9 +98,11 @@ internal sealed class SampleRingBuffer(int capacity)
     /// <summary>
     /// Appends every <paramref name="channelIndex"/>-th sample (stride <paramref name="channelCount"/>)
     /// from an interleaved block — i.e. one channel's worth of samples out of a multi-channel
-    /// <c>PcmBlock</c>.
+    /// <c>PcmBlock</c>. Each sample is multiplied by <paramref name="scale"/> on the way in: the
+    /// external input gain undone, so the buffer holds the DUT's volts rather than the analyzer's.
+    /// Done here, where the float becomes a double, because it is the one place every sample passes.
     /// </summary>
-    public void AppendInterleaved(ReadOnlySpan<float> interleaved, int channelIndex, int channelCount)
+    public void AppendInterleaved(ReadOnlySpan<float> interleaved, int channelIndex, int channelCount, double scale = 1.0)
     {
         lock (_lock)
         {
@@ -115,7 +117,7 @@ internal sealed class SampleRingBuffer(int capacity)
                     continue;
                 }
 
-                _buffer[_writeIndex % cap] = interleaved[i];
+                _buffer[_writeIndex % cap] = interleaved[i] * scale;
                 _writeIndex++;
             }
         }

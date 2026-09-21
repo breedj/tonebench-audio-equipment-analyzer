@@ -7,6 +7,7 @@ import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
 import { useDevice } from '../composables/useDevice'
+import { useExternalGain } from '../composables/useExternalGain'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useStartupConfig } from '../composables/useStartupConfig'
@@ -20,6 +21,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
 const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
+const { leftDb: externalGainLeftDb, rightDb: externalGainRightDb, set: setExternalGain } = useExternalGain()
 const { config, apply: applyConfig } = useSpectrumConfig()
 const { status: deviceStatus } = useDevice()
 const { updateCheckEnabled } = useUpdateCheck()
@@ -75,6 +77,18 @@ async function onCaptureDelayChange(event: Event) {
   const ms = Number(input.value)
   await setCaptureDelay(Number.isFinite(ms) && ms >= 0 ? Math.min(ms, 10000) : 0)
   input.value = String(captureDelayMs.value)
+}
+
+// Same on-change discipline as the capture delay: each write lands in the configuration database
+// and a half-typed "-2" applied to every level on screen is not a setting either.
+async function onExternalGainChange(channel: 'left' | 'right', event: Event) {
+  const input = event.target as HTMLInputElement
+  const db = Number(input.value)
+  await setExternalGain({
+    leftDb: channel === 'left' ? db : externalGainLeftDb.value,
+    rightDb: channel === 'right' ? db : externalGainRightDb.value,
+  })
+  input.value = String(channel === 'left' ? externalGainLeftDb.value : externalGainRightDb.value)
 }
 
 // The dropdown's rows carry a live example of "now" in each format, taken once per open: the
@@ -255,6 +269,39 @@ async function clearStoredCalibration() {
               class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
             />
           </label>
+
+          <div
+            class="flex flex-col gap-1"
+            title="The gain of whatever sits between the DUT and this input, in dB: −20 for a 10:1 divider, needed to measure a DUT above the analyzer's +32 dBV ceiling. Every level the app reports — the spectrum, the metrics, every sweep point, every output-referred level target — is then the DUT's output rather than what reached the analyzer. Input ranging still follows what the analyzer actually sees. 0 for nothing in the path."
+          >
+            <span>External gain (dB)</span>
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-1.5">
+                Left
+                <input
+                  type="number"
+                  min="-60"
+                  max="60"
+                  step="1"
+                  :value="externalGainLeftDb"
+                  @change="onExternalGainChange('left', $event)"
+                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+                />
+              </label>
+              <label class="flex items-center gap-1.5">
+                Right
+                <input
+                  type="number"
+                  min="-60"
+                  max="60"
+                  step="1"
+                  :value="externalGainRightDb"
+                  @change="onExternalGainChange('right', $event)"
+                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+                />
+              </label>
+            </div>
+          </div>
 
           <label
             v-if="deviceStatus?.autoRangeStepDownDelayMs != null"

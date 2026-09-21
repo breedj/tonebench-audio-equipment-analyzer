@@ -100,6 +100,8 @@ function traceFrame(kind: ResponseTraceKind, peakDb: number, stepped: boolean | 
     magnitudeMaxDb: Float32Array.from([0, 0]),
     phaseDeg: Float32Array.from([0, 0]),
     coherence: Float32Array.from([1, 1]),
+    groupDelayS: Float32Array.from([0, 0]),
+    phaseDelayS: Float32Array.from([0, 0]),
     oneDb: { ...bandwidth, dropDb: 1, symmetric: true },
     threeDb: { ...bandwidth, symmetric: false },
     peakDb,

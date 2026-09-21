@@ -272,6 +272,68 @@ public class ResponseRepositoryTests
         }
     }
 
+    [Fact]
+    public async Task SaveResponse_RoundTripsTheDelayCurves()
+    {
+        // The delays are derived from the full-resolution phase before decimation, so a reloaded
+        // result cannot re-derive them from the stored, column-sampled phase: they have to survive
+        // the round trip themselves, at f32 precision, exactly like the phase does.
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+
+            var request = BuildRequest(typeId);
+            var repo = new MeasurementRepository(factory);
+            long resultId = await repo.SaveResponseResultAsync(request, CancellationToken.None);
+
+            var traces = await repo.GetResponseTracesAsync(resultId, CancellationToken.None);
+
+            Assert.Equal(request.Traces.Count, traces.Count);
+            for (int i = 0; i < traces.Count; i++)
+            {
+                Assert.Equal(request.Traces[i].GroupDelayS, traces[i].GroupDelayS);
+                Assert.Equal(request.Traces[i].PhaseDelayS, traces[i].PhaseDelayS);
+            }
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task SaveResponse_WithNoDelayRecorded_ReadsBackAsNull()
+    {
+        // What a row written before migration 012 reads as. Null rather than zeros: the chart draws
+        // no delay curve and the panel a dash, where a zero would assert a delay the row never held.
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+
+            var request = BuildRequest(typeId);
+            var withoutDelays = request with
+            {
+                Traces = [.. request.Traces.Select(t => t with { GroupDelayS = null, PhaseDelayS = null })],
+            };
+
+            var repo = new MeasurementRepository(factory);
+            long resultId = await repo.SaveResponseResultAsync(withoutDelays, CancellationToken.None);
+
+            var traces = await repo.GetResponseTracesAsync(resultId, CancellationToken.None);
+
+            Assert.All(traces, t => Assert.Null(t.GroupDelayS));
+            Assert.All(traces, t => Assert.Null(t.PhaseDelayS));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
     private static async Task<long> CreateResponseTypeAsync(SqliteConnectionFactory factory)
     {
         var projectRepo = new ProjectRepository(factory);
@@ -286,6 +348,8 @@ public class ResponseRepositoryTests
         var magMax = new float[Columns];
         var phase = new float[Columns];
         var coherence = new float[Columns];
+        var groupDelay = new float[Columns];
+        var phaseDelay = new float[Columns];
 
         for (int i = 0; i < Columns; i++)
         {
@@ -294,6 +358,8 @@ public class ResponseRepositoryTests
             magMax[i] = 0.5f - (i * 0.01f);
             phase[i] = -i * 3.0f;
             coherence[i] = 1.0f - (i * 0.001f);
+            groupDelay[i] = 2.083e-3f - (i * 1e-6f);
+            phaseDelay[i] = 2.1e-3f + (i * 0.5e-6f);
         }
 
         ResponseTraceInput Trace(string kind) => new(
@@ -306,7 +372,9 @@ public class ResponseRepositoryTests
             ThreeDb: new ResponseBandwidth(4.4, 90800.0, false, true),
             freqHz, magMin, magMax, phase, coherence,
             ReferenceDb: 33.75,
-            ReferenceMode: "BandMedian");
+            ReferenceMode: "BandMedian",
+            GroupDelayS: groupDelay,
+            PhaseDelayS: phaseDelay);
 
         return new ResponseSaveRequest(
             typeId, "loopback", "notes", "{}",

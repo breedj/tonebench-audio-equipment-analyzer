@@ -3,7 +3,9 @@ import type {
   DecayChartMode,
   DecayPalette,
   ImpulseResponseParameters,
+  ResponseDelayView,
 } from '../api/client'
+import { isDelayView } from '../response/delayAxis'
 import { defaultCsdAnalysis, type CsdAnalysis } from './decay'
 
 /**
@@ -31,6 +33,10 @@ export interface ImpulseDisplay {
   harmonicsYBottomDb: number
   phaseTopDeg: number
   phaseBottomDeg: number
+  /** The gated response's delay curve and its axis window in µs — see ResponseDisplay. */
+  delayView: ResponseDelayView
+  delayTopUs: number
+  delayBottomUs: number
   freqFromHz: number
   freqToHz: number
   /** The two decay views: how the surface is drawn, and how each is analysed. */
@@ -66,6 +72,9 @@ export function defaultImpulseDisplay(sampleRateHz: number): ImpulseDisplay {
     harmonicsYBottomDb: -120,
     phaseTopDeg: 180,
     phaseBottomDeg: -180,
+    delayView: 'None',
+    delayTopUs: 1000,
+    delayBottomUs: -1000,
     freqFromHz: 20,
     freqToHz: 20000,
     decayMode: 'Waterfall',
@@ -113,6 +122,9 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartHarmonicsYBottomDb === 'number') display.harmonicsYBottomDb = stored.chartHarmonicsYBottomDb
   if (typeof stored.chartPhaseTopDeg === 'number') display.phaseTopDeg = stored.chartPhaseTopDeg
   if (typeof stored.chartPhaseBottomDeg === 'number') display.phaseBottomDeg = stored.chartPhaseBottomDeg
+  if (isDelayView(stored.chartDelayView)) display.delayView = stored.chartDelayView
+  if (typeof stored.chartDelayTopUs === 'number' && Number.isFinite(stored.chartDelayTopUs)) display.delayTopUs = stored.chartDelayTopUs
+  if (typeof stored.chartDelayBottomUs === 'number' && Number.isFinite(stored.chartDelayBottomUs)) display.delayBottomUs = stored.chartDelayBottomUs
   if (typeof stored.chartFreqFromHz === 'number' && stored.chartFreqFromHz > 0) display.freqFromHz = stored.chartFreqFromHz
   if (typeof stored.chartFreqToHz === 'number' && stored.chartFreqToHz > 0) display.freqToHz = stored.chartFreqToHz
   if (stored.chartDecayMode) display.decayMode = stored.chartDecayMode

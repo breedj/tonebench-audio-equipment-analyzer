@@ -33,7 +33,9 @@ const { showPage } = useManual()
     <p>
       <strong>RUN SWEEP</strong> walks the levels once and stops. <strong>CANCEL</strong> stops
       early and keeps the points measured so far. <strong>Clear</strong> discards them, and is
-      disabled while a sweep runs.
+      disabled while a sweep runs. A sweep armed with <strong>Stop when THD exceeds</strong> ends
+      itself at the first point over that figure, keeps that point, and says so in amber under the
+      progress line.
     </p>
 
     <h2>Sweep settings</h2>
@@ -87,6 +89,16 @@ const { showPage } = useManual()
             Captures one generator-off record before the sweep, giving the residual the distortion
             traces sit above. See the caution below about what that trace means at the top of a
             level sweep.
+          </td>
+        </tr>
+        <tr>
+          <td>Stop when THD exceeds … %</td>
+          <td>
+            Ends the sweep as soon as a measured channel reads more than this THD, instead of
+            driving on to the end voltage. The point that crossed the threshold is kept — it is the
+            one that says where the amplifier gave up — which also means the DUT is driven one step
+            past the figure. Off, the sweep runs to its end voltage. The threshold is saved with the
+            measurement type and with every result.
           </td>
         </tr>
       </tbody>

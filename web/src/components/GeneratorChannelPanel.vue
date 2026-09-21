@@ -77,6 +77,16 @@ function applyPreset(levelDbv: number) {
   actualFreqHz.splice(0, actualFreqHz.length, null, null)
 }
 
+function onKindChange() {
+  // Picking the multitone stimulus is asking for its reading, the way an IMD preset is: surface
+  // the TD+N tiles once. A later removal is respected.
+  if (kind.value === 'Multitone') {
+    const missing = ['TD+N %', 'TD+N dB'].filter((label) => !selectedMetrics.value.includes(label))
+    if (missing.length) setSelectedMetrics([...selectedMetrics.value, ...missing])
+  }
+  emit('change')
+}
+
 function onPresetChange() {
   if (imd.preset !== 'Custom') {
     const preset = imdPreset(imd.preset)
@@ -185,7 +195,7 @@ defineExpose({ currentConfig, syncFromStatus })
       <select
         v-model="kind"
         class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        @change="emit('change')"
+        @change="onKindChange"
       >
         <option v-for="k in KINDS" :key="k.value" :value="k.value">{{ k.label }}</option>
       </select>

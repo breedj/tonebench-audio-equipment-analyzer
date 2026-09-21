@@ -299,8 +299,9 @@ internal static class SteppedCaptureSupport
             ? session.Capabilities.OutputRangesDbv.Max()
             : 18.0;
 
+        // The target is the DUT's level on the measured channel; the ladder is the analyzer's.
         if (session.AutoRangeEnabled != false)
-            await SetInputRangeForAsync(session, wantedOutDbv, ct);
+            await SetInputRangeForAsync(session, session.ToAnalyzerDbv(wantedOutDbv, measuredChannel), ct);
 
         var probeTone = CoherentFrequency.Nearest(ProbeFrequencyHz, sampleRateHz, probeFftSize);
         double genDbv = ProbeStartDbv;
@@ -490,11 +491,21 @@ internal static class SteppedCaptureSupport
             fellBackToPeak = false;
         }
 
+        // A stepped sweep removes no delay and its unwrapper starts at the first tone, so the
+        // phase already carries the DUT's physical turns: the delays are a plain finite difference
+        // on the sweep's own grid and the phase delay takes no anchor -- anchoring it at a passband
+        // tone would delete a whole turn's worth of real delay from any DUT slower than half a
+        // period there. Valid while the tone spacing keeps each phase step under half a turn.
+        var groupDelayS = GroupDelay.FromPhaseOnGrid(phaseDeg, freqHz);
+        var phaseDelayS = GroupDelay.PhaseDelayOnGrid(phaseDeg, freqHz, anchorIndex: null);
+
         int n = freqHz.Length;
         var freq = new float[n];
         var mag = new float[n];
         var phase = new float[n];
         var coherence = new float[n];
+        var groupDelay = new float[n];
+        var phaseDelay = new float[n];
 
         for (int i = 0; i < n; i++)
         {
@@ -502,6 +513,8 @@ internal static class SteppedCaptureSupport
             mag[i] = (float)magnitudeDb[i];
             phase[i] = (float)phaseDeg[i];
             coherence[i] = 1.0f;
+            groupDelay[i] = (float)groupDelayS[i];
+            phaseDelay[i] = (float)phaseDelayS[i];
         }
 
         // The same array for min and max: the chart draws the max as the line and the min as a band
@@ -515,6 +528,8 @@ internal static class SteppedCaptureSupport
             (float[])mag.Clone(),
             phase,
             coherence,
+            groupDelay,
+            phaseDelay,
             oneDb,
             threeDb,
             peak.LevelDb,

@@ -370,7 +370,9 @@ public sealed class FrequencyResponseRunner(
             double generatorAmpDbv;
             if (request.SolvesGeneratorLevel)
             {
-                double predictedRangeDbv = InputRangeSelector.For(session.Capabilities.InputRangesDbv, request.LevelDbv);
+                // The target is the DUT's level on the left input; the ladder is the analyzer's.
+                double predictedRangeDbv = InputRangeSelector.For(
+                    session.Capabilities.InputRangesDbv, session.ToAnalyzerDbv(request.LevelDbv, StreamChannel.Left));
                 if (ownsInputRange)
                     await ApplyInputRangeAsync(predictedRangeDbv, ct);
 

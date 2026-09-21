@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame } from '../streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, MultitoneFrame, NoiseFiguresFrame } from '../streaming/protocol'
 import type { GeneratorTone } from '../api/client'
 import { channelTiles, type MetricTile } from '../metrics'
 import { useChartDisplay } from '../composables/useChartDisplay'
@@ -17,6 +17,8 @@ const props = defineProps<{
   imdUnresolved?: boolean
   /** This channel's band RMS / noise density / weighting frame — adds the noise tiles and the weighting qualifier. */
   noise?: NoiseFiguresFrame | null
+  /** This channel's multitone figure, while the generator plays a comb — adds the TD+N tiles. */
+  multitone?: MultitoneFrame | null
 }>()
 
 // Shared with the other channel — see useLoadOhms.ts. Edited in the Generator pane, not here; the
@@ -26,7 +28,10 @@ const { dutGainDb } = useChartDisplay()
 const { selectedMetrics, removeMetric } = useMetricSelection()
 
 const allTiles = computed(() =>
-  channelTiles(props.meters, props.generatorTones, loadOhms.value, props.imd ?? null, props.imdUnresolved ?? false, props.noise ?? null, dutGainDb.value),
+  channelTiles(
+    props.meters, props.generatorTones, loadOhms.value, props.imd ?? null, props.imdUnresolved ?? false, props.noise ?? null, dutGainDb.value,
+    props.multitone ?? null,
+  ),
 )
 
 // Selected fixed metrics, in the order they were picked — see metrics.ts's AVAILABLE_METRIC_LABELS.

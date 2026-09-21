@@ -1,6 +1,6 @@
 import type { ReportRow, ReportSection } from '../../api/client'
 import { channelTiles, GEN_METRIC_LABEL } from '../../metrics'
-import type { IntermodulationFrame, MetersFrame } from '../../streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, MultitoneFrame } from '../../streaming/protocol'
 import { imdProductLabel } from '../../imd/products'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
@@ -41,7 +41,7 @@ export function metricsSections(subject: ReportSubject): ReportSection[] {
   for (const channel of channels) {
     const tiles = channelTiles(
       meters[channel] ?? null, generatorTones, loadOhms, subject.data.intermodulation[channel] ?? null, false,
-      noise[channel] ?? null, display.dutGainDb.value,
+      noise[channel] ?? null, display.dutGainDb.value, subject.data.multitone?.[channel] ?? null,
     )
     const byLabel = new Map(tiles.map((tile) => [tile.label, tile]))
     const rows: ReportRow[] = []
@@ -88,6 +88,52 @@ export function harmonicsSections(subject: ReportSubject): ReportSection[] {
     sections.push({ kind: 'paragraph', title: 'Harmonics', text: 'No fundamental was found, so there are no harmonics.' })
   }
   sections.push(...intermodulationSections(subject.data.intermodulation))
+  sections.push(...multitoneSections(subject.data.multitone ?? {}))
+  return sections
+}
+
+/**
+ * The Multitone table per channel, when the measurement had one: every tone with the highest line
+ * and the D+N of the gap above it, and the total, as the screen's MultitoneTable lays them out.
+ * Nothing at all without a multitone figure.
+ */
+export function multitoneSections(multitone: Record<number, MultitoneFrame>): ReportSection[] {
+  const sections: ReportSection[] = []
+  const entries = Object.entries(multitone)
+    .map(([channel, frame]) => [Number(channel), frame] as [number, MultitoneFrame])
+    .filter(([channel]) => channel === 0 || channel === 1)
+    .sort(([a], [b]) => a - b)
+
+  const hz = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 2)} kHz` : `${v.toFixed(1)} Hz`)
+  for (const [channel, f] of entries) {
+    sections.push({
+      kind: 'table',
+      title: `Multitone — ${CHANNEL_LABELS[channel]}`,
+      headers: ['Tone', 'Level', 'Highest above', 'dBr', 'D+N dBr'],
+      cells: f.tones.map((tone, i) => {
+        const band = f.bands[i]
+        if (!band) return [hz(tone.freqHz), `${tone.dbv.toFixed(2)} dBV`, '—', '—', '—']
+        if (!band.resolved) return [hz(tone.freqHz), `${tone.dbv.toFixed(2)} dBV`, 'unresolved', '—', '—']
+        return [
+          hz(tone.freqHz),
+          `${tone.dbv.toFixed(2)} dBV`,
+          `${hz(band.highestFreqHz)} · ${band.highestDbv.toFixed(1)} dBV`,
+          `${band.highestDbr.toFixed(1)} dBr`,
+          `${band.dnDbr.toFixed(1)} dBr`,
+        ]
+      }),
+    })
+    const tdnDb = f.tdn > 0 ? `, ${(20 * Math.log10(f.tdn)).toFixed(2)} dB` : ''
+    sections.push({
+      kind: 'keyValues',
+      title: `TD+N — ${CHANNEL_LABELS[channel]}`,
+      rows: [
+        { label: 'TD+N', value: `${(f.tdn * 100).toFixed(5)} %${tdnDb}` },
+        { label: 'Gaps resolved', value: `${f.resolvedBands} of ${f.bands.length}` },
+        { label: 'Comb level (RMS)', value: `${f.combDbv.toFixed(2)} dBV` },
+      ],
+    })
+  }
   return sections
 }
 

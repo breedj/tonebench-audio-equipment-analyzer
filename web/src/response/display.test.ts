@@ -27,6 +27,9 @@ describe('responseDisplayFromParams', () => {
       chartXToHz: 20000,
       chartPhaseTopDeg: 90,
       chartPhaseBottomDeg: -270,
+      chartDelayView: 'Group',
+      chartDelayTopUs: 2500,
+      chartDelayBottomUs: -100,
       chartNyquistRadius: 'Db',
       chartNyquistRadiusFloorDb: -60,
       chartInvertLoopSign: true,
@@ -51,11 +54,20 @@ describe('responseDisplayFromParams', () => {
       xToHz: 20000,
       phaseTopDeg: 90,
       phaseBottomDeg: -270,
+      delayView: 'Group',
+      delayTopUs: 2500,
+      delayBottomUs: -100,
       nyquistRadius: 'Db',
       nyquistRadiusFloorDb: -60,
       invertLoopSign: true,
       restoreDelay: true,
     })
+  })
+
+  it('ignores a delay view it does not know, so an older or hand-edited type opens with no delay curve', () => {
+    expect(responseDisplayFromParams(JSON.stringify({ chartDelayView: 'group' })).delayView).toBe('None')
+    expect(responseDisplayFromParams(JSON.stringify({ chartDelayView: 'Phase' })).delayView).toBe('Phase')
+    expect(responseDisplayFromParams(JSON.stringify({ chartDelayTopUs: 'big' })).delayTopUs).toBe(1000)
   })
 
   it('ignores a non-negative radius floor', () => {
@@ -117,6 +129,12 @@ describe('responseChartFlags', () => {
   it('hides phase when the run measured none, but not on an empty chart', () => {
     expect(responseChartFlags(display, { kind: 'SteppedResponse', phaseKind: 'None', rightChannelIsReference: false, hasTraces: true }).showPhase).toBe(false)
     expect(responseChartFlags(display, { kind: 'SteppedResponse', phaseKind: 'None', rightChannelIsReference: false, hasTraces: false }).showPhase).toBe(true)
+  })
+
+  it('gates the delay curve on the same phase availability as the phase series', () => {
+    const withDelay = { ...display, delayView: 'Group' as const }
+    expect(responseChartFlags(withDelay, { kind: 'FrequencyResponse', phaseKind: 'PerTrace', rightChannelIsReference: false, hasTraces: true }).delayView).toBe('Group')
+    expect(responseChartFlags(withDelay, { kind: 'SteppedResponse', phaseKind: 'None', rightChannelIsReference: false, hasTraces: true }).delayView).toBe('None')
   })
 
   it('never draws coherence for a stepped run', () => {

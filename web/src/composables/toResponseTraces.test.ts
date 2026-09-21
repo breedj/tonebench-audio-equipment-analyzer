@@ -18,6 +18,8 @@ function stored(kind: string): StoredResponseTrace {
     peakHz: 20000,
     referenceDb: -59,
     referenceMode: 'Peak',
+    groupDelayS: null,
+    phaseDelayS: null,
   } as StoredResponseTrace
 }
 
@@ -34,6 +36,18 @@ describe('toResponseTraces', () => {
     const impedance = toImpedanceTraces([stored('zout'), stored('gain_load1'), stored('gain_load2')])
     expect(impedance.map((t) => t.kind)).toEqual(['Impedance'])
     expect(impedance[0].magnitudeMaxDbOhms).toEqual([-70, -59])
+  })
+
+  it('keeps null delay curves for a result saved before they existed, and carries them when present', () => {
+    // Null stays null: back-filling from the stored phase would draw a derivative of the decimated
+    // columns, which is not the measurement the live screen showed.
+    const [older] = toResponseTraces([stored('gain')])
+    expect(older.groupDelayS).toBeNull()
+    expect(older.phaseDelayS).toBeNull()
+
+    const [newer] = toResponseTraces([{ ...stored('gain'), groupDelayS: [1e-6, 2e-6], phaseDelayS: [3e-6, 4e-6] }])
+    expect(newer.groupDelayS).toEqual([1e-6, 2e-6])
+    expect(newer.phaseDelayS).toEqual([3e-6, 4e-6])
   })
 
   it('refuses a kind it does not know rather than drawing it as gain', () => {

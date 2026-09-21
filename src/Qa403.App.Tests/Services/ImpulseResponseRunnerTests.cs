@@ -394,6 +394,33 @@ public class ImpulseResponseRunnerTests
     private static double Extent(ImpulseTrace impulse, int column) =>
         Math.Max(Math.Abs(impulse.MinVolts[column]), Math.Abs(impulse.MaxVolts[column]));
 
+    /// <summary>
+    /// The gated response traces go through the same builder as the chirp's, so with the right
+    /// input as the reference the gain trace's delay curves carry the DUT's physical delay.
+    /// </summary>
+    [Fact]
+    public async Task WithTheRightChannelAsReference_TheGatedResponseCarriesThePhysicalDelay()
+    {
+        const int delayFrames = 100;
+        var taps = new double[delayFrames + 1];
+        taps[delayFrames] = 1.0;
+        var harness = await CreateAsync(new KnownImpulseResponseDevice(CleanDevice(), taps));
+
+        await harness.Runner.StartAsync(Request(referenceMode: ImpulseReferenceMode.RightChannel, smoothing: 24), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        double expectedS = delayFrames / SampleRateHz;
+        var gain = status.Traces.Single(t => t.Kind == FrequencyResponseTraceKind.Gain);
+        for (int c = gain.FreqHz.Length / 4; c < gain.FreqHz.Length * 3 / 4; c += 20)
+        {
+            Assert.True(Math.Abs(gain.GroupDelayS[c] - expectedS) < 0.01 * expectedS,
+                $"group delay {gain.GroupDelayS[c] * 1e6:F1} µs at {gain.FreqHz[c]:F0} Hz, expected {expectedS * 1e6:F1}");
+            Assert.True(Math.Abs(gain.PhaseDelayS[c] - expectedS) < 0.01 * expectedS,
+                $"phase delay {gain.PhaseDelayS[c] * 1e6:F1} µs at {gain.FreqHz[c]:F0} Hz, expected {expectedS * 1e6:F1}");
+        }
+    }
+
     /// <summary>Peak-to-peak departure from flat, in dB, over the middle of the gain trace.</summary>
     private static double RippleDb(ImpulseResponseStatus status)
     {

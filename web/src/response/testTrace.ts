@@ -12,6 +12,12 @@ export function makeTrace(over: {
   magnitudeMinDb?: number[]
   phaseDeg: number[]
   coherence?: number[]
+  /** Default null — what a stored result from before the delay curves reads as. */
+  groupDelayS?: number[] | null
+  phaseDelayS?: number[] | null
+  peakFreqHz?: number
+  referenceMode?: ResponseTrace['referenceMode']
+  referenceFellBackToPeak?: boolean
 }): ResponseTrace {
   const bandwidth = { dropDb: 3, symmetric: false, lowerHz: 0, upperHz: 0, bandwidthHz: 0, lowerClamped: false, upperClamped: false }
   return {
@@ -24,13 +30,15 @@ export function makeTrace(over: {
     magnitudeMaxDb: over.magnitudeMaxDb,
     phaseDeg: over.phaseDeg,
     coherence: over.coherence ?? over.freqHz.map(() => 1),
+    groupDelayS: over.groupDelayS ?? null,
+    phaseDelayS: over.phaseDelayS ?? null,
     oneDb: bandwidth,
     threeDb: bandwidth,
     peakDb: 0,
-    peakFreqHz: 0,
+    peakFreqHz: over.peakFreqHz ?? 0,
     referenceDb: 0,
-    referenceMode: 'BandMedian',
-    referenceFellBackToPeak: false,
+    referenceMode: over.referenceMode ?? 'BandMedian',
+    referenceFellBackToPeak: over.referenceFellBackToPeak ?? false,
   }
 }
 

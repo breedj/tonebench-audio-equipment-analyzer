@@ -118,10 +118,31 @@ describe('frequencyResponseMeasurementSections', () => {
       'Max. gain': '4.41 dB (1.661 x)',
       'Peak at': '38.0 kHz',
       Reference: '0.12 dB — Passband median',
+      'Group delay at reference': '—',
+      'Phase delay at reference': '—',
+      'Group delay min': '—',
+      'Group delay max': '—',
       Curve: 'Gain (left relative to the reference)',
     })
     expect(sections[2].kind).toBe('paragraph')
+    expect(sections[2].text).toContain('Delay was not recorded')
     expect(sections[2].text).toContain('never reached')
+  })
+
+  it('writes the delay rows from the curve the chart draws them on, at the reference band', () => {
+    const withDelays = {
+      ...gain,
+      groupDelayS: [2.5e-3, 12e-6, 4e-6],
+      phaseDelayS: [2.6e-3, 13e-6, 5e-6],
+    }
+    const sections = frequencyResponseMeasurementSections([withDelays], 'Gain', true, 'DutResponse', { lowHz: 50, highHz: 500 })
+    expect(rowsToObject(sections[1].rows!)).toMatchObject({
+      'Group delay at reference': '12.0 µs',
+      'Phase delay at reference': '13.0 µs',
+      'Group delay min': '4.0 µs at 1.00 kHz',
+      'Group delay max': '2.500 ms at 10.00 Hz',
+    })
+    expect(sections[2].text).not.toContain('Delay was not recorded')
   })
 
   it('says so when there is no curve to read', () => {
@@ -149,7 +170,9 @@ describe('frequencyResponseSections / chapterSections', () => {
     facts: [],
     data: {
       kind: 'response',
-      traces: [makeTrace({ freqHz: [10, 100], magnitudeMaxDb: [0, 0], phaseDeg: [0, 0] })],
+      // A trace that recorded its delays, so the measurements element carries no "not recorded"
+      // note and the section list below is exactly the chosen elements.
+      traces: [makeTrace({ freqHz: [10, 100], magnitudeMaxDb: [0, 0], phaseDeg: [0, 0], groupDelayS: [0, 0], phaseDelayS: [0, 0] })],
       display: DEFAULT_RESPONSE_DISPLAY,
       phaseKind: 'PerTrace',
       rightChannelIsReference: true,

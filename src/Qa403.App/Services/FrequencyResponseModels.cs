@@ -167,6 +167,15 @@ public sealed record BandwidthReading(
 /// <para>The peak and the bandwidth readings are computed server-side on the <b>full-resolution,
 /// smoothed</b> trace, not on these columns — decimation would move a corner by up to a column, and
 /// a column near 20 kHz is far wider than the corner it is reporting.</para>
+///
+/// <para><see cref="GroupDelayS"/> and <see cref="PhaseDelayS"/> are derived from the
+/// full-resolution unwrapped phase <i>before</i> decimation (a derivative of the column-sampled
+/// phase would be aliased wherever columns are finer than bins) and then sampled at the column
+/// centre like the phase itself, in seconds. Whether they are the DUT's physical delay or only its
+/// <i>excess</i> delay depends on what the phase was measured against: a chirp trace estimated
+/// against the synthesised sweep had the record's arbitrary rotation removed, so Left and Right —
+/// and Gain without a measured reference — carry excess delay only, while Gain against the right
+/// input has the measured delay put back. See <c>ResponseCaptureSupport.BuildTraces</c>.</para>
 /// </summary>
 public sealed record FrequencyResponseTrace(
     FrequencyResponseTraceKind Kind,
@@ -177,6 +186,8 @@ public sealed record FrequencyResponseTrace(
     float[] MagnitudeMaxDb,
     float[] PhaseDeg,
     float[] Coherence,
+    float[] GroupDelayS,
+    float[] PhaseDelayS,
     BandwidthReading OneDb,
     BandwidthReading ThreeDb,
     double PeakDb,

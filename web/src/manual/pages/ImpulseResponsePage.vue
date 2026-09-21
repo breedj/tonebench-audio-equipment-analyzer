@@ -89,7 +89,16 @@ const { showPage } = useManual()
       can see polarity; <em>Normalised</em> switches to dB below the peak, which is easier for
       reading a decay.
     </p>
-    <p><strong>Gated response</strong> is the magnitude and phase computed from the window, drawn by the same chart the frequency response uses.</p>
+    <p>
+      <strong>Gated response</strong> is the magnitude and phase computed from the window, drawn by
+      the same chart the frequency response uses. Its display block offers the same
+      <strong>Delay</strong> selector (None, Group delay, Phase delay) on a right-hand axis, with a
+      <strong>Delay top</strong> / <strong>bottom</strong> window in µs or ms that Autofit sizes
+      along with the level and phase windows. The curves are the physical delay only with
+      <strong>Right channel</strong> as the reference; against the generated sweep the bulk delay
+      went out with the record's arbitrary start point and what remains is the excess delay. See
+      the frequency-response page for what the two delays mean.
+    </p>
     <p><strong>Harmonics</strong> is the distortion curves described above.</p>
     <p>
       <strong>Cumulative spectral decay</strong> and <strong>Burst decay</strong> are the two decay

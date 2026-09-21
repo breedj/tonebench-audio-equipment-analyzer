@@ -108,6 +108,10 @@ export function toResponseTraces(stored: StoredResponseTrace[]): ResponseTrace[]
     magnitudeMaxDb: trace.magnitudeMaxDb,
     phaseDeg: trace.phaseDeg,
     coherence: trace.coherence,
+    // Null on a result saved before the delays were recorded (migration 012), and kept null: a
+    // derivative of the decimated phase is not the curve the live screen showed.
+    groupDelayS: trace.groupDelayS ?? null,
+    phaseDelayS: trace.phaseDelayS ?? null,
     // The stored rows keep the two corner frequencies and their clamped flags but not the width,
     // which is exactly their difference — recomputed here rather than stored twice and able to
     // disagree.

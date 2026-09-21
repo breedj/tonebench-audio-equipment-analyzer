@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 using Qa403.App.Endpoints;
@@ -475,7 +476,12 @@ public sealed class MeasurementSaveService(
 
         // The settle time is a run record, set here and not in BuildParameters: that method also
         // writes a type's own params_json, where the field has to stay null.
-        var parameters = BuildParameters() with { CaptureDelayMs = session.LastAppliedCaptureDelayMs };
+        var parameters = BuildParameters() with
+        {
+            CaptureDelayMs = session.LastAppliedCaptureDelayMs,
+            ExternalGainLeftDb = session.ExternalGainLeftDb,
+            ExternalGainRightDb = session.ExternalGainRightDb,
+        };
         // The pipeline knows the tones it measured with but not which template put them there;
         // the type does. Carried over only when the type's stored pair is the one that ran.
         parameters = parameters with { ImdPreset = await ResolveImdPresetNameAsync(measurementTypeId, parameters, ct) };
@@ -541,6 +547,8 @@ public sealed class MeasurementSaveService(
 
             if (m.Intermodulation is { } imd)
                 metrics.AddRange(IntermodulationMetrics(channel, imd));
+            if (m.Multitone is { } multitone)
+                metrics.AddRange(MultitoneMetrics(channel, multitone));
         }
 
         var info = session.Info;
@@ -582,7 +590,9 @@ public sealed class MeasurementSaveService(
                     request.StepsPerOctave, request.LoadOhms, request.ProcessLeft, request.ProcessRight,
                     request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
                     request.MeasureNoiseFloor,
-                    CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                    CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                    StopThdPercent: request.StopThdPercent),
                 SerializerOptions)
             : JsonSerializer.Serialize(
                 new ThdVsFrequencyParameters(
@@ -592,7 +602,8 @@ public sealed class MeasurementSaveService(
                     request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
                     request.MeasureNoiseFloor, status.GeneratorAmpDbv,
                     request.AdaptiveResolution, request.ThdMethod.ToString(),
-                    CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                    CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
                 SerializerOptions);
 
         // One capture per sweep point, in sweep order. Points arrive per channel, so group them back
@@ -651,7 +662,8 @@ public sealed class MeasurementSaveService(
                 request.ProcessLeft, request.ProcessRight,
                 request.FftSize, ImdSweepRequest.Window, request.AverageCount, request.SampleRateHz,
                 request.MeasureNoiseFloor, request.MaxProductFreqHz,
-                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
             SerializerOptions);
 
         // Grouped by the level, which is the axis; capture.freq_hz carries the low tone, which is
@@ -769,7 +781,8 @@ public sealed class MeasurementSaveService(
                 BandwidthReference: request.BandwidthReference.ToString(),
                 BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
                 BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
-                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
             SerializerOptions);
 
         var info = session.Info;
@@ -811,7 +824,8 @@ public sealed class MeasurementSaveService(
                 request.AdaptiveResolution,
                 GeneratorAmpDbvLeftToRight: levels.TryGetValue(FrequencyResponseTraceKind.CrosstalkLeftToRight, out double l2r) ? l2r : null,
                 GeneratorAmpDbvRightToLeft: levels.TryGetValue(FrequencyResponseTraceKind.CrosstalkRightToLeft, out double r2l) ? r2l : null,
-                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
             SerializerOptions);
 
         var info = session.Info;
@@ -854,7 +868,8 @@ public sealed class MeasurementSaveService(
                 request.AdaptiveResolution,
                 GeneratorAmpDbv: status.GeneratorAmpDbv,
                 InputRangeDbv: status.InputRangeDbv,
-                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
             SerializerOptions);
 
         var traces = new List<ResponseTraceInput> { ToImpedanceTraceInput(status.Trace, ResponseTraceKind.OutputImpedance) };
@@ -910,7 +925,8 @@ public sealed class MeasurementSaveService(
                 BandwidthReference: request.BandwidthReference.ToString(),
                 BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
                 BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
-                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
             SerializerOptions);
 
         var info = session.Info;
@@ -964,7 +980,8 @@ public sealed class MeasurementSaveService(
                 request.GatePreMs, request.GatePostMs, request.GateWindow.ToString(),
                 request.ExtractHarmonics, request.MaxHarmonicOrder,
                 status.GeneratorAmpDbv, request.ChirpStartHz, request.LoadOhms,
-                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
             SerializerOptions);
 
         var info = session.Info;
@@ -1072,7 +1089,8 @@ public sealed class MeasurementSaveService(
                 EndFreqHz: request.EndFreqHz,
                 StepsPerOctave: request.StepsPerOctave,
                 AdaptiveResolution: request.AdaptiveResolution,
-                CaptureDelayMs: session.LastAppliedCaptureDelayMs),
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
             SerializerOptions);
 
         var info = session.Info;
@@ -1138,7 +1156,9 @@ public sealed class MeasurementSaveService(
             trace.PhaseDeg,
             trace.Coherence,
             trace.ReferenceDb,
-            trace.ReferenceMode.ToString());
+            trace.ReferenceMode.ToString(),
+            trace.GroupDelayS,
+            trace.PhaseDelayS);
 
     private static string TraceKindName(FrequencyResponseTraceKind kind) => kind switch
     {
@@ -1289,6 +1309,41 @@ public sealed class MeasurementSaveService(
         }
     }
 
+    /// <summary>
+    /// The multitone figures as metric rows: the total, the comb, every tone (<c>mt_t{i}_*</c>) and
+    /// every <em>resolved</em> gap (<c>mt_b{i}_*</c>, i = the index of the tone at its lower edge).
+    /// Unresolved gaps get no rows -- their figures are minus infinity, which the metrics dictionary
+    /// could not serialize (a NaN or an infinity truncates the whole response, see
+    /// <c>ImpedanceStatusJsonTests</c>) -- and the client reads a gap with no rows as unresolved.
+    /// </summary>
+    internal static IEnumerable<MeasurementMetric> MultitoneMetrics(int channel, MultitoneResult multitone)
+    {
+        yield return new MeasurementMetric(channel, "tdn_percent", multitone.TdnPercent, "%");
+        yield return new MeasurementMetric(channel, "tdn_db", multitone.TdnDb, "dB");
+        yield return new MeasurementMetric(channel, "mt_comb_dbv", multitone.CombDbv, "dBV");
+        yield return new MeasurementMetric(channel, "mt_tone_count", multitone.Tones.Count, null);
+        yield return new MeasurementMetric(channel, "mt_band_count", multitone.Bands.Count, null);
+        yield return new MeasurementMetric(channel, "mt_resolved_bands", multitone.ResolvedBands, null);
+
+        for (int i = 0; i < multitone.Tones.Count; i++)
+        {
+            var tone = multitone.Tones[i];
+            yield return new MeasurementMetric(channel, $"mt_t{i}_hz", tone.FreqHz, "Hz");
+            yield return new MeasurementMetric(channel, $"mt_t{i}_dbv", tone.AmplitudeDbv, "dBV");
+        }
+
+        for (int i = 0; i < multitone.Bands.Count; i++)
+        {
+            var band = multitone.Bands[i];
+            if (!band.Resolved)
+                continue;
+            yield return new MeasurementMetric(channel, $"mt_b{i}_hz", band.HighestFreqHz, "Hz");
+            yield return new MeasurementMetric(channel, $"mt_b{i}_dbv", band.HighestDbv, "dBV");
+            yield return new MeasurementMetric(channel, $"mt_b{i}_dbr", band.HighestDbr, "dBr");
+            yield return new MeasurementMetric(channel, $"mt_b{i}_dn_dbr", band.DnDbr, "dBr");
+        }
+    }
+
     public async Task<MeasurementTypeAppliedResponse> ApplyAsync(long measurementTypeId, CancellationToken ct)
     {
         var type = await projectRepository.GetTypeAsync(measurementTypeId, ct)
@@ -1308,6 +1363,24 @@ public sealed class MeasurementSaveService(
 
         var parameters = JsonSerializer.Deserialize<FftSpectrumParameters>(type.ParamsJson, SerializerOptions)
             ?? throw new InvalidOperationException($"Measurement type {measurementTypeId} has no usable parameters.");
+
+        // An FFT params_json that is not a whole configuration is not applied at all. Deserializing
+        // a partial document does not fail: a missing generator is null and a missing harmonic count
+        // or band is 0, and those zeros used to go straight onto the pipeline before the null was
+        // even reached -- so the type 500'd on selection *and* left every sweep run afterwards
+        // measuring THD with zero harmonics (the sweep runners inherit HarmonicCount and the band
+        // from the live options), which read as "no data" on two screens at once. Nothing but this
+        // method ever writes those fields, and no endpoint accepts a zero for them, so a zero is a
+        // document that was never complete, not a setting. The live state is handed back instead,
+        // and the stored document is rewritten from it there and then -- keeping only the chart
+        // preferences it did hold -- so the type is whole again for its next selection rather than
+        // only once the user happens to change something.
+        if (!IsCompleteFftConfiguration(parameters))
+        {
+            await projectRepository.UpdateTypeAsync(
+                type.Id, type.Name, type.Notes, HealedFftParamsJson(type.ParamsJson), ct);
+            return ToAppliedResponse(BuildParameters());
+        }
 
         spectrumPipeline.Options = spectrumPipeline.Options with
         {
@@ -1329,6 +1402,7 @@ public sealed class MeasurementSaveService(
             // Same rule: a type saved without a weighting (or by a build that had none) is
             // unweighted, not "whatever the last type left behind".
             Weighting = WeightingSpecOf(parameters),
+            ScopeResidual = parameters.ScopeResidual ?? false,
         };
 
         return ToAppliedResponse(parameters);
@@ -1400,6 +1474,49 @@ public sealed class MeasurementSaveService(
         return new IntermodulationSpec(low, high, method, parameters.ImdMaxOrder ?? IntermodulationPresets.DefaultMaxOrder(method), parameters.ImdMaxProductFreqHz);
     }
 
+    /// <summary>
+    /// Whether a stored FFT record holds everything <see cref="ApplyAsync"/> pushes onto the
+    /// pipeline and the device. Public so a test can pin the signature of a document that was
+    /// written incomplete: no generator, no harmonics, an empty band.
+    /// </summary>
+    public static bool IsCompleteFftConfiguration(FftSpectrumParameters parameters) =>
+        parameters.Generator is { Left: not null, Right: not null }
+        && parameters.FftSize > 0
+        && parameters.SampleRateHz > 0
+        && parameters.HarmonicCount > 0
+        && parameters.MeasurementLoFreqHz >= 0
+        && parameters.MeasurementHiFreqHz > parameters.MeasurementLoFreqHz;
+
+    /// <summary>
+    /// The live state as a whole FFT document, with whatever <c>chart*</c> preferences the
+    /// incomplete <paramref name="storedJson"/> did carry laid over it: those describe how the
+    /// screen was being looked at and were never the broken part.
+    /// </summary>
+    internal string HealedFftParamsJson(string storedJson)
+    {
+        var healed = JsonNode.Parse(BuildCurrentParametersJson())!.AsObject();
+        JsonObject? stored;
+        try
+        {
+            stored = JsonNode.Parse(storedJson) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            stored = null;
+        }
+
+        if (stored is not null)
+        {
+            foreach (var (key, value) in stored)
+            {
+                if (key.StartsWith("chart", StringComparison.OrdinalIgnoreCase))
+                    healed[key] = value?.DeepClone();
+            }
+        }
+
+        return healed.ToJsonString(SerializerOptions);
+    }
+
     private static MeasurementTypeAppliedResponse ToAppliedResponse(FftSpectrumParameters parameters) =>
         new(
             DeviceSessionService.ToResponse(parameters.Generator.Left),
@@ -1434,7 +1551,8 @@ public sealed class MeasurementSaveService(
             parameters.WeightingUser2,
             parameters.DutGainDb,
             parameters.ChartUnit,
-            parameters.ChartShowWeightingCurve);
+            parameters.ChartShowWeightingCurve,
+            parameters.ScopeResidual);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -1496,6 +1614,9 @@ public sealed class MeasurementSaveService(
             DutGainDb = staged?.DutGainDb,
             ChartUnit = staged?.ChartUnit,
             ChartShowWeightingCurve = staged?.ChartShowWeightingCurve,
+            // Live pipeline state, like the IMD spec: the oscilloscope's Residual checkbox pushes
+            // it through spectrum-config the moment it is toggled.
+            ScopeResidual = options.ScopeResidual,
         };
     }
 

@@ -82,6 +82,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ImpedanceFixtureConfig))]
 [JsonSerializable(typeof(UiLayoutConfig))]
 [JsonSerializable(typeof(CaptureDelayConfig))]
+[JsonSerializable(typeof(ExternalGainConfig))]
 // The user weighting tables: the config document (a Qa403.Data record, registered by hand like the
 // others) and the endpoints' own DTOs.
 [JsonSerializable(typeof(UserWeightingTable))]

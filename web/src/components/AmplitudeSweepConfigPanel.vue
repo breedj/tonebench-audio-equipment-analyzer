@@ -58,6 +58,8 @@ const form = reactive({
   processRight: false,
   averageCount: 4,
   measureNoiseFloor: true,
+  stopOnThd: false,
+  stopThdPercent: 1,
 })
 
 /**
@@ -92,6 +94,14 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.processRight === 'boolean') form.processRight = stored.processRight
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (typeof stored.measureNoiseFloor === 'boolean') form.measureNoiseFloor = stored.measureNoiseFloor
+  // Stored as one nullable number; the form keeps the checkbox and the value apart so unticking
+  // does not lose the threshold the user typed.
+  if (typeof stored.stopThdPercent === 'number' && stored.stopThdPercent > 0) {
+    form.stopOnThd = true
+    form.stopThdPercent = stored.stopThdPercent
+  } else if (stored.stopThdPercent === null) {
+    form.stopOnThd = false
+  }
 
   // The form writes land in this tick; the watcher runs on the next one, so the flag has to survive
   // until then.
@@ -156,8 +166,12 @@ const invalid = computed(() => {
   // Unconditional here, unlike the frequency sweep: the chart can plot output power against the
   // swept level, and that needs a load whichever way the sweep was set up.
   if (!(loadOhms.value > 0)) return 'A load above 0 Ω is needed to report output power.'
+  if (form.stopOnThd && !(form.stopThdPercent > 0)) return 'The THD stop threshold must be above 0 %.'
   return null
 })
+
+/** The threshold as the server takes it: a number when armed, null for "sweep to the end". */
+const stopThdPercent = computed(() => (form.stopOnThd ? form.stopThdPercent : null))
 
 defineExpose({ run, invalid, buildParamsJson })
 
@@ -181,6 +195,7 @@ function buildParamsJson(): string {
     averageCount: form.averageCount,
     sampleRateHz: SWEEP_SAMPLE_RATE_HZ,
     measureNoiseFloor: form.measureNoiseFloor,
+    stopThdPercent: stopThdPercent.value,
   }
   return JSON.stringify(parameters)
 }
@@ -197,6 +212,7 @@ function run() {
     processRight: form.processRight,
     averageCount: form.averageCount,
     measureNoiseFloor: form.measureNoiseFloor,
+    stopThdPercent: stopThdPercent.value,
   })
 }
 </script>
@@ -308,6 +324,23 @@ function run() {
     >
       <input v-model="form.measureNoiseFloor" type="checkbox" :disabled="running" />
       Measure noise floor first
+    </label>
+
+    <label
+      class="flex items-center gap-1.5 text-xs"
+      title="Ends the sweep as soon as a measured channel's THD exceeds this figure. The point that crossed it is kept — it is the one that says where the DUT gave up — so the DUT is driven one step past the threshold. Off: the sweep runs to its end voltage."
+    >
+      <input v-model="form.stopOnThd" type="checkbox" :disabled="running" />
+      Stop when THD exceeds
+      <input
+        v-model.number="form.stopThdPercent"
+        type="number"
+        min="0.001"
+        step="0.1"
+        :disabled="running || !form.stopOnThd"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      />
+      %
     </label>
 
     <p

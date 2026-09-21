@@ -118,6 +118,7 @@ try
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<CaptureDelaySetting>();
+    builder.Services.AddSingleton<ExternalGainSetting>();
     builder.Services.AddSingleton<UserWeightingSetting>();
     builder.Services.AddSingleton<UserWeightingService>();
     builder.Services.AddSingleton<DeviceSessionService>();
@@ -207,6 +208,13 @@ try
             (await ConfigEndpoints.ReadCaptureDelayAsync(
                 scope.ServiceProvider.GetRequiredService<ConfigRepository>(),
                 CancellationToken.None)).CaptureDelayMs;
+
+        // The external input gain, for the same reason: the pipeline reads it per block.
+        var externalGain = await ConfigEndpoints.ReadExternalGainAsync(
+            scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
+        var externalGainSetting = app.Services.GetRequiredService<ExternalGainSetting>();
+        externalGainSetting.LeftDb = externalGain.LeftDb;
+        externalGainSetting.RightDb = externalGain.RightDb;
 
         // The user weighting tables, for the same reason: the pipeline reads them on its worker
         // thread. A damaged document leaves its slot empty and is logged.

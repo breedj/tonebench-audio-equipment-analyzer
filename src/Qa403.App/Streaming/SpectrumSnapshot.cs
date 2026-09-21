@@ -32,7 +32,28 @@ public sealed record SpectrumMeters(
     /// was set for this tick and the tones were resolvable (see
     /// <see cref="IntermodulationAnalyzer.Analyze"/> for when it is null even then).
     /// </summary>
-    IntermodulationResult? Intermodulation = null);
+    IntermodulationResult? Intermodulation = null,
+    /// <summary>
+    /// Multitone distortion, present only when <see cref="SpectrumPipelineOptions.Multitone"/> was
+    /// set for this tick and at least two tones of the comb were measurable.
+    /// </summary>
+    MultitoneResult? Multitone = null,
+    /// <summary>
+    /// The external input gain this channel's samples were divided by on their way into the
+    /// pipeline (see <see cref="Services.ExternalGainSetting"/>), in dB. Every level on this record
+    /// is the DUT's; adding this back gives the analyzer's, which is what input ranging must be
+    /// fed -- see <see cref="AnalyzerPeakDbv"/>. 0 when nothing is in the path.
+    /// </summary>
+    float ExternalGainDb = 0f)
+{
+    /// <summary>
+    /// The record's peak as the analyzer's own input saw it, before the external gain was undone.
+    /// The one level input ranging may be given: the ladder in <see cref="Services.InputRangeSelector"/>
+    /// is in the analyzer's dBV, and a DUT-referred peak through a 20 dB divider would park the
+    /// range 20 dB too wide.
+    /// </summary>
+    public float AnalyzerPeakDbv => PeakDbv + ExternalGainDb;
+}
 
 /// <summary>
 /// A signal decimated to at most a few hundred points for a small preview chart -- never the

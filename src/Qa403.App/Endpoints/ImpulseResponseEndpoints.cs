@@ -44,7 +44,7 @@ public static class ImpulseResponseEndpoints
                 // Already running, or no device — both states the UI can reach.
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/cancel", async (ImpulseResponseRunner runner) =>
         {

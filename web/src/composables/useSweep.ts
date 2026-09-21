@@ -50,6 +50,8 @@ const thdMethod = ref<ThdMethodName>('Conventional')
 const requestedEndFreqHz = ref<number | null>(null)
 const generatorAmpDbv = ref(0)
 const error = ref<string | null>(null)
+/** Why a finished sweep ended early (the THD stop threshold) — null for one that ran to the end. */
+const stopReason = ref<string | null>(null)
 
 // shallowRef + whole-array replacement: a sweep point is immutable once measured, and replacing
 // the array is what makes the chart's watcher fire without deep-watching hundreds of objects.
@@ -99,6 +101,7 @@ function applyStatus(status: ThdSweepStatus) {
   currentX.value = axis.value === 'Amplitude' ? status.currentAmplitudeVolt : status.currentFreqHz
   generatorAmpDbv.value = status.generatorAmpDbv
   error.value = status.error
+  stopReason.value = status.stopReason ?? null
   thdMethod.value = status.thdMethod ?? 'Conventional'
   measured.value = status.points
 }
@@ -151,8 +154,9 @@ function ingestProgress(frame: SweepProgressFrame) {
     frame.phase === SweepPhase.NoiseFloor ||
     frame.phase === SweepPhase.Sweeping
 
-  // The frame carries no message; the reason lives on the status endpoint.
-  if (frame.phase === SweepPhase.Failed) void refresh()
+  // The frame carries no message; the reason lives on the status endpoint -- an error on a failed
+  // sweep, and on a finished one whether it stopped short at the THD threshold.
+  if (frame.phase === SweepPhase.Failed || frame.phase === SweepPhase.Finished) void refresh()
 
   // A sweep this browser did not start -- another tab, or a script against the API -- announces
   // itself only through its progress frames, which carry neither the method nor the axis, and
@@ -182,6 +186,7 @@ async function startAmplitude(request: ThdAmplitudeSweepStartRequest) {
 async function beginWith<T>(call: () => Promise<T>): Promise<T> {
   measured.value = []
   error.value = null
+  stopReason.value = null
   index.value = 0
   currentX.value = 0
   return call()
@@ -235,6 +240,7 @@ export function useSweep() {
     currentX,
     generatorAmpDbv,
     error,
+    stopReason,
     points,
     thdMethod,
     requestedEndFreqHz,

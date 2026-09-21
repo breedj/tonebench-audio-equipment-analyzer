@@ -30,7 +30,7 @@ namespace Qa403.App.Streaming;
 /// </remarks>
 public sealed class SpectrumPipeline(
     SpectrumBroadcastHub hub, ILogger<SpectrumPipeline> logger, DiagnosticRecorder? diagnostics = null,
-    UserWeightingSetting? userWeighting = null)
+    UserWeightingSetting? userWeighting = null, ExternalGainSetting? externalGain = null)
 {
     private const int MaxChannels = 2;
 
@@ -364,7 +364,13 @@ public sealed class SpectrumPipeline(
             lock (_sampleSetLock)
             {
                 for (int ch = 0; ch < channelCount; ch++)
-                    ringBuffers[ch]?.AppendInterleaved(block.Samples, ch, block.ChannelCount);
+                {
+                    // The external input gain is undone here and nowhere else: everything past
+                    // this line reads the DUT's volts. What input ranging needs -- the analyzer's
+                    // own volts -- is put back on SpectrumMeters.AnalyzerPeakDbv, see ComputeMeters.
+                    double scale = externalGain?.LinearScale(ch) ?? 1.0;
+                    ringBuffers[ch]?.AppendInterleaved(block.Samples, ch, block.ChannelCount, scale);
+                }
             }
         }
     }
@@ -648,7 +654,8 @@ public sealed class SpectrumPipeline(
             Volatile.Write(ref _lastAverageWritten[channelIndex], writtenAtSnapshot);
 
             (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
-            var meters = ComputeMeters(psd, psdWeighted, peakDbv, totalRmsDbv, options, averagesTaken);
+            var meters = ComputeMeters(psd, psdWeighted, peakDbv, totalRmsDbv, options, averagesTaken,
+                (float)(externalGain?.GainDb(channelIndex) ?? 0.0));
             var noise = ComputeNoiseFigures(psdWeighted, meters, window.Sums.EnbwHz(_sampleRateHz), options);
 
             // Past the flush-generation check above, so a record that gets discarded is never logged
@@ -702,8 +709,12 @@ public sealed class SpectrumPipeline(
                     hub.Broadcast(StreamFrame.EncodeIntermodulation(channel, seq, intermodulation, singleShotComplete));
                 else if (options.Intermodulation is not null)
                     hub.Broadcast(StreamFrame.EncodeIntermodulationUnresolved(channel, seq));
+                if (meters.Multitone is { } multitone)
+                    hub.Broadcast(StreamFrame.EncodeMultitone(channel, seq, multitone, singleShotComplete));
             }
             BroadcastScopeFrame(channel, seq, timeBuf.AsSpan(0, n), _sampleRateHz);
+            if (options.ScopeResidual && meters is not null)
+                BroadcastScopeResidualFrame(channel, seq, timeBuf.AsSpan(0, n), _sampleRateHz, meters.FundamentalFreqHz);
         }
         finally
         {
@@ -952,7 +963,8 @@ public sealed class SpectrumPipeline(
     /// be found, matching the old inline logic's "nothing to broadcast this tick" behaviour.
     /// </summary>
     private static SpectrumMeters? ComputeMeters(
-        PsdSpectrum psd, PsdSpectrum psdWeighted, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options, int averagesTaken)
+        PsdSpectrum psd, PsdSpectrum psdWeighted, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options, int averagesTaken,
+        float externalGainDb = 0f)
     {
         int minSearchBin = Math.Max(1, (int)Math.Round(options.FundamentalMinSearchHz / psd.BinSizeHz));
         int fundamentalBin = FindGlobalPeakBin(psd.ValuesV2PerHz, minSearchBin);
@@ -1005,10 +1017,24 @@ public sealed class SpectrumPipeline(
                 imdSpec.Method, imdSpec.MaxOrder, maxProductBin);
         }
 
+        // Same band-limit convention as IMD: gaps above MeasurementHiFreqHz (or the spec's own
+        // limit) do not count, so the figure is in-band distortion the way THD+N is.
+        MultitoneResult? multitone = null;
+        if (options.Multitone is { } multitoneSpec && multitoneSpec.ToneFreqsHz.Count >= 2)
+        {
+            int maxGapBin = multitoneSpec.MaxProductFreqHz is { } maxGapHz
+                ? Math.Min(psd.ValuesV2PerHz.Length - 1, psd.BinOfFrequency(maxGapHz))
+                : band.HiBinInclusive;
+            int[] toneBins = new int[multitoneSpec.ToneFreqsHz.Count];
+            for (int i = 0; i < toneBins.Length; i++)
+                toneBins[i] = psd.BinOfFrequency(multitoneSpec.ToneFreqsHz[i]);
+            multitone = MultitoneAnalyzer.Analyze(psd, toneBins, maxGapBin);
+        }
+
         return new SpectrumMeters(
             fundamentalFreqHz, (float)psd.BinSizeHz, thdPercent, thdNPercent, snrDb,
             fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks, averagesTaken,
-            intermodulation);
+            intermodulation, multitone, externalGainDb);
     }
 
     /// <summary>
@@ -1065,6 +1091,33 @@ public sealed class SpectrumPipeline(
 
             byte[] frame = StreamFrame.EncodeScope(channel, seq, (float)(1.0 / sampleRateHz), samples.AsSpan(0, count));
             hub.Broadcast(frame);
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(samples);
+        }
+    }
+
+    /// <summary>
+    /// The raw scope tail with the fundamental removed. The fit is over the <em>whole</em> record,
+    /// not the 2048-sample tail: a 20 Hz tone is under one period in the tail at 48 kHz, where the
+    /// three linear parameters are barely separable, and the frequency refinement needs the length
+    /// to resolve a fraction of a bin. The subtraction is then evaluated on the tail alone. Started
+    /// from the meters' bin frequency, which is exact for a snapped tone and within half a bin for
+    /// anything else -- inside the refinement's reach.
+    /// </summary>
+    private void BroadcastScopeResidualFrame(StreamChannel channel, uint seq, ReadOnlySpan<double> record, double sampleRateHz, double fundamentalFreqHz)
+    {
+        if (!(fundamentalFreqHz > 0.0) || fundamentalFreqHz >= sampleRateHz / 2.0)
+            return;
+
+        int count = Math.Min(ScopeSampleCount, record.Length);
+        float[] samples = ArrayPool<float>.Shared.Rent(count);
+        try
+        {
+            var fit = SineFit.Fit(record, sampleRateHz, fundamentalFreqHz);
+            SineFit.Subtract(record, fit, sampleRateHz, record.Length - count, samples.AsSpan(0, count));
+            hub.Broadcast(StreamFrame.EncodeScope(channel, seq, (float)(1.0 / sampleRateHz), samples.AsSpan(0, count), StreamFlags.ScopeResidual));
         }
         finally
         {

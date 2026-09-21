@@ -51,6 +51,13 @@ export interface ResponseTrace {
   magnitudeMaxDb: number[]
   phaseDeg: number[]
   coherence: number[]
+  /**
+   * Group delay and phase delay per column, in seconds — or null for a stored result saved before
+   * they were recorded. Null rather than re-derived from `phaseDeg`: that is sampled per display
+   * column and its derivative is not the measurement the live screen showed.
+   */
+  groupDelayS: number[] | null
+  phaseDelayS: number[] | null
   oneDb: ResponseBandwidthView
   threeDb: ResponseBandwidthView
   peakDb: number
@@ -273,6 +280,8 @@ function fromJson(trace: FrequencyResponseTraceJson): ResponseTrace {
     magnitudeMaxDb: trace.magnitudeMaxDb,
     phaseDeg: trace.phaseDeg,
     coherence: trace.coherence,
+    groupDelayS: trace.groupDelayS ?? null,
+    phaseDelayS: trace.phaseDelayS ?? null,
     oneDb: { ...trace.oneDb },
     threeDb: { ...trace.threeDb },
     peakDb: trace.peakDb,
@@ -293,6 +302,8 @@ function fromFrame(frame: FrequencyResponseFrame): ResponseTrace {
     magnitudeMaxDb: Array.from(frame.magnitudeMaxDb),
     phaseDeg: Array.from(frame.phaseDeg),
     coherence: Array.from(frame.coherence),
+    groupDelayS: Array.from(frame.groupDelayS),
+    phaseDelayS: Array.from(frame.phaseDelayS),
     oneDb: { ...frame.oneDb },
     threeDb: { ...frame.threeDb },
     peakDb: frame.peakDb,

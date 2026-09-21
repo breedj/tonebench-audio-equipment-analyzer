@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBandwidth, formatCorner, formatDb, formatHz, formatRatio } from './format'
+import { formatBandwidth, formatCorner, formatDb, formatDelay, formatHz, formatRatio } from './format'
 
 const reading = (over: Partial<Parameters<typeof formatBandwidth>[0]> = {}) => ({
   dropDb: 3,
@@ -77,5 +77,25 @@ describe('formatDb', () => {
     expect(formatDb(-0.0001)).toBe('0.00 dB')
     expect(formatDb(-0)).toBe('0.00 dB')
     expect(formatDb(-0.02)).toBe('-0.02 dB')
+  })
+})
+
+describe('formatDelay', () => {
+  it('picks the unit from the size of the delay', () => {
+    expect(formatDelay(2.0833e-3)).toBe('2.083 ms')
+    expect(formatDelay(12.34e-6)).toBe('12.3 µs')
+    expect(formatDelay(250e-9)).toBe('250 ns')
+  })
+
+  it('keeps the sign, since an excess delay can be negative', () => {
+    expect(formatDelay(-12.34e-6)).toBe('-12.3 µs')
+    expect(formatDelay(-1.5e-3)).toBe('-1.500 ms')
+  })
+
+  it('shows a dash for a result that never recorded a delay', () => {
+    expect(formatDelay(null)).toBe('—')
+    expect(formatDelay(undefined)).toBe('—')
+    expect(formatDelay(Number.NaN)).toBe('—')
+    expect(formatDelay(0)).toBe('0 ns')
   })
 })

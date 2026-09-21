@@ -3,8 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { OverlayEntry } from '../composables/useMeasurements'
-import type { ResponsePhaseKindName } from '../api/client'
+import type { ResponseDelayView, ResponsePhaseKindName } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
+import { DELAY_INCREMENTS, chooseDelayUnit, delayLabel, delayScale, delayValuesOf, usToUnit } from '../response/delayAxis'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import {
@@ -53,6 +54,13 @@ const props = defineProps<{
   phaseBottomDeg: number
   /** What phase this run measured — decides which curve carries it and what it is called. See ResponsePhaseKind. */
   phaseKind: ResponsePhaseKindName
+  /**
+   * Which delay curve rides the delay axis, if any, and that axis' window in microseconds. Optional
+   * so the crosstalk screen, which has no phase to derive a delay from, need not say so.
+   */
+  delayView?: ResponseDelayView
+  delayTopUs?: number
+  delayBottomUs?: number
   /** The button that starts this screen's measurement — RUN on the chirp, RUN SWEEP on the stepped sine. */
   runLabel?: string
   /**
@@ -111,6 +119,8 @@ function isCrosstalkTrace(kind: ResponseTrace['kind']): boolean {
 
 const PHASE_COLOR = ['#7c3aed', '#a78bfa'] as const
 const COHERENCE_COLOR = ['#059669', '#34d399'] as const
+/** Pink: distinct from the violet phase, the green coherence, the blue/orange inputs and the amber/blue markers. */
+const DELAY_COLOR = ['#db2777', '#f472b6'] as const
 
 /** The dashed verticals and the double-headed arrow the ±1 dB / −3 dB readings are drawn with. */
 const BANDWIDTH_COLORS = {
@@ -236,6 +246,48 @@ const phaseTrace = computed<ResponseTrace | null>(() =>
 
 /** What the phase curve is entitled to be called — a difference between two measured paths is not a DUT's phase response. */
 const phaseLabel = computed(() => (props.phaseKind === 'ChannelDifference' ? 'Phase difference' : 'Phase'))
+
+/**
+ * The delay curve, drawn from the same trace as the phase: it is the phase's derivative (group) or
+ * its ratio to frequency (phase delay), computed server-side at full resolution, so it belongs to
+ * the measurement exactly the way the phase does. One curve at a time on one axis — group delay and
+ * phase delay differ by orders of magnitude on a DUT with a high-pass corner and would each need a
+ * window of their own.
+ *
+ * The window is held in microseconds and shown in µs or ms as its size calls for; the unit follows
+ * the *window*, not the data, so the axis cannot flip units as a run settles.
+ */
+const delayView = computed<ResponseDelayView>(() => props.delayView ?? 'None')
+const delayShown = computed(() => delayView.value !== 'None')
+const delayUnit = computed(() => chooseDelayUnit(props.delayTopUs ?? 1000, props.delayBottomUs ?? -1000))
+const delayRange = computed<[number, number]>(() => [
+  usToUnit(props.delayBottomUs ?? -1000, delayUnit.value),
+  usToUnit(props.delayTopUs ?? 1000, delayUnit.value),
+])
+const delayLabelText = computed(() => delayLabel(delayView.value, props.phaseKind === 'ChannelDifference'))
+
+/** The selected delay curve of a trace in the axis' unit; all-null (a gap, not a zero line) when the trace never recorded one. */
+function delaySeriesOf(trace: ResponseTrace | null, length: number): (number | null)[] {
+  const values = delayValuesOf(trace, delayView.value)
+  if (!values || values.length !== length) return new Array<number | null>(length).fill(null)
+  const scale = delayScale(delayUnit.value)
+  return Array.from(values, (v) => (Number.isFinite(v) ? v * scale : null))
+}
+
+/**
+ * A stored result's delay curve, from whichever of its traces carries a phase under this run's
+ * phase kind (the trace on screen under PerTrace, the gain curve otherwise), resampled onto the
+ * live grid like its magnitude. Null throughout when the result predates the delay curves.
+ */
+function overlayDelaySeries(overlayId: number, shownKind: ResponseTrace['kind'], grid: Float64Array): (number | null)[] {
+  const traces = props.overlays.find((o) => o.id === overlayId)?.responseTraces ?? []
+  const wanted: ResponseTrace['kind'] = props.phaseKind === 'PerTrace' ? shownKind : 'Gain'
+  const source = traces.find((t) => t.kind === wanted) ?? null
+  const values = delayValuesOf(source, delayView.value)
+  if (!source || !values || values.length !== source.freqHz.length) return new Array<number | null>(grid.length).fill(null)
+  const scale = delayScale(delayUnit.value)
+  return interpolateOnto(source.freqHz, values, grid).map((v) => (v === null ? null : v * scale))
+}
 
 /**
  * Draws the min of each column as a vertical stroke under its max, exactly as the spectrum chart's
@@ -401,11 +453,40 @@ function buildData(): uPlot.AlignedData {
     series.push(source ? Float64Array.from(source.coherence) : new Float64Array(x.length))
   }
 
+  if (delayShown.value) series.push(delaySeriesOf(phaseTrace.value, x.length))
+
   // Overlays last, so they draw behind nothing and their series indices are stable against the
-  // optional phase/coherence traces above.
+  // optional phase/coherence/delay traces above. An overlay's delay curve follows its magnitude,
+  // so the two lists stay in the same order buildSeries and buildReadoutSeries walk them.
   for (const overlay of overlayCurves.value) series.push(resampleOnto(overlay.trace, x))
+  if (delayShown.value) {
+    for (const overlay of overlayCurves.value) series.push(overlayDelaySeries(overlay.id, overlay.trace.kind, x))
+  }
 
   return [x, ...series] as uPlot.AlignedData
+}
+
+/** Linear interpolation in log frequency of an arbitrary array onto the live grid; null outside the source's band. */
+function interpolateOnto(sourceHz: number[], values: number[], grid: Float64Array): (number | null)[] {
+  const out: (number | null)[] = new Array(grid.length)
+  let j = 0
+
+  for (let i = 0; i < grid.length; i++) {
+    const f = grid[i]
+    if (sourceHz.length < 2 || f < sourceHz[0] || f > sourceHz[sourceHz.length - 1]) {
+      out[i] = null
+      continue
+    }
+
+    while (j < sourceHz.length - 2 && sourceHz[j + 1] < f) j++
+
+    const f0 = sourceHz[j]
+    const f1 = sourceHz[j + 1]
+    const t = f1 > f0 ? (Math.log10(f) - Math.log10(f0)) / (Math.log10(f1) - Math.log10(f0)) : 0
+    out[i] = values[j] + t * (values[j + 1] - values[j])
+  }
+
+  return out
 }
 
 /**
@@ -475,6 +556,17 @@ function buildSeries(p: Palette): uPlot.Series[] {
     })
   }
 
+  if (delayShown.value) {
+    series.push({
+      label: delayLabelText.value,
+      scale: 'delay',
+      stroke: p.color(DELAY_COLOR),
+      width,
+      dash: [10, 4],
+      points: { show: false },
+    })
+  }
+
   for (const overlay of overlayCurves.value) {
     series.push({
       label: overlay.name,
@@ -486,6 +578,20 @@ function buildSeries(p: Palette): uPlot.Series[] {
       points: { show: false },
       alpha: 0.7,
     })
+  }
+
+  if (delayShown.value) {
+    for (const overlay of overlayCurves.value) {
+      series.push({
+        label: `${overlay.name} ${delayLabelText.value.toLowerCase()}`,
+        scale: 'delay',
+        stroke: p.color(DELAY_COLOR),
+        width: 1,
+        dash: sweepOverlayDash(props.overlays, overlay.id) ?? [6, 3],
+        points: { show: false },
+        alpha: 0.7,
+      })
+    }
   }
 
   return series
@@ -533,6 +639,11 @@ function buildReadoutSeries(p: Palette): ReadoutSeries[] {
     entries.push({ key: 'coherence', label: 'Coh', color: p.color(COHERENCE_COLOR), unit: '', digits: 3 })
   }
 
+  const delayDigits = delayUnit.value === 'ms' ? 3 : 1
+  if (delayShown.value) {
+    entries.push({ key: 'delay', label: delayLabelText.value, color: p.color(DELAY_COLOR), unit: delayUnit.value, digits: delayDigits })
+  }
+
   for (const overlay of overlayCurves.value) {
     entries.push({
       key: `overlay-${overlay.id}-${overlay.trace.kind}`,
@@ -541,6 +652,18 @@ function buildReadoutSeries(p: Palette): ReadoutSeries[] {
       unit: magnitudeUnit,
       digits: 2,
     })
+  }
+
+  if (delayShown.value) {
+    for (const overlay of overlayCurves.value) {
+      entries.push({
+        key: `overlay-delay-${overlay.id}-${overlay.trace.kind}`,
+        label: `${overlay.name} ${delayLabelText.value.toLowerCase()}`,
+        color: p.color(DELAY_COLOR),
+        unit: delayUnit.value,
+        digits: delayDigits,
+      })
+    }
   }
 
   return entries
@@ -613,6 +736,10 @@ const signature = computed(() =>
     // redraw -- and the kind also decides which curve the phase is read from.
     props.phaseKind,
     props.showCoherence,
+    // The delay series' label and unit are baked into the series and the axis, so a change of
+    // either is a rebuild; the window itself is a refresh (see the delayRange watch).
+    delayView.value,
+    delayUnit.value,
     overlayCurves.value.map((o) => o.id).join(','),
     props.thickLines,
     props.showDataPoints,
@@ -697,6 +824,7 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
       // nothing rescaled.
       phase: { range: () => phaseRange.value },
       coh: { range: () => [0, 1] as [number, number] },
+      delay: { range: () => delayRange.value },
     },
     axes: [
       // Axis titles with units on the export, and on screen only where the screen asks for them
@@ -741,6 +869,18 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
         stroke: p.color(COHERENCE_COLOR),
         grid: { show: false },
         ticks: { stroke: p.color(COHERENCE_COLOR), width: 1 },
+      },
+      {
+        scale: 'delay',
+        side: 1,
+        show: delayShown.value,
+        size: 60,
+        ...axisLabel(props.axisTitles ?? false, interactive, `${delayLabelText.value} (${delayUnit.value})`),
+        incrs: DELAY_INCREMENTS,
+        values: (_u, vals) => vals.map((v) => `${v}`),
+        stroke: p.color(DELAY_COLOR),
+        grid: { show: false },
+        ticks: { stroke: p.color(DELAY_COLOR), width: 1 },
       },
     ],
     series: buildSeries(p),
@@ -854,7 +994,12 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
     const legend: ExportLegendEntry[] = buildReadoutSeries(light).map((entry) => ({
       label: primaryLabel && !entry.key.startsWith('overlay-') ? `${primaryLabel} — ${entry.label}` : entry.label,
       color: entry.color,
-      dash: entry.key === 'phase' ? [4, 3] : entry.key === 'coherence' ? [2, 2] : entry.key.startsWith('overlay-') ? [6, 3] : undefined,
+      dash:
+        entry.key === 'phase' ? [4, 3]
+        : entry.key === 'coherence' ? [2, 2]
+        : entry.key === 'delay' ? [10, 4]
+        : entry.key.startsWith('overlay-') ? [6, 3]
+        : undefined,
     }))
 
     return await composeChartPng({
@@ -950,6 +1095,7 @@ watch(() => [props.showOneDb, props.showThreeDb], () => refresh())
 // the drag-zoom (uPlot zooms the first plotted series, which is the dB one), so nothing about the
 // series or their styling needs rebuilding here.
 watch(phaseRange, () => refresh())
+watch(delayRange, () => refresh())
 </script>
 
 <template>

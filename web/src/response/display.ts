@@ -1,11 +1,13 @@
 import type {
   FrequencyResponseParameters,
   NyquistRadiusName,
+  ResponseDelayView,
   ResponsePhaseKindName,
   ResponseView,
   SteppedResponseParameters,
 } from '../api/client'
 import { isSteppedResponseKind } from '../measurements/kinds'
+import { isDelayView } from './delayAxis'
 
 /**
  * The Bode chart's display state — every prop `FrequencyResponseChart` takes that is a preference
@@ -33,6 +35,10 @@ export interface ResponseDisplay {
   xToHz: number
   phaseTopDeg: number
   phaseBottomDeg: number
+  /** Which delay curve rides the Bode chart's delay axis, and that axis' window in µs. */
+  delayView: ResponseDelayView
+  delayTopUs: number
+  delayBottomUs: number
   /** The Nyquist and Nichols projections' own settings — see ResponsePolarChart. */
   nyquistRadius: NyquistRadiusName
   nyquistRadiusFloorDb: number
@@ -59,6 +65,9 @@ export const DEFAULT_RESPONSE_DISPLAY: Readonly<ResponseDisplay> = Object.freeze
   xToHz: 100000,
   phaseTopDeg: 180,
   phaseBottomDeg: -180,
+  delayView: 'None',
+  delayTopUs: 1000,
+  delayBottomUs: -1000,
   nyquistRadius: 'Linear',
   nyquistRadiusFloorDb: -40,
   invertLoopSign: false,
@@ -108,6 +117,9 @@ export function responseDisplayFromParams(
   if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) display.xToHz = stored.chartXToHz
   if (typeof stored.chartPhaseTopDeg === 'number') display.phaseTopDeg = stored.chartPhaseTopDeg
   if (typeof stored.chartPhaseBottomDeg === 'number') display.phaseBottomDeg = stored.chartPhaseBottomDeg
+  if (isDelayView(stored.chartDelayView)) display.delayView = stored.chartDelayView
+  if (typeof stored.chartDelayTopUs === 'number' && Number.isFinite(stored.chartDelayTopUs)) display.delayTopUs = stored.chartDelayTopUs
+  if (typeof stored.chartDelayBottomUs === 'number' && Number.isFinite(stored.chartDelayBottomUs)) display.delayBottomUs = stored.chartDelayBottomUs
   if (stored.chartNyquistRadius === 'Linear' || stored.chartNyquistRadius === 'Db') display.nyquistRadius = stored.chartNyquistRadius
   if (typeof stored.chartNyquistRadiusFloorDb === 'number' && stored.chartNyquistRadiusFloorDb < 0)
     display.nyquistRadiusFloorDb = stored.chartNyquistRadiusFloorDb
@@ -155,11 +167,13 @@ export function responseRightChannelIsReferenceFromParams(paramsJson: string | n
 export function responseChartFlags(
   display: Readonly<ResponseDisplay>,
   context: { kind: string; phaseKind: ResponsePhaseKindName; rightChannelIsReference: boolean; hasTraces: boolean },
-): Pick<ResponseDisplay, 'showRight' | 'showPhase' | 'showCoherence'> {
+): Pick<ResponseDisplay, 'showRight' | 'showPhase' | 'showCoherence' | 'delayView'> {
   const phaseAvailable = context.phaseKind !== 'None' || !context.hasTraces
   return {
     showRight: !context.rightChannelIsReference && display.showRight,
     showPhase: phaseAvailable && display.showPhase,
     showCoherence: !isSteppedResponseKind(context.kind) && display.showCoherence,
+    // The delay curves are derived from the phase, so they are gated by exactly what gates it.
+    delayView: phaseAvailable ? display.delayView : 'None',
   }
 }

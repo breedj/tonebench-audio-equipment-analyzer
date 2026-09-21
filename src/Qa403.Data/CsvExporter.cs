@@ -178,6 +178,15 @@ public static class CsvExporter
             sb.Append(',').Append(trace.Kind).Append("_max_db");
             sb.Append(',').Append(trace.Kind).Append("_phase_deg");
             sb.Append(',').Append(trace.Kind).Append("_coherence");
+
+            // Microseconds rather than the stored seconds: a spreadsheet reading 2.083e-03 next to
+            // 1.2e-05 is unreadable, and every delay an audio DUT has fits in whole microseconds.
+            // Omitted for a result saved before the delays were recorded, the reference_db policy.
+            if (HasDelays(trace))
+            {
+                sb.Append(',').Append(trace.Kind).Append("_group_delay_us");
+                sb.Append(',').Append(trace.Kind).Append("_phase_delay_us");
+            }
         }
 
         sb.Append('\n');
@@ -194,6 +203,12 @@ public static class CsvExporter
                 sb.Append(',').Append(trace.MagnitudeMaxDb[i].ToString("F4", CultureInfo.InvariantCulture));
                 sb.Append(',').Append(trace.PhaseDeg[i].ToString("F4", CultureInfo.InvariantCulture));
                 sb.Append(',').Append(trace.Coherence[i].ToString("F6", CultureInfo.InvariantCulture));
+
+                if (HasDelays(trace))
+                {
+                    sb.Append(',').Append((trace.GroupDelayS![i] * 1e6).ToString("F3", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append((trace.PhaseDelayS![i] * 1e6).ToString("F3", CultureInfo.InvariantCulture));
+                }
             }
 
             sb.Append('\n');
@@ -201,6 +216,11 @@ public static class CsvExporter
 
         return sb.ToString();
     }
+
+    /// <summary>Whether a stored trace carries delay curves at all — a row from before migration 012 does not.</summary>
+    private static bool HasDelays(StoredResponseTrace trace) =>
+        trace.GroupDelayS is not null && trace.PhaseDelayS is not null
+        && trace.GroupDelayS.Length == trace.FreqHz.Length && trace.PhaseDelayS.Length == trace.FreqHz.Length;
 
     /// <summary>
     /// An impedance result as CSV: one row per display column, in <b>ohms</b>.

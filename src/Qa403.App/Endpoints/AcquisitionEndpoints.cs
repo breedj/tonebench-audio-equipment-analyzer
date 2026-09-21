@@ -47,6 +47,21 @@ public static class AcquisitionEndpoints
             return Results.Ok(session.GetStatus());
         });
 
+        // Every running measurement, cancelled and unwound, before whatever the client does next --
+        // switching measurements, most of all. A sweep left running restarts the generator and the
+        // stream for its next point right after a plain /stop, and collides with the measurement the
+        // user has moved on to (see IMeasurementRun). The session's own acquisition is left to /stop.
+        group.MapPost("/cancel-runs", async (DeviceSessionService session, IEnumerable<IMeasurementRun> runs) =>
+        {
+            foreach (var run in runs)
+            {
+                if (!ReferenceEquals(run, session) && run.Running)
+                    await run.CancelAsync();
+            }
+
+            return Results.Ok(session.GetStatus());
+        });
+
         group.MapPost("/spectrum-config", async (
             SpectrumConfigRequest request, SpectrumPipeline pipeline, DeviceSessionService session, CancellationToken ct) =>
         {
@@ -108,6 +123,7 @@ public static class AcquisitionEndpoints
                 OtherPeaksCount = request.OtherPeaksCount ?? current.OtherPeaksCount,
                 ProcessLeft = request.ProcessLeft ?? current.ProcessLeft,
                 ProcessRight = request.ProcessRight ?? current.ProcessRight,
+                ScopeResidual = request.ScopeResidual ?? current.ScopeResidual,
             };
 
             // Which frequency is coherent depends on the FFT size, so a size change has to re-snap
@@ -180,7 +196,9 @@ public sealed record SpectrumConfigRequest(
     /// <summary>Null leaves the current IMD spec alone; see <see cref="IntermodulationConfigRequest"/>.</summary>
     IntermodulationConfigRequest? Intermodulation = null,
     /// <summary>Null leaves the weighting alone; see <see cref="WeightingConfigRequest"/>.</summary>
-    WeightingConfigRequest? Weighting = null);
+    WeightingConfigRequest? Weighting = null,
+    /// <summary>Send the scope tail with its fundamental removed as well — see <see cref="SpectrumPipelineOptions.ScopeResidual"/>. Null leaves it alone.</summary>
+    bool? ScopeResidual = null);
 
 /// <summary>
 /// The combined weighting curve, log-spaced from <see cref="DefaultLoHz"/> to <see cref="DefaultHiHz"/>

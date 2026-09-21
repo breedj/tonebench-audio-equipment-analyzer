@@ -23,6 +23,13 @@ const DISABLED_CHANNEL = { enabled: false, kind: 'Tones' as const, tones: [] }
  * generator is disabled, so that branch isn't taken and the retained snapshot survives.
  */
 export async function stopRun(): Promise<void> {
+  // Runners first: a sweep is *between* points most of the time, and stopping the acquisition
+  // alone leaves it to restart the generator and the stream for its next point a moment later --
+  // straight into whatever measurement the user has switched to. Measured 2026-09-21: an IMD
+  // sweep left running under a crosstalk start failed both runs. The server also refuses a start
+  // while any runner is running (MeasurementRunGuard), so this is what makes a switch mid-sweep
+  // land on a runnable screen rather than a 409.
+  await api.cancelRuns()
   await api.stopAcquisition()
   await api.setGenerator({ left: DISABLED_CHANNEL, right: DISABLED_CHANNEL })
 }

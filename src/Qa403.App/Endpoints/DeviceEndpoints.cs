@@ -241,7 +241,15 @@ public sealed record DeviceStatusResponse(
     /// <summary>The simulated amplifier's output stage (<see cref="Qa403.Device.Simulation.SimulatedOutputStageModel"/> name), or null when the device isn't the simulator.</summary>
     string? SimulatedOutputStage = null,
     /// <summary>What hangs on the simulated amplifier's output (<see cref="Qa403.Device.Simulation.SimulatedLoad"/> name), or null when the device isn't the simulator.</summary>
-    string? SimulatedLoad = null);
+    string? SimulatedLoad = null,
+    /// <summary>
+    /// The gain of whatever sits between the DUT and the left input, in dB (a 10:1 divider is −20),
+    /// undone on every sample so the levels the app reports are the DUT's -- see
+    /// <see cref="Services.ExternalGainSetting"/>. 0 with nothing in the path.
+    /// </summary>
+    double ExternalGainLeftDb = 0.0,
+    /// <summary>The same for the right input.</summary>
+    double ExternalGainRightDb = 0.0);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);

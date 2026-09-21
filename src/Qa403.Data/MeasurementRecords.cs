@@ -74,6 +74,15 @@ public sealed record FftSpectrumParameters(
     /// </summary>
     double? CaptureDelayMs = null,
     /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null,
+    /// <summary>
     /// The two-tone intermodulation analysis in force, if any -- see
     /// <c>SpectrumPipelineOptions.Intermodulation</c>. All null (the default, and every row saved
     /// before this existed) means no IMD figure. <paramref name="ImdPreset"/> is the generator
@@ -108,7 +117,14 @@ public sealed record FftSpectrumParameters(
     /// <summary>The chart's level unit: <c>dBV</c>, <c>dBVPerRootHz</c> or <c>dBVPerRootHzInput</c> (see the client's SpectrumUnit). Null means dBV.</summary>
     string? ChartUnit = null,
     /// <summary>Whether the chart draws the weighting curve in effect as a dashed overlay. Null means off.</summary>
-    bool? ChartShowWeightingCurve = null);
+    bool? ChartShowWeightingCurve = null,
+    /// <summary>
+    /// Whether the oscilloscope shows the THD residual (the record with its fitted fundamental
+    /// removed) instead of the raw waveform -- <c>SpectrumPipelineOptions.ScopeResidual</c>, live
+    /// pipeline state like the IMD spec, so it is read from the options on save and re-applied on
+    /// load. Null on a row an older build wrote, meaning off.
+    /// </summary>
+    bool? ScopeResidual = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
@@ -180,7 +196,16 @@ public sealed record ThdVsFrequencyParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);
 
 /// <summary>
 /// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a
@@ -298,7 +323,22 @@ public sealed record ThdVsAmplitudeParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// End the sweep once a channel's THD exceeds this many percent; null means sweep to the end.
+    /// A type setting like the rest of the grid, saved with the result so a curve that stops short
+    /// can say it did so on purpose.
+    /// </summary>
+    double? StopThdPercent = null);
 
 /// <summary>
 /// Configured or as-run parameters for the 'ImdVsAmplitude' measurement kind: a two-tone pair
@@ -356,7 +396,16 @@ public sealed record ImdVsAmplitudeParameters(
     double? ChartYBottomDb = null,
     bool? ChartAutofitOnDone = null,
     /// <summary>The settle time the run discarded after each stimulus change, in ms -- a run record, null on a type's own params_json.</summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm
@@ -487,7 +536,15 @@ public sealed record ResponseTraceInput(
     /// rows read back as null and draw no reference line.
     /// </summary>
     double? ReferenceDb = null,
-    string? ReferenceMode = null);
+    string? ReferenceMode = null,
+    /// <summary>
+    /// Group delay and phase delay per column, in seconds — derived from the full-resolution
+    /// phase before decimation, so they cannot be re-derived from <see cref="PhaseDeg"/> on load.
+    /// Null for a curve that carries no meaningful transfer phase (an impedance trace), and never
+    /// written by an older build, whose rows read back as null and draw no delay curve.
+    /// </summary>
+    float[]? GroupDelayS = null,
+    float[]? PhaseDelayS = null);
 
 /// <summary>
 /// A stored ±1 dB or −3 dB reading. The clamped flags say the curve never left the tolerance on
@@ -585,7 +642,16 @@ public sealed record CrosstalkParameters(
     double? ChartXToHz = null,
     bool? ChartAutofitOnDone = null,
     /// <summary>The settle time the run discarded after each stimulus change, in ms — a run record, null on a type's own params_json.</summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the
@@ -628,7 +694,16 @@ public sealed record OutputImpedanceParameters(
     bool? ChartShowDataPoints = null,
     bool? ChartAutofitOnDone = null,
     /// <summary>The settle time the run discarded after each stimulus change, in ms — a run record, null on a type's own params_json.</summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);
 
 /// <summary>
 /// An impedance measurement type's <c>params_json</c>.
@@ -714,7 +789,16 @@ public sealed record ImpedanceParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);
 
 /// <summary>One save of a frequency-response measurement: a result row, its single capture, and the curves.</summary>
 public sealed record ResponseSaveRequest(
@@ -749,7 +833,10 @@ public sealed record StoredResponseTrace(
     float[] Coherence,
     /// <summary>Null on a row written before the reference was recorded — see <see cref="ResponseTraceInput.ReferenceDb"/>.</summary>
     double? ReferenceDb = null,
-    string? ReferenceMode = null);
+    string? ReferenceMode = null,
+    /// <summary>Null on a row written before the delays were recorded — see <see cref="ResponseTraceInput.GroupDelayS"/>.</summary>
+    float[]? GroupDelayS = null,
+    float[]? PhaseDelayS = null);
 
 /// <summary>
 /// A frequency-response measurement type's <c>params_json</c>: the run settings, then the chart's
@@ -792,6 +879,14 @@ public sealed record FrequencyResponseParameters(
     /// </summary>
     double? ChartPhaseTopDeg = null,
     double? ChartPhaseBottomDeg = null,
+    /// <summary>
+    /// Which delay curve the chart draws on its own right-hand axis — "None", "Group" or "Phase" —
+    /// and that axis' window in microseconds. Null on a type saved before the delay curves existed,
+    /// in which case the client keeps its defaults (no curve, ±1000 µs).
+    /// </summary>
+    string? ChartDelayView = null,
+    double? ChartDelayTopUs = null,
+    double? ChartDelayBottomUs = null,
     /// <summary>Null on a type saved before the chirp start was configurable; the runner then uses its default.</summary>
     double? ChirpStartHz = null,
     /// <summary>
@@ -841,7 +936,16 @@ public sealed record FrequencyResponseParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);
 
 /// <summary>
 /// A stepped-sine response measurement type's <c>params_json</c>: the run settings, then the chart's
@@ -894,6 +998,10 @@ public sealed record SteppedResponseParameters(
     /// <summary>Null on a type saved before the phase axis was independently rangeable — see <see cref="FrequencyResponseParameters.ChartPhaseTopDeg"/>.</summary>
     double? ChartPhaseTopDeg = null,
     double? ChartPhaseBottomDeg = null,
+    /// <summary>The delay curve and its axis window — see <see cref="FrequencyResponseParameters.ChartDelayView"/>.</summary>
+    string? ChartDelayView = null,
+    double? ChartDelayTopUs = null,
+    double? ChartDelayBottomUs = null,
     /// <summary>The FR (dBV) view's own y window — see <see cref="FrequencyResponseParameters.ChartYTopDbv"/>.</summary>
     double? ChartYTopDbv = null,
     double? ChartYBottomDbv = null,
@@ -930,7 +1038,16 @@ public sealed record SteppedResponseParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);
 
 /// <summary>The <c>impulse_result.kind</c> values — mirrors the subset of FrequencyResponseTraceKind an impulse response has.</summary>
 public static class ImpulseTraceKind
@@ -1086,6 +1203,10 @@ public sealed record ImpulseResponseParameters(
     double? ChartHarmonicsYBottomDb = null,
     double? ChartPhaseTopDeg = null,
     double? ChartPhaseBottomDeg = null,
+    /// <summary>The Response view's delay curve and its axis window — see <see cref="FrequencyResponseParameters.ChartDelayView"/>.</summary>
+    string? ChartDelayView = null,
+    double? ChartDelayTopUs = null,
+    double? ChartDelayBottomUs = null,
     double? ChartTimeFromMs = null,
     double? ChartTimeToMs = null,
     double? ChartFreqFromHz = null,
@@ -1113,4 +1234,13 @@ public sealed record ImpulseResponseParameters(
     /// run record, not a type setting: null on a type's own params_json and on results saved
     /// before it was recorded, and the value the session actually used on a saved result.
     /// </summary>
-    double? CaptureDelayMs = null);
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). Every stored level is already the
+    /// DUT's, with this undone; the value is kept so a result can say what was in the path. The
+    /// setting at save time, not stamped per sample -- null on a type's own params_json and on
+    /// results saved before it was recorded.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null);

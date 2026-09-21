@@ -4,6 +4,7 @@ import {
   type FrequencyResponseParameters,
   type ReportRow,
   type ReportSection,
+  type ResponsePhaseKindName,
   type ResponseView,
   type SteppedResponseParameters,
   type SweepLevelMode,
@@ -11,9 +12,11 @@ import {
 } from '../../api/client'
 import type { ResponseTrace } from '../../composables/useFrequencyResponse'
 import { isSteppedResponseKind } from '../../measurements/kinds'
-import { formatBandwidth, formatCorner, formatDb, formatHz, formatRatio } from '../../response/format'
+import { formatBandwidth, formatCorner, formatDb, formatDelay, formatHz, formatRatio } from '../../response/format'
 import {
   CLAMPED_CORNER_NOTE,
+  delayReadings,
+  delayResponseTrace,
   peakLabel,
   primaryResponseTrace,
   REFERENCE_FELL_BACK_NOTE,
@@ -164,8 +167,32 @@ export function frequencyResponseSettingsRows(kind: string, paramsJson: string):
   return isSteppedResponseKind(kind) ? steppedSettingsRows(params) : chirpSettingsRows(params)
 }
 
-/** The Measurements panel, as sections: the corner table, then the peak and the reference, then the notes that apply. */
-export function frequencyResponseMeasurementSections(traces: ResponseTrace[], view: ResponseView, showLeft: boolean): ReportSection[] {
+/** The band the delay readings are taken over — the bandwidth reference band the run was saved with, or the app's default. */
+export function bandwidthReferenceBandFromParams(paramsJson: string | null | undefined): { lowHz: number; highHz: number } {
+  const fallback = { lowHz: 200, highHz: 2000 }
+  if (!paramsJson) return fallback
+  try {
+    const stored = JSON.parse(paramsJson) as Partial<FrequencyResponseParameters>
+    const lowHz = typeof stored?.bandwidthReferenceLowHz === 'number' && stored.bandwidthReferenceLowHz > 0 ? stored.bandwidthReferenceLowHz : fallback.lowHz
+    const highHz = typeof stored?.bandwidthReferenceHighHz === 'number' && stored.bandwidthReferenceHighHz > lowHz ? stored.bandwidthReferenceHighHz : fallback.highHz
+    return { lowHz, highHz }
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * The Measurements panel, as sections: the corner table, then the peak, the reference and the
+ * delay readings, then the notes that apply. `phaseKind` and `band` feed the delay rows the way the
+ * panel's do; a stored result from before the delay curves shows dashes there, as on screen.
+ */
+export function frequencyResponseMeasurementSections(
+  traces: ResponseTrace[],
+  view: ResponseView,
+  showLeft: boolean,
+  phaseKind: ResponsePhaseKindName = 'PerTrace',
+  band: { lowHz: number; highHz: number } = { lowHz: 200, highHz: 2000 },
+): ReportSection[] {
   const trace = primaryResponseTrace(traces, view, showLeft)
   if (!trace) return [{ kind: 'paragraph', title: 'Measurements', text: 'Nothing measured.' }]
 
@@ -202,10 +229,23 @@ export function frequencyResponseMeasurementSections(traces: ResponseTrace[], vi
       value: trace.referenceDb === null ? reference : `${formatDb(trace.referenceDb)} — ${reference}`,
     })
   }
+  const delayTrace = delayResponseTrace(traces, view, showLeft, phaseKind)
+  const delays = delayTrace ? delayReadings(delayTrace, band) : null
+  if (delays) {
+    const suffix = phaseKind === 'ChannelDifference' ? ' difference' : ''
+    const at = (extreme: { s: number; freqHz: number } | null) => (extreme ? `${formatDelay(extreme.s)} at ${formatHz(extreme.freqHz)}` : '—')
+    rows.push(
+      { label: `Group delay${suffix} at reference`, value: formatDelay(delays.groupDelayAtReferenceS) },
+      { label: `Phase delay${suffix} at reference`, value: formatDelay(delays.phaseDelayAtReferenceS) },
+      { label: 'Group delay min', value: at(delays.groupDelayMin) },
+      { label: 'Group delay max', value: at(delays.groupDelayMax) },
+    )
+  }
   rows.push({ label: 'Curve', value: trace.kind === 'Gain' ? 'Gain (left relative to the reference)' : `${trace.kind} input` })
   sections.push({ kind: 'keyValues', rows })
 
   const notes: string[] = []
+  if (delays && !delays.recorded) notes.push('Delay was not recorded for this stored result.')
   if (trace.referenceFellBackToPeak) notes.push(REFERENCE_FELL_BACK_NOTE)
   if (trace.threeDb.lowerClamped || trace.threeDb.upperClamped || trace.oneDb.lowerClamped || trace.oneDb.upperClamped) {
     notes.push(CLAMPED_CORNER_NOTE)
@@ -231,7 +271,15 @@ export function frequencyResponseSections(subject: ReportSubject, elements: read
 
   if (elements.includes('measurements')) {
     if (subject.data.kind === 'response') {
-      sections.push(...frequencyResponseMeasurementSections(subject.data.traces, subject.data.display.view, subject.data.display.showLeft))
+      sections.push(
+        ...frequencyResponseMeasurementSections(
+          subject.data.traces,
+          subject.data.display.view,
+          subject.data.display.showLeft,
+          subject.data.phaseKind,
+          bandwidthReferenceBandFromParams(subject.paramsJson),
+        ),
+      )
     } else {
       sections.push({ kind: 'paragraph', title: 'Measurements', text: 'Nothing measured.' })
     }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { DeviceStatus } from '../api/client'
@@ -17,16 +17,31 @@ import {
 
 const props = defineProps<{
   scope: Record<number, ScopeFrame>
+  /**
+   * The same tick's frames with the fundamental fitted and subtracted (the THD residual), present
+   * only while the pipeline's ScopeResidual option is on and a fundamental was found. Drawn instead
+   * of `scope` in residual mode, but always at the window found on the raw left frame: a residual
+   * has no fundamental crossings to trigger on.
+   */
+  residual?: Record<number, ScopeFrame>
   status: DeviceStatus | null
 }>()
 
 // Same shared config SpectrumChart reads — a channel the Acquisition panel has turned off must
 // not keep showing its last waveform forever (the stream only ever adds entries per channel,
 // never removes a stale one on disable).
-const { config: spectrumConfig } = useSpectrumConfig()
+const { config: spectrumConfig, apply: applyConfig } = useSpectrumConfig()
 function channelEnabled(ch: number): boolean {
   if (!spectrumConfig.value) return true
   return ch === 0 ? spectrumConfig.value.processLeft : spectrumConfig.value.processRight
+}
+
+// Residual mode is live pipeline state (SpectrumPipelineOptions.ScopeResidual), like the FFT size:
+// the server has to fit and subtract, so the checkbox writes the option and the chart reads it back
+// from the shared config -- which is also what a loaded measurement type restores it through.
+const residualMode = computed(() => spectrumConfig.value?.scopeResidual ?? false)
+function onResidualChange(event: Event) {
+  void applyConfig({ scopeResidual: (event.target as HTMLInputElement).checked })
 }
 
 const CHANNEL_LABELS = ['L', 'R']
@@ -76,7 +91,7 @@ function buildOptions(width: number, height: number, theme: (typeof THEME)[keyof
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },
-        ...exportAxisLabel(interactive, 'Volts'),
+        ...exportAxisLabel(interactive, residualMode.value ? 'Residual (V)' : 'Volts'),
       },
     ],
     series: [
@@ -89,15 +104,18 @@ function buildOptions(width: number, height: number, theme: (typeof THEME)[keyof
   }
 }
 
+// The axis label is baked into the plot's options, so a mode change rebuilds it.
+let plotIsResidual = false
 function ensurePlot() {
   const el = containerRef.value
   if (!el) return
-  if (plot && plotIsDark === darkQuery.matches) return
+  if (plot && plotIsDark === darkQuery.matches && plotIsResidual === residualMode.value) return
 
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
   plot = new uPlot(buildOptions(width, CHART_HEIGHT, currentTheme(), true), [[], [], []], el)
   plotIsDark = darkQuery.matches
+  plotIsResidual = residualMode.value
 }
 
 // The generator's own configured tone frequency — not something re-derived from the captured
@@ -238,6 +256,10 @@ function computeData(): { data: uPlot.AlignedData; periods: number | null } | nu
   const ch1 = props.scope[1]
   if (!ch0 && !ch1) return null
 
+  // In residual mode the window is still found on the raw frames below; only what is sliced at
+  // that window changes. A channel with no residual frame this tick draws nothing.
+  const drawn = residualMode.value ? (props.residual ?? {}) : props.scope
+
   // Triggers off whichever enabled channel is available, preferring L — both channels then draw
   // from that same window, so their relative phase stays meaningful. Falls back to the raw start
   // of the buffer (no trigger) when there's no known generator tone frequency to trigger on, e.g.
@@ -263,8 +285,8 @@ function computeData(): { data: uPlot.AlignedData; periods: number | null } | nu
   const xs = new Float64Array(count)
   for (let i = 0; i < count; i++) xs[i] = i * stepMs
 
-  const left = ch0 && channelEnabled(0) ? sliceSamples(ch0.samples, startStep, count) : new Array(count).fill(null)
-  const right = ch1 && channelEnabled(1) ? sliceSamples(ch1.samples, startStep, count) : new Array(count).fill(null)
+  const left = drawn[0] && channelEnabled(0) ? sliceSamples(drawn[0].samples, startStep, count) : new Array(count).fill(null)
+  const right = drawn[1] && channelEnabled(1) ? sliceSamples(drawn[1].samples, startStep, count) : new Array(count).fill(null)
 
   return { data: [xs, left, right] as unknown as uPlot.AlignedData, periods }
 }
@@ -315,7 +337,8 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
     if (props.scope[0] && channelEnabled(0)) legend.push({ label: CHANNEL_LABELS[0], color: CHANNEL_COLORS[0] })
     if (props.scope[1] && channelEnabled(1)) legend.push({ label: CHANNEL_LABELS[1], color: CHANNEL_COLORS[1] })
 
-    const title = computed.periods === null ? 'Oscilloscope' : `Oscilloscope — ${computed.periods} period${computed.periods === 1 ? '' : 's'}`
+    const what = residualMode.value ? 'Oscilloscope — residual' : 'Oscilloscope'
+    const title = computed.periods === null ? what : `${what} — ${computed.periods} period${computed.periods === 1 ? '' : 's'}`
     return await composeChartPng({ width, height, plotCanvas: u.ctx.canvas, headerHeight: header, title, legend })
   } finally {
     u?.destroy()
@@ -327,8 +350,15 @@ defineExpose({ exportPng })
 
 watch(() => props.scope, update)
 // A Periods change has to redraw off the *last* frame rather than waiting for the next one —
-// otherwise the field looks dead while acquisition is stopped.
+// otherwise the field looks dead while acquisition is stopped. The residual box likewise: while
+// stopped the raw frame is still there, and toggling back to it must not wait for a tick.
 watch(scopePeriods, update)
+watch(residualMode, update)
+
+/** Residual mode with a raw frame but no residual one: the tick found no fundamental to remove. */
+const residualMissing = computed(
+  () => residualMode.value && (!!props.scope[0] || !!props.scope[1]) && !props.residual?.[0] && !props.residual?.[1],
+)
 
 // Observes the container rather than the window: the column this chart sits in also changes width
 // when the measurement sidebar is pinned or unpinned, which is not a window resize — measured, the
@@ -384,6 +414,14 @@ onBeforeUnmount(() => {
       <span v-if="shownPeriods !== null && shownPeriods !== scopePeriods" class="text-amber-600 dark:text-amber-500">
         showing {{ shownPeriods }} — the captured frame is too short for {{ scopePeriods }}
       </span>
+      <label
+        class="flex items-center gap-1.5"
+        title="Shows the captured waveform with its fundamental fitted and subtracted — the THD residual — so crossover spikes and harmonic residue are visible in the time domain. Still triggered on the raw left channel. Needs a fundamental; a multitone or noise stimulus has none to remove."
+      >
+        <input type="checkbox" :checked="residualMode" @change="onResidualChange" />
+        Residual
+      </label>
+      <span v-if="residualMissing" class="text-amber-600 dark:text-amber-500">no fundamental to remove</span>
       <span class="flex-1"></span>
       <span v-if="!scope[0] && !scope[1]">Waiting for data…</span>
     </div>

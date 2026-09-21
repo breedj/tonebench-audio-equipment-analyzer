@@ -190,6 +190,27 @@ public sealed record CaptureDelayConfig(double CaptureDelayMs = 0.0)
 }
 
 /// <summary>
+/// The gain of whatever sits between the DUT and each analyzer input, in dB: a 10:1 divider in
+/// front of the left input is <c>LeftDb = -20</c>. The pipeline divides every sample by it as it
+/// arrives, so each level the app reports is the DUT's output rather than what reached the
+/// analyzer. Per input, because a bench fixture rarely puts the divider on both -- an impedance or
+/// response measurement that references the right channel has the DUT on one side only. 0 means
+/// nothing in the path. Bounded at ±<see cref="MaxAbsDb"/>: a 60 dB divider brings +92 dBV down
+/// to the analyzer's ceiling, and anything past that is a typo.
+/// </summary>
+public sealed record ExternalGainConfig(double LeftDb = 0.0, double RightDb = 0.0)
+{
+    public const double MaxAbsDb = 60.0;
+
+    public static ExternalGainConfig Default { get; } = new();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid =>
+        double.IsFinite(LeftDb) && Math.Abs(LeftDb) <= MaxAbsDb
+        && double.IsFinite(RightDb) && Math.Abs(RightDb) <= MaxAbsDb;
+}
+
+/// <summary>
 /// One user weighting table, stored parsed: the QA40x-style "frequency, dB" file's rows, with the
 /// file's sign convention (positive = attenuation, see <see cref="Qa403.Dsp.WeightingPoint"/>).
 /// Stored as its points and not as a path, because the file is the user's and may move; the
@@ -256,6 +277,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The capture delay's key. One document, see <see cref="CaptureDelayConfig"/>.</summary>
     public const string CaptureDelayKey = "acquisition.captureDelay";
+
+    /// <summary>The external input gain's key. One document, see <see cref="ExternalGainConfig"/>.</summary>
+    public const string ExternalGainKey = "acquisition.externalGain";
 
     /// <summary>A user weighting table's key, one document per slot (1 or 2) — see <see cref="UserWeightingTable"/>.</summary>
     public static string UserWeightingKey(int slot)

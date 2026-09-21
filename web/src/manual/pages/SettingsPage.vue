@@ -39,6 +39,22 @@
           </td>
         </tr>
         <tr>
+          <td>External gain (dB), Left / Right</td>
+          <td>
+            The gain of whatever sits between the device under test and each analyzer input: −20 for
+            a 10:1 divider, which is how a DUT above the analyzer's +32 dBV input ceiling is measured
+            at all. Every sample is divided by it as it arrives, so every level the app reports — the
+            spectrum, the metrics, every sweep point, and every output-referred level target such as
+            "0 dBV out" — is the DUT's output rather than what reached the analyzer. Input ranging is
+            the one thing that still follows what the analyzer actually sees, so a divider-fed input
+            is not parked on a range 20 dB too wide. Per input, because a bench fixture rarely puts
+            the divider on both — an impedance or frequency-response measurement that references the
+            right channel has the DUT on one side only. 0 means nothing in the path; while either is
+            non-zero the status bar shows <strong>Ext. gain</strong> in amber. Stored with the
+            analyzer's configuration and recorded with each saved result.
+          </td>
+        </tr>
+        <tr>
           <td>Metrics bandwidth (Hz)</td>
           <td>
             The band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated

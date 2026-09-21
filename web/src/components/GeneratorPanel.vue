@@ -34,11 +34,14 @@ const { kind: stimulusKind } = useGeneratorStimulus()
 // Snapping only ever rewrites a channel's `tones` list (see DeviceSessionService.SnapTones) — a
 // silent no-op for Multitone/WhiteNoise, which have none. Disabled rather than just documented so
 // it can't look like it's doing something for those kinds.
-const canSnapToBin = computed(() => stimulusKind.value === 'Tones')
-// Switching to Tones re-enables it by default (the common case wants it on); switching away
-// disables it, same as before.
+// Sine tones and the multitone comb: the server snaps a comb tone by tone (DeviceSessionService.
+// SnapTones), and the multitone TD+N reading depends on it -- unsnapped, every gap between two
+// tones reads their own Hann sidelobes, about -60 dBr on a straight wire, as if it were distortion.
+const canSnapToBin = computed(() => stimulusKind.value === 'Tones' || stimulusKind.value === 'Multitone')
+// Switching to a snappable stimulus re-enables it by default (the common case wants it on);
+// switching away disables it, same as before.
 watch(stimulusKind, (kind) => {
-  snapToBin.value = kind === 'Tones'
+  snapToBin.value = kind === 'Tones' || kind === 'Multitone'
 })
 
 watch(
@@ -139,7 +142,7 @@ defineExpose({ buildRequest, resyncTones })
         :class="{ 'opacity-40': !canSnapToBin }"
         :title="canSnapToBin
           ? 'Snap tone frequencies to the nearest coherent FFT bin, so a tone lands on exactly one bin with no leakage.'
-          : 'Only applies to sine tones — Multitone and White noise have no single frequency to snap.'"
+          : 'Only applies to sine tones and the multitone comb — noise and the chirp have no frequency to snap.'"
       >
         <input v-model="snapToBin" type="checkbox" :disabled="!canSnapToBin" @change="emit('change')" />
         Snap to bin

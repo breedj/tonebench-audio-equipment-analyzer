@@ -40,7 +40,7 @@ public static class SweepEndpoints
                 // as /api/acquisition/start.
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         // The amplitude axis. A far smaller request than its frequency counterpart because most of
         // what that one carries has no meaning here: the level *is* the swept variable, so there is
@@ -48,26 +48,7 @@ public static class SweepEndpoints
         // analysis preset is fixed (see ThdSweepRequest.AmplitudeSweepFftSize).
         group.MapPost("/thd-vs-amplitude/start", async (ThdAmplitudeSweepStartRequest request, ThdSweepRunner runner, CancellationToken ct) =>
         {
-            var sweep = new ThdSweepRequest(
-                StartFreqHz: request.FixedFreqHz,
-                EndFreqHz: request.FixedFreqHz,
-                StepsPerOctave: request.StepsPerOctave,
-                LevelMode: ThdSweepLevelMode.GeneratorVoltage,
-                LevelValue: 0.0,
-                LevelUnit: ThdSweepLevelUnit.Dbv,
-                LoadOhms: request.LoadOhms,
-                ProcessLeft: request.ProcessLeft,
-                ProcessRight: request.ProcessRight,
-                FftSize: ThdSweepRequest.AmplitudeSweepFftSize,
-                Window: WindowType.Hann,
-                AverageCount: request.AverageCount,
-                SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
-                MeasureNoiseFloor: request.MeasureNoiseFloor,
-                AdaptiveResolution: false,
-                Axis: SweepAxis.Amplitude,
-                FixedFreqHz: request.FixedFreqHz,
-                StartAmplitudeVolt: request.StartAmplitudeVolt,
-                EndAmplitudeVolt: request.EndAmplitudeVolt);
+            var sweep = request.ToMeasurement();
 
             try
             {
@@ -81,7 +62,7 @@ public static class SweepEndpoints
             {
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/cancel", async (ThdSweepRunner runner) =>
         {
@@ -191,7 +172,39 @@ public sealed record ThdAmplitudeSweepStartRequest(
     bool ProcessRight,
     int AverageCount,
     /// <summary>Capture one generator-off record before the sweep, for the residual the distortion traces sit above.</summary>
-    bool MeasureNoiseFloor = true);
+    bool MeasureNoiseFloor = true,
+    /// <summary>End the sweep once a channel's THD exceeds this many percent — see <see cref="ThdSweepRequest.StopThdPercent"/>. Absent means sweep to the end.</summary>
+    double? StopThdPercent = null)
+{
+    /// <summary>
+    /// The runner's request, with everything this axis fixes filled in. A method for the same
+    /// reason <see cref="ThdSweepStartRequest.ToMeasurement"/> is one: a wire field left out of the
+    /// mapping is a default, not an error, and <c>ThdAmplitudeSweepStartRequestTests</c> checks
+    /// that every field arrives.
+    /// </summary>
+    public ThdSweepRequest ToMeasurement() =>
+        new(
+            StartFreqHz: FixedFreqHz,
+            EndFreqHz: FixedFreqHz,
+            StepsPerOctave: StepsPerOctave,
+            LevelMode: ThdSweepLevelMode.GeneratorVoltage,
+            LevelValue: 0.0,
+            LevelUnit: ThdSweepLevelUnit.Dbv,
+            LoadOhms: LoadOhms,
+            ProcessLeft: ProcessLeft,
+            ProcessRight: ProcessRight,
+            FftSize: ThdSweepRequest.AmplitudeSweepFftSize,
+            Window: WindowType.Hann,
+            AverageCount: AverageCount,
+            SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
+            MeasureNoiseFloor: MeasureNoiseFloor,
+            AdaptiveResolution: false,
+            Axis: SweepAxis.Amplitude,
+            FixedFreqHz: FixedFreqHz,
+            StartAmplitudeVolt: StartAmplitudeVolt,
+            EndAmplitudeVolt: EndAmplitudeVolt,
+            StopThdPercent: StopThdPercent);
+}
 
 public sealed record SaveSweepRequest(long MeasurementTypeId, string Name, string? Notes);
 

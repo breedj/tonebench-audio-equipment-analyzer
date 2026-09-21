@@ -70,6 +70,14 @@ export interface DeviceStatus {
    * discovered as a 500 on one history entry days later.
    */
   databaseProblem: string | null
+  /**
+   * The gain of whatever sits between the DUT and the left input, in dB (a 10:1 divider is −20),
+   * undone on every sample so every level the app reports is the DUT's. 0 with nothing in the
+   * path. Configuration ▸ Acquisition ▸ External gain.
+   */
+  externalGainLeftDb: number
+  /** The same for the right input. */
+  externalGainRightDb: number
 }
 
 /**
@@ -365,6 +373,16 @@ export interface CaptureDelayConfig {
   captureDelayMs: number
 }
 
+/**
+ * The external input gain, per input, in dB — see DeviceStatus.externalGainLeftDb. Stored in the
+ * configuration database and applied server-side at the pipeline's door, so the live screen and
+ * every runner read DUT-referred levels alike.
+ */
+export interface ExternalGainConfig {
+  leftDb: number
+  rightDb: number
+}
+
 export interface ImpedanceStartRequest {
   method: ImpedanceMethodName
   stimulus: ImpedanceStimulusName
@@ -615,6 +633,10 @@ export interface FrequencyResponseParameters {
   /** Absent on a type saved before the phase axis was independently rangeable; the client falls back to ±180°. */
   chartPhaseTopDeg?: number | null
   chartPhaseBottomDeg?: number | null
+  /** Which delay curve the chart draws ('None' | 'Group' | 'Phase') and its axis window in µs. Absent on a type saved before the delay curves existed. */
+  chartDelayView?: ResponseDelayView | null
+  chartDelayTopUs?: number | null
+  chartDelayBottomUs?: number | null
   /** The FR (dBV) view's own y window — chartYTopDb/chartYBottomDb (despite the name) is the Gain (dB) view's window only. Absent on a type saved before the two views had separate ranges. */
   chartYTopDbv?: number | null
   chartYBottomDbv?: number | null
@@ -651,6 +673,13 @@ export type ResponseView = 'Dbv' | 'Gain'
  * would add a silent third case to each of those.
  */
 export type ResponseProjection = 'Bode' | 'Nyquist' | 'Nichols'
+
+/**
+ * Which delay curve the Bode chart draws on its own right-hand axis. One at a time, because they
+ * share that axis: group delay (−dφ/df) and phase delay (−φ/f) differ by orders of magnitude on a
+ * DUT with a high-pass corner and would need two windows.
+ */
+export type ResponseDelayView = 'None' | 'Group' | 'Phase'
 
 /** How a Nyquist plot maps magnitude onto radius. Mirrors NyquistRadiusMode in response/projection.ts. */
 export type NyquistRadiusName = 'Linear' | 'Db'
@@ -899,6 +928,10 @@ export interface SteppedResponseParameters {
   chartXToHz?: number | null
   chartPhaseTopDeg?: number | null
   chartPhaseBottomDeg?: number | null
+  /** See FrequencyResponseParameters.chartDelayView. */
+  chartDelayView?: ResponseDelayView | null
+  chartDelayTopUs?: number | null
+  chartDelayBottomUs?: number | null
   /** The FR (dBV) view's own y window — see FrequencyResponseParameters.chartYTopDbv. */
   chartYTopDbv?: number | null
   chartYBottomDbv?: number | null
@@ -959,6 +992,9 @@ export interface FrequencyResponseTraceJson {
   magnitudeMaxDb: number[]
   phaseDeg: number[]
   coherence: number[]
+  /** Seconds per column; see FrequencyResponseTrace server-side for when they are physical and when excess only. */
+  groupDelayS: number[]
+  phaseDelayS: number[]
   oneDb: ResponseBandwidthJson
   threeDb: ResponseBandwidthJson
   peakDb: number
@@ -1154,6 +1190,10 @@ export interface ImpulseResponseParameters {
   chartHarmonicsYBottomDb?: number | null
   chartPhaseTopDeg?: number | null
   chartPhaseBottomDeg?: number | null
+  /** The Response view's delay curve and its axis window — see FrequencyResponseParameters.chartDelayView. */
+  chartDelayView?: ResponseDelayView | null
+  chartDelayTopUs?: number | null
+  chartDelayBottomUs?: number | null
   chartTimeFromMs?: number | null
   chartTimeToMs?: number | null
   chartFreqFromHz?: number | null
@@ -1291,6 +1331,9 @@ export interface StoredResponseTrace {
   magnitudeMaxDb: number[]
   phaseDeg: number[]
   coherence: number[]
+  /** Null on a result saved before the delay curves were recorded — the chart then draws none and the panel shows a dash. */
+  groupDelayS: number[] | null
+  phaseDelayS: number[] | null
 }
 
 export interface StoredResponseTracesResponse {
@@ -1381,6 +1424,8 @@ export interface SpectrumConfig {
   intermodulation?: IntermodulationSpec | null
   /** The noise weighting in effect — see WeightingConfigRequest. */
   weighting: WeightingSpec
+  /** Whether the pipeline also sends each scope tail with its fundamental removed — the oscilloscope's Residual view. */
+  scopeResidual: boolean
 }
 
 export type ImdMethodName = 'Smpte' | 'Ccif'
@@ -1456,6 +1501,8 @@ export interface SpectrumConfigRequest {
   measurementLoFreqHz?: number
   measurementHiFreqHz?: number
   intermodulation?: IntermodulationConfigRequest
+  /** Send the scope tail with its fundamental removed as well — see SpectrumConfig.scopeResidual. Omitted leaves it alone. */
+  scopeResidual?: boolean
 }
 
 // Projects / measurement-types / measurements — mirrors Qa403.App/Endpoints/ProjectsEndpoints.cs,
@@ -1610,6 +1657,8 @@ export interface MeasurementTypeAppliedResponse {
   dutGainDb?: number | null
   chartUnit?: string | null
   chartShowWeightingCurve?: boolean | null
+  /** Whether the oscilloscope shows the THD residual — live pipeline state like the IMD spec, re-applied on load. */
+  scopeResidual?: boolean | null
 }
 
 /**
@@ -1915,6 +1964,8 @@ export interface ThdAmplitudeSweepStartRequest {
   averageCount: number
   /** Capture one generator-off record before the sweep, for the residual the distortion traces sit above. */
   measureNoiseFloor: boolean
+  /** End the sweep once a channel's THD exceeds this many percent; the crossing point is kept. Null or absent means sweep to the end. */
+  stopThdPercent?: number | null
 }
 
 /**
@@ -1960,6 +2011,8 @@ export interface ThdVsAmplitudeParameters {
   chartYBottomDb?: number | null
   /** Off unless the user opts in — see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
+  /** End the sweep once a channel's THD exceeds this many percent. Absent or null on a type saved without it, meaning sweep to the end. */
+  stopThdPercent?: number | null
 }
 
 /** The three x-axis choices a THD-vs-amplitude chart offers. Mirrors the old app's E_X_AxisType. */
@@ -2156,6 +2209,8 @@ export interface ThdSweepStatus {
   points: ThdSweepPoint[]
   /** How the points' harmonics are referenced — which of a point's two sets of figures this run is about. */
   thdMethod: ThdMethodName
+  /** Why a Finished sweep ended before its last planned point (the THD stop threshold). Null for a sweep that ran to the end. */
+  stopReason?: string | null
 }
 
 export const api = {
@@ -2195,6 +2250,8 @@ export const api = {
     request<DeviceStatus>('/acquisition/start', { method: 'POST', body: JSON.stringify(config) }),
 
   stopAcquisition: () => request<DeviceStatus>('/acquisition/stop', { method: 'POST' }),
+  /** Cancels every running measurement (sweeps, responses, impedance…) and waits for them to unwind; the plain acquisition is left to stopAcquisition. */
+  cancelRuns: () => request<DeviceStatus>('/acquisition/cancel-runs', { method: 'POST' }),
 
   getSpectrumConfig: () => request<SpectrumConfig>('/acquisition/spectrum-config'),
 
@@ -2391,6 +2448,10 @@ export const api = {
 
   setCaptureDelay: (config: CaptureDelayConfig) =>
     request<CaptureDelayConfig>('/config/capture-delay', { method: 'PUT', body: JSON.stringify(config) }),
+
+  getExternalGain: () => request<ExternalGainConfig>('/config/external-gain'),
+  setExternalGain: (config: ExternalGainConfig) =>
+    request<ExternalGainConfig>('/config/external-gain', { method: 'PUT', body: JSON.stringify(config) }),
 
   startImpedance: (req: ImpedanceStartRequest) =>
     request<ImpedanceStarted>('/impedance/start', { method: 'POST', body: JSON.stringify(req) }),

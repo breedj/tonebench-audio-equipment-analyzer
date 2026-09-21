@@ -26,7 +26,7 @@ public static class HarmonicAnalyzer
     /// unmistakably in "below the floor" territory while contributing 1% of a noise bin's power to
     /// the THD sum — i.e. nothing.
     /// </summary>
-    private const double BelowFloorAmplitudeFactor = 0.1;
+    internal const double BelowFloorAmplitudeFactor = 0.1;
 
     /// <summary>
     /// How far above the local noise floor a candidate peak must sit before
@@ -49,7 +49,7 @@ public static class HarmonicAnalyzer
     /// what has to be subtracted from a sum of bins, so it needs scaling back up by 1/ln(2).
     /// Skipping this under-subtracts by 10·log10(1/ln2) = 1.6 dB on every harmonic.
     /// </summary>
-    private static readonly double MedianToMeanExponential = 1.0 / Math.Log(2.0);
+    internal static readonly double MedianToMeanExponential = 1.0 / Math.Log(2.0);
 
     /// <summary>
     /// Writes up to <paramref name="harmonicCount"/> harmonics (order 1 = fundamental) into

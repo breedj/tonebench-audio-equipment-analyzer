@@ -40,7 +40,7 @@ public static class OutputImpedanceEndpoints
             {
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/continue", (OutputImpedanceRunner runner) =>
         {

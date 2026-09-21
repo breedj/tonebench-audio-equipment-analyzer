@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { MeasurementDetail } from '../../api/client'
 import { createSpectrumDisplaySource } from '../../composables/useChartDisplay'
 import { defaultReportElements, reportElementsForKind } from '../elements'
-import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedNoiseFrames } from '../spectrumFrames'
+import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedMultitoneFrames, storedNoiseFrames } from '../spectrumFrames'
 import { NO_WEIGHTING } from '../../weighting'
 import type { ReportSubject } from '../types'
 import { chapterSections } from './index'
-import { harmonicsSections, metricsSections } from './spectrum'
+import { harmonicsSections, metricsSections, multitoneSections } from './spectrum'
 
 /** A stored FFT result the way MeasurementSaveService writes one: a metric row per meter and a pair per harmonic. */
 const detail: MeasurementDetail = {
@@ -296,5 +296,93 @@ describe('intermodulation', () => {
     expect(metricRows?.kind === 'keyValues' && (metricRows.rows ?? []).some((r) => r.label === 'IMD %')).toBe(true)
 
     expect(harmonicsSections(subjectOf([])).map((s) => s.title)).not.toContain('IMD — L')
+  })
+})
+
+describe('multitone', () => {
+  /** The `tdn_*` / `mt_*` rows MeasurementSaveService.MultitoneMetrics writes for a three-tone comb whose first gap was unresolved. */
+  const multitoneDetail: MeasurementDetail = {
+    ...detail,
+    channelsData: [
+      {
+        channel: 0,
+        columns: [],
+        metrics: {
+          ...detail.channelsData[0]!.metrics,
+          tdn_percent: 0.112,
+          tdn_db: -59.02,
+          mt_comb_dbv: -20.5,
+          mt_tone_count: 3,
+          mt_band_count: 2,
+          mt_resolved_bands: 1,
+          mt_t0_hz: 1000,
+          mt_t0_dbv: -26,
+          mt_t1_hz: 1004,
+          mt_t1_dbv: -26,
+          mt_t2_hz: 2000,
+          mt_t2_dbv: -26,
+          mt_b1_hz: 1500,
+          mt_b1_dbv: -72,
+          mt_b1_dbr: -60.9,
+          mt_b1_dn_dbr: -58.9,
+        },
+      },
+      { channel: 1, columns: [], metrics: {} },
+    ],
+  }
+
+  it('rebuilds the multitone frame from the stored rows, with a gap that has no rows unresolved', () => {
+    const frames = storedMultitoneFrames(multitoneDetail)
+
+    expect(Object.keys(frames)).toEqual(['0'])
+    const f = frames[0]!
+    expect(f.combDbv).toBe(-20.5)
+    expect(f.tdn).toBeCloseTo(0.00112, 8)
+    expect(f.resolvedBands).toBe(1)
+    expect(f.tones).toEqual([
+      { freqHz: 1000, dbv: -26 },
+      { freqHz: 1004, dbv: -26 },
+      { freqHz: 2000, dbv: -26 },
+    ])
+    expect(f.bands).toHaveLength(2)
+    expect(f.bands[0]!.resolved).toBe(false)
+    expect(f.bands[1]).toEqual({ resolved: true, highestFreqHz: 1500, highestDbv: -72, highestDbr: -60.9, dnDbr: -58.9 })
+  })
+
+  it('gives a channel without a tdn_percent row no frame', () => {
+    expect(storedMultitoneFrames(detail)).toEqual({})
+  })
+
+  it('prints the multitone table and the TD+N total, and the TD+N tiles', () => {
+    const base = subjectOf(['TD+N %', 'TD+N dB'])
+    const withMultitone: ReportSubject = {
+      ...base,
+      data: {
+        ...base.data,
+        meters: storedMetersFrames(multitoneDetail),
+        multitone: storedMultitoneFrames(multitoneDetail),
+      } as ReportSubject['data'],
+    }
+
+    const sections = multitoneSections(withMultitone.data.kind === 'spectrum' ? (withMultitone.data.multitone ?? {}) : {})
+    const titles = sections.map((s) => s.title)
+    expect(titles).toEqual(['Multitone — L', 'TD+N — L'])
+    const table = sections[0]!
+    expect(table.kind).toBe('table')
+    if (table.kind === 'table') {
+      expect(table.cells?.[0]?.[2]).toBe('unresolved')
+      expect(table.cells?.[1]?.[2]).toBe('1.50 kHz · -72.0 dBV')
+      expect(table.cells?.[2]?.[2]).toBe('—')
+    }
+    const totals = sections[1]!
+    if (totals.kind === 'keyValues') {
+      expect(totals.rows?.[0]).toEqual({ label: 'TD+N', value: '0.11200 %, -59.02 dB' })
+      expect(totals.rows?.[1]).toEqual({ label: 'Gaps resolved', value: '1 of 2' })
+    }
+
+    expect(harmonicsSections(withMultitone).map((s) => s.title)).toContain('Multitone — L')
+    const metricRows = metricsSections(withMultitone).find((s) => s.title === 'Metrics — L')
+    expect(metricRows?.kind === 'keyValues' && (metricRows.rows ?? []).some((r) => r.label === 'TD+N %')).toBe(true)
+    expect(harmonicsSections(subjectOf([])).map((s) => s.title)).not.toContain('Multitone — L')
   })
 })

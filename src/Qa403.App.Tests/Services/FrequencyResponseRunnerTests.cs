@@ -1174,6 +1174,67 @@ public class FrequencyResponseRunnerTests
         Assert.Equal(bandReferenced.ThreeDb.UpperHz, reapplied.ThreeDb.UpperHz, 1);
     }
 
+    /// <summary>
+    /// A pure delay of 100 frames on the left channel. Against the right input as reference the
+    /// gain estimator's removed rotation *is* that delay, so both delay curves read it back once
+    /// the runner has put it back; against the synthesised chirp the removed rotation was the
+    /// record's arbitrary start point, so the left trace reads excess delay only -- nothing.
+    /// </summary>
+    [Fact]
+    public async Task ADelayedDut_ReadsItsDelayOnTheGainTrace_AndOnlyExcessOnTheLeft()
+    {
+        const int delayFrames = 100;
+        var taps = new double[delayFrames + 1];
+        taps[delayFrames] = 1.0;
+        var harness = await CreateAsync(new KnownImpulseResponseDevice(CleanDevice(), taps));
+
+        await harness.Runner.StartAsync(Request(rightIsReference: true, smoothing: 24), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        double expectedS = delayFrames / status.SampleRateHz;
+        Assert.NotNull(status.LatencySamples);
+        Assert.Equal(delayFrames, status.LatencySamples!.Value, 0.5);
+
+        var gain = Trace(status, FrequencyResponseTraceKind.Gain);
+        var left = Trace(status, FrequencyResponseTraceKind.Left);
+        foreach (int i in MidBandColumns(gain))
+        {
+            Assert.True(Math.Abs(gain.GroupDelayS[i] - expectedS) < 0.01 * expectedS,
+                $"gain group delay {gain.GroupDelayS[i] * 1e6:F1} µs at {gain.FreqHz[i]:F0} Hz, expected {expectedS * 1e6:F1}");
+            Assert.True(Math.Abs(gain.PhaseDelayS[i] - expectedS) < 0.01 * expectedS,
+                $"gain phase delay {gain.PhaseDelayS[i] * 1e6:F1} µs at {gain.FreqHz[i]:F0} Hz, expected {expectedS * 1e6:F1}");
+            Assert.True(Math.Abs(left.GroupDelayS[i]) < 20e-6,
+                $"left group delay {left.GroupDelayS[i] * 1e6:F1} µs at {left.FreqHz[i]:F0} Hz should be excess only");
+        }
+    }
+
+    [Fact]
+    public async Task ApplyBandwidthReference_KeepsTheDelayCurves()
+    {
+        // The rebuild path goes through the same trace builder as a pass, so the delays survive a
+        // post-run reference change -- and the phase delay is re-anchored at the new reference,
+        // which on a pure delay changes nothing.
+        const int delayFrames = 100;
+        var taps = new double[delayFrames + 1];
+        taps[delayFrames] = 1.0;
+        var harness = await CreateAsync(new KnownImpulseResponseDevice(CleanDevice(), taps));
+
+        await harness.Runner.StartAsync(Request(rightIsReference: true), CancellationToken.None);
+        var measured = Trace(await AwaitCompletionAsync(harness.Runner), FrequencyResponseTraceKind.Gain);
+
+        var reapplied = Trace(
+            harness.Runner.ApplyBandwidthReference(new BandwidthReferenceSpec(BandwidthReferenceMode.BandMedian, 500.0, 5_000.0)),
+            FrequencyResponseTraceKind.Gain);
+
+        Assert.Equal(measured.GroupDelayS.Length, reapplied.GroupDelayS.Length);
+        foreach (int i in MidBandColumns(measured))
+        {
+            Assert.Equal(measured.GroupDelayS[i], reapplied.GroupDelayS[i], 9);
+            Assert.Equal(measured.PhaseDelayS[i], reapplied.PhaseDelayS[i], 9);
+        }
+    }
+
     [Fact]
     public async Task ApplyBandwidthReference_IsRecordedOnTheRequestASaveReads()
     {

@@ -63,6 +63,12 @@ export const StreamMsgType = {
    * decodeNoiseFiguresFrame.
    */
   NoiseFigures: 12,
+  /**
+   * One channel's multitone distortion figures — every tone of the comb, the highest line and the
+   * D+N of every gap between adjacent tones, and the total — sent right after that tick's Meters
+   * frame whenever the generator plays a multitone comb. See decodeMultitoneFrame.
+   */
+  Multitone: 13,
 } as const
 export type StreamMsgType = (typeof StreamMsgType)[keyof typeof StreamMsgType]
 
@@ -118,6 +124,12 @@ export const STREAM_FLAG_OUTPUT_IMPEDANCE = 1 << 8
  * so a client drops the last reading instead of keeping one measured at a different FFT size.
  */
 export const STREAM_FLAG_IMD_UNRESOLVED = 1 << 6
+/**
+ * Scope-frame-only: the samples are the record's tail with its fitted fundamental subtracted (the
+ * THD residual), sent as a second scope frame of the same seq after the raw one. Mirrors
+ * StreamFlags.ScopeResidual. The raw frame is what the chart triggers on.
+ */
+export const STREAM_FLAG_SCOPE_RESIDUAL = 1 << 9
 
 /** Client -> server control message kinds. Everything else is REST. */
 export const ClientControlType = {
@@ -356,6 +368,84 @@ export function decodeNoiseFiguresFrame(buffer: ArrayBuffer): NoiseFiguresFrame 
     noiseDensityDbvPerRootHz,
     enbwHz,
     weighting: { standard, user1: (userMask & 1) !== 0, user2: (userMask & 2) !== 0 },
+    held: (header.flags & STREAM_FLAG_HELD) !== 0,
+  }
+}
+
+/** One gap between two adjacent comb tones — see MultitoneBand server-side. Figures are 0 when `resolved` is false. */
+export interface MultitoneBandFrame {
+  /** False when the two tones sit closer than the analyzer's minimum spacing at this FFT size: nothing between them can be read. */
+  resolved: boolean
+  /** The highest line in the gap. */
+  highestFreqHz: number
+  highestDbv: number
+  /** Relative to the comb's total RMS. */
+  highestDbr: number
+  /** Everything in the gap — distortion plus noise — relative to the comb's total RMS. */
+  dnDbr: number
+}
+
+export interface MultitoneFrame {
+  header: StreamFrameHeader
+  /** The comb's total RMS level (√Σ V²), what every dBr figure is relative to. */
+  combDbv: number
+  /** Total distortion plus noise over the resolved gaps, as a ratio of the comb's RMS. */
+  tdn: number
+  resolvedBands: number
+  /** Every measured tone, ascending; comb tones that merged onto one bin appear once. */
+  tones: { freqHz: number; dbv: number }[]
+  /** One per adjacent pair of tones: bands[i] is the gap above tones[i]. */
+  bands: MultitoneBandFrame[]
+  held: boolean
+}
+
+/**
+ * Multitone payload (offsets relative to the 20-byte header) — see EncodeMultitone server-side:
+ * header x0 = combDbv, dx = tdn ratio, nPoints = tone count; 20 u32 bandCount, 24 u32 resolvedBands,
+ * 28 (f32 freqHz, f32 dbv) * nPoints, then (u8 resolved + 3 pad, f32 highestHz, f32 highestDbv,
+ * f32 highestDbr, f32 dnDbr) * bandCount.
+ */
+export function decodeMultitoneFrame(buffer: ArrayBuffer): MultitoneFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  let offset = HEADER_LENGTH
+
+  const bandCount = view.getUint32(offset, true)
+  offset += 4
+  const resolvedBands = view.getUint32(offset, true)
+  offset += 4
+
+  const tones: { freqHz: number; dbv: number }[] = new Array(header.nPoints)
+  for (let i = 0; i < header.nPoints; i++) {
+    const freqHz = view.getFloat32(offset, true)
+    offset += 4
+    const dbv = view.getFloat32(offset, true)
+    offset += 4
+    tones[i] = { freqHz, dbv }
+  }
+
+  const bands: MultitoneBandFrame[] = new Array(bandCount)
+  for (let i = 0; i < bandCount; i++) {
+    const resolved = view.getUint8(offset) !== 0
+    offset += 4
+    const highestFreqHz = view.getFloat32(offset, true)
+    offset += 4
+    const highestDbv = view.getFloat32(offset, true)
+    offset += 4
+    const highestDbr = view.getFloat32(offset, true)
+    offset += 4
+    const dnDbr = view.getFloat32(offset, true)
+    offset += 4
+    bands[i] = { resolved, highestFreqHz, highestDbv, highestDbr, dnDbr }
+  }
+
+  return {
+    header,
+    combDbv: header.x0,
+    tdn: header.dx,
+    resolvedBands,
+    tones,
+    bands,
     held: (header.flags & STREAM_FLAG_HELD) !== 0,
   }
 }
@@ -844,6 +934,15 @@ export interface FrequencyResponseFrame {
   magnitudeMaxDb: Float32Array
   phaseDeg: Float32Array
   coherence: Float32Array
+  /**
+   * Group delay and phase delay per column, in seconds. Derived server-side from the
+   * full-resolution phase before decimation — a derivative of `phaseDeg` here would be aliased
+   * wherever the columns are finer than the FFT bins — and sampled at the column centre like the
+   * phase. Physical delay only where the phase was measured against a real reference; excess delay
+   * otherwise (see FrequencyResponseTrace server-side).
+   */
+  groupDelayS: Float32Array
+  phaseDelayS: Float32Array
   oneDb: ResponseBandwidth
   threeDb: ResponseBandwidth
   peakDb: number
@@ -883,6 +982,8 @@ export function decodeFrequencyResponseFrame(buffer: ArrayBuffer): FrequencyResp
   const magnitudeMaxDb = new Float32Array(columns)
   const phaseDeg = new Float32Array(columns)
   const coherence = new Float32Array(columns)
+  const groupDelayS = new Float32Array(columns)
+  const phaseDelayS = new Float32Array(columns)
 
   let offset = HEADER_LENGTH
   for (let i = 0; i < columns; i++) {
@@ -891,7 +992,9 @@ export function decodeFrequencyResponseFrame(buffer: ArrayBuffer): FrequencyResp
     magnitudeMaxDb[i] = view.getFloat32(offset + 8, true)
     phaseDeg[i] = view.getFloat32(offset + 12, true)
     coherence[i] = view.getFloat32(offset + 16, true)
-    offset += 20
+    groupDelayS[i] = view.getFloat32(offset + 20, true)
+    phaseDelayS[i] = view.getFloat32(offset + 24, true)
+    offset += 28
   }
 
   const oneDb = readBandwidth(view, offset)
@@ -908,6 +1011,8 @@ export function decodeFrequencyResponseFrame(buffer: ArrayBuffer): FrequencyResp
     magnitudeMaxDb,
     phaseDeg,
     coherence,
+    groupDelayS,
+    phaseDelayS,
     oneDb,
     threeDb,
     peakDb: view.getFloat32(offset, true),

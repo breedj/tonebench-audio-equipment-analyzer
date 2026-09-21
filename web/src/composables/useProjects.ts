@@ -46,6 +46,14 @@ const typeNotes = ref('')
 // ever be dirty — a Set rather than a single flag is just future-proofing, not a sign multiple
 // types can be dirty simultaneously today.
 const dirtyTypeIds = ref<Set<number>>(new Set())
+/**
+ * The type whose stored settings were last pushed into the live state successfully. A save writes
+ * the *live* state into a type, so it may only ever write the type that state came from: after a
+ * failed apply the screen still holds the previous type's settings, and saving -- or autosaving,
+ * which any watcher can trigger -- would write those over the failed type's own. That is exactly
+ * what turned one 500 on selection into a permanently broken FFT type on 2026-09-21.
+ */
+const appliedTypeId = ref<number | null>(null)
 // The file path of the last session answer, so a Save As (same project id in a new file) still
 // counts as a change of project.
 let lastSessionPath: string | null = null
@@ -83,6 +91,7 @@ export function useProjects() {
         if (changed) {
           currentTypeId.value = null
           loadedParams.value = null
+          appliedTypeId.value = null
           typeNotes.value = ''
           dirtyTypeIds.value = new Set()
           types.value = []
@@ -135,7 +144,9 @@ export function useProjects() {
     await stopRun()
     currentTypeId.value = id
     typeNotes.value = types.value.find((t) => t.id === id)?.notes ?? ''
+    appliedTypeId.value = null
     loadedParams.value = await applyMeasurementType(id)
+    appliedTypeId.value = id
     markClean(id)
   }
 
@@ -160,7 +171,9 @@ export function useProjects() {
 
   /** Flags the currently-open type as having live edits not yet reflected in its stored params_json. */
   function markDirty() {
-    if (currentTypeId.value === null || dirtyTypeIds.value.has(currentTypeId.value)) return
+    // Nothing on screen belongs to a type whose settings never loaded, so nothing can dirty it.
+    if (currentTypeId.value === null || appliedTypeId.value !== currentTypeId.value) return
+    if (dirtyTypeIds.value.has(currentTypeId.value)) return
     dirtyTypeIds.value = new Set(dirtyTypeIds.value).add(currentTypeId.value)
   }
 
@@ -211,6 +224,7 @@ export function useProjects() {
       if (currentTypeId.value === id) {
         currentTypeId.value = null
         loadedParams.value = null
+        appliedTypeId.value = null
       }
       markClean(id)
       await loadTypes(projectId)
@@ -267,6 +281,11 @@ export function useProjects() {
   async function saveMeasurementType(id: number, staged?: StagedMeasurementConfig, paramsJson?: string) {
     const type = types.value.find((t) => t.id === id)
     if (!type) throw new Error(`Measurement type ${id} not found.`)
+    if (id === currentTypeId.value && appliedTypeId.value !== id) {
+      const message = `The settings of "${type.name}" could not be loaded, so they are not saved — select it again once the problem is fixed.`
+      error.value = message
+      throw new Error(message)
+    }
     try {
       await api.updateMeasurementType(id, { kind: type.kind, name: type.name, notes: notesToSave(type), staged, paramsJson })
       await loadTypes(type.projectId)
@@ -298,6 +317,7 @@ export function useProjects() {
         kind: type.kind, name: newName, notes: notesToSave(type), staged, paramsJson,
       })
       loadedParams.value = await applyMeasurementType(id)
+      appliedTypeId.value = id
       // The original reverts to its own stored notes along with its stored settings.
       typeNotes.value = type.notes ?? ''
       markClean(id)
@@ -335,6 +355,7 @@ export function useProjects() {
     currentProjectId,
     currentTypeId,
     loadedParams,
+    appliedTypeId,
     typeNotes,
     setTypeNotes,
     dirtyTypeIds,

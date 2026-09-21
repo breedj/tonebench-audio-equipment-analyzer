@@ -12,6 +12,8 @@ function trace(freqHz: number[], db: number[], kind: ResponseTrace['kind'] = 'Cr
     magnitudeMaxDb: [...db],
     phaseDeg: freqHz.map(() => 0),
     coherence: freqHz.map(() => 1),
+    groupDelayS: freqHz.map(() => 0),
+    phaseDelayS: freqHz.map(() => 0),
     oneDb: { dropDb: 1, symmetric: true, lowerHz: 0, upperHz: 0, bandwidthHz: 0, lowerClamped: false, upperClamped: false },
     threeDb: { dropDb: 3, symmetric: false, lowerHz: 0, upperHz: 0, bandwidthHz: 0, lowerClamped: false, upperClamped: false },
     peakDb: Math.max(...db),

@@ -22,6 +22,8 @@ public class ProjectStartupHostedServiceTests : IDisposable
     private sealed class IdleRun : IMeasurementRun
     {
         public bool Running => false;
+
+        public Task CancelAsync() => Task.CompletedTask;
     }
 
     public ProjectStartupHostedServiceTests()

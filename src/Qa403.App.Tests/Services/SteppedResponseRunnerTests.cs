@@ -92,6 +92,40 @@ public class SteppedResponseRunnerTests
     private static FrequencyResponseTrace Trace(FrequencyResponseStatus status, FrequencyResponseTraceKind kind) =>
         status.Traces.Single(t => t.Kind == kind);
 
+    /// <summary>
+    /// A pure delay of four frames on the left channel. The stepped sweep removes nothing and
+    /// unwraps from its first tone, so arg(L/R) is the physical phase and both delay curves on the
+    /// gain trace read the delay at every point -- a linear phase makes the central difference
+    /// exact. Left and Right carry no phase, so their delays are zero. The 2 steps/octave grid
+    /// keeps each phase step at ~35°, well inside the unwrapper's half turn.
+    /// </summary>
+    [Fact]
+    public async Task ADelayedDut_ReadsItsGroupAndPhaseDelayOnEveryPoint()
+    {
+        const int delayFrames = 4;
+        var taps = new double[delayFrames + 1];
+        taps[delayFrames] = 1.0;
+        var harness = await CreateAsync(new KnownImpulseResponseDevice(CleanDevice(), taps));
+
+        await harness.Runner.StartAsync(Request(rightIsReference: true), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        double expectedS = delayFrames / 48_000.0;
+        var gain = Trace(status, FrequencyResponseTraceKind.Gain);
+        Assert.True(gain.FreqHz.Length >= 4, "the sweep should have several points");
+        for (int i = 0; i < gain.FreqHz.Length; i++)
+        {
+            Assert.True(Math.Abs(gain.GroupDelayS[i] - expectedS) < 0.02 * expectedS,
+                $"group delay {gain.GroupDelayS[i] * 1e6:F2} µs at {gain.FreqHz[i]:F0} Hz, expected {expectedS * 1e6:F2}");
+            Assert.True(Math.Abs(gain.PhaseDelayS[i] - expectedS) < 0.02 * expectedS,
+                $"phase delay {gain.PhaseDelayS[i] * 1e6:F2} µs at {gain.FreqHz[i]:F0} Hz, expected {expectedS * 1e6:F2}");
+        }
+
+        Assert.All(Trace(status, FrequencyResponseTraceKind.Left).GroupDelayS, v => Assert.Equal(0.0f, v));
+        Assert.All(Trace(status, FrequencyResponseTraceKind.Right).PhaseDelayS, v => Assert.Equal(0.0f, v));
+    }
+
     [Fact]
     public async Task ARun_ProducesTheSameThreeTracesTheChirpDoes_OnePointEach()
     {

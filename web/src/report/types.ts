@@ -19,7 +19,7 @@ import type { ImpulseDisplay } from '../measurements/impulseDisplay'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
 import type { SweepTraceFamily } from '../sweep/points'
-import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, ScopeFrame, SpectrumFrame } from '../streaming/protocol'
+import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, ScopeFrame, SpectrumFrame, MultitoneFrame } from '../streaming/protocol'
 import type { SpectrumDisplaySource } from '../composables/useChartDisplay'
 import type { ReportElementId } from './elements'
 import type { ExportableChart } from './renderChart'
@@ -88,8 +88,12 @@ export type ReportSubjectData =
       /** The generator's tones, for the Gain tile; empty when nothing is known. */
       generatorTones: GeneratorTone[]
       loadOhms: number
+      /** Each channel's multitone figure, while the generator plays a comb; rebuilt from the mt_* rows for a stored result. */
+      multitone?: Record<number, MultitoneFrame>
       /** The oscilloscope frames — the screen's; empty for a stored result, which keeps no waveform. */
       scope: Record<number, ScopeFrame>
+      /** The same tick's THD-residual frames, when the oscilloscope's Residual view is on; the chart draws these instead of `scope` then. */
+      scopeResidual?: Record<number, ScopeFrame>
       /** What the oscilloscope triggers from; null for a stored result. */
       status: DeviceStatus | null
       /** The waterfall chart on screen, whose collected history only it can draw; null off screen or for a stored result. */

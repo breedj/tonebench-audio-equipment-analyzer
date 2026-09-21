@@ -149,6 +149,9 @@ function thdVsAmplitudeRows(params: Partial<ThdVsAmplitudeParameters & { capture
   }
   if (typeof params.stepsPerOctave === 'number') rows.push({ label: 'Steps per octave', value: String(params.stepsPerOctave) })
   if (typeof params.loadOhms === 'number') rows.push({ label: 'Load', value: `${formatNumber(params.loadOhms)} Ω` })
+  if (typeof params.stopThdPercent === 'number') {
+    rows.push({ label: 'Stop when THD exceeds', value: `${formatNumber(params.stopThdPercent)} %` })
+  }
   rows.push(...commonRows(params))
   push(rows, captureDelayRow(params))
   return rows

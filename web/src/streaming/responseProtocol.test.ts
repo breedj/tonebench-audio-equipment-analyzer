@@ -15,6 +15,8 @@ interface Column {
   maxDb: number
   phaseDeg: number
   coherence: number
+  groupDelayS: number
+  phaseDelayS: number
 }
 
 interface Bandwidth {
@@ -46,7 +48,7 @@ function buildFrame(opts: {
   referenceMode: number
   referenceFellBackToPeak: boolean
 }): ArrayBuffer {
-  const length = HEADER_LENGTH + opts.columns.length * 20 + 40 + 16
+  const length = HEADER_LENGTH + opts.columns.length * 28 + 40 + 16
   const buffer = new ArrayBuffer(length)
   const view = new DataView(buffer)
 
@@ -65,7 +67,9 @@ function buildFrame(opts: {
     view.setFloat32(offset + 8, column.maxDb, true)
     view.setFloat32(offset + 12, column.phaseDeg, true)
     view.setFloat32(offset + 16, column.coherence, true)
-    offset += 20
+    view.setFloat32(offset + 20, column.groupDelayS, true)
+    view.setFloat32(offset + 24, column.phaseDelayS, true)
+    offset += 28
   }
 
   for (const bandwidth of [opts.oneDb, opts.threeDb]) {
@@ -89,9 +93,9 @@ function buildFrame(opts: {
 }
 
 const columns: Column[] = [
-  { freqHz: 20, minDb: -3.5, maxDb: -3, phaseDeg: -12, coherence: 0.4 },
-  { freqHz: 1000, minDb: -0.2, maxDb: 0.1, phaseDeg: -1, coherence: 0.99 },
-  { freqHz: 20000, minDb: -1.5, maxDb: -1, phaseDeg: -40, coherence: 0.95 },
+  { freqHz: 20, minDb: -3.5, maxDb: -3, phaseDeg: -12, coherence: 0.4, groupDelayS: 2.083e-3, phaseDelayS: 2.1e-3 },
+  { freqHz: 1000, minDb: -0.2, maxDb: 0.1, phaseDeg: -1, coherence: 0.99, groupDelayS: 12.5e-6, phaseDelayS: 12.4e-6 },
+  { freqHz: 20000, minDb: -1.5, maxDb: -1, phaseDeg: -40, coherence: 0.95, groupDelayS: -3.1e-6, phaseDelayS: 0 },
 ]
 
 const oneDb: Bandwidth = {
@@ -145,6 +149,18 @@ describe('decodeFrequencyResponseFrame', () => {
       expect(frame.magnitudeMaxDb[i]).toBeCloseTo(expected, 5)
     for (const [i, expected] of [0.4, 0.99, 0.95].entries())
       expect(frame.coherence[i]).toBeCloseTo(expected, 5)
+  })
+
+  it('reads the delay columns, which sit after coherence in a 28-byte column', () => {
+    // Column stride is what a decoder gets silently wrong: at 20 bytes the second column's
+    // frequency would be read out of the first column's group delay.
+    const frame = decode()
+
+    for (const [i, expected] of [2.083e-3, 12.5e-6, -3.1e-6].entries())
+      expect(frame.groupDelayS[i]).toBeCloseTo(expected, 9)
+    for (const [i, expected] of [2.1e-3, 12.4e-6, 0].entries())
+      expect(frame.phaseDelayS[i]).toBeCloseTo(expected, 9)
+    expect(Array.from(frame.freqHz)).toEqual([20, 1000, 20000])
   })
 
   it('keeps both magnitude bounds, because both are drawn', () => {

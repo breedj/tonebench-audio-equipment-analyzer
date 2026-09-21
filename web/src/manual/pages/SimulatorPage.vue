@@ -190,6 +190,17 @@ const { showPage } = useManual()
       so what the screen shows will carry the simulated noise floor and the chart's own decimation on
       top of it, and nothing else.
     </p>
+    <p>
+      Which model a measurement needs is not obvious from its name, so the DUT list is grouped by
+      it — <strong>Linear — response, no distortion</strong>, <strong>Distorting — for THD and
+      IMD</strong>, <strong>Impedance fixtures — for the impedance screen</strong> — and each
+      measurement screen says so above its chart whenever the simulator's setup makes its result
+      trivial: an IMD sweep into a linear model (every point 0 %, nothing on a log axis), a THD sweep
+      with Harmonics off, an impedance run into an amplifier model, a crosstalk sweep with the
+      Crosstalk box off, an output-impedance run with Zout at None, or a response measurement of the
+      straight wire. The line disappears as soon as the status bar is set to something the
+      measurement can show, and it never appears with the real analyzer.
+    </p>
 
     <h3>Linear devices</h3>
     <table>
@@ -272,7 +283,7 @@ const { showPage } = useManual()
       </tbody>
     </table>
 
-    <h3>Nonlinear amplifiers</h3>
+    <h3>Nonlinear amplifiers (the Distorting group)</h3>
     <p>
       Selecting any of these switches the generator's harmonic stack <em>off</em> whatever the
       <strong>Harmonics</strong> box says — the box is greyed out to show it: the left channel then

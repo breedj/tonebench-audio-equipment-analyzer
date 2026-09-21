@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import { api, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
 import { useDevice } from './composables/useDevice'
+import { DEVICE_STATUS_KEY } from './simulator/hints'
 import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
 import { useProjects } from './composables/useProjects'
@@ -16,6 +17,7 @@ import { useUserWeighting } from './composables/useUserWeighting'
 import { weightingLabel } from './weighting'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
 import { useCaptureDelay } from './composables/useCaptureDelay'
+import { useExternalGain } from './composables/useExternalGain'
 import { useAutosave } from './composables/useAutosave'
 import { determineAttenuation, nearestInputRange } from './attenuation'
 import { formatAveraging } from './metrics'
@@ -37,6 +39,7 @@ import MetricsPanel from './components/MetricsPanel.vue'
 import GeneratorMetricsPanel from './components/GeneratorMetricsPanel.vue'
 import HarmonicsTable from './components/HarmonicsTable.vue'
 import ImdProductsTable from './components/ImdProductsTable.vue'
+import MultitoneTable from './components/MultitoneTable.vue'
 import OtherPeaksTable from './components/OtherPeaksTable.vue'
 import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
 import MeasurementNotesPanel from './components/MeasurementNotesPanel.vue'
@@ -87,7 +90,7 @@ import ReportDialog from './components/ReportDialog.vue'
 import ProjectReportDialog from './components/ProjectReportDialog.vue'
 import ToolbarIcon from './components/ToolbarIcon.vue'
 import ScreenshotDialog from './components/ScreenshotDialog.vue'
-import { responseDisplayFromParams, type ResponseDisplay } from './response/display'
+import { DEFAULT_RESPONSE_DISPLAY, responseDisplayFromParams, type ResponseDisplay } from './response/display'
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
 import { crosstalkDisplayFromParams, crosstalkDisplayToParams, DEFAULT_CROSSTALK_DISPLAY, type CrosstalkDisplay } from './crosstalk/display'
@@ -99,7 +102,7 @@ import {
 } from './outputImpedance/display'
 import { useOutputImpedance } from './composables/useOutputImpedance'
 import { formatOhms } from './impedance/equivalent'
-import { impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
+import { DEFAULT_IMPULSE_DISPLAY, impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
 import { monochromeChartPng } from './charts/exportChart'
 import { copyPngToClipboard, frameChartPng, screenshotFrameLayout, type ScreenshotSettings } from './screenshot'
 import { useScreenshotSettings } from './composables/useScreenshotSettings'
@@ -133,9 +136,9 @@ import {
 } from './measurements/kinds'
 
 const { status, ranges, error, refreshStatus } = useDevice()
-const { spectrum, meters, intermodulation, imdUnresolved, noise, scope, setViewport, clearScope } = useSpectrumStream()
+const { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, setViewport, clearScope } = useSpectrumStream()
 const { overlays } = useMeasurements()
-const { config: spectrumConfig } = useSpectrumConfig()
+const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
 // For the report's Metrics element — the power tiles need the load the Generator pane names.
 const { loadOhms } = useLoadOhms()
@@ -196,6 +199,16 @@ const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
 // Whether the pipeline is measuring two-tone IMD right now — what the Intermodulation table
 // needs to tell "no frame yet" from "nothing configured".
 const imdConfigured = computed(() => (spectrumConfig.value?.intermodulation ?? null) !== null)
+// The multitone figure follows the generator: the server derives its spec from the comb it plays,
+// so the staged stimulus kind is what says whether a table belongs on screen (the frames say when
+// there is something in it).
+const multitoneConfigured = computed(() => stimulusKind.value === 'Multitone')
+// The server just stops sending multitone frames when the comb goes away (there is no
+// "unresolved" marker as there is for IMD), so the last figure has to be dropped here or the
+// TD+N tiles keep quoting it against a sine.
+watch(multitoneConfigured, (configured) => {
+  if (!configured) multitone.value = {}
+})
 
 // The IMD analysis follows the staged stimulus: exactly two sine tones make a spec, anything else
 // clears it (see imd/presets.ts). Pushed straight to the pipeline like FFT size — it is pure
@@ -229,6 +242,10 @@ watch(
 // applied server-side (see useCaptureDelay).
 const { load: loadCaptureDelay } = useCaptureDelay()
 void loadCaptureDelay()
+// Loaded for the simulator's ranging watcher below, which must hand the range ladder the
+// analyzer's peak, not the DUT-referred one the meters frame carries.
+const { load: loadExternalGain, gainDb: externalGainDb } = useExternalGain()
+void loadExternalGain()
 
 // Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the Metrics button
 // and the chart — same formatAveraging formula, just relocated. Either channel's averagesTaken is
@@ -272,6 +289,9 @@ watch(
     applyLoadedMetrics(params?.selectedMetrics)
     applyLoadedScopePeriods(params?.scopePeriods)
     applyLoadedChartDisplay(params)
+    // The server applied the type's spectrum options (FFT size, IMD spec, scope residual...) on
+    // the way here; re-read them so every reader of the shared config sees this type's.
+    if (params) void reloadSpectrumConfig()
     // The IMD template/analysis choice is staged with the tones (see useGeneratorStimulus.ts);
     // a type without one is Custom, i.e. whatever its tone list says.
     Object.assign(stimulusImd, {
@@ -322,6 +342,7 @@ const {
   progressLabel: thdSweepProgressLabel,
   generatorAmpDbv: sweepGeneratorAmpDbv,
   error: thdSweepError,
+  stopReason: thdSweepStopReason,
   points: thdSweepPoints,
   thdMethod: thdSweepMethod,
   viewAxis: sweepViewAxis,
@@ -348,6 +369,8 @@ const sweepTraceFamily = computed<import('./sweep/points').SweepTraceFamily>(() 
 // ThdSweepChart falls back to useSweep() without this; providing the switched source is what
 // puts the IMD runner's points on the chart. A report's headless render provides its own.
 provide(SWEEP_POINTS_KEY, { points: sweepPoints, thdMethod: sweepThdMethod })
+// The one polled device status, for the simulator hint every MeasurementLayout carries.
+provide(DEVICE_STATUS_KEY, status)
 
 const {
   running: responseRunning,
@@ -815,6 +838,11 @@ const responseXToHz = ref(100000)
 // is the widest range a wrapped reading could ever need, and Autofit takes over from there.
 const responsePhaseTopDeg = ref(180)
 const responsePhaseBottomDeg = ref(-180)
+// The delay curve on the Bode chart's own delay axis: none by default, and a +/-1 ms window in
+// microseconds -- the unit the chart, the panel and params_json all carry it in.
+const responseDelayView = ref<import('./api/client').ResponseDelayView>(DEFAULT_RESPONSE_DISPLAY.delayView)
+const responseDelayTopUs = ref(DEFAULT_RESPONSE_DISPLAY.delayTopUs)
+const responseDelayBottomUs = ref(DEFAULT_RESPONSE_DISPLAY.delayBottomUs)
 // Off by default so nothing changes for a type saved before this existed.
 const responseAutofitOnDone = ref(false)
 
@@ -880,6 +908,9 @@ function currentResponseDisplay(): ResponseDisplay {
     xToHz: responseXToHz.value,
     phaseTopDeg: responsePhaseTopDeg.value,
     phaseBottomDeg: responsePhaseBottomDeg.value,
+    delayView: responseDelayView.value,
+    delayTopUs: responseDelayTopUs.value,
+    delayBottomUs: responseDelayBottomUs.value,
     nyquistRadius: responseNyquistRadius.value,
     nyquistRadiusFloorDb: responseNyquistRadiusFloorDb.value,
     invertLoopSign: responseInvertLoopSign.value,
@@ -923,6 +954,9 @@ function applyStoredResponseDisplay(paramsJson: string) {
   responseXToHz.value = display.xToHz
   responsePhaseTopDeg.value = display.phaseTopDeg
   responsePhaseBottomDeg.value = display.phaseBottomDeg
+  responseDelayView.value = display.delayView
+  responseDelayTopUs.value = display.delayTopUs
+  responseDelayBottomUs.value = display.delayBottomUs
   responseNyquistRadius.value = display.nyquistRadius
   responseNyquistRadiusFloorDb.value = display.nyquistRadiusFloorDb
   responseInvertLoopSign.value = display.invertLoopSign
@@ -951,6 +985,7 @@ watch(
     responseShowOneDb, responseShowThreeDb, responseThickLines, responseShowDataPoints,
     responseYTopDb, responseYBottomDb, responseYTopDbv, responseYBottomDbv, responseXFromHz, responseXToHz,
     responsePhaseTopDeg, responsePhaseBottomDeg, responseAutofitOnDone,
+    responseDelayView, responseDelayTopUs, responseDelayBottomUs,
     responseProjection, responseNyquistRadius, responseNyquistRadiusFloorDb,
     responseInvertLoopSign, responseRestoreDelay,
   ],
@@ -1494,6 +1529,7 @@ function runMeasurement(runConfig: RunConfig, singleShot = false) {
     meters.value = {}
     intermodulation.value = {}
     imdUnresolved.value = {}
+    multitone.value = {}
     noise.value = {}
     spectrum.value = {}
     clearScope()
@@ -1689,9 +1725,11 @@ watch(meters, (m) => {
     return
   }
 
+  // The meters frame carries the DUT-referred peak; the ladder is in the analyzer's own dBV, so
+  // the external input gain goes back on first (a divider-fed input would otherwise range wide).
   const peaks: number[] = []
-  if ((spectrumConfig.value?.processLeft ?? true) && m[0]) peaks.push(m[0].peakDbv)
-  if ((spectrumConfig.value?.processRight ?? true) && m[1]) peaks.push(m[1].peakDbv)
+  if ((spectrumConfig.value?.processLeft ?? true) && m[0]) peaks.push(m[0].peakDbv + externalGainDb(0))
+  if ((spectrumConfig.value?.processRight ?? true) && m[1]) peaks.push(m[1].peakDbv + externalGainDb(1))
   if (peaks.length === 0) return
 
   const options = ranges.value?.inputRangesDbv ?? [0, 6, 12, 18, 24, 30, 36, 42]
@@ -1930,6 +1968,7 @@ function buildLiveSubject(): ReportSubject | null {
       spectrum: spectrum.value,
       meters: meters.value,
       intermodulation: intermodulation.value,
+      multitone: multitone.value,
       noise: noise.value,
       weightingLabel: weightingAnnunciator.value,
       display: useChartDisplay(),
@@ -1937,6 +1976,7 @@ function buildLiveSubject(): ReportSubject | null {
       generatorTones: status.value?.generatorLeft.tones ?? [],
       loadOhms: loadOhms.value,
       scope: scope.value,
+      scopeResidual: scopeResidual.value,
       status: status.value,
       waterfall: waterfallChart.value,
     }
@@ -1970,6 +2010,7 @@ function clearMeasurement() {
     await api.clearSpectrum()
     meters.value = {}
     intermodulation.value = {}
+    multitone.value = {}
     noise.value = {}
     spectrum.value = {}
     clearScope()
@@ -2079,6 +2120,9 @@ const impulseYBottomDb = computed({
 })
 const impulsePhaseTopDeg = ref(180)
 const impulsePhaseBottomDeg = ref(-180)
+const impulseDelayView = ref<import('./api/client').ResponseDelayView>(DEFAULT_IMPULSE_DISPLAY.delayView)
+const impulseDelayTopUs = ref(DEFAULT_IMPULSE_DISPLAY.delayTopUs)
+const impulseDelayBottomUs = ref(DEFAULT_IMPULSE_DISPLAY.delayBottomUs)
 const impulseTimeFromMs = ref(-1)
 const impulseTimeToMs = ref(20)
 const impulseFreqFromHz = ref(20)
@@ -2170,6 +2214,9 @@ function currentImpulseDisplay(): ImpulseDisplay {
     harmonicsYBottomDb: impulseYWindows.Harmonics.bottom,
     phaseTopDeg: impulsePhaseTopDeg.value,
     phaseBottomDeg: impulsePhaseBottomDeg.value,
+    delayView: impulseDelayView.value,
+    delayTopUs: impulseDelayTopUs.value,
+    delayBottomUs: impulseDelayBottomUs.value,
     freqFromHz: impulseFreqFromHz.value,
     freqToHz: impulseFreqToHz.value,
     decayMode: impulseDecayMode.value,
@@ -2219,6 +2266,9 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseYWindows.Harmonics.bottom = display.harmonicsYBottomDb
   impulsePhaseTopDeg.value = display.phaseTopDeg
   impulsePhaseBottomDeg.value = display.phaseBottomDeg
+  impulseDelayView.value = display.delayView
+  impulseDelayTopUs.value = display.delayTopUs
+  impulseDelayBottomUs.value = display.delayBottomUs
   impulseFreqFromHz.value = display.freqFromHz
   impulseFreqToHz.value = display.freqToHz
   impulseDecayMode.value = display.decayMode
@@ -2257,6 +2307,7 @@ watch(
     impulseView, impulseNormalised, impulseShowPhase, impulseShowCoherence, impulseThickLines,
     impulseShowDataPoints, impulseYWindows, impulseTimeFromMs, impulseTimeToMs,
     impulseFreqFromHz, impulseFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
+    impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayRangeDb,
     impulseCsdFftLength, impulseCsdBlockShiftSamples, impulseCsdBlockCount, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
@@ -2394,6 +2445,9 @@ function buildTypeParamsJson(): string | undefined {
       chartHarmonicsYBottomDb: impulseYWindows.Harmonics.bottom,
       chartPhaseTopDeg: impulsePhaseTopDeg.value,
       chartPhaseBottomDeg: impulsePhaseBottomDeg.value,
+      chartDelayView: impulseDelayView.value,
+      chartDelayTopUs: impulseDelayTopUs.value,
+      chartDelayBottomUs: impulseDelayBottomUs.value,
       chartTimeFromMs: impulseTimeFromMs.value,
       chartTimeToMs: impulseTimeToMs.value,
       chartFreqFromHz: impulseFreqFromHz.value,
@@ -2475,6 +2529,9 @@ function buildTypeParamsJson(): string | undefined {
       chartXToHz: responseXToHz.value,
       chartPhaseTopDeg: responsePhaseTopDeg.value,
       chartPhaseBottomDeg: responsePhaseBottomDeg.value,
+      chartDelayView: responseDelayView.value,
+      chartDelayTopUs: responseDelayTopUs.value,
+      chartDelayBottomUs: responseDelayBottomUs.value,
       chartAutofitOnDone: responseAutofitOnDone.value,
     })
   }
@@ -2967,6 +3024,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :x-to-hz="impulseFreqToHz"
                   :phase-top-deg="impulsePhaseTopDeg"
                   :phase-bottom-deg="impulsePhaseBottomDeg"
+                  :delay-view="impulseDelayView"
+                  :delay-top-us="impulseDelayTopUs"
+                  :delay-bottom-us="impulseDelayBottomUs"
                   phase-kind="PerTrace"
                   :axis-titles="true"
                 />
@@ -3053,6 +3113,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:freq-to-hz="impulseFreqToHz"
                   v-model:phase-top-deg="impulsePhaseTopDeg"
                   v-model:phase-bottom-deg="impulsePhaseBottomDeg"
+                  v-model:delay-view="impulseDelayView"
+                  v-model:delay-top-us="impulseDelayTopUs"
+                  v-model:delay-bottom-us="impulseDelayBottomUs"
                   v-model:decay-mode="impulseDecayMode"
                   v-model:decay-palette="impulseDecayPalette"
                   v-model:decay-colored-curves="impulseDecayColoredCurves"
@@ -3177,6 +3240,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :traces="responseTraces"
                   :view="responseView"
                   :show-left="responseShowLeft"
+                  :phase-kind="responsePhaseKind"
                   :stepped="!isChirpResponse"
                 />
               </template>
@@ -3226,6 +3290,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :x-to-hz="responseXToHz"
                   :phase-top-deg="responsePhaseTopDeg"
                   :phase-bottom-deg="responsePhaseBottomDeg"
+                  :delay-view="responsePhaseAvailable ? responseDelayView : 'None'"
+                  :delay-top-us="responseDelayTopUs"
+                  :delay-bottom-us="responseDelayBottomUs"
                 />
                 <ResponsePolarChart
                   v-else
@@ -3276,6 +3343,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:x-to-hz="responseXToHz"
                   v-model:phase-top-deg="responsePhaseTopDeg"
                   v-model:phase-bottom-deg="responsePhaseBottomDeg"
+                  v-model:delay-view="responseDelayView"
+                  v-model:delay-top-us="responseDelayTopUs"
+                  v-model:delay-bottom-us="responseDelayBottomUs"
                   v-model:autofit-on-done="responseAutofitOnDone"
                 />
 
@@ -3740,6 +3810,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   <span v-if="sweepPoints.length">· {{ sweepPoints.length }} readings</span>
                 </div>
                 <p v-if="sweepError" class="text-xs text-red-600 dark:text-red-400">{{ sweepError }}</p>
+                <p v-else-if="!isImdSweep && thdSweepStopReason" class="text-xs text-amber-600 dark:text-amber-400">
+                  {{ thdSweepStopReason }}
+                </p>
 
                 <ThdSweepChart
                   ref="sweepChart"
@@ -3877,6 +3950,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     :imd="intermodulation[0] ?? null"
                     :imd-unresolved="imdUnresolved[0] ?? false"
                     :noise="noise[0] ?? null"
+                    :multitone="multitone[0] ?? null"
                   />
                   <MetricsPanel
                     v-if="spectrumConfig?.processRight ?? true"
@@ -3886,6 +3960,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     :imd="intermodulation[1] ?? null"
                     :imd-unresolved="imdUnresolved[1] ?? false"
                     :noise="noise[1] ?? null"
+                    :multitone="multitone[1] ?? null"
                   />
                 </div>
                 <button
@@ -3909,6 +3984,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 :fit-above="fftAbove"
                 :spectrum="spectrum"
                 :meters="meters"
+                :multitone="multitone"
                 :overlays="overlays"
                 :weighting-label="weightingAnnunciator"
                 @viewport-change="setViewport"
@@ -3919,7 +3995,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                    the panel hides it; unmounting it would throw all of that away. Both charts
                    skip a zero-width resize while hidden and refit when shown again. -->
               <WaterfallChart v-show="chartShowWaterfall" ref="waterfallChart" class="mt-3" :spectrum="spectrum" />
-              <OscilloscopeChart v-show="chartShowOscilloscope" class="mt-3" :scope="scope" :status="status" />
+              <OscilloscopeChart v-show="chartShowOscilloscope" class="mt-3" :scope="scope" :residual="scopeResidual" :status="status" />
             </div>
 
             <template #aside>
@@ -3932,6 +4008,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
           <!-- Everything below isn't part of the new FFT Spectrum design — kept here for now, to be
                repositioned later. -->
           <OverlayList />
+
+          <!-- The multitone table takes the harmonics table's place while a comb plays: it is the
+               comb's own distortion reading, and the harmonics grid below is gated off for it.
+               Its own container rather than a widening of that gate, which is there for a reason. -->
+          <div
+            v-if="multitoneConfigured && chartShowHarmonics"
+            class="grid grid-cols-1 gap-4 xl:grid-cols-2"
+          >
+            <MultitoneTable v-if="spectrumConfig?.processLeft ?? true" :multitone="multitone" :channel="0" channel-label="L" />
+            <MultitoneTable v-if="spectrumConfig?.processRight ?? true" :multitone="multitone" :channel="1" channel-label="R" />
+          </div>
 
           <!-- Harmonics/other-peaks only mean something relative to a single fundamental tone —
                Multitone's comb and White noise have none (see showFundamentalMarkers above). The

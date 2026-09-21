@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ResponseView } from '../api/client'
+import type { ResponsePhaseKindName, ResponseView } from '../api/client'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
-import { formatBandwidth, formatCorner, formatDb, formatHz, formatRatio } from '../response/format'
-import { peakLabel as peakLabelFor, primaryResponseTrace, referenceLabel as referenceLabelFor } from '../response/measurements'
+import { useBandwidthReference } from '../composables/useBandwidthReference'
+import { formatBandwidth, formatCorner, formatDb, formatDelay, formatHz, formatRatio } from '../response/format'
+import {
+  delayReadings,
+  delayResponseTrace,
+  peakLabel as peakLabelFor,
+  primaryResponseTrace,
+  referenceLabel as referenceLabelFor,
+} from '../response/measurements'
 import BandwidthReferenceControls from './BandwidthReferenceControls.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
@@ -11,6 +18,8 @@ const props = defineProps<{
   traces: ResponseTrace[]
   view: ResponseView
   showLeft: boolean
+  /** What phase the run measured — decides which curve the delay rows are read from, as on the chart. */
+  phaseKind: ResponsePhaseKindName
   /** Which measurement the reference controls apply their change to. */
   stepped: boolean
 }>()
@@ -24,6 +33,18 @@ const trace = computed<ResponseTrace | null>(() => primaryResponseTrace(props.tr
 const peakLabel = computed(() => peakLabelFor(props.view))
 const peakFreqLabel = 'Peak at'
 const referenceLabel = computed(() => (trace.value ? referenceLabelFor(trace.value) : null))
+
+// The delay rows read the curve the chart draws its delay from, at the same band the corners and
+// the drive target use -- so "at reference" means the same place in every row of this panel. The
+// band comes from the shared store because the trace carries only the mode that was applied.
+const { bandwidthReferenceLowHz, bandwidthReferenceHighHz } = useBandwidthReference()
+const delayTrace = computed(() => delayResponseTrace(props.traces, props.view, props.showLeft, props.phaseKind))
+const delays = computed(() =>
+  delayTrace.value
+    ? delayReadings(delayTrace.value, { lowHz: bandwidthReferenceLowHz.value, highHz: bandwidthReferenceHighHz.value })
+    : null,
+)
+const delaySuffix = computed(() => (props.phaseKind === 'ChannelDifference' ? ' diff.' : ''))
 </script>
 
 <template>
@@ -84,7 +105,39 @@ const referenceLabel = computed(() => (trace.value ? referenceLabelFor(trace.val
           <span class="ml-3 text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</span>
         </dd>
       </template>
+
+      <!-- Delay, from the curve the chart's delay series is drawn from: at the reference band (or
+           the peak, under a peak reference), then the extremes over the whole measured band with
+           the frequency each sits at. Dashes for a stored result from before the delays existed. -->
+      <template v-if="delays">
+        <dt class="text-neutral-500 dark:text-neutral-400" title="Group delay, −dφ/df, as the median over the reference band — the same band the corners are measured from. Under a peak reference, at the peak.">
+          Group delay{{ delaySuffix }} @ ref
+        </dt>
+        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.groupDelayAtReferenceS) }}</dd>
+        <dd></dd>
+
+        <dt class="text-neutral-500 dark:text-neutral-400" title="Phase delay, −φ/(360·f), over the same band. Referenced so that the phase at the band sits inside ±180°, so an inverting DUT reads half a period.">
+          Phase delay{{ delaySuffix }} @ ref
+        </dt>
+        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.phaseDelayAtReferenceS) }}</dd>
+        <dd></dd>
+
+        <dt class="text-neutral-500 dark:text-neutral-400" title="The smallest group delay anywhere in the measured band, and where.">Group delay min</dt>
+        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.groupDelayMin?.s) }}</dd>
+        <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ delays.groupDelayMin ? formatHz(delays.groupDelayMin.freqHz) : '' }}</dd>
+
+        <dt class="text-neutral-500 dark:text-neutral-400" title="The largest group delay anywhere in the measured band, and where — on an amplifier, usually at the low-frequency corner.">Group delay max</dt>
+        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.groupDelayMax?.s) }}</dd>
+        <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ delays.groupDelayMax ? formatHz(delays.groupDelayMax.freqHz) : '' }}</dd>
+      </template>
     </dl>
+
+    <p
+      v-if="delays && !delays.recorded"
+      class="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400"
+    >
+      Delay was not recorded for this stored result; measure it again to get the delay curves.
+    </p>
 
     <p
       v-if="trace && trace.referenceFellBackToPeak"

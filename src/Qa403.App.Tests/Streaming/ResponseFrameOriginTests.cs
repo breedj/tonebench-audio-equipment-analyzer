@@ -20,6 +20,8 @@ public class ResponseFrameOriginTests
             MagnitudeMaxDb: [0f, 0f],
             PhaseDeg: [0f, -45f],
             Coherence: [1f, 1f],
+            GroupDelayS: [0f, 0f],
+            PhaseDelayS: [0f, 0f],
             OneDb: new BandwidthReading(1.0, true, 20.0, 20_000.0, 19_980.0, false, false),
             ThreeDb: new BandwidthReading(3.0, false, 20.0, 20_000.0, 19_980.0, false, false),
             PeakDb: 0.0,

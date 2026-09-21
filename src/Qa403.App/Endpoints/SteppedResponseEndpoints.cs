@@ -51,7 +51,7 @@ public static class SteppedResponseEndpoints
                 // /api/sweep/*/start, /api/frequency-response/start and /api/acquisition/start.
                 return Results.Conflict(ex.Message);
             }
-        });
+        }).AddEndpointFilter<MeasurementRunGuard>();
 
         group.MapPost("/cancel", async (SteppedResponseRunner runner) =>
         {

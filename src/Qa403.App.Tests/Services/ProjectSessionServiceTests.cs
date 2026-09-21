@@ -28,6 +28,12 @@ public class ProjectSessionServiceTests : IDisposable
     private sealed class FakeRun : IMeasurementRun
     {
         public bool Running { get; set; }
+
+        public Task CancelAsync()
+        {
+            Running = false;
+            return Task.CompletedTask;
+        }
     }
 
     public ProjectSessionServiceTests()

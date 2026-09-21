@@ -35,7 +35,9 @@ const { showPage } = useManual()
       Levels are in <strong>dBV</strong> (0 dBV = 1 V rms) throughout. Watts appear wherever a load
       has been entered, computed from the measured voltage and that load — the app has no idea what
       your amplifier is really driving, so a wrong load figure makes every power reading wrong with
-      it.
+      it. With an <strong>External gain</strong> set in Configuration, every level is the DUT's
+      output — what reached the analyzer through the divider, corrected by that gain — and the
+      status bar says so.
     </p>
 
     <h2>Running it</h2>
@@ -131,14 +133,18 @@ const { showPage } = useManual()
             Moves each tone to the nearest exact FFT bin so it lands on one bin with no leakage into
             its neighbours. Leave it on for distortion work. The frequency you typed stays in the
             field; the grey figure beneath it is what is really playing, which depends on the FFT
-            size. Sine tones only.
+            size. Sine tones and the multitone comb (snapped tone by tone); noise and the chirp
+            have nothing to snap.
           </td>
         </tr>
         <tr>
           <td>Tones per octave, Total RMS level, Rolloff per octave</td>
           <td>
             Multitone only: density of the comb, its total level, and a tilt in dB per octave for
-            testing with a spectrum shaped more like programme material.
+            testing with a spectrum shaped more like programme material. Mind the crest factor: the
+            comb's tones add in phase, so 60 tones at −20 dBV total peak near 1.5 V — keep the total
+            low enough that the peaks stay clear of the analyzer's range and the DUT's rails, or the
+            TD+N reading is your own clipping.
           </td>
         </tr>
       </tbody>
@@ -259,6 +265,9 @@ const { showPage } = useManual()
       fundamental frequency and its nearest musical note, and gain relative to the generator.
       <strong>IMD %</strong> and <strong>IMD dB</strong> read only while two sine tones are staged —
       no reading is not a reading, so with any other stimulus the tiles are simply absent.
+      <strong>TD+N %</strong> and <strong>TD+N dB</strong> likewise appear only while a Multitone
+      comb plays: total distortion plus noise, everything found between the comb's tones over the
+      comb's own RMS (see the Multitone table below).
     </p>
     <p>
       Three tiles are for noise work. <strong>RMS dBV(bw)</strong> is the RMS of everything inside
@@ -315,7 +324,16 @@ const { showPage } = useManual()
       The captured waveform, triggered on a zero crossing of the left channel, showing the number of
       generator periods you ask for. Both channels are drawn from the same instant, so a phase
       difference between them is real. If the captured record is too short for the requested number
-      of periods, it shows fewer and says so.
+      of periods, it shows fewer and says so. <strong>Residual</strong> shows the same window with
+      the fundamental removed: a sine is fitted to the whole captured record (frequency, amplitude,
+      phase and offset — the frequency refined, so an unsnapped tone cancels too) and subtracted,
+      leaving the DUT's distortion in the time domain. Crossover distortion shows as spikes at the
+      zero crossings, a soft clip as bumps at the peaks, and a harmonic residue as a periodic ripple
+      whose order you can count against the raw trace. The trigger still comes from the raw left
+      channel, so the residual lines up with the waveform it came from; the axis autoscales to the
+      residual, which is typically tens of dB below the tone. It needs a fundamental — with a
+      multitone or noise stimulus the box says so and shows nothing. The setting is saved with the
+      measurement type and follows the FFT screen's report.
     </p>
 
     <h3>Harmonics, Intermodulation and Other peaks</h3>
@@ -332,6 +350,27 @@ const { showPage } = useManual()
       intermodulation products, spurs — largest first, as many as you ask for. Both tables need a
       single fundamental to refer to, so neither appears for Multitone or White noise. Other peaks
       starts collapsed; its ▸ opens it.
+    </p>
+    <p>
+      <strong>Multitone</strong> takes the Harmonics table's place while a Multitone comb plays. With
+      every tone's own bins set aside, whatever is left <em>between</em> adjacent tones is the DUT's
+      distortion products plus the noise floor, and the table reads it per gap: one row per tone,
+      with the tone's level, then the highest line between it and the next tone (frequency, level,
+      and dBr — relative to the comb's total RMS, √ΣV², the same reference for every row and for the
+      total) and the gap's D+N, the RMS of everything in it. Underneath, <strong>TD+N</strong> is the
+      power sum of every resolved gap over the comb, in percent and dB, with how many gaps were
+      resolved. The chart marks each resolved gap's highest line with a tick and its dBr. A gap whose
+      two tones sit closer than 8 bins at the current FFT size reads <em>unresolved</em>: nothing
+      between them can be separated from their own window lobes — at 5 tones per octave the
+      bottom of the comb is under 1 Hz apart, which no practical FFT resolves, so the low rows merge
+      and are reported as such; a larger FFT resolves lower. Nothing below the first tone or above
+      the last is counted, and the analysis band's upper limit bounds the gaps like THD+N's. The
+      tones are measured like harmonics (skirt-summed, floor-subtracted); the highest line in a gap
+      the same way, with its skirt kept inside the gap; the gap's D+N is the plain integral — it is
+      distortion <em>plus noise</em> by definition. Keep <strong>Snap to bin</strong> on: the comb
+      is snapped tone by tone, and an unsnapped comb reads its own window sidelobes in every gap —
+      about −60 dBr under Hann on a straight wire — as if they were distortion. Saved with the
+      result and printed in its report.
     </p>
 
     <h2>Display panel</h2>

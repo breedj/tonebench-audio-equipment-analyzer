@@ -159,6 +159,17 @@ public sealed record SpectrumPipelineOptions
     public bool CapturePreview { get; init; } = false;
 
     /// <summary>
+    /// Also send, per tick and channel, the scope tail with its fundamental fitted and subtracted
+    /// (<see cref="Qa403.Dsp.SineFit"/>): the THD residual, on which crossover spikes and harmonic
+    /// residue are visible in the time domain. A second scope frame flagged
+    /// <see cref="StreamFlags.ScopeResidual"/>, sent after the raw one so the client can trigger on
+    /// the raw and slice the residual at the same offset. Off by default -- it is a fit over the
+    /// whole record per channel per tick, and one more frame on the wire, for a view most ticks do
+    /// not show. Needs a fundamental; a tick without one sends no residual.
+    /// </summary>
+    public bool ScopeResidual { get; init; } = false;
+
+    /// <summary>
     /// Keep each analyzed record's raw complex spectrum on the retained snapshot
     /// (<see cref="SpectrumSnapshot.Complex"/>), not just its magnitudes.
     ///
@@ -191,6 +202,21 @@ public sealed record SpectrumPipelineOptions
     public IntermodulationSpec? Intermodulation { get; init; }
 
     /// <summary>
+    /// When set, every tick also measures the multitone comb at these frequencies and the
+    /// distortion-plus-noise between its tones (see <see cref="MultitoneAnalyzer"/>), carried on
+    /// <see cref="SpectrumMeters.Multitone"/> and its own stream frame. Null means no figure.
+    ///
+    /// <para><b>Written only by <c>DeviceSessionService</c></b>, on every generator configure and
+    /// re-snap, from the effective (snapped) tone list of the first enabled Multitone channel --
+    /// and cleared for any other stimulus. Unlike the IMD spec it is not pushed by the client: the
+    /// comb is a function of the generator settings and the FFT size, both of which the session
+    /// already owns, so deriving it there removes a round trip and the window in which the client's
+    /// copy is a size behind. Everything else that rebuilds the options carries it through
+    /// (<c>with</c>) or builds fresh ones for a run and restores the saved ones after.</para>
+    /// </summary>
+    public MultitoneSpec? Multitone { get; init; }
+
+    /// <summary>
     /// The noise weighting in effect. Applied <b>after</b> averaging, to the displayed spectrum and
     /// to a copy of the PSD that only the noise integrals read (THD+N, SNR, the noise floor, the
     /// band RMS and the noise density) — the fundamental, the harmonics, THD, the other-peaks list
@@ -214,6 +240,13 @@ public sealed record WeightingSpec(WeightingStandard Standard, bool User1 = fals
     /// <summary>True when nothing is selected at all — not the same as "resolves to flat", which also covers empty user slots.</summary>
     public bool IsNone => Standard == WeightingStandard.None && !User1 && !User2;
 }
+
+/// <summary>
+/// The comb a multitone distortion figure is measured against: the effective generator tone
+/// frequencies, snapped. <see cref="MaxProductFreqHz"/> bounds the gaps that count; null means
+/// <see cref="SpectrumPipelineOptions.MeasurementHiFreqHz"/>.
+/// </summary>
+public sealed record MultitoneSpec(IReadOnlyList<double> ToneFreqsHz, double? MaxProductFreqHz = null);
 
 /// <summary>
 /// The two tones an intermodulation figure is measured between, and how. <see cref="ToneLowHz"/>

@@ -140,8 +140,15 @@ const { showPage } = useManual()
         offered.
       </li>
       <li>
-        <strong>No delay figure.</strong> Nothing is deconvolved, so there is no bulk rotation to
-        recover or restore.
+        <strong>No delay figure in the progress line, and no delay removed.</strong> Nothing is
+        deconvolved, so there is no bulk rotation to recover or restore — which is why the
+        <strong>Delay</strong> trace (group delay, phase delay) and the Measurements panel's delay
+        rows are the DUT's <em>physical</em> delay here, with nothing put back, whenever the right
+        channel is the reference. Group delay is a plain difference between neighbouring points, so
+        it is only right while the tone spacing keeps each phase step under half a turn: at
+        <em>n</em> steps per octave a DUT with delay τ is readable up to about
+        <em>f</em> = 1 / (2 · τ · (2<sup>1/n</sup> − 1)). A 12 ms digital processor at 4 steps per
+        octave runs out at ~220 Hz; step density is the lever.
       </li>
     </ul>
     <p>

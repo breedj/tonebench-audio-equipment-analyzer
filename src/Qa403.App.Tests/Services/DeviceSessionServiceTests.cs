@@ -38,6 +38,29 @@ public class DeviceSessionServiceTests
         Assert.Equal(3, status.DroppedBlocks);
     }
 
+    /// <summary>
+    /// The external input gain rides on the status so the status bar can say a divider is in the
+    /// path -- a fixture the user must not forget about, since every level on screen is corrected by it.
+    /// </summary>
+    [Fact]
+    public async Task GetStatus_ReportsTheExternalGain_ConnectedOrNot()
+    {
+        var gain = new ExternalGainSetting { LeftDb = -20.0, RightDb = 3.0 };
+        var session = new DeviceSessionService(
+            new StubDevice(),
+            new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance, externalGain: gain),
+            new CaptureDelaySetting(), NullLogger<DeviceSessionService>.Instance, gain);
+
+        var before = session.GetStatus();
+        Assert.Equal(-20.0, before.ExternalGainLeftDb);
+        Assert.Equal(3.0, before.ExternalGainRightDb);
+
+        await session.ConnectAsync(CancellationToken.None);
+        var after = session.GetStatus();
+        Assert.Equal(-20.0, after.ExternalGainLeftDb);
+        Assert.Equal(3.0, after.ExternalGainRightDb);
+    }
+
     [Fact]
     public async Task StartAcquisitionAsync_RejectsBlockFrameCountBelowHardwareQueueDepth()
     {

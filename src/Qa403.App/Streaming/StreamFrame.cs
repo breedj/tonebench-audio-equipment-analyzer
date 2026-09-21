@@ -62,6 +62,14 @@ public enum StreamMsgType : byte
     /// the generator off has none). See <see cref="StreamFrame.EncodeNoiseFigures"/>.
     /// </summary>
     NoiseFigures = 12,
+
+    /// <summary>
+    /// The multitone distortion figures of one channel and tick: every tone of the comb, the highest
+    /// line and the D+N of every gap between adjacent tones, and the total. Sent after the meters
+    /// frame whenever <see cref="SpectrumPipelineOptions.Multitone"/> is set and the comb was
+    /// measurable. See <see cref="StreamFrame.EncodeMultitone"/>.
+    /// </summary>
+    Multitone = 13,
 }
 
 public enum StreamChannel : byte
@@ -158,6 +166,15 @@ public enum StreamFlags : ushort
     /// make for the response frame.
     /// </summary>
     OutputImpedance = 1 << 8,
+
+    /// <summary>
+    /// Scope-frame-only: the samples are the record's tail with its fitted fundamental subtracted
+    /// (see <see cref="Qa403.Dsp.SineFit"/>) -- the THD residual -- rather than the raw waveform.
+    /// Sent as a second scope frame of the same <c>seq</c> and channel, after the raw one, only
+    /// while <see cref="SpectrumPipelineOptions.ScopeResidual"/> is on and a fundamental was found.
+    /// The raw frame is what the client triggers on; a residual has no fundamental crossings.
+    /// </summary>
+    ScopeResidual = 1 << 9,
 }
 
 /// <summary>
@@ -292,11 +309,11 @@ public static class StreamFrame
     /// real scope's single-shot capture), not a continuous timeline a client accumulates across
     /// frames. dx is the sample period (s) = 1/sampleRateHz.
     /// </summary>
-    public static byte[] EncodeScope(StreamChannel channel, uint seq, float dx, ReadOnlySpan<float> samples)
+    public static byte[] EncodeScope(StreamChannel channel, uint seq, float dx, ReadOnlySpan<float> samples, StreamFlags flags = StreamFlags.None)
     {
         int nPoints = samples.Length;
         byte[] buffer = new byte[HeaderLength + (nPoints * sizeof(float))];
-        WriteHeader(buffer, StreamMsgType.Scope, channel, StreamFlags.None, seq, 0f, dx, (uint)nPoints);
+        WriteHeader(buffer, StreamMsgType.Scope, channel, flags, seq, 0f, dx, (uint)nPoints);
 
         int offset = HeaderLength;
         for (int i = 0; i < nPoints; i++)
@@ -601,12 +618,14 @@ public static class StreamFrame
     /// frequencies, nPoints the column count, channel the <see cref="FrequencyResponseTraceKind"/>.
     /// Payload, all little-endian:
     /// <code>
-    /// per column (20 bytes x nPoints):
+    /// per column (28 bytes x nPoints):
     ///   f32  freqHz
     ///   f32  magnitudeMinDb
     ///   f32  magnitudeMaxDb
     ///   f32  phaseDeg
     ///   f32  coherence
+    ///   f32  groupDelayS
+    ///   f32  phaseDelayS
     /// then two bandwidth readings (+-1 dB, then -3 dB), 20 bytes each:
     ///   f32  dropDb
     ///   f32  lowerHz
@@ -641,12 +660,13 @@ public static class StreamFrame
         RequireOriginFlag(origin);
         int columns = trace.FreqHz.Length;
         if (trace.MagnitudeMinDb.Length != columns || trace.MagnitudeMaxDb.Length != columns
-            || trace.PhaseDeg.Length != columns || trace.Coherence.Length != columns)
+            || trace.PhaseDeg.Length != columns || trace.Coherence.Length != columns
+            || trace.GroupDelayS.Length != columns || trace.PhaseDelayS.Length != columns)
         {
             throw new ArgumentException("Every trace array must be the same length.", nameof(trace));
         }
 
-        const int perColumn = 5 * sizeof(float);
+        const int perColumn = 7 * sizeof(float);
         const int perBandwidth = (4 * sizeof(float)) + 4;
         const int trailer = (3 * sizeof(float)) + 4;
 
@@ -665,6 +685,8 @@ public static class StreamFrame
             BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 8, 4), trace.MagnitudeMaxDb[i]);
             BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 12, 4), trace.PhaseDeg[i]);
             BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 16, 4), trace.Coherence[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 20, 4), trace.GroupDelayS[i]);
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset + 24, 4), trace.PhaseDelayS[i]);
             offset += perColumn;
         }
 
@@ -1004,6 +1026,89 @@ public static class StreamFrame
             referenceDbv, perOrder, products, (header.Flags & StreamFlags.Held) != 0);
     }
 
+    /// <summary>
+    /// Encodes one channel's multitone result. Header: x0 = the comb's RMS level (dBV), dx = TD+N
+    /// as a ratio, nPoints = tone count; <paramref name="held"/> sets <see cref="StreamFlags.Held"/>
+    /// like the meters frame it follows. Payload, little-endian:
+    /// <code>
+    /// 20  u32  bandCount          -- always toneCount - 1
+    /// 24  u32  resolvedBands
+    /// 28  (f32 freqHz, f32 dbv) * nPoints                       -- every tone, ascending
+    /// ..  (u8 resolved, u8 u8 u8 padding,
+    ///      f32 highestHz, f32 highestDbv, f32 highestDbr, f32 dnDbr) * bandCount
+    ///                                                            -- every gap, in tone order
+    /// </code>
+    /// An unresolved band's four figures are written as 0 -- its flag is what a reader keys on, and
+    /// the negative infinity the analyzer carries for it is not something every decoder handles.
+    /// </summary>
+    public static byte[] EncodeMultitone(StreamChannel channel, uint seq, MultitoneResult result, bool held)
+    {
+        int toneCount = result.Tones.Count;
+        int bandCount = result.Bands.Count;
+        int length = HeaderLength + 8 + (toneCount * 8) + (bandCount * 20);
+        byte[] buffer = new byte[length];
+
+        WriteHeader(
+            buffer, StreamMsgType.Multitone, channel, held ? StreamFlags.Held : StreamFlags.None,
+            seq, (float)result.CombDbv, (float)result.Tdn, (uint)toneCount);
+
+        int offset = HeaderLength;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)bandCount); offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset, 4), (uint)result.ResolvedBands); offset += 4;
+
+        foreach (var tone in result.Tones)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)tone.FreqHz); offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)tone.AmplitudeDbv); offset += 4;
+        }
+
+        foreach (var band in result.Bands)
+        {
+            buffer[offset] = band.Resolved ? (byte)1 : (byte)0;
+            offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), band.Resolved ? (float)band.HighestFreqHz : 0f); offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), band.Resolved ? (float)band.HighestDbv : 0f); offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), band.Resolved ? (float)band.HighestDbr : 0f); offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), band.Resolved ? (float)band.DnDbr : 0f); offset += 4;
+        }
+
+        return buffer;
+    }
+
+    /// <summary>Decodes a <see cref="StreamMsgType.Multitone"/> frame -- see <see cref="EncodeMultitone"/> for the layout.</summary>
+    public static DecodedMultitone DecodeMultitone(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.Multitone)
+            throw new ArgumentException("Frame is not a multitone frame.", nameof(frame));
+
+        int offset = HeaderLength;
+        uint bandCount = BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+        uint resolvedBands = BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(offset, 4)); offset += 4;
+
+        var tones = new (float FreqHz, float Dbv)[header.NPoints];
+        for (int i = 0; i < header.NPoints; i++)
+        {
+            float freqHz = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            float dbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            tones[i] = (freqHz, dbv);
+        }
+
+        var bands = new DecodedMultitoneBand[bandCount];
+        for (int i = 0; i < bandCount; i++)
+        {
+            bool resolved = frame[offset] != 0;
+            offset += 4;
+            float highestHz = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            float highestDbv = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            float highestDbr = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            float dnDbr = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4)); offset += 4;
+            bands[i] = new DecodedMultitoneBand(resolved, highestHz, highestDbv, highestDbr, dnDbr);
+        }
+
+        return new DecodedMultitone(header.X0, header.Dx, (int)resolvedBands, tones, bands, (header.Flags & StreamFlags.Held) != 0);
+    }
+
     /// <summary>Decodes a <see cref="StreamMsgType.SweepPoint"/> frame — see <see cref="EncodeSweepPoint"/> for the layout.</summary>
     public static DecodedSweepPoint DecodeSweepPoint(ReadOnlySpan<byte> frame)
     {
@@ -1091,6 +1196,8 @@ public static class StreamFrame
         var magMax = new float[columns];
         var phaseDeg = new float[columns];
         var coherence = new float[columns];
+        var groupDelayS = new float[columns];
+        var phaseDelayS = new float[columns];
 
         int offset = HeaderLength;
         for (int i = 0; i < columns; i++)
@@ -1100,7 +1207,9 @@ public static class StreamFrame
             magMax[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 8, 4));
             phaseDeg[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 12, 4));
             coherence[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 16, 4));
-            offset += 20;
+            groupDelayS[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 20, 4));
+            phaseDelayS[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 24, 4));
+            offset += 28;
         }
 
         (var oneDb, offset) = ReadBandwidth(frame, offset);
@@ -1115,7 +1224,7 @@ public static class StreamFrame
         return new FrequencyResponseTrace(
             (FrequencyResponseTraceKind)(byte)header.Channel,
             header.X0, header.Dx,
-            freqHz, magMin, magMax, phaseDeg, coherence,
+            freqHz, magMin, magMax, phaseDeg, coherence, groupDelayS, phaseDelayS,
             oneDb, threeDb, peakDb, peakFreqHz,
             referenceDb, referenceMode, fellBackToPeak);
     }
@@ -1167,6 +1276,14 @@ public readonly record struct DecodedIntermodulation(
     float ToneLowHz, float ToneHighHz, IntermodulationMethod Method, int MaxOrder,
     float ToneLowDbv, float ToneHighDbv, float ImdPercent, float SineEquivalentDbv, float CombinedRmsDbv, float ReferenceDbv,
     (int Order, float Percent)[] PerOrder, DecodedIntermodulationProduct[] Products, bool Held);
+
+/// <summary>One gap of a decoded multitone frame; the figures are 0 when <paramref name="Resolved"/> is false.</summary>
+public readonly record struct DecodedMultitoneBand(bool Resolved, float HighestFreqHz, float HighestDbv, float HighestDbr, float DnDbr);
+
+/// <param name="CombDbv">The comb's total RMS level.</param>
+/// <param name="Tdn">Total distortion plus noise over the resolved gaps, as a ratio.</param>
+public readonly record struct DecodedMultitone(
+    float CombDbv, float Tdn, int ResolvedBands, (float FreqHz, float Dbv)[] Tones, DecodedMultitoneBand[] Bands, bool Held);
 
 public readonly record struct DecodedMeters(
     float FundamentalFreqHz, float BinSizeHz, float ThdPercent, float ThdNPercent, float SnrDb, float FundamentalDbv,

@@ -468,6 +468,44 @@ public class CsvExporterTests
         Assert.Contains("# kind: Crosstalk", csv);
     }
 
+    /// <summary>
+    /// The delays are written in microseconds, per trace, only when the row carries them: a row
+    /// saved before migration 012 has none and gets no columns rather than empty ones.
+    /// </summary>
+    [Fact]
+    public void ExportResponse_WritesDelayColumnsInMicroseconds()
+    {
+        var gain = BuildCrosstalkTrace(ResponseTraceKind.Gain, 0f) with
+        {
+            GroupDelayS = [2.083e-3f, 12.5e-6f],
+            PhaseDelayS = [2.100e-3f, -3.0e-6f],
+        };
+
+        string csv = CsvExporter.ExportResponse(BuildDetail() with { Kind = "FrequencyResponse" }, [gain]);
+        string[] lines = csv.Split('\n');
+        string header = lines.Single(l => l.StartsWith("freq_hz"));
+
+        Assert.Equal("freq_hz,gain_min_db,gain_max_db,gain_phase_deg,gain_coherence,gain_group_delay_us,gain_phase_delay_us", header);
+        Assert.Equal(2083.0, Field(lines, "100.", header, "gain_group_delay_us"), 2);
+        Assert.Equal(12.5, Field(lines, "200.", header, "gain_group_delay_us"), 2);
+        Assert.Equal(-3.0, Field(lines, "200.", header, "gain_phase_delay_us"), 2);
+    }
+
+    [Fact]
+    public void ExportResponse_OmitsDelayColumnsForARowThatNeverRecordedThem()
+    {
+        var left = BuildCrosstalkTrace(ResponseTraceKind.Left, -20f);
+        var gain = BuildCrosstalkTrace(ResponseTraceKind.Gain, 0f) with { GroupDelayS = [1e-6f, 1e-6f], PhaseDelayS = [1e-6f, 1e-6f] };
+
+        string csv = CsvExporter.ExportResponse(BuildDetail() with { Kind = "FrequencyResponse" }, [left, gain]);
+        string header = csv.Split('\n').Single(l => l.StartsWith("freq_hz"));
+
+        Assert.Equal(
+            "freq_hz,left_min_db,left_max_db,left_phase_deg,left_coherence,gain_min_db,gain_max_db,gain_phase_deg,gain_coherence,gain_group_delay_us,gain_phase_delay_us",
+            header);
+        Assert.Equal(1.0, Field(csv.Split('\n'), "100.", header, "gain_group_delay_us"), 3);
+    }
+
     private static StoredResponseTrace BuildCrosstalkTrace(string kind, float db) =>
         new(kind, StartHz: 100.0, EndHz: 200.0,
             PeakDb: db, PeakHz: 100.0,

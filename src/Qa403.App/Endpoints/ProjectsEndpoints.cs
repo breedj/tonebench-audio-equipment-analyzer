@@ -218,4 +218,6 @@ public sealed record MeasurementTypeAppliedResponse(
     bool? WeightingUser2 = null,
     double? DutGainDb = null,
     string? ChartUnit = null,
-    bool? ChartShowWeightingCurve = null);
+    bool? ChartShowWeightingCurve = null,
+    /// <summary>Whether the oscilloscope shows the THD residual — see <see cref="Qa403.Data.FftSpectrumParameters.ScopeResidual"/>.</summary>
+    bool? ScopeResidual = null);

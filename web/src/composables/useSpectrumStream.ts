@@ -13,13 +13,16 @@ import {
   decodeFrequencyResponseProgressFrame,
   decodeImpedanceFrame,
   decodeImpedanceProgressFrame,
+  decodeMultitoneFrame,
   encodeSetViewport,
   STREAM_FLAG_IMD_SWEEP,
   STREAM_FLAG_IMD_UNRESOLVED,
+  STREAM_FLAG_SCOPE_RESIDUAL,
   STREAM_FLAG_OUTPUT_IMPEDANCE,
   StreamMsgType,
   type IntermodulationFrame,
   type MetersFrame,
+  type MultitoneFrame,
   type NoiseFiguresFrame,
   type ScopeFrame,
   type SpectrumFrame,
@@ -47,10 +50,17 @@ export function useSpectrumStream() {
   // Per channel: an IMD spec is set but the pipeline could not resolve it this tick — see
   // STREAM_FLAG_IMD_UNRESOLVED. What the Intermodulation table's "FFT too small" message keys on.
   const imdUnresolved = shallowRef<Record<number, boolean>>({})
+  // Present only while the generator plays a multitone comb (the server derives the spec from it);
+  // keyed by channel like `meters`, and cleared together with it by the owner.
+  const multitone = shallowRef<Record<number, MultitoneFrame>>({})
   // Every tick, fundamental or not: the band RMS, the noise density, the window's ENBW and the
   // weighting in effect. Cleared with `meters` by the owner for the same reason.
   const noise = shallowRef<Record<number, NoiseFiguresFrame>>({})
   const scope = shallowRef<Record<number, ScopeFrame>>({})
+  // The same tick's scope tails with the fundamental removed (STREAM_FLAG_SCOPE_RESIDUAL); empty
+  // unless the pipeline's ScopeResidual option is on and a fundamental was found. Published as one
+  // group with `scope` so the chart can trigger on the raw left and slice these at the same offset.
+  const scopeResidual = shallowRef<Record<number, ScopeFrame>>({})
   const connected = ref(false)
   const sweep = useSweep()
   const imdSweep = useImdSweep()
@@ -81,15 +91,19 @@ const outputImpedance = useOutputImpedance()
   // frame's arrival cannot deadlock the way waiting for an expected partner could, and costs one
   // tick (~50 ms) of latency on a live display, which is not perceptible.
   let pendingScope: Record<number, ScopeFrame> = {}
+  let pendingScopeResidual: Record<number, ScopeFrame> = {}
   let pendingScopeSeq: number | null = null
 
-  function ingestScopeFrame(seq: number, channel: number, frame: ScopeFrame) {
+  function ingestScopeFrame(seq: number, channel: number, frame: ScopeFrame, residual: boolean) {
     if (pendingScopeSeq !== null && seq !== pendingScopeSeq) {
       scope.value = pendingScope
+      scopeResidual.value = pendingScopeResidual
       pendingScope = {}
+      pendingScopeResidual = {}
     }
     pendingScopeSeq = seq
-    pendingScope = { ...pendingScope, [channel]: frame }
+    if (residual) pendingScopeResidual = { ...pendingScopeResidual, [channel]: frame }
+    else pendingScope = { ...pendingScope, [channel]: frame }
   }
 
   /**
@@ -99,8 +113,10 @@ const outputImpedance = useOutputImpedance()
    */
   function clearScope() {
     pendingScope = {}
+    pendingScopeResidual = {}
     pendingScopeSeq = null
     scope.value = {}
+    scopeResidual.value = {}
   }
 
   function sendViewport() {
@@ -158,8 +174,10 @@ const outputImpedance = useOutputImpedance()
           intermodulation.value = { ...intermodulation.value, [header.channel]: decodeIntermodulationFrame(event.data) }
           imdUnresolved.value = { ...imdUnresolved.value, [header.channel]: false }
         }
+      } else if (header.msgType === StreamMsgType.Multitone) {
+        multitone.value = { ...multitone.value, [header.channel]: decodeMultitoneFrame(event.data) }
       } else if (header.msgType === StreamMsgType.Scope) {
-        ingestScopeFrame(header.seq, header.channel, decodeScopeFrame(event.data))
+        ingestScopeFrame(header.seq, header.channel, decodeScopeFrame(event.data), (header.flags & STREAM_FLAG_SCOPE_RESIDUAL) !== 0)
       } else if (header.msgType === StreamMsgType.SweepPoint) {
         // Sweep frames go straight into useSweep's singleton store rather than being returned
         // from here: a sweep is one server-side run shared by every component looking at it, not
@@ -208,5 +226,5 @@ const outputImpedance = useOutputImpedance()
     socket?.close()
   })
 
-  return { spectrum, meters, intermodulation, imdUnresolved, noise, scope, connected, setViewport, clearScope }
+  return { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, connected, setViewport, clearScope }
 }

@@ -41,3 +41,17 @@ export function formatDb(db: number): string {
   // flat loopback's gain lands there every time. Adding zero normalises it away.
   return `${(db + 0).toFixed(2).replace(/^-0\.00$/, '0.00')} dB`
 }
+
+/**
+ * A group or phase delay in the unit its size calls for: milliseconds from 1 ms up, microseconds
+ * below that, nanoseconds under a microsecond. Sign kept — an excess delay against the generated
+ * sweep can legitimately read negative. A dash for null (a stored result from before the delay
+ * curves) or anything non-finite.
+ */
+export function formatDelay(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '—'
+  const magnitude = Math.abs(seconds)
+  if (magnitude >= 1e-3) return `${(seconds * 1e3).toFixed(3)} ms`
+  if (magnitude >= 1e-6) return `${(seconds * 1e6).toFixed(1)} µs`
+  return `${(seconds * 1e9 + 0).toFixed(0).replace(/^-0$/, '0')} ns`
+}

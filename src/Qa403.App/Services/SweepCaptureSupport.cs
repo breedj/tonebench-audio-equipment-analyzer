@@ -63,6 +63,11 @@ internal static class SweepCaptureSupport
     /// The largest time-domain peak level any measured channel saw, in the same "Pk dBV"
     /// (peak volts / sqrt(2)) convention <c>Qa40xAutoRanger</c> compares against — one input range
     /// serves both channels, so the louder one decides. Negative infinity when nothing was measured.
+    ///
+    /// <para>The <em>analyzer's</em> peak, not the DUT's: every caller feeds this to
+    /// <see cref="InputRangeSelector"/>, whose ladder is in the analyzer's own dBV, so an external
+    /// input gain (see <see cref="ExternalGainSetting"/>) is put back here. Every other level a
+    /// runner reads stays DUT-referred.</para>
     /// </summary>
     public static double MeasuredPeakDbv(SpectrumSnapshot[] snapshots)
     {
@@ -70,7 +75,7 @@ internal static class SweepCaptureSupport
         foreach (var snapshot in snapshots)
         {
             if (snapshot.Meters is { } meters)
-                best = Math.Max(best, meters.PeakDbv);
+                best = Math.Max(best, meters.AnalyzerPeakDbv);
         }
 
         return best;

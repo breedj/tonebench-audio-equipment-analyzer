@@ -16,9 +16,11 @@ namespace Qa403.App.Services;
 /// </summary>
 public sealed class DeviceSessionService(
     AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
-    ILogger<DeviceSessionService> logger)
+    ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null)
     : IDisposable, IMeasurementRun
 {
+    private readonly ExternalGainSetting _externalGain = externalGain ?? new ExternalGainSetting();
+
     /// <summary>
     /// The device this session is talking to. A <b>field</b> rather than a constructor parameter
     /// because it is replaceable at runtime — see <see cref="SwitchDeviceAsync"/>, and
@@ -38,11 +40,11 @@ public sealed class DeviceSessionService(
     {
     }
 
-    /// <summary>The pinned-device overload with a capture delay of the test's choosing.</summary>
+    /// <summary>The pinned-device overload with a capture delay (and, optionally, an external gain) of the test's choosing.</summary>
     public DeviceSessionService(
         IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
-        ILogger<DeviceSessionService> logger)
-        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger)
+        ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null)
+        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger, externalGain)
     {
     }
 
@@ -51,6 +53,24 @@ public sealed class DeviceSessionService(
     /// read it to size their per-point timeouts; the discard itself is applied here, not by them.
     /// </summary>
     public double CaptureDelayMs => captureDelay.Ms;
+
+    /// <summary>The gain in front of the left input, in dB -- see <see cref="ExternalGainSetting"/>.</summary>
+    public double ExternalGainLeftDb => _externalGain.LeftDb;
+
+    /// <summary>The gain in front of the right input, in dB.</summary>
+    public double ExternalGainRightDb => _externalGain.RightDb;
+
+    /// <summary>
+    /// A DUT-referred level as the analyzer's input will see it, i.e. with the external input gain
+    /// put back. The one conversion the runners need: a level <em>target</em> names the DUT's
+    /// output, while the input-range ladder is in the analyzer's own dBV, so a 0 dBV target through
+    /// a 20 dB divider wants the range for −20 dBV. With no measured channel to name, the wider of
+    /// the two results is returned -- one range serves both inputs, and too wide is the safe error.
+    /// </summary>
+    public double ToAnalyzerDbv(double dutDbv, StreamChannel? measuredChannel = null) =>
+        measuredChannel is { } ch
+            ? dutDbv + _externalGain.GainDb(ch)
+            : dutDbv + Math.Max(_externalGain.LeftDb, _externalGain.RightDb);
 
     /// <summary>
     /// The settle time the most recent stimulus change or acquisition start actually discarded, or
@@ -146,6 +166,13 @@ public sealed class DeviceSessionService(
 
     /// <summary>An acquisition is something the project file cannot change under — see <see cref="IMeasurementRun"/>.</summary>
     bool IMeasurementRun.Running => _isAcquiring;
+
+    /// <summary>
+    /// Nothing: a plain acquisition is not a measurement run. It is stopped by
+    /// <see cref="StopAcquisitionAsync"/> on its own explicit call, which the client's switch makes
+    /// right after cancelling the runners.
+    /// </summary>
+    Task IMeasurementRun.CancelAsync() => Task.CompletedTask;
 
     /// <summary>Whether a device has been brought up. False from startup until <see cref="ConnectAsync"/> first succeeds — the app runs fine with no QA403 attached.</summary>
     public bool Connected => _info is not null;
@@ -525,7 +552,8 @@ public sealed class DeviceSessionService(
                 SimulatedDut?.ToString(), _kind.ToString(),
                 _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks,
                 SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled,
-                SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString());
+                SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
+                ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
@@ -533,7 +561,8 @@ public sealed class DeviceSessionService(
             SimulatedDut?.ToString(), _kind.ToString(),
             _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks,
             SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled,
-            SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString());
+            SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
+            ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb);
     }
 
     /// <summary>
@@ -735,6 +764,32 @@ public sealed class DeviceSessionService(
         ConfigureGeneratorCoreAsync(_requestedGeneratorConfig, ct);
 
     /// <summary>
+    /// The one writer of <see cref="SpectrumPipelineOptions.Multitone"/>: the snapped comb of the
+    /// first enabled Multitone channel, or null when nothing plays a comb. Called on every configure
+    /// and re-snap, so it follows the FFT size and sample rate the way the comb itself does.
+    /// </summary>
+    private void SetMultitoneSpec(GeneratorConfig snapped)
+    {
+        ChannelGeneratorConfig? comb = snapped.Left is { Enabled: true, Kind: GeneratorKind.Multitone } ? snapped.Left
+            : snapped.Right is { Enabled: true, Kind: GeneratorKind.Multitone } ? snapped.Right
+            : null;
+
+        var current = spectrumPipeline.Options;
+        if (comb is null)
+        {
+            if (current.Multitone is not null)
+                spectrumPipeline.Options = current with { Multitone = null };
+            return;
+        }
+
+        double[] freqs = [.. comb.Tones.Select(t => t.FrequencyHz)];
+        if (current.Multitone is { } existing && existing.ToneFreqsHz.SequenceEqual(freqs))
+            return;
+
+        spectrumPipeline.Options = current with { Multitone = new MultitoneSpec(freqs) };
+    }
+
+    /// <summary>
     /// Rewrites every tone frequency to the nearest coherent bin for the current FFT size and sample
     /// rate. No-op when <see cref="GeneratorConfig.SnapToBin"/> is off. Applies to the *effective*
     /// tone list, so a multitone comb gets snapped tone by tone as well.
@@ -821,6 +876,7 @@ public sealed class DeviceSessionService(
         _requestedGeneratorConfig = config;
 
         config = SnapTones(config);
+        SetMultitoneSpec(config);
 
         // Silencing a generator there is no device to silence is a success, not a 409: deviceControl's
         // stopRun (Stop, and every measurement switch) disables both channels unconditionally, and

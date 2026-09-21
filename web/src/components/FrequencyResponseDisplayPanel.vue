@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import type { NyquistRadiusName, ResponseProjection, ResponseView } from '../api/client'
+import type { NyquistRadiusName, ResponseDelayView, ResponseProjection, ResponseView } from '../api/client'
 import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
 import { useMeasurements, type OverlayEntry } from '../composables/useMeasurements'
+import { autofitRange } from '../measurements/autofitRange'
+import {
+  DELAY_MAX_US,
+  DELAY_MIN_US,
+  chooseDelayUnit,
+  delayFitStepUs,
+  delayLabel,
+  delayValuesOf,
+  unitToUs,
+  usToUnit,
+} from '../response/delayAxis'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -36,6 +47,9 @@ const xFromHz = defineModel<number>('xFromHz', { required: true })
 const xToHz = defineModel<number>('xToHz', { required: true })
 const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
 const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
+const delayView = defineModel<ResponseDelayView>('delayView', { required: true })
+const delayTopUs = defineModel<number>('delayTopUs', { required: true })
+const delayBottomUs = defineModel<number>('delayBottomUs', { required: true })
 const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 
 const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable, running, latencySamples } =
@@ -104,6 +118,35 @@ const PHASE_MIN_SPAN = PHASE_TICK_DEG * 2
 const X_FROM_OPTIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500]
 const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
 
+const DELAY_VIEWS: { value: ResponseDelayView; label: string }[] = [
+  { value: 'None', label: 'None' },
+  { value: 'Group', label: 'Group delay' },
+  { value: 'Phase', label: 'Phase delay' },
+]
+
+/**
+ * The delay window is held in microseconds (that is what the chart, App.vue and params_json carry)
+ * and edited in whichever unit the chart's axis is reading in — the same rule as the chart, so the
+ * numbers in these boxes are the numbers on the axis. The step and minimum span scale with the unit.
+ */
+const delayUnit = computed(() => chooseDelayUnit(delayTopUs.value, delayBottomUs.value))
+const delayStepUs = computed(() => (delayUnit.value === 'ms' ? 100 : 10))
+const delayMinSpanUs = computed(() => delayStepUs.value * 2)
+const delayHint = computed(() =>
+  phaseKind.value === 'ChannelDifference'
+    ? 'Derived from the phase difference between the two inputs, so a difference in delay between two measured paths rather than the DUT\'s. Group delay is −dφ/df; phase delay is −φ/(360·f). Own axis at the right; range set below.'
+    : phaseKind.value === 'PerTrace'
+      ? 'Group delay is −dφ/df, phase delay −φ/(360·f), on their own axis at the right. Against the generated sweep the bulk delay went out with the record\'s arbitrary start point, so these are the excess delay only; with the right input as the reference the measured delay is put back. Range set below.'
+      : 'Group delay is −dφ/df, phase delay −φ/(360·f), from the phase of the left input against the right — the DUT\'s physical delay — on their own axis at the right. Range set below.',
+)
+
+/** Visible overlays that cannot draw a delay curve because they were saved before it was recorded. */
+const overlaysWithoutDelay = computed(() =>
+  activeOverlayResponseTraces()
+    .filter((o) => o.responseTraces!.every((t) => t.groupDelayS === null))
+    .map((o) => o.detail.name),
+)
+
 /**
  * Clamping through `:value` + `@change` rather than `defineModel` + `@change`. Two reasons, both
  * learned the hard way on the sweep panel: a `defineModel` write goes out as an emit and comes back
@@ -137,6 +180,30 @@ function onTopPhaseChange(event: Event) {
 
 function onBottomPhaseChange(event: Event) {
   phaseBottomDeg.value = commitBoundedNumber(event, phaseBottomDeg.value, PHASE_MIN, phaseTopDeg.value - PHASE_MIN_SPAN)
+}
+
+// The boxes read and write in the axis' unit; the bounds are converted the other way so the clamp
+// happens in the unit the user typed in.
+function onTopDelayChange(event: Event) {
+  const unit = delayUnit.value
+  const next = commitBoundedNumber(
+    event,
+    usToUnit(delayTopUs.value, unit),
+    usToUnit(delayBottomUs.value + delayMinSpanUs.value, unit),
+    usToUnit(DELAY_MAX_US, unit),
+  )
+  delayTopUs.value = unitToUs(next, unit)
+}
+
+function onBottomDelayChange(event: Event) {
+  const unit = delayUnit.value
+  const next = commitBoundedNumber(
+    event,
+    usToUnit(delayBottomUs.value, unit),
+    usToUnit(DELAY_MIN_US, unit),
+    usToUnit(delayTopUs.value - delayMinSpanUs.value, unit),
+  )
+  delayBottomUs.value = unitToUs(next, unit)
 }
 
 /** Stored responses actually drawable right now — checked on and carrying traces of this kind. */
@@ -241,6 +308,32 @@ function autofitPhase() {
   phaseBottomDeg.value = Math.max(PHASE_MIN, bottom)
 }
 
+/**
+ * Fits the delay window to the selected delay curve of the traces the chart draws it from, within
+ * the plotted frequency window. The grid is chosen from the fitted span so a window of any size
+ * shows four to ten ticks; a flat curve gets two steps of height rather than a zero-height window.
+ */
+function autofitDelay() {
+  const values: number[] = []
+  for (const trace of phaseTraces.value) {
+    const curve = delayValuesOf(trace, delayView.value)
+    if (!curve) continue
+    for (let i = 0; i < curve.length; i++) {
+      const freqHz = trace.freqHz[i]
+      if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
+      if (Number.isFinite(curve[i])) values.push(curve[i] * 1e6)
+    }
+  }
+  if (values.length === 0) return
+
+  const step = delayFitStepUs(Math.max(...values) - Math.min(...values))
+  const fitted = autofitRange(values, { step, minSpan: step * 2, pad: 0.05 })
+  if (!fitted) return
+
+  delayTopUs.value = Math.min(DELAY_MAX_US, fitted.top)
+  delayBottomUs.value = Math.max(DELAY_MIN_US, fitted.bottom)
+}
+
 /** Fits the frequency range to the measured band, snapped to the dropdown's own options. */
 function autofitX() {
   const list = fitTraces.value.filter((t) => t.freqHz.length > 0)
@@ -264,6 +357,7 @@ watch(running, (isRunning, wasRunning) => {
     autofitDb()
     autofitX()
     if (showPhase.value && phaseAvailable.value) autofitPhase()
+    if (delayView.value !== 'None' && phaseAvailable.value) autofitDelay()
   }
 })
 </script>
@@ -359,6 +453,38 @@ watch(running, (isRunning, wasRunning) => {
       class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
       title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
       @click="autofitPhase"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <!-- Same shape as the phase range, in the unit the axis is reading in. -->
+  <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      Top
+      <input
+        :value="usToUnit(delayTopUs, delayUnit)"
+        type="number"
+        :step="usToUnit(delayStepUs, delayUnit)"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onTopDelayChange"
+      />
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      Bottom
+      <input
+        :value="usToUnit(delayBottomUs, delayUnit)"
+        type="number"
+        :step="usToUnit(delayStepUs, delayUnit)"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onBottomDelayChange"
+      />
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      title="Fits the window to the delay curve inside the plotted frequency range, in whichever unit its size calls for."
+      @click="autofitDelay"
     >
       Autofit
     </button>
@@ -515,6 +641,22 @@ watch(running, (isRunning, wasRunning) => {
         <input v-model="showPhase" type="checkbox" />
         {{ phaseKind === 'ChannelDifference' ? 'Phase difference' : 'Phase' }}
       </label>
+      <!-- Gated exactly like phase: the delay curves are derived from it and mean nothing without it. -->
+      <label v-if="phaseAvailable" class="flex flex-col gap-1" :title="delayHint">
+        <span>{{ delayLabel('None') }}</span>
+        <select
+          v-model="delayView"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="option in DELAY_VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+      <p
+        v-if="phaseAvailable && delayView !== 'None' && overlaysWithoutDelay.length > 0"
+        class="text-[11px] text-amber-600 dark:text-amber-400"
+      >
+        Delay was not recorded for: {{ overlaysWithoutDelay.join(', ') }}.
+      </p>
       <label
         v-if="props.allowCoherence"
         class="flex items-center gap-1.5"

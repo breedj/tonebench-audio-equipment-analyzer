@@ -199,6 +199,8 @@ public class ProjectRepositoryTests
                         DROP TABLE impulse_reference;
                         ALTER TABLE response_trace DROP COLUMN reference_db;
                         ALTER TABLE response_trace DROP COLUMN reference_mode;
+                        ALTER TABLE response_trace DROP COLUMN group_delay_s;
+                        ALTER TABLE response_trace DROP COLUMN phase_delay_s;
                         DELETE FROM schema_version WHERE version >= 8;
                         """;
                     await command.ExecuteNonQueryAsync();

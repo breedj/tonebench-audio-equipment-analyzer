@@ -129,7 +129,16 @@ public sealed record ThdSweepRequest(
     /// <see cref="EndFreqHz"/> (to <see cref="ReferenceEndFreqHz"/>) so every harmonic of every
     /// requested point has a fundamental to be divided by.
     /// </summary>
-    ThdMethod ThdMethod = ThdMethod.Conventional)
+    ThdMethod ThdMethod = ThdMethod.Conventional,
+
+    /// <summary>
+    /// Amplitude axis only: end the sweep early once any measured channel's THD exceeds this many
+    /// percent. The point that crossed it is kept -- it is the informative one -- and the run
+    /// finishes as <see cref="ThdSweepPhase.Finished"/> with <see cref="ThdSweepStatus.StopReason"/>
+    /// saying why. Null means sweep to the end. A DUT is driven one step past the threshold by
+    /// construction; the check needs the point to exist.
+    /// </summary>
+    double? StopThdPercent = null)
 {
     /// <summary>The level expressed in dBV. Watts are converted through the load: V = sqrt(P·R).</summary>
     public double LevelDbv => LevelUnit switch
@@ -273,6 +282,8 @@ public sealed record ThdSweepRequest(
 
         if (LevelUnit == ThdSweepLevelUnit.Watt && LevelMode != ThdSweepLevelMode.OutputPower)
             throw new ArgumentOutOfRangeException(nameof(LevelUnit), "Watts only make sense for the output-power level mode.");
+        if (StopThdPercent is not null)
+            throw new ArgumentOutOfRangeException(nameof(StopThdPercent), StopThdPercent, "A THD stop threshold only applies to an amplitude sweep.");
     }
 
     /// <summary>
@@ -317,6 +328,8 @@ public sealed record ThdSweepRequest(
             throw new ArgumentOutOfRangeException(nameof(LevelMode), LevelMode, "An amplitude sweep steps the generator voltage itself, so it has no level mode to solve for.");
         if (ThdMethod != ThdMethod.Conventional)
             throw new ArgumentOutOfRangeException(nameof(ThdMethod), ThdMethod, "An amplitude sweep measures one frequency, so there is no frequency response to normalize the harmonics against.");
+        if (StopThdPercent is { } stopThd && !(stopThd > 0.0))
+            throw new ArgumentOutOfRangeException(nameof(StopThdPercent), StopThdPercent, "The THD stop threshold must be above 0 %.");
     }
 
     /// <summary>
@@ -427,7 +440,13 @@ public sealed record ThdSweepStatus(
     /// <summary>The generator amplitude of the point being measured, in volts. Only moves on the amplitude axis.</summary>
     double CurrentAmplitudeVolt = 0.0,
     /// <summary>How the points' harmonics are referenced, so a client knows which of a point's two sets of figures the run is about.</summary>
-    ThdMethod ThdMethod = ThdMethod.Conventional);
+    ThdMethod ThdMethod = ThdMethod.Conventional,
+    /// <summary>
+    /// Why a <see cref="ThdSweepPhase.Finished"/> sweep ended before its last planned point -- the
+    /// THD stop threshold, today. Null for a sweep that ran to the end. Not a phase of its own, so
+    /// nothing that asks "is it over" has to learn about it.
+    /// </summary>
+    string? StopReason = null);
 
 /// <summary>The immediate reply to a start request: the sweep itself runs in the background.</summary>
 /// <param name="PointCount">How many points the sweep will measure.</param>

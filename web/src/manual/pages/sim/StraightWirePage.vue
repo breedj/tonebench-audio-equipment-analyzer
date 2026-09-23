@@ -42,15 +42,16 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
       the measurement of the analyzer rather than of anything patched to it.
     </p>
     <p>
-      All three boxes start <strong>unchecked</strong>, and with them off the wire carries the
-      simulated <em>generator</em> and nothing else: a tone is one line at exactly the level asked
-      for, there is no floor under it, and THD reads 0.000 %. Each box patches one impairment into
-      that: <strong>Noise</strong> a −150 dBV/√Hz white floor with a little 1/f rise below 300 Hz,
-      <strong>Hum</strong> mains at 50 Hz with two harmonics, and <strong>Harmonics</strong> a fixed
-      stack on every generator tone — H2 −46 dBc, H3 −60 dBc, each order above 12 dB lower — that
-      stands in for a distorting source and reads 0.51 % THD at any level. The linear models on the
-      pages that follow add no distortion of their own, so with Harmonics off they read 0.000 %
-      too, and with it on they read that same 0.51 % bent by their response.
+      <strong>Noise</strong> and <strong>Hum</strong> start unchecked and <strong>Harmonics</strong>
+      starts checked. With all three off the wire carries the simulated <em>generator</em> and
+      nothing else: a tone is one line at exactly the level asked for, there is no floor under it,
+      and THD reads 0.000 %. Each box patches one impairment into that: <strong>Noise</strong> a
+      −150 dBV/√Hz white floor with a little 1/f rise below 300 Hz, <strong>Hum</strong> mains at
+      50 Hz with two harmonics, and <strong>Harmonics</strong> a fixed stack on every generator tone
+      — H2 −46 dBc, H3 −60 dBc, each order above 12 dB lower — that stands in for a distorting
+      source and reads 0.51 % THD at any level. The linear models on the pages that follow add no
+      distortion of their own, so with Harmonics off they read 0.000 % too, and with it on they
+      read that same 0.51 % bent by their response.
     </p>
 
     <h2>What to expect, in numbers</h2>

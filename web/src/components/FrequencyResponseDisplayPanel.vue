@@ -27,6 +27,8 @@ const view = defineModel<ResponseView>('view', { required: true })
 const projection = defineModel<ResponseProjection>('projection', { required: true })
 const nyquistRadius = defineModel<NyquistRadiusName>('nyquistRadius', { required: true })
 const nyquistRadiusFloorDb = defineModel<number>('nyquistRadiusFloorDb', { required: true })
+const showFittedModel = defineModel<boolean>('showFittedModel', { required: true })
+const hideOutOfBandRoots = defineModel<boolean>('hideOutOfBandRoots', { required: true })
 const restoreDelay = defineModel<boolean>('restoreDelay', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
@@ -68,7 +70,7 @@ const complexAvailable = computed(
 
 const projectionHint = computed(() =>
   complexAvailable.value
-    ? 'Bode is magnitude and phase against frequency; Nyquist and Nichols are the same data as one complex curve.'
+    ? 'Bode is magnitude and phase against frequency; Nyquist and Nichols are the same data as one complex curve; Poles/zeros is the fitted model’s roots in the s-plane.'
     : phaseKind.value === 'ChannelDifference'
       ? 'This run measures gain against the generator but phase against the right input, so it has no single complex response. Make the right channel the reference.'
       : 'This run measured no phase. Turn the right-channel generator on and make it the reference.',
@@ -81,6 +83,7 @@ const PROJECTIONS: { value: ResponseProjection; label: string }[] = [
   { value: 'Bode', label: 'Bode' },
   { value: 'Nyquist', label: 'Nyquist' },
   { value: 'Nichols', label: 'Nichols' },
+  { value: 'PoleZero', label: 'Poles/zeros' },
 ]
 const { overlays } = useMeasurements()
 
@@ -561,6 +564,23 @@ watch(running, (isRunning, wasRunning) => {
         />
       </label>
     </div>
+
+    <!-- The contour views only: on the map the fit is the content rather than an overlay on it. -->
+    <label v-if="!bodeShowing && projection !== 'PoleZero'" class="flex items-center gap-1.5 text-xs">
+      <input v-model="showFittedModel" type="checkbox" />
+      <span title="Draws the Poles and zeros panel's rational model over the measurement, dashed. It is the check on that panel — a root list whose model does not follow the measured contour describes nothing — and it is worth hiding once you have looked, since a poor fit can wander far across the plot.">
+        Show fitted model
+      </span>
+    </label>
+
+    <!-- The map only: a root outside the measured band is the fit's extrapolation, and since the
+         window is fitted to the roots, one of them squeezes every real one into the origin. -->
+    <label v-if="!bodeShowing && projection === 'PoleZero'" class="flex items-center gap-1.5 text-xs">
+      <input v-model="hideOutOfBandRoots" type="checkbox" />
+      <span title="Leaves the roots the fit placed outside the swept band off the plot, and rescales it to what is left. They are extrapolation — the sweep constrains the response between its endpoints and says nothing beyond them. The fit itself is unchanged, and the Poles and zeros panel goes on listing them, flagged.">
+        Remove out of band
+      </span>
+    </label>
 
     <!-- Only the chirp removes a delay, so only the chirp can put one back. -->
     <label v-if="!bodeShowing && latencySamples !== null" class="flex items-center gap-1.5 text-xs">

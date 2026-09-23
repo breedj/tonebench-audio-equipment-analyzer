@@ -17,9 +17,19 @@ namespace Qa403.Dsp;
 /// bin-for-bin comparable, <see cref="BandwidthAnalyzer"/> needs no separate grid, and the chart
 /// can switch smoothing without re-deriving an x axis.</para>
 ///
-/// <para>Cost is O(N) regardless of width, via a running power integral — a 1/3-octave band at
-/// 20 kHz spans several thousand bins, so the naive form would be quadratic and unusable at the
-/// 0.37 Hz resolution setting.</para>
+/// <para><b>Summed in blocks, not from a running integral over the whole trace.</b> The obvious
+/// implementation keeps one cumulative power array and takes a band as a single subtraction — O(N)
+/// whatever the width, which matters because a 1/3-octave band at 20 kHz spans several thousand
+/// bins and the naive form is quadratic at the 0.37 Hz resolution setting. It is also wrong on
+/// exactly the traces this app produces. The integral is dominated by the passband, so recovering a
+/// stopband band's power means subtracting two numbers of order 1e3 to get 1e-11, which is far
+/// below the spacing of doubles that size: the answer is rounding, and rounding is often exactly
+/// zero. Measured on the simulated Butterworth at a 96 kHz span, 1/24 octave: unsmoothed the trace
+/// followed the filter to −138 dB at 40 kHz, smoothed it read <b>−600 dB</b> — the estimator's
+/// zero floor — from 38 kHz up, which on the Bode plot is a cliff and reads as a broken DUT.
+/// Summing per band from a block table touches only the bins inside the band, so the arithmetic
+/// never mixes a passband bin into a stopband answer. Cost is O(N·(W/B + 2B)) with B = 128: a few
+/// hundred operations per bin at the widest setting, once per pass.</para>
 /// </summary>
 public static class FractionalOctaveSmoother
 {
@@ -53,11 +63,16 @@ public static class FractionalOctaveSmoother
 
         int n = magnitude.Length;
 
-        // Running integral of power, so any band sum is one subtraction. cumulative[i] is the sum of
-        // magnitude[0..i-1] squared, hence the extra element.
-        double[] cumulative = new double[n + 1];
+        // Per-bin power once, then per block of bins. Deliberately not a running total across the
+        // whole trace -- see the remarks above for what that costs on a trace with a deep stopband.
+        double[] power = new double[n];
+        int blockCount = ((n - 1) / BlockBins) + 1;
+        double[] blockPower = new double[blockCount];
         for (int i = 0; i < n; i++)
-            cumulative[i + 1] = cumulative[i] + (magnitude[i] * magnitude[i]);
+        {
+            power[i] = magnitude[i] * magnitude[i];
+            blockPower[i / BlockBins] += power[i];
+        }
 
         // Half-width as a frequency ratio: a 1/N-octave band spans 2^(1/N), so each edge sits
         // 2^(1/2N) away from the centre.
@@ -86,9 +101,50 @@ public static class FractionalOctaveSmoother
                 continue;
             }
 
-            double power = cumulative[high + 1] - cumulative[low];
-            destination[k] = Math.Sqrt(power / (high - low + 1));
+            double bandPower = BandPower(power, blockPower, low, high);
+            destination[k] = Math.Sqrt(bandPower / (high - low + 1));
         }
+    }
+
+    /// <summary>
+    /// Bins per block in the table above. The per-bin cost is <c>W/B + 2B</c> for a band of
+    /// <c>W</c> bins, so this trades the wide bands (thousands of bins at 1/3 octave) against the
+    /// narrow ones, which pay the two partial ends whatever their width.
+    /// </summary>
+    private const int BlockBins = 128;
+
+    /// <summary>
+    /// The summed power over <c>[low, high]</c>, from those bins and no others: whole blocks
+    /// straight off the table, the partial block at each end bin by bin. A band narrower than the
+    /// blocks it touches is summed directly.
+    /// </summary>
+    private static double BandPower(double[] binPower, double[] blockPower, int low, int high)
+    {
+        // The first bin of the first block the band covers completely, and one past the last bin of
+        // the last one. When they cross, no block is fully inside the band.
+        int firstWhole = ((low + BlockBins - 1) / BlockBins) * BlockBins;
+        int lastWholeEnd = ((high + 1) / BlockBins) * BlockBins;
+
+        double power = 0.0;
+
+        if (firstWhole >= lastWholeEnd)
+        {
+            for (int i = low; i <= high; i++)
+                power += binPower[i];
+
+            return power;
+        }
+
+        for (int i = low; i < firstWhole; i++)
+            power += binPower[i];
+
+        for (int b = firstWhole / BlockBins; b < lastWholeEnd / BlockBins; b++)
+            power += blockPower[b];
+
+        for (int i = lastWholeEnd; i <= high; i++)
+            power += binPower[i];
+
+        return power;
     }
 
     /// <summary>Allocating convenience overload, for callers that are not reusing a buffer.</summary>

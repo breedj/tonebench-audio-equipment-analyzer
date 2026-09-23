@@ -43,6 +43,13 @@ public sealed class PhaseUnwrapper
     /// <summary>Unwraps a radian angle, for callers reading straight off a complex number.</summary>
     public double NextFromRadians(double rawRad) => Next(rawRad * DegreesPerRadian);
 
+    /// <summary>
+    /// The last unwrapped value, unchanged — what a caller hands out for a bin whose phase is not a
+    /// measurement (see <see cref="FrequencyResponseEstimator.PhaseFloorRelative"/>), so the turn
+    /// count is carried over that bin rather than random-walked through it. 0 before the first sample.
+    /// </summary>
+    public double Hold() => _started ? _previousDeg : 0.0;
+
     /// <summary>Forgets the accumulated turns, so the next sample starts a fresh curve.</summary>
     public void Reset()
     {

@@ -3,6 +3,7 @@ import {
   MIN_DB_RADIUS,
   MIN_LINEAR_EXTENT,
   criticalPhases,
+  MAX_CRITICAL_MARKERS,
   nicholsPoint,
   nyquistPoint,
   nyquistRadius,
@@ -110,6 +111,11 @@ describe('criticalPhases', () => {
 
   it('returns nothing when no turn falls inside the window', () => {
     expect(criticalPhases(-170, -10)).toEqual([])
+  })
+
+  it('draws none at all once there are too many turns to mean anything', () => {
+    expect(criticalPhases(-360 * MAX_CRITICAL_MARKERS + 10, 0)).toHaveLength(MAX_CRITICAL_MARKERS)
+    expect(criticalPhases(-360 * (MAX_CRITICAL_MARKERS + 1), 0)).toEqual([])
   })
 })
 

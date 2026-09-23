@@ -427,15 +427,21 @@ public sealed class FrequencyResponseEstimator
         // Unwrap as we go: keep each step within half a turn of the last, so a response that
         // accumulates several turns of phase reads as a continuous curve rather than a sawtooth.
         // Shared with the stepped-sine response, which does the same across sweep points -- see
-        // PhaseUnwrapper.
+        // PhaseUnwrapper. A bin below the phase floor is held at the last unwrapped value instead
+        // of being unwrapped: its phase is roundoff, and unwrapping through a stretch of roundoff
+        // random-walks the turn count -- see PhaseFloorRelative for the measured case.
         var unwrapper = new PhaseUnwrapper();
+        double phaseFloor = 0.0;
+        for (int k = 0; k < _binCount; k++)
+            phaseFloor = Math.Max(phaseFloor, _h[k].Magnitude);
+        phaseFloor *= PhaseFloorRelative;
 
         for (int k = 0; k < _binCount; k++)
         {
             Complex h = _h[k];
             magnitude[k] = h.Magnitude;
 
-            phaseDeg[k] = unwrapper.NextFromRadians(h.Phase);
+            phaseDeg[k] = h.Magnitude > phaseFloor ? unwrapper.NextFromRadians(h.Phase) : unwrapper.Hold();
 
             double denominator = _sxx[k] * _syy[k];
             coherence[k] = denominator > 0.0
@@ -617,6 +623,22 @@ public sealed class FrequencyResponseEstimator
             max = Math.Max(max, (spectrum[k] * Complex.Conjugate(spectrum[k])).Real);
         return max;
     }
+
+    /// <summary>
+    /// Below this fraction of the largest |H| a bin's phase is not unwrapped but held (see
+    /// <see cref="Complete"/>). 1e-6 is 120 dB down: the QA403's own dynamic range, and beyond
+    /// what any phase measurement on it can mean. Found on the simulated Bessel over a 96 kHz span
+    /// with the noise off: the response falls to the float32 sample format's rounding at about
+    /// −134 dB by 52 kHz, every bin above that is rounding with a uniformly random phase -- and,
+    /// being deterministic, rounding repeats identically across averages, so coherence stays at
+    /// 1.0 and cannot catch it -- and unwrapping through five thousand such bins accumulated
+    /// −1 311 194° by 95 kHz. That put the Nichols phase axis at −1e6°, drew its −180° markers as a
+    /// solid band and gave the margin search 3 377 phantom crossings. A real device's floor is noise
+    /// rather than rounding and its coherence collapses there, which is the ordinary defence; this
+    /// is for a floor coherence cannot see. Holding rather than zeroing keeps the turn count, so a
+    /// response that comes back up (a band-stop) unwraps on from the last measured bin.
+    /// </summary>
+    public const double PhaseFloorRelative = 1e-6;
 
     /// <summary>dB from a linear magnitude, floored so an exactly-zero bin yields a finite number.</summary>
     public static double ToDb(double magnitude) => 20.0 * Math.Log10(Math.Max(magnitude, 1e-30));

@@ -48,6 +48,42 @@ export interface ComplexCurveOptions {
   invertSign?: boolean
 }
 
+/**
+ * Below this a column measured nothing, and its phase is not a measurement either.
+ *
+ * `FrequencyResponseEstimator.ToDb` floors an exactly-zero bin at 1e-30, i.e. −600 dB, and a bin
+ * *is* exactly zero where a noise-free simulation's DUT is below the ADC's quantisation: the Bessel
+ * measured over a 96 kHz span reads −600 dB above 50 kHz, with coherence 1.0 (no noise means no
+ * disagreement between averages) and a phase that is whatever the unwrapper made of atan2(0, 0)
+ * and the removed-delay ramp — measured, −332 878° at 71 kHz. Unfiltered, that put the Nichols
+ * phase axis at −1e6°, drew three thousand −180° markers as a solid red band, and handed the margin
+ * search phantom crossings. Coherence cannot catch it, so this does: nothing physical is 300 dB
+ * down from anything, and a real device's floor is a hundred dB above this line.
+ */
+export const MIN_MEASURED_DB = -300
+
+/**
+ * And below this far under the trace's own peak, the phase was never measured either — it was
+ * *held*.
+ *
+ * `FrequencyResponseEstimator.PhaseFloorRelative` is 1e-6, i.e. 120 dB: under it the server stops
+ * unwrapping and hands out the last unwrapped value for every bin, because what such a bin carries
+ * is the arithmetic's phase rather than the DUT's. The magnitude there is still a number worth
+ * plotting on a Bode chart — it is the floor, and the floor is a measurement — but a point in the
+ * complex plane needs *both* parts, and half of this one is a placeholder.
+ *
+ * Leaving them in is what stretches a Nichols plot. Measured on the simulated Butterworth over a
+ * 96 kHz span with the delay restored: the response reaches −121 dB at 29.9 kHz and the phase is
+ * held from there, while the client's delay restoration keeps adding 360·f·τ to that frozen value —
+ * so the held tail ramped on to −6054° at 83 kHz, took the phase axis with it, and filled the 0 dB
+ * line with nineteen critical-phase markers. Dropped, the curve ends where the measurement does.
+ *
+ * Relative rather than absolute because that is how the server's floor is defined; the client
+ * reproduces the decision from the same information (a magnitude against the trace's peak) rather
+ * than needing a new column on the wire to say which bins were held.
+ */
+export const MIN_MEASURED_RELATIVE_DB = -120
+
 /** dB → linear voltage ratio. Named because `/20` versus `/10` is the single easiest thing to get wrong here. */
 export function dbToRatio(db: number): number {
   return Math.pow(10, db / 20)
@@ -89,6 +125,18 @@ export function toComplexCurve(trace: ResponseTrace, opts: ComplexCurveOptions):
   const signDeg = opts.invertSign ? 180 : 0
   const out: ComplexPoint[] = []
 
+  // The peak is taken over the whole trace, not over the plotted window, because the server's own
+  // phase floor is relative to the whole trace — see MIN_MEASURED_RELATIVE_DB. A window sitting
+  // entirely in a DUT's stopband would otherwise raise its own floor and keep the held bins.
+  let peakDb = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < trace.freqHz.length; i++) {
+    const columnDb = columnMagnitudeDb(trace, i)
+    if (Number.isFinite(columnDb) && columnDb > peakDb) peakDb = columnDb
+  }
+  const floorDb = Number.isFinite(peakDb)
+    ? Math.max(MIN_MEASURED_DB, peakDb + MIN_MEASURED_RELATIVE_DB)
+    : MIN_MEASURED_DB
+
   for (let i = 0; i < trace.freqHz.length; i++) {
     const freqHz = trace.freqHz[i]
     if (!Number.isFinite(freqHz) || freqHz < fromHz || freqHz > toHz) continue
@@ -104,6 +152,7 @@ export function toComplexCurve(trace: ResponseTrace, opts: ComplexCurveOptions):
     const magDb = columnMagnitudeDb(trace, i)
     const rawPhaseDeg = trace.phaseDeg[i]
     if (!Number.isFinite(magDb) || !Number.isFinite(rawPhaseDeg)) continue
+    if (magDb < floorDb) continue
 
     const phaseDeg = rawPhaseDeg - derotate * freqHz + signDeg
     const ratio = dbToRatio(magDb)

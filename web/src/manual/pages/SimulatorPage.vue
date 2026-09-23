@@ -69,8 +69,9 @@ const { showPage } = useManual()
           <td>Harmonics</td>
           <td>
             Gives every generator tone a fixed harmonic stack — H2 at −46 dBc, H3 at −60 dBc, then 12 dB
-            further down per order — standing in for a distorting source. See <em>How it is wired</em>
-            below; the four nonlinear amplifier models grey it out and switch it off.
+            further down per order — standing in for a distorting source. On by default, so a linear
+            model has a THD to show. See <em>How it is wired</em> below; the four nonlinear amplifier
+            models grey it out and switch it off.
           </td>
         </tr>
         <tr>
@@ -279,6 +280,54 @@ const { showPage } = useManual()
           </td>
           <td>A fourth-order 20 kHz low-pass with 12 ms of latency. The only model with a real delay.</td>
           <td>The DUT delay readout; the impulse response's position.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Filters (the four classic low-pass alignments)</h3>
+    <p>
+      Four fifth-order low-pass filters with the same 2 kHz corner, each the textbook answer to a
+      different question, so a frequency-response run of each shows exactly the trade it made. All
+      four are unity at DC and none distorts; the
+      <button type="button" class="manual-link" @click="showPage('sim-butterworth')">Butterworth</button>
+      page draws them on one axis.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>What it is</th>
+          <th>Best shown by</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('sim-butterworth')">Butterworth LP (2 kHz)</button>
+          </td>
+          <td>Maximally flat: −3 dB at 2 kHz, then 100 dB per decade. The reference the other three are read against.</td>
+          <td>Frequency response; the ±1 dB and −3 dB rows; a group delay that peaks at the corner.</td>
+        </tr>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('sim-chebyshev')">Chebyshev LP (2 kHz)</button>
+          </td>
+          <td>1 dB of passband ripple for a transition twice as steep; the corner is the −1 dB ripple edge.</td>
+          <td>The ripple on a stepped sweep; the ring on the impulse response; the reference level landing in the ripple.</td>
+        </tr>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('sim-bessel')">Bessel LP (2 kHz)</button>
+          </td>
+          <td>A flat 193 µs group delay across the passband, at the price of the gentlest roll-off of the four.</td>
+          <td>The Group delay and Phase delay columns — a straight line here, a peak on every other filter.</td>
+        </tr>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('sim-elliptic')">Elliptic LP (2 kHz)</button>
+          </td>
+          <td>Two stopband nulls, at 3.48 and 5.31 kHz, the steepest skirt of the four, and a stopband that levels off at −60 dB.</td>
+          <td>Frequency response with smoothing off; what a stopband figure means against a noise floor.</td>
         </tr>
       </tbody>
     </table>

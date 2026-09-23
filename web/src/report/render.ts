@@ -150,7 +150,7 @@ export async function renderView(
         )
         return { png, caption: display.view === 'Gain' ? 'Gain against frequency' : 'Input level against frequency' }
       }
-      if (view === 'Nyquist' || view === 'Nichols') {
+      if (view === 'Nyquist' || view === 'Nichols' || view === 'PoleZero') {
         const png = await renderChartPng(
           ResponsePolarChart,
           {
@@ -168,11 +168,14 @@ export async function renderView(
             xToHz: display.xToHz,
             thickLines: display.thickLines,
             showDataPoints: display.showDataPoints,
-            fittedModel: null,
+            showFittedModel: display.showFittedModel,
+            hideOutOfBandRoots: display.hideOutOfBandRoots,
+            // No panel exists for a report: the chart fits the map's own model (see effectiveFit).
+            fit: null,
           },
           options,
         )
-        return { png, caption: view === 'Nyquist' ? 'Nyquist plot' : 'Nichols plot' }
+        return { png, caption: view === 'Nyquist' ? 'Nyquist plot' : view === 'Nichols' ? 'Nichols plot' : 'Poles and zeros of the fitted model' }
       }
       return null
     }

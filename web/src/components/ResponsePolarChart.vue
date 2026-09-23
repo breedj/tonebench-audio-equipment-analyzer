@@ -11,7 +11,15 @@ import ToolbarIcon from './ToolbarIcon.vue'
 import { fitTransform, niceTicks, type PlaneTransform, type Viewport } from '../charts/planeTransform'
 import { toComplexCurve, type ComplexPoint } from '../response/complexPlane'
 import { stabilityMargins } from '../response/margins'
-import { evaluateModel, type RationalModel } from '../response/rationalFit'
+import { evaluateModel, fitRational, suggestOrder, type FitResult } from '../response/rationalFit'
+import {
+  fitRootPoints,
+  measuredBand,
+  nearestRoot,
+  poleZeroViewport,
+  visibleRoots,
+  type RootPoint,
+} from '../response/poleZeroMap'
 import {
   MIN_LINEAR_EXTENT,
   criticalPhases,
@@ -25,7 +33,8 @@ import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
 
 /**
- * The complex-plane views of a response measurement: Nyquist (Re/Im) and Nichols (phase/gain).
+ * The complex-plane views of a response measurement: Nyquist (Re/Im), Nichols (phase/gain) and
+ * the pole–zero map (the fitted model's roots in the s-plane, in hertz).
  *
  * Hand-drawn on a canvas rather than built on uPlot, and that is forced rather than chosen. uPlot
  * wants an ascending x array — `FrequencyResponseChart` gives it log frequency and its cursor
@@ -35,18 +44,27 @@ import { useAppTheme } from '../composables/useAppTheme'
  * — have to be hand-rolled either way, which leaves a uPlot instance with a fake x axis and its own
  * cursor. So: a canvas.
  *
- * One component for both projections. They differ in exactly three things — the point map, the
- * decorations, and whether the aspect is locked — and share the polyline, the overlays, the hover
- * readout, the zoom and the theme.
+ * One component for all three projections. Nyquist and Nichols differ in exactly three things — the
+ * point map, the decorations, and whether the aspect is locked — and share the polyline, the
+ * overlays, the hover readout, the zoom and the theme. The pole–zero map draws no contour at all:
+ * it is a different plane (s, not G(jω) — see response/poleZeroMap.ts), so it shares the canvas,
+ * the grid, the zoom and the legend, and draws the roots where the others draw the curve.
  */
 const props = defineProps<{
   traces: ResponseTrace[]
   overlays: OverlayEntry[]
-  projection: 'Nyquist' | 'Nichols'
+  projection: 'Nyquist' | 'Nichols' | 'PoleZero'
   radiusMode: NyquistRadiusMode
   radiusFloorDb: number
   /** Adds 180°: the summing-junction inversion the measurement cannot see. */
   invertSign: boolean
+  /**
+   * Draw the fitted model over the measurement on Nyquist and Nichols. The pole-zero map ignores
+   * it: there the fit is not an overlay on the measurement, it is the content.
+   */
+  showFittedModel: boolean
+  /** Pole-zero map: leave out the roots the fit placed outside the measured band - see visibleRoots. */
+  hideOutOfBandRoots: boolean
   /** Puts back the bulk delay the chirp estimator removed. Null latency means there is none. */
   restoreDelay: boolean
   latencySamples: number | null
@@ -58,11 +76,13 @@ const props = defineProps<{
   showDataPoints: boolean
   runLabel?: string
   /**
-   * The fitted rational model, drawn over the measurement as a dashed curve. This is what makes the
-   * pole/zero table falsifiable: a list of roots whose model does not track the measured contour is
-   * a description of nothing, and only the residual shows it.
+   * The fitted rational model — the pole/zero panel's — drawn over the measurement as a dashed
+   * curve on Nyquist and Nichols, and as the roots themselves on the pole–zero map. The dashed
+   * curve is what makes the pole/zero table falsifiable: a list of roots whose model does not track
+   * the measured contour is a description of nothing, and only the residual shows it. Null when no
+   * panel is mounted (a report render); the map then fits its own, see `effectiveFit`.
    */
-  fittedModel?: RationalModel | null
+  fit?: FitResult | null
 }>()
 
 const { isDark } = useAppTheme()
@@ -141,13 +161,37 @@ const overlayCurves = computed(() =>
 
 const margins = computed(() => stabilityMargins(curve.value))
 
+/**
+ * The fit the map draws. The panel's when there is one, so the map and the table can never
+ * disagree; otherwise — a report rendering a stored result, where no panel exists — the same fit
+ * the panel would make at its automatic order, from the same curve.
+ */
+const effectiveFit = computed<FitResult | null>(() => {
+  if (props.fit) return props.fit
+  if (props.projection !== 'PoleZero' || curve.value.length < 6) return null
+  const order = suggestOrder(curve.value, 8).order
+  return fitRational(curve.value, order, order)
+})
+
+const band = computed(() => measuredBand(curve.value))
+
+/** Every root of the fit; `roots` is what the map actually draws. */
+const allRoots = computed<RootPoint[]>(() => (effectiveFit.value ? fitRootPoints(effectiveFit.value) : []))
+const roots = computed<RootPoint[]>(() => visibleRoots(allRoots.value, band.value, props.hideOutOfBandRoots))
+const hiddenRootCount = computed(() => allRoots.value.length - roots.value.length)
+
 function toPlane(point: ComplexPoint): PlanePoint {
   return props.projection === 'Nyquist'
     ? nyquistPoint(point, props.radiusMode, props.radiusFloorDb)
     : nicholsPoint(point)
 }
 
-const equalAspect = computed(() => props.projection === 'Nyquist')
+/** A root's place on the map: σ/2π along x, ω/2π up y. */
+function rootToPlane(root: RootPoint): PlanePoint {
+  return { x: root.re, y: root.im, clamped: false }
+}
+
+const equalAspect = computed(() => props.projection !== 'Nichols')
 
 /**
  * The window the chart opens on, before any zoom.
@@ -161,6 +205,8 @@ const equalAspect = computed(() => props.projection === 'Nyquist')
  * quantity, so it fits to the data with a margin.
  */
 function baseViewport(): Viewport {
+  if (props.projection === 'PoleZero') return poleZeroViewport(roots.value)
+
   const points = [...curve.value, ...overlayCurves.value.flatMap((o) => o.points)]
 
   if (props.projection === 'Nyquist') {
@@ -259,6 +305,14 @@ function renderScene(
 
   drawGrid(ctx, width, height, t)
   drawDecorations(ctx, t)
+
+  if (props.projection === 'PoleZero') {
+    drawPoleZeroMap(ctx, t)
+    drawLegend(ctx, t)
+    if (showHover) drawRootHover(ctx, t)
+    return t
+  }
+
   for (const overlay of overlayCurves.value) {
     drawCurve(ctx, overlay.points, t, {
       stroke: color(CURVE_COLOR),
@@ -277,6 +331,7 @@ function renderScene(
   })
   drawFittedModel(ctx, t)
   drawCrossings(ctx, t)
+  drawLegend(ctx, t)
   if (showHover) drawHover(ctx, t)
   return t
 }
@@ -304,17 +359,193 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
   const title =
     props.projection === 'Nyquist'
       ? `Nyquist — real vs imaginary (${props.radiusMode === 'Linear' ? 'linear' : 'log'} radius)`
-      : 'Nichols — gain (dB) vs phase (°)'
-  const legend = [
-    { label: primaryLabel ?? 'Response', color: CURVE_COLOR[0] },
-    ...overlayCurves.value.map((o) => ({
-      label: o.name,
-      color: CURVE_COLOR[0],
-      dash: responseOverlayDash(props.overlays, o.id) ?? [6, 3],
-    })),
-    ...(props.fittedModel ? [{ label: 'Fitted model', color: FIT_COLOR[0], dash: [5, 3] }] : []),
-  ]
+      : props.projection === 'Nichols'
+        ? 'Nichols — gain (dB) vs phase (°)'
+        : `Poles and zeros — s-plane in Hz${effectiveFit.value ? `, order ${effectiveFit.value.denominatorOrder}` : ''}` +
+          (hiddenRootCount.value > 0 ? `, ${hiddenRootCount.value} out of band hidden` : '')
+  const legend =
+    props.projection === 'PoleZero'
+      ? [
+          { label: 'Pole', color: CRITICAL_COLOR[0] },
+          { label: 'Zero', color: UNIT_COLOR[0] },
+        ]
+      : [
+          { label: primaryLabel ?? 'Response', color: CURVE_COLOR[0] },
+          ...overlayCurves.value.map((o) => ({
+            label: o.name,
+            color: CURVE_COLOR[0],
+            dash: responseOverlayDash(props.overlays, o.id) ?? [6, 3],
+          })),
+          ...(props.fit && props.showFittedModel ? [{ label: 'Fitted model', color: FIT_COLOR[0], dash: [5, 3] }] : []),
+        ]
   return composeChartPng({ width, height, plotCanvas: plot, headerHeight: header, title, legend })
+}
+
+// --- legend ----------------------------------------------------------------
+
+interface LegendEntry {
+  label: string
+  color: string
+  /** How the sample is drawn: a line (solid or dashed), one of the marker glyphs, or nothing - a note. */
+  sample: 'line' | 'dashed' | 'cross' | 'ring' | 'pole' | 'zero' | 'band' | 'none'
+  dash?: number[]
+}
+
+/**
+ * What every mark on the plot is. On the canvas rather than in the DOM so an export carries it,
+ * and drawn last so it sits over the curve. Only marks actually present are listed — a legend that
+ * names a fitted model on a plot with none is a puzzle of its own.
+ */
+function legendEntries(t: PlaneTransform): LegendEntry[] {
+  if (props.projection === 'PoleZero') {
+    return [
+      { label: 'Pole', color: color(CRITICAL_COLOR), sample: 'pole' },
+      { label: 'Zero', color: color(UNIT_COLOR), sample: 'zero' },
+      { label: 'Measured band (jω axis)', color: color(MARKER_COLOR), sample: 'band' },
+      ...(hiddenRootCount.value > 0
+        ? [{ label: `${hiddenRootCount.value} out of band, hidden`, color: color(AXIS_COLOR), sample: 'none' as const }]
+        : []),
+    ]
+  }
+
+  const nyquist = props.projection === 'Nyquist'
+  const entries: LegendEntry[] = [{ label: props.runLabel === 'RUN SWEEP' ? 'Measured (stepped)' : 'Measured', color: color(CURVE_COLOR), sample: 'line' }]
+  for (const o of overlayCurves.value) {
+    entries.push({ label: o.name, color: color(CURVE_COLOR), sample: 'dashed', dash: responseOverlayDash(props.overlays, o.id) ?? [6, 3] })
+  }
+  if (props.fit && props.showFittedModel) {
+    entries.push({ label: 'Fitted model', color: color(FIT_COLOR), sample: 'dashed', dash: [5, 3] })
+  }
+  entries.push({ label: nyquist ? 'Unit circle, |G| = 1' : '0 dB', color: color(UNIT_COLOR), sample: 'dashed', dash: [4, 3] })
+  // Nichols draws no −180° markers at all when the window holds too many turns (see criticalPhases).
+  if (nyquist || criticalPhases(t.viewport.xMin, t.viewport.xMax).length > 0) {
+    entries.push({ label: nyquist ? '−1 (critical point)' : '−180° (critical phase)', color: color(CRITICAL_COLOR), sample: 'cross' })
+  }
+  const { gainCrossoverHz, phaseCrossoverHz } = margins.value
+  if (gainCrossoverHz != null || phaseCrossoverHz != null) {
+    entries.push({ label: 'Crossings: |G| = 1, −180°', color: color(MARKER_COLOR), sample: 'ring' })
+  }
+  return entries
+}
+
+function drawLegend(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
+  const entries = legendEntries(t)
+  if (entries.length === 0) return
+
+  const rowHeight = 15
+  const padding = 6
+  const sampleWidth = 22
+  ctx.save()
+  ctx.font = '11px ui-sans-serif, system-ui, sans-serif'
+  let textWidth = 0
+  for (const e of entries) textWidth = Math.max(textWidth, ctx.measureText(e.label).width)
+  const boxWidth = padding * 2 + sampleWidth + 6 + textWidth
+  const boxHeight = padding * 2 + rowHeight * entries.length
+  const x = paint.width - INSETS.right - boxWidth - 6
+  const y = INSETS.top + 6
+
+  ctx.fillStyle = paint.dark ? 'rgba(23, 23, 23, 0.85)' : 'rgba(255, 255, 255, 0.88)'
+  ctx.strokeStyle = color(GRID_COLOR)
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.rect(x + 0.5, y + 0.5, boxWidth, boxHeight)
+  ctx.fill()
+  ctx.stroke()
+
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  entries.forEach((e, i) => {
+    const cy = y + padding + rowHeight * i + rowHeight / 2
+    const sx = x + padding
+    const cx = sx + sampleWidth / 2
+    ctx.strokeStyle = e.color
+    ctx.fillStyle = e.color
+    ctx.lineWidth = 1.5
+    ctx.setLineDash(e.sample === 'dashed' ? (e.dash ?? [4, 3]) : [])
+    ctx.beginPath()
+    switch (e.sample) {
+      case 'line':
+      case 'dashed':
+        ctx.moveTo(sx, cy)
+        ctx.lineTo(sx + sampleWidth, cy)
+        ctx.stroke()
+        break
+      case 'cross':
+      case 'pole':
+        ctx.moveTo(cx - 4, cy - 4)
+        ctx.lineTo(cx + 4, cy + 4)
+        ctx.moveTo(cx + 4, cy - 4)
+        ctx.lineTo(cx - 4, cy + 4)
+        ctx.stroke()
+        break
+      case 'ring':
+      case 'zero':
+        ctx.arc(cx, cy, 4, 0, Math.PI * 2)
+        ctx.stroke()
+        break
+      case 'band':
+        ctx.lineWidth = 4
+        ctx.moveTo(sx + 4, cy)
+        ctx.lineTo(sx + sampleWidth - 4, cy)
+        ctx.stroke()
+        break
+      case 'none':
+        break
+    }
+    ctx.setLineDash([])
+    ctx.fillStyle = color(AXIS_COLOR)
+    ctx.fillText(e.label, sx + sampleWidth + 6, cy)
+  })
+  ctx.restore()
+}
+
+// --- pole–zero map -----------------------------------------------------------
+
+/**
+ * The roots of the fitted model as × (poles) and ○ (zeros), conjugates included, with the measured
+ * band drawn as a heavy segment on the jω axis — the only stretch of the axis the data spoke for.
+ * A root well outside it is the fit's extrapolation, exactly as the panel's "out of band" flag
+ * says, and here that reads directly off the picture.
+ */
+function drawPoleZeroMap(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
+  ctx.save()
+  clipToPlot(ctx, paint.width, paint.height)
+
+  const measured = curve.value
+  if (measured.length >= 2) {
+    const lowHz = measured[0].freqHz
+    const highHz = measured[measured.length - 1].freqHz
+    ctx.strokeStyle = color(MARKER_COLOR)
+    ctx.lineWidth = 4
+    ctx.globalAlpha = 0.6
+    ctx.beginPath()
+    for (const sign of [1, -1]) {
+      ctx.moveTo(t.toScreenX(0), t.toScreenY(sign * lowHz))
+      ctx.lineTo(t.toScreenX(0), t.toScreenY(sign * highHz))
+    }
+    ctx.stroke()
+    ctx.globalAlpha = 1
+  }
+
+  ctx.lineWidth = 1.5
+  for (const root of roots.value) {
+    const plane = rootToPlane(root)
+    const px = t.toScreenX(plane.x)
+    const py = t.toScreenY(plane.y)
+    ctx.beginPath()
+    if (root.kind === 'pole') {
+      ctx.strokeStyle = color(CRITICAL_COLOR)
+      ctx.moveTo(px - 5, py - 5)
+      ctx.lineTo(px + 5, py + 5)
+      ctx.moveTo(px + 5, py - 5)
+      ctx.lineTo(px - 5, py + 5)
+    } else {
+      ctx.strokeStyle = color(UNIT_COLOR)
+      ctx.arc(px, py, 5, 0, Math.PI * 2)
+    }
+    ctx.stroke()
+  }
+  ctx.restore()
 }
 
 function clipToPlot(ctx: CanvasRenderingContext2D, width: number, height: number) {
@@ -354,20 +585,28 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, 
   ctx.textBaseline = 'middle'
   for (const y of yTicks) ctx.fillText(tickLabel(y), INSETS.left - 6, t.toScreenY(y))
 
-  // Axis captions, so the two projections are never confused for one another.
+  // Axis captions, so the three projections are never confused for one another.
   ctx.textAlign = 'center'
   ctx.textBaseline = 'bottom'
   ctx.fillText(
-    props.projection === 'Nyquist' ? 'Re' : 'Phase (°)',
+    props.projection === 'Nyquist' ? 'Re' : props.projection === 'Nichols' ? 'Phase (°)' : 'σ / 2π (Hz)',
     (INSETS.left + width - INSETS.right) / 2,
     height - 2,
   )
+  ctx.save()
+  ctx.translate(10, (INSETS.top + height - INSETS.bottom) / 2)
+  ctx.rotate(-Math.PI / 2)
+  ctx.textBaseline = 'top'
+  ctx.fillText(props.projection === 'Nyquist' ? 'Im' : props.projection === 'Nichols' ? 'Gain (dB)' : 'jω / 2π (Hz)', 0, 0)
+  ctx.restore()
   ctx.restore()
 }
 
 function tickLabel(v: number): string {
   if (v === 0) return '0'
   const abs = Math.abs(v)
+  // The map's axes are hertz, and "1e+4" is not how anyone reads a frequency axis.
+  if (props.projection === 'PoleZero' && abs >= 1000) return `${Number((v / 1000).toPrecision(3))}k`
   if (abs >= 1000 || abs < 0.01) return v.toExponential(0)
   return String(Number(v.toPrecision(3)))
 }
@@ -378,7 +617,18 @@ function drawDecorations(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
   ctx.save()
   clipToPlot(ctx, width, height)
 
-  if (props.projection === 'Nyquist') {
+  if (props.projection === 'PoleZero') {
+    // The σ and jω axes; the left half-plane is where a stable pole lives, and nothing else here
+    // needs a decoration — the roots are the content.
+    ctx.strokeStyle = color(AXIS_COLOR)
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(INSETS.left, t.toScreenY(0))
+    ctx.lineTo(width - INSETS.right, t.toScreenY(0))
+    ctx.moveTo(t.toScreenX(0), INSETS.top)
+    ctx.lineTo(t.toScreenX(0), height - INSETS.bottom)
+    ctx.stroke()
+  } else if (props.projection === 'Nyquist') {
     // The origin axes.
     ctx.strokeStyle = color(AXIS_COLOR)
     ctx.lineWidth = 1
@@ -526,7 +776,7 @@ function drawDirectionArrow(
  * reveal.
  */
 function drawFittedModel(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
-  const model = props.fittedModel
+  const model = props.showFittedModel ? props.fit?.model : null
   const measured = curve.value
   if (!model || measured.length < 2) return
 
@@ -600,6 +850,20 @@ function nearestByFrequency(freqHz: number): ComplexPoint | null {
 // --- hover -----------------------------------------------------------------
 
 const hover = ref<ComplexPoint | null>(null)
+const hoverRoot = ref<RootPoint | null>(null)
+
+function drawRootHover(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
+  const root = hoverRoot.value
+  if (!root) return
+  const plane = rootToPlane(root)
+  ctx.save()
+  ctx.strokeStyle = color(AXIS_COLOR)
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.arc(t.toScreenX(plane.x), t.toScreenY(plane.y), 9, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
 
 function drawHover(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
   const point = hover.value
@@ -660,7 +924,15 @@ function onPointerMove(event: PointerEvent) {
     drawDragBox()
     return
   }
-  hover.value = nearestPoint(point.x, point.y)
+  if (props.projection === 'PoleZero') {
+    hoverRoot.value = transform
+      ? nearestRoot(roots.value, point.x, point.y, (r) => ({ x: transform!.toScreenX(r.re), y: transform!.toScreenY(r.im) }))
+      : null
+    hover.value = null
+  } else {
+    hover.value = nearestPoint(point.x, point.y)
+    hoverRoot.value = null
+  }
   draw()
 }
 
@@ -727,7 +999,9 @@ watch(
     props.xToHz,
     props.thickLines,
     props.showDataPoints,
-    props.fittedModel,
+    props.fit,
+    props.showFittedModel,
+    props.hideOutOfBandRoots,
     isDark.value,
   ],
   () => draw(),
@@ -747,6 +1021,23 @@ defineExpose({ margins, curve, exportPng })
         <span>{{ hover.phaseDeg.toFixed(1) }}°</span>
         <span>Re {{ hover.re.toFixed(4) }}</span>
         <span>Im {{ hover.im.toFixed(4) }}</span>
+      </span>
+      <span v-else-if="hoverRoot" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
+        <span class="text-neutral-800 dark:text-neutral-100">{{ hoverRoot.kind === 'pole' ? 'Pole' : 'Zero' }} {{ formatHz(hoverRoot.singularity.freqHz) }}</span>
+        <span v-if="hoverRoot.singularity.q !== null">Q {{ hoverRoot.singularity.q.toFixed(3) }}</span>
+        <span>ζ {{ hoverRoot.singularity.zeta.toFixed(3) }}</span>
+        <span>σ/2π {{ formatHz(hoverRoot.re) }}</span>
+        <span v-if="hoverRoot.im !== 0">jω/2π {{ hoverRoot.im < 0 ? '−' : '' }}{{ formatHz(Math.abs(hoverRoot.im)) }}</span>
+        <span v-if="hoverRoot.singularity.isRhp" class="text-amber-600 dark:text-amber-400">right half-plane</span>
+      </span>
+      <span v-else-if="props.projection === 'PoleZero'">
+        {{
+          roots.length > 0
+            ? 'Hover a pole or zero for its frequency, Q and damping'
+            : allRoots.length === 0
+              ? 'No fitted roots to plot'
+              : 'Every fitted root is outside the measured band'
+        }}
       </span>
       <span v-else>Hover the plot for values at a frequency</span>
 
@@ -770,7 +1061,7 @@ defineExpose({ margins, curve, exportPng })
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
-        @pointerleave="hover = null"
+        @pointerleave="hover = null; hoverRoot = null"
       />
     </div>
 

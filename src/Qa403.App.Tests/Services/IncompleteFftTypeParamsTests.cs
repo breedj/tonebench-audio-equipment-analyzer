@@ -105,10 +105,13 @@ public class IncompleteFftTypeParamsTests
 
         private long? _projectId;
 
+        // Through the property, not the constructor parameter: reading the parameter here would
+        // capture it into the class *as well as* initialising Projects with it, which is CS9124 --
+        // two copies of the same reference, one of them invisible.
         public async Task<long> CreateFftTypeAsync(string paramsJson)
         {
-            _projectId ??= await projects.CreateProjectAsync("incomplete", null, CancellationToken.None);
-            return await projects.CreateTypeAsync(_projectId.Value, "FFTSpectrum", "fft", null, paramsJson, CancellationToken.None);
+            _projectId ??= await Projects.CreateProjectAsync("incomplete", null, CancellationToken.None);
+            return await Projects.CreateTypeAsync(_projectId.Value, "FFTSpectrum", "fft", null, paramsJson, CancellationToken.None);
         }
     }
 

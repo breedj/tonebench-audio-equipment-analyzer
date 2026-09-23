@@ -19,6 +19,7 @@ const ALL_MODELS: SimulatedDutModel[] = [
   'PhonoRiaa', 'DigitalProcessor', 'TriodeSingleEnded', 'ClassAbCrossover', 'SolidStateClipping',
   'TransformerCoreSaturation', 'ImpedanceResistive', 'ImpedanceReactive', 'ImpedanceLoudspeaker',
   'ImpedanceCapacitive', 'ImpedanceShort', 'ImpedanceOpen',
+  'ButterworthLowPass', 'ChebyshevLowPass', 'BesselLowPass', 'EllipticLowPass',
 ]
 
 describe('simulatorHint', () => {

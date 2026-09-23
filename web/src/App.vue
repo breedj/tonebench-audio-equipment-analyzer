@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
-import { api, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
+import { api, ApiError, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
 import { useDevice } from './composables/useDevice'
 import { DEVICE_STATUS_KEY } from './simulator/hints'
@@ -32,6 +32,7 @@ import WelcomeScreen from './components/WelcomeScreen.vue'
 import { type ProjectDialogMode, type ProjectForm } from './projects/projectDialogModel'
 import GeneratorPanel from './components/GeneratorPanel.vue'
 import SpectrumConfigPanel from './components/SpectrumConfigPanel.vue'
+import BandwidthWeightingPanel from './components/BandwidthWeightingPanel.vue'
 import SpectrumChart from './components/SpectrumChart.vue'
 import WaterfallChart from './components/WaterfallChart.vue'
 import OscilloscopeChart from './components/OscilloscopeChart.vue'
@@ -855,6 +856,8 @@ const responseNyquistRadius = ref<import('./api/client').NyquistRadiusName>('Lin
 const responseNyquistRadiusFloorDb = ref(-40)
 const responseInvertLoopSign = ref(false)
 const responseRestoreDelay = ref(false)
+const responseShowFittedModel = ref(DEFAULT_RESPONSE_DISPLAY.showFittedModel)
+const responseHideOutOfBandRoots = ref(DEFAULT_RESPONSE_DISPLAY.hideOutOfBandRoots)
 
 /**
  * Whether the measurement on screen has a complex response at all.
@@ -883,6 +886,7 @@ const responsePoleZeroPanel = ref<InstanceType<typeof ResponsePoleZeroPanel> | n
 // would silently be applied to a different DUT's curve on load.
 const responseFitAutoOrder = ref(true)
 const responseFitOrder = ref(2)
+const responseFitZeroOrder = ref(2)
 
 // Same guard as sweepDisplayRestoring: applying a type's stored display state is the opposite of an
 // unsaved edit, and marking it dirty there would light Save up on every selection.
@@ -915,6 +919,8 @@ function currentResponseDisplay(): ResponseDisplay {
     nyquistRadiusFloorDb: responseNyquistRadiusFloorDb.value,
     invertLoopSign: responseInvertLoopSign.value,
     restoreDelay: responseRestoreDelay.value,
+    showFittedModel: responseShowFittedModel.value,
+    hideOutOfBandRoots: responseHideOutOfBandRoots.value,
   }
 }
 
@@ -959,6 +965,8 @@ function applyStoredResponseDisplay(paramsJson: string) {
   responseDelayBottomUs.value = display.delayBottomUs
   responseNyquistRadius.value = display.nyquistRadius
   responseNyquistRadiusFloorDb.value = display.nyquistRadiusFloorDb
+  responseShowFittedModel.value = display.showFittedModel
+  responseHideOutOfBandRoots.value = display.hideOutOfBandRoots
   responseInvertLoopSign.value = display.invertLoopSign
   responseRestoreDelay.value = display.restoreDelay
   if (typeof stored.chartAutofitOnDone === 'boolean') responseAutofitOnDone.value = stored.chartAutofitOnDone
@@ -1492,18 +1500,22 @@ function setDeviceKind(kind: import('./api/client').DeviceKindName) {
 
 // The status bar's Connect button: the app starts with no device rather than refusing to start, so
 // this is how a QA403 plugged in afterwards gets picked up. Failure is just an error line in the
-// status bar — nothing else about the session changes, and pressing it again is safe.
+// status bar — nothing else about the session changes, and pressing it again is safe. The line is
+// the server's own text rather than the usual "POST /api/device/connect failed: 503 …": the
+// endpoint writes it for the person at the bench (see DeviceEndpoints), and the request line in
+// front of it is what made "no QA403 found" read as a fault in the app.
 const connecting = ref(false)
 
-function connectDevice() {
-  return withErrorReporting(async () => {
-    connecting.value = true
-    try {
-      status.value = await api.connectDevice()
-    } finally {
-      connecting.value = false
-    }
-  })
+async function connectDevice() {
+  connecting.value = true
+  try {
+    status.value = await api.connectDevice()
+    error.value = null
+  } catch (e) {
+    error.value = e instanceof ApiError && e.status === 503 ? e.body : (e as Error).message
+  } finally {
+    connecting.value = false
+  }
 }
 
 // The Run button's whole job: push everything staged in the FFT settings and Generator panels'
@@ -2513,6 +2525,8 @@ function buildTypeParamsJson(): string | undefined {
       chartNyquistRadiusFloorDb: responseNyquistRadiusFloorDb.value,
       chartInvertLoopSign: responseInvertLoopSign.value,
       chartRestoreDelay: responseRestoreDelay.value,
+      chartShowFittedModel: responseShowFittedModel.value,
+      chartHideOutOfBandRoots: responseHideOutOfBandRoots.value,
       chartShowLeft: responseShowLeft.value,
       chartShowRight: responseShowRight.value,
       chartShowPhase: responseShowPhase.value,
@@ -3143,7 +3157,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
           </template>
 
           <template v-else-if="isFrequencyResponse">
-            <MeasurementLayout>
+            <!-- The one screen with a wide settings rail: its generator block carries sentences
+                 ("at 5-10 Hz (bandwidth reference)", the stepped sweep's point and time estimate)
+                 that wrap to three lines at the default 16rem. -->
+            <MeasurementLayout wide-rail>
               <template #rail>
                 <!-- RUN / SINGLE / STOP, the same trio and the same shape as the FFT screen's, so
                      the button that starts a measurement sits in one place whichever screen you are
@@ -3218,8 +3235,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   @run="runSteppedResponse"
                 />
 
+                <!-- Margins belong to the contour views; the pole–zero map has no −1 point to measure from. -->
                 <ResponseStabilityPanel
-                  v-if="activeResponseProjection !== 'Bode' && responsePolarChart"
+                  v-if="(activeResponseProjection === 'Nyquist' || activeResponseProjection === 'Nichols') && responsePolarChart"
                   :margins="responsePolarChart.margins"
                   :radius-mode="responseNyquistRadius"
                   :projection="activeResponseProjection"
@@ -3231,6 +3249,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   ref="responsePoleZeroPanel"
                   :curve="responsePolarChart.curve"
                   v-model:order="responseFitOrder"
+                  v-model:zero-order="responseFitZeroOrder"
                   v-model:auto-order="responseFitAutoOrder"
                 />
 
@@ -3312,7 +3331,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :x-to-hz="responseXToHz"
                   :thick-lines="responseThickLines"
                   :show-data-points="responseShowDataPoints"
-                  :fitted-model="responsePoleZeroPanel?.fit?.model ?? null"
+                  :fit="responsePoleZeroPanel?.fit ?? null"
+                  :show-fitted-model="responseShowFittedModel"
+                  :hide-out-of-band-roots="responseHideOutOfBandRoots"
                 />
 
                 <MeasurementNotesPanel />
@@ -3326,6 +3347,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:projection="responseProjection"
                   v-model:nyquist-radius="responseNyquistRadius"
                   v-model:nyquist-radius-floor-db="responseNyquistRadiusFloorDb"
+                  v-model:show-fitted-model="responseShowFittedModel"
+                  v-model:hide-out-of-band-roots="responseHideOutOfBandRoots"
                   v-model:restore-delay="responseRestoreDelay"
                   v-model:show-left="responseShowLeft"
                   v-model:show-right="responseShowRight"
@@ -3932,6 +3955,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 @error="reportError"
                 @sample-rate-change="onSampleRateChange"
               />
+              <BandwidthWeightingPanel @error="reportError" />
             </template>
 
             <div class="min-w-0 flex-1">

@@ -111,6 +111,88 @@ public class FractionalOctaveSmootherTests
         Assert.True(wide < narrow, $"1/3 octave should smooth more than 1/48: {wide} vs {narrow}");
     }
 
+    /// <summary>
+    /// A band's value has to come from the bins in that band and nothing else.
+    ///
+    /// <para>This is the invariant a running power integral breaks. Summing the whole trace and
+    /// taking one subtraction per band is O(N) and looks exact, but the integral is dominated by
+    /// the passband: recovering a stopband band's power then means subtracting two numbers of order
+    /// 1e3 to get 1e-11, which is below the doubles' own spacing there, so the answer is rounding —
+    /// often exactly zero. Measured on the simulated Butterworth at a 96 kHz span, 1/24 octave: the
+    /// trace followed the filter to −138 dB at 40 kHz unsmoothed and read <b>−600 dB</b> (an exact
+    /// zero) at the same frequency smoothed, with −379 dB further up. On the Bode plot that is a
+    /// cliff into the floor, and it reads as a broken DUT model.</para>
+    ///
+    /// <para>The assertion is the RMS's own definition rather than a reference implementation: an
+    /// RMS over a set of values lies between the smallest and the largest of them. Nothing about
+    /// how the sum is computed can excuse leaving that range.</para>
+    /// </summary>
+    [Fact]
+    public void Smooth_OverATraceWithAHugeDynamicRange_StaysWithinEachBandsOwnValues()
+    {
+        // A fifth-order low pass at 2 kHz over a 96 kHz span, as the simulator's Butterworth is
+        // measured: flat, then 100 dB per decade, which reaches 280 dB down by the top of the band.
+        const int n = 65536;
+        var magnitude = new double[n];
+        for (int k = 0; k < n; k++)
+        {
+            double freqHz = k * BinHz;
+            magnitude[k] = freqHz <= 2000.0 ? 1.0 : Math.Pow(freqHz / 2000.0, -5.0);
+        }
+
+        var smoothed = FractionalOctaveSmoother.Smooth(magnitude, BinHz, denominator: 24);
+
+        double halfWidth = Math.Pow(2.0, 1.0 / 48.0);
+        for (int k = 1; k < n; k++)
+        {
+            int low = Math.Max(1, (int)Math.Ceiling(k / halfWidth));
+            int high = Math.Min(n - 1, (int)Math.Floor(k * halfWidth));
+            if (high < low)
+            {
+                Assert.Equal(magnitude[k], smoothed[k]);
+                continue;
+            }
+
+            double min = double.MaxValue;
+            double max = 0.0;
+            for (int i = low; i <= high; i++)
+            {
+                min = Math.Min(min, magnitude[i]);
+                max = Math.Max(max, magnitude[i]);
+            }
+
+            Assert.InRange(smoothed[k], min, max);
+        }
+    }
+
+    /// <summary>
+    /// The same thing said in the units the screen uses: a smoothed trace must track an unsmoothed
+    /// one down a monotonic slope, all the way to the bottom of it. Half a dB is generous — the
+    /// RMS over a 1/24-octave band of a 100 dB/decade slope sits about 0.02 dB above its centre —
+    /// and the failure it is written against is 460 dB wide.
+    /// </summary>
+    [Fact]
+    public void Smooth_FollowsASteepSlopeIntoTheFarStopband()
+    {
+        const int n = 65536;
+        var magnitude = new double[n];
+        for (int k = 0; k < n; k++)
+        {
+            double freqHz = k * BinHz;
+            magnitude[k] = freqHz <= 2000.0 ? 1.0 : Math.Pow(freqHz / 2000.0, -5.0);
+        }
+
+        var smoothed = FractionalOctaveSmoother.Smooth(magnitude, BinHz, denominator: 24);
+
+        foreach (double freqHz in new[] { 4000.0, 10_000.0, 20_000.0, 40_000.0, 70_000.0, 90_000.0 })
+        {
+            int k = (int)Math.Round(freqHz / BinHz);
+            double expectedDb = 20.0 * Math.Log10(magnitude[k]);
+            double actualDb = 20.0 * Math.Log10(smoothed[k]);
+            Assert.InRange(actualDb - expectedDb, -0.5, 0.5);
+        }
+    }
+
     [Fact]
     public void Smooth_LeavesDcAlone()
     {

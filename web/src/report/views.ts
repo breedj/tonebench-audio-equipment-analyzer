@@ -29,6 +29,7 @@ const RESPONSE_VIEWS: ReportView[] = [
   { id: 'Bode', label: 'Bode', combinable: true },
   { id: 'Nyquist', label: 'Nyquist', combinable: true },
   { id: 'Nichols', label: 'Nichols', combinable: true },
+  { id: 'PoleZero', label: 'Poles and zeros', combinable: true },
 ]
 const IMPULSE_VIEWS: ReportView[] = [
   { id: 'Impulse', label: 'Impulse', combinable: false },

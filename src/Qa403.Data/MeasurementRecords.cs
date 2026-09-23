@@ -917,6 +917,14 @@ public sealed record FrequencyResponseParameters(
     bool? ChartInvertLoopSign = null,
     /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
     bool? ChartRestoreDelay = null,
+    /// <summary>Nyquist and Nichols: draw the Poles and zeros panel's model over the measurement. Null on a type saved before the checkbox existed, treated as on -- which is what those builds did.</summary>
+    bool? ChartShowFittedModel = null,
+    /// <summary>
+    /// Pole-zero map: leave out the roots the fit placed outside the swept band. A display choice
+    /// only -- the fit, its residual and the panel's table are unchanged. Null on a type saved
+    /// before the map existed, treated as false.
+    /// </summary>
+    bool? ChartHideOutOfBandRoots = null,
     /// <summary>
     /// What the ±1 dB and −3 dB corners were measured down from: "BandMedian" or "Peak". Null on a
     /// type saved before the reference was configurable, where the peak is what that build did.
@@ -1019,6 +1027,14 @@ public sealed record SteppedResponseParameters(
     bool? ChartInvertLoopSign = null,
     /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
     bool? ChartRestoreDelay = null,
+    /// <summary>Nyquist and Nichols: draw the Poles and zeros panel's model over the measurement. Null on a type saved before the checkbox existed, treated as on -- which is what those builds did.</summary>
+    bool? ChartShowFittedModel = null,
+    /// <summary>
+    /// Pole-zero map: leave out the roots the fit placed outside the swept band. A display choice
+    /// only -- the fit, its residual and the panel's table are unchanged. Null on a type saved
+    /// before the map existed, treated as false.
+    /// </summary>
+    bool? ChartHideOutOfBandRoots = null,
     /// <summary>
     /// What the ±1 dB and −3 dB corners were measured down from: "BandMedian" or "Peak". Null on a
     /// type saved before the reference was configurable, where the peak is what that build did.

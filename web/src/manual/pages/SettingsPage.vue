@@ -59,7 +59,7 @@
           <td>
             The band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated
             over, and what keeps DC out of that integration. This is the <strong>Custom</strong>
-            choice of the FFT settings panel's Bandwidth dropdown, whose two presets (20 Hz–20 kHz
+            choice of the FFT screen's Bandwidth dropdown (in the Bandwidth &amp; weighting panel), whose two presets (20 Hz–20 kHz
             and 20 Hz–80 kHz) write these same fields. 20 Hz–20 kHz gives audio-band figures;
             widening it includes noise the ear cannot hear and makes every noise-based number look
             worse. It is saved with the FFT measurement.
@@ -111,6 +111,18 @@
             about unsaved changes. It is ticked by default; unticked, changes wait for Save and the red
             dot says so. Either way <strong>Save as…</strong> still makes a copy, and saving a
             <em>result</em> is always a separate, deliberate step.
+          </td>
+        </tr>
+        <tr>
+          <td>Detailed logging (for reporting a problem)</td>
+          <td>
+            The app always keeps a log, one file per day, in the folder shown under the checkbox
+            (<strong>Open log folder</strong> opens it in the file manager). Ticked, that log also
+            records every request the app handles with its outcome and timing, and the device
+            layer's own debug lines — the record needed to work out what went wrong from the file
+            alone. Switch it on before reproducing a problem, reproduce it, then send in the day's
+            file; the setting survives a restart, so it can stay on across one. Off is the
+            default, and the ordinary log is written either way.
           </td>
         </tr>
       </tbody>

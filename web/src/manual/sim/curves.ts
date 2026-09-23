@@ -69,6 +69,23 @@ export function phaseCurve(dut: Cascade, fromHz: number, toHz: number, count = 4
   return out
 }
 
+/**
+ * Group delay in microseconds against frequency, as the central difference of the phase over ±1 Hz
+ * — what the response screens' Group delay column shows for a model with no bulk latency. `dut`'s
+ * own delay is what is drawn; the chirp's arbitrary rotation, which the screen removes, is not in
+ * a transfer function to begin with.
+ */
+export function groupDelayCurve(dut: Cascade, fromHz: number, toHz: number, count = 400): Point[] {
+  return logSpace(fromHz, toHz, count).map((f) => {
+    const lo = dut.responseAt(f - 1)
+    const hi = dut.responseAt(f + 1)
+    let d = Math.atan2(hi.im, hi.re) - Math.atan2(lo.im, lo.re)
+    if (d > Math.PI) d -= 2 * Math.PI
+    if (d < -Math.PI) d += 2 * Math.PI
+    return [f, (-d / (2 * Math.PI * 2)) * 1e6] as Point
+  })
+}
+
 export interface BandwidthReading {
   /** The reference level the corners were measured against, dB. */
   referenceDb: number

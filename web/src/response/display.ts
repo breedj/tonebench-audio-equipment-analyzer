@@ -44,6 +44,10 @@ export interface ResponseDisplay {
   nyquistRadiusFloorDb: number
   invertLoopSign: boolean
   restoreDelay: boolean
+  /** Draw the Poles and zeros panel's model over the measurement on Nyquist and Nichols. */
+  showFittedModel: boolean
+  /** Pole-zero map: leave the fit's extrapolated roots off the plot. */
+  hideOutOfBandRoots: boolean
 }
 
 /** What a fresh measurement type shows before anything is stored — the literals App.vue starts from. */
@@ -72,6 +76,8 @@ export const DEFAULT_RESPONSE_DISPLAY: Readonly<ResponseDisplay> = Object.freeze
   nyquistRadiusFloorDb: -40,
   invertLoopSign: false,
   restoreDelay: false,
+  showFittedModel: true,
+  hideOutOfBandRoots: false,
 })
 
 type StoredDisplay = Partial<FrequencyResponseParameters & SteppedResponseParameters>
@@ -125,6 +131,8 @@ export function responseDisplayFromParams(
     display.nyquistRadiusFloorDb = stored.chartNyquistRadiusFloorDb
   if (typeof stored.chartInvertLoopSign === 'boolean') display.invertLoopSign = stored.chartInvertLoopSign
   if (typeof stored.chartRestoreDelay === 'boolean') display.restoreDelay = stored.chartRestoreDelay
+  if (typeof stored.chartShowFittedModel === 'boolean') display.showFittedModel = stored.chartShowFittedModel
+  if (typeof stored.chartHideOutOfBandRoots === 'boolean') display.hideOutOfBandRoots = stored.chartHideOutOfBandRoots
 
   return display
 }

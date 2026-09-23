@@ -279,6 +279,37 @@ public enum SimulatedDutModel
     /// open on every plot and is finite everywhere.
     /// </summary>
     ImpedanceOpen = 17,
+
+    /// <summary>
+    /// A fifth-order <b>Butterworth</b> low-pass at <see cref="SimulatedDut.FilterCornerHz"/>:
+    /// maximally flat, −3.01 dB at the corner, then 100 dB per decade. The reference the other three
+    /// filters are read against — see <see cref="FilterPrototype"/> for the four side by side.
+    /// </summary>
+    ButterworthLowPass = 18,
+
+    /// <summary>
+    /// A fifth-order <b>Chebyshev</b> (type I) low-pass, 1 dB ripple: five ripple extrema between
+    /// 0 and −1 dB across the passband, −1 dB at the corner, and a transition twice as steep as the
+    /// Butterworth's just above it. The model for seeing what the ripple costs on a step and what
+    /// it buys in the stopband.
+    /// </summary>
+    ChebyshevLowPass = 19,
+
+    /// <summary>
+    /// A fifth-order <b>Bessel</b> low-pass, normalised to −3.01 dB at the corner: the flattest
+    /// group delay of the four — 193 µs, constant across the passband — and the gentlest roll-off.
+    /// The model for the group-delay column, which reads a flat line here and a peak at the corner
+    /// on the Chebyshev and the elliptic.
+    /// </summary>
+    BesselLowPass = 20,
+
+    /// <summary>
+    /// A fifth-order <b>elliptic</b> (Cauer) low-pass, 1 dB passband ripple, 60 dB stopband: the
+    /// only one with zeros, two notches in the stopband at 1.74 and 2.65 times the corner, between
+    /// which the response climbs back to −60 dB and stays there. The steepest transition of the
+    /// four, and a stopband that does not keep falling — which is what the zeros cost.
+    /// </summary>
+    EllipticLowPass = 21,
 }
 
 public static class SimulatedDutModelExtensions
@@ -300,4 +331,11 @@ public static class SimulatedDutModelExtensions
     /// right. One channel each, never both: filtering both cancels the model out of any ratio.
     /// </summary>
     public static int MeasuredChannel(this SimulatedDutModel model) => model.IsImpedanceFixture() ? 1 : 0;
+
+    /// <summary>The four textbook low-pass alignments, all at <see cref="SimulatedDut.FilterCornerHz"/> — see <see cref="FilterPrototype"/>.</summary>
+    public static bool IsClassicFilter(this SimulatedDutModel model) => model
+        is SimulatedDutModel.ButterworthLowPass
+        or SimulatedDutModel.ChebyshevLowPass
+        or SimulatedDutModel.BesselLowPass
+        or SimulatedDutModel.EllipticLowPass;
 }

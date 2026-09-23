@@ -130,7 +130,14 @@ const { showPage } = useManual()
       <button type="button" class="manual-link" @click="showPage('frequency-response')">
         Frequency response
       </button>
-      for what each of those means.
+      for what each of those means, and
+      <button type="button" class="manual-link" @click="showPage('view-nyquist')">the Nyquist view</button>,
+      <button type="button" class="manual-link" @click="showPage('view-nichols')">the Nichols view</button>
+      and
+      <button type="button" class="manual-link" @click="showPage('view-pole-zero')">the pole–zero map</button>
+      for the three projections in detail. One difference there: a stepped run removes no bulk
+      delay, so <strong>Restore removed delay</strong> is not offered and the phase it plots is
+      already the physical one.
     </p>
     <p>Two differences:</p>
     <ul>

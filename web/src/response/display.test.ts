@@ -34,6 +34,8 @@ describe('responseDisplayFromParams', () => {
       chartNyquistRadiusFloorDb: -60,
       chartInvertLoopSign: true,
       chartRestoreDelay: true,
+      chartShowFittedModel: false,
+      chartHideOutOfBandRoots: true,
     })
 
     expect(responseDisplayFromParams(json)).toEqual({
@@ -61,6 +63,8 @@ describe('responseDisplayFromParams', () => {
       nyquistRadiusFloorDb: -60,
       invertLoopSign: true,
       restoreDelay: true,
+      showFittedModel: false,
+      hideOutOfBandRoots: true,
     })
   })
 

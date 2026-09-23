@@ -36,25 +36,30 @@ async function onCreate() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="New measurement" @close="emit('close')">
+  <!-- Wide, and the kinds in two columns: eleven of them in one column ran past the bottom of an
+       ordinary window, so the last few were only found by scrolling a list that gave no sign it
+       scrolled. Two columns of six fit without one. -->
+  <Modal :open="props.open" title="New measurement" :wide="selectedKind === null" @close="emit('close')">
     <div v-if="selectedKind === null" class="flex flex-col gap-2 text-sm">
       <p v-if="currentProjectId === null" class="text-xs text-neutral-400 dark:text-neutral-600">
         Select or create a project first.
       </p>
-      <button
-        v-for="k in MEASUREMENT_KINDS"
-        :key="k.kind"
-        type="button"
-        class="flex items-start gap-3 rounded border border-neutral-200 p-3 text-left hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-800 dark:hover:bg-neutral-800"
-        :disabled="currentProjectId === null"
-        @click="pickKind(k.kind)"
-      >
-        <MeasurementKindIcon :kind="k.kind" class="mt-0.5 shrink-0 text-neutral-500 dark:text-neutral-400" />
-        <span>
-          <span class="block font-medium text-neutral-900 dark:text-neutral-100">{{ k.label }}</span>
-          <span class="block text-xs text-neutral-500 dark:text-neutral-400">{{ k.description }}</span>
-        </span>
-      </button>
+      <div class="grid max-h-[80vh] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+        <button
+          v-for="k in MEASUREMENT_KINDS"
+          :key="k.kind"
+          type="button"
+          class="flex items-start gap-3 rounded border border-neutral-200 p-3 text-left hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-800 dark:hover:bg-neutral-800"
+          :disabled="currentProjectId === null"
+          @click="pickKind(k.kind)"
+        >
+          <MeasurementKindIcon :kind="k.kind" class="mt-0.5 shrink-0 text-neutral-500 dark:text-neutral-400" />
+          <span class="min-w-0">
+            <span class="block font-medium text-neutral-900 dark:text-neutral-100">{{ k.label }}</span>
+            <span class="block text-xs text-neutral-500 dark:text-neutral-400">{{ k.description }}</span>
+          </span>
+        </button>
+      </div>
     </div>
 
     <div v-else class="flex flex-col gap-3 text-sm">

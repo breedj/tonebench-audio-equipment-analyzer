@@ -25,9 +25,9 @@ const { showPage } = useManual()
       The analyzer plays a stimulus of your choosing, captures both inputs continuously, and
       transforms one record at a time. Distortion figures are referred to the fundamental you asked
       the generator for. Noise-based figures — THD+N, SNR, the noise floor, the band RMS and the
-      noise density — are integrated over the <strong>Bandwidth</strong> chosen in the FFT settings
-      panel, which also keeps DC out of the sum, and optionally through a <strong>Weighting</strong>
-      curve (A, C, ITU-R 468, CCIR/ARM, RIAA, or your own table). A weighting changes what "noise"
+      noise density — are integrated over the <strong>Bandwidth</strong> chosen in the Bandwidth
+      &amp; weighting panel, which also keeps DC out of the sum, and optionally through a
+      <strong>Weighting</strong> curve (A, C, ITU-R 468, CCIR/ARM, RIAA, or your own table). A weighting changes what "noise"
       means and nothing else: the fundamental, the harmonics, THD, gain and peak are always measured
       flat, and THD+N and SNR keep the unweighted fundamental as their reference.
     </p>
@@ -211,6 +211,23 @@ const { showPage } = useManual()
             or the time constant of an Exponential one, in records.
           </td>
         </tr>
+      </tbody>
+    </table>
+
+    <h2>Bandwidth &amp; weighting panel</h2>
+    <p>
+      Below FFT settings, and separate from it on purpose: the FFT size, window and averaging decide
+      how a record is <em>transformed</em>, while these two decide what the numbers read from it
+      <em>mean</em>. Both apply live, like the FFT settings, and both are saved with the measurement.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Control</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
         <tr>
           <td>Bandwidth</td>
           <td>

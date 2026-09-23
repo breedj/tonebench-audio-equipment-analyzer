@@ -108,6 +108,18 @@ public sealed record AutosaveConfig(bool Enabled = true)
 }
 
 /// <summary>
+/// Whether the log file carries the detailed record a fault report needs: every API request with
+/// its status and timing, and the Debug-level lines the ordinary Information floor drops. Off by
+/// default -- the ordinary log is what the app writes for itself; this is what a tester is asked
+/// to switch on (Configuration ▸ General ▸ Detailed logging) before reproducing a problem and
+/// sending the file in. Persisted, so it survives the restart the reproduction usually involves.
+/// </summary>
+public sealed record DiagnosticLoggingConfig(bool Enabled = false)
+{
+    public static DiagnosticLoggingConfig Default { get; } = new();
+}
+
+/// <summary>
 /// How a date and time is written wherever the app puts one on paper -- the Screenshot's date
 /// line, a report's "Taken" row and its "Generated" line. The vocabulary is the client's
 /// (<c>web/src/dateTime.ts</c>): the server keeps the id and checks only that it is a non-empty
@@ -300,6 +312,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The autosave preference's key. One document, see <see cref="AutosaveConfig"/>.</summary>
     public const string AutosaveKey = "projects.autosave";
+
+    /// <summary>The detailed-logging switch's key. One document, see <see cref="DiagnosticLoggingConfig"/>.</summary>
+    public const string DiagnosticLoggingKey = "logging.diagnostic";
 
     /// <summary>The date/time format's key. One document, see <see cref="DateTimeFormatConfig"/>.</summary>
     public const string DateTimeFormatKey = "ui.dateTimeFormat";

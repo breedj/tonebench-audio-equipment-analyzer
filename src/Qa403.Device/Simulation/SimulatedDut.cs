@@ -100,11 +100,29 @@ internal readonly record struct Biquad(double B0, double B1, double B2, double A
     /// <c>tan(x) ~ x</c> to seven figures at 45 Hz.</para>
     /// </summary>
     public static Biquad FromAnalog(
-        double b2, double b1, double b0, double a2, double a1, double a0, double sampleRateHz)
+        double b2, double b1, double b0, double a2, double a1, double a0, double sampleRateHz) =>
+        Bilinear(b2, b1, b0, a2, a1, a0, 2.0 * sampleRateHz);
+
+    /// <summary>
+    /// The same mapping <b>prewarped</b> so that <paramref name="prewarpHz"/> lands exactly on
+    /// itself — the right choice for a filter specified by its corner, which is what
+    /// <see cref="FilterPrototype.Sections"/> builds, and the wrong one for a circuit (see the
+    /// overload above). <c>k = w / tan(w T / 2)</c> in place of <c>2 fs</c>; the two agree to
+    /// <c>(wT)^2/12</c>, i.e. within 0.6 % for 2 kHz at 48 kHz, which is the size of the corner
+    /// error the plain mapping would put on the response.
+    /// </summary>
+    public static Biquad FromAnalog(
+        double b2, double b1, double b0, double a2, double a1, double a0, double sampleRateHz, double prewarpHz)
+    {
+        double w = 2.0 * Math.PI * Math.Clamp(prewarpHz, 1.0, sampleRateHz * 0.45);
+        return Bilinear(b2, b1, b0, a2, a1, a0, w / Math.Tan(w / (2.0 * sampleRateHz)));
+    }
+
+    private static Biquad Bilinear(
+        double b2, double b1, double b0, double a2, double a1, double a0, double k)
     {
         // s -> k(1 - z^-1)/(1 + z^-1). Multiplying through by (1 + z^-1)^2 turns each analog
         // coefficient into three z-plane ones.
-        double k = 2.0 * sampleRateHz;
         double kk = k * k;
 
         return Normalise(
@@ -482,6 +500,24 @@ internal sealed class SimulatedDut
                     sampleRateHz)],
                 reflectionMs: 0.0, reflectionGain: 0.0),
 
+            // The four classic alignments: pure cascades, so ResponseAt is exact for them, and unity
+            // at DC by construction -- see FilterPrototype.Sections.
+            SimulatedDutModel.ButterworthLowPass => new SimulatedDut(
+                model, sampleRateHz, FilterPrototype.Butterworth.Sections(FilterCornerHz, sampleRateHz),
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.ChebyshevLowPass => new SimulatedDut(
+                model, sampleRateHz, FilterPrototype.Chebyshev.Sections(FilterCornerHz, sampleRateHz),
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.BesselLowPass => new SimulatedDut(
+                model, sampleRateHz, FilterPrototype.Bessel.Sections(FilterCornerHz, sampleRateHz),
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.EllipticLowPass => new SimulatedDut(
+                model, sampleRateHz, FilterPrototype.Elliptic.Sections(FilterCornerHz, sampleRateHz),
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
             _ => null,
         };
     }
@@ -537,6 +573,15 @@ internal sealed class SimulatedDut
     /// <c>A</c>, with <c>A_f = A |LP(f)|</c> and |LP(20 Hz)| = 0.83.
     /// </summary>
     public const double CoreFluxLimitVolts = 1.26;
+
+    /// <summary>
+    /// Where the four classic low-pass filters put their corner. 2 kHz on purpose: an octave above
+    /// the FFT screen's default 1 kHz tone, so that tone sits in the passband of all four (−0.004 dB
+    /// on the Butterworth, −0.27 dB in the Chebyshev's ripple), and a full decade below the
+    /// 20 kHz edge, so a 24 kHz span shows the whole transition and a decade of stopband --
+    /// 100 dB of it on the all-pole designs, which is about where the simulator's floor is.
+    /// </summary>
+    public const double FilterCornerHz = 2_000.0;
 
     /// <summary>The digital processor's latency. 576 samples at 48 kHz, 2304 at 192 kHz.</summary>
     public const double ProcessorLatencyMs = 12.0;

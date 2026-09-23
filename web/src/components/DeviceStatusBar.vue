@@ -7,15 +7,20 @@ const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
   { value: 'Simulated', label: 'Simulator' },
 ]
 
-type DutGroup = 'Linear — response, no distortion' | 'Distorting — for THD and IMD' | 'Impedance fixtures — for the impedance screen'
+type DutGroup =
+  | 'Linear — response, no distortion'
+  | 'Filters — the four classic low-pass alignments, 5th order at 2 kHz'
+  | 'Distorting — for THD and IMD'
+  | 'Impedance fixtures — for the impedance screen'
 
 /**
  * What the simulator can pretend is patched in. A straight wire has no response and no memory,
  * which is enough for a spectrum and shows nothing at all on the measurements whose subject is
- * what a DUT does over time. Three groups, because eighteen flat entries are unreadable: the
- * linear models (a shape and a memory, unity gain), the nonlinear ones (distortion that depends
- * on level or frequency — the THD sweeps' models), and the impedance fixtures (dividers, so never
- * unity, wired bench-style with the load junction on the right input).
+ * what a DUT does over time. Four groups, because twenty-two flat entries are unreadable: the
+ * linear models (a shape and a memory, unity gain), the four classic filters (the same again, at
+ * one corner, for comparing alignments), the nonlinear ones (distortion that depends on level or
+ * frequency — the THD sweeps' models), and the impedance fixtures (dividers, so never unity,
+ * wired bench-style with the load junction on the right input).
  */
 const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string; group: DutGroup }[] = [
   { value: 'StraightWire', label: 'Straight wire', title: 'No DUT: the generator reaches the input unaltered.', group: 'Linear — response, no distortion' },
@@ -67,6 +72,34 @@ const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string; grou
     title:
       'A digital processor: a fourth-order low-pass at 20 kHz and 12 ms of latency — 576 samples at 48 kHz. The only model with a real delay, so the frequency response’s “removed N sample delay” readout and the impulse response’s position finally mean something.',
     group: 'Linear — response, no distortion',
+  },
+  {
+    value: 'ButterworthLowPass',
+    label: 'Butterworth LP (2 kHz)',
+    title:
+      'A fifth-order Butterworth low-pass at 2 kHz: maximally flat, −3 dB at the corner, then 100 dB per decade. The reference the other three filters are read against — same order, same corner, a different trade each.',
+    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+  },
+  {
+    value: 'ChebyshevLowPass',
+    label: 'Chebyshev LP (2 kHz)',
+    title:
+      'A fifth-order Chebyshev low-pass, 1 dB ripple: the passband ripples between 0 and −1 dB, the corner is the ripple edge at −1 dB, and the transition just above it is twice as steep as the Butterworth’s. Its group delay peaks at the corner — see the delay column on the response screens.',
+    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+  },
+  {
+    value: 'BesselLowPass',
+    label: 'Bessel LP (2 kHz)',
+    title:
+      'A fifth-order Bessel low-pass, −3 dB at 2 kHz: the flattest group delay of the four — 193 µs, constant across the passband — at the price of the gentlest roll-off, 28 dB down where the Butterworth is 48. The model for the group-delay and phase-delay columns.',
+    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+  },
+  {
+    value: 'EllipticLowPass',
+    label: 'Elliptic LP (2 kHz)',
+    title:
+      'A fifth-order elliptic (Cauer) low-pass, 1 dB passband ripple, 60 dB stopband: the only one with zeros — two notches at 3.5 and 5.3 kHz — and the steepest transition anything of this order can have, −60 dB by 4 kHz. Between and above the notches the stopband comes back up to −60 dB and stays there, which is what the zeros cost.',
+    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
   },
   {
     value: 'TriodeSingleEnded',
@@ -140,7 +173,12 @@ const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string; grou
   },
 ]
 
-const DUT_GROUPS: DutGroup[] = ['Linear — response, no distortion', 'Distorting — for THD and IMD', 'Impedance fixtures — for the impedance screen']
+const DUT_GROUPS: DutGroup[] = [
+  'Linear — response, no distortion',
+  'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+  'Distorting — for THD and IMD',
+  'Impedance fixtures — for the impedance screen',
+]
 
 const props = defineProps<{
   status: DeviceStatus | null

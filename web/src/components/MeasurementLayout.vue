@@ -4,11 +4,12 @@
 // App.vue renders through this, so a breakpoint decision made here holds everywhere.
 //
 //   < 1024 px   one stacked column: rail, chart, display sections.
-//   1024–1279   two columns: a 16rem rail beside the chart, and the display sections + History
-//               checklist flow two-wide UNDER the chart. Three columns here left the chart ~170 px
+//   1024-1279   two columns: a 16rem rail (18.75rem with `wideRail`) beside the chart, and the
+//               display sections + History checklist flow two-wide UNDER the chart. Three columns
+//               here left the chart ~170 px
 //               with the sidebar pinned (246 + 32 + 304 + 272 of a 1024 px window), narrower than
 //               the same window one pixel smaller, where everything stacked.
-//   ≥ 1280 px   three columns: the same 16rem rail, chart, 16rem display rail. The FFT screen's
+//   ≥ 1280 px   three columns: the same rail, chart, 16rem display rail. The FFT screen's
 //               used to be 12rem, which its ChartDisplayPanel was designed for; every screen is
 //               16rem since 2026-09-19 so the display rails line up when switching screens.
 //
@@ -26,6 +27,15 @@
 // a remount.
 import { useUiLayout } from '../composables/useUiLayout'
 import SimulatorHint from './SimulatorHint.vue'
+
+/**
+ * `wideRail` gives the settings column 18.75rem instead of 16rem. Only the response screens ask
+ * for it, and for one reason: their generator block carries whole sentences rather than labels —
+ * the level mode's "at 5-10 Hz (bandwidth reference)" line and the stepped runner's point/time
+ * estimate — which wrap to three lines at 16rem. Sixteen stays the default so every other screen's
+ * rail, and both display rails, still line up when switching between measurements.
+ */
+const props = withDefaults(defineProps<{ wideRail?: boolean }>(), { wideRail: false })
 
 const {
   settingsRailCollapsed,
@@ -54,8 +64,8 @@ const STRIP =
          overrides the grid's items-start so the strip runs the row's full height. -->
     <div class="flex min-w-0 items-stretch lg:row-span-2 lg:self-stretch xl:row-span-1">
       <div
-        class="flex min-w-0 flex-1 flex-col gap-3 lg:w-64 lg:flex-none"
-        :class="settingsRailCollapsed ? 'lg:hidden' : ''"
+        class="flex min-w-0 flex-1 flex-col gap-3 lg:flex-none"
+        :class="[props.wideRail ? 'lg:w-75' : 'lg:w-64', settingsRailCollapsed ? 'lg:hidden' : '']"
       >
         <slot name="rail" />
       </div>

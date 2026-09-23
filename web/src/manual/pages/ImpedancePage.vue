@@ -177,7 +177,11 @@ const { showPage } = useManual()
       the Nyquist locus. A driver's resonance is a circle there, and the axes are drawn to true equal
       aspect so a circle looks like one. This is the audio-standard view of a complex impedance;
       there is deliberately no Smith chart, which plots reflection coefficient against a
-      transmission line that does not exist at these frequencies.
+      transmission line that does not exist at these frequencies. Note that this is <em>not</em> the
+      response screens'
+      <button type="button" class="manual-link" @click="showPage('view-nyquist')">Nyquist view</button>:
+      that one plots a dimensionless gain against the critical point −1, this one plots an impedance
+      in ohms, where −1 means nothing and the origin is a short circuit.
     </p>
     <p>
       The <strong>Equivalent circuit</strong> panel turns one frequency into components: the series

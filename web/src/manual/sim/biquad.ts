@@ -95,7 +95,29 @@ export function fromAnalog(
   a0: number,
   sampleRateHz: number,
 ): Biquad {
-  const k = 2 * sampleRateHz
+  return bilinear(b2, b1, b0, a2, a1, a0, 2 * sampleRateHz)
+}
+
+/**
+ * The same mapping prewarped so `prewarpHz` lands exactly on itself — `k = ω / tan(ωT/2)` in place
+ * of `2fs`. What the C# `Biquad.FromAnalog(…, sampleRateHz, prewarpHz)` overload does, and what the
+ * four classic filters are built with: they are specified by their corner and nothing else.
+ */
+export function fromAnalogPrewarped(
+  b2: number,
+  b1: number,
+  b0: number,
+  a2: number,
+  a1: number,
+  a0: number,
+  sampleRateHz: number,
+  prewarpHz: number,
+): Biquad {
+  const w = 2 * Math.PI * Math.min(Math.max(prewarpHz, 1), sampleRateHz * 0.45)
+  return bilinear(b2, b1, b0, a2, a1, a0, w / Math.tan(w / (2 * sampleRateHz)))
+}
+
+function bilinear(b2: number, b1: number, b0: number, a2: number, a1: number, a0: number, k: number): Biquad {
   const kk = k * k
   return normalise(
     b2 * kk + b1 * k + b0,

@@ -6,6 +6,7 @@ import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
 import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
+import { useDiagnosticLogging } from '../composables/useDiagnosticLogging'
 import { useDevice } from '../composables/useDevice'
 import { useExternalGain } from '../composables/useExternalGain'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
@@ -31,6 +32,15 @@ const { autosaveEnabled, load: loadAutosave, setAutosaveEnabled } = useAutosave(
 void loadAutosave()
 const { dateTimeFormat, load: loadDateTimeFormat, setDateTimeFormat } = useDateTimeFormat()
 void loadDateTimeFormat()
+const {
+  enabled: diagnosticLoggingEnabled,
+  logsDirectory,
+  error: diagnosticLoggingError,
+  load: loadDiagnosticLogging,
+  setEnabled: setDiagnosticLogging,
+  openLogFolder,
+} = useDiagnosticLogging()
+void loadDiagnosticLogging()
 const { fixture, hasCalibration, error: fixtureError, load: loadFixture, save: saveFixture, clear: clearFixture } =
   useImpedanceFixture()
 
@@ -251,6 +261,34 @@ async function clearStoredCalibration() {
             />
             Autosave measurement settings
           </label>
+
+          <!-- The switch to ask a tester for. The folder line and the button are the other half
+               of that request: a log file is only sendable by someone who can find it. -->
+          <div
+            class="flex flex-col gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800"
+            title="Writes a detailed record to the log file — every request the app handles, with its outcome and timing, plus the device layer's own debug lines. Switch it on before reproducing a problem, then send the day's file from the folder below. Off, the app still keeps its ordinary log."
+          >
+            <label class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                :checked="diagnosticLoggingEnabled"
+                @change="setDiagnosticLogging(($event.target as HTMLInputElement).checked)"
+              />
+              Detailed logging (for reporting a problem)
+            </label>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+              <span class="min-w-0 break-all font-mono" :title="logsDirectory ?? ''">{{ logsDirectory ?? '…' }}</span>
+              <button
+                type="button"
+                class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                title="Opens the log folder in the file manager. The current file is named after today's date."
+                @click="openLogFolder"
+              >
+                Open log folder
+              </button>
+            </div>
+            <p v-if="diagnosticLoggingError" class="text-xs text-red-600 dark:text-red-400">{{ diagnosticLoggingError }}</p>
+          </div>
         </template>
 
         <template v-else-if="activeTab === 'Acquisition'">

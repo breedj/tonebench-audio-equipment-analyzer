@@ -162,13 +162,14 @@ public class DeviceSessionServiceTests
     }
 
     /// <summary>
-    /// The user's simulator starts clean: a straight wire that reads 0.51 % THD, −90 dBV of hum
-    /// and a −150 dBV/√Hz floor is a bench with three impairments patched in, and each one is a
-    /// checkbox to switch on rather than a number to explain away. The device type's own defaults
-    /// stay on, because the bench most tests are written against has them.
+    /// The user's simulator starts nearly clean: −90 dBV of hum and a −150 dBV/√Hz floor are
+    /// impairments patched in, and each is a checkbox to switch on rather than a number to explain
+    /// away. The generator's 0.51 % harmonic stack stays on, so the FFT screen has a THD to show on
+    /// a linear model. The device type's own defaults stay on, because the bench most tests are
+    /// written against has them.
     /// </summary>
     [Fact]
-    public void AnalyzerDeviceFactory_HandsOutTheSimulatorWithEveryImpairmentOff()
+    public void AnalyzerDeviceFactory_HandsOutTheSimulatorWithNoiseAndHumOffAndHarmonicsOn()
     {
         var factory = new AnalyzerDeviceFactory(NullLoggerFactory.Instance, DeviceKind.Simulated);
 
@@ -176,8 +177,8 @@ public class DeviceSessionServiceTests
 
         Assert.False(device.SignalProfile.NoiseEnabled);
         Assert.False(device.SignalProfile.HumEnabled);
-        Assert.False(device.SignalProfile.HarmonicsEnabled);
-        // Everything else is the device's own default — the factory only touches the three switches.
+        Assert.True(device.SignalProfile.HarmonicsEnabled);
+        // Everything else is the device's own default — the factory only touches the two switches.
         Assert.Equal(new SimulatedDevice().SignalProfile.Dut, device.SignalProfile.Dut);
         Assert.Equal(new SimulatedDevice().SignalProfile.GeneratorLeft, device.SignalProfile.GeneratorLeft);
     }

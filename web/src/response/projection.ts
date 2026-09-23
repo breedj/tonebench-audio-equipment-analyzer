@@ -99,6 +99,13 @@ export function criticalPhases(xMinDeg: number, xMaxDeg: number): number[] {
   const out: number[] = []
   const first = Math.ceil((xMinDeg + 180) / 360)
   const last = Math.floor((xMaxDeg + 180) / 360)
+  // A window spanning hundreds of turns (the DSP processor with its 12 ms delay restored is 240
+  // by 20 kHz) would draw a marker every few pixels and read as a solid band; past this many the
+  // markers say nothing a reader can use, so none are drawn and the legend drops the entry.
+  if (last - first + 1 > MAX_CRITICAL_MARKERS) return out
   for (let k = first; k <= last; k++) out.push(-180 + 360 * k)
   return out
 }
+
+/** Above this many −180° turns in view, `criticalPhases` draws none rather than a band. */
+export const MAX_CRITICAL_MARKERS = 24

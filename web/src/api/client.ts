@@ -102,6 +102,11 @@ export type SimulatedDutModel =
   // band) and a processor with real latency.
   | 'PhonoRiaa'
   | 'DigitalProcessor'
+  // The four classic low-pass alignments, fifth order at 2 kHz: one corner, four different trades.
+  | 'ButterworthLowPass'
+  | 'ChebyshevLowPass'
+  | 'BesselLowPass'
+  | 'EllipticLowPass'
   // Fixtures rather than DUTs: each is a reference resistor with a load hanging off it, so unlike
   // every model above they are deliberately not unity gain — a divider never is.
   | 'ImpedanceResistive'
@@ -651,6 +656,10 @@ export interface FrequencyResponseParameters {
   chartNyquistRadiusFloorDb?: number | null
   chartInvertLoopSign?: boolean | null
   chartRestoreDelay?: boolean | null
+  /** Nyquist and Nichols: draw the fitted model over the measurement. */
+  chartShowFittedModel?: boolean | null
+  /** Pole-zero map: hide the roots the fit placed outside the measured band. */
+  chartHideOutOfBandRoots?: boolean | null
   /**
    * A *run* setting, not a chart one: it changes the numbers in the Measurements table rather than
    * how they are drawn. Absent on a type saved before the reference was configurable — those runs
@@ -672,7 +681,7 @@ export type ResponseView = 'Dbv' | 'Gain'
  * quantity the Bode chart shows*, and everything branching on it carries that meaning. Widening it
  * would add a silent third case to each of those.
  */
-export type ResponseProjection = 'Bode' | 'Nyquist' | 'Nichols'
+export type ResponseProjection = 'Bode' | 'Nyquist' | 'Nichols' | 'PoleZero'
 
 /**
  * Which delay curve the Bode chart draws on its own right-hand axis. One at a time, because they
@@ -946,6 +955,10 @@ export interface SteppedResponseParameters {
   chartNyquistRadiusFloorDb?: number | null
   chartInvertLoopSign?: boolean | null
   chartRestoreDelay?: boolean | null
+  /** Nyquist and Nichols: draw the fitted model over the measurement. */
+  chartShowFittedModel?: boolean | null
+  /** Pole-zero map: hide the roots the fit placed outside the measured band. */
+  chartHideOutOfBandRoots?: boolean | null
   /**
    * A *run* setting, not a chart one: it changes the numbers in the Measurements table rather than
    * how they are drawn. Absent on a type saved before the reference was configurable — those runs
@@ -1443,7 +1456,7 @@ export interface WeightingConfigRequest {
   user2?: boolean
 }
 
-/** What the FFT settings panel shows for a user weighting slot; null when the slot is empty. */
+/** What the Bandwidth & weighting panel shows for a user weighting slot; null when the slot is empty. */
 export interface UserWeightingSummary {
   name: string
   sourcePath: string | null
@@ -1556,6 +1569,16 @@ export interface StartupConfig {
 /** Configuration ▸ General ▸ Autosave: whether a measurement's settings are saved the moment they change. */
 export interface AutosaveConfig {
   enabled: boolean
+}
+
+/**
+ * Configuration ▸ General ▸ Detailed logging: whether the log carries every API request and the
+ * Debug-level lines, for a fault report. `logsDirectory` is where the file the tester will be asked
+ * for lives.
+ */
+export interface DiagnosticLoggingStatus {
+  enabled: boolean
+  logsDirectory: string
 }
 
 /** Configuration ▸ General ▸ Date and time format: an id from `dateTime.ts`; the server keeps the string. */
@@ -1810,6 +1833,23 @@ export interface UpdateStatus {
   updateAvailable: boolean
 }
 
+/**
+ * A non-2xx response. `message` is the technical line every error banner has always shown
+ * (`POST /api/x failed: 503 …`); `body` is the server's own text, for the few places whose body
+ * is written for the user — the status bar's Connect, say — and should be shown as it is.
+ */
+export class ApiError extends Error {
+  readonly status: number
+  readonly body: string
+
+  constructor(status: number, body: string, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.body = body
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -1818,7 +1858,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.text()
-    throw new Error(`${init?.method ?? 'GET'} /api${path} failed: ${response.status} ${body}`)
+    throw new ApiError(response.status, body, `${init?.method ?? 'GET'} /api${path} failed: ${response.status} ${body}`)
   }
 
   // Every endpoint until now always returned a full JSON body. The project/measurement CRUD
@@ -2293,6 +2333,14 @@ export const api = {
 
   setAutosaveConfig: (config: AutosaveConfig) =>
     request<AutosaveConfig>('/config/autosave', { method: 'PUT', body: JSON.stringify(config) }),
+
+  getDiagnosticLogging: () => request<DiagnosticLoggingStatus>('/config/diagnostic-logging'),
+
+  setDiagnosticLogging: (enabled: boolean) =>
+    request<DiagnosticLoggingStatus>('/config/diagnostic-logging', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+
+  /** Opens the log folder in the system file manager, on the machine the server runs on. */
+  openLogFolder: () => request<void>('/config/diagnostic-logging/open-folder', { method: 'POST' }),
 
   getDateTimeFormatConfig: () => request<DateTimeFormatConfig>('/config/date-time-format'),
 

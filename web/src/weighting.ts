@@ -1,7 +1,7 @@
 import type { WeightingSpec, WeightingStandardName } from './streaming/protocol'
 
 /**
- * The noise weighting as the FFT settings panel, the metric tiles and the chart's annunciator name
+ * The noise weighting as the Bandwidth & weighting panel, the metric tiles and the chart's annunciator name
  * it. Pure so it can be tested; the server owns the curves themselves (Qa403.Dsp.Weighting).
  */
 
@@ -83,7 +83,7 @@ export function weightingFromStored(
   return { standard: known?.value ?? 'None', user1: user1 ?? false, user2: user2 ?? false }
 }
 
-/** The measurement-band presets the FFT settings panel offers. `Custom` is whatever the Configuration dialog holds. */
+/** The measurement-band presets the Bandwidth & weighting panel offers. `Custom` is whatever the Configuration dialog holds. */
 export const BANDWIDTH_PRESETS = [
   { value: 'audio', label: '20 Hz – 20 kHz', loHz: 20, hiHz: 20000 },
   { value: 'wide', label: '20 Hz – 80 kHz', loHz: 20, hiHz: 80000 },

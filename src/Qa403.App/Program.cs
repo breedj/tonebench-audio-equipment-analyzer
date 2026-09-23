@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.StaticFiles;
@@ -17,6 +18,8 @@ using Qa403.Device;
 using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
 using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 
 var noBrowser = args.Contains("--no-browser");
 
@@ -61,10 +64,15 @@ string poolFloorNote;
 // an installed binary's folder belongs to the installer (and is read-only under /usr/lib), and a
 // rebuild must not take the logs with it. Deliberately not tied to the "Config:Path" override below —
 // that names one file, and a log location that silently moved with it would be a surprise.
+//
+// The minimum level is a switch rather than a constant: Configuration ▸ General ▸ Detailed logging
+// drops it to Debug at runtime (see DiagnosticLoggingSetting), and the stored setting is applied
+// once the configuration database is up, below.
 var logDirectory = Qa403AppData.LogsDirectory;
+var logLevelSwitch = new LoggingLevelSwitch(LogEventLevel.Information);
 Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Information()
-    .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+    .MinimumLevel.ControlledBy(logLevelSwitch)
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .WriteTo.Console()
     .WriteTo.File(Path.Combine(logDirectory, "qa403-.log"), rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14)
     .CreateLogger();
@@ -73,6 +81,10 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
     builder.Host.UseSerilog();
+
+    // One instance at a time: an earlier one still running is asked to shut down (gracefully -- it
+    // may be holding the QA403) and waited for, so this one takes 8399 and not the next free port.
+    ReplaceRunningInstance(8399, 8409);
 
     var port = FindAvailablePort(8399, 8409);
     builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
@@ -114,6 +126,7 @@ try
     // before the QA403 is touched.
     builder.Host.ConfigureHostOptions(options => options.ShutdownTimeout = TimeSpan.FromSeconds(3));
 
+    builder.Services.AddSingleton(new DiagnosticLoggingSetting(logLevelSwitch));
     builder.Services.AddSingleton<DiagnosticRecorder>();
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
@@ -219,7 +232,30 @@ try
         // The user weighting tables, for the same reason: the pipeline reads them on its worker
         // thread. A damaged document leaves its slot empty and is logged.
         await scope.ServiceProvider.GetRequiredService<UserWeightingService>().LoadAllAsync(CancellationToken.None);
+
+        // Detailed logging, if it was left on: the reproduction a tester is asked for usually
+        // involves a restart, and a switch that reset on every start would miss it.
+        var diagnosticLogging = await ReadDiagnosticLoggingAsync(
+            scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
+        if (diagnosticLogging.Enabled)
+        {
+            app.Services.GetRequiredService<DiagnosticLoggingSetting>().Enabled = true;
+            Log.Information("Detailed logging is on (app {Version}, {Os}, .NET {Runtime})",
+                UpdateCheckService.CurrentVersion, Environment.OSVersion, Environment.Version);
+        }
     }
+
+    // One line per API request with its status and timing -- but only while detailed logging is
+    // on, and never for the status poll that lands every second while the app is idle: at one line
+    // a second the file would be that poll and nothing else.
+    app.UseSerilogRequestLogging(options =>
+    {
+        var setting = app.Services.GetRequiredService<DiagnosticLoggingSetting>();
+        options.GetLevel = (httpContext, _, exception) =>
+            httpContext.Request.Path == "/api/device" && httpContext.Request.Method == "GET" && exception is null && httpContext.Response.StatusCode < 400
+                ? LogEventLevel.Verbose
+                : setting.RequestLogLevel(httpContext.Response.StatusCode, exception);
+    });
 
     // A request that needs a project while none is open is a 409 with a message, from any endpoint.
     app.UseNoProjectOpenHandler();
@@ -236,6 +272,7 @@ try
     app.Services.GetRequiredService<DiagnosticRecorder>().ContextProvider =
         app.Services.GetRequiredService<DeviceSessionService>().CaptureDiagnosticContext;
 
+    app.MapAppEndpoints();
     app.MapDeviceEndpoints();
     app.MapGeneratorEndpoints();
     app.MapAcquisitionEndpoints();
@@ -400,6 +437,133 @@ static void StartShutdownWatchdog(IHostApplicationLifetime lifetime)
 
         watchdog.Start();
     });
+}
+
+/// <summary>The stored detailed-logging switch, or off when nothing is stored or the document is unreadable.</summary>
+static async Task<DiagnosticLoggingConfig> ReadDiagnosticLoggingAsync(ConfigRepository repo, CancellationToken ct)
+{
+    string? stored = await repo.GetAsync(ConfigRepository.DiagnosticLoggingKey, ct);
+    if (string.IsNullOrWhiteSpace(stored))
+        return DiagnosticLoggingConfig.Default;
+
+    try
+    {
+        return System.Text.Json.JsonSerializer.Deserialize(stored, AppJsonContext.Default.DiagnosticLoggingConfig)
+            ?? DiagnosticLoggingConfig.Default;
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return DiagnosticLoggingConfig.Default;
+    }
+}
+
+/// <summary>
+/// Shuts down any earlier instance of this app found listening on <paramref name="start"/> to
+/// <paramref name="end"/>, and waits for it to exit, so the instance starting now can take the
+/// first port.
+///
+/// <para>Two instances is never what the user meant. The browser tab, the Vite dev proxy
+/// (<c>web/vite.config.ts</c>, hard-wired to 8399) and the launch scripts all assume one app on
+/// one port; a second start used to take 8400 silently, and the visible result was a UI whose Run
+/// button did nothing (the dev proxy still pointed at the old process) or a QA403 that "could not
+/// be claimed" (the old process still held it). So the newcomer wins, which is also the only order
+/// that can work: the old instance may be wedged, and the new one is the process the user is
+/// looking at.</para>
+///
+/// <para>The old instance is asked over its own API (<c>POST /api/app/shutdown</c>) rather than
+/// killed, because a kill is exactly the shutdown the hard rules forbid: a process terminated with
+/// transfers in flight leaves the QA403 claimed until it is power-cycled. Its graceful shutdown is
+/// bounded by its own watchdog (3.5 s, then it kills itself), so the wait here is longer than that
+/// and a kill from this side is the fallback for a process that is past helping. A listener that
+/// does not identify as this product is left alone and the port scan below steps past it, as it
+/// always did.</para>
+/// </summary>
+static void ReplaceRunningInstance(int start, int end)
+{
+    // Only the ports something is actually listening on are probed. Asking the stack rather than
+    // connecting to each one matters more than it looks: on this Windows machine a connect to a
+    // closed loopback port takes two seconds to be refused (measured, 2.02 s for every closed port
+    // between 8400 and 8409), and a start that first waits ten seconds on empty ports is a start
+    // that reads as hung.
+    int[] listening;
+    try
+    {
+        listening = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners()
+            .Where(e => e.Port >= start && e.Port <= end)
+            .Where(e => e.Address.Equals(IPAddress.Loopback) || e.Address.Equals(IPAddress.Any) || e.Address.Equals(IPAddress.IPv6Any))
+            .Select(e => e.Port)
+            .Distinct()
+            .OrderBy(p => p)
+            .ToArray();
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Could not list listening ports; not looking for an earlier instance");
+        return;
+    }
+
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
+
+    foreach (var port in listening)
+    {
+        AppIdentity? other;
+        try
+        {
+            var json = http.GetStringAsync($"http://127.0.0.1:{port}/api/app").GetAwaiter().GetResult();
+            other = System.Text.Json.JsonSerializer.Deserialize(json, AppJsonContext.Default.AppIdentity);
+        }
+        catch (Exception)
+        {
+            // Nothing listening, or something that is not us (a 404 from another server, a
+            // connection refused, a body that is not our record): not ours to touch.
+            continue;
+        }
+
+        if (other is null || other.Product != AppEndpoints.ProductId || other.Pid == Environment.ProcessId)
+            continue;
+
+        Log.Information("Another instance (pid {Pid}, version {Version}) is running on port {Port} — asking it to shut down",
+            other.Pid, other.Version, port);
+
+        try
+        {
+            using var response = http.PostAsync($"http://127.0.0.1:{port}/api/app/shutdown", content: null).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "The shutdown request to pid {Pid} failed; falling back to waiting on the process", other.Pid);
+        }
+
+        Process? process = null;
+        try { process = Process.GetProcessById(other.Pid); }
+        catch (ArgumentException) { /* already gone */ }
+
+        if (process is not null)
+        {
+            using (process)
+            {
+                // Its own budget is 3.5 s to the watchdog; give it that and a margin before deciding
+                // it is stuck. A process that has not gone by then is holding the interface with
+                // no way left of releasing it cleanly, and killing it is what releases the handle.
+                if (!process.WaitForExit(TimeSpan.FromSeconds(8)))
+                {
+                    Log.Warning("Pid {Pid} did not exit within 8 s of the shutdown request — terminating it", other.Pid);
+                    try
+                    {
+                        process.Kill();
+                        process.WaitForExit(TimeSpan.FromSeconds(3));
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "Could not terminate pid {Pid}; this instance will start on another port", other.Pid);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Log.Information("The earlier instance has exited; taking port {Port}", port);
+    }
 }
 
 static int FindAvailablePort(int start, int end)

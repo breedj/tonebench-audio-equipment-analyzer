@@ -350,10 +350,25 @@ const { showPage } = useManual()
       than quoting figures against a band it never measured.
     </p>
 
-    <h3>Nyquist and Nichols</h3>
+    <h3 id="projections">Nyquist, Nichols and the pole–zero map</h3>
+    <p>
+      Each has a page of its own:
+      <button type="button" class="manual-link" @click="showPage('view-nyquist')">the Nyquist view</button>,
+      <button type="button" class="manual-link" @click="showPage('view-nichols')">the Nichols view</button>
+      and
+      <button type="button" class="manual-link" @click="showPage('view-pole-zero')">the pole–zero map</button>
+      — what each one plots, what every mark on it means, and how to read a margin off it. In
+      summary:
+    </p>
     <p>
       The same data drawn as one complex curve rather than two curves against frequency. Both need a
       genuine complex response, so both are only available when the right channel is the reference.
+      A legend in the corner of the plot names every mark on it: the measured curve, any overlays,
+      the fitted model (purple, dashed), the unit circle (or the 0 dB line on Nichols), the critical
+      point (−1, or −180°, the red ×) and the two amber rings at the crossings the stability panel
+      quotes — where |G| crosses 1 and where the phase crosses −180°. Those rings mark
+      <em>frequencies on the curve</em>; they are not zeros. Poles and zeros live in a different
+      plane altogether, which is the third projection.
     </p>
     <ul>
       <li>
@@ -364,7 +379,21 @@ const { showPage } = useManual()
       </li>
       <li>
         <strong>Restore removed delay</strong> puts the bulk delay the estimator removed back, so
-        the contour is the physical one.
+        the contour is the physical one; its page says when to leave it off.
+      </li>
+      <li>
+        <strong>Show fitted model</strong> draws the Poles and zeros panel's model over the
+        measurement on Nyquist and Nichols, and <strong>Remove out of band</strong> leaves the
+        fit's extrapolated roots off the pole–zero map.
+      </li>
+      <li>
+        <strong>Poles/zeros</strong> draws the fitted model's roots in the s-plane, in hertz: σ/2π
+        along the bottom, jω/2π up the side, a red × per pole and a blue ○ per zero, conjugates
+        included, on the same square scale so a Butterworth's poles sit on a circle. The heavy
+        amber segment on the jω axis is the measured band — the only stretch of the axis the data
+        spoke for; a root far outside it is the fit's extrapolation. Hover a root for its frequency,
+        Q, damping and coordinates. The plot is fitted to the roots, not the sweep, so the band
+        segment usually runs off the top and bottom.
       </li>
     </ul>
 
@@ -389,6 +418,12 @@ const { showPage } = useManual()
       falsifiable: the panel says so plainly when the model does not follow the measurement, and
       warns when nearly-cancelling pairs mean the fit is spending order on noise. A root outside the
       measured band is an extrapolation — widen the sweep rather than trusting one.
+      <strong>Choose order automatically</strong> searches orders with as many zeros as poles;
+      untick it to set <strong>Poles</strong> and <strong>Zeros</strong> separately, and set Zeros
+      to 0 for an all-pole DUT — any of the simulator's four classic filters, say — which is
+      otherwise fitted with as many zeros as poles and spends them on noise. The same roots
+      are drawn by the <strong>Poles/zeros</strong> projection; the table and the map always show
+      one fit.
     </p>
 
     <h2>Display panels</h2>
@@ -398,7 +433,7 @@ const { showPage } = useManual()
       remembers its own), <strong>Frequency range (Hz)</strong>, <strong>Phase range (°)</strong>
       while the Phase trace is on, and <strong>Delay range</strong> (in µs or ms, following the
       window's size) while a delay trace is selected. Under them, <strong>Display</strong>:
-      <strong>Projection</strong> chooses Bode, Nyquist or Nichols, and under Bode
+      <strong>Projection</strong> chooses Bode, Nyquist, Nichols or Poles/zeros, and under Bode
       <strong>View</strong> switches FR (dBV) against Gain (dB); then the channel checkboxes, the
       bandwidth markers and the extra traces — the Phase and Coherence checkboxes and the
       <strong>Delay</strong> selector (None, Group delay, Phase delay).
@@ -418,10 +453,10 @@ const { showPage } = useManual()
 
     <h2>Screenshot and report</h2>
     <p>
-      <strong>Screenshot</strong> in the toolbar downloads the plot on screen — Bode, Nyquist or
-      Nichols — as a 1600 × 900 PNG in the light colour scheme, at the zoom on screen, with the
+      <strong>Screenshot</strong> in the toolbar downloads the plot on screen — Bode, Nyquist,
+      Nichols or the pole–zero map — as a 1600 × 900 PNG in the light colour scheme, at the zoom on screen, with the
       bandwidth markers and any overlays. <strong>Report…</strong> makes a PDF of this measurement:
-      the results ticked in its dialog, the current one among them, with any of the three
+      the results ticked in its dialog, the current one among them, with any of the four
       projections, the notes, the settings and the Measurements panel's readings, as chosen; a stored
       result has its own Report button in History details. The report's charts follow the display
       panel's view and ranges, not the zoom. See <em>Projects, saving and history</em> for the

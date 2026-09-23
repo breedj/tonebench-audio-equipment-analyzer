@@ -21,9 +21,12 @@ public sealed class UpdateCheckService(IHttpClientFactory httpClientFactory, ILo
     private const string ReleasesUrl = "repos/breedj/qa40x-audio-analyzer-cp/releases/latest";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(1);
 
-    private readonly string _currentVersion = (typeof(UpdateCheckService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+    /// <summary>This build's version, as the release check compares it and the log announces it.</summary>
+    public static string CurrentVersion { get; } = (typeof(UpdateCheckService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? typeof(UpdateCheckService).Assembly.GetName().Version?.ToString()
         ?? "0.0.0");
+
+    private readonly string _currentVersion = CurrentVersion;
 
     private UpdateCheckResult? _cached;
     private DateTimeOffset _cachedAt;

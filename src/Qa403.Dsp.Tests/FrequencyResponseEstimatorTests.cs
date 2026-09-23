@@ -104,6 +104,34 @@ public class FrequencyResponseEstimatorTests
         Assert.True(bandwidth.LowerClamped, "a low pass has no lower corner inside the band");
     }
 
+    /// <summary>
+    /// A bin whose |H| is roundoff carries the arithmetic's phase, not the DUT's, and unwrapping
+    /// through a run of them random-walks the turn count into everything after -- see
+    /// <see cref="FrequencyResponseEstimator.PhaseFloorRelative"/>. The response here is a straight
+    /// loopback whose spectrum is scaled to 1e-40 with a scrambled phase above 5 kHz, so the DUT's
+    /// true phase is 0 everywhere and every held bin must read the last good value, not a walk.
+    /// </summary>
+    [Fact]
+    public void Estimate_HoldsThePhase_WhereTheMagnitudeIsBelowTheFloor()
+    {
+        var stimulus = Chirp();
+        var stimulusSpectrum = Spectrum(stimulus);
+        var responseSpectrum = Spectrum(stimulus);
+        int floorBin = (int)(5000.0 / BinHz);
+        var rng = new Random(11);
+        for (int k = floorBin; k < responseSpectrum.Length; k++)
+            responseSpectrum[k] = Complex.FromPolarCoordinates(1e-40, rng.NextDouble() * 2.0 * Math.PI) * responseSpectrum[k].Magnitude;
+
+        var estimator = new FrequencyResponseEstimator(FftSize, new MathNetBackend(), removeLatency: false);
+        estimator.Add(stimulusSpectrum, responseSpectrum);
+        var result = estimator.Complete();
+
+        double lastGood = result.PhaseDeg[floorBin - 1];
+        Assert.InRange(lastGood, -1.0, 1.0);
+        for (int k = floorBin; k < result.PhaseDeg.Length; k++)
+            Assert.Equal(lastGood, result.PhaseDeg[k]);
+    }
+
     [Fact]
     public void Estimate_IsUnchangedByWhereTheCaptureWindowLanded()
     {

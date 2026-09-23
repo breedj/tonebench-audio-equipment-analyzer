@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using Qa403.App.Json;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
@@ -283,6 +284,66 @@ public static class ConfigEndpoints
                 ct);
 
             return Results.Ok(config);
+        });
+
+        // Detailed logging for a fault report -- see DiagnosticLoggingSetting. The GET carries the
+        // log folder's path because the checkbox is only half of "enable logging and send me the
+        // file": the other half is knowing where the file is.
+        group.MapGet("/diagnostic-logging", (DiagnosticLoggingSetting setting) =>
+            Results.Ok(new DiagnosticLoggingResponse(setting.Enabled, Qa403AppData.LogsDirectory)));
+
+        group.MapPut("/diagnostic-logging", async (
+            DiagnosticLoggingConfig config, DiagnosticLoggingSetting setting, ConfigRepository repo,
+            ILoggerFactory loggers, CancellationToken ct) =>
+        {
+            await repo.SetAsync(
+                ConfigRepository.DiagnosticLoggingKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.DiagnosticLoggingConfig),
+                ct);
+
+            var logger = loggers.CreateLogger("Qa403.App.Logging");
+            if (config.Enabled && !setting.Enabled)
+            {
+                // Flip first, then announce, so the announcement is the first detailed line -- and it
+                // names the build, since a log file sent in on its own has no other way of saying
+                // which version wrote it.
+                setting.Enabled = true;
+                logger.LogInformation(
+                    "Detailed logging enabled (app {Version}, {Os}, .NET {Runtime})",
+                    UpdateCheckService.CurrentVersion, Environment.OSVersion, Environment.Version);
+            }
+            else if (!config.Enabled && setting.Enabled)
+            {
+                logger.LogInformation("Detailed logging disabled");
+                setting.Enabled = false;
+            }
+
+            return Results.Ok(new DiagnosticLoggingResponse(setting.Enabled, Qa403AppData.LogsDirectory));
+        });
+
+        // Opens the log folder in the system file manager, so "send me the log file" needs no path
+        // typed. The same shell launch LaunchBrowser uses, pointed at a directory; a failure is a
+        // 500 with its message, and the path is still on screen beside the button.
+        group.MapPost("/diagnostic-logging/open-folder", () =>
+        {
+            var directory = Qa403AppData.LogsDirectory;
+            Directory.CreateDirectory(directory);
+            try
+            {
+                if (OperatingSystem.IsWindows())
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"\"{directory}\"") { UseShellExecute = true });
+                else if (OperatingSystem.IsLinux())
+                    Process.Start("xdg-open", directory);
+                else if (OperatingSystem.IsMacOS())
+                    Process.Start("open", directory);
+                else
+                    return Results.Problem("No file manager known for this platform.");
+                return Results.NoContent();
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Could not open {directory}: {ex.Message}");
+            }
         });
 
         // How dates are written on screenshots and reports. Client-owned vocabulary, like the report

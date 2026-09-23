@@ -87,6 +87,48 @@ describe('toComplexCurve', () => {
     expect(toComplexCurve(trace, { ...WIDE, minCoherence: 0.9 }).map((p) => p.freqHz)).toEqual([10, 1000])
   })
 
+  it('drops a column at the estimator’s zero floor, whose phase is not a measurement', () => {
+    // The simulated Bessel over a 96 kHz span: −600 dB (an exactly-zero bin) above 50 kHz with
+    // coherence 1.0 and an unwrapped phase of −332 878°. See MIN_MEASURED_DB.
+    const trace = makeTrace({
+      freqHz: [1000, 43_000, 71_000],
+      magnitudeMaxDb: [0, -110, -600],
+      phaseDeg: [0, 2411, -332_878],
+      coherence: [1, 1, 1],
+    })
+
+    expect(toComplexCurve(trace, { ...WIDE, minCoherence: 0.5 }).map((p) => p.freqHz)).toEqual([1000, 43_000])
+  })
+
+  it('drops a column whose phase the server held, 120 dB under the trace’s own peak', () => {
+    // The simulated Butterworth over a 96 kHz span: the response reaches −121 dB at 29.9 kHz, which
+    // is where FrequencyResponseEstimator.PhaseFloorRelative stops unwrapping, and every column
+    // above it carries that same frozen phase. The magnitude is still plottable and the Bode chart
+    // still draws it; a complex point needs both halves. See MIN_MEASURED_RELATIVE_DB.
+    const trace = makeTrace({
+      freqHz: [1000, 24_000, 29_900, 33_000],
+      magnitudeMaxDb: [0, -110.7, -121.1, -160],
+      phaseDeg: [0, 2117, 2679, 2679],
+      coherence: [1, 1, 1, 1],
+    })
+
+    expect(toComplexCurve(trace, { ...WIDE, minCoherence: 0.5 }).map((p) => p.freqHz)).toEqual([1000, 24_000])
+  })
+
+  it('measures that floor from the whole trace, not from the plotted window', () => {
+    // A window sitting entirely in a DUT's stopband has its own, much lower peak; taking the floor
+    // from it would raise the floor with the window and keep exactly the held columns this exists
+    // to drop. The server's floor is relative to the whole trace, so this one is too.
+    const trace = makeTrace({
+      freqHz: [1000, 24_000, 29_900],
+      magnitudeMaxDb: [0, -110.7, -121.1],
+      phaseDeg: [0, 2117, 2679],
+      coherence: [1, 1, 1],
+    })
+
+    expect(toComplexCurve(trace, { fromHz: 20_000, toHz: 96_000 }).map((p) => p.freqHz)).toEqual([24_000])
+  })
+
   describe('the removed chirp delay', () => {
     /**
      * `φ_shown = φ_true + 360·f·τ/fs`, so restoring it is frequency-dependent. Asserted at two

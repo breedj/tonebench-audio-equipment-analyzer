@@ -3,6 +3,12 @@ REM Single-process mode: build the frontend into Qa403.App/wwwroot, then run jus
 REM against the simulated device, which serves the built UI and auto-opens your default browser.
 setlocal
 
+REM One instance at a time. The app itself replaces an earlier instance when it starts (see
+REM Program.ReplaceRunningInstance), but the build below cannot overwrite an exe that is still
+REM running -- so a running instance is asked to shut down first, gracefully, over its own API.
+REM Nothing listening is the ordinary case and is silent.
+curl -s -m 2 -o nul -X POST http://127.0.0.1:8399/api/app/shutdown 2>nul && echo Stopping a running instance...
+
 echo Building frontend...
 pushd "%~dp0web"
 call npm run build

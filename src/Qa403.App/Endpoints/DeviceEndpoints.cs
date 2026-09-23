@@ -1,5 +1,6 @@
 ﻿using Qa403.App.Services;
 using Qa403.Device;
+using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
 
 namespace Qa403.App.Endpoints;
@@ -20,16 +21,20 @@ public static class DeviceEndpoints
         // one afterwards. Idempotent: connecting an already-connected session just returns status.
         // 503 rather than 500 on failure because "no device found" is a transient condition the user
         // fixes by plugging one in, and the message is what the status bar shows them.
-        group.MapPost("/connect", async (DeviceSessionService session, CancellationToken ct) =>
+        // The body is what the status bar shows, so it is written for the person at the bench: the
+        // transport's own message names a VID and a PID, which tells a tester nothing they can act
+        // on. The precise message still goes to the log, where it belongs.
+        group.MapPost("/connect", async (DeviceSessionService session, ILoggerFactory loggers, CancellationToken ct) =>
         {
             try
             {
                 await session.ConnectAsync(ct);
                 return Results.Ok(session.GetStatus());
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                return Results.Text(ex.Message, "text/plain", statusCode: StatusCodes.Status503ServiceUnavailable);
+                loggers.CreateLogger("Qa403.App.Endpoints.Device").LogWarning(ex, "Connect failed");
+                return Results.Text(ConnectFailure.MessageFor(ex), "text/plain", statusCode: StatusCodes.Status503ServiceUnavailable);
             }
         });
 
@@ -165,6 +170,17 @@ public static class DeviceEndpoints
             return Results.Ok(session.GetStatus());
         });
     }
+}
+
+/// <summary>The line the status bar shows when Connect fails — plain language, no USB identifiers.</summary>
+internal static class ConnectFailure
+{
+    public static string MessageFor(Exception ex) => ex switch
+    {
+        Qa40xDeviceNotFoundException =>
+            "No QA403 was found. Check that it is connected over USB and switched on, then press Connect again.",
+        _ => ex.Message,
+    };
 }
 
 public sealed record DeviceStatusResponse(

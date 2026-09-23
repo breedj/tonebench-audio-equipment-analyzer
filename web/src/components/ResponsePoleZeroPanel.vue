@@ -13,8 +13,18 @@ import CollapsibleSection from './CollapsibleSection.vue'
  */
 const props = defineProps<{ curve: ComplexPoint[] }>()
 
+/** The denominator order — how many poles the model has. */
 const order = defineModel<number>('order', { required: true })
-/** 0 = follow `suggestOrder`; anything else pins the order. */
+/**
+ * The numerator order — how many zeros — pinned separately since 2026-09-21. With one order for
+ * both, an all-pole DUT (any of the four classic filters, most amplifiers below their output
+ * stage) is fitted with as many zeros as poles, and the fitter spends them: measured on the
+ * simulated fifth-order Butterworth, Poles = Zeros = 5 read 0.31 dB rms with three spurious zeros
+ * and two right-half-plane poles, while Poles 5, Zeros 0 is the textbook answer. Auto keeps the two
+ * equal, because the knee search has no way of knowing which the DUT is.
+ */
+const zeroOrder = defineModel<number>('zeroOrder', { required: true })
+/** Follow `suggestOrder` (poles = zeros); off, both orders are pinned by hand. */
 const autoOrder = defineModel<boolean>('autoOrder', { required: true })
 
 const suggestion = computed(() => (props.curve.length >= 6 ? suggestOrder(props.curve, 8) : null))
@@ -23,8 +33,13 @@ const activeOrder = computed(() =>
   autoOrder.value ? (suggestion.value?.order ?? 2) : Math.max(1, Math.min(10, order.value)),
 )
 
+/** Never more zeros than poles: a DUT's transfer function is proper, and an improper fit is a fit of nothing physical. */
+const activeZeroOrder = computed(() =>
+  autoOrder.value ? activeOrder.value : Math.max(0, Math.min(activeOrder.value, zeroOrder.value)),
+)
+
 const fit = computed(() =>
-  props.curve.length >= 6 ? fitRational(props.curve, activeOrder.value, activeOrder.value) : null,
+  props.curve.length >= 6 ? fitRational(props.curve, activeZeroOrder.value, activeOrder.value) : null,
 )
 
 defineExpose({ fit })
@@ -76,17 +91,29 @@ const POOR_FIT_DB = 0.5
             Choose order automatically
           </span>
         </label>
-        <label v-if="!autoOrder" class="flex items-center justify-between gap-2">
-          Order
-          <input
-            v-model.number="order"
-            type="number"
-            min="1"
-            max="10"
-            class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-          />
-        </label>
-        <span v-else class="text-neutral-500 dark:text-neutral-400">Order {{ activeOrder }}</span>
+        <template v-if="!autoOrder">
+          <label class="flex items-center justify-between gap-2" title="The denominator order: how many poles the model may have.">
+            Poles
+            <input
+              v-model.number="order"
+              type="number"
+              min="1"
+              max="10"
+              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+          <label class="flex items-center justify-between gap-2" title="The numerator order: how many zeros the model may have, never more than poles. 0 for an all-pole DUT — a low-pass filter, an amplifier without an output transformer — which is otherwise fitted with as many zeros as poles and spends them on noise.">
+            Zeros
+            <input
+              v-model.number="zeroOrder"
+              type="number"
+              min="0"
+              :max="activeOrder"
+              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+        </template>
+        <span v-else class="text-neutral-500 dark:text-neutral-400">Order {{ activeOrder }} (poles and zeros)</span>
       </div>
 
       <table class="w-full text-left text-[11px] whitespace-nowrap">

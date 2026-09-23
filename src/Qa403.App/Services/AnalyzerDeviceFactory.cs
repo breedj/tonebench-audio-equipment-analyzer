@@ -79,11 +79,15 @@ public class AnalyzerDeviceFactory
         };
 
     /// <summary>
-    /// The simulator as the app hands it to the user: noise floor, mains hum and the generator's
-    /// fixed harmonic stack all <b>off</b>, so a straight wire reads as a straight wire and each
-    /// impairment is something to switch on from the status bar rather than something to explain
-    /// away. <see cref="SimulatedDevice"/>'s own defaults keep all three on — a large number of
-    /// tests are written against that bench, and a device built directly still gets it.
+    /// The simulator as the app hands it to the user: noise floor and mains hum <b>off</b>, so a
+    /// straight wire reads as a straight wire and each impairment is something to switch on from the
+    /// status bar rather than something to explain away. The generator's fixed harmonic stack stays
+    /// <b>on</b> (since 2026-09-21, at Joost's request): without it the FFT screen's THD reads
+    /// 0.000 % on every linear model, which looks like a broken measurement rather than a clean one,
+    /// and the nonlinear models switch the stack off for themselves anyway
+    /// (<see cref="SimulatedDut.SuppliesOwnDistortion"/>). <see cref="SimulatedDevice"/>'s own
+    /// defaults keep all three on — a large number of tests are written against that bench, and a
+    /// device built directly still gets it.
     /// </summary>
     private static SimulatedDevice CreateSimulator()
     {
@@ -92,7 +96,6 @@ public class AnalyzerDeviceFactory
         {
             NoiseEnabled = false,
             HumEnabled = false,
-            HarmonicsEnabled = false,
         };
         return device;
     }

@@ -11,6 +11,7 @@ import type {
 import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
 import { CSD_FFT_LENGTHS, csdSpanMs, describeCsdFftLength, PALETTE_NAMES } from '../measurements/decay'
+import { impulseReferenceLabel } from '../measurements/impulseReadings'
 import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
 import CollapsibleSection from './CollapsibleSection.vue'
 
@@ -242,12 +243,10 @@ function autofit() {
   }
 }
 
+// Shared with the report's impulse chapter, which prints this same block (measurements/impulseReadings.ts).
 const referenceLabel = computed(() => {
   const s = status.value
-  if (!s) return null
-  if (s.referenceMode === 'RightChannel') return 'right input channel'
-  if (s.referenceMode === 'StoredLoopback') return s.referenceCalibrationName ?? 'stored loopback'
-  return 'the generated sweep'
+  return s ? impulseReferenceLabel(s.referenceMode, s.referenceCalibrationName) : null
 })
 </script>
 

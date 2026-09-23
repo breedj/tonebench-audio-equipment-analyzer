@@ -101,6 +101,18 @@ const { showPage } = useManual()
     </p>
     <p><strong>Harmonics</strong> is the distortion curves described above.</p>
     <p>
+      The display panel's <strong>Measurement</strong> block describes the data on screen rather
+      than the settings in the panel, which after an edit are not the same thing: the
+      <strong>Reference</strong> the run divided by, the <strong>Gate</strong> and what it
+      <strong>resolves above</strong>, how many <strong>records</strong> of the requested average
+      have arrived, the <strong>generator</strong> level, and — only when the reference was measured
+      — the <strong>DUT delay</strong> the deconvolution removed, in samples. A report of the
+      measurement prints that block, with the impulse's peak and record length beside it, and the
+      harmonic orders' levels at 100 Hz, 1 kHz and 10 kHz. It deliberately quotes no ±1 dB or −3 dB
+      corners: this response is gated, so below the resolution limit the curve is the window's and a
+      corner read from there would not be the DUT's.
+    </p>
+    <p>
       <strong>Cumulative spectral decay</strong> and <strong>Burst decay</strong> are the two decay
       surfaces, described below. Both are computed from the impulse response already on screen, so
       every one of their settings redraws rather than re-measures — which is why they sit on the

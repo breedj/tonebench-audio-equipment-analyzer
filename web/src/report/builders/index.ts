@@ -4,6 +4,7 @@ import {
   isCrosstalkKind,
   isFrequencyResponseKind,
   isImpedanceKind,
+  isImpulseResponseKind,
   isOutputImpedanceKind,
   isSweepKind,
 } from '../../measurements/kinds'
@@ -14,6 +15,7 @@ import { outputImpedanceSections } from './outputImpedance'
 import { frequencyResponseSections } from './frequencyResponse'
 import { descriptionSections, genericSettingsSection } from './generic'
 import { impedanceSections } from './impedance'
+import { impulseResponseSections } from './impulseResponse'
 import { spectrumSections } from './spectrum'
 import { sweepSections } from './sweep'
 
@@ -29,6 +31,7 @@ export function chapterSections(subject: ReportSubject, elements: readonly Repor
   if (isOutputImpedanceKind(subject.kind)) return outputImpedanceSections(subject, elements)
   if (isSweepKind(subject.kind)) return sweepSections(subject, elements)
   if (isImpedanceKind(subject.kind)) return impedanceSections(subject, elements)
+  if (isImpulseResponseKind(subject.kind)) return impulseResponseSections(subject, elements)
   if (subject.kind === FFT_SPECTRUM_KIND) return spectrumSections(subject, elements)
 
   const sections: ReportSection[] = []

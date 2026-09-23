@@ -1949,12 +1949,21 @@ function buildLiveSubject(): ReportSubject | null {
   } else if (isImpulseResponse.value) {
     subject.sampleRateHz = impulseStatus.value?.sampleRateHz ?? 0
     if (subject.sampleRateHz > 0) facts.push({ label: 'Sample rate', value: `${subject.sampleRateHz} Hz` })
+    const impulse = impulseStatus.value
     subject.data = {
       kind: 'impulse',
       impulse: impulseTrace.value,
       traces: impulseTraces.value,
       harmonics: impulseHarmonics.value,
       display: currentImpulseDisplay(),
+      run: {
+        referenceMode: impulse?.referenceMode ?? 'None',
+        referenceName: impulse?.referenceCalibrationName ?? null,
+        latencySamples: impulse?.latencySamples ?? null,
+        averagesTaken: impulse?.averagesTaken ?? null,
+        averageCount: impulse?.averageCount ?? 0,
+        generatorAmpDbv: impulse?.generatorAmpDbv ?? null,
+      },
     }
   } else if (isImpedance.value) {
     facts.push({ label: 'Reference resistor', value: `${impedanceReferenceOhms.value} Ω` })

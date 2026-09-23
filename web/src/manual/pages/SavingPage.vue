@@ -186,7 +186,10 @@ const { showPage } = useManual()
         current and the reference resistor, then the component fit for whatever the
         <strong>Device under test</strong> dropdown says is on the fixture — the capacitor's C, ESR
         and ESL, the inductor's L and DCR, or the loudspeaker's Thiele-Small numbers — with the same
-        caveats the readout panel shows. For an FFT the <strong>Metrics</strong> tiles chosen
+        caveats the readout panel shows; for an impulse response its <strong>Measurement</strong>
+        block (peak, gate, what the gate resolves, the record, the reference, the records taken, the
+        generator level and the removed DUT delay) and, when harmonics were extracted, each order's
+        level at 100 Hz, 1 kHz and 10 kHz with the frequency it stays valid to. For an FFT the <strong>Metrics</strong> tiles chosen
         with the Metrics button, the <strong>Harmonics table</strong>, and the
         <strong>Oscilloscope</strong> and <strong>Waterfall</strong> under the spectrum. Those last
         two exist only for the measurement on screen (a stored result keeps no waveform and no

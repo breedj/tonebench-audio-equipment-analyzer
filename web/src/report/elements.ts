@@ -3,6 +3,7 @@ import {
   isCrosstalkKind,
   isFrequencyResponseKind,
   isImpedanceKind,
+  isImpulseResponseKind,
   isOutputImpedanceKind,
   isSweepKind,
 } from '../measurements/kinds'
@@ -80,6 +81,12 @@ const IMPEDANCE_MEASUREMENTS: ReportElement = {
   hint: 'Peak, minimum and median |Z|, the drive current and, for the Component the screen selects, its capacitor, inductor or Thiele-Small fit.',
 }
 
+const IMPULSE_MEASUREMENTS: ReportElement = {
+  id: 'measurements',
+  label: 'Measurements',
+  hint: "The peak, the gate and what it resolves, the reference, the records and the generator level — the Measurement block — then each harmonic order's level at 100 Hz, 1 kHz and 10 kHz.",
+}
+
 const METRICS: ReportElement = {
   id: 'metrics',
   label: 'Metrics',
@@ -113,6 +120,7 @@ export function reportElementsForKind(kind: string | null | undefined): readonly
   if (isOutputImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, OUTPUT_IMPEDANCE_MEASUREMENTS]
   if (isSweepKind(kind)) return [CHART, DESCRIPTION, SETTINGS, SWEEP_MEASUREMENTS]
   if (isImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPEDANCE_MEASUREMENTS]
+  if (isImpulseResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPULSE_MEASUREMENTS]
   if (kind === FFT_SPECTRUM_KIND) return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, OSCILLOSCOPE, WATERFALL]
   return GENERIC_REPORT_ELEMENTS
 }

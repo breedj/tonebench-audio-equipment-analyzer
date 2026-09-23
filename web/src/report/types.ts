@@ -16,6 +16,7 @@ import type { ImpedanceDisplay } from '../impedance/display'
 import type { CrosstalkDisplay } from '../crosstalk/display'
 import type { OutputImpedanceDisplay } from '../outputImpedance/display'
 import type { ImpulseDisplay } from '../measurements/impulseDisplay'
+import type { ImpulseRunFacts } from '../measurements/impulseReadings'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
 import type { SweepTraceFamily } from '../sweep/points'
@@ -114,6 +115,8 @@ export type ReportSubjectData =
       traces: ResponseTrace[]
       harmonics: HarmonicCurveJson[]
       display: ImpulseDisplay
+      /** What the run says about itself — the Display panel's Measurement block, which no curve carries. */
+      run: ImpulseRunFacts
     }
   | {
       kind: 'impedance'

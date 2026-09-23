@@ -190,12 +190,24 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       api.getStoredImpulse(detail.resultId),
       api.getStoredResponse(detail.resultId),
     ])
+    const run = impulseRunFromParams(detail.paramsJson)
+    // The reference and the removed delay are the stored impulse's own; the rest is the as-run params.
+    const storedImpulse = stored.impulses[0] ?? null
     return {
       kind: 'impulse',
       impulse: trace.impulse,
       traces: toResponseTraces(response.traces),
       harmonics: stored.harmonics,
       display: impulseDisplayFromParams(displayParams, defaultImpulseDisplay(detail.sampleRateHz)),
+      run: {
+        referenceMode: storedImpulse?.referenceMode ?? run.referenceMode,
+        referenceName: storedImpulse?.referenceName ?? null,
+        latencySamples: storedImpulse?.latencySamples ?? null,
+        // A stored result records what it was asked for, never how many records it actually took.
+        averagesTaken: null,
+        averageCount: run.averageCount,
+        generatorAmpDbv: run.generatorAmpDbv,
+      },
     }
   }
 
@@ -234,6 +246,20 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
   }
 
   return { kind: 'none' }
+}
+
+/** The run facts an impulse chapter needs that its curves do not carry, read off a result's `params_json`. */
+function impulseRunFromParams(paramsJson: string): { referenceMode: string; averageCount: number; generatorAmpDbv: number | null } {
+  try {
+    const params = JSON.parse(paramsJson) as { referenceMode?: unknown; averageCount?: unknown; generatorAmpDbv?: unknown }
+    return {
+      referenceMode: typeof params.referenceMode === 'string' ? params.referenceMode : 'None',
+      averageCount: typeof params.averageCount === 'number' ? params.averageCount : 0,
+      generatorAmpDbv: typeof params.generatorAmpDbv === 'number' ? params.generatorAmpDbv : null,
+    }
+  } catch {
+    return { referenceMode: 'None', averageCount: 0, generatorAmpDbv: null }
+  }
 }
 
 /** The two run facts an impedance chapter needs beside its curve, read off a result's `params_json`. */

@@ -205,7 +205,9 @@ describe('report element defaults', () => {
     expect(defaultReportElements('FrequencyResponse')).toEqual(['chart', 'description', 'measurements'])
     expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description', 'measurements'])
     expect(defaultReportElements('Impedance')).toEqual(['chart', 'description', 'measurements'])
-    expect(defaultReportElements('ImpulseResponse')).toEqual(['chart', 'description'])
+    expect(defaultReportElements('ImpulseResponse')).toEqual(['chart', 'description', 'measurements'])
+    // A kind no build of this client knows: chart and description, and the settings dump behind them.
+    expect(defaultReportElements('SomethingNewer')).toEqual(['chart', 'description'])
   })
 })
 

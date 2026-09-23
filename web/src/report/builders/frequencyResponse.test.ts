@@ -189,8 +189,9 @@ describe('frequencyResponseSections / chapterSections', () => {
   it('routes a response kind to its builder and anything else to the generic one', () => {
     expect(chapterSections(subject, ['settings'])[0].rows!.map((r) => r.label)).toContain('Bandwidth reference')
 
-    // The impulse response is the one kind still without a builder of its own.
-    const other = chapterSections({ ...subject, kind: 'ImpulseResponse', paramsJson: JSON.stringify({ frequencySpanHz: 24000, chartView: 'x' }) }, ['settings'])
+    // Every kind has a builder now, so the generic branch is what an unknown one falls to — a type
+    // from a newer build, or the notes-and-settings chapter of a measurement that has no result.
+    const other = chapterSections({ ...subject, kind: 'SomethingNewer', paramsJson: JSON.stringify({ frequencySpanHz: 24000, chartView: 'x' }) }, ['settings'])
     expect(other).toEqual([{ kind: 'keyValues', title: 'Settings', rows: [{ label: 'Frequency span hz', value: '24000' }] }])
   })
 })

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ComplexPoint } from './complexPlane'
-import { fitRational, kneeOrder, suggestOrder, type OrderFit } from './rationalFit'
+import {
+  CANCELLATION_SWING_DB,
+  dcGainExtrapolation,
+  fitRational,
+  kneeOrder,
+  suggestOrder,
+  type OrderFit,
+} from './rationalFit'
 import { polyRoots, trimLeading } from './poly'
 import { logGrid } from './testTrace'
 
@@ -317,14 +324,16 @@ describe('kneeOrder', () => {
   })
 
   it('takes the discount when it is nearly free', () => {
+    // Errors kept above KNEE_NEGLIGIBLE_ERROR_DB on the way down, or the walk stops at order 2 and
+    // the discount this is about never happens — which is that floor working, not this rule.
     const cheapDiscount: OrderFit[] = [
-      { order: 1, rmsErrorDb: 1, cancellations: 0 },
-      { order: 2, rmsErrorDb: 0.01, cancellations: 0 },
-      { order: 3, rmsErrorDb: 0.009, cancellations: 1 },
-      { order: 4, rmsErrorDb: 0.002, cancellations: 1 },
+      { order: 1, rmsErrorDb: 100, cancellations: 0 },
+      { order: 2, rmsErrorDb: 1, cancellations: 0 },
+      { order: 3, rmsErrorDb: 0.9, cancellations: 1 },
+      { order: 4, rmsErrorDb: 0.2, cancellations: 1 },
     ]
 
-    // Last cliff is 4 (4.5x), minus its one cancellation is 3, and 0.009 is inside 10x of 0.002.
+    // Last cliff is 4 (4.5x), minus its one cancellation is 3, and 0.9 is inside 10x of 0.2.
     expect(kneeOrder(cheapDiscount)).toBe(3)
   })
 
@@ -368,6 +377,53 @@ describe('kneeOrder', () => {
     ).toBe(3)
   })
 
+  /**
+   * The EL84 amplifier, chirp 13 Hz–91 kHz with the right channel as reference: a push-pull output
+   * stage that is flat to 0.11 dB from 100 Hz to 20 kHz, with every pole of the DUT outside the
+   * swept band. Errors and cancellation counts are the fitter's own, order 1 through 8.
+   *
+   * Nothing here is structure: orders 1 to 5 all sit on the chirp's own ripple, and the 6.4x step
+   * to order 6 buys five hundredths of a decibel with four extra roots — two right-half-plane pairs
+   * on an unconditionally stable amplifier — and moves the reported DC gain from 26.55 dB to
+   * 18.43 dB. Without the floor this curve's largest ratio is that step and the rule took it.
+   */
+  const EL84_FLAT: OrderFit[] = [
+    { order: 1, rmsErrorDb: 0.0605, cancellations: 0 },
+    { order: 2, rmsErrorDb: 0.0598, cancellations: 1 },
+    { order: 3, rmsErrorDb: 0.0531, cancellations: 1 },
+    { order: 4, rmsErrorDb: 0.053, cancellations: 2 },
+    { order: 5, rmsErrorDb: 0.0523, cancellations: 0 },
+    { order: 6, rmsErrorDb: 0.0081, cancellations: 0 },
+    { order: 7, rmsErrorDb: 0.0077, cancellations: 2 },
+    { order: 8, rmsErrorDb: 0.0079, cancellations: 0 },
+  ]
+
+  it('does not climb on a response that was already fitted within the measurement noise', () => {
+    expect(kneeOrder(EL84_FLAT)).toBe(1)
+  })
+
+  /**
+   * The floor gates a step by where it *started*, not by where it ended — otherwise a filter whose
+   * true order fits to round-off would never be reached, since that step ends below any floor.
+   */
+  it('counts a cliff out of a real error and not one out of a negligible error', () => {
+    expect(
+      kneeOrder([
+        { order: 1, rmsErrorDb: 0.5, cancellations: 0 },
+        { order: 2, rmsErrorDb: 0.05, cancellations: 0 },
+        { order: 3, rmsErrorDb: 0.005, cancellations: 0 },
+      ]),
+    ).toBe(2)
+
+    expect(
+      kneeOrder([
+        { order: 1, rmsErrorDb: 5, cancellations: 0 },
+        { order: 2, rmsErrorDb: 0.5, cancellations: 0 },
+        { order: 3, rmsErrorDb: 0.05, cancellations: 0 },
+      ]),
+    ).toBe(3)
+  })
+
   it('handles degenerate input', () => {
     expect(kneeOrder([])).toBe(2)
     expect(kneeOrder([{ order: 3, rmsErrorDb: 0.5, cancellations: 0 }])).toBe(3)
@@ -391,5 +447,112 @@ describe('suggestOrder', () => {
     const { order } = suggestOrder(sample(cascade, GRID), 6)
 
     expect(order).toBe(4)
+  })
+})
+
+/**
+ * `fitRational.cancellations`: which pole/zero pairs are the fit spending order on nothing.
+ *
+ * Judged by the pair's effect over the measured band rather than by how close its two frequencies
+ * are, so every case below is stated as the swing it produces.
+ */
+describe('cancellations', () => {
+  it('flags a pair that does nothing across the band', () => {
+    // A second-order filter fitted at order 4: the two extra roots land on top of each other and
+    // swing 0.00 dB, which is the definition being tested.
+    const fit = fitRational(sample(twoPole(1000, Math.SQRT1_2), GRID), 4, 4)!
+
+    expect(fit.cancellations.length).toBeGreaterThan(0)
+    for (const pair of fit.cancellations) expect(pair.swingDb).toBeLessThan(CANCELLATION_SWING_DB)
+  })
+
+  /**
+   * The false positive the frequency-distance rule produced, and the reason it was replaced: a notch
+   * *is* a zero pair sitting on a pole pair — same frequency, different damping — so fitted at its
+   * own order 2/2, with nothing spurious in the model at all, it was reported as a cancellation and
+   * the panel told the user to lower the order on a component they had built.
+   */
+  it('does not call a notch a cancellation', () => {
+    const fit = fitRational(sample(notch(800, 4), GRID), 2, 2)!
+
+    expect(fit.poles[0].freqHz).toBeCloseTo(800, 0)
+    expect(fit.zeros[0].freqHz).toBeCloseTo(800, 0)
+    expect(fit.cancellations).toEqual([])
+  })
+
+  /** A gentle shelf is 17 % apart in frequency and 1.58 dB of real response. Both facts matter. */
+  it('does not call a first-order shelf a cancellation', () => {
+    // (1 + s/w_z)/(1 + s/w_p), pole 300 Hz against zero 360 Hz.
+    const shelf = (omega: number) => {
+      const n = { re: 1, im: omega / (2 * Math.PI * 360) }
+      const d = { re: 1, im: omega / (2 * Math.PI * 300) }
+      const mag = d.re * d.re + d.im * d.im
+      return { re: (n.re * d.re + n.im * d.im) / mag, im: (n.im * d.re - n.re * d.im) / mag }
+    }
+    const fit = fitRational(sample(shelf, GRID), 1, 1)!
+
+    expect(fit.poles[0].freqHz).toBeCloseTo(300, 0)
+    expect(fit.zeros[0].freqHz).toBeCloseTo(360, 0)
+    expect(fit.cancellations).toEqual([])
+  })
+
+  it('spends each zero on at most one pole', () => {
+    const fit = fitRational(sample(twoPole(1000, Math.SQRT1_2), GRID), 4, 4)!
+
+    expect(new Set(fit.cancellations.map((c) => c.zeroHz)).size).toBe(fit.cancellations.length)
+    expect(fit.cancellations.length).toBeLessThanOrEqual(fit.zeros.length)
+  })
+})
+
+/**
+ * `dcGainExtrapolation`: whether the DC gain is a reading of the measurement or a continuation of
+ * the model past its last data point.
+ */
+describe('dcGainExtrapolation', () => {
+  const BAND = { lowHz: 20, highHz: 20000 }
+
+  it('is null when every root is above the band, where DC gain is the passband gain', () => {
+    const fit = fitRational(sample(onePole(100_000), GRID), 0, 1)!
+
+    expect(fit.poles[0].freqHz).toBeGreaterThan(BAND.highHz)
+    expect(dcGainExtrapolation(fit, BAND)).toBeNull()
+    expect(fit.dcGainDb).toBeCloseTo(0, 3)
+  })
+
+  it('is null when the root is inside the band', () => {
+    const fit = fitRational(sample(onePole(1000), GRID), 0, 1)!
+
+    expect(dcGainExtrapolation(fit, BAND)).toBeNull()
+  })
+
+  /**
+   * The EL84 case in miniature: a corner below the sweep, so H(0) is separated from everything
+   * measured by a roll-off the data never saw. The gain at the bottom of the band is −12 dB and the
+   * fit still quotes 0 dB at DC — correctly, for the model, and unverifiably.
+   */
+  it('names the pole below the band that the DC gain runs through', () => {
+    const fit = fitRational(sample(onePole(5), GRID), 0, 1)!
+
+    expect(fit.poles[0].freqHz).toBeCloseTo(5, 1)
+    expect(dcGainExtrapolation(fit, BAND)).toEqual({ rootHz: expect.closeTo(5, 1), kind: 'pole' })
+  })
+
+  it('names the lowest root when a pole and a zero are both below the band', () => {
+    // (s/w0)/(1 + s/w0): an AC-coupled stage, zero at the origin and a pole at 5 Hz, measured from
+    // 20 Hz up. This is what the EL84's order-6 fit found, and what made its DC gain 8 dB low.
+    const highPass = (omega: number) => {
+      const x = omega / (2 * Math.PI * 5)
+      const mag = 1 + x * x
+      return { re: (x * x) / mag, im: x / mag }
+    }
+    const fit = fitRational(sample(highPass, GRID), 1, 1)!
+    const extrapolation = dcGainExtrapolation(fit, BAND)!
+
+    expect(extrapolation.kind).toBe('zero')
+    expect(extrapolation.rootHz).toBeLessThan(fit.poles[0].freqHz)
+  })
+
+  it('judges nothing without a band', () => {
+    expect(dcGainExtrapolation(fitRational(sample(onePole(5), GRID), 0, 1)!, null)).toBeNull()
   })
 })

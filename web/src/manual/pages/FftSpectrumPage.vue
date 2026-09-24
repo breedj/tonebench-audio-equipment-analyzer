@@ -314,6 +314,18 @@ const { showPage } = useManual()
       an amber tag naming it (<code>A</code>, <code>468</code>, <code>A+U1</code>); the fundamental,
       THD, gain, peak and RMS tiles never do, because nothing weights them.
     </p>
+    <p>
+      Those same tiles read <code>n/a</code> whenever the stimulus is more than one tone — an IMD
+      preset, any Sine tones stimulus with two or more tones, or a Multitone comb. Every one of them
+      is defined against a single fundamental: the loudest tone is treated as the signal and
+      everything else in the band as noise and distortion. Play a second tone and the figure is
+      still arithmetically correct and completely meaningless — SMPTE's 7 kHz tone sits 12.04 dB
+      under its 60 Hz one, which reads as THD+N 399.8 % and SNR −12.04 dB on a perfectly healthy
+      analyzer. Hovering an <code>n/a</code> tile says why. THD, the harmonics table, the IMD figure
+      and its products table are unaffected and keep their numbers — those are what a two-tone test
+      is for, and TD+N is the multitone equivalent. A report of such a measurement prints
+      <code>n/a</code> for the same rows and gives the reason once per channel.
+    </p>
 
     <h3>Spectrum</h3>
     <p>

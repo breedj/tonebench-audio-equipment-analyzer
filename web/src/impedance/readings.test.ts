@@ -5,12 +5,15 @@ import {
   LOUDSPEAKER_NOTE,
   componentLabel,
   componentReading,
+  equivalentAt,
+  equivalentRows,
   formatBand,
   formatQ,
   formatRatio,
   impedanceReadings,
 } from './readings'
-import { driverTestTrace, impedanceTestTrace } from './testTrace'
+import { ohmsToDbOhms } from './equivalent'
+import { driverTestTrace, impedanceTestTrace, portedDriverTestTrace } from './testTrace'
 
 describe('impedanceReadings', () => {
   it('reads the peak off the trace, the minimum and median off the curve, and the drive current by the runner formula', () => {
@@ -65,6 +68,23 @@ describe('componentReading', () => {
     expect(reading.notes).toEqual([LOUDSPEAKER_NOTE])
   })
 
+  it('withholds the Thiele-Small rows, and says why, when the curve has two peaks', () => {
+    // A ported box. Every row would be arithmetically correct for whichever peak was chosen and
+    // physically meaningless, so none of them is shown — see the note itself for the measurement
+    // this came from.
+    const reading = componentReading(portedDriverTestTrace(), 'Loudspeaker')!
+    expect(reading.rows).toEqual([])
+    expect(reading.notes).toHaveLength(1)
+    expect(reading.notes[0]).toContain('ported (bass-reflex)')
+    // Both peaks and the minimum between them, named, in ascending order.
+    expect(reading.notes[0]).toContain('at 37.85 Hz and 104.0 Hz')
+    expect(reading.notes[0]).toContain('minimum between them at 62.74 Hz')
+  })
+
+  it('keeps the Thiele-Small rows for a single resonance, which a sealed box or free air gives', () => {
+    expect(componentReading(driverTestTrace(), 'Loudspeaker')!.notes).toEqual([LOUDSPEAKER_NOTE])
+  })
+
   it('says so, with no rows, when a loudspeaker was named but the curve has no resonance', () => {
     const reading = componentReading(impedanceTestTrace([20, 100, 1000, 10000, 20000], [8, 8, 8, 8, 8]), 'Loudspeaker')!
     expect(reading.rows).toEqual([])
@@ -90,5 +110,47 @@ describe('componentReading', () => {
     expect(reading.rows[0].value).toBe('10.000 µF')
     expect(reading.rows[2].value).toBe('—')
     expect(reading.notes).toEqual([CAPACITOR_NO_SRF_NOTE])
+  })
+})
+
+describe('equivalentAt', () => {
+  it('reads the measured column nearest the frequency asked for, as a series R + jX', () => {
+    // 45° at 1 kHz on 10 Ω: R and X are both 10/√2, and that reactance is 1.125 mH.
+    const trace = impedanceTestTrace([100, 1000, 10000], [10, 10, 10], [0, 45, 0])
+    const reading = equivalentAt(trace, 900)!
+
+    expect(reading.freqHz).toBe(1000)
+    expect(reading.equivalent.resistanceOhms).toBeCloseTo(7.0711, 3)
+    expect(reading.equivalent.reactanceOhms).toBeCloseTo(7.0711, 3)
+    expect(reading.equivalent.inductanceH).toBeCloseTo(0.0011254, 6)
+    expect(reading.equivalent.capacitanceF).toBeNull()
+  })
+
+  it('takes |Z| as the midpoint of the column, not its maximum', () => {
+    // The max carries the aggregation bias of a maximum over several bins — right for a peak
+    // reading, wrong for "what is the impedance here".
+    const trace = impedanceTestTrace([1000], [10])
+    trace.magnitudeMinDbOhms = [ohmsToDbOhms(8)]
+    trace.magnitudeMaxDbOhms = [ohmsToDbOhms(12)]
+    expect(equivalentAt(trace, 1000)!.ohms).toBeCloseTo(10, 6)
+  })
+
+  it('is null for a curve with no columns', () => {
+    expect(equivalentAt(impedanceTestTrace([], []), 1000)).toBeNull()
+  })
+})
+
+describe('equivalentRows', () => {
+  it('names the reactive row after the sign of the reactance', () => {
+    const inductive = equivalentRows(equivalentAt(impedanceTestTrace([1000], [10], [45]), 1000))
+    const capacitive = equivalentRows(equivalentAt(impedanceTestTrace([1000], [10], [-45]), 1000))
+
+    expect(inductive.map((r) => r.label)).toEqual(['Measured at', '|Z|', 'Phase', 'Series R', 'Series X', 'Series inductance', 'Coherence'])
+    expect(capacitive[5].label).toBe('Series capacitance')
+    expect(equivalentRows(null)[5].label).toBe('Series L or C')
+  })
+
+  it('dashes every value when there is nothing to read, rather than dropping the rows', () => {
+    expect(equivalentRows(null).map((r) => r.value)).toEqual(['—', '—', '—', '—', '—', '—', '—'])
   })
 })

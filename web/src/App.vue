@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
-import { api, ApiError, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
+import { api, ApiError, type ResponsePhaseKindName, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
 import { useDevice } from './composables/useDevice'
 import { DEVICE_STATUS_KEY } from './simulator/hints'
@@ -20,7 +20,7 @@ import { useCaptureDelay } from './composables/useCaptureDelay'
 import { useExternalGain } from './composables/useExternalGain'
 import { useAutosave } from './composables/useAutosave'
 import { determineAttenuation, nearestInputRange } from './attenuation'
-import { formatAveraging } from './metrics'
+import { formatAveraging, stimulusSummary } from './metrics'
 import { stopRun } from './deviceControl'
 import DeviceStatusBar from './components/DeviceStatusBar.vue'
 import MeasurementSidebar from './components/MeasurementSidebar.vue'
@@ -68,6 +68,7 @@ import ImpedanceDisplayPanel from './components/ImpedanceDisplayPanel.vue'
 import ImpedanceChart from './components/ImpedanceChart.vue'
 import ImpedancePlaneChart from './components/ImpedancePlaneChart.vue'
 import ImpedanceReadoutPanel from './components/ImpedanceReadoutPanel.vue'
+import ImpedanceComparisonPanel from './components/ImpedanceComparisonPanel.vue'
 import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.vue'
 import CrosstalkConfigPanel from './components/CrosstalkConfigPanel.vue'
 import CrosstalkDisplayPanel from './components/CrosstalkDisplayPanel.vue'
@@ -91,7 +92,7 @@ import ReportDialog from './components/ReportDialog.vue'
 import ProjectReportDialog from './components/ProjectReportDialog.vue'
 import ToolbarIcon from './components/ToolbarIcon.vue'
 import ScreenshotDialog from './components/ScreenshotDialog.vue'
-import { DEFAULT_RESPONSE_DISPLAY, responseDisplayFromParams, type ResponseDisplay } from './response/display'
+import { DEFAULT_RESPONSE_DISPLAY, responseDisplayFromParams, responsePhaseKindFromParams, type ResponseDisplay } from './response/display'
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
 import { crosstalkDisplayFromParams, crosstalkDisplayToParams, DEFAULT_CROSSTALK_DISPLAY, type CrosstalkDisplay } from './crosstalk/display'
@@ -194,7 +195,7 @@ watch(
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
 // fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
-const { kind: stimulusKind, tones: stimulusTones, imd: stimulusImd } = useGeneratorStimulus()
+const { kind: stimulusKind, tones: stimulusTones, multitone: stimulusMultitone, imd: stimulusImd } = useGeneratorStimulus()
 const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
 
 // Whether the pipeline is measuring two-tone IMD right now — what the Intermodulation table
@@ -430,6 +431,8 @@ const {
   decayComputing: impulseDecayComputing,
   computeCsd: computeImpulseCsd,
   computeBurstDecay: computeImpulseBurstDecay,
+  computeStoredCsd: computeStoredImpulseCsd,
+  computeStoredBurstDecay: computeStoredImpulseBurstDecay,
 } = useImpulseResponse()
 
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
@@ -567,6 +570,16 @@ const visibleResponseOverlays = computed(() =>
 const visibleImpedanceOverlays = computed(() =>
   overlays.value.filter((o) => o.visible && o.impedanceTraces?.length),
 )
+
+/**
+ * The same filter for the impulse waveform. Gated on the trace actually being there, so a result of
+ * another kind checked on while this screen is open — or an impulse result that stored none — is
+ * skipped rather than drawn empty.
+ */
+const visibleImpulseOverlays = computed(() => overlays.value.filter((o) => o.visible && o.impulseTrace))
+
+/** The same for the harmonic curves, which a stored impulse result carries separately from its waveform. */
+const visibleHarmonicOverlays = computed(() => overlays.value.filter((o) => o.visible && o.harmonicCurves?.length))
 
 /**
  * selectedSweepPointFor's counterpart for a stored overlay: never "running" (it's a saved result),
@@ -868,8 +881,25 @@ const responseHideOutOfBandRoots = ref(DEFAULT_RESPONSE_DISPLAY.hideOutOfBandRoo
  * complex number describing nothing. It plots, and it looks entirely plausible, which is why it is
  * excluded by construction rather than by a warning.
  */
+/**
+ * The phase kind the screen should be read with: the live run's when there is one, and otherwise the
+ * first checked history item's, taken from its own stored settings exactly as a report takes it.
+ *
+ * <p>Without the second half the projection buttons did nothing whenever a stored result was the
+ * only thing on screen. The gate asked the <i>runner</i>, and an idle stepped runner reports
+ * <c>None</c> — so `activeResponseProjection` clamped every choice back to Bode, silently, while the
+ * buttons went on looking clickable. Reported 2026-09-24 against a saved stepped run whose own
+ * settings say DutResponse, i.e. one the polar views can represent perfectly well.</p>
+ */
+const effectiveResponsePhaseKind = computed<ResponsePhaseKindName>(() => {
+  if (responseTraces.value.length > 0) return responsePhaseKind.value
+  const first = visibleResponseOverlays.value[0]
+  if (!first) return responsePhaseKind.value
+  return responsePhaseKindFromParams(first.detail.kind, first.detail.paramsJson)
+})
+
 const responseHasComplexResponse = computed(
-  () => responsePhaseKind.value === 'DutResponse' || responsePhaseKind.value === 'PerTrace',
+  () => effectiveResponsePhaseKind.value === 'DutResponse' || effectiveResponsePhaseKind.value === 'PerTrace',
 )
 
 // Falls back to the Bode chart whenever the run cannot support a projection, so selecting a
@@ -881,9 +911,12 @@ const activeResponseProjection = computed(() =>
 const responsePolarChart = ref<InstanceType<typeof ResponsePolarChart> | null>(null)
 const responsePoleZeroPanel = ref<InstanceType<typeof ResponsePoleZeroPanel> | null>(null)
 
-// Fit settings. Not persisted into params_json: unlike the projection or the radius map these
-// describe an analysis of one measurement rather than how the screen is set up, and a stored order
-// would silently be applied to a different DUT's curve on load.
+// Fit settings. Persisted into params_json since 2026-09-24, at Joost's request. They were left out
+// originally on the grounds that they describe an *analysis* rather than how the screen is set up,
+// and that a stored order could be applied to a different DUT's curve on load — but params_json
+// belongs to one measurement type, i.e. one DUT and one setup, so that case does not arise; and the
+// order is a judgement reached by reading the residual, which should survive closing the app. Auto
+// is the default, so a type that never touched them still fits adaptively.
 const responseFitAutoOrder = ref(true)
 const responseFitOrder = ref(2)
 const responseFitZeroOrder = ref(2)
@@ -971,6 +1004,10 @@ function applyStoredResponseDisplay(paramsJson: string) {
   responseRestoreDelay.value = display.restoreDelay
   if (typeof stored.chartAutofitOnDone === 'boolean') responseAutofitOnDone.value = stored.chartAutofitOnDone
   if (stored.chartProjection) responseProjection.value = stored.chartProjection
+  // Absent on a type written before the orders were stored: Auto, which is what those builds did.
+  responseFitAutoOrder.value = typeof stored.chartFitAutoOrder === 'boolean' ? stored.chartFitAutoOrder : true
+  if (typeof stored.chartFitPoles === 'number') responseFitOrder.value = stored.chartFitPoles
+  if (typeof stored.chartFitZeros === 'number') responseFitZeroOrder.value = stored.chartFitZeros
 
   void nextTick(() => {
     responseDisplayRestoring = false
@@ -996,6 +1033,7 @@ watch(
     responseDelayView, responseDelayTopUs, responseDelayBottomUs,
     responseProjection, responseNyquistRadius, responseNyquistRadiusFloorDb,
     responseInvertLoopSign, responseRestoreDelay,
+    responseFitAutoOrder, responseFitOrder, responseFitZeroOrder,
   ],
   () => {
     if (!responseDisplayRestoring && isFrequencyResponse.value) markDirty()
@@ -1028,6 +1066,13 @@ const impedanceAutofitOnDone = ref(true)
  * fixture is how a choke's self-resonance gets reported as a driver's fs.
  */
 const impedanceDutType = ref<DutType>('None')
+
+/**
+ * The frequency the Equivalent circuit block reads, owned here rather than by the readout panel: the
+ * comparison table under the chart reads every checked history curve at the same frequency, and the
+ * report's Equivalent circuit block prints it. Persisted with the rest of the screen's display state.
+ */
+const impedanceEquivalentHz = ref(1000)
 
 let impedanceDisplayRestoring = false
 
@@ -1083,6 +1128,8 @@ function applyStoredImpedanceDisplay(paramsJson: string) {
   impedancePhaseBottomDeg.value = display.phaseBottomDeg
   if (typeof stored.chartAutofitOnDone === 'boolean') impedanceAutofitOnDone.value = stored.chartAutofitOnDone
   impedanceDutType.value = isDutType(stored.chartDutType) ? stored.chartDutType : 'None'
+  impedanceEquivalentHz.value =
+    typeof stored.chartEquivalentHz === 'number' && stored.chartEquivalentHz > 0 ? stored.chartEquivalentHz : 1000
 
   void nextTick(() => {
     impedanceDisplayRestoring = false
@@ -1104,7 +1151,7 @@ watch(
     impedanceView, impedanceShowPhase, impedanceShowCoherence, impedanceShowShortCal, impedanceThickLines,
     impedanceShowDataPoints, impedanceZTopOhms, impedanceZBottomOhms, impedanceZScale, impedanceXFromHz,
     impedanceXToHz, impedancePhaseTopDeg, impedancePhaseBottomDeg, impedanceAutofitOnDone,
-    impedanceDutType,
+    impedanceDutType, impedanceEquivalentHz,
   ],
   () => {
     if (!impedanceDisplayRestoring && isImpedance.value) markDirty()
@@ -1916,7 +1963,7 @@ function buildLiveSubject(): ReportSubject | null {
       kind: 'response',
       traces: responseTraces.value,
       display: currentResponseDisplay(),
-      phaseKind: responsePhaseKind.value,
+      phaseKind: effectiveResponsePhaseKind.value,
       rightChannelIsReference: responseRightChannelIsReference.value,
       latencySamples: responseLatencySamples.value,
     }
@@ -1973,6 +2020,7 @@ function buildLiveSubject(): ReportSubject | null {
       traces: impedanceTraces.value,
       display: currentImpedanceDisplay(),
       dutType: impedanceDutType.value,
+      equivalentHz: impedanceEquivalentHz.value,
       referenceOhms: impedanceReferenceOhms.value,
       generatorAmpDbv: impedanceTraces.value.length > 0 && Number.isFinite(impedanceGeneratorAmpDbv.value) ? impedanceGeneratorAmpDbv.value : null,
     }
@@ -1995,6 +2043,9 @@ function buildLiveSubject(): ReportSubject | null {
       display: useChartDisplay(),
       selectedMetrics: selectedMetrics.value,
       generatorTones: status.value?.generatorLeft.tones ?? [],
+      // The staged stimulus, not the live one: a report is usually taken after Stop, which silences
+      // DeviceStatus's tones — MetricsPanel.vue decides the same thing from the same place.
+      stimulus: stimulusSummary(stimulusKind.value, stimulusTones, stimulusMultitone),
       loadOhms: loadOhms.value,
       scope: scope.value,
       scopeResidual: scopeResidual.value,
@@ -2356,13 +2407,20 @@ function requestImpulseDecay() {
   if (impulseDecayTimer) clearTimeout(impulseDecayTimer)
   if (!isImpulseResponse.value) return
   if (impulseView.value !== 'Csd' && impulseView.value !== 'BurstDecay') return
-  if (!impulseStatus.value || impulseStatus.value.passesCompleted === 0) return
+
+  // A surface is a heatmap and cannot overlay, so there is one subject: the live measurement when
+  // there is one, otherwise the first checked history item. Without this second case a checked item
+  // drew its waveform and its gated response and then left both decay views blank, which reads as
+  // the analysis being broken rather than as having no input.
+  const live = (impulseStatus.value?.passesCompleted ?? 0) > 0
+  const storedId = live ? null : (visibleImpulseOverlays.value[0]?.id ?? null)
+  if (!live && storedId === null) return
 
   const isCsd = impulseView.value === 'Csd'
   impulseDecayTimer = setTimeout(() => {
     impulseDecayTimer = null
     if (isCsd) {
-      void computeImpulseCsd({
+      const csdRequest = {
         fftLength: impulseCsdFftLength.value,
         blockShiftSamples: impulseCsdBlockShiftSamples.value,
         blockCount: impulseCsdBlockCount.value,
@@ -2371,16 +2429,20 @@ function requestImpulseDecay() {
         lowHz: impulseFreqFromHz.value,
         highHz: impulseFreqToHz.value,
         displayColumns: DECAY_DISPLAY_COLUMNS,
-      })
+      }
+      void (storedId === null ? computeImpulseCsd(csdRequest) : computeStoredImpulseCsd(storedId, csdRequest))
     } else {
-      void computeImpulseBurstDecay({
+      const burstRequest = {
         lowHz: impulseFreqFromHz.value,
         highHz: impulseFreqToHz.value,
         maxPeriods: impulseBurstMaxPeriods.value,
         pointsPerPeriod: impulseBurstPointsPerPeriod.value,
         resolution: impulseBurstResolution.value,
         frequencyColumns: BURST_FREQUENCY_COLUMNS,
-      })
+      }
+      void (storedId === null
+        ? computeImpulseBurstDecay(burstRequest)
+        : computeStoredImpulseBurstDecay(storedId, burstRequest))
     }
   }, 250)
 }
@@ -2402,6 +2464,8 @@ watch(
     impulseBurstPointsPerPeriod.value,
     impulseBurstResolution.value,
     impulseStatus.value?.passesCompleted ?? 0,
+    // Checking a history item on or off changes which run the surface is of when nothing is live.
+    visibleImpulseOverlays.value.map((o) => o.id).join(','),
   ],
   () => requestImpulseDecay(),
 )
@@ -2508,6 +2572,7 @@ function buildTypeParamsJson(): string | undefined {
       chartPhaseBottomDeg: impedancePhaseBottomDeg.value,
       chartAutofitOnDone: impedanceAutofitOnDone.value,
       chartDutType: impedanceDutType.value,
+      chartEquivalentHz: impedanceEquivalentHz.value,
     })
   }
 
@@ -2536,6 +2601,9 @@ function buildTypeParamsJson(): string | undefined {
       chartRestoreDelay: responseRestoreDelay.value,
       chartShowFittedModel: responseShowFittedModel.value,
       chartHideOutOfBandRoots: responseHideOutOfBandRoots.value,
+      chartFitAutoOrder: responseFitAutoOrder.value,
+      chartFitPoles: responseFitOrder.value,
+      chartFitZeros: responseFitZeroOrder.value,
       chartShowLeft: responseShowLeft.value,
       chartShowRight: responseShowRight.value,
       chartShowPhase: responseShowPhase.value,
@@ -3014,6 +3082,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-if="impulseView === 'Impulse'"
                   ref="impulseChart"
                   :impulse="impulseTrace"
+                  :overlays="visibleImpulseOverlays"
                   :normalised="impulseNormalised"
                   :thick-lines="impulseThickLines"
                   :time-from-ms="impulseTimeFromMs"
@@ -3023,13 +3092,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 />
                 <!-- The gated magnitude and phase are the same curves a frequency response produces,
                      so they are drawn by the same chart rather than a second one that would have to
-                     be kept in step with it. -->
+                     be kept in step with it.
+
+                     It takes the history overlays for the same reason: a saved impulse result stores
+                     its gated magnitude and phase as response_trace rows, and addOverlay already
+                     reads them into responseTraces for exactly this chart. Passing [] here is what
+                     made the History checkbox on an impulse type do nothing visible anywhere. The
+                     time-domain view above still has none — the impulse itself is not a
+                     response_trace row and is never loaded for an overlay. -->
                 <FrequencyResponseChart
                   v-else-if="impulseView === 'Response'"
                   ref="impulseResponseChart"
                   run-label="RUN"
                   :traces="impulseTraces"
-                  :overlays="[]"
+                  :overlays="visibleResponseOverlays"
                   view="Gain"
                   :show-left="true"
                   :show-right="false"
@@ -3057,6 +3133,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-else-if="impulseView === 'Harmonics'"
                   ref="impulseHarmonicsChart"
                   :harmonics="impulseHarmonics"
+                  :overlays="visibleHarmonicOverlays"
                   :thick-lines="impulseThickLines"
                   :show-data-points="impulseShowDataPoints"
                   :freq-from-hz="impulseFreqFromHz"
@@ -3268,7 +3345,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :traces="responseTraces"
                   :view="responseView"
                   :show-left="responseShowLeft"
-                  :phase-kind="responsePhaseKind"
+                  :phase-kind="effectiveResponsePhaseKind"
                   :stepped="!isChirpResponse"
                 />
               </template>
@@ -3304,7 +3381,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :show-left="responseShowLeft"
                   :show-right="!responseRightChannelIsReference && responseShowRight"
                   :show-phase="responsePhaseAvailable && responseShowPhase"
-                  :phase-kind="responsePhaseKind"
+                  :phase-kind="effectiveResponsePhaseKind"
                   :show-coherence="isChirpResponse && responseShowCoherence"
                   :show-one-db="responseShowOneDb"
                   :show-three-db="responseShowThreeDb"
@@ -3335,7 +3412,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :restore-delay="responseRestoreDelay"
                   :latency-samples="responseLatencySamples"
                   :sample-rate-hz="responseSampleRateHz"
-                  :phase-kind="responsePhaseKind"
+                  :phase-kind="effectiveResponsePhaseKind"
                   :x-from-hz="responseXFromHz"
                   :x-to-hz="responseXToHz"
                   :thick-lines="responseThickLines"
@@ -3690,6 +3767,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
                 <ImpedanceReadoutPanel
                   v-model:dut-type="impedanceDutType"
+                  v-model:equivalent-hz="impedanceEquivalentHz"
                   :traces="impedanceTraces"
                   :median-ohms="impedanceMedianOhms"
                   :drive-current-amps="impedanceDriveCurrentAmps"
@@ -3735,6 +3813,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :x-from-hz="impedanceXFromHz"
                   :x-to-hz="impedanceXToHz"
                   :thick-lines="impedanceThickLines"
+                />
+
+                <ImpedanceComparisonPanel
+                  :traces="impedanceTraces"
+                  :overlays="visibleImpedanceOverlays"
+                  :dut-type="impedanceDutType"
+                  :reference-ohms="impedanceReferenceOhms"
+                  :generator-amp-dbv="impedanceTraces.length > 0 && Number.isFinite(impedanceGeneratorAmpDbv) ? impedanceGeneratorAmpDbv : null"
+                  :equivalent-hz="impedanceEquivalentHz"
                 />
 
                 <MeasurementNotesPanel />

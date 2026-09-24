@@ -427,14 +427,31 @@ const { showPage } = useManual()
       A rational s-domain fit of whatever band is currently plotted, listing each pole and zero with
       its frequency and Q, the DC gain, and the fit residual. The residual is what makes the table
       falsifiable: the panel says so plainly when the model does not follow the measurement, and
-      warns when nearly-cancelling pairs mean the fit is spending order on noise. A root outside the
-      measured band is an extrapolation — widen the sweep rather than trusting one.
+      warns when a pole–zero pair moves the response by less than a decibel across the band, which
+      is the fit spending order on noise. A root outside the measured band is an extrapolation —
+      widen the sweep rather than trusting one — and when the lowest root is <em>below</em> the
+      band the DC gain is one too, so it is shown as <strong>≈ … · extrapolated</strong> with the
+      root that causes it named. If every root is outside the band, the panel says that as well:
+      the sweep has then constrained no component at all.
       <strong>Choose order automatically</strong> searches orders with as many zeros as poles;
       untick it to set <strong>Poles</strong> and <strong>Zeros</strong> separately, and set Zeros
       to 0 for an all-pole DUT — any of the simulator's four classic filters, say — which is
       otherwise fitted with as many zeros as poles and spends them on noise. The same roots
       are drawn by the <strong>Poles/zeros</strong> projection; the table and the map always show
       one fit.
+    </p>
+    <p>
+      The order is <strong>saved with the measurement</strong>, so a pinned Poles/Zeros pair comes
+      back when you reopen it, and a report of that measurement fits at the order you chose rather
+      than re-deciding automatically. A measurement that never touched the controls stays on
+      <em>Choose order automatically</em>.
+    </p>
+    <p>
+      The fit follows whichever run the plot draws <strong>solid</strong>: the live measurement when
+      there is one, and otherwise the first checked history item. So opening a saved result from
+      History and switching to Poles/zeros gives you its roots, its stability margins and its
+      measured band, with no need to measure again. One fit at a time — a table of roots describes
+      one model, so a second checked run is drawn as a contour and nothing more.
     </p>
 
     <h2>Display panels</h2>

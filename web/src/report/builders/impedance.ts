@@ -11,7 +11,7 @@ import {
 import type { ImpedanceTrace } from '../../composables/useImpedance'
 import type { DutType } from '../../impedance/component'
 import { formatCurrent, formatInductance, formatOhms } from '../../impedance/equivalent'
-import { componentReading, impedanceReadings } from '../../impedance/readings'
+import { componentReading, equivalentAt, equivalentRows, impedanceReadings } from '../../impedance/readings'
 import { formatHz } from '../../response/format'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
@@ -19,10 +19,11 @@ import { descriptionSections, genericSettingsSection } from './generic'
 
 /**
  * The impedance chapter. The chart is a PNG the orchestrator renders (the Bode and/or Nyquist
- * views); the settings rows are labelled the way the config panel labels them, and the readings —
- * the Measurements block and the component fit for the DUT the type names — come from
- * impedance/readings.ts, which the readout panel reads too, so the paper and the screen quote the
- * same numbers.
+ * views); the settings rows are labelled the way the config panel labels them, and the three
+ * readings blocks — Measurements, the component fit for the DUT the type names, and the equivalent
+ * circuit at the frequency the readout is set to — come from impedance/readings.ts, which the
+ * readout panel and the comparison table under the chart read too, so nothing on paper can quote a
+ * different number from what was on screen. Each block is its own report element.
  */
 
 const STIMULUS_LABELS: Record<ImpedanceStimulusName, string> = {
@@ -146,13 +147,17 @@ export function impedanceSettingsRows(paramsJson: string): ReportRow[] {
 }
 
 /**
- * The Measurements panel as sections: the peak, minimum and median |Z|, the drive current and the
- * reference resistor, then — for the DUT the type names — its component fit and the notes that
- * apply to it.
+ * The Measurements block: the peak, the minimum and the median |Z|, the drive current and the
+ * reference resistor — the readout panel's first section, and nothing else.
+ *
+ * <p>The component fit and the equivalent circuit used to be part of this and are their own report
+ * elements now, because an impedance chapter is read for different things depending on what was on
+ * the fixture: a driver's Thiele-Small block is the point of one report and noise in the next. A
+ * report choice saved before the split is read back as including the component fit — see
+ * migrateStoredElements.</p>
  */
 export function impedanceMeasurementSections(
   traces: ImpedanceTrace[],
-  dutType: DutType,
   referenceOhms: number,
   generatorAmpDbv: number | null,
 ): ReportSection[] {
@@ -160,7 +165,7 @@ export function impedanceMeasurementSections(
   const readings = trace ? impedanceReadings(trace, referenceOhms, generatorAmpDbv) : null
   if (!trace || !readings) return [{ kind: 'paragraph', title: 'Measurements', text: 'Nothing measured.' }]
 
-  const sections: ReportSection[] = [
+  return [
     {
       kind: 'keyValues',
       title: 'Measurements',
@@ -173,18 +178,52 @@ export function impedanceMeasurementSections(
       ],
     },
   ]
+}
 
-  const component = componentReading(trace, dutType)
-  if (component) {
-    if (component.rows.length > 0) {
-      sections.push({ kind: 'keyValues', title: component.label, rows: component.rows.map((r) => ({ label: r.label, value: r.value })) })
-    }
-    if (component.notes.length > 0) {
-      sections.push({ kind: 'paragraph', title: component.rows.length > 0 ? null : component.label, text: component.notes.join('\n') })
-    }
+/**
+ * The component fit for the DUT the type names, and the notes that apply to it — nothing at all when
+ * the Component dropdown says None, or when there is no curve to fit.
+ *
+ * <p>A fit the sweep cannot support prints its note and no table, which is `componentReading`'s own
+ * rule: a ported box's Thiele-Small rows are each arithmetically correct and physically meaningless,
+ * and paper has no tooltip to say so.</p>
+ */
+export function impedanceComponentSections(traces: ImpedanceTrace[], dutType: DutType): ReportSection[] {
+  const trace = traces.find((t) => t.kind === 'Impedance') ?? null
+  const component = trace ? componentReading(trace, dutType) : null
+  if (!component) return []
+
+  const sections: ReportSection[] = []
+  if (component.rows.length > 0) {
+    sections.push({ kind: 'keyValues', title: component.label, rows: component.rows.map((r) => ({ label: r.label, value: r.value })) })
   }
-
+  if (component.notes.length > 0) {
+    sections.push({ kind: 'paragraph', title: component.rows.length > 0 ? null : component.label, text: component.notes.join('\n') })
+  }
   return sections
+}
+
+/**
+ * The equivalent circuit at the frequency the readout panel is set to: |Z| and phase there, and the
+ * series R + jX they make.
+ *
+ * <p>The title carries the frequency that was <i>asked</i> for while the block's first row carries
+ * the measured column it landed on, exactly as on screen — on a decimated curve the two differ, and
+ * a value quoted at a frequency it was not measured at is the kind of small lie a report should not
+ * tell.</p>
+ */
+export function impedanceEquivalentSections(traces: ImpedanceTrace[], equivalentHz: number): ReportSection[] {
+  const trace = traces.find((t) => t.kind === 'Impedance') ?? null
+  const reading = trace ? equivalentAt(trace, equivalentHz) : null
+  if (!reading) return []
+
+  return [
+    {
+      kind: 'keyValues',
+      title: `Equivalent circuit at ${formatHz(equivalentHz)}`,
+      rows: equivalentRows(reading).map((r) => ({ label: r.label, value: r.value })),
+    },
+  ]
 }
 
 /** Every section of an impedance chapter except the chart, in report order, for the chosen elements. */
@@ -198,13 +237,23 @@ export function impedanceSections(subject: ReportSubject, elements: readonly Rep
     sections.push(rows.length > 0 ? { kind: 'keyValues', title: 'Settings', rows } : genericSettingsSection(subject.paramsJson))
   }
 
+  const data = subject.data
+  const traces = data.kind === 'impedance' ? data.traces : []
+
   if (elements.includes('measurements')) {
-    const data = subject.data
     sections.push(
       ...(data.kind === 'impedance'
-        ? impedanceMeasurementSections(data.traces, data.dutType, data.referenceOhms, data.generatorAmpDbv)
-        : impedanceMeasurementSections([], 'None', 0, null)),
+        ? impedanceMeasurementSections(traces, data.referenceOhms, data.generatorAmpDbv)
+        : impedanceMeasurementSections([], 0, null)),
     )
+  }
+
+  if (elements.includes('component') && data.kind === 'impedance') {
+    sections.push(...impedanceComponentSections(traces, data.dutType))
+  }
+
+  if (elements.includes('equivalent') && data.kind === 'impedance') {
+    sections.push(...impedanceEquivalentSections(traces, data.equivalentHz))
   }
 
   return sections

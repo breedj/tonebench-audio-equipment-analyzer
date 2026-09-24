@@ -5,10 +5,13 @@ import type {
   CsdWindowModeName,
   DecayChartMode,
   DecayPalette,
+  ImpulseTraceJson,
   ImpulseView,
   ResponseDelayView,
 } from '../api/client'
+import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
+import { useMeasurements } from '../composables/useMeasurements'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
 import { CSD_FFT_LENGTHS, csdSpanMs, describeCsdFftLength, PALETTE_NAMES } from '../measurements/decay'
 import { impulseReferenceLabel } from '../measurements/impulseReadings'
@@ -68,6 +71,24 @@ const burstPointsPerPeriod = defineModel<number>('burstPointsPerPeriod', { requi
 const burstResolution = defineModel<BurstDecayResolutionName>('burstResolution', { required: true })
 
 const { impulse, traces, harmonics, status, gateResolutionHz, running } = useImpulseResponse()
+
+// The checked history items, which the two curve views draw alongside the measurement. Autofit has
+// to see them or it sizes the axis to the live data alone — and with only history on screen it had
+// nothing to fit at all, so the button sat disabled over a chart full of curves.
+const { overlays } = useMeasurements()
+
+/** Checked history items carrying an impulse waveform, in the order the chart draws them. */
+const overlayImpulses = computed(() =>
+  overlays.value.map((o) => (o.visible ? o.impulseTrace : null)).filter((t): t is ImpulseTraceJson => !!t),
+)
+
+/** Checked history items carrying a gated magnitude, likewise. */
+const overlayGains = computed(() =>
+  overlays.value
+    .filter((o) => o.visible)
+    .map((o) => o.responseTraces?.find((t) => t.kind === 'Gain') ?? null)
+    .filter((t): t is ResponseTrace => t !== null),
+)
 
 const VIEWS: { value: ImpulseView; label: string }[] = [
   { value: 'Impulse', label: 'Impulse response' },
@@ -138,8 +159,8 @@ const canAutofit = computed(() => {
   // The decay views have a range rather than a window: 0 dB is fixed by the surface's own
   // normalisation, so there is nothing for an autofit to find.
   if (isDecayView.value) return false
-  if (view.value === 'Impulse') return normalisedImpulse.value && impulse.value !== null
-  if (view.value === 'Response') return traces.value.length > 0
+  if (view.value === 'Impulse') return normalisedImpulse.value && (impulse.value !== null || overlayImpulses.value.length > 0)
+  if (view.value === 'Response') return traces.value.length > 0 || overlayGains.value.length > 0
   return harmonics.value.length > 0
 })
 
@@ -154,13 +175,16 @@ const ImpulseFloorDb = -120
 
 /** The impulse as the chart draws it in normalised mode: dB of each column's largest excursion, re the peak. */
 function impulseLevelsDb(): number[] {
-  const trace = impulse.value
-  if (!trace) return []
-
-  const peak = Math.max(trace.peakVolts, 1e-12)
-  return trace.maxVolts.map((v, i) =>
-    20 * Math.log10(Math.max(Math.abs(v), Math.abs(trace.minVolts[i]), 1e-12) / peak),
-  )
+  // The overlays are on the same axis, each dB re its own peak exactly as the chart draws it, so the
+  // fitted floor is the lowest of everything shown rather than of the live trace alone.
+  const levels: number[] = []
+  for (const trace of [...(impulse.value ? [impulse.value] : []), ...overlayImpulses.value]) {
+    const peak = Math.max(trace.peakVolts, 1e-12)
+    for (let i = 0; i < trace.maxVolts.length; i++) {
+      levels.push(20 * Math.log10(Math.max(Math.abs(trace.maxVolts[i]), Math.abs(trace.minVolts[i]), 1e-12) / peak))
+    }
+  }
+  return levels
 }
 
 /**
@@ -181,11 +205,19 @@ function autofit() {
   }
 
   if (view.value === 'Response') {
-    const gain = traces.value.find((t) => t.kind === 'Gain') ?? traces.value[0]
+    // The live gain when there is one, else the first overlay's — the phase and delay axes below are
+    // read off a single curve, and the live measurement is the one being read when both are present.
+    const gain = traces.value.find((t) => t.kind === 'Gain') ?? traces.value[0] ?? overlayGains.value[0]
     if (!gain) return
 
-    const levels = [...gain.magnitudeMinDb, ...gain.magnitudeMaxDb]
-    const freqs = [...gain.freqHz, ...gain.freqHz]
+    // The level axis, though, is fitted to everything drawn on it: an overlay left outside the window
+    // is exactly the "I checked it and nothing happened" the button is there to prevent.
+    const levels: number[] = []
+    const freqs: number[] = []
+    for (const curve of [...traces.value, ...overlayGains.value]) {
+      levels.push(...curve.magnitudeMinDb, ...curve.magnitudeMaxDb)
+      freqs.push(...curve.freqHz, ...curve.freqHz)
+    }
     const fitted = autofitRangeInBand(freqs, levels, freqFromHz.value, freqToHz.value)
     if (fitted) {
       yTopDb.value = fitted.top

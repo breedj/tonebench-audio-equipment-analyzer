@@ -1,8 +1,16 @@
 import type { ImpedanceTrace } from '../composables/useImpedance'
 import { formatHz } from '../response/format'
 import { DUT_TYPES, analyseCapacitor, analyseInductor, type DutType } from './component'
-import { dbOhmsToOhms, formatCapacitance, formatInductance, formatOhms } from './equivalent'
-import { findExtremes, findResonance } from './resonance'
+import {
+  dbOhmsToOhms,
+  formatCapacitance,
+  formatInductance,
+  formatOhms,
+  formatReactiveComponent,
+  seriesEquivalent,
+  type SeriesEquivalent,
+} from './equivalent'
+import { findExtremes, findResonance, type RivalPeak } from './resonance'
 
 /**
  * The numbers an impedance curve is read for, as pure functions: the peak, the minimum and the
@@ -73,6 +81,72 @@ export function impedanceReadings(trace: ImpedanceTrace, referenceOhms: number, 
 }
 
 // ---------------------------------------------------------------------------
+// The equivalent circuit — what the Equivalent circuit section of the readout shows
+// ---------------------------------------------------------------------------
+
+/** One column of the curve read as a component: the measured numbers there, and the series R + jX they make. */
+export interface EquivalentReading {
+  /** The measured column's own frequency, which is the nearest one to the frequency that was asked for. */
+  freqHz: number
+  ohms: number
+  phaseDeg: number
+  coherence: number
+  equivalent: SeriesEquivalent
+}
+
+/**
+ * The measured column nearest `cursorHz`, read as a series equivalent — or null for an empty curve.
+ *
+ * <p>|Z| is the <b>midpoint</b> of the column's min and max, not the max: the max carries the
+ * aggregation bias of a maximum over several bins, which is right for a peak reading and wrong for
+ * "what is the impedance here". That is deliberately different from {@link curveOhms}, which the
+ * peak, the minimum and the median are taken over because the chart's line is drawn from it.</p>
+ */
+export function equivalentAt(trace: ImpedanceTrace, cursorHz: number): EquivalentReading | null {
+  if (trace.freqHz.length === 0) return null
+
+  let best = 0
+  for (let i = 1; i < trace.freqHz.length; i++) {
+    if (Math.abs(trace.freqHz[i] - cursorHz) < Math.abs(trace.freqHz[best] - cursorHz)) best = i
+  }
+
+  const ohms = 0.5 * (dbOhmsToOhms(trace.magnitudeMinDbOhms[best]) + dbOhmsToOhms(trace.magnitudeMaxDbOhms[best]))
+
+  return {
+    freqHz: trace.freqHz[best],
+    ohms,
+    phaseDeg: trace.phaseDeg[best],
+    coherence: trace.coherence[best],
+    equivalent: seriesEquivalent(ohms, trace.phaseDeg[best], trace.freqHz[best]),
+  }
+}
+
+/** The readout's label for the reactive component, which names whichever kind the sign of X makes it. */
+export function seriesComponentLabel(equivalent: SeriesEquivalent | null | undefined): string {
+  if (!equivalent) return 'Series L or C'
+  if (equivalent.inductanceH !== null) return 'Series inductance'
+  if (equivalent.capacitanceF !== null) return 'Series capacitance'
+  return 'Series reactance'
+}
+
+/**
+ * The Equivalent circuit block's rows, in the readout panel's order and with its labels — the panel
+ * renders these, the report prints them and the comparison table transposes them, so the three
+ * cannot quote different numbers for one column.
+ */
+export function equivalentRows(reading: EquivalentReading | null): ComponentRow[] {
+  return [
+    { label: 'Measured at', value: reading ? formatHz(reading.freqHz) : '—' },
+    { label: '|Z|', value: reading ? formatOhms(reading.ohms) : '—' },
+    { label: 'Phase', value: reading ? `${reading.phaseDeg.toFixed(1)}°` : '—' },
+    { label: 'Series R', value: reading ? formatOhms(reading.equivalent.resistanceOhms) : '—' },
+    { label: 'Series X', value: reading ? formatOhms(reading.equivalent.reactanceOhms) : '—' },
+    { label: seriesComponentLabel(reading?.equivalent), value: reading ? formatReactiveComponent(reading.equivalent) : '—' },
+    { label: 'Coherence', value: reading ? reading.coherence.toFixed(4) : '—' },
+  ]
+}
+
+// ---------------------------------------------------------------------------
 // The component fit — what the Component section of the readout shows
 // ---------------------------------------------------------------------------
 
@@ -124,6 +198,29 @@ export const LOUDSPEAKER_NOTE =
   'Vas, Bl and Mms need a second run with a known added mass or a sealed box, so they are not ' +
   'derivable from this one and are deliberately not shown. Smoothing blunts Zmax and widens the ' +
   'skirts, so measure with none if these numbers matter.'
+
+/**
+ * What a second peak means, named with the frequencies that were actually measured — a note rather
+ * than a constant because the three frequencies are the whole of its content.
+ *
+ * <p>The Thiele-Small rows are withheld when this applies. They are not merely uncertain: for a
+ * ported box every one of them is arithmetically correct for the peak it was read from and
+ * physically meaningless, which is the failure a reader cannot catch for themselves. Measured on a
+ * Jamo 504, the 104 Hz peak gave Qts 2.76 — a figure no driver has.</p>
+ */
+export function loudspeakerTwoPeakNote(fsHz: number, rival: RivalPeak): string {
+  const lowerHz = Math.min(fsHz, rival.freqHz)
+  const upperHz = Math.max(fsHz, rival.freqHz)
+
+  return (
+    `Two impedance peaks, at ${formatHz(lowerHz)} and ${formatHz(upperHz)}, with a minimum between ` +
+    `them at ${formatHz(rival.dipFreqHz)}: that is the signature of a ported (bass-reflex) ` +
+    'enclosure. Neither peak is the free-air fs of the driver — the minimum is roughly where the ' +
+    'box is tuned — so Thiele-Small parameters read off either one would describe the driver and ' +
+    'the box together, and are not reported. Measure the driver in free air, or with the port ' +
+    'blocked, to get them.'
+  )
+}
 
 export const LOUDSPEAKER_NO_RESONANCE_NOTE =
   'No motional resonance found: the curve is flat, still rising at the top of the sweep, or its ' +
@@ -194,6 +291,7 @@ export function componentReading(trace: ImpedanceTrace, dutType: DutType): Compo
 
   const r = findResonance(trace.freqHz, ohms)
   if (!r) return { label, rows: [], notes: [LOUDSPEAKER_NO_RESONANCE_NOTE] }
+  if (r.rival) return { label, rows: [], notes: [loudspeakerTwoPeakNote(r.fsHz, r.rival)] }
   return {
     label,
     rows: [

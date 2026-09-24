@@ -106,14 +106,22 @@
         channel solid, its right channel dashed.
       </li>
       <li>
-        On the sweep charts, each overlaid run gets its own dash pattern, shown in the legend under
-        the chart and beside its name in the History checklist, so a legend entry can always be
-        traced back to a run.
+        On the sweep, response, impedance and impulse charts, each overlaid run gets its own dash
+        pattern, shown in the legend under the chart and beside its name in the History checklist, so
+        a legend entry can always be traced back to a run.
+      </li>
+      <li>
+        The <strong>solid</strong> line is the curve you are meant to read, which is normally the
+        live measurement. Open a stored result from History with nothing measured — or put one in a
+        report without the current measurement — and the first checked run is drawn solid instead, at
+        full width, with any further ones dashed behind it. A chart showing a single curve has
+        nothing to tell that curve apart from, and a lone dashed line is only harder to read.
       </li>
       <li>
         <strong>Thick lines</strong> and <strong>Show data points</strong> are per-chart style
         toggles. Data points are worth turning on for stepped measurements, where they show where
-        readings were actually taken rather than interpolated.
+        readings were actually taken rather than interpolated. Neither appears on the frequency
+        response's <strong>Poles/zeros</strong> projection, which draws marks and no curve.
       </li>
     </ul>
 

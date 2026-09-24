@@ -159,6 +159,93 @@ describe('findResonance', () => {
   })
 })
 
+/**
+ * A ported (bass-reflex) box: the same driver with <b>two</b> motional resonances in series, which
+ * is what the box's Helmholtz resonance does to the driver's — two peaks straddling a minimum near
+ * the tuning frequency. Shaped on the Jamo 504 measured on 2026-09-24 (12.20 Ω at 38.1 Hz, 14.38 Ω
+ * at 104.0 Hz, 6.30 Ω at 63.0 Hz), the measurement this detection was written for.
+ */
+function portedCurve(
+  { reOhms = 5.6, lowerHz = 38, upperHz = 104, lowerRmOhms = 7, upperRmOhms = 7, qms = 10 } = {},
+  { fromHz = 13, toHz = 20000, perOctave = 48 } = {},
+): { freqHz: number[]; ohms: number[] } {
+  const freqHz: number[] = []
+  const ohms: number[] = []
+
+  const steps = Math.round(Math.log2(toHz / fromHz) * perOctave)
+  for (let i = 0; i <= steps; i++) {
+    const f = fromHz * Math.pow(2, i / perOctave)
+    let re = reOhms
+    let im = 0
+
+    for (const [fsHz, rmOhms] of [
+      [lowerHz, lowerRmOhms],
+      [upperHz, upperRmOhms],
+    ]) {
+      const detune = qms * (f / fsHz - fsHz / f)
+      const denom = 1 + detune * detune
+      re += rmOhms / denom
+      im -= (rmOhms * detune) / denom
+    }
+
+    freqHz.push(f)
+    ohms.push(Math.hypot(re, im))
+  }
+
+  return { freqHz, ohms }
+}
+
+describe('findResonance, on a curve with two peaks', () => {
+  it('reports the rival peak and the minimum between them', () => {
+    const { freqHz, ohms } = portedCurve()
+    const r = findResonance(freqHz, ohms)!
+
+    expect(r.rival).not.toBeNull()
+
+    // Which of the pair is the taller is the box's business, not this test's: what matters is that
+    // both are reported and that the minimum sits between them.
+    const peaks = [r.fsHz, r.rival!.freqHz].sort((a, b) => a - b)
+    expect(peaks[0]).toBeCloseTo(38, 0)
+    expect(peaks[1]).toBeCloseTo(104, 0)
+    expect(r.rival!.dipFreqHz).toBeGreaterThan(peaks[0])
+    expect(r.rival!.dipFreqHz).toBeLessThan(peaks[1])
+
+    // And the dip is a real valley rather than a rounding of the curve.
+    expect(r.rival!.dipOhms).toBeLessThan(Math.min(r.zMaxOhms, r.rival!.zOhms) / Math.SQRT2)
+  })
+
+  it('finds no rival on a single resonance — a sealed box, or a driver in free air', () => {
+    const { freqHz, ohms } = driverCurve()
+    expect(findResonance(freqHz, ohms)!.rival).toBeNull()
+  })
+
+  it('does not call the ripple on a noisy trace a second peak', () => {
+    // A single resonance with 5% of ripple on it, which is what a measured trace looks like: dozens
+    // of interior local maxima, several of them within 6 dB of the peak, none with a valley between.
+    const { freqHz, ohms } = driverCurve()
+    const rippled = ohms.map((z, i) => z * (1 + 0.05 * Math.sin(i * 1.7)))
+
+    expect(findResonance(freqHz, rippled)!.rival).toBeNull()
+  })
+
+  it('ignores a second peak far below the first, which is a cabinet artefact and not an alignment', () => {
+    // A genuine second peak with a genuine valley before it — 5.0 dB of dip, comfortably past the
+    // dip gate — but 15.9 dB down on the first. Two peaks, not two of a pair.
+    const { freqHz, ohms } = portedCurve({ reOhms: 1, lowerRmOhms: 1, upperRmOhms: 12 })
+    expect(findResonance(freqHz, ohms)!.rival).toBeNull()
+  })
+
+  it('ignores a pair of peaks too high in frequency to be a bass alignment', () => {
+    // The same shape an octave and a half up, where a crossover or a breakup mode puts bumps that
+    // say nothing about how the driver is loaded.
+    const { freqHz, ohms } = portedCurve({ lowerHz: 380, upperHz: 1040 }, { fromHz: 130, toHz: 20000 })
+    const r = findResonance(freqHz, ohms)!
+
+    expect(r.fsHz).toBeGreaterThan(300)
+    expect(r.rival).toBeNull()
+  })
+})
+
 function curveArgs(
   driver?: Parameters<typeof driverCurve>[0],
   grid?: Parameters<typeof driverCurve>[1],

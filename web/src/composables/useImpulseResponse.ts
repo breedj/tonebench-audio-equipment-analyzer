@@ -142,6 +142,47 @@ export function useImpulseResponse() {
     }
   }
 
+  /**
+   * The same two analyses run against a **stored** result's impulse response instead of the runner's.
+   *
+   * <p>They exist because a decay surface is a heatmap: it cannot overlay, so a checked history item
+   * can only be drawn when there is no live measurement to draw instead. Same in-flight slot and same
+   * error line as the live pair — only one surface is ever on screen.</p>
+   */
+  async function computeStoredCsd(measurementId: number, request: ImpulseCsdRequest): Promise<void> {
+    const token = ++decayToken
+    decayComputing.value = true
+    try {
+      const surface = await api.computeStoredImpulseCsd(measurementId, request)
+      if (token !== decayToken) return
+      csdSurface.value = surface
+      decayError.value = null
+    } catch (e) {
+      if (token !== decayToken) return
+      csdSurface.value = null
+      decayError.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (token === decayToken) decayComputing.value = false
+    }
+  }
+
+  async function computeStoredBurstDecay(measurementId: number, request: ImpulseBurstDecayRequest): Promise<void> {
+    const token = ++decayToken
+    decayComputing.value = true
+    try {
+      const surface = await api.computeStoredImpulseBurstDecay(measurementId, request)
+      if (token !== decayToken) return
+      burstSurface.value = surface
+      decayError.value = null
+    } catch (e) {
+      if (token !== decayToken) return
+      burstSurface.value = null
+      decayError.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (token === decayToken) decayComputing.value = false
+    }
+  }
+
   async function refreshReferences(): Promise<void> {
     references.value = (await api.listLoopbackReferences()).references
   }
@@ -198,6 +239,8 @@ export function useImpulseResponse() {
     decayComputing,
     computeCsd,
     computeBurstDecay,
+    computeStoredCsd,
+    computeStoredBurstDecay,
     invalidateDecay,
     traces,
     impulses,

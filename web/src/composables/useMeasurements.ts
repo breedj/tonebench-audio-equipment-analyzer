@@ -1,6 +1,8 @@
 import { ref } from 'vue'
 import {
   api,
+  type HarmonicCurveJson,
+  type ImpulseTraceJson,
   type MeasurementDetail,
   type MeasurementFilter,
   type MeasurementSummary,
@@ -68,6 +70,27 @@ export interface OverlayEntry {
    * running one with. Undefined for every other kind.
    */
   responseTraces?: ResponseTrace[]
+
+  /**
+   * An impulse-response result's waveform, gated and decimated server-side into exactly the shape
+   * the live measurement produces — so ImpulseResponseChart draws a stored impulse through the same
+   * code path it draws the running one with. Undefined for every other kind, and null for an impulse
+   * result that stored no trace.
+   *
+   * <p>Its own fetch, unlike the gated magnitude beside it: the impulse is not a response_trace row,
+   * it comes from `/measurements/{id}/impulse-trace`.</p>
+   */
+  impulseTrace?: ImpulseTraceJson | null
+
+  /**
+   * An impulse-response result's harmonic distortion curves, so the Harmonics view can draw a stored
+   * run beside the live one. Undefined for every other kind.
+   *
+   * <p>They come from `/measurements/{id}/impulse`, which also carries the full-resolution impulse —
+   * about 1.2 MB for a 131072-sample record. That is the only endpoint holding the curves, and this
+   * server is bound to loopback by design, so the cost is a local copy rather than a download.</p>
+   */
+  harmonicCurves?: HarmonicCurveJson[]
 
   /**
    * An impedance result's stored curve. Read through the same endpoint as a response — impedance
@@ -471,6 +494,15 @@ export function useMeasurements() {
         isFrequencyResponseKind(detail.kind) || isImpulseResponseKind(detail.kind) || isCrosstalkKind(detail.kind)
           ? toResponseTraces((await api.getStoredResponse(resultId)).traces)
           : undefined
+      // The impulse waveform itself, which is not a response_trace row and so needs its own call.
+      // Gated and windowed by the runner's own code server-side, so an overlay and the live trace
+      // are the same kind of object rather than two decimations that disagree.
+      const impulseTrace = isImpulseResponseKind(detail.kind)
+        ? (await api.getStoredImpulseTrace(resultId)).impulse
+        : undefined
+      const harmonicCurves = isImpulseResponseKind(detail.kind)
+        ? (await api.getStoredImpulse(resultId)).harmonics
+        : undefined
       // Impedance comes back through the same reader, since it shares the rows — but into its own
       // field, because its magnitudes are ohms in dB rather than a gain.
       const impedanceTraces = isImpedanceKind(detail.kind) || isOutputImpedanceKind(detail.kind)
@@ -478,7 +510,7 @@ export function useMeasurements() {
         : undefined
       overlays.value = [
         ...overlays.value,
-        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepFamily, sweepEndFreqHz, responseTraces, impedanceTraces },
+        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepFamily, sweepEndFreqHz, responseTraces, impulseTrace, harmonicCurves, impedanceTraces },
       ]
       error.value = null
     } catch (e) {

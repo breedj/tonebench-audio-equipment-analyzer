@@ -93,6 +93,12 @@ public sealed class ImpedanceRunner(
     private ImpedanceCalibration? _capturedCalibration;
     private double? _medianOhms;
     private string? _warning;
+
+    /// <summary>
+    /// A warning that holds for the whole run rather than being re-derived per pass -- today only
+    /// <see cref="StoredStandardWarning"/>, which is a property of the request, not of a capture.
+    /// </summary>
+    private string? _standingWarning;
     private double? _driveCurrentAmps;
     private string? _error;
     private List<ImpedanceTrace> _traces = [];
@@ -173,7 +179,8 @@ public sealed class ImpedanceRunner(
                 _capturedCalibration = null;
                 _medianOhms = null;
                 _driveCurrentAmps = null;
-                _warning = null;
+                _standingWarning = StoredStandardWarning(request);
+                _warning = _standingWarning;
                 _error = null;
                 _traces = [];
             }
@@ -244,6 +251,7 @@ public sealed class ImpedanceRunner(
             _capturedCalibration = null;
             _medianOhms = null;
             _driveCurrentAmps = null;
+            _standingWarning = null;
             _warning = null;
             _error = null;
 
@@ -566,7 +574,8 @@ public sealed class ImpedanceRunner(
 
             return new PassResult(
                 [ImpedanceTraceBuilder.Build(request, kind, h, result.Coherence, DisplayColumns)],
-                peakDbv, calibration, MedianOhms: null, DriveCurrentAmps: null);
+                peakDbv, calibration, MedianOhms: null, DriveCurrentAmps: null,
+                Warning: MislabelledStandardWarning(request.CalTarget, calibration));
         }
 
         return BuildPass(request, result, peakDbv);
@@ -608,6 +617,68 @@ public sealed class ImpedanceRunner(
     /// than any, because a real measurement's phase does wander past ±90 in the noise at the edges
     /// of the band.
     /// </summary>
+    /// <summary>
+    /// A standard that is not the standard it was captured as -- the open taken with the fixture
+    /// still shorted, or the short taken with it open.
+    ///
+    /// <para>Cheap, and unambiguous in a way <see cref="SwappedChannelWarning"/> is not: the two
+    /// standards sit three orders of magnitude apart, so this is never a marginal call. It is
+    /// reported the moment the capture finishes, because the alternative is discovering it from a
+    /// measurement days later -- and the measurement does not look broken, it looks like a flat
+    /// negative resistance, which reads as a wiring fault and sends the search to the bench.</para>
+    /// </summary>
+    private static string? MislabelledStandardWarning(ImpedanceCalTarget target, ImpedanceCalibration calibration)
+    {
+        if (!calibration.IsUsable)
+            return null;
+
+        string median = $"|H| = {calibration.MedianMagnitude:G3}";
+
+        return (target, calibration.LooksLikeOpen) switch
+        {
+            (ImpedanceCalTarget.Open, false) =>
+                $"This capture reads {median} across the band, which is a short, not an open — an open reads close to 1. "
+                + "Take everything off the fixture terminals and capture it again.",
+            (ImpedanceCalTarget.Short, true) =>
+                $"This capture reads {median} across the band, which is an open, not a short — a short reads close to 0. "
+                + "Short the fixture terminals and capture it again.",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The same test applied to the standards a measurement is about to be corrected with, which is
+    /// the case that actually bites: a bad standard is captured once and then silently ruins every
+    /// measurement made after it. Checked at run start so the warning is on screen before the first
+    /// pass, and kept standing for the whole run -- unlike a per-pass warning, nothing later in the
+    /// run re-derives it.
+    /// </summary>
+    private static string? StoredStandardWarning(ImpedanceRequest request)
+    {
+        if (request.IsCalibration)
+            return null;
+
+        if (request.OpenCal is { IsUsable: true, LooksLikeOpen: false } open)
+            return $"The stored open standard reads |H| = {open.MedianMagnitude:G3}, which is a short, not an open. "
+                + "Correcting with it inflates the measured ratio by about 60 dB, so the impedance comes out flat at "
+                + "roughly minus the reference resistor whatever is connected. Capture the open again with nothing "
+                + "across the fixture, or clear it.";
+
+        if (request.CableMode == ImpedanceCableMode.Measured
+            && request.ShortCal is { IsUsable: true, LooksLikeOpen: true } shortCal)
+            return $"The stored short standard reads |H| = {shortCal.MedianMagnitude:G3}, which is an open, not a short. "
+                + "The lead impedance it subtracts is meaningless. Capture it again with the fixture terminals shorted, "
+                + "or set the cable correction to None.";
+
+        return null;
+    }
+
+    /// <summary>Both warnings when both fired, since a bad standard also makes the impedance go negative.</summary>
+    private static string? JoinWarnings(string? first, string? second) =>
+        first is null ? second
+        : second is null ? first
+        : $"{first} {second}";
+
     private static string? SwappedChannelWarning(ImpedanceRequest request, double negativeRealFraction)
     {
         if (!(negativeRealFraction > 0.5))
@@ -628,7 +699,7 @@ public sealed class ImpedanceRunner(
             _capturedCalibration = pass.Calibration;
             _medianOhms = pass.MedianOhms;
             _driveCurrentAmps = pass.DriveCurrentAmps;
-            _warning = pass.Warning;
+            _warning = JoinWarnings(_standingWarning, pass.Warning);
         }
 
         foreach (var trace in pass.Traces)
@@ -736,6 +807,7 @@ public sealed class ImpedanceRunner(
             // Only at the end: a partial standard stored halfway through would be a calibration
             // covering part of the band, and the browser would keep it.
             calibration = ImpedanceCalibration.FromPoints(freqHz.AsSpan(0, measured), values);
+            warning = MislabelledStandardWarning(request.CalTarget, calibration);
         }
         else
         {
@@ -754,7 +826,7 @@ public sealed class ImpedanceRunner(
             _capturedCalibration = calibration;
             _medianOhms = medianOhms;
             _driveCurrentAmps = driveCurrentAmps;
-            _warning = warning;
+            _warning = JoinWarnings(_standingWarning, warning);
         }
 
         hub.Broadcast(StreamFrame.EncodeImpedance(trace, StreamFlags.None));

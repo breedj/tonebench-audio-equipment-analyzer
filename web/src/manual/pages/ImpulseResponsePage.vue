@@ -124,6 +124,30 @@ const { showPage } = useManual()
       corner read from there would not be the DUT's.
     </p>
     <p>
+      Checking a saved run in <strong>History</strong> overlays it on all three curve views: the
+      waveform on <strong>Impulse response</strong>, the stored gated magnitude and phase on
+      <strong>Gated response</strong>, and the stored distortion curves on
+      <strong>Harmonics</strong>. Overlays are drawn with a dash pattern per run — on the waveform
+      and the gated response in the trace colour, and on Harmonics keeping each order's own colour,
+      so H3 is the same colour in every run and the dash says which run. The waveform's overlays
+      carry no min/max band; that stays with the measurement you are reading.
+    </p>
+    <p>
+      The two <strong>decay surfaces</strong> are heatmaps and cannot show two runs at once, so they
+      have one subject: the live measurement when there is one, and otherwise the first checked
+      history item — which is what lets you open a saved result and look at its decay without
+      re-measuring. <strong>Autofit</strong> sizes the level axis to everything drawn, overlays
+      included, which matters on the gated response: a stored amplifier run sits tens of dB above a
+      window left at 0 dB and would otherwise be off the top of the plot.
+    </p>
+    <p>
+      On the waveform the overlay is put on the measurement's own time columns, so checking one on
+      never changes the live curve; a stored run gated <em>wider</em> than the current one keeps its
+      extra span, and the live trace is simply absent there. In <em>Normalised</em> each curve is dB
+      below <em>its own</em> peak, which is what lets two decays be compared without the louder run
+      merely sitting above the quieter one.
+    </p>
+    <p>
       <strong>Cumulative spectral decay</strong> and <strong>Burst decay</strong> are the two decay
       surfaces, described below. Both are computed from the impulse response already on screen, so
       every one of their settings redraws rather than re-measures — which is why they sit on the

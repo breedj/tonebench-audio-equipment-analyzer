@@ -527,6 +527,89 @@ public class ImpedanceRunnerTests
     }
 
     /// <summary>
+    /// The other setup mistake the numbers can prove, and a sharper one: a standard captured with
+    /// the fixture in the wrong state. Measured on a real fixture on 2026-09-24, an open taken with
+    /// the leads still shorted stored |H| = 0.00084 where an open reads 0.9998 -- and nothing
+    /// downstream could tell, because the resulting measurement is a clean, coherent, flat negative
+    /// resistance rather than anything that looks broken.
+    /// </summary>
+    [Fact]
+    public async Task AnOpenCapturedOverAShort_IsCalledOutWhenItIsCaptured()
+    {
+        var wrong = await CreateAsync(SimulatedDutModel.ImpedanceShort);
+        await wrong.Runner.StartAsync(Request(calTarget: ImpedanceCalTarget.Open), CancellationToken.None);
+        var wrongStatus = await AwaitCompletionAsync(wrong.Runner);
+
+        AssertFinished(wrongStatus);
+        Assert.NotNull(wrongStatus.Warning);
+        Assert.Contains("a short, not an open", wrongStatus.Warning);
+
+        var right = await CreateAsync(SimulatedDutModel.ImpedanceOpen);
+        await right.Runner.StartAsync(Request(calTarget: ImpedanceCalTarget.Open), CancellationToken.None);
+        var rightStatus = await AwaitCompletionAsync(right.Runner);
+
+        AssertFinished(rightStatus);
+        Assert.Null(rightStatus.Warning);
+    }
+
+    /// <summary>The same test the other way round, so a short taken with nothing connected is caught too.</summary>
+    [Fact]
+    public async Task AShortCapturedOverAnOpen_IsCalledOutWhenItIsCaptured()
+    {
+        var wrong = await CreateAsync(SimulatedDutModel.ImpedanceOpen);
+        await wrong.Runner.StartAsync(Request(calTarget: ImpedanceCalTarget.Short), CancellationToken.None);
+        var status = await AwaitCompletionAsync(wrong.Runner);
+
+        AssertFinished(status);
+        Assert.NotNull(status.Warning);
+        Assert.Contains("an open, not a short", status.Warning);
+    }
+
+    /// <summary>
+    /// The case that actually bites: the bad standard was captured once, days ago, and now silently
+    /// ruins every measurement corrected with it. Checked at run start so the warning is on screen
+    /// before the first pass -- and it must survive the pass, because the bad correction also drives
+    /// the impedance negative and so raises the swapped-channel warning, which blames the wiring and
+    /// sends the search to the bench. That is exactly what happened on 2026-09-24.
+    /// </summary>
+    [Fact]
+    public async Task AMeasurementCorrectedWithAnOpenStandardThatIsAShort_SaysSoBeforeItIsBelieved()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(openCal: FlatStandard(0.00084)), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.NotNull(status.Warning);
+        Assert.Contains("stored open standard", status.Warning);
+    }
+
+    /// <summary>A stored short that is really an open, which makes the lead subtraction meaningless.</summary>
+    [Fact]
+    public async Task AMeasurementCorrectedWithAShortStandardThatIsAnOpen_SaysSo()
+    {
+        var harness = await CreateAsync(SimulatedDutModel.ImpedanceResistive);
+        await harness.Runner.StartAsync(
+            Request(cableMode: ImpedanceCableMode.Measured, shortCal: FlatStandard(0.98)),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.NotNull(status.Warning);
+        Assert.Contains("stored short standard", status.Warning);
+    }
+
+    /// <summary>A standard of one flat magnitude across the band, which is what both of them are.</summary>
+    private static ImpedanceCalibration FlatStandard(double magnitude)
+    {
+        var freqHz = new double[] { 10.0, 100.0, 1000.0, 10_000.0, 20_000.0 };
+        var real = new double[freqHz.Length];
+        Array.Fill(real, magnitude);
+        return new ImpedanceCalibration(freqHz, real, new double[freqHz.Length]);
+    }
+
+    /// <summary>
     /// The reference resistor is not cosmetic: it scales the answer directly, so entering the wrong
     /// one is a silent proportional error. Halving it must halve the reported impedance.
     /// </summary>

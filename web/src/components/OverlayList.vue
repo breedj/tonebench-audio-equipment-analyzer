@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
+import { useProjects } from '../composables/useProjects'
 import { FFT_SPECTRUM_KIND } from '../measurements/kinds'
+import { foreignMeasurementName } from '../measurements/overlayScope'
 import { fftOverlayColor, fftOverlays } from '../measurements/spectrumOverlayColors'
 
 const { overlays, removeOverlay, setOverlayVisible, canShowMoreOverlays } = useMeasurements()
+const { currentTypeId } = useProjects()
 
 // This list only ever renders on the FFT Spectrum screen (App.vue), but `overlays` is the one
 // singleton shared with the THD-vs-frequency screen's own checklist — filter to this chart's own
@@ -13,6 +16,15 @@ const fftOnlyOverlays = computed(() => fftOverlays(overlays.value))
 
 function hasChannel(o: (typeof overlays.value)[number], ch: number): boolean {
   return o.detail.channelsData.some((c) => c.channel === ch)
+}
+
+/**
+ * The measurement a row came from when that is not the open one — see overlayScope.ts. This list is
+ * scoped by kind rather than by measurement, so it legitimately shows overlays the History checklist
+ * beside it does not, and those are also the only rows that can be hidden or removed from here alone.
+ */
+function foreignNameFor(o: (typeof overlays.value)[number]): string | null {
+  return foreignMeasurementName(o.detail, currentTypeId.value)
 }
 </script>
 
@@ -32,11 +44,20 @@ function hasChannel(o: (typeof overlays.value)[number], ch: number): boolean {
         <line x1="1" y1="10" x2="27" y2="10" :stroke="fftOverlayColor(overlays, overlay.id)" stroke-width="1.5" stroke-dasharray="6,3" />
       </svg>
 
-      <span class="min-w-0 flex-1 truncate">
-        {{ overlay.detail.name }}
-        <span class="text-xs text-neutral-400 dark:text-neutral-500">
-          <template v-if="hasChannel(overlay, 0)">L</template>
-          <template v-if="hasChannel(overlay, 1)">R</template>
+      <span class="flex min-w-0 flex-1 flex-col leading-tight">
+        <span class="truncate">
+          {{ overlay.detail.name }}
+          <span class="text-xs text-neutral-400 dark:text-neutral-500">
+            <template v-if="hasChannel(overlay, 0)">L</template>
+            <template v-if="hasChannel(overlay, 1)">R</template>
+          </span>
+        </span>
+        <span
+          v-if="foreignNameFor(overlay)"
+          class="truncate text-[11px] text-amber-600 dark:text-amber-500"
+          :title="`Loaded from the measurement &quot;${foreignNameFor(overlay)}&quot;, not the one open — so it has no row in History and can only be hidden or removed here.`"
+        >
+          from {{ foreignNameFor(overlay) }}
         </span>
       </span>
 

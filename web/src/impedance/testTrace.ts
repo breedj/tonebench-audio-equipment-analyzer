@@ -47,3 +47,42 @@ export function driverTestTrace(
   }
   return impedanceTestTrace(freqHz, ohms, phaseDeg)
 }
+
+/**
+ * A ported (bass-reflex) loudspeaker's impedance: the same voice coil with <b>two</b> motional
+ * resonances in series rather than one, which is what the box's Helmholtz resonance does to the
+ * driver's — two peaks straddling a minimum at roughly the tuning frequency.
+ *
+ * <p>The defaults are shaped on the Jamo 504 measured on 2026-09-24 (12.20 Ω at 38.1 Hz, 14.38 Ω at
+ * 104.0 Hz, 6.30 Ω at 63.0 Hz), which is the measurement the two-peak detection was written for.
+ * It is a shape, not a model of a vented alignment — the tests assert that two peaks and their
+ * valley are found, not that these are a particular box's numbers.</p>
+ */
+export function portedDriverTestTrace(
+  { reOhms = 5.6, lowerHz = 38, upperHz = 104, rmOhms = 7, qms = 10 } = {},
+  { fromHz = 13, toHz = 20000, perOctave = 48 } = {},
+): ImpedanceTrace {
+  const freqHz: number[] = []
+  const ohms: number[] = []
+  const phaseDeg: number[] = []
+  const steps = Math.round(Math.log2(toHz / fromHz) * perOctave)
+
+  for (let i = 0; i <= steps; i++) {
+    const f = fromHz * Math.pow(2, i / perOctave)
+    let re = reOhms
+    let im = 0
+
+    for (const fsHz of [lowerHz, upperHz]) {
+      const detune = qms * (f / fsHz - fsHz / f)
+      const denom = 1 + detune * detune
+      re += rmOhms / denom
+      im -= (rmOhms * detune) / denom
+    }
+
+    freqHz.push(f)
+    ohms.push(Math.hypot(re, im))
+    phaseDeg.push((Math.atan2(im, re) * 180) / Math.PI)
+  }
+
+  return impedanceTestTrace(freqHz, ohms, phaseDeg)
+}

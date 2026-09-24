@@ -43,6 +43,53 @@ public sealed record ImpedanceCalibration(double[] FreqHz, double[] Real, double
         FreqHz is { Length: >= 2 } && Real?.Length == FreqHz.Length && Imag?.Length == FreqHz.Length;
 
     /// <summary>
+    /// The |H| that separates the two standards. An open reads within a fraction of a dB of unity --
+    /// it is only the two ADC channels' gain mismatch -- and a short reads a lead resistance over the
+    /// reference resistor, which for ordinary leads on 100 ohms is about -60 dB. So the two are three
+    /// orders of magnitude apart and any threshold between them does the job; -6 dB is far from both.
+    /// </summary>
+    public const double StandardMagnitudeThreshold = 0.5;
+
+    /// <summary>
+    /// The median |H| of the stored curve -- near 1 for an open, near 0 for a short -- or NaN when
+    /// there is no usable curve. A median because a standard is smooth by construction and the ends
+    /// of the captured band are the noisiest part of it.
+    /// </summary>
+    public double MedianMagnitude
+    {
+        get
+        {
+            if (!IsUsable)
+                return double.NaN;
+
+            var magnitudes = new double[FreqHz.Length];
+            for (int i = 0; i < magnitudes.Length; i++)
+                magnitudes[i] = double.Hypot(Real[i], Imag[i]);
+
+            Array.Sort(magnitudes);
+            int mid = magnitudes.Length / 2;
+            return magnitudes.Length % 2 == 1
+                ? magnitudes[mid]
+                : 0.5 * (magnitudes[mid - 1] + magnitudes[mid]);
+        }
+    }
+
+    /// <summary>
+    /// Whether this curve has the shape of an <b>open</b> rather than a short.
+    ///
+    /// <para>A standard is entirely self-identifying, which is worth exploiting: the capture says
+    /// which one it is regardless of what the user meant to connect. Capturing an open with the
+    /// fixture still shorted stores a second short, and the correction then divides by the near-zero
+    /// difference between two standards that should be a thousand apart -- inflating H by some 60 dB
+    /// and reporting a flat negative impedance of exactly minus the reference resistor, at 180
+    /// degrees, with coherence 1.0. Measured on a real Jamo 504 on 2026-09-24: -101 ohms flat across
+    /// 15 Hz - 20 kHz, with no trace of the speaker's two resonances, from a fixture a tone test
+    /// proved was perfect. Nothing downstream can tell that from a real measurement, so the check
+    /// belongs on the standard itself.</para>
+    /// </summary>
+    public bool LooksLikeOpen => MedianMagnitude >= StandardMagnitudeThreshold;
+
+    /// <summary>
     /// Reduces a full-resolution measured ratio to the stored curve, sampling it at log-spaced
     /// frequencies across <paramref name="lowHz"/> to <paramref name="highHz"/>.
     /// </summary>

@@ -45,6 +45,19 @@ export interface Singularity {
   isRhp: boolean
 }
 
+/** The frequencies a fit speaks for: the plotted curve's first and last point. */
+export interface MeasuredBand {
+  lowHz: number
+  highHz: number
+}
+
+export interface Cancellation {
+  poleHz: number
+  zeroHz: number
+  /** Peak-to-peak dB the pair contributes across the measured band. */
+  swingDb: number
+}
+
 export interface FitResult {
   model: RationalModel
   poles: Singularity[]
@@ -57,15 +70,40 @@ export interface FitResult {
   numeratorOrder: number
   denominatorOrder: number
   /**
-   * Pairs of a pole and a zero within `CANCELLATION_FRACTION` of each other in frequency. They are
-   * the fit spending order on noise, and the honest response is to lower the order rather than to
-   * report them as features.
+   * Pairs of a pole and a zero that together do nothing the measurement can see — the fit spending
+   * order on noise, whose honest answer is a lower order rather than two reported components.
    */
-  cancellations: { poleHz: number; zeroHz: number }[]
+  cancellations: Cancellation[]
 }
 
-/** A pole and zero closer than this in relative frequency are treated as cancelling. */
-export const CANCELLATION_FRACTION = 0.05
+/**
+ * A pole/zero pair that moves the response by less than this across the measured band cancels.
+ *
+ * **Judged by what the pair does, not by how close its two frequencies are.** The rule was a
+ * relative frequency distance (5 %) until 2026-09-24, and proximity in frequency is not
+ * cancellation: a notch *is* a zero pair sitting exactly on a pole pair, differing only in damping,
+ * so the 800 Hz Q = 4 notch in this module's own tests — fitted at its true order 2/2, nothing
+ * spurious anywhere — was reported as a cancellation and the panel told the user to lower the
+ * order on it. Measured here with the pair evaluated instead: that notch swings **10.98 dB**, while
+ * the genuine article, a second-order filter fitted at order 4/4, swings **0.00 dB**.
+ *
+ * The threshold is 1 dB because the two nearest honest cases measured are a gentle first-order
+ * shelf (pole 300 Hz, zero 360 Hz — 17 % apart in frequency, and **1.58 dB** of real response) and
+ * the 91 kHz doublet an order-3 fit of the EL84 amplifier invents at the very edge of its band
+ * (**1.12 dB**). Those two are a third of a dB apart, so no threshold separates them; 1 dB keeps
+ * the shelf, which is a component someone built, and lets the doublet through, which shows up in
+ * the out-of-band flag instead.
+ */
+export const CANCELLATION_SWING_DB = 1
+
+/**
+ * At most this many frequencies are used to evaluate a pair's swing.
+ *
+ * The swing is smooth in log f, so a stride over the measured points answers the same question as
+ * all 1600 of them: `suggestOrder` fits eight orders, each with up to 8 × 8 pole/zero combinations,
+ * and the full grid would put a quarter of a million logarithms behind every automatic order.
+ */
+const SWING_SAMPLES = 256
 
 /** Solves `A x = b` for a small dense system by Gaussian elimination with partial pivoting. */
 function solve(a: number[][], b: number[]): number[] | null {
@@ -201,6 +239,114 @@ function toSingularities(coeffs: number[], omegaScale: number): Singularity[] {
 }
 
 /**
+ * The s-plane roots a singularity stands for, in Hz (σ/2π along the real axis, ω/2π along the
+ * imaginary one) — a conjugate pair contributes both of its roots, a real root only itself.
+ *
+ * `Singularity` reports a pair once as (f, ζ): the pair is |s| = 2πf at −ζ|s| ± j|s|√(1−ζ²), and a
+ * real root is at −ζ|s| with ζ = ±1, its sign carrying which half-plane it is in. Shared with
+ * `poleZeroMap.rootPoints`, which draws exactly these points, so the arithmetic exists once.
+ */
+export function singularityRoots(s: Singularity): { re: number; im: number }[] {
+  const sigmaHz = -s.zeta * s.freqHz
+  if (!s.isPair) return [{ re: sigmaHz, im: 0 }]
+
+  const omegaHz = Math.sqrt(Math.max(0, s.freqHz * s.freqHz - sigmaHz * sigmaHz))
+  return [
+    { re: sigmaHz, im: omegaHz },
+    { re: sigmaHz, im: -omegaHz },
+  ]
+}
+
+/** A root's natural frequency lies inside the measured band. No band to judge against counts as in. */
+export function singularityInBand(s: Singularity, band: MeasuredBand | null): boolean {
+  if (!band) return true
+  return s.freqHz >= band.lowHz && s.freqHz <= band.highHz
+}
+
+/**
+ * Peak-to-peak dB the pole/zero pair contributes over `freqHz`: `Σ|jω − z| / Σ|jω − p|` in dB, at
+ * its largest minus at its smallest. A flat contribution is a pair the measurement cannot see, and
+ * the *swing* rather than the level is what says so — a pair that is flat but not unity is only a
+ * gain, which the numerator's leading coefficient absorbs.
+ */
+function pairSwingDb(pole: Singularity, zero: Singularity, freqHz: number[]): number {
+  const p = singularityRoots(pole)
+  const z = singularityRoots(zero)
+  let lowest = Infinity
+  let highest = -Infinity
+
+  for (const f of freqHz) {
+    let db = 0
+    for (const r of z) db += 20 * Math.log10(Math.hypot(r.re, f - r.im))
+    for (const r of p) db -= 20 * Math.log10(Math.hypot(r.re, f - r.im))
+    if (!Number.isFinite(db)) continue
+    if (db < lowest) lowest = db
+    if (db > highest) highest = db
+  }
+
+  return highest >= lowest ? highest - lowest : Infinity
+}
+
+/**
+ * The pole/zero pairs that cancel, each zero spent at most once.
+ *
+ * Greedy on the smallest swing rather than every combination: with three poles and three zeros
+ * there are nine pairings and only three of them can be real, so reporting all of the close ones
+ * would count the same wasted order several times over.
+ */
+function findCancellations(poles: Singularity[], zeros: Singularity[], freqHz: number[]): Cancellation[] {
+  const spent = new Array(zeros.length).fill(false)
+  const out: Cancellation[] = []
+
+  for (const pole of poles) {
+    let bestIndex = -1
+    let bestSwing = Infinity
+    zeros.forEach((zero, index) => {
+      if (spent[index]) return
+      const swing = pairSwingDb(pole, zero, freqHz)
+      if (swing < bestSwing) {
+        bestSwing = swing
+        bestIndex = index
+      }
+    })
+
+    if (bestIndex >= 0 && bestSwing < CANCELLATION_SWING_DB) {
+      spent[bestIndex] = true
+      out.push({ poleHz: pole.freqHz, zeroHz: zeros[bestIndex].freqHz, swingDb: bestSwing })
+    }
+  }
+
+  return out
+}
+
+/**
+ * The root that makes a fit's DC gain an extrapolation rather than a reading, or null when nothing
+ * does.
+ *
+ * `H(0)` is always evaluated at a frequency no sweep contains, but it is only *extrapolated* when
+ * the model bends on the way down: with every root above the band, |H| is flat from the lowest one
+ * to DC and H(0) is the passband gain the measurement already reported. A root below the band is
+ * the opposite case, and the figure then describes a corner the sweep never reached.
+ *
+ * Measured on a push-pull EL84 amplifier (chirp 13 Hz–91 kHz, passband gain 26.58 dB): an order-6
+ * fit placed a pole at 7.65 Hz against a zero at 3.00 Hz — the amplifier's coupling, half seen —
+ * and reported **DC gain 18.43 dB**, eight decibels below the measurement, next to a fit error of
+ * 0.008 dB rms. Forced to 2 poles and 1 zero, both above the band, the same curve gives 26.55 dB.
+ * Neither fit is wrong; only one of them is quoting a number the sweep constrains.
+ */
+export function dcGainExtrapolation(fit: FitResult, band: MeasuredBand | null): { rootHz: number; kind: 'pole' | 'zero' } | null {
+  if (!band) return null
+
+  const roots = [
+    ...fit.poles.map((p) => ({ rootHz: p.freqHz, kind: 'pole' as const })),
+    ...fit.zeros.map((z) => ({ rootHz: z.freqHz, kind: 'zero' as const })),
+  ].filter((r) => Number.isFinite(r.rootHz) && r.rootHz < band.lowHz)
+
+  if (roots.length === 0) return null
+  return roots.reduce((lowest, r) => (r.rootHz < lowest.rootHz ? r : lowest))
+}
+
+/**
  * Fit a model of the given order to a measured curve.
  *
  * `points` are the curve the chart is already drawing — windowed, sign-corrected and
@@ -256,15 +402,9 @@ export function fitRational(
   const poles = toSingularities(model.den, omegaScale)
   const zeros = toSingularities(trimLeading(model.num), omegaScale)
 
-  const cancellations: { poleHz: number; zeroHz: number }[] = []
-  for (const pole of poles) {
-    for (const zero of zeros) {
-      const scale = Math.max(pole.freqHz, zero.freqHz)
-      if (scale > 0 && Math.abs(pole.freqHz - zero.freqHz) / scale < CANCELLATION_FRACTION) {
-        cancellations.push({ poleHz: pole.freqHz, zeroHz: zero.freqHz })
-      }
-    }
-  }
+  const stride = Math.max(1, Math.ceil(usable.length / SWING_SAMPLES))
+  const swingGrid = usable.filter((_, i) => i % stride === 0).map((p) => p.freqHz)
+  const cancellations = findCancellations(poles, zeros, swingGrid)
 
   const dc = cAbs(cDiv(cx(model.num[0]), cx(model.den[0])))
 
@@ -284,6 +424,26 @@ export function fitRational(
 /** A step must improve the error by at least this factor to count as a cliff rather than drift. */
 export const KNEE_SIGNIFICANT_FACTOR = 1.5
 
+/**
+ * A cliff only counts when the order below it still *missed* the measurement by this much.
+ *
+ * Without it the rule reads a ratio and nothing else, and a ratio cannot tell structure from noise:
+ * measured on a push-pull EL84 amplifier over 13 Hz–91 kHz, whose response is flat to 0.11 dB from
+ * 100 Hz to 20 kHz, orders 1 through 5 all fit within **0.052–0.060 dB rms** — the chirp's own
+ * ripple — and order 6 reaches 0.0081. That 6.4x step is the largest in the curve and the rule took
+ * it, spending four extra roots (two of them right-half-plane pairs, on an unconditionally stable
+ * amplifier) to buy five hundredths of a decibel, and moving the reported DC gain 8 dB in the
+ * process. With the floor, no step on that curve counts and the fallback returns the lowest order
+ * tried, which describes a featureless response as honestly as order 5 did.
+ *
+ * 0.1 dB is above what this instrument's own chirp repeatability leaves on a flat DUT and below
+ * anything a person would call a feature; it is also well under `POOR_FIT_DB`, so an order the
+ * floor stops at is still a fit the panel calls good. It gates the step's *starting* point, not its
+ * end, so a synthetic filter — large errors below its true order, round-off at and above it — keeps
+ * selecting exactly its own order.
+ */
+export const KNEE_NEGLIGIBLE_ERROR_DB = 0.1
+
 /** Discounting cancelling poles may not cost more than this factor of fit accuracy. */
 export const KNEE_MAX_DISCOUNT_COST = 10
 
@@ -294,9 +454,13 @@ export interface OrderFit {
 }
 
 /**
- * The order to fit at. Three steps, and each one exists because the previous rule failed on measured
- * data from the GM70 driver stage (5 Hz–80 kHz, −25 dBV, 65 points).
+ * The order to fit at. Four steps, and each one exists because the previous rule failed on measured
+ * data — steps 1 to 3 on the GM70 driver stage (5 Hz–80 kHz, −25 dBV, 65 points), step 0 on the
+ * EL84 amplifier described at `KNEE_NEGLIGIBLE_ERROR_DB`.
  *
+ * 0. **A step out of an error that was already negligible is not a cliff.** See
+ *    `KNEE_NEGLIGIBLE_ERROR_DB`: a featureless response is fitted to the measurement's own ripple at
+ *    every order, and the largest ratio in such a curve is a ratio between two kinds of noise.
  * 1. **Walk to the last cliff.** Take the highest order whose step improved the error by
  *    `KNEE_SIGNIFICANT_FACTOR`. Not the *biggest* cliff: that curve has two comparable ones — 5.1x at
  *    order 2 and 4.6x at order 7 — with a plateau between, and taking the biggest returned order 2,
@@ -313,10 +477,11 @@ export interface OrderFit {
  *    rule. Requiring the discounted order to stay within `KNEE_MAX_DISCOUNT_COST` of the best error
  *    achieved returns **5 on both**.
  *
- * Falls back to the lowest order tried when nothing improves by `KNEE_SIGNIFICANT_FACTOR`: a
- * first-order system is fitted exactly at order 1, and every step above it is then a ratio of
- * round-off to round-off. Under-fitting is the safe failure — it shows in the error readout and in
- * the fitted curve visibly leaving the measurement, whereas over-fitting looks like success.
+ * Falls back to the lowest order tried when no step qualifies: a first-order system is fitted
+ * exactly at order 1, and every step above it is then a ratio of round-off to round-off, while a
+ * flat amplifier is fitted about equally well at every order and the fallback says so. Under-fitting
+ * is the safe failure — it shows in the error readout and in the fitted curve visibly leaving the
+ * measurement, whereas over-fitting looks like success.
  */
 export function kneeOrder(fits: OrderFit[]): number {
   if (fits.length === 0) return 2
@@ -327,8 +492,8 @@ export function kneeOrder(fits: OrderFit[]): number {
   const floor = 1e-12
   const err = (fit: OrderFit) => Math.max(fit.rmsErrorDb, floor)
 
-  const ratios = fits.slice(1).map((fit, i) => ({ fit, ratio: err(fits[i]) / err(fit) }))
-  const significant = ratios.filter((r) => r.ratio >= KNEE_SIGNIFICANT_FACTOR)
+  const ratios = fits.slice(1).map((fit, i) => ({ fit, ratio: err(fits[i]) / err(fit), from: err(fits[i]) }))
+  const significant = ratios.filter((r) => r.ratio >= KNEE_SIGNIFICANT_FACTOR && r.from > KNEE_NEGLIGIBLE_ERROR_DB)
   if (significant.length === 0) return fits[0].order
 
   const cliff = significant[significant.length - 1].fit

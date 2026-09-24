@@ -22,6 +22,8 @@ export type ReportElementId =
   | 'description'
   | 'settings'
   | 'measurements'
+  | 'component'
+  | 'equivalent'
   | 'metrics'
   | 'harmonics'
   | 'oscilloscope'
@@ -78,7 +80,19 @@ const SWEEP_MEASUREMENTS: ReportElement = {
 const IMPEDANCE_MEASUREMENTS: ReportElement = {
   id: 'measurements',
   label: 'Measurements',
-  hint: 'Peak, minimum and median |Z|, the drive current and, for the Component the screen selects, its capacitor, inductor or Thiele-Small fit.',
+  hint: 'Peak, minimum and median |Z|, the drive current and the reference resistor — the Measurements panel.',
+}
+
+const IMPEDANCE_COMPONENT: ReportElement = {
+  id: 'component',
+  label: 'Component values',
+  hint: "The fit for whatever the screen's Component dropdown says is on the fixture: a capacitor's C/ESR/ESL, an inductor's L/DCR/Q or a driver's Thiele-Small block. Nothing when it says None.",
+}
+
+const IMPEDANCE_EQUIVALENT: ReportElement = {
+  id: 'equivalent',
+  label: 'Equivalent circuit',
+  hint: "The series R + jX at the frequency the readout panel's Equivalent circuit block is set to, with the inductance or capacitance that reactance makes.",
 }
 
 const IMPULSE_MEASUREMENTS: ReportElement = {
@@ -119,7 +133,7 @@ export function reportElementsForKind(kind: string | null | undefined): readonly
   if (isCrosstalkKind(kind)) return [CHART, DESCRIPTION, SETTINGS, CROSSTALK_MEASUREMENTS]
   if (isOutputImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, OUTPUT_IMPEDANCE_MEASUREMENTS]
   if (isSweepKind(kind)) return [CHART, DESCRIPTION, SETTINGS, SWEEP_MEASUREMENTS]
-  if (isImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPEDANCE_MEASUREMENTS]
+  if (isImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPEDANCE_MEASUREMENTS, IMPEDANCE_COMPONENT, IMPEDANCE_EQUIVALENT]
   if (isImpulseResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPULSE_MEASUREMENTS]
   if (kind === FFT_SPECTRUM_KIND) return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, OSCILLOSCOPE, WATERFALL]
   return GENERIC_REPORT_ELEMENTS
@@ -134,6 +148,24 @@ export function defaultReportElements(kind: string | null | undefined): ReportEl
   return reportElementsForKind(kind)
     .map((element) => element.id)
     .filter((id) => id !== 'settings')
+}
+
+/**
+ * A stored element choice read back the way it was meant when it was made.
+ *
+ * <p>The impedance chapter's component fit used to be part of `measurements`; it is its own checkbox
+ * now. A choice saved before the split says `measurements` and cannot say `component`, so taken
+ * literally it would silently drop a block the user had been getting — the same reasoning as
+ * migration 008's backfill, which reproduced the order the list already appeared to have. A choice
+ * that mentions either new id was made after the split and is taken exactly as it stands.</p>
+ *
+ * <p>Takes plain strings, because this is what came back out of a stored settings document and may
+ * hold ids no build of this client knows; the caller filters it against what the kind offers.</p>
+ */
+export function migrateStoredElements(stored: readonly string[]): string[] {
+  const split = stored.includes('component') || stored.includes('equivalent')
+  if (split || !stored.includes('measurements')) return [...stored]
+  return [...stored, 'component']
 }
 
 /** Whether a kind's report can carry its chart — i.e. its chart component exposes `exportPng`. Every kind's does. */

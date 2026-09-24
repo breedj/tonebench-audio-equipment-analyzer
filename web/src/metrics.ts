@@ -15,7 +15,17 @@ export interface MetricTile {
    * always absent on the fundamental, THD, Gain, Pk and RMS tiles, which no weighting touches.
    */
   qualifier?: string
+  /**
+   * Why this tile reads NOT_APPLICABLE instead of a number: the stimulus is not a single sine, so
+   * the figure's "fundamental" is only the loudest tone of several and everything else it plays
+   * against falls into the noise-and-distortion integral. Shown as the tile's tooltip, printed once
+   * per channel in a report. Absent on every tile that has a real value.
+   */
+  caveat?: string
 }
+
+/** What a noise figure reads when the stimulus has no single fundamental to reference. */
+export const NOT_APPLICABLE = 'n/a'
 
 /**
  * The label backing the single, channel-independent generator summary tile (see generatorTile()
@@ -66,6 +76,60 @@ export const AVAILABLE_METRIC_LABELS = [
   'Noise dBV/√Hz',
   'Noise in nV/√Hz',
 ] as const
+
+/**
+ * The stimulus the tiles are being read against, as the *staged* generator form reports it (see
+ * useGeneratorStimulus.ts) rather than DeviceStatus, whose tones are silenced by Stop — a capture
+ * that has finished must still know what produced it. For a stored result it comes from the
+ * measurement's own gen_json (see report/spectrumFrames.ts's storedStimulus).
+ */
+export interface StimulusSummary {
+  kind: GeneratorKind
+  /** How many sine tones the stimulus plays. For Multitone this is the derived comb's length. */
+  toneCount: number
+}
+
+/**
+ * Why the noise figures cannot be read against this stimulus, or null when they can.
+ *
+ * Every figure integrated over the noise band — THD+N, N+D, N-D, SNR, the weighted band RMS and the
+ * two noise densities — is defined against exactly one fundamental: SpectrumPipeline's ComputeMeters
+ * picks the loudest tone and notches it, and everything else in the band counts as noise and
+ * distortion. Play a second tone and that is arithmetically correct and physically meaningless.
+ * Measured on a real QA403, SMPTE 60 Hz + 7 kHz at -6 dBV sine-equivalent through a loopback: the
+ * 7 kHz tone sits 12.04 dB under the 60 Hz one, so THD+N read 399.83521 % (10^(12.04/20) = 4.00) and
+ * SNR read exactly -12.04 dB — numbers that look like a fault in the analyzer.
+ *
+ * THD, the harmonics table, IMD and TD+N are not affected and keep their values: those are the
+ * figures a multi-tone test is for.
+ */
+export function noiseFigureCaveat(stimulus: StimulusSummary | null | undefined): string | null {
+  if (!stimulus) return null
+  if (stimulus.kind === 'Multitone') {
+    return 'the stimulus is a multitone comb, so every tone but the loudest is counted as noise and distortion rather than as signal; read TD+N instead'
+  }
+  if (stimulus.kind === 'Tones' && stimulus.toneCount === 2) {
+    return 'the stimulus is a two-tone pair, so the quieter tone is counted as noise and distortion rather than as signal; read IMD instead'
+  }
+  if (stimulus.kind === 'Tones' && stimulus.toneCount > 2) {
+    return `the stimulus carries ${stimulus.toneCount} tones, so every tone but the loudest is counted as noise and distortion rather than as signal`
+  }
+  return null
+}
+
+/**
+ * The StimulusSummary a staged generator form describes (useGeneratorStimulus.ts's kind/tones/
+ * multitone). One function so the FFT screen's tiles and a report of that same screen cannot
+ * disagree about how many tones were playing. Multitone's comb is derived rather than staged, so
+ * its length comes from multitoneToneCount, the way the Gen tile's own summary does.
+ */
+export function stimulusSummary(
+  kind: GeneratorKind,
+  tones: readonly GeneratorTone[],
+  multitone: MultitoneSettings,
+): StimulusSummary {
+  return { kind, toneCount: kind === 'Multitone' ? multitoneToneCount(multitone.tonesPerOctave) : tones.length }
+}
 
 /**
  * The noise density referred to the DUT's input: density − gain, as volts. −150 dBV/√Hz at 0 dB
@@ -192,14 +256,27 @@ export function channelTiles(
    * useSpectrumStream). Null adds no TD+N tiles at all, the IMD rule.
    */
   multitone: MultitoneFrame | null = null,
+  /**
+   * The stimulus the record was captured against, when it is known. A stimulus with more than one
+   * tone makes every noise-integrated tile read NOT_APPLICABLE with the reason on `caveat` — see
+   * noiseFigureCaveat. Null leaves them all showing their numbers, which is the right answer for a
+   * caller that cannot know (and for every single-tone stimulus).
+   */
+  stimulus: StimulusSummary | null = null,
 ): MetricTile[] {
   const qualifier = weightingQualifier(noise?.weighting) ?? undefined
-  const weighted = (tile: MetricTile): MetricTile => (qualifier ? { ...tile, qualifier } : tile)
+  const caveat = noiseFigureCaveat(stimulus)
+  // The tiles integrated over the noise band. Exactly the set a weighting qualifies, and exactly
+  // the set that assumes the record holds one fundamental — a weighting changes what "noise" means,
+  // and a second tone changes what is counted as noise at all. A tile that reads n/a drops the
+  // weighting qualifier with its number: there is no integral left for it to describe.
+  const noiseFigure = (tile: MetricTile): MetricTile =>
+    caveat ? { label: tile.label, value: NOT_APPLICABLE, caveat } : qualifier ? { ...tile, qualifier } : tile
   const noiseTiles: MetricTile[] = noise
     ? [
-        weighted({ label: 'RMS dBV(bw)', value: `${noise.bandRmsDbv.toFixed(2)} dBV` }),
-        weighted({ label: 'Noise dBV/√Hz', value: `${noise.noiseDensityDbvPerRootHz.toFixed(2)} dBV/√Hz` }),
-        weighted({ label: 'Noise in nV/√Hz', value: formatNvPerRootHz(noiseInputReferredNvPerRootHz(noise.noiseDensityDbvPerRootHz, dutGainDb)) }),
+        noiseFigure({ label: 'RMS dBV(bw)', value: `${noise.bandRmsDbv.toFixed(2)} dBV` }),
+        noiseFigure({ label: 'Noise dBV/√Hz', value: `${noise.noiseDensityDbvPerRootHz.toFixed(2)} dBV/√Hz` }),
+        noiseFigure({ label: 'Noise in nV/√Hz', value: formatNvPerRootHz(noiseInputReferredNvPerRootHz(noise.noiseDensityDbvPerRootHz, dutGainDb)) }),
       ]
     : []
 
@@ -248,17 +325,17 @@ export function channelTiles(
         ]
       : []),
 
-    weighted({ label: 'THD+N %', value: `${m.thdNPercent.toFixed(5)} %` }),
-    weighted({ label: 'THD+N dB', value: `${thdNDb.toFixed(2)} dB` }),
-    weighted({ label: 'THD+N dBr', value: `${thdNDbv.toFixed(2)} dBr` }),
-    weighted({ label: 'THD+N dBV', value: `${thdNDbv.toFixed(2)} dBV` }),
-    weighted({ label: 'N+D dBr', value: `${thdNDbv.toFixed(2)} dBr` }),
-    weighted({ label: 'N+D dBV', value: `${thdNDbv.toFixed(2)} dBV` }),
+    noiseFigure({ label: 'THD+N %', value: `${m.thdNPercent.toFixed(5)} %` }),
+    noiseFigure({ label: 'THD+N dB', value: `${thdNDb.toFixed(2)} dB` }),
+    noiseFigure({ label: 'THD+N dBr', value: `${thdNDbv.toFixed(2)} dBr` }),
+    noiseFigure({ label: 'THD+N dBV', value: `${thdNDbv.toFixed(2)} dBV` }),
+    noiseFigure({ label: 'N+D dBr', value: `${thdNDbv.toFixed(2)} dBr` }),
+    noiseFigure({ label: 'N+D dBV', value: `${thdNDbv.toFixed(2)} dBV` }),
 
-    weighted({ label: 'N-D dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` }),
-    weighted({ label: 'N-D dBV', value: `${noiseOnlyDbv.toFixed(2)} dBV` }),
-    weighted({ label: 'SNR dB', value: `${m.snrDb.toFixed(2)} dB` }),
-    weighted({ label: 'SNR dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` }),
+    noiseFigure({ label: 'N-D dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` }),
+    noiseFigure({ label: 'N-D dBV', value: `${noiseOnlyDbv.toFixed(2)} dBV` }),
+    noiseFigure({ label: 'SNR dB', value: `${m.snrDb.toFixed(2)} dB` }),
+    noiseFigure({ label: 'SNR dBr', value: `${noiseOnlyDbv.toFixed(2)} dBr` }),
 
     { label: 'Pk dBr', value: `${m.peakDbv.toFixed(2)} dBr` },
     { label: 'Pk dBV', value: `${m.peakDbv.toFixed(2)} dBV` },

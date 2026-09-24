@@ -1,5 +1,5 @@
 import type { ReportRow, ReportSection } from '../../api/client'
-import { channelTiles, GEN_METRIC_LABEL } from '../../metrics'
+import { channelTiles, GEN_METRIC_LABEL, NOT_APPLICABLE } from '../../metrics'
 import type { IntermodulationFrame, MetersFrame, MultitoneFrame } from '../../streaming/protocol'
 import { imdProductLabel } from '../../imd/products'
 import type { ReportElementId } from '../elements'
@@ -25,7 +25,7 @@ function channelsOf(meters: Record<number, MetersFrame>): [number, MetersFrame][
 /** One key/value section per channel with the selected tiles — what the tiles above the chart show. */
 export function metricsSections(subject: ReportSubject): ReportSection[] {
   if (subject.data.kind !== 'spectrum') return []
-  const { meters, selectedMetrics, generatorTones, loadOhms, noise, display } = subject.data
+  const { meters, selectedMetrics, generatorTones, loadOhms, noise, display, stimulus } = subject.data
   const sections: ReportSection[] = []
 
   // The Gen tile is one tile for both channels on screen (GeneratorMetricsPanel); here it heads the
@@ -41,16 +41,21 @@ export function metricsSections(subject: ReportSubject): ReportSection[] {
   for (const channel of channels) {
     const tiles = channelTiles(
       meters[channel] ?? null, generatorTones, loadOhms, subject.data.intermodulation[channel] ?? null, false,
-      noise[channel] ?? null, display.dutGainDb.value, subject.data.multitone?.[channel] ?? null,
+      noise[channel] ?? null, display.dutGainDb.value, subject.data.multitone?.[channel] ?? null, stimulus ?? null,
     )
     const byLabel = new Map(tiles.map((tile) => [tile.label, tile]))
     const rows: ReportRow[] = []
     if (genRow && sections.length === 0) rows.push(genRow)
+    let caveat: string | null = null
     for (const label of selectedMetrics) {
       const tile = byLabel.get(label)
       // The weighting qualifier travels with the label, as it does on the tile.
       if (tile) rows.push({ label: tile.qualifier ? `${tile.label} (${tile.qualifier})` : tile.label, value: tile.value.replace(/\n/g, ', ') })
+      if (tile?.caveat) caveat = tile.caveat
     }
+    // Paper has no tooltip, so the reason those rows read "n/a" is spelled out once per channel
+    // rather than repeated on each of the thirteen that carry it.
+    if (caveat) rows.push({ label: NOT_APPLICABLE, value: `${caveat.charAt(0).toUpperCase()}${caveat.slice(1)}.` })
     if (rows.length > 0) sections.push({ kind: 'keyValues', title: `Metrics — ${CHANNEL_LABELS[channel]}`, rows })
   }
 

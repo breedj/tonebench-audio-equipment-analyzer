@@ -1,4 +1,5 @@
-import type { GeneratorTone, MeasurementDetail } from '../api/client'
+import type { GeneratorKind, GeneratorTone, MeasurementDetail } from '../api/client'
+import type { StimulusSummary } from '../metrics'
 import {
   StreamMsgType,
   type HarmonicMarker,
@@ -269,5 +270,33 @@ export function storedGeneratorTones(genJson: string | null): GeneratorTone[] {
     return tones.filter((t) => typeof t.freqHz === 'number' && typeof t.ampDbv === 'number')
   } catch {
     return []
+  }
+}
+
+/**
+ * The stimulus a stored result was captured against, from the same `genJson` — the kind plus how
+ * many tones it played, which is all metrics.ts's noiseFigureCaveat needs to decide whether that
+ * result's noise figures had a single fundamental to reference. `tones` is the *effective* list
+ * MeasurementSaveService wrote (ChannelGeneratorConfig.Tones), so a Multitone capture's comb is
+ * already expanded here and needs no re-derivation. Null when the result records no generator at
+ * all, which leaves every tile showing its number exactly as it always did.
+ */
+export function storedStimulus(genJson: string | null): StimulusSummary | null {
+  if (!genJson) return null
+  try {
+    const parsed = JSON.parse(genJson) as {
+      left?: { kind?: GeneratorKind; tones?: GeneratorTone[] }
+      right?: { kind?: GeneratorKind; tones?: GeneratorTone[] }
+    }
+    // The enabled channel with tones, as storedGeneratorTones picks it — both channels play the
+    // same stimulus (GeneratorPanel.vue), so either answers for the pair.
+    const channel = parsed.left?.tones?.length ? parsed.left : (parsed.right ?? parsed.left)
+    const tones = channel?.tones ?? []
+    if (!channel?.kind && tones.length === 0) return null
+    // A gen_json that records tones but no kind is a plain tone list — `kind` is init-only with
+    // Tones as its default, so that is what such a capture played.
+    return { kind: channel?.kind ?? 'Tones', toneCount: tones.length }
+  } catch {
+    return null
   }
 }

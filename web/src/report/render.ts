@@ -20,6 +20,7 @@ import { responseChartFlags } from '../response/display'
 import { sweepChartWindow } from '../sweep/display'
 import { sweepEndFreqHzFromParams } from '../sweep/points'
 import { sweepXLabel } from '../sweep/xAxis'
+import type { FrequencyResponseParameters } from '../api/client'
 import type { ReportElementId } from './elements'
 import { renderChartPng, type ChartProvision } from './renderChart'
 import { subjectLabel, type ReportSubject } from './types'
@@ -55,6 +56,7 @@ export function toOverlayEntry(subject: ReportSubject): OverlayEntry | null {
     sweepFamily: data.kind === 'sweep' ? data.family : undefined,
     sweepEndFreqHz: data.kind === 'sweep' ? sweepEndFreqHzFromParams(subject.paramsJson) : undefined,
     responseTraces: data.kind === 'response' || data.kind === 'impulse' || data.kind === 'crosstalk' ? data.traces : undefined,
+    impulseTrace: data.kind === 'impulse' ? data.impulse : undefined,
     impedanceTraces: data.kind === 'impedance' ? data.traces : data.kind === 'outputImpedance' && data.trace ? [data.trace] : undefined,
   }
 }
@@ -126,6 +128,22 @@ export async function renderExtraCharts(
  * the primary has nothing for that view. `primaryLabel` names the primary curve in the legend when
  * there is anything to tell it apart from.
  */
+/**
+ * The pole-zero fit order a result was saved with, or null for Auto — which is also what a result
+ * written before the orders were stored reads as.
+ */
+function storedFitOrder(paramsJson: string | null): { poles: number; zeros: number } | null {
+  if (!paramsJson) return null
+  try {
+    const stored = JSON.parse(paramsJson) as FrequencyResponseParameters
+    if (stored.chartFitAutoOrder !== false) return null
+    if (typeof stored.chartFitPoles !== 'number' || typeof stored.chartFitZeros !== 'number') return null
+    return { poles: stored.chartFitPoles, zeros: stored.chartFitZeros }
+  } catch {
+    return null
+  }
+}
+
 export async function renderView(
   view: string,
   primary: ReportSubject,
@@ -170,8 +188,10 @@ export async function renderView(
             showDataPoints: display.showDataPoints,
             showFittedModel: display.showFittedModel,
             hideOutOfBandRoots: display.hideOutOfBandRoots,
-            // No panel exists for a report: the chart fits the map's own model (see effectiveFit).
+            // No panel exists for a report, so the chart fits its own (see effectiveFit) — at the
+            // order this measurement was saved with when it pinned one, and automatically otherwise.
             fit: null,
+            fitOrder: storedFitOrder(primary.paramsJson),
           },
           options,
         )
@@ -245,6 +265,7 @@ export async function renderView(
             ImpulseResponseChart,
             {
               impulse,
+              overlays: overlayEntries,
               normalised: display.normalised,
               thickLines: display.thickLines,
               timeFromMs: display.timeFromMs,
@@ -295,6 +316,7 @@ export async function renderView(
             ImpulseHarmonicsChart,
             {
               harmonics,
+              overlays: overlayEntries,
               thickLines: display.thickLines,
               showDataPoints: display.showDataPoints,
               freqFromHz: display.freqFromHz,

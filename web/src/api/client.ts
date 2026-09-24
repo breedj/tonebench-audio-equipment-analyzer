@@ -494,6 +494,12 @@ export interface ImpedanceParameters {
    * `chart*` display fields and is null on a type stored before it existed.
    */
   chartDutType?: string | null
+  /**
+   * The frequency the readout's Equivalent circuit block reads, which the comparison table under the
+   * chart and the report's own block follow. Display state like the rest of the `chart*` fields, and
+   * null on a type stored before it existed — the screen then starts at 1 kHz.
+   */
+  chartEquivalentHz?: number | null
 }
 
 /** Which chart the impedance screen is showing. */
@@ -658,6 +664,12 @@ export interface FrequencyResponseParameters {
   chartRestoreDelay?: boolean | null
   /** Nyquist and Nichols: draw the fitted model over the measurement. */
   chartShowFittedModel?: boolean | null
+  /** The Poles and zeros panel's Auto checkbox. Absent on a type saved before the orders were stored, which is treated as on. */
+  chartFitAutoOrder?: boolean | null
+  /** The pinned denominator order (poles) used when Auto is off. */
+  chartFitPoles?: number | null
+  /** The pinned numerator order (zeros), never more than the poles. */
+  chartFitZeros?: number | null
   /** Pole-zero map: hide the roots the fit placed outside the measured band. */
   chartHideOutOfBandRoots?: boolean | null
   /**
@@ -957,6 +969,12 @@ export interface SteppedResponseParameters {
   chartRestoreDelay?: boolean | null
   /** Nyquist and Nichols: draw the fitted model over the measurement. */
   chartShowFittedModel?: boolean | null
+  /** The Poles and zeros panel's Auto checkbox. Absent on a type saved before the orders were stored, which is treated as on. */
+  chartFitAutoOrder?: boolean | null
+  /** The pinned denominator order (poles) used when Auto is off. */
+  chartFitPoles?: number | null
+  /** The pinned numerator order (zeros), never more than the poles. */
+  chartFitZeros?: number | null
   /** Pole-zero map: hide the roots the fit placed outside the measured band. */
   chartHideOutOfBandRoots?: boolean | null
   /**

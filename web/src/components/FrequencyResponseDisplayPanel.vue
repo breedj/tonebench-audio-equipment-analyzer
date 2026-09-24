@@ -696,7 +696,11 @@ watch(running, (isRunning, wasRunning) => {
       </p>
     </div>
 
-    <div class="flex flex-col gap-1 text-xs">
+    <!-- Hidden on the pole-zero map, where neither control does anything: that projection draws
+         singularities and its own legend, and ResponsePolarChart.renderScene returns before it ever
+         reaches the curve the two style props are passed to. A control that cannot change what is on
+         screen is worse than a missing one. -->
+    <div v-if="bodeShowing || projection !== 'PoleZero'" class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Style</span>
       <label class="flex items-center gap-1.5"><input v-model="thickLines" type="checkbox" /> Thick lines</label>
       <label class="flex items-center gap-1.5">

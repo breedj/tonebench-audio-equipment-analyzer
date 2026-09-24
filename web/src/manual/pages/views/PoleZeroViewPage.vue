@@ -149,7 +149,7 @@ const markers: ManualMarker[] = [{ x: 0, color: 'grey' }]
     <SettingsTable
       :headings="['Control', 'What it does']"
       :rows="[
-        ['Choose order automatically', 'Searches orders and takes the lowest that fits about as well as the best one tried, with as many zeros as poles. Untick it to set the two separately.'],
+        ['Choose order automatically', 'Searches orders and takes the lowest that fits about as well as the best one tried, with as many zeros as poles. It stops climbing once the model is already inside the measurement’s own ripple (0.1 dB rms), so a flat amplifier is described by a low order rather than by roots invented to chase noise. Untick it to set the two separately.'],
         ['Poles', 'The denominator order: how many poles the model may have, 1 to 10.'],
         ['Zeros', 'The numerator order, never more than Poles — a transfer function is proper. Set it to 0 for an all-pole DUT (any of the four classic filters, most amplifiers): with as many zeros as poles the fitter spends them on noise, and invents right-half-plane poles to go with them.'],
         ['Remove out of band', 'A display option on the map: leaves out the roots the fit placed outside the swept band and rescales the plot to what is left. The fit is unchanged and the table goes on listing them, flagged.'],
@@ -183,6 +183,32 @@ const markers: ManualMarker[] = [{ x: 0, color: 'grey' }]
       fit is an <em>equivalent</em> model over the fitted band — the real pole lands at 2.6 kHz
       rather than 2.0 — which is what 0.006 dB of residual buys and what a root list is worth.
     </p>
+
+    <h2>Right-half-plane roots: delay, or too high an order</h2>
+    <p>
+      Both produce them, and the removed delay is only one of the two. On a chirp of a filter the
+      delay is large — the Butterworth's 14 samples above — and restoring it moves the roots a long
+      way. On a measurement whose removed delay is a fraction of a sample the checkbox changes
+      nothing, and a right-half-plane pair then means the order is too high: measured on a push-pull
+      EL84 amplifier (chirp 13 Hz–91 kHz, 0.213 samples removed, about a microsecond), a hand-set
+      order of 6 produced two right-half-plane pairs at 74.9 and 84.7 kHz whose Q changed by 0.011
+      with the delay restored. The tell is the residual: that fit was already flat to 0.05 dB at
+      order 1, so the extra roots bought nothing.
+    </p>
+
+    <div class="manual-note">
+      <p>
+        <strong>The DC gain is a reading only when every root is above the band.</strong> Then the
+        response is flat from the lowest root down to DC and the figure is the passband gain. A root
+        <em>below</em> the band means the model bends on the way down through a corner the sweep
+        never reached, and the panel marks the figure <strong>≈ … · extrapolated</strong> and names
+        the root. On the EL84 above, an order-6 fit put a pole at 7.65 Hz against a zero at 3.00 Hz
+        — the amplifier's coupling, half seen — and quoted a DC gain of 18.43 dB against a measured
+        passband gain of 26.58 dB, next to a fit error of 0.008 dB rms. An excellent fit and a
+        confidently wrong headline number are not in conflict; only one of them is about the
+        measurement.
+      </p>
+    </div>
 
     <div class="manual-note">
       <p>

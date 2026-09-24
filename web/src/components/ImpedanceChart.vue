@@ -105,6 +105,12 @@ function color(pair: readonly string[]): string {
 /** The DUT curve. */
 const trace = computed(() => props.traces.find((t) => t.kind === 'Impedance') ?? null)
 
+/**
+ * Whether the live measurement occupies run 0 — see runDash. With nothing measured, the first
+ * checked history item is promoted to the solid line instead of every curve on screen being dashed.
+ */
+const liveDrawn = computed(() => trace.value !== null)
+
 const { storedShortCal, referenceOhms } = useImpedance()
 
 /** The x grid: the DUT's when there is one, otherwise a standard's own so it can be seen alone. */
@@ -400,9 +406,11 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       color: color(IMPEDANCE_COLOR),
       pair: IMPEDANCE_COLOR,
       unit: 'ohms',
-      width: 1,
-      dash: impedanceOverlayDash(props.overlays, overlay.id) ?? undefined,
-      points: false,
+      // Width and markers follow the live |Z| curve this is drawn to be compared against; a fixed
+      // weight here made Thick lines and Data points apply to half the chart only.
+      width,
+      dash: impedanceOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? undefined,
+      points: props.showDataPoints,
     })
   }
 
@@ -440,10 +448,12 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
         key: `o${overlay.id}p`,
         label: `${overlay.name} phase`,
         color: color(PHASE_COLOR),
-      pair: PHASE_COLOR,
+        pair: PHASE_COLOR,
         unit: 'deg',
-        width: 1,
-        dash: impedanceOverlayDash(props.overlays, overlay.id) ?? undefined,
+        // Markers stay off, as they are on the live phase curve: each overlay series follows the
+        // live series it mirrors.
+        width,
+        dash: impedanceOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? undefined,
         scale: 'phase',
         points: false,
       })
@@ -497,10 +507,10 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
         color: color(DAMPING_FACTOR_COLOR),
         pair: DAMPING_FACTOR_COLOR,
         unit: 'df',
-        width: 1,
-        dash: impedanceOverlayDash(props.overlays, overlay.id) ?? undefined,
+        width,
+        dash: impedanceOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? undefined,
         scale: 'df',
-        points: false,
+        points: props.showDataPoints,
       })
     }
   }

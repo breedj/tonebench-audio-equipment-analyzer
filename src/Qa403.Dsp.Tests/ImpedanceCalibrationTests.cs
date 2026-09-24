@@ -176,4 +176,57 @@ public class ImpedanceCalibrationTests
         Assert.Equal(uniform[517].Imaginary, sampled[1].Imaginary, 12);
         Assert.Equal(uniform[4000].Real, sampled[2].Real, 12);
     }
+
+    /// <summary>
+    /// A standard says which one it is, whatever the user meant to connect: an open is the two ADC
+    /// channels' gain mismatch and reads within a fraction of a dB of unity, a short is a lead
+    /// resistance over the reference resistor and reads some 60 dB down. The figures here are the
+    /// ones measured on a real fixture on 2026-09-24 -- 0.9998 for a good open, 0.0013 for a good
+    /// short, and 0.00084 for an "open" that was captured with the leads still shorted.
+    /// </summary>
+    [Theory]
+    [InlineData(0.9998, true)]
+    [InlineData(0.9583, true)]
+    [InlineData(0.0013, false)]
+    [InlineData(0.00084, false)]
+    public void LooksLikeOpen_SeparatesTheTwoStandards(double magnitude, bool expected)
+    {
+        var cal = Flat(magnitude);
+
+        Assert.Equal(magnitude, cal.MedianMagnitude, 6);
+        Assert.Equal(expected, cal.LooksLikeOpen);
+    }
+
+    /// <summary>
+    /// The median ignores a few wild points at the ends of the captured band, which is where a
+    /// standard is noisiest -- so one bad end bin cannot flip the verdict.
+    /// </summary>
+    [Fact]
+    public void MedianMagnitude_IsNotDraggedByTheEndsOfTheBand()
+    {
+        var freqHz = new double[] { 10.0, 100.0, 1000.0, 10000.0, 20000.0 };
+        var real = new double[] { 0.0, 0.99, 1.0, 1.01, 40.0 };
+        var imag = new double[freqHz.Length];
+
+        var cal = new ImpedanceCalibration(freqHz, real, imag);
+
+        Assert.Equal(1.0, cal.MedianMagnitude, 6);
+        Assert.True(cal.LooksLikeOpen);
+    }
+
+    /// <summary>A curve with nothing in it has no shape to report, rather than a misleading zero.</summary>
+    [Fact]
+    public void MedianMagnitude_OfAnUnusableCurve_IsNaN()
+    {
+        Assert.True(double.IsNaN(new ImpedanceCalibration([], [], []).MedianMagnitude));
+    }
+
+    private static ImpedanceCalibration Flat(double magnitude)
+    {
+        var freqHz = new double[] { 10.0, 100.0, 1000.0, 10000.0 };
+        var real = new double[freqHz.Length];
+        var imag = new double[freqHz.Length];
+        Array.Fill(real, magnitude);
+        return new ImpedanceCalibration(freqHz, real, imag);
+    }
 }

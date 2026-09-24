@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_IMPEDANCE_DISPLAY } from '../../impedance/display'
 import { LOUDSPEAKER_NOTE } from '../../impedance/readings'
-import { driverTestTrace, impedanceTestTrace } from '../../impedance/testTrace'
+import { driverTestTrace, impedanceTestTrace, portedDriverTestTrace } from '../../impedance/testTrace'
 import type { ReportSubject } from '../types'
-import { impedanceMeasurementSections, impedanceSections, impedanceSettingsRows } from './impedance'
+import {
+  impedanceComponentSections,
+  impedanceEquivalentSections,
+  impedanceMeasurementSections,
+  impedanceSections,
+  impedanceSettingsRows,
+} from './impedance'
 import { chapterSections } from './index'
 
 const chirpParams = JSON.stringify({
@@ -112,7 +118,7 @@ describe('impedanceSettingsRows', () => {
 describe('impedanceMeasurementSections', () => {
   it('quotes the readout panel: peak, minimum, median, drive current and the reference', () => {
     const trace = impedanceTestTrace([20, 100, 1000, 10000, 20000], [8, 30, 6, 7, 12])
-    const sections = impedanceMeasurementSections([trace], 'None', 100, 0)
+    const sections = impedanceMeasurementSections([trace], 100, 0)
     expect(sections).toHaveLength(1)
     expect(sections[0].title).toBe('Measurements')
     expect(rowsToObject(sections[0].rows!)).toEqual({
@@ -124,24 +130,55 @@ describe('impedanceMeasurementSections', () => {
     })
   })
 
-  it('adds the Thiele-Small fit and its note for a loudspeaker', () => {
-    const sections = impedanceMeasurementSections([driverTestTrace()], 'Loudspeaker', 100, null)
-    expect(sections.map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual(['keyValues:Measurements', 'keyValues:Loudspeaker', 'paragraph:'])
-    expect(rowsToObject(sections[0].rows!)['Drive current']).toBe('—')
-    expect(sections[1].rows!.map((r) => r.label)).toEqual(['fs', 'Zmax', 'Re', 'f1 / f2', 'Qms', 'Qes', 'Qts'])
-    expect(sections[2].text).toBe(LOUDSPEAKER_NOTE)
+  it('says so when nothing was measured', () => {
+    expect(impedanceMeasurementSections([], 100, -20)).toEqual([
+      { kind: 'paragraph', title: 'Measurements', text: 'Nothing measured.' },
+    ])
+  })
+})
+
+describe('impedanceComponentSections', () => {
+  it('is the Thiele-Small fit and its note for a loudspeaker', () => {
+    const sections = impedanceComponentSections([driverTestTrace()], 'Loudspeaker')
+    expect(sections.map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual(['keyValues:Loudspeaker', 'paragraph:'])
+    expect(sections[0].rows!.map((r) => r.label)).toEqual(['fs', 'Zmax', 'Re', 'f1 / f2', 'Qms', 'Qes', 'Qts'])
+    expect(sections[1].text).toBe(LOUDSPEAKER_NOTE)
+  })
+
+  it('drops the Thiele-Small block for a ported box and prints the note that says why', () => {
+    // The warning has to reach the report as well as the readout panel; both read componentReading.
+    const sections = impedanceComponentSections([portedDriverTestTrace()], 'Loudspeaker')
+    expect(sections.map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual(['paragraph:Loudspeaker'])
+    expect(sections[0].text).toContain('ported (bass-reflex)')
   })
 
   it('titles the note with the component when a fit has no rows to title', () => {
     const flat = impedanceTestTrace([20, 100, 1000, 10000, 20000], [8, 8, 8, 8, 8])
-    const sections = impedanceMeasurementSections([flat], 'Loudspeaker', 100, null)
-    expect(sections.map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual(['keyValues:Measurements', 'paragraph:Loudspeaker'])
+    expect(impedanceComponentSections([flat], 'Loudspeaker').map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual([
+      'paragraph:Loudspeaker',
+    ])
   })
 
-  it('says so when nothing was measured', () => {
-    expect(impedanceMeasurementSections([], 'Loudspeaker', 100, -20)).toEqual([
-      { kind: 'paragraph', title: 'Measurements', text: 'Nothing measured.' },
-    ])
+  it('is nothing at all when the fixture holds nothing nameable, or nothing was measured', () => {
+    expect(impedanceComponentSections([driverTestTrace()], 'None')).toEqual([])
+    expect(impedanceComponentSections([], 'Loudspeaker')).toEqual([])
+  })
+})
+
+describe('impedanceEquivalentSections', () => {
+  it('names the frequency asked for in its title and the column it landed on in its first row', () => {
+    const trace = impedanceTestTrace([20, 100, 1000, 10000, 20000], [8, 30, 6, 7, 12])
+    const sections = impedanceEquivalentSections([trace], 900)
+    expect(sections).toHaveLength(1)
+    expect(sections[0].title).toBe('Equivalent circuit at 900.0 Hz')
+
+    const rows = rowsToObject(sections[0].rows!)
+    expect(rows['Measured at']).toBe('1.00 kHz')
+    expect(rows['|Z|']).toBe('6.000 Ω')
+  })
+
+  it('is nothing at all without a curve to read', () => {
+    expect(impedanceEquivalentSections([], 1000)).toEqual([])
   })
 })
 
@@ -161,17 +198,33 @@ describe('impedanceSections', () => {
     facts: [],
     sampleRateHz: 48000,
     detail: null,
-    data: { kind: 'impedance', traces: [driverTestTrace()], display: { ...DEFAULT_IMPEDANCE_DISPLAY }, dutType: 'Loudspeaker', referenceOhms: 100, generatorAmpDbv: -20 },
+    data: {
+      kind: 'impedance',
+      traces: [driverTestTrace()],
+      display: { ...DEFAULT_IMPEDANCE_DISPLAY },
+      dutType: 'Loudspeaker',
+      equivalentHz: 1000,
+      referenceOhms: 100,
+      generatorAmpDbv: -20,
+    },
   }
 
   it('is what the chapter router picks for the kind, in report order', () => {
-    const sections = chapterSections(subject, ['chart', 'settings', 'measurements'])
-    expect(sections).toEqual(impedanceSections(subject, ['chart', 'settings', 'measurements']))
+    const elements = ['chart', 'settings', 'measurements', 'component', 'equivalent'] as const
+    const sections = chapterSections(subject, elements)
+    expect(sections).toEqual(impedanceSections(subject, elements))
     expect(sections.map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual([
       'keyValues:Settings',
       'keyValues:Measurements',
       'keyValues:Loudspeaker',
       'paragraph:',
+      'keyValues:Equivalent circuit at 1.00 kHz',
     ])
+  })
+
+  it('leaves out the blocks whose boxes are unticked', () => {
+    expect(impedanceSections(subject, ['measurements']).map((s) => s.title)).toEqual(['Measurements'])
+    expect(impedanceSections(subject, ['component']).map((s) => s.title)).toEqual(['Loudspeaker', null])
+    expect(impedanceSections(subject, ['equivalent']).map((s) => s.title)).toEqual(['Equivalent circuit at 1.00 kHz'])
   })
 })

@@ -8,7 +8,9 @@ import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOpt
 import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
 import { useAppTheme } from '../composables/useAppTheme'
+import type { OverlayEntry } from '../composables/useMeasurements'
 import { useZoomBounds } from '../composables/useZoomBounds'
+import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { freqAxis } from '../freqAxis'
 
 /**
@@ -23,6 +25,11 @@ import { freqAxis } from '../freqAxis'
  */
 const props = defineProps<{
   harmonics: HarmonicCurveJson[]
+  /**
+   * Checked history items. Unlike the two decay surfaces this chart can genuinely overlay — colour
+   * still means the order, so H3 is the same colour in every run, and the dash says which run.
+   */
+  overlays: OverlayEntry[]
   thickLines: boolean
   showDataPoints: boolean
   freqFromHz: number
@@ -69,12 +76,43 @@ function colorFor(order: number, dark: boolean = isDark.value): string {
 const ordered = computed(() => [...props.harmonics].sort((a, b) => a.order - b.order))
 
 /**
+ * Every curve to draw, flattened: the live run's orders first, then each checked history item's.
+ * One list so the series, the data columns and the legend are built from the same order — the same
+ * arrangement the sweep chart uses, and for the same reason.
+ */
+const plotted = computed(() =>
+  [
+    { dash: undefined as number[] | undefined, curves: ordered.value },
+    ...props.overlays.map((o) => ({
+      dash: sweepOverlayDash(props.overlays, o.id, props.harmonics.length > 0) ?? undefined,
+      curves: [...(o.harmonicCurves ?? [])].sort((a, b) => a.order - b.order),
+    })),
+  ].flatMap((run) => run.curves.map((curve) => ({ curve, dash: run.dash }))),
+)
+
+/**
  * One shared x axis with every curve resampled onto it. uPlot wants a single x series, and the
  * orders arrive on different grids (each packet is transformed at its own length, then relabelled
  * f → f/k), so they have to be merged rather than passed through.
  */
+/**
+ * One entry per order actually drawn, whichever run it came from — the legend names the colours, and
+ * the colours mean orders. A legend built from the live curves alone read "No harmonic curves" over a
+ * chart full of a checked history item's, which is how the overlay looked broken when it was not.
+ *
+ * <p>The validity limit shown is the widest of the runs carrying that order: it is the frequency past
+ * which <em>nothing</em> on screen has a curve.</p>
+ */
+const legendOrders = computed(() => {
+  const widest = new Map<number, number>()
+  for (const { curve } of plotted.value) {
+    widest.set(curve.order, Math.max(widest.get(curve.order) ?? 0, curve.upperValidHz))
+  }
+  return [...widest.entries()].sort((a, b) => a[0] - b[0]).map(([order, upperValidHz]) => ({ order, upperValidHz }))
+})
+
 const data = computed<uPlot.AlignedData>(() => {
-  const curves = ordered.value
+  const curves = plotted.value.map((p) => p.curve)
   if (curves.length === 0) return [[], []] as unknown as uPlot.AlignedData
 
   const xs = new Set<number>()
@@ -147,11 +185,13 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
     ],
     series: [
       { label: 'Fundamental (Hz)' },
-      ...ordered.value.map((curve) => ({
+      ...plotted.value.map(({ curve, dash }) => ({
         label: `H${curve.order}`,
         stroke: colorFor(curve.order, dark),
         width: props.thickLines ? 2 : 1,
+        dash,
         points: { show: props.showDataPoints, size: 4 },
+        alpha: dash ? 0.7 : undefined,
       })),
     ],
     // Both axes: narrowing onto the band a DUT distorts in is the common gesture, but a dBc window
@@ -212,7 +252,7 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
       plotCanvas: u.ctx.canvas,
       headerHeight: header,
       title: 'Harmonic distortion vs fundamental',
-      legend: ordered.value.map((curve) => ({ label: `H${curve.order}`, color: colorFor(curve.order, false) })),
+      legend: legendOrders.value.map(({ order }) => ({ label: `H${order}`, color: colorFor(order, false) })),
     })
   } finally {
     u?.destroy()
@@ -259,8 +299,21 @@ onBeforeUnmount(() => {
 })
 
 // The series set changes when the orders do, which needs a rebuild; new values do not.
-watch([isDark, () => props.thickLines, () => props.showDataPoints, () => ordered.value.map((c) => c.order).join()], rebuild)
-watch([() => props.harmonics, () => props.freqFromHz, () => props.freqToHz, () => props.yTopDb, () => props.yBottomDb], refresh)
+watch(
+  [
+    isDark,
+    () => props.thickLines,
+    () => props.showDataPoints,
+    // Series count and colours are baked in at construction, so a run appearing or disappearing is a
+    // rebuild rather than a redraw.
+    () => plotted.value.map((p) => `${p.curve.order}${p.dash?.join('') ?? ''}`).join(','),
+  ],
+  rebuild,
+)
+watch(
+  [() => props.harmonics, () => props.overlays, () => props.freqFromHz, () => props.freqToHz, () => props.yTopDb, () => props.yBottomDb],
+  refresh,
+)
 </script>
 
 <template>
@@ -269,11 +322,11 @@ watch([() => props.harmonics, () => props.freqFromHz, () => props.freqToHz, () =
     <div class="min-h-6 pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Harmonic distortion vs fundamental</span>
       <span class="flex items-center gap-3">
-        <span v-for="curve in ordered" :key="curve.order" class="flex items-center gap-1">
-          <span class="h-1.5 w-4 rounded" :style="{ background: colorFor(curve.order) }"></span>
-          H{{ curve.order }} ≤ {{ (curve.upperValidHz / 1000).toFixed(2) }} kHz
+        <span v-for="entry in legendOrders" :key="entry.order" class="flex items-center gap-1">
+          <span class="h-1.5 w-4 rounded" :style="{ background: colorFor(entry.order) }"></span>
+          H{{ entry.order }} ≤ {{ (entry.upperValidHz / 1000).toFixed(2) }} kHz
         </span>
-        <span v-if="ordered.length === 0">No harmonic curves</span>
+        <span v-if="legendOrders.length === 0">No harmonic curves</span>
       </span>
 
       <button

@@ -920,6 +920,25 @@ public sealed record FrequencyResponseParameters(
     /// <summary>Nyquist and Nichols: draw the Poles and zeros panel's model over the measurement. Null on a type saved before the checkbox existed, treated as on -- which is what those builds did.</summary>
     bool? ChartShowFittedModel = null,
     /// <summary>
+    /// The Poles and zeros panel's <b>Auto</b> checkbox: the fit order follows the knee search
+    /// rather than the two numbers below. Null on a type saved before the orders were stored, which
+    /// is treated as on -- automatic is what those builds always did.
+    /// </summary>
+    bool? ChartFitAutoOrder = null,
+    /// <summary>
+    /// The denominator order the fit is pinned to when Auto is off -- how many poles the model has.
+    ///
+    /// <para>Stored with the measurement despite describing an <i>analysis</i> rather than the
+    /// screen's layout, which was the reason it deliberately was not until 2026-09-24. The risk that
+    /// reasoning named -- an order restored onto a different DUT's curve -- does not arise, because
+    /// params_json belongs to one measurement type, i.e. to one DUT and one setup; and the order is
+    /// a judgement the user reached by looking at the residual, which is exactly the kind of thing
+    /// that should survive closing the app.</para>
+    /// </summary>
+    int? ChartFitPoles = null,
+    /// <summary>The numerator order -- how many zeros -- pinned separately, and never more than <see cref="ChartFitPoles"/>.</summary>
+    int? ChartFitZeros = null,
+    /// <summary>
     /// Pole-zero map: leave out the roots the fit placed outside the swept band. A display choice
     /// only -- the fit, its residual and the panel's table are unchanged. Null on a type saved
     /// before the map existed, treated as false.
@@ -1029,6 +1048,25 @@ public sealed record SteppedResponseParameters(
     bool? ChartRestoreDelay = null,
     /// <summary>Nyquist and Nichols: draw the Poles and zeros panel's model over the measurement. Null on a type saved before the checkbox existed, treated as on -- which is what those builds did.</summary>
     bool? ChartShowFittedModel = null,
+    /// <summary>
+    /// The Poles and zeros panel's <b>Auto</b> checkbox: the fit order follows the knee search
+    /// rather than the two numbers below. Null on a type saved before the orders were stored, which
+    /// is treated as on -- automatic is what those builds always did.
+    /// </summary>
+    bool? ChartFitAutoOrder = null,
+    /// <summary>
+    /// The denominator order the fit is pinned to when Auto is off -- how many poles the model has.
+    ///
+    /// <para>Stored with the measurement despite describing an <i>analysis</i> rather than the
+    /// screen's layout, which was the reason it deliberately was not until 2026-09-24. The risk that
+    /// reasoning named -- an order restored onto a different DUT's curve -- does not arise, because
+    /// params_json belongs to one measurement type, i.e. to one DUT and one setup; and the order is
+    /// a judgement the user reached by looking at the residual, which is exactly the kind of thing
+    /// that should survive closing the app.</para>
+    /// </summary>
+    int? ChartFitPoles = null,
+    /// <summary>The numerator order -- how many zeros -- pinned separately, and never more than <see cref="ChartFitPoles"/>.</summary>
+    int? ChartFitZeros = null,
     /// <summary>
     /// Pole-zero map: leave out the roots the fit placed outside the swept band. A display choice
     /// only -- the fit, its residual and the panel's table are unchanged. Null on a type saved

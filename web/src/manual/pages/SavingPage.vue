@@ -182,11 +182,14 @@ const { showPage } = useManual()
         the Measurements panel for a response, a crosstalk or a damping-factor run; for the three
         sweeps (THD vs frequency, THD vs amplitude, IMD vs amplitude) the worst and best figure per
         channel and where they sit, then every point in the chart's own metrics table, in the unit
-        the display panel is set to; for an impedance run the peak, minimum and median |Z|, the drive
-        current and the reference resistor, then the component fit for whatever the
+        the display panel is set to; for an impedance run three separate boxes —
+        <strong>Measurements</strong> (the peak, minimum and median |Z|, the drive current and the
+        reference resistor), <strong>Component values</strong> (the fit for whatever the
         <strong>Device under test</strong> dropdown says is on the fixture — the capacitor's C, ESR
-        and ESL, the inductor's L and DCR, or the loudspeaker's Thiele-Small numbers — with the same
-        caveats the readout panel shows; for an impulse response its <strong>Measurement</strong>
+        and ESL, the inductor's L and DCR, or the loudspeaker's Thiele-Small numbers, with the same
+        caveats the readout panel shows) and <strong>Equivalent circuit</strong> (the series R and X
+        at the frequency the readout's <strong>At frequency</strong> box is set to, and the
+        inductance or capacitance that reactance makes); for an impulse response its <strong>Measurement</strong>
         block (peak, gate, what the gate resolves, the record, the reference, the records taken, the
         generator level and the removed DUT delay) and, when harmonics were extracted, each order's
         level at 100 Hz, 1 kHz and 10 kHz with the frequency it stays valid to. For an FFT the <strong>Metrics</strong> tiles chosen

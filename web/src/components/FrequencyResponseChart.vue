@@ -158,6 +158,12 @@ const visibleTraces = computed<ResponseTrace[]>(() => {
  * gain curve belongs under the live gain curve, not under the dBV one. Dash pattern comes from the
  * shared overlay styling, so a run is identified the same way here as on the sweep screen.
  */
+/**
+ * Whether the live measurement occupies run 0 — see runDash. With nothing measured, the first
+ * checked history item is promoted to the solid line instead of every curve on screen being dashed.
+ */
+const liveDrawn = computed(() => visibleTraces.value.length > 0)
+
 const overlayCurves = computed(() => {
   // A stored crosstalk result may hold both directions; each is its own curve, coloured by its
   // kind and dashed by the overlay, so two stored runs of both directions are still four
@@ -573,10 +579,13 @@ function buildSeries(p: Palette): uPlot.Series[] {
       // In the crosstalk view a stored curve keeps its direction's colour, so an overlay's L→R
       // reads as an L→R; elsewhere overlays are the neutral gain colour and told apart by dash.
       stroke: p.color(props.view === 'Crosstalk' ? TRACE_COLORS[overlay.trace.kind] : TRACE_COLORS.Gain),
-      width: 1,
-      dash: sweepOverlayDash(props.overlays, overlay.id) ?? [6, 3],
-      points: { show: false },
-      alpha: 0.7,
+      // The same width and markers as the live trace it is there to be compared against: an overlay
+      // drawn at a fixed weight ignored both checkboxes, so Thick lines and Data points changed only
+      // half the chart and the comparison was between two differently-drawn curves.
+      width,
+      dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? undefined,
+      points,
+      alpha: liveDrawn.value ? 0.7 : 1,
     })
   }
 
@@ -586,10 +595,12 @@ function buildSeries(p: Palette): uPlot.Series[] {
         label: `${overlay.name} ${delayLabelText.value.toLowerCase()}`,
         scale: 'delay',
         stroke: p.color(DELAY_COLOR),
-        width: 1,
-        dash: sweepOverlayDash(props.overlays, overlay.id) ?? [6, 3],
+        // Markers stay off here, as they are on the live delay curve — this follows the live
+        // series it mirrors, not the magnitude's.
+        width,
+        dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? undefined,
         points: { show: false },
-        alpha: 0.7,
+        alpha: liveDrawn.value ? 0.7 : 1,
       })
     }
   }

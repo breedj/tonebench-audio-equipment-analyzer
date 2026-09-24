@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { api, type ReportKindSettings } from '../api/client'
-import { defaultReportElements, reportElementsForKind, type ReportElementId } from '../report/elements'
+import { defaultReportElements, migrateStoredElements, reportElementsForKind, type ReportElementId } from '../report/elements'
 import type { ReportMode } from '../report/types'
 import { defaultReportViews, reportViewsForKind } from '../report/views'
 
@@ -51,7 +51,8 @@ export function useReportSettings() {
     const offered = reportElementsForKind(kind).map((element) => element.id)
     const stored = kinds.value[kind]?.elements
     if (!stored) return defaultReportElements(kind)
-    return offered.filter((id) => stored.includes(id))
+    const meant = migrateStoredElements(stored)
+    return offered.filter((id) => meant.includes(id))
   }
 
   /** The chart views a report of this kind includes: the stored choice, or the kind's default view. */

@@ -76,6 +76,14 @@ const props = defineProps<{
   showDataPoints: boolean
   runLabel?: string
   /**
+   * The fit order to use when no panel is mounted — a report render. Null keeps the automatic order,
+   * which is what every report did before the orders were stored. Passing the stored pair is what
+   * keeps a chapter's map the same map the screen showed: the order is a judgement the user made by
+   * reading the residual, and a report that quietly re-fits at a different one describes a different
+   * model.
+   */
+  fitOrder?: { poles: number; zeros: number } | null
+  /**
    * The fitted rational model — the pole/zero panel's — drawn over the measurement as a dashed
    * curve on Nyquist and Nichols, and as the roots themselves on the pole–zero map. The dashed
    * curve is what makes the pole/zero table falsifiable: a list of roots whose model does not track
@@ -84,6 +92,12 @@ const props = defineProps<{
    */
   fit?: FitResult | null
 }>()
+
+/**
+ * Whether the live measurement occupies run 0 — see runDash. A stored result opened from History
+ * has none, and there the first overlay is the curve being read, so it is drawn solid.
+ */
+const liveDrawn = computed(() => props.traces.length > 0)
 
 const { isDark } = useAppTheme()
 
@@ -159,7 +173,26 @@ const overlayCurves = computed(() =>
     .filter((entry): entry is { id: number; name: string; points: ComplexPoint[] } => entry !== null),
 )
 
-const margins = computed(() => stabilityMargins(curve.value))
+/**
+ * The curve everything *derived* reads — the fit, the stability margins, the measured-band marker
+ * and the cursor — as opposed to the contour the plot strokes for the live run.
+ *
+ * <p>The live measurement when there is one, and otherwise the first checked history item: the same
+ * "run 0 is the curve you are meant to read" rule the dash allocation follows, so the solid line and
+ * the fitted model are always the same run. Without it a stored result opened from History drew its
+ * contour and then reported no poles, no zeros, no margins and no band — every derived number came
+ * from a live curve that was not there, which is exactly what a saved pole-zero measurement looks
+ * like when it is reopened.</p>
+ *
+ * <p>Note an overlay carries no latency or sample rate, so a promoted curve is fitted without the
+ * delay correction the live one would get; the header already says so whenever an overlay is drawn
+ * beside a corrected live run.</p>
+ */
+const readCurve = computed<ComplexPoint[]>(() =>
+  curve.value.length > 0 ? curve.value : (overlayCurves.value[0]?.points ?? []),
+)
+
+const margins = computed(() => stabilityMargins(readCurve.value))
 
 /**
  * The fit the map draws. The panel's when there is one, so the map and the table can never
@@ -168,12 +201,17 @@ const margins = computed(() => stabilityMargins(curve.value))
  */
 const effectiveFit = computed<FitResult | null>(() => {
   if (props.fit) return props.fit
-  if (props.projection !== 'PoleZero' || curve.value.length < 6) return null
-  const order = suggestOrder(curve.value, 8).order
-  return fitRational(curve.value, order, order)
+  if (props.projection !== 'PoleZero' || readCurve.value.length < 6) return null
+  if (props.fitOrder) {
+    // Never more zeros than poles, the same properness rule the panel applies.
+    const poles = Math.max(1, Math.min(10, props.fitOrder.poles))
+    return fitRational(readCurve.value, Math.max(0, Math.min(poles, props.fitOrder.zeros)), poles)
+  }
+  const order = suggestOrder(readCurve.value, 8).order
+  return fitRational(readCurve.value, order, order)
 })
 
-const band = computed(() => measuredBand(curve.value))
+const band = computed(() => measuredBand(readCurve.value))
 
 /** Every root of the fit; `roots` is what the map actually draws. */
 const allRoots = computed<RootPoint[]>(() => (effectiveFit.value ? fitRootPoints(effectiveFit.value) : []))
@@ -317,8 +355,9 @@ function renderScene(
     drawCurve(ctx, overlay.points, t, {
       stroke: color(CURVE_COLOR),
       width: 1,
-      dash: responseOverlayDash(props.overlays, overlay.id) ?? [6, 3],
-      alpha: 0.7,
+      // Empty = solid, which is what a promoted overlay gets; see runDash.
+      dash: responseOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? [],
+      alpha: liveDrawn.value ? 0.7 : 1,
       points: false,
     })
   }
@@ -374,7 +413,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
           ...overlayCurves.value.map((o) => ({
             label: o.name,
             color: CURVE_COLOR[0],
-            dash: responseOverlayDash(props.overlays, o.id) ?? [6, 3],
+            dash: responseOverlayDash(props.overlays, o.id, liveDrawn.value) ?? undefined,
           })),
           ...(props.fit && props.showFittedModel ? [{ label: 'Fitted model', color: FIT_COLOR[0], dash: [5, 3] }] : []),
         ]
@@ -409,9 +448,15 @@ function legendEntries(t: PlaneTransform): LegendEntry[] {
   }
 
   const nyquist = props.projection === 'Nyquist'
-  const entries: LegendEntry[] = [{ label: props.runLabel === 'RUN SWEEP' ? 'Measured (stepped)' : 'Measured', color: color(CURVE_COLOR), sample: 'line' }]
+  // No "Measured" row when nothing was: the legend would be naming a curve that is not on the plot.
+  const entries: LegendEntry[] = liveDrawn.value
+    ? [{ label: props.runLabel === 'RUN SWEEP' ? 'Measured (stepped)' : 'Measured', color: color(CURVE_COLOR), sample: 'line' }]
+    : []
   for (const o of overlayCurves.value) {
-    entries.push({ label: o.name, color: color(CURVE_COLOR), sample: 'dashed', dash: responseOverlayDash(props.overlays, o.id) ?? [6, 3] })
+    // The swatch follows the line: a promoted overlay is solid, so a 'dashed' sample would draw a
+    // pattern the plot does not use.
+    const dash = responseOverlayDash(props.overlays, o.id, liveDrawn.value) ?? undefined
+    entries.push({ label: o.name, color: color(CURVE_COLOR), sample: dash ? 'dashed' : 'line', dash })
   }
   if (props.fit && props.showFittedModel) {
     entries.push({ label: 'Fitted model', color: color(FIT_COLOR), sample: 'dashed', dash: [5, 3] })
@@ -511,7 +556,7 @@ function drawPoleZeroMap(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
   ctx.save()
   clipToPlot(ctx, paint.width, paint.height)
 
-  const measured = curve.value
+  const measured = readCurve.value
   if (measured.length >= 2) {
     const lowHz = measured[0].freqHz
     const highHz = measured[measured.length - 1].freqHz
@@ -777,7 +822,7 @@ function drawDirectionArrow(
  */
 function drawFittedModel(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
   const model = props.showFittedModel ? props.fit?.model : null
-  const measured = curve.value
+  const measured = readCurve.value
   if (!model || measured.length < 2) return
 
   const lowHz = measured[0].freqHz
@@ -837,7 +882,7 @@ function drawCrossings(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
 function nearestByFrequency(freqHz: number): ComplexPoint | null {
   let best: ComplexPoint | null = null
   let bestDistance = Infinity
-  for (const point of curve.value) {
+  for (const point of readCurve.value) {
     const distance = Math.abs(Math.log(point.freqHz) - Math.log(freqHz))
     if (distance < bestDistance) {
       bestDistance = distance
@@ -884,7 +929,7 @@ function nearestPoint(px: number, py: number): ComplexPoint | null {
   let best: ComplexPoint | null = null
   let bestDistance = Infinity
 
-  for (const point of curve.value) {
+  for (const point of readCurve.value) {
     const plane = toPlane(point)
     const dx = transform.toScreenX(plane.x) - px
     const dy = transform.toScreenY(plane.y) - py
@@ -1008,7 +1053,8 @@ watch(
   { deep: true },
 )
 
-defineExpose({ margins, curve, exportPng })
+// `curve` is the *read* curve: the pole-zero panel fits whatever the plot presents as run 0.
+defineExpose({ margins, curve: readCurve, exportPng })
 </script>
 
 <template>

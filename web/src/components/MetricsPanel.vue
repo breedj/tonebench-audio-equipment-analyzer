@@ -2,8 +2,9 @@
 import { computed } from 'vue'
 import type { IntermodulationFrame, MetersFrame, MultitoneFrame, NoiseFiguresFrame } from '../streaming/protocol'
 import type { GeneratorTone } from '../api/client'
-import { channelTiles, type MetricTile } from '../metrics'
+import { channelTiles, NOT_APPLICABLE, stimulusSummary, type MetricTile } from '../metrics'
 import { useChartDisplay } from '../composables/useChartDisplay'
+import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useMetricSelection } from '../composables/useMetricSelection'
 
@@ -27,10 +28,17 @@ const { loadOhms } = useLoadOhms()
 const { dutGainDb } = useChartDisplay()
 const { selectedMetrics, removeMetric } = useMetricSelection()
 
+// The *staged* stimulus, not DeviceStatus's generatorTones above: those are silenced by Stop (see
+// useGeneratorStimulus.ts), and a SINGLE capture of a two-tone pair would then go back to printing
+// its meaningless noise figures the moment the generator went quiet. This only decides whether the
+// noise figures have a single fundamental to reference — every number still comes from the frames.
+const { kind, tones, multitone: multitoneSettings } = useGeneratorStimulus()
+const stimulus = computed(() => stimulusSummary(kind.value, tones, multitoneSettings))
+
 const allTiles = computed(() =>
   channelTiles(
     props.meters, props.generatorTones, loadOhms.value, props.imd ?? null, props.imdUnresolved ?? false, props.noise ?? null, dutGainDb.value,
-    props.multitone ?? null,
+    props.multitone ?? null, stimulus.value,
   ),
 )
 
@@ -75,7 +83,12 @@ const accentClass = computed(() =>
           </svg>
         </button>
       </div>
-      <div class="whitespace-pre-line font-mono text-lg">{{ tile.value }}</div>
+      <div
+        v-if="tile.caveat"
+        class="cursor-help font-mono text-lg italic text-neutral-400 underline decoration-dotted underline-offset-4 dark:text-neutral-500"
+        :title="`Not applicable — ${tile.caveat}.`"
+      >{{ NOT_APPLICABLE }}</div>
+      <div v-else class="whitespace-pre-line font-mono text-lg">{{ tile.value }}</div>
     </div>
   </div>
   <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">

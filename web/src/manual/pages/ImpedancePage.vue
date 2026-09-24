@@ -197,6 +197,19 @@ const { showPage } = useManual()
       about.
     </p>
     <p>
+      The <strong>Readings</strong> table under the chart is those same three blocks &mdash;
+      Measurements, the component fit and the equivalent circuit &mdash; for <em>every</em> curve on
+      screen at once, one row each: the current measurement first when there is one, then each
+      history item ticked in the checklist. Nothing extra is stored for it. The peak, the fit and the
+      equivalent circuit are all functions of a curve, and a saved result keeps its curve, so a
+      history item is read through exactly the same arithmetic the side panel uses &mdash; which is
+      why an older result can be compared against today's without having been measured any
+      differently. Each row uses its <em>own</em> reference resistor and generator level, off the
+      settings that run was saved with, so a drive current is never quoted against a fixture the run
+      did not use. The equivalent-circuit rows all follow the one <strong>At frequency</strong> box
+      in the side panel.
+    </p>
+    <p>
       <strong>Short calibration</strong> in the Display panel draws the stored short standard as the
       impedance it represents, on the same ohms axis as the DUT. That is the quickest way to see
       whether a measurement is trustworthy at a given frequency: the short is the <em>floor</em>
@@ -261,6 +274,16 @@ const { showPage } = useManual()
       width — a Q from a truncated skirt is a lower bound dressed up as a measurement. And note
       <em>smoothing blunts Zmax and widens the skirts</em>, so measure with none if these numbers
       matter.
+    </p>
+    <p>
+      <strong>A curve with two peaks gets no Thiele-Small block at all</strong>, only a note naming
+      the two peaks and the minimum between them. Two comparable peaks in the bass straddling a
+      clear minimum is what a <em>ported (bass-reflex) enclosure</em> looks like from the terminals:
+      the box splits the driver's resonance in two and tunes the minimum between them. Neither peak
+      is the driver's free-air fs, so every figure read off either one would describe the driver and
+      the box together — a measured Jamo 504 gives a Qts of 2.76 that way, which no driver has.
+      Take the driver out of the box, or block the port, to measure it. A sealed box and a driver in
+      free air both have one peak, and both are read normally.
     </p>
 
     <h3>Capacitor</h3>
@@ -374,6 +397,23 @@ const { showPage } = useManual()
       the wrong value with the phase pinned at ±180° — the 8 Ω fixture reads 108 Ω that way. A
       passive load cannot do that, so the run finishes with an amber <strong>warning</strong> under
       the status line naming the other channel.
+    </p>
+    <p>
+      A <strong>calibration standard is self-identifying</strong> in the same way, and the app checks
+      it. An open reads |H| close to <strong>1</strong> — it is only the two input channels' gain
+      mismatch — while a short reads close to <strong>0</strong>, typically 60 dB down. Capture one
+      with the fixture in the other state and the capture finishes with a warning saying which it
+      actually is, so you can take it again.
+    </p>
+    <p>
+      The same test runs on the <em>stored</em> standards every time a measurement starts, and that
+      is the one worth knowing about: a bad standard is captured once and then quietly spoils every
+      measurement corrected with it afterwards. An "open" that is really a short is the damaging
+      case — the correction then divides by the near-zero difference between two standards that
+      should be a thousand apart, inflating the ratio by about 60 dB, and <em>every</em> impedance
+      comes out flat at roughly minus the reference resistor with the phase at ±180° and coherence
+      1.0. That looks exactly like the swapped-channel fault above, so the standards are named first
+      when both warnings appear: fix the calibration before believing anything else on the screen.
     </p>
     <p>
       The 8 Ω resistor is the one number in this screen that can be checked against arithmetic rather

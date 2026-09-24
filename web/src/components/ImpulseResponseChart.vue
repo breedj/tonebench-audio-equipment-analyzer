@@ -8,8 +8,11 @@ import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOpt
 import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
 import { useAppTheme } from '../composables/useAppTheme'
+import type { OverlayEntry } from '../composables/useMeasurements'
 import { useZoomBounds } from '../composables/useZoomBounds'
+import { impulseTimeGrid, resampleImpulse } from '../measurements/impulseOverlay'
 import { formatImpulsePeak, impulseUnit } from '../measurements/impulseUnit'
+import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 
 /**
  * The impulse response itself, on a **linear** time axis with the impulse at t = 0.
@@ -24,6 +27,13 @@ import { formatImpulsePeak, impulseUnit } from '../measurements/impulseUnit'
  */
 const props = defineProps<{
   impulse: ImpulseTraceJson | null
+  /**
+   * Checked history items. Drawn as a line each, in the trace colour with the run's own dash — the
+   * convention the response and impedance charts use, where colour says which quantity and the dash
+   * says which run. No min/max band: three overlapping envelopes are mud, and the band belongs to
+   * the measurement being read rather than to what it is compared against.
+   */
+  overlays: OverlayEntry[]
   /** dB relative to the impulse's own peak, rather than volts. What you want for reading a decay. */
   normalised: boolean
   thickLines: boolean
@@ -63,7 +73,26 @@ function toDb(volts: number, peak: number): number {
 
 // Both pure, and in their own module so they can be unit-tested: nothing in a .vue file is testable
 // under the node environment vitest runs in. See impulseUnit.ts for why the scaling exists at all.
-const unit = computed(() => impulseUnit(props.impulse?.peakVolts ?? 0))
+/** The checked history items that actually carry a waveform; any other kind is skipped, not drawn empty. */
+const overlayTraces = computed(() =>
+  props.overlays
+    .map((o) => ({ id: o.id, name: o.detail.name, trace: o.impulseTrace ?? null }))
+    .filter((o): o is { id: number; name: string; trace: ImpulseTraceJson } => o.trace !== null),
+)
+
+/**
+ * What the volts axis is scaled by — the live impulse's peak, or the loudest overlay's when there is
+ * no live trace yet, so a history item checked on before a run is drawn in a sensible unit instead
+ * of scaled against zero.
+ */
+const referencePeakVolts = computed(() => {
+  if (props.impulse) return props.impulse.peakVolts
+  let peak = 0
+  for (const o of overlayTraces.value) peak = Math.max(peak, o.trace.peakVolts)
+  return peak
+})
+
+const unit = computed(() => impulseUnit(referencePeakVolts.value))
 
 const peakLabel = computed(() =>
   props.impulse ? formatImpulsePeak(props.impulse.peakVolts, unit.value) : '',
@@ -79,42 +108,82 @@ const peakLabel = computed(() =>
 const yWindow = computed(() => {
   if (props.normalised) return { min: props.yBottomDb, max: props.yTopDb }
 
-  const { min, max } = series.value
+  const { min, max, overlays } = series.value
   if (min.length === 0) return { min: -1, max: 1 }
 
   let lo = Number.POSITIVE_INFINITY
   let hi = Number.NEGATIVE_INFINITY
-  for (let i = 0; i < min.length; i++) {
-    if (min[i] < lo) lo = min[i]
-    if (max[i] > hi) hi = max[i]
+  // Nulls are the gaps outside a curve's own span (see impulseOverlay.ts) and are not levels.
+  const note = (v: number | null) => {
+    if (v === null) return
+    if (v < lo) lo = v
+    if (v > hi) hi = v
   }
+
+  for (let i = 0; i < min.length; i++) {
+    note(min[i])
+    note(max[i])
+  }
+  // The overlays are inside the window as well, or checking one on would draw it off the top.
+  for (const overlay of overlays) for (const v of overlay.values) note(v)
+
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { min: -1, max: 1 }
 
   const pad = (hi - lo) * 0.05 || 0.1
   return { min: lo - pad, max: hi + pad }
 })
 
-const series = computed(() => {
-  const impulse = props.impulse
-  if (!impulse) return { timeMs: [] as number[], min: [] as number[], max: [] as number[] }
+/** One curve's two envelope halves on the shared grid; equal, and the magnitude, in the dB view. */
+function envelopeOf(trace: ImpulseTraceJson, grid: readonly number[]) {
+  const timeMs = trace.timeS.map((t) => t * 1000)
 
-  const timeMs = impulse.timeS.map((t) => t * 1000)
   if (!props.normalised) {
     const factor = unit.value.factor
     return {
-      timeMs,
-      min: impulse.minVolts.map((v) => v * factor),
-      max: impulse.maxVolts.map((v) => v * factor),
+      min: resampleImpulse(timeMs, trace.minVolts.map((v) => v * factor), grid),
+      max: resampleImpulse(timeMs, trace.maxVolts.map((v) => v * factor), grid),
     }
   }
 
   // In dB the two envelope halves stop being "min" and "max": what a reader wants is the column's
   // largest excursion either way, so the band collapses to one magnitude curve. Drawing 20·log of a
   // negative minimum would be arithmetic on a sign that no longer means anything.
-  const peak = Math.max(impulse.peakVolts, 1e-12)
-  const magnitude = impulse.maxVolts.map((v, i) =>
-    toDb(Math.max(Math.abs(v), Math.abs(impulse.minVolts[i])), peak),
+  //
+  // Each curve is dB re **its own** peak, overlays included, which is the point of the view: it puts
+  // two decays side by side without the louder run simply sitting above the other.
+  const peak = Math.max(trace.peakVolts, 1e-12)
+  const magnitude = trace.maxVolts.map((v, i) =>
+    toDb(Math.max(Math.abs(v), Math.abs(trace.minVolts[i])), peak),
   )
-  return { timeMs, min: magnitude, max: magnitude }
+  const resampled = resampleImpulse(timeMs, magnitude, grid)
+  return { min: resampled, max: resampled }
+}
+
+/**
+ * Every curve on one time axis. See impulseOverlay.ts for why the grid is the live trace's own
+ * columns rather than a union: on them the live envelope is reproduced exactly, so nothing about the
+ * measurement changes when a history item is checked on.
+ */
+const series = computed(() => {
+  const impulse = props.impulse
+  const overlays = overlayTraces.value
+
+  const grid = impulseTimeGrid(
+    impulse ? impulse.timeS.map((t) => t * 1000) : [],
+    overlays.map((o) => o.trace.timeS.map((t) => t * 1000)),
+  )
+
+  const empty = { timeMs: [] as number[], min: [] as (number | null)[], max: [] as (number | null)[], overlays: [] as { id: number; name: string; values: (number | null)[] }[] }
+  if (grid.length === 0) return empty
+
+  const live = impulse ? envelopeOf(impulse, grid) : { min: grid.map(() => null), max: grid.map(() => null) }
+
+  return {
+    timeMs: grid,
+    min: live.min,
+    max: live.max,
+    overlays: overlays.map((o) => ({ id: o.id, name: o.name, values: envelopeOf(o.trace, grid).max })),
+  }
 })
 
 /**
@@ -139,9 +208,14 @@ function minMaxBandPlugin(t: Theme): uPlot.Plugin {
 
           const path = new Path2D()
           for (let i = 0; i < timeMs.length; i++) {
+            // Null where the live trace does not reach — a column an overlay's wider gate added.
+            const lo = min[i]
+            const hi = max[i]
+            if (lo === null || hi === null) continue
+
             const x = u.valToPos(timeMs[i], 'x', true)
-            path.moveTo(x, u.valToPos(min[i], 'y', true))
-            path.lineTo(x, u.valToPos(max[i], 'y', true))
+            path.moveTo(x, u.valToPos(lo, 'y', true))
+            path.lineTo(x, u.valToPos(hi, 'y', true))
           }
 
           ctx.strokeStyle = t.trace
@@ -229,6 +303,16 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         width: props.thickLines ? 2 : 1,
         points: { show: false },
       },
+      // One per checked history item, in the order series.value.overlays lists them — refresh()
+      // stacks the data arrays in that same order, so the two agree position for position.
+      ...series.value.overlays.map((overlay) => ({
+        label: overlay.name,
+        stroke: t.trace,
+        width: props.thickLines ? 2 : 1,
+        dash: sweepOverlayDash(props.overlays, overlay.id, props.impulse !== null) ?? undefined,
+        points: { show: false },
+        alpha: props.impulse === null ? 1 : 0.7,
+      })),
     ],
     plugins: [minMaxBandPlugin(t), impulseMarkerPlugin(t)],
     // Both axes, because a reflection is read off the time axis and its level off the other, and
@@ -267,9 +351,12 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
 
   let u: uPlot | null = null
   try {
-    u = new uPlot(buildOptions(width, plotHeight, THEME.light, false), [[], []], host)
-    const { timeMs, max } = series.value
-    u.setData([timeMs, max])
+    // Same series order as the live plot, overlays included — a report of this chart shows what is
+    // on screen, so a checked history item has to reach the PNG too.
+    const { timeMs, max, overlays } = series.value
+    const blank = [[], [], ...overlays.map(() => [])] as unknown as uPlot.AlignedData
+    u = new uPlot(buildOptions(width, plotHeight, THEME.light, false), blank, host)
+    u.setData([timeMs, max, ...overlays.map((o) => o.values)] as uPlot.AlignedData)
     u.setScale('x', xWindow)
     u.setScale('y', yWin)
     await nextPaint()
@@ -300,7 +387,10 @@ function rebuild() {
 
   plot.value?.destroy()
   const width = el.getBoundingClientRect().width || 600
-  plot.value = new uPlot(buildOptions(width, chartHeight.value, theme(), true), [[], []], el)
+  // One empty array per declared series, overlays included. Empty construction then setData is
+  // also what makes the x window honour the panel's props rather than the data's span (CLAUDE.md).
+  const blank = [[], [], ...series.value.overlays.map(() => [])] as unknown as uPlot.AlignedData
+  plot.value = new uPlot(buildOptions(width, chartHeight.value, theme(), true), blank, el)
   // uPlot has no double-click-to-reset of its own once drag zoom is on.
   plot.value.over.addEventListener('dblclick', resetZoom)
   refresh()
@@ -310,9 +400,10 @@ function refresh() {
   const p = plot.value
   if (!p) return
 
-  const { timeMs, max } = series.value
-  // setData on the existing instance, never a new plot per frame.
-  p.setData([timeMs, max])
+  const { timeMs, max, overlays } = series.value
+  // setData on the existing instance, never a new plot per frame. The overlay arrays follow the
+  // live one in the order buildOptions declared their series.
+  p.setData([timeMs, max, ...overlays.map((o) => o.values)] as uPlot.AlignedData)
   p.setScale('x', { min: props.timeFromMs, max: props.timeToMs })
   p.setScale('y', { min: yWindow.value.min, max: yWindow.value.max })
 }
@@ -339,8 +430,22 @@ onBeforeUnmount(() => {
 })
 
 // A theme change or a change of axis meaning needs the whole plot rebuilt; new data does not.
-watch([isDark, () => props.normalised, () => props.thickLines, () => unit.value.label], rebuild)
-watch([() => props.impulse, () => props.timeFromMs, () => props.timeToMs, () => props.yTopDb, () => props.yBottomDb], refresh)
+watch(
+  [
+    isDark,
+    () => props.normalised,
+    () => props.thickLines,
+    () => unit.value.label,
+    // Series count and labels are baked in at construction, so checking a history item on or off is
+    // a rebuild rather than a redraw — the same rule the sweep and response charts follow.
+    () => series.value.overlays.map((o) => o.id).join(','),
+  ],
+  rebuild,
+)
+watch(
+  [() => props.impulse, () => props.overlays, () => props.timeFromMs, () => props.timeToMs, () => props.yTopDb, () => props.yBottomDb],
+  refresh,
+)
 </script>
 
 <template>

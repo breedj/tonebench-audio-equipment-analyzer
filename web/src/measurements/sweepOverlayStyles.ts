@@ -39,6 +39,28 @@ export const SWEEP_OVERLAY_DASH: number[][] = [
 ]
 
 /**
+ * The dash for the n-th drawn run. **Run 0 is always solid**, whatever it is.
+ *
+ * <p>Solid is not "the live measurement"; it is "the curve you are meant to read". With a live
+ * measurement on screen that is the live one and every history item is dashed, which is the old
+ * behaviour. With nothing live — a stored result opened from History, or a report of one — the first
+ * history item takes run 0 and is drawn solid, because a chart showing exactly one curve has nothing
+ * to tell that curve apart *from*, and a lone dashed line is just harder to read.</p>
+ */
+export function runDash(runIndex: number): number[] | null {
+  if (runIndex <= 0) return null
+  return SWEEP_OVERLAY_DASH[(runIndex - 1) % SWEEP_OVERLAY_DASH.length] ?? null
+}
+
+/**
+ * Which run an overlay is, by its position among the drawn overlays: one behind the live measurement
+ * when there is one, and taking its place when there is not.
+ */
+export function overlayRunIndex(slot: number, liveDrawn: boolean): number {
+  return liveDrawn ? slot + 1 : slot
+}
+
+/**
  * The overlays this chart can actually draw: visible, and carrying stored sweep points. An FFT
  * result checked on while the sweep screen is open has no points and is skipped rather than drawn
  * empty.
@@ -62,10 +84,10 @@ export function sweepOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
  * Null for an overlay that is not currently drawn -- the checklist renders no swatch for it rather
  * than one that promises a line the chart is not showing.
  */
-export function sweepOverlayDash(overlays: OverlayEntry[], id: number): number[] | null {
+export function sweepOverlayDash(overlays: OverlayEntry[], id: number, liveDrawn: boolean): number[] | null {
   const idx = sweepOverlays(overlays).findIndex((o) => o.id === id)
   if (idx < 0) return null
-  return SWEEP_OVERLAY_DASH[idx % SWEEP_OVERLAY_DASH.length] ?? null
+  return runDash(overlayRunIndex(idx, liveDrawn))
 }
 
 /** The colour a blend moves toward: the page background, so a lightened line stays opaque against it. */
@@ -165,9 +187,7 @@ export function sweepLineStyle(input: SweepLineStyleInput): SweepLineStyle {
     MIN_WIDTH,
   )
 
-  const dash = isHistory
-    ? [...(SWEEP_OVERLAY_DASH[(runIdx - 1) % SWEEP_OVERLAY_DASH.length] ?? [])]
-    : undefined
+  const dash = runDash(runIdx)?.slice() ?? undefined
 
   return { stroke, width, dash }
 }
@@ -205,14 +225,14 @@ export function impedanceOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
  * `responseTraces`: sharing a helper would hand every impedance overlay a null dash and draw it
  * solid, indistinguishable from the live curve.
  */
-export function impedanceOverlayDash(overlays: OverlayEntry[], id: number): number[] | null {
+export function impedanceOverlayDash(overlays: OverlayEntry[], id: number, liveDrawn: boolean): number[] | null {
   const idx = impedanceOverlays(overlays).findIndex((o) => o.id === id)
   if (idx < 0) return null
-  return SWEEP_OVERLAY_DASH[idx % SWEEP_OVERLAY_DASH.length] ?? null
+  return runDash(overlayRunIndex(idx, liveDrawn))
 }
 
-export function responseOverlayDash(overlays: OverlayEntry[], id: number): number[] | null {
+export function responseOverlayDash(overlays: OverlayEntry[], id: number, liveDrawn: boolean): number[] | null {
   const idx = responseOverlays(overlays).findIndex((o) => o.id === id)
   if (idx < 0) return null
-  return SWEEP_OVERLAY_DASH[idx % SWEEP_OVERLAY_DASH.length] ?? null
+  return runDash(overlayRunIndex(idx, liveDrawn))
 }

@@ -12,10 +12,13 @@ import {
   formatWatts,
   generatorTile,
   multitoneToneCount,
+  noiseFigureCaveat,
   noiseInputReferredNvPerRootHz,
+  NOT_APPLICABLE,
   noteName,
   powerWatts,
   ratioPercentToDb,
+  stimulusSummary,
   systemTiles,
   vrmsToDbv,
 } from './metrics'
@@ -231,6 +234,83 @@ describe('channelTiles', () => {
     expect(tiles.find((t) => t.label === 'RMS dBV')?.qualifier).toBeUndefined()
     // Unweighted: no qualifier anywhere.
     expect(channelTiles(meters, [], 8, null, false, noise, 0).some((t) => t.qualifier)).toBe(false)
+  })
+
+  // The bench case this was written for: SMPTE 60 Hz + 7 kHz at -6 dBV sine-equivalent through a
+  // loopback read THD+N 399.83521 % and SNR -12.04 dB on a perfectly healthy QA403, because the
+  // 7 kHz tone is 12.04 dB under the 60 Hz one and lands in the noise-and-distortion integral.
+  const twoTone = { kind: 'Tones' as const, toneCount: 2 }
+
+  it('reads the noise figures as n/a against a two-tone stimulus, with the reason on the tile', () => {
+    const tiles = channelTiles(meters, [], 8, imd, false, noise, 0, null, twoTone)
+    const na = tiles.filter((t) => t.value === NOT_APPLICABLE).map((t) => t.label)
+    expect(na).toEqual([
+      'THD+N %', 'THD+N dB', 'THD+N dBr', 'THD+N dBV', 'N+D dBr', 'N+D dBV', 'N-D dBr', 'N-D dBV', 'SNR dB', 'SNR dBr',
+      'RMS dBV(bw)', 'Noise dBV/√Hz', 'Noise in nV/√Hz',
+    ])
+    expect(tiles.find((t) => t.label === 'SNR dB')?.caveat).toMatch(/two-tone pair/)
+    expect(tiles.every((t) => (t.caveat === undefined) === (t.value !== NOT_APPLICABLE))).toBe(true)
+  })
+
+  it('leaves THD, IMD, the levels and the fundamental alone — those are what a two-tone test is for', () => {
+    const tiles = channelTiles(meters, [], 8, imd, false, noise, 0, null, twoTone)
+    const valueOf = (label: string) => tiles.find((t) => t.label === label)?.value
+    expect(valueOf('THD %')).toBe('0.00861 %')
+    expect(valueOf('IMD %')).toBe('0.01000 %')
+    expect(valueOf('Freq Hz')).toBe('1000.488 Hz')
+    expect(valueOf('RMS dBV')).toBe('-17.60 dBV')
+    expect(valueOf('Pk dBV')).toBe('-17.61 dBV')
+  })
+
+  it('suppresses exactly the tiles a weighting qualifies, and drops the qualifier with the number', () => {
+    const weighted = { ...noise, weighting: { standard: 'A' as const, user1: false, user2: false } }
+    const qualified = channelTiles(meters, [], 8, null, false, weighted, 0).filter((t) => t.qualifier).map((t) => t.label)
+    const suppressed = channelTiles(meters, [], 8, null, false, weighted, 0, null, twoTone)
+      .filter((t) => t.value === NOT_APPLICABLE)
+    expect(suppressed.map((t) => t.label)).toEqual(qualified)
+    expect(suppressed.some((t) => t.qualifier)).toBe(false)
+  })
+
+  it('suppresses them for a multitone comb too, and points at TD+N', () => {
+    const tiles = channelTiles(meters, [], 8, null, false, noise, 0, null, { kind: 'Multitone', toneCount: 29 })
+    expect(tiles.find((t) => t.label === 'THD+N %')?.value).toBe(NOT_APPLICABLE)
+    expect(tiles.find((t) => t.label === 'THD+N %')?.caveat).toMatch(/TD\+N/)
+  })
+
+  it('leaves every figure alone for one tone, for no staged stimulus, and for a silent generator', () => {
+    for (const stimulus of [null, { kind: 'Tones' as const, toneCount: 1 }, { kind: 'Off' as const, toneCount: 0 }]) {
+      const tiles = channelTiles(meters, [], 8, null, false, noise, 0, null, stimulus)
+      expect(tiles.some((t) => t.value === NOT_APPLICABLE)).toBe(false)
+    }
+  })
+})
+
+describe('noiseFigureCaveat', () => {
+  it('names the tone count once there are more than two', () => {
+    expect(noiseFigureCaveat({ kind: 'Tones', toneCount: 3 })).toMatch(/3 tones/)
+  })
+
+  it('says nothing for a stimulus with no second tone to confuse the integral', () => {
+    expect(noiseFigureCaveat(null)).toBeNull()
+    expect(noiseFigureCaveat({ kind: 'Tones', toneCount: 1 })).toBeNull()
+    expect(noiseFigureCaveat({ kind: 'Tones', toneCount: 0 })).toBeNull()
+    expect(noiseFigureCaveat({ kind: 'Off', toneCount: 0 })).toBeNull()
+    // Deliberately unflagged: a chirp or a noise generator has no fundamental either, but the
+    // measurements that play them do not show these tiles, and a bare noise floor with the
+    // generator off is exactly what they are for.
+    expect(noiseFigureCaveat({ kind: 'WhiteNoise', toneCount: 0 })).toBeNull()
+    expect(noiseFigureCaveat({ kind: 'EchoChirp', toneCount: 0 })).toBeNull()
+  })
+})
+
+describe('stimulusSummary', () => {
+  const multitone = { tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 }
+
+  it('counts the staged tones for Tones and derives the comb for Multitone', () => {
+    expect(stimulusSummary('Tones', [{ freqHz: 60, ampDbv: -2 }, { freqHz: 7000, ampDbv: -14 }], multitone))
+      .toEqual({ kind: 'Tones', toneCount: 2 })
+    expect(stimulusSummary('Multitone', [], multitone))
+      .toEqual({ kind: 'Multitone', toneCount: multitoneToneCount(5) })
   })
 })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { ImpedanceTrace } from '../composables/useImpedance'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { formatHz } from '../response/format'
@@ -9,8 +9,6 @@ import {
   formatCurrent,
   formatInductance,
   formatOhms,
-  formatReactiveComponent,
-  seriesEquivalent,
 } from '../impedance/equivalent'
 import { findExtremes, findResonance } from '../impedance/resonance'
 import {
@@ -27,9 +25,12 @@ import {
   LOUDSPEAKER_NO_Q_NOTE,
   LOUDSPEAKER_NO_RESONANCE_NOTE,
   LOUDSPEAKER_NOTE,
+  equivalentAt,
+  equivalentRows,
   formatBand,
   formatQ,
   formatRatio,
+  loudspeakerTwoPeakNote,
 } from '../impedance/readings'
 
 /**
@@ -45,6 +46,15 @@ import {
  */
 const dutType = defineModel<DutType>('dutType', { required: true })
 
+/**
+ * The frequency the equivalent-circuit readout describes.
+ *
+ * <p>A model rather than local state because two other things quote it: the comparison table under
+ * the chart reads every checked history curve at this frequency, and the report's Equivalent circuit
+ * block prints it. A number the panel kept to itself would leave those two picking their own.</p>
+ */
+const cursorHz = defineModel<number>('equivalentHz', { required: true })
+
 const props = defineProps<{
   traces: ImpedanceTrace[]
   medianOhms: number | null
@@ -53,9 +63,6 @@ const props = defineProps<{
 }>()
 
 const trace = computed(() => props.traces.find((t) => t.kind === 'Impedance') ?? null)
-
-/** The frequency the equivalent-circuit readout describes. */
-const cursorHz = ref(1000)
 
 const peak = computed(() => {
   const t = trace.value
@@ -100,6 +107,20 @@ const resonance = computed(() => {
   return t && ohms ? findResonance(t.freqHz, ohms) : null
 })
 
+/**
+ * What a second impedance peak means, when the curve has one — and when it has, that note replaces
+ * the Thiele-Small table rather than sitting under it.
+ *
+ * <p>Every row of that table is arithmetically correct for the peak `findResonance` chose and
+ * physically meaningless for a ported box, which is exactly the kind of wrong a reader cannot catch
+ * from the numbers themselves. The report's impedance chapter withholds them for the same reason,
+ * through `componentReading`.</p>
+ */
+const twoPeakNote = computed(() => {
+  const r = resonance.value
+  return r && r.rival ? loudspeakerTwoPeakNote(r.fsHz, r.rival) : null
+})
+
 const capacitor = computed(() => {
   if (dutType.value !== 'Capacitor') return null
   const t = trace.value
@@ -114,37 +135,18 @@ const inductor = computed(() => {
   return t && ohms ? analyseInductor(t.freqHz, ohms, t.phaseDeg) : null
 })
 
-/** The measured column nearest the chosen frequency, as ohms and degrees. */
+/**
+ * The measured column nearest the chosen frequency, read as a series equivalent, and the rows the
+ * block shows for it. Both come from impedance/readings.ts, which the report chapter and the
+ * comparison table read too — the arithmetic is the kind where a degrees/radians slip produces a
+ * plausible wrong answer, and nothing in a .vue is testable.
+ */
 const atCursor = computed(() => {
   const t = trace.value
-  if (!t || t.freqHz.length === 0) return null
-
-  let best = 0
-  for (let i = 1; i < t.freqHz.length; i++) {
-    if (Math.abs(t.freqHz[i] - cursorHz.value) < Math.abs(t.freqHz[best] - cursorHz.value)) best = i
-  }
-
-  // The midpoint of the column's min/max, not the max: the max carries the aggregation bias of a
-  // maximum over several bins.
-  const ohms =
-    0.5 * (dbOhmsToOhms(t.magnitudeMinDbOhms[best]) + dbOhmsToOhms(t.magnitudeMaxDbOhms[best]))
-
-  return {
-    freqHz: t.freqHz[best],
-    ohms,
-    phaseDeg: t.phaseDeg[best],
-    coherence: t.coherence[best],
-    equivalent: seriesEquivalent(ohms, t.phaseDeg[best], t.freqHz[best]),
-  }
+  return t ? equivalentAt(t, cursorHz.value) : null
 })
 
-const componentLabel = computed(() => {
-  const e = atCursor.value?.equivalent
-  if (!e) return 'Series L or C'
-  if (e.inductanceH !== null) return 'Series inductance'
-  if (e.capacitanceF !== null) return 'Series capacitance'
-  return 'Series reactance'
-})
+const equivalentBlock = computed(() => equivalentRows(atCursor.value))
 </script>
 
 <template>
@@ -306,7 +308,7 @@ const componentLabel = computed(() => {
     </p>
 
     <!-- Loudspeaker -->
-    <table v-if="resonance" class="w-full text-xs">
+    <table v-if="resonance && !twoPeakNote" class="w-full text-xs">
       <tbody class="font-mono">
         <tr>
           <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400" title="Resonance frequency.">fs</td>
@@ -343,7 +345,10 @@ const componentLabel = computed(() => {
       </tbody>
     </table>
 
-    <p v-if="resonance && resonance.qms === null" class="text-xs text-amber-600 dark:text-amber-400">
+    <p v-if="twoPeakNote" class="text-xs text-amber-600 dark:text-amber-400">
+      {{ twoPeakNote }}
+    </p>
+    <p v-else-if="resonance && resonance.qms === null" class="text-xs text-amber-600 dark:text-amber-400">
       {{ LOUDSPEAKER_NO_Q_NOTE }}
     </p>
     <p v-else-if="resonance" class="text-xs text-neutral-500 dark:text-neutral-400">
@@ -369,47 +374,9 @@ const componentLabel = computed(() => {
 
     <table class="w-full text-xs">
       <tbody class="font-mono">
-        <tr>
-          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">Measured at</td>
-          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">
-            {{ atCursor ? formatHz(atCursor.freqHz) : '—' }}
-          </td>
-        </tr>
-        <tr>
-          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">|Z|</td>
-          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">
-            {{ atCursor ? formatOhms(atCursor.ohms) : '—' }}
-          </td>
-        </tr>
-        <tr>
-          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">Phase</td>
-          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">
-            {{ atCursor ? `${atCursor.phaseDeg.toFixed(1)}°` : '—' }}
-          </td>
-        </tr>
-        <tr>
-          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">Series R</td>
-          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">
-            {{ atCursor ? formatOhms(atCursor.equivalent.resistanceOhms) : '—' }}
-          </td>
-        </tr>
-        <tr>
-          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">Series X</td>
-          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">
-            {{ atCursor ? formatOhms(atCursor.equivalent.reactanceOhms) : '—' }}
-          </td>
-        </tr>
-        <tr>
-          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">{{ componentLabel }}</td>
-          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">
-            {{ atCursor ? formatReactiveComponent(atCursor.equivalent) : '—' }}
-          </td>
-        </tr>
-        <tr>
-          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">Coherence</td>
-          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">
-            {{ atCursor ? atCursor.coherence.toFixed(4) : '—' }}
-          </td>
+        <tr v-for="row in equivalentBlock" :key="row.label">
+          <td class="py-0.5 pr-2 font-sans text-neutral-500 dark:text-neutral-400">{{ row.label }}</td>
+          <td class="py-0.5 text-right text-neutral-900 dark:text-neutral-100">{{ row.value }}</td>
         </tr>
       </tbody>
     </table>

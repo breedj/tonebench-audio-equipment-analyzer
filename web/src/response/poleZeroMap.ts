@@ -1,5 +1,5 @@
 import type { Viewport } from '../charts/planeTransform'
-import type { FitResult, Singularity } from './rationalFit'
+import { singularityInBand, singularityRoots, type FitResult, type MeasuredBand, type Singularity } from './rationalFit'
 
 /**
  * The pole–zero map: the fitted model's roots in the s-plane, drawn in hertz (σ/2π along x,
@@ -22,20 +22,12 @@ export interface RootPoint {
 }
 
 /**
- * The s-plane roots a singularity stands for, in Hz. `Singularity` reports a conjugate pair once,
- * as (f, ζ): the pair is |s| = 2πf at −ζ|s| ± j|s|√(1−ζ²), and a real root is at −ζ|s| with
- * ζ = ±1 (its `zeta` carries the sign, so a right-half-plane root comes back on the right).
+ * The s-plane roots a singularity stands for, tagged as poles or zeros for the map. The arithmetic
+ * is `rationalFit.singularityRoots`, which the cancellation test also evaluates pairs at, so the
+ * picture and the “this pair does nothing” rule can never place the same root differently.
  */
 export function rootPoints(singularity: Singularity, kind: 'pole' | 'zero'): RootPoint[] {
-  const magnitudeHz = singularity.freqHz
-  const sigmaHz = -singularity.zeta * magnitudeHz
-  if (!singularity.isPair) return [{ kind, re: sigmaHz, im: 0, singularity }]
-
-  const omegaHz = Math.sqrt(Math.max(0, magnitudeHz * magnitudeHz - sigmaHz * sigmaHz))
-  return [
-    { kind, re: sigmaHz, im: omegaHz, singularity },
-    { kind, re: sigmaHz, im: -omegaHz, singularity },
-  ]
+  return singularityRoots(singularity).map((r) => ({ kind, re: r.re, im: r.im, singularity }))
 }
 
 /** Every root of a fit, poles and zeros, conjugates included. */
@@ -48,7 +40,7 @@ export function fitRootPoints(fit: FitResult): RootPoint[] {
  * curve. The same band `ResponsePoleZeroPanel` flags its rows against, so the map's filter and the
  * table's "out of band" mark can never disagree about which roots those are.
  */
-export function measuredBand(curve: readonly { freqHz: number }[]): { lowHz: number; highHz: number } | null {
+export function measuredBand(curve: readonly { freqHz: number }[]): MeasuredBand | null {
   if (curve.length === 0) return null
   return { lowHz: curve[0]!.freqHz, highHz: curve[curve.length - 1]!.freqHz }
 }
@@ -56,12 +48,11 @@ export function measuredBand(curve: readonly { freqHz: number }[]): { lowHz: num
 /**
  * A root's natural frequency lies inside the measured band. Judged on |s|/2π — the frequency the
  * table lists — not on the point's own coordinates, so a resonant pair is in or out as a pair
- * rather than one conjugate at a time.
+ * rather than one conjugate at a time, and through `singularityInBand` so the map's filter and the
+ * table's own flag are one rule.
  */
-export function rootInBand(root: RootPoint, band: { lowHz: number; highHz: number } | null): boolean {
-  if (!band) return true
-  const f = root.singularity.freqHz
-  return f >= band.lowHz && f <= band.highHz
+export function rootInBand(root: RootPoint, band: MeasuredBand | null): boolean {
+  return singularityInBand(root.singularity, band)
 }
 
 /**
@@ -73,7 +64,7 @@ export function rootInBand(root: RootPoint, band: { lowHz: number; highHz: numbe
  * the residual and the table are all untouched, and the table goes on listing them with its own
  * flag, which is what keeps the option from hiding the fact that the fit needed them.
  */
-export function visibleRoots(roots: readonly RootPoint[], band: { lowHz: number; highHz: number } | null, hideOutOfBand: boolean): RootPoint[] {
+export function visibleRoots(roots: readonly RootPoint[], band: MeasuredBand | null, hideOutOfBand: boolean): RootPoint[] {
   return hideOutOfBand ? roots.filter((r) => rootInBand(r, band)) : [...roots]
 }
 

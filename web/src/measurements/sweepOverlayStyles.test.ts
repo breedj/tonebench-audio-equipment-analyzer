@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blendToward, sweepLineStyle, SWEEP_OVERLAY_DASH } from './sweepOverlayStyles'
+import { blendToward, overlayRunIndex, runDash, sweepLineStyle, SWEEP_OVERLAY_DASH } from './sweepOverlayStyles'
 import { MAX_VISIBLE_OVERLAYS } from '../composables/useMeasurements'
 
 /** The eight TRACES entries from ThdSweepChart.vue, in the same order. */
@@ -138,3 +138,57 @@ function luminance(hex: string): number {
   const n = parseInt(hex.slice(1), 16)
   return 0.2126 * ((n >> 16) & 0xff) + 0.7152 * ((n >> 8) & 0xff) + 0.0722 * (n & 0xff)
 }
+
+describe('runDash', () => {
+  // The rule the whole scheme rests on: solid means "the curve to read", not "the live one".
+  it('draws run 0 solid, whatever occupies it', () => {
+    expect(runDash(0)).toBeNull()
+    expect(runDash(-1)).toBeNull()
+  })
+
+  it('gives every later run a pattern of its own', () => {
+    const dashes = Array.from({ length: SWEEP_OVERLAY_DASH.length }, (_, i) => runDash(i + 1))
+
+    expect(dashes).toEqual(SWEEP_OVERLAY_DASH)
+    expect(new Set(dashes.map((d) => d!.join(','))).size).toBe(SWEEP_OVERLAY_DASH.length)
+  })
+})
+
+describe('overlayRunIndex', () => {
+  it('puts the overlays behind a live measurement', () => {
+    expect([0, 1, 2].map((slot) => overlayRunIndex(slot, true))).toEqual([1, 2, 3])
+    expect([0, 1, 2].map((slot) => runDash(overlayRunIndex(slot, true)))).toEqual(SWEEP_OVERLAY_DASH)
+  })
+
+  // A stored result opened from History, or a report of one: the first overlay is the only curve
+  // there is, so it takes run 0 and is drawn solid.
+  it('promotes the first overlay when nothing is live', () => {
+    expect([0, 1, 2].map((slot) => overlayRunIndex(slot, false))).toEqual([0, 1, 2])
+    expect(runDash(overlayRunIndex(0, false))).toBeNull()
+    expect(runDash(overlayRunIndex(1, false))).toEqual(SWEEP_OVERLAY_DASH[0])
+  })
+
+  it('never gives two drawn runs the same pattern, either way round', () => {
+    for (const liveDrawn of [true, false]) {
+      const shown = [0, 1, 2].map((slot) => runDash(overlayRunIndex(slot, liveDrawn)))
+      const keys = [...(liveDrawn ? ['solid'] : []), ...shown.map((d) => d?.join(',') ?? 'solid')]
+      expect(new Set(keys).size).toBe(keys.length)
+    }
+  })
+})
+
+describe('sweepLineStyle', () => {
+  // The sweep chart passes a run index rather than a slot, so promotion reaches it by the caller
+  // choosing the index — and run 0 is styled as the one being read, not merely un-dashed.
+  it('gives run 0 the read-me styling, not merely an absent dash', () => {
+    const promoted = sweepLineStyle(base({ runIdx: 0, channel: 0 }))
+    const behind = sweepLineStyle(base({ runIdx: 1, channel: 0 }))
+
+    expect(promoted.dash).toBeUndefined()
+    expect(behind.dash).toEqual(SWEEP_OVERLAY_DASH[0])
+    // Full width and undimmed: a promoted overlay is the curve being read, so it should not also be
+    // drawn thinner and paler than the thing it replaced.
+    expect(promoted.width).toBeGreaterThan(behind.width)
+    expect(promoted.stroke).not.toBe(behind.stroke)
+  })
+})

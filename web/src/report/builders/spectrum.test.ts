@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { MeasurementDetail } from '../../api/client'
 import { createSpectrumDisplaySource } from '../../composables/useChartDisplay'
-import { defaultReportElements, reportElementsForKind } from '../elements'
-import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedMultitoneFrames, storedNoiseFrames } from '../spectrumFrames'
+import { defaultReportElements, migrateStoredElements, reportElementsForKind } from '../elements'
+import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedMultitoneFrames, storedNoiseFrames, storedStimulus } from '../spectrumFrames'
 import { NO_WEIGHTING } from '../../weighting'
+import type { StimulusSummary } from '../../metrics'
 import type { ReportSubject } from '../types'
 import { chapterSections } from './index'
 import { harmonicsSections, metricsSections, multitoneSections } from './spectrum'
@@ -54,7 +55,7 @@ const detail: MeasurementDetail = {
   ],
 }
 
-function subjectOf(selectedMetrics: string[]): ReportSubject {
+function subjectOf(selectedMetrics: string[], stimulus: StimulusSummary | null = null): ReportSubject {
   return {
     id: 'stored-7',
     resultId: 7,
@@ -80,6 +81,7 @@ function subjectOf(selectedMetrics: string[]): ReportSubject {
       display: createSpectrumDisplaySource(null, [0, 1]),
       selectedMetrics,
       generatorTones: storedGeneratorTones(detail.genJson),
+      stimulus,
       loadOhms: 8,
       scope: {},
       status: null,
@@ -135,6 +137,50 @@ describe('storedGeneratorTones', () => {
     expect(storedGeneratorTones(detail.genJson)).toEqual([{ freqHz: 1000.49, ampDbv: -18 }])
     expect(storedGeneratorTones(null)).toEqual([])
     expect(storedGeneratorTones('{')).toEqual([])
+  })
+})
+
+describe('a two-tone result\'s metric rows', () => {
+  it('prints n/a for the noise figures and spells out why once, not on all thirteen rows', () => {
+    const labels = ['THD %', 'THD+N %', 'SNR dB', 'RMS dBV(bw)', 'RMS dBV']
+    const sections = metricsSections(subjectOf(labels, { kind: 'Tones', toneCount: 2 }))
+    const rows = sections[0].rows ?? []
+    expect(rows.map((r) => [r.label, r.value])).toEqual([
+      ['THD %', '0.00100 %'],
+      ['THD+N %', 'n/a'],
+      ['SNR dB', 'n/a'],
+      ['RMS dBV(bw)', 'n/a'],
+      ['RMS dBV', '-18.04 dBV'],
+      ['n/a', expect.stringMatching(/^The stimulus is a two-tone pair,.*\.$/)],
+    ])
+  })
+
+  it("leaves a single-tone result's rows, weighting qualifiers and all, exactly as they were", () => {
+    const sections = metricsSections(subjectOf(['THD+N %', 'SNR dB'], { kind: 'Tones', toneCount: 1 }))
+    const rows = sections[0].rows ?? []
+    expect(rows.map((r) => r.label)).toEqual(['THD+N % (A)', 'SNR dB (A)'])
+    expect(rows.every((r) => r.value !== 'n/a')).toBe(true)
+  })
+})
+
+describe('storedStimulus', () => {
+  const genJson = (left: unknown) => JSON.stringify({ left, right: { enabled: false, tones: [] } })
+
+  it('reads the kind and the tone count a result was captured with', () => {
+    const two = genJson({ enabled: true, kind: 'Tones', tones: [{ freqHz: 60, ampDbv: -2 }, { freqHz: 7000, ampDbv: -14 }] })
+    expect(storedStimulus(two)).toEqual({ kind: 'Tones', toneCount: 2 })
+  })
+
+  it('counts the stored comb for a multitone capture, which gen_json already expands', () => {
+    const comb = genJson({ enabled: true, kind: 'Multitone', tones: [{ freqHz: 5, ampDbv: -50 }, { freqHz: 10, ampDbv: -50 }] })
+    expect(storedStimulus(comb)).toEqual({ kind: 'Multitone', toneCount: 2 })
+  })
+
+  it('treats a tone list with no kind as Tones, and gives up on no generator at all', () => {
+    expect(storedStimulus(detail.genJson)).toEqual({ kind: 'Tones', toneCount: 1 })
+    expect(storedStimulus(null)).toBeNull()
+    expect(storedStimulus('{')).toBeNull()
+    expect(storedStimulus(genJson({ enabled: false, tones: [] }))).toBeNull()
   })
 })
 
@@ -204,10 +250,24 @@ describe('report element defaults', () => {
     expect(defaultReportElements('FFTSpectrum')).toEqual(['chart', 'description', 'metrics', 'harmonics', 'oscilloscope', 'waterfall'])
     expect(defaultReportElements('FrequencyResponse')).toEqual(['chart', 'description', 'measurements'])
     expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description', 'measurements'])
-    expect(defaultReportElements('Impedance')).toEqual(['chart', 'description', 'measurements'])
+    expect(defaultReportElements('Impedance')).toEqual(['chart', 'description', 'measurements', 'component', 'equivalent'])
     expect(defaultReportElements('ImpulseResponse')).toEqual(['chart', 'description', 'measurements'])
     // A kind no build of this client knows: chart and description, and the settings dump behind them.
     expect(defaultReportElements('SomethingNewer')).toEqual(['chart', 'description'])
+  })
+
+  it('reads a choice saved before the impedance split as still including the component fit', () => {
+    // It used to be part of `measurements`, so a stored choice cannot say `component` and taking it
+    // literally would silently drop a block the user had been getting. Backfilling what the choice
+    // already appeared to mean is migration 008's rule.
+    expect(migrateStoredElements(['chart', 'measurements'])).toEqual(['chart', 'measurements', 'component'])
+  })
+
+  it('leaves a choice that knows about the split exactly as it stands', () => {
+    expect(migrateStoredElements(['chart', 'measurements', 'equivalent'])).toEqual(['chart', 'measurements', 'equivalent'])
+    expect(migrateStoredElements(['chart', 'component'])).toEqual(['chart', 'component'])
+    // Nothing to backfill onto: the component fit was never part of a choice without Measurements.
+    expect(migrateStoredElements(['chart', 'description'])).toEqual(['chart', 'description'])
   })
 })
 

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
+import { useSweep } from '../composables/useSweep'
 import { dashAttr, sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { isSweepKind } from '../measurements/kinds'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -11,6 +12,11 @@ const emit = defineEmits<{ error: [message: string] }>()
 const { currentTypeId, types } = useProjects()
 const { items, overlays, addOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays } =
   useMeasurements()
+
+// The chart gives run 0 — the solid line — to the live sweep when there is one, and to the first
+// checked history item when there is not (see runDash). The swatch has to make the same call, or a
+// row promises a pattern the chart is not drawing.
+const { points: sweepPoints } = useSweep()
 
 // The open type's kind — every item in `items` is server-filtered to currentTypeId, so they all
 // share this same kind. Needed to scope the MAX_VISIBLE_OVERLAYS cap per kind (see the constant's
@@ -39,7 +45,7 @@ function isChecked(resultId: number): boolean {
 const showsSweepDash = computed(() => isSweepKind(currentKind.value))
 
 function sweepDashFor(resultId: number): string | undefined {
-  return dashAttr(sweepOverlayDash(overlays.value, resultId))
+  return dashAttr(sweepOverlayDash(overlays.value, resultId, sweepPoints.value.length > 0))
 }
 
 // At most MAX_VISIBLE_OVERLAYS of the open type's kind may be plotted at once (see the constant for
@@ -87,7 +93,7 @@ async function onToggle(resultId: number, event: Event) {
           type="checkbox"
           :checked="isChecked(item.resultId)"
           :disabled="isDisabled(item.resultId)"
-          class="h-4 w-4 rounded border-neutral-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-600"
+          class="h-4 w-4 shrink-0 rounded border-neutral-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-600"
           :title="isDisabled(item.resultId) ? `Uncheck one of the ${MAX_VISIBLE_OVERLAYS} plotted items first.` : undefined"
           @change="onToggle(item.resultId, $event)"
         />

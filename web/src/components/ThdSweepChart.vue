@@ -29,7 +29,7 @@ import {
 } from '../sweep/xAxis'
 import { interpolateOnGrid } from '../sweep/align'
 import type { OverlayEntry } from '../composables/useMeasurements'
-import { dashAttr, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
+import { dashAttr, overlayRunIndex, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
 
@@ -259,6 +259,18 @@ const activeTraces = computed(() =>
  */
 const activeOverlays = computed(() => sweepOverlays(props.overlays))
 
+/**
+ * Whether the live sweep occupies run 0 — the solid line. With no live sweep (a stored result opened
+ * from History, or a report of one) the first checked run is promoted into it instead, so the chart
+ * is not a set of dashes with nothing solid to read them against. See runDash.
+ */
+const liveDrawn = computed(() => points.value.length > 0)
+
+/** The run index the chart styles an overlay as, which is its slot plus one only while a live sweep is drawn. */
+function overlayRun(overlayIdx: number): number {
+  return overlayRunIndex(overlayIdx, liveDrawn.value)
+}
+
 /** This point's position on the axis currently selected — the one number everything below sorts, indexes and plots by. */
 function xOf(point: ThdSweepPoint): number {
   return sweepXValue(point, props.xAxis)
@@ -436,7 +448,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
       for (const trace of activeTraces.value) {
         series.push({
           label: `${overlay.detail.name} ${CHANNEL_LABELS[ch]} ${sweepTraceLabel(trace.key, methodOf(overlay), familyOf(overlay))}`,
-          ...styleOf(overlayIdx + 1, ch, trace, dark),
+          ...styleOf(overlayRun(overlayIdx), ch, trace, dark),
           points,
           scale: 'y',
         })
@@ -629,9 +641,12 @@ const metricGroups = computed(() => {
  * heading names it.
  */
 function legendGroupsFor(dark: boolean) {
-  const groups = [{ key: 'live', name: 'Live sweep', runIdx: 0, method: thdMethod.value, family: family.value }]
+  // No "Live sweep" group when none was measured: it would name a run with no line on the chart.
+  const groups = liveDrawn.value
+    ? [{ key: 'live', name: 'Live sweep', runIdx: 0, method: thdMethod.value, family: family.value }]
+    : []
   activeOverlays.value.forEach((overlay, i) =>
-    groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: i + 1, method: methodOf(overlay), family: familyOf(overlay) }),
+    groups.push({ key: `o${overlay.id}`, name: overlay.detail.name, runIdx: overlayRun(i), method: methodOf(overlay), family: familyOf(overlay) }),
   )
 
   return groups.map((group) => ({

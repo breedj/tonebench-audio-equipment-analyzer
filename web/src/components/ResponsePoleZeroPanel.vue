@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ComplexPoint } from '../response/complexPlane'
-import { fitRational, suggestOrder, type Singularity } from '../response/rationalFit'
+import {
+  CANCELLATION_SWING_DB,
+  dcGainExtrapolation,
+  fitRational,
+  singularityInBand,
+  suggestOrder,
+  type Singularity,
+} from '../response/rationalFit'
+import { measuredBand } from '../response/poleZeroMap'
 import { formatHz } from '../response/format'
 import CollapsibleSection from './CollapsibleSection.vue'
 
@@ -44,11 +52,8 @@ const fit = computed(() =>
 
 defineExpose({ fit })
 
-/** The measured band — the only region the fit can speak for. */
-const band = computed(() => {
-  if (props.curve.length === 0) return null
-  return { lowHz: props.curve[0].freqHz, highHz: props.curve[props.curve.length - 1].freqHz }
-})
+/** The measured band — the only region the fit can speak for, and the map's own definition of it. */
+const band = computed(() => measuredBand(props.curve))
 
 /**
  * A root outside the measured band is an extrapolation, not a measurement: the data constrains the
@@ -57,9 +62,27 @@ const band = computed(() => {
  * right, and hiding it would make the model look like it had fewer components than it does.
  */
 function outsideBand(s: Singularity): boolean {
-  const b = band.value
-  return b !== null && (s.freqHz < b.lowHz || s.freqHz > b.highHz)
+  return band.value !== null && !singularityInBand(s, band.value)
 }
+
+/**
+ * Non-null when the model bends below the sweep on its way to DC, in which case the DC gain is an
+ * extrapolation through a corner nothing measured and is labelled as one. See
+ * `dcGainExtrapolation`, which is also what keeps this out of the template: the rule is the
+ * falsifiable part, and nothing in a `.vue` is testable under the node environment vitest runs in.
+ */
+const dcExtrapolated = computed(() => (fit.value ? dcGainExtrapolation(fit.value, band.value) : null))
+
+/**
+ * Every root the fit placed lies outside the sweep. Then the measurement has constrained no
+ * component at all — it has only said the response is featureless between its endpoints — and the
+ * whole table is extrapolation. Measured on a push-pull EL84 amplifier over 13 Hz–91 kHz, which is
+ * flat to 0.11 dB across the audio band and whose every pole lies beyond the sweep at both ends.
+ */
+const allRootsOutOfBand = computed(() => {
+  const roots = fit.value ? [...fit.value.poles, ...fit.value.zeros] : []
+  return band.value !== null && roots.length > 0 && roots.every(outsideBand)
+})
 
 function rowsOf(list: Singularity[]) {
   return list.map((s) => ({
@@ -145,7 +168,14 @@ const POOR_FIT_DB = 0.5
       </table>
 
       <div class="flex flex-col gap-0.5 text-[11px] text-neutral-500 dark:text-neutral-400">
-        <span>DC gain {{ fit.dcGainDb.toFixed(2) }} dB</span>
+        <span>
+          DC gain {{ dcExtrapolated ? '≈ ' : '' }}{{ fit.dcGainDb.toFixed(2) }} dB<span
+            v-if="dcExtrapolated"
+            class="text-amber-600 dark:text-amber-400"
+          >
+            · extrapolated</span
+          >
+        </span>
         <span>Fit error {{ fit.rmsErrorDb.toFixed(3) }} dB rms · {{ fit.maxErrorDb.toFixed(3) }} dB peak</span>
       </div>
 
@@ -158,9 +188,29 @@ const POOR_FIT_DB = 0.5
         narrow the frequency window onto the region of interest.
       </p>
 
-      <p v-if="fit.cancellations.length > 0" class="text-[11px] text-amber-600 dark:text-amber-400">
-        {{ fit.cancellations.length }} pole–zero pair{{ fit.cancellations.length > 1 ? 's' : '' }} nearly
-        cancel, which is the fit spending order on noise. Lower the order.
+      <p v-if="dcExtrapolated" class="text-[11px] text-amber-600 dark:text-amber-400">
+        The DC gain is extrapolated: the model's lowest root, a {{ dcExtrapolated.kind }} at
+        {{ formatHz(dcExtrapolated.rootHz) }}, sits below the measured band, so the figure comes from a
+        corner the sweep never reached rather than from the measurement. The passband gain is what the
+        Bode trace reports.
+      </p>
+
+      <p v-if="allRootsOutOfBand" class="text-[11px] text-amber-600 dark:text-amber-400">
+        Every root lies outside the measured band, so the sweep constrains no pole or zero — it says
+        only that the response is featureless between its endpoints. Widen the sweep to place the
+        components.
+      </p>
+
+      <!-- Not beside the note above: a fit whose roots are all outside the band is usually already at
+           the lowest order the panel offers, where "lower the order" is advice that cannot be taken,
+           and the out-of-band note says the more useful half of it. -->
+      <p
+        v-if="fit.cancellations.length > 0 && !allRootsOutOfBand"
+        class="text-[11px] text-amber-600 dark:text-amber-400"
+      >
+        {{ fit.cancellations.length }} pole–zero pair{{ fit.cancellations.length > 1 ? 's move' : ' moves' }} the
+        response by under {{ CANCELLATION_SWING_DB }} dB across the measured band, which is the fit
+        spending order on noise. Lower the order.
       </p>
 
       <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">

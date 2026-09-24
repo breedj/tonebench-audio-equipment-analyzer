@@ -22,6 +22,7 @@ import type { SweepDisplay } from '../sweep/display'
 import type { SweepTraceFamily } from '../sweep/points'
 import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, ScopeFrame, SpectrumFrame, MultitoneFrame } from '../streaming/protocol'
 import type { SpectrumDisplaySource } from '../composables/useChartDisplay'
+import type { StimulusSummary } from '../metrics'
 import type { ReportElementId } from './elements'
 import type { ExportableChart } from './renderChart'
 
@@ -88,6 +89,12 @@ export type ReportSubjectData =
       selectedMetrics: string[]
       /** The generator's tones, for the Gain tile; empty when nothing is known. */
       generatorTones: GeneratorTone[]
+      /**
+       * What the generator was playing, when it is known — the screen's staged stimulus, or a
+       * stored result's gen_json (storedStimulus). A stimulus with more than one tone makes the
+       * noise-integrated metric rows read "n/a"; see metrics.ts's noiseFigureCaveat.
+       */
+      stimulus?: StimulusSummary | null
       loadOhms: number
       /** Each channel's multitone figure, while the generator plays a comb; rebuilt from the mt_* rows for a stored result. */
       multitone?: Record<number, MultitoneFrame>
@@ -124,6 +131,8 @@ export type ReportSubjectData =
       display: ImpedanceDisplay
       /** What the type's Component dropdown says is on the fixture — which component fit the chapter prints. */
       dutType: DutType
+      /** The frequency the readout panel's Equivalent circuit block is set to — what that block is printed at. */
+      equivalentHz: number
       /** The series resistor the run was measured through. */
       referenceOhms: number
       /** The generator level the run used, for the drive current; null when the run did not record one. */

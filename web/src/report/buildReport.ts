@@ -37,7 +37,7 @@ import { chapterSections } from './builders'
 import { blobToBase64 } from './download'
 import type { ReportElementId } from './elements'
 import { renderExtraCharts, renderView, viewIsCombinable, type RenderedChart } from './render'
-import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedNoiseFrames, storedSpectrumFrames, storedMultitoneFrames } from './spectrumFrames'
+import { storedGeneratorTones, storedIntermodulationFrames, storedMetersFrames, storedNoiseFrames, storedSpectrumFrames, storedMultitoneFrames, storedStimulus } from './spectrumFrames'
 import type { WeightingSpec } from '../streaming/protocol'
 import { NO_WEIGHTING, weightingFromStored, weightingLabel } from '../weighting'
 import { subjectLabel, type ReportPlan, type ReportSubject, type ReportSubjectData } from './types'
@@ -165,6 +165,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
           ? selected.filter((l): l is string => typeof l === 'string')
           : [...DEFAULT_SELECTED_METRICS],
       generatorTones: storedGeneratorTones(detail.genJson),
+      stimulus: storedStimulus(detail.genJson),
       loadOhms: useLoadOhms().loadOhms.value,
       scope: {},
       status: null,
@@ -217,8 +218,10 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       kind: 'impedance',
       traces: toImpedanceTraces((await api.getStoredResponse(detail.resultId)).traces),
       display: impedanceDisplayFromParams(displayParams),
-      // The component is a screen setting, stored with the display on the type — not with the run.
+      // The component and the equivalent circuit's frequency are screen settings, stored with the
+      // display on the type — not with the run.
       dutType: impedanceDutTypeFromParams(displayParams),
+      equivalentHz: impedanceEquivalentHzFromParams(displayParams),
       referenceOhms: run.referenceOhms,
       generatorAmpDbv: run.generatorAmpDbv,
     }
@@ -279,6 +282,12 @@ function impedanceRunFromParams(paramsJson: string): { referenceOhms: number; ge
 function impedanceDutTypeFromParams(paramsJson: string | null | undefined): DutType {
   const stored = parseStoredDisplay(paramsJson) as { chartDutType?: unknown } | null
   return isDutType(stored?.chartDutType) ? stored.chartDutType : 'None'
+}
+
+/** The frequency the readout's Equivalent circuit block is set to; 1 kHz for a type that never chose. */
+function impedanceEquivalentHzFromParams(paramsJson: string | null | undefined): number {
+  const stored = parseStoredDisplay(paramsJson) as { chartEquivalentHz?: unknown } | null
+  return typeof stored?.chartEquivalentHz === 'number' && stored.chartEquivalentHz > 0 ? stored.chartEquivalentHz : 1000
 }
 
 /** The two run facts an output-impedance chapter needs beside its curve, read off a result's `params_json`. */

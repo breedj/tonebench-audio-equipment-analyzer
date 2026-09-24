@@ -17,6 +17,13 @@ const { showPage } = useManual()
       between the channels rises 6 dB per octave.
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-crosstalk')">
+        the wiring diagram
+      </button>
+    </p>
+
     <h2>Wiring it</h2>
     <ul>
       <li>

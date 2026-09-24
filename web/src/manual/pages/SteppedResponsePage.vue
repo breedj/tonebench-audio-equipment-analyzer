@@ -14,6 +14,17 @@ const { showPage } = useManual()
       is measured — one steady sine, settled, captured, recorded, and only then the next.
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
+        a line-level DUT
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
+        a power amplifier
+      </button>
+    </p>
+
     <h2>When to prefer it over the chirp</h2>
     <ul>
       <li>

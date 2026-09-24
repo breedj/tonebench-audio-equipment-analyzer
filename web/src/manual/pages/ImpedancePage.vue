@@ -15,6 +15,13 @@ const { showPage } = useManual()
       impedance are all this measurement.
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-impedance')">
+        the fixture wiring diagram
+      </button>
+    </p>
+
     <h2>The fixture</h2>
     <p>
       Impedance is not something the analyzer can read directly: it measures voltages. So a known

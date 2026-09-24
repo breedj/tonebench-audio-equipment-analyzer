@@ -17,6 +17,17 @@ const { showPage } = useManual()
       a 10 kHz tone, but the products of 19 + 20 kHz land at 1 kHz and 18 kHz, well inside it.
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
+        a line-level DUT
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
+        a power amplifier
+      </button>
+    </p>
+
     <h2>What it measures</h2>
     <p>
       Two conventions, chosen by the <strong>Method</strong> control, and a figure is meaningless

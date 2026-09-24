@@ -15,6 +15,17 @@ const { showPage } = useManual()
       rises with it (genuinely nonlinear).
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
+        a line-level DUT
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
+        a power amplifier
+      </button>
+    </p>
+
     <h2>What it measures</h2>
     <p>
       At each level the generator plays one tone, and one capture is analysed for the fundamental

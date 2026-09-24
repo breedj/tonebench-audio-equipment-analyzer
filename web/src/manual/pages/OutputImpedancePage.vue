@@ -14,6 +14,13 @@ const { showPage } = useManual()
       loads, and the difference between the two says how much of the output is being lost across
       the amplifier's own output impedance. With <code>q = G<sub>2</sub> / G<sub>1</sub></code>:
     </p>
+
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-output-impedance')">
+        the wiring diagram
+      </button>
+    </p>
     <p><code>Zout = R<sub>1</sub> · R<sub>2</sub> · (q − 1) / (R<sub>2</sub> − R<sub>1</sub> · q)</code>, and <code>DF = Z<sub>nominal</sub> / |Zout|</code>.</p>
     <p>
       With the second pass taken open (R<sub>2</sub> → ∞) that is the QA40x tutorial's

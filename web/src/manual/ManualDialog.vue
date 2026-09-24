@@ -342,6 +342,16 @@ function onBackdropClick(e: MouseEvent) {
 .dark .manual-prose .manual-link {
   color: rgb(147 197 253);
 }
+.manual-prose .manual-wiring-links {
+  font-size: 0.8125rem;
+  border-left: 3px solid rgb(212 212 212);
+  padding-left: 0.6rem;
+  color: rgb(82 82 82);
+}
+.dark .manual-prose .manual-wiring-links {
+  border-left-color: rgb(64 64 64);
+  color: rgb(163 163 163);
+}
 .manual-prose .manual-index {
   list-style: none;
   padding-left: 0;

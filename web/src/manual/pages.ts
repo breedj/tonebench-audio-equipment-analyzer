@@ -27,7 +27,7 @@ export interface ManualPage {
   /** Which measurement kind's help button lands here, if any. */
   kind?: string
   /** Grouping header in the index sidebar. */
-  group: 'Basics' | 'Measurements' | 'Simulator' | 'Reference'
+  group: 'Basics' | 'Wiring' | 'Measurements' | 'Simulator' | 'Reference'
   component: Component
 }
 
@@ -93,6 +93,55 @@ export const MANUAL_PAGES: ManualPage[] = [
     summary: 'Cursors, zooming, autofit, colours and the off-scale markers.',
     group: 'Basics',
     component: manualPage(() => import('./pages/ChartsPage.vue')),
+  },
+  {
+    id: 'wiring-basics',
+    title: 'Connections and cables',
+    summary: 'The eight BNCs, shorting plugs, the +32 dBV ceiling, and keeping hum out.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringBasicsPage.vue')),
+  },
+  {
+    id: 'wiring-loopback',
+    title: 'Wiring: loopback',
+    summary: 'Output straight back to input — the analyzer measuring itself.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringLoopbackPage.vue')),
+  },
+  {
+    id: 'wiring-line-level',
+    title: 'Wiring: a line-level DUT',
+    summary: 'One channel in, one channel out — and the reference tap for phase.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringLineLevelPage.vue')),
+  },
+  {
+    id: 'wiring-power-amp',
+    title: 'Wiring: a power amplifier',
+    summary: 'The load, the quiet ground, and the divider for anything past 40 V.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringPowerAmpPage.vue')),
+  },
+  {
+    id: 'wiring-impedance',
+    title: 'Wiring: the impedance fixture',
+    summary: 'The series reference resistor, the two taps, and the calibration standards.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringImpedancePage.vue')),
+  },
+  {
+    id: 'wiring-crosstalk',
+    title: 'Wiring: crosstalk',
+    summary: 'Both channels loaded, the victim shorted, and why the returns do not cross.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringCrosstalkPage.vue')),
+  },
+  {
+    id: 'wiring-output-impedance',
+    title: 'Wiring: output impedance',
+    summary: 'Two loads, a Kelvin tap and the reference loop.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringOutputImpedancePage.vue')),
   },
   {
     id: 'fft-spectrum',
@@ -365,7 +414,7 @@ export const MANUAL_PAGES: ManualPage[] = [
   },
 ]
 
-export const MANUAL_GROUPS: ManualPage['group'][] = ['Basics', 'Measurements', 'Simulator', 'Reference']
+export const MANUAL_GROUPS: ManualPage['group'][] = ['Basics', 'Wiring', 'Measurements', 'Simulator', 'Reference']
 
 export function manualPageById(id: string | null): ManualPage | null {
   if (id === null) return null

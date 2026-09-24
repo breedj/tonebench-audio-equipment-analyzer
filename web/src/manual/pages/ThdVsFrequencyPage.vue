@@ -15,6 +15,17 @@ const { showPage } = useManual()
       gain to spare, and the rise at the top where it runs out.
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
+        a line-level DUT
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
+        a power amplifier
+      </button>
+    </p>
+
     <h2>What it measures</h2>
     <p>
       At each frequency the generator plays one tone, the analyzer waits for it to settle (the

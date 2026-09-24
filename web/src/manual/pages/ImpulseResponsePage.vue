@@ -17,6 +17,17 @@ const { showPage } = useManual()
       stops — a cumulative spectral decay and a burst decay.
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
+        a line-level DUT
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-loopback')">
+        loopback
+      </button>
+    </p>
+
     <h2>Why gate an impulse response</h2>
     <p>
       Everything a DUT does arrives at a different time. Direct sound comes first; a reflection off a

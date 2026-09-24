@@ -14,6 +14,21 @@ const { showPage } = useManual()
       broadband noise floor, and the summary numbers computed from all of them — THD, THD+N, SNR,
       RMS level, output power.
     </p>
+
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
+        a line-level DUT
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
+        a power amplifier
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-loopback')">
+        loopback
+      </button>
+    </p>
     <p>
       It is also the screen to reach for when something is wrong and you do not yet know what. The
       three sweep screens each reduce a whole capture to one number per point; this one shows the

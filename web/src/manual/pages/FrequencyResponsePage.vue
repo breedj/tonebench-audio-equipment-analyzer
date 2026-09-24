@@ -15,6 +15,17 @@ const { showPage } = useManual()
       every bin.
     </p>
 
+    <p class="manual-wiring-links">
+      <strong>How to wire it:</strong>
+      <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
+        a line-level DUT
+      </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
+        a power amplifier
+      </button>
+    </p>
+
     <p>
       The same sweep can be read as an
       <a href="#" @click.prevent="showPage('impulse-response')">impulse response</a> instead, which

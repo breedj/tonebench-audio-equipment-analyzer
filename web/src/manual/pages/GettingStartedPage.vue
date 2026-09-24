@@ -159,6 +159,13 @@ const { showPage } = useManual()
     <h2>Where to go next</h2>
     <ul>
       <li>
+        <button type="button" class="manual-link" @click="showPage('wiring-basics')">
+          Connections and cables
+        </button>
+        — the eight BNCs, the shorting plugs, and what happens if you leave one off. Read this
+        before the first measurement.
+      </li>
+      <li>
         <button type="button" class="manual-link" @click="showPage('charts')">Reading the charts</button>
         — cursors, zooming and the display panels, which work the same way everywhere.
       </li>

@@ -183,6 +183,11 @@ const { showPage } = useManual()
         </button>
         — keeping results and comparing them against each other.
       </li>
+      <li>
+        <button type="button" class="manual-link" @click="showPage('glossary')">Glossary</button>
+        — any term on a panel, an axis or a tile you do not recognise, with the convention this
+        analyzer uses for it.
+      </li>
     </ul>
   </div>
 </template>

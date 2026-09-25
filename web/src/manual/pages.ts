@@ -412,6 +412,13 @@ export const MANUAL_PAGES: ManualPage[] = [
     group: 'Reference',
     component: manualPage(() => import('./pages/SettingsPage.vue')),
   },
+  {
+    id: 'glossary',
+    title: 'Glossary',
+    summary: 'What the terms mean, A to Z — and which convention this analyzer uses for each.',
+    group: 'Reference',
+    component: manualPage(() => import('./pages/GlossaryPage.vue')),
+  },
 ]
 
 export const MANUAL_GROUPS: ManualPage['group'][] = ['Basics', 'Wiring', 'Measurements', 'Simulator', 'Reference']

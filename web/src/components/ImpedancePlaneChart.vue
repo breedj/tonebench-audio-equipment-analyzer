@@ -9,6 +9,7 @@ import { useAppTheme } from '../composables/useAppTheme'
 import { formatHz } from '../response/format'
 import { dbOhmsToOhms, formatOhms } from '../impedance/equivalent'
 import { signedOhmTickLabel } from '../impedance/ohmAxis'
+import { EXPORT_GRID_WIDTH_SCALE, exportGridStroke } from '../charts/palette'
 
 /**
  * The complex-impedance locus: resistance across, reactance up, one point per measured column.
@@ -57,10 +58,24 @@ const MARKER_COLOR = ['#dc2626', '#f87171'] as const
 // Which theme the drawing code reads — the screen's, or light for the duration of an export. Safe as
 // module state only because the drawing is synchronous; see ResponsePolarChart's `paint`.
 let paintDark = isDark.value
+let paintExport = false
 
 function color(pair: readonly string[]): string {
   return paintDark ? pair[1] : pair[0]
 }
+
+/**
+ * The grid as this paint should draw it. An export is shown scaled down (see charts/palette.ts), so
+ * its grid is darkened and widened; on screen both are left exactly as they were.
+ */
+function gridStroke(): string {
+  return paintExport ? exportGridStroke(color(GRID_COLOR)) : color(GRID_COLOR)
+}
+
+function gridLineWidth(base = 1): number {
+  return paintExport ? base * EXPORT_GRID_WIDTH_SCALE : base
+}
+
 
 interface PlanePoint {
   freqHz: number
@@ -159,8 +174,9 @@ function draw() {
 
 /** The hovered point, on its own canvas so a mousemove costs one small redraw rather than the whole plot. */
 /** The whole picture — grid, axes, the locus — onto any context, in CSS pixels. */
-function renderScene(ctx: CanvasRenderingContext2D, width: number, height: number, dark: boolean) {
+function renderScene(ctx: CanvasRenderingContext2D, width: number, height: number, dark: boolean, forExport = false) {
   paintDark = dark
+  paintExport = forExport
 
   const transform = fitTransform(viewport.value, width, height, INSETS, true)
   const view = transform.viewport
@@ -169,9 +185,9 @@ function renderScene(ctx: CanvasRenderingContext2D, width: number, height: numbe
   ctx.textBaseline = 'middle'
 
   // Grid and tick labels.
-  ctx.strokeStyle = color(GRID_COLOR)
+  ctx.strokeStyle = gridStroke()
   ctx.fillStyle = color(AXIS_COLOR)
-  ctx.lineWidth = 1
+  ctx.lineWidth = gridLineWidth()
 
   for (const x of niceTicks(view.xMin, view.xMax, 6)) {
     const px = transform.toScreenX(x)
@@ -251,9 +267,10 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
   if (!ctx) throw new Error('Could not get a 2D context for the chart export.')
 
   try {
-    renderScene(ctx, width, plotHeight, false)
+    renderScene(ctx, width, plotHeight, false, true)
   } finally {
     paintDark = isDark.value
+    paintExport = false
   }
 
   return composeChartPng({

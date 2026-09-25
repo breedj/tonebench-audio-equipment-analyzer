@@ -6,6 +6,7 @@ import { useDevice } from './composables/useDevice'
 import { DEVICE_STATUS_KEY } from './simulator/hints'
 import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
+import { curveOverlayScreen, type CurveOverlayScreen } from './measurements/overlayScope'
 import { useProjects } from './composables/useProjects'
 import { useProjectSession } from './composables/useProjectSession'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
@@ -561,12 +562,45 @@ const sweepSelectedRight = computed(() => selectedSweepPointFor(1))
 const visibleSweepOverlays = computed(() => overlays.value.filter((o) => o.visible && o.sweepPoints?.length))
 
 /**
- * The same filter for the response screen. Gated on the curves actually being there, so a result of
- * another kind that happens to be checked on is skipped rather than drawn empty.
+ * The checked history items one curve screen may draw: visible, carrying curves, and of a kind that
+ * belongs on that screen — see measurements/overlayScope.ts for why the last clause is not optional.
  */
-const visibleResponseOverlays = computed(() =>
-  overlays.value.filter((o) => o.visible && o.responseTraces?.length),
-)
+function curveOverlaysFor(screen: CurveOverlayScreen): OverlayEntry[] {
+  return overlays.value.filter(
+    (o) =>
+      o.visible &&
+      ((o.responseTraces?.length ?? 0) > 0 || (o.impedanceTraces?.length ?? 0) > 0) &&
+      curveOverlayScreen(o.detail.kind) === screen,
+  )
+}
+
+/**
+ * The same filter for the response screens — and split by **kind**, for the reason the impedance
+ * one below is.
+ *
+ * <p>Three kinds store their curves as `response_trace` rows and read back through one reader into
+ * `responseTraces`: a frequency response, an impulse response (its gated magnitude and phase) and a
+ * crosstalk run. Two of them even use the same trace kinds — an impulse result's gated response is
+ * a `Left` and a `Gain` curve, exactly what the chirp screen draws — so a filter on the field alone
+ * cannot tell them apart. Overlays deliberately stay loaded when you move between measurements, so
+ * an impulse result checked on for its gated response and its group delay then appeared on the next
+ * frequency-response chart, legend and all, with no row in that screen's History to uncheck it from.
+ * Reported 2026-09-25.</p>
+ *
+ * <p>The chirp and the stepped sine share one list on purpose: they are two ways of measuring the
+ * same curve, stored identically, and drawing one under the other is a comparison worth having.</p>
+ */
+const visibleResponseOverlays = computed(() => curveOverlaysFor('Response'))
+
+/** The same for the impulse screen's gated-response view: its own kind's runs, and never a chirp's. */
+const visibleImpulseResponseOverlays = computed(() => curveOverlaysFor('ImpulseResponse'))
+
+/**
+ * The same for the crosstalk screen. Its chart asks for the two crosstalk trace kinds, which no
+ * other kind stores, so this was already safe in the drawing — but stating the kind keeps all three
+ * response screens answering the same question in the same place.
+ */
+const visibleCrosstalkOverlays = computed(() => curveOverlaysFor('Crosstalk'))
 
 /**
  * Checked history items carrying an ohms curve — and split by **kind**, not by shape alone.
@@ -582,14 +616,10 @@ const visibleResponseOverlays = computed(() =>
  * crosstalk overlay is skipped because the chart asks for a `Gain` trace it does not have — nothing
  * downstream can tell them apart. The kind is the only thing that can.</p>
  */
-const visibleImpedanceOverlays = computed(() =>
-  overlays.value.filter((o) => o.visible && o.impedanceTraces?.length && isImpedanceKind(o.detail.kind)),
-)
+const visibleImpedanceOverlays = computed(() => curveOverlaysFor('Impedance'))
 
 /** The same for the damping-factor screen: its own kind's runs, and never a one-port impedance. */
-const visibleOutputImpedanceOverlays = computed(() =>
-  overlays.value.filter((o) => o.visible && o.impedanceTraces?.length && isOutputImpedanceKind(o.detail.kind)),
-)
+const visibleOutputImpedanceOverlays = computed(() => curveOverlaysFor('OutputImpedance'))
 
 /**
  * The same filter for the impulse waveform. Gated on the trace actually being there, so a result of
@@ -3153,7 +3183,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   ref="impulseResponseChart"
                   run-label="RUN"
                   :traces="impulseTraces"
-                  :overlays="visibleResponseOverlays"
+                  :overlays="visibleImpulseResponseOverlays"
                   view="Gain"
                   :show-left="true"
                   :show-right="false"
@@ -3446,6 +3476,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :delay-view="responsePhaseAvailable ? responseDelayView : 'None'"
                   :delay-top-us="responseDelayTopUs"
                   :delay-bottom-us="responseDelayBottomUs"
+                  :axis-titles="true"
                 />
                 <ResponsePolarChart
                   v-else
@@ -3571,7 +3602,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   ref="responseChart"
                   run-label="RUN SWEEP"
                   :traces="responseTraces"
-                  :overlays="visibleResponseOverlays"
+                  :overlays="visibleCrosstalkOverlays"
                   view="Crosstalk"
                   :show-left="true"
                   :show-right="true"
@@ -3590,6 +3621,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :x-to-hz="crosstalkXToHz"
                   :phase-top-deg="180"
                   :phase-bottom-deg="-180"
+                  :axis-titles="true"
                 />
 
                 <MeasurementNotesPanel />

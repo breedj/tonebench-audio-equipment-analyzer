@@ -117,7 +117,16 @@ const { showPage } = useManual()
     </ul>
     <p>
       Only results of the same kind as the selected measurement can be overlaid — a spectrum and a
-      sweep have no common axes to share.
+      sweep have no common axes to share. A ticked result stays loaded while you move between
+      measurements, so that it can be compared against more than one of them, but it is only drawn
+      on the screens its own kind belongs to: an impulse response's gated response never appears on
+      a frequency-response chart, and an amplifier's output impedance never on a loudspeaker's
+      impedance chart, though in both cases the two curves are stored the same way.
+    </p>
+    <p>
+      The one deliberate exception is the <strong>frequency response</strong> and the
+      <strong>stepped sine response</strong>, which share a chart: they are two ways of measuring the
+      same curve, and drawing a chirp run under a stepped one is a comparison worth having.
     </p>
 
     <h2>Screenshots and reports</h2>

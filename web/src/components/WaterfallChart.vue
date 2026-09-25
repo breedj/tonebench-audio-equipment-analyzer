@@ -10,6 +10,7 @@ import { useAppTheme } from '../composables/useAppTheme'
 // Shared with SpectrumChart.vue — the two charts sit on one x span and must label it identically.
 import { freqAxis } from '../freqAxis'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, exportAxisLabel, nextPaint, type ChartExportOptions } from '../charts/exportChart'
+import { exportGridTheme } from '../charts/palette'
 
 const props = defineProps<{
   spectrum: Record<number, SpectrumFrame>
@@ -88,8 +89,8 @@ const legendGradient = `linear-gradient(to right, ${COLOR_STOPS.map(
 // this has to be an opaque colour rather than a transparent one, or it would punch a hole through
 // to whatever uPlot drew underneath.
 const THEME = {
-  dark: { axis: '#a3a3a3', grid: '#404040', empty: [23, 23, 23] as const },
-  light: { axis: '#525252', grid: '#e5e5e5', empty: [245, 245, 245] as const },
+  dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1, empty: [23, 23, 23] as const },
+  light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1, empty: [245, 245, 245] as const },
 } as const
 type WaterfallTheme = (typeof THEME)[keyof typeof THEME]
 function currentTheme(): WaterfallTheme {
@@ -193,7 +194,7 @@ function buildOptions(
         ...freqAxis(),
         stroke: theme.axis,
         grid: { show: false },
-        ticks: { stroke: theme.grid, width: 1 },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
         ...exportAxisLabel(interactive, 'Frequency (Hz)'),
       },
       {
@@ -208,7 +209,7 @@ function buildOptions(
         },
         stroke: theme.axis,
         grid: { show: false },
-        ticks: { stroke: theme.grid, width: 1 },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
         ...exportAxisLabel(interactive, 'Seconds ago'),
       },
     ],
@@ -422,7 +423,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
 
   let u: uPlot | null = null
   try {
-    u = new uPlot(buildOptions(width, plotHeight, span, THEME.light, false), [[span.min, span.max], [null, null]], host)
+    u = new uPlot(buildOptions(width, plotHeight, span, exportGridTheme(THEME.light), false), [[span.min, span.max], [null, null]], host)
     u.setScale('y', { min: -historySeconds(), max: 0 })
     await nextPaint()
     // The screen's plot keys its row cache on its own grid; its next draw restores it.

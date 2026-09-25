@@ -64,9 +64,12 @@ const props = defineProps<{
   /** The button that starts this screen's measurement — RUN on the chirp, RUN SWEEP on the stepped sine. */
   runLabel?: string
   /**
-   * Axis titles on screen, not only on the export. On the response screens the display panel names
-   * the quantities and the space is the plot's; on the impulse screen every other view titles its
-   * axes, so the gated response does too.
+   * Axis titles on screen, not only on the export. Every screen that mounts this chart asks for
+   * them: five stacked quantities — dB, degrees, coherence, a delay in µs or ms, and a log
+   * frequency — share one plot here, and the display panel beside it names what is *drawn* rather
+   * than what each of the three right-hand axes measures. Left out and the dropdowns are the only
+   * thing saying which axis is which; reported 2026-09-25. Still a prop rather than a constant, so
+   * an embedding with no room for them can say so.
    */
   axisTitles?: boolean
 }>()
@@ -844,15 +847,15 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
         ...freqAxis(),
         ...axisLabel(props.axisTitles ?? false, interactive, 'Frequency (Hz)'),
         stroke: p.axis,
-        grid: { stroke: p.grid, width: 1 },
-        ticks: { stroke: p.grid, width: 1 },
+        grid: { stroke: p.grid, width: p.gridWidth },
+        ticks: { stroke: p.grid, width: p.gridWidth },
       },
       {
         size: 50,
         ...axisLabel(props.axisTitles ?? false, interactive, magnitudeAxisLabel()),
         stroke: p.axis,
-        grid: { stroke: p.grid, width: 1 },
-        ticks: { stroke: p.grid, width: 1 },
+        grid: { stroke: p.grid, width: p.gridWidth },
+        ticks: { stroke: p.grid, width: p.gridWidth },
       },
       // Right-hand axes, outermost last. Only the visible trace's axis is shown, and neither draws
       // gridlines: a second and third grid over the dB one turns the plot into graph paper, and the
@@ -981,7 +984,7 @@ function exportTitle(): string {
 async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
   const header = CHART_EXPORT_HEADER_PX
   const plotHeight = height - header
-  const light = makePalette(false)
+  const light = makePalette(false, true)
 
   const host = document.createElement('div')
   host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`

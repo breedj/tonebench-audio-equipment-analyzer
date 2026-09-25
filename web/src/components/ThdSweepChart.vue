@@ -32,6 +32,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { dashAttr, overlayRunIndex, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
+import { exportGridStroke, exportGridTheme } from '../charts/palette'
 
 /**
  * The sweep result chart, for both sweep axes.
@@ -195,17 +196,35 @@ const CHANNEL_LABELS = ['L', 'R']
 // split used by the volt and watt x axes: the decades are what the labels name, so they carry the
 // stronger line, and the 2..9 positions between them sit back far enough to read as structure
 // rather than as data.
-const THEME = {
-  dark: { axis: '#a3a3a3', grid: '#404040', gridMajor: '#585858', gridMinor: '#333333' },
-  light: { axis: '#525252', grid: '#e5e5e5', gridMajor: '#c8c8c8', gridMinor: '#ededed' },
-} as const
+interface Theme {
+  axis: string
+  grid: string
+  /** The decade lines, drawn stronger than the 2..9 positions between them. */
+  gridMajor: string
+  gridMinor: string
+  /** Device pixels a grid line is drawn at — wider on an export, which is shown scaled down. */
+  gridWidth: number
+}
 
-type Theme = (typeof THEME)[keyof typeof THEME]
+// Not `as const`: an export darkens each grey, so the greys are strings rather than literals.
+const THEME: { dark: Theme; light: Theme } = {
+  dark: { axis: '#a3a3a3', grid: '#404040', gridMajor: '#585858', gridMinor: '#333333', gridWidth: 1 },
+  light: { axis: '#525252', grid: '#e5e5e5', gridMajor: '#c8c8c8', gridMinor: '#ededed', gridWidth: 1 },
+}
 
 // Threaded through as an argument (which theme, via `dark`) rather than read at draw time — the
 // export builds a second, light plot while the screen may be dark. See charts/palette.ts.
-function themeFor(dark: boolean): Theme {
-  return dark ? THEME.dark : THEME.light
+function themeFor(dark: boolean, forExport = false): Theme {
+  const theme = dark ? THEME.dark : THEME.light
+  // All three tiers, not just `grid`: darkening one of them would close the gap the decade lines
+  // rely on to read as stronger than the 2..9 positions between them.
+  return forExport
+    ? {
+        ...exportGridTheme(theme),
+        gridMajor: exportGridStroke(theme.gridMajor),
+        gridMinor: exportGridStroke(theme.gridMinor),
+      }
+    : theme
 }
 
 /** Minimum pixels between two labelled distortion ticks, for the sub-decade fallback. Tighter than the x axis': a number is far shorter than it is tall. */
@@ -220,7 +239,7 @@ function minorGridAxis(scale: 'x' | 'y', side: 1 | 2 | 3, theme: Theme): uPlot.A
     size: 0,
     gap: 0,
     stroke: theme.axis,
-    grid: { stroke: theme.gridMinor, width: 1 },
+    grid: { stroke: theme.gridMinor, width: theme.gridWidth },
     ticks: { show: false },
   }
 }
@@ -404,8 +423,8 @@ const outOfRange = computed(() => {
  * @param interactive False for the export's offscreen plot: no cursor, and none of the hooks that
  *   feed the zoom flag and the preview charts.
  */
-function buildOptions(width: number, height: number, dark: boolean, interactive: boolean): uPlot.Options {
-  const theme = themeFor(dark)
+function buildOptions(width: number, height: number, dark: boolean, interactive: boolean, forExport = false): uPlot.Options {
+  const theme = themeFor(dark, forExport)
   // Decade emphasis on x is for the level axes only. The frequency axis is shared with the FFT
   // screen (freqAxis), where the 1/2/5 ladder and its kHz labels are long-standing.
   const decadeGridX = props.xAxis !== 'frequency'
@@ -503,8 +522,8 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
         ...sweepXAxis(props.xAxis),
         ...exportAxisLabel(interactive, `${sweepXLabel(props.xAxis)} (${sweepXUnit(props.xAxis)})`),
         stroke: theme.axis,
-        grid: { stroke: decadeGridX ? theme.gridMajor : theme.grid, width: decadeGridX ? 1.5 : 1 },
-        ticks: { stroke: theme.grid, width: 1 },
+        grid: { stroke: decadeGridX ? theme.gridMajor : theme.grid, width: (decadeGridX ? 1.5 : 1) * theme.gridWidth },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
       },
       {
         scale: 'y',
@@ -521,8 +540,8 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
           : {}),
         values: (_u, vals) => vals.map((v) => (v == null ? null : formatYTick(v))),
         stroke: theme.axis,
-        grid: { stroke: decadeGridY ? theme.gridMajor : theme.grid, width: decadeGridY ? 1.5 : 1 },
-        ticks: { stroke: theme.grid, width: 1 },
+        grid: { stroke: decadeGridY ? theme.gridMajor : theme.grid, width: (decadeGridY ? 1.5 : 1) * theme.gridWidth },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
       },
       // The 2..9 lines of each emphasised axis, as their own label-less axis on the same scale --
       // see logMinorGridAxis on why this cannot be folded into the axis above. Listed after both, so
@@ -841,7 +860,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
     const blocks = 1 + activeOverlays.value.length
     const slots = 1 + blocks * activeChannels.value.length * activeTraces.value.length
     const empty = Array.from({ length: slots }, () => [] as number[]) as unknown as uPlot.AlignedData
-    u = new uPlot(buildOptions(width, plotHeight, false, false), empty, host)
+    u = new uPlot(buildOptions(width, plotHeight, false, false, true), empty, host)
     const data = buildData()
     if (data) u.setData(data)
     if (restore?.x) u.setScale('x', restore.x)

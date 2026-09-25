@@ -668,16 +668,16 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
         ...freqAxis(),
         ...exportAxisLabel(interactive, 'Frequency (Hz)'),
         stroke: p.axis,
-        grid: { stroke: p.grid, width: 1 },
-        ticks: { stroke: p.grid, width: 1 },
+        grid: { stroke: p.grid, width: p.gridWidth },
+        ticks: { stroke: p.grid, width: p.gridWidth },
       },
       {
         ...ohmAxis(logZ.value),
         size: 54,
         ...exportAxisLabel(interactive, '|Z| (Ω)'),
         stroke: p.axis,
-        grid: { stroke: p.grid, width: 1 },
-        ticks: { stroke: p.grid, width: 1 },
+        grid: { stroke: p.grid, width: p.gridWidth },
+        ticks: { stroke: p.grid, width: p.gridWidth },
       },
       {
         scale: 'phase',
@@ -775,7 +775,7 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
 async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
   const header = CHART_EXPORT_HEADER_PX
   const plotHeight = height - header
-  const light = makeChartPalette(false)
+  const light = makeChartPalette(false, true)
 
   const host = document.createElement('div')
   host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`

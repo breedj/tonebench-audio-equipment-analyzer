@@ -6,6 +6,7 @@ import type { DeviceStatus } from '../api/client'
 import type { ScopeFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { MAX_SCOPE_PERIODS, useScopeDisplay } from '../composables/useScopeDisplay'
+import { exportGridTheme } from '../charts/palette'
 import {
   CHART_EXPORT_HEADER_PX,
   composeChartPng,
@@ -50,7 +51,7 @@ const CHART_HEIGHT = 350
 
 // Same canvas-colour reasoning as SpectrumChart.vue: uPlot draws its axes onto the canvas itself,
 // so Tailwind's `dark:` classes can't reach them.
-const THEME = { dark: { axis: '#a3a3a3', grid: '#404040' }, light: { axis: '#525252', grid: '#e5e5e5' } } as const
+const THEME = { dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1 }, light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1 } } as const
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
 function currentTheme() {
   return darkQuery.matches ? THEME.dark : THEME.light
@@ -81,16 +82,16 @@ function buildOptions(width: number, height: number, theme: (typeof THEME)[keyof
         space: 60,
         values: (_u, vals) => vals.map((v) => (v == null ? null : `${v.toFixed(1)}`)),
         stroke: theme.axis,
-        grid: { stroke: theme.grid, width: 1 },
-        ticks: { stroke: theme.grid, width: 1 },
+        grid: { stroke: theme.grid, width: theme.gridWidth },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
         ...exportAxisLabel(interactive, 'Time (ms)'),
       },
       {
         values: (_u, vals) => vals.map((v) => (v == null ? null : `${v}`)),
         size: 50,
         stroke: theme.axis,
-        grid: { stroke: theme.grid, width: 1 },
-        ticks: { stroke: theme.grid, width: 1 },
+        grid: { stroke: theme.grid, width: theme.gridWidth },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
         ...exportAxisLabel(interactive, residualMode.value ? 'Residual (V)' : 'Volts'),
       },
     ],
@@ -330,7 +331,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
 
   let u: uPlot | null = null
   try {
-    u = new uPlot(buildOptions(width, plotHeight, THEME.light, false), computed.data, host)
+    u = new uPlot(buildOptions(width, plotHeight, exportGridTheme(THEME.light), false), computed.data, host)
     await nextPaint()
 
     const legend: ExportLegendEntry[] = []

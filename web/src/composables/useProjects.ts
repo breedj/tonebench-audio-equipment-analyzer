@@ -164,6 +164,21 @@ export function useProjects() {
     return trimmed.length > 0 ? trimmed : null
   }
 
+  /**
+   * Re-reads the open type's notes after a save that may have changed them — but never when the
+   * stored text is only what is already on screen, trimmed.
+   *
+   * <p>The Notes box is a controlled textarea, and autosave fires 750 ms after a keystroke. Writing
+   * the stored text back unconditionally therefore deleted the space the user had just typed
+   * between two words, a second after pressing it: `notesToSave` trims, so mid-word the round trip
+   * is an identity and at a trailing space it is not. Reported 2026-09-25. The resync itself stays,
+   * for a save that really did land different text.</p>
+   */
+  function adoptStoredNotes(id: number) {
+    const stored = types.value.find((t) => t.id === id)?.notes ?? ''
+    if (stored !== typeNotes.value.trim()) typeNotes.value = stored
+  }
+
   /** Registers the autosave flush — see `autosaveFlush`. App.vue calls this once. */
   function setAutosaveFlush(flush: (() => Promise<void>) | null) {
     autosaveFlush = flush
@@ -289,7 +304,7 @@ export function useProjects() {
     try {
       await api.updateMeasurementType(id, { kind: type.kind, name: type.name, notes: notesToSave(type), staged, paramsJson })
       await loadTypes(type.projectId)
-      if (id === currentTypeId.value) typeNotes.value = types.value.find((t) => t.id === id)?.notes ?? ''
+      if (id === currentTypeId.value) adoptStoredNotes(id)
       markClean(id)
       error.value = null
     } catch (e) {

@@ -6,6 +6,7 @@ import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from
 import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import type { DecayLayout, DecayPick, OrientedSurface, WallRib } from '../measurements/decay'
+import { exportGridTheme } from '../charts/palette'
 import {
   acrossX,
   advancesTrailingEdge,
@@ -94,21 +95,25 @@ interface ChartTheme {
   background: string
   axis: string
   grid: string
+  /** Device pixels a grid line is drawn at — wider on an export, which is shown scaled down. */
+  gridWidth: number
   plain: string
   text: string
 }
 
 const THEME: { dark: ChartTheme; light: ChartTheme } = {
-  dark: { background: '#0a0a0a', axis: '#a3a3a3', grid: '#333333', plain: '#60a5fa', text: '#d4d4d4' },
-  light: { background: '#ffffff', axis: '#525252', grid: '#d4d4d4', plain: '#1d6fd0', text: '#404040' },
+  dark: { background: '#0a0a0a', axis: '#a3a3a3', grid: '#333333', gridWidth: 1, plain: '#60a5fa', text: '#d4d4d4' },
+  light: { background: '#ffffff', axis: '#525252', grid: '#d4d4d4', gridWidth: 1, plain: '#1d6fd0', text: '#404040' },
 }
 
 // Which theme the drawing code reads — the screen's, or light for the duration of an export. Safe as
 // module state only because the drawing is synchronous; see ResponsePolarChart's `paint`.
 let paintDark = isDark.value
+let paintExport = false
 
 function theme(): ChartTheme {
-  return paintDark ? THEME.dark : THEME.light
+  const colors = paintDark ? THEME.dark : THEME.light
+  return paintExport ? exportGridTheme(colors) : colors
 }
 
 /**
@@ -178,8 +183,9 @@ function draw() {
  * three axes. `dpr` is the backing-store scale of `ctx`'s canvas — the sonogram is blitted in
  * backing-store pixels (putImageData ignores the transform), so it has to know.
  */
-function renderScene(ctx: CanvasRenderingContext2D, cssWidth: number, cssHeight: number, dpr: number, dark: boolean) {
+function renderScene(ctx: CanvasRenderingContext2D, cssWidth: number, cssHeight: number, dpr: number, dark: boolean, forExport = false) {
   paintDark = dark
+  paintExport = forExport
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   const colors = theme()
   ctx.fillStyle = colors.background
@@ -239,9 +245,10 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
   if (!ctx) throw new Error('Could not get a 2D context for the chart export.')
 
   try {
-    renderScene(ctx, width, plotHeight, 1, false)
+    renderScene(ctx, width, plotHeight, 1, false, true)
   } finally {
     paintDark = isDark.value
+    paintExport = false
   }
 
   const kind = props.surface?.sliceAxis === 'Periods' ? 'Burst decay' : 'Cumulative spectral decay'
@@ -524,7 +531,7 @@ function drawBackWall(
   const height = Math.round(layout.levelHeight)
 
   ctx.strokeStyle = colors.grid
-  ctx.lineWidth = 1
+  ctx.lineWidth = colors.gridWidth
   ctx.strokeRect(left, top, width, height)
 
   // Ruled, so that the empty part of the wall — the part above the surface, which is the part still
@@ -565,7 +572,7 @@ function drawFloor(
 
   const fractions = [0, ...acrossTicks(view).map((tick) => tick.fraction), 1]
 
-  ctx.lineWidth = 1
+  ctx.lineWidth = colors.gridWidth
   for (const u of fractions) {
     const edge = u <= 0 || u >= 1
     ctx.strokeStyle = edge ? colors.axis : colors.grid
@@ -628,7 +635,7 @@ function drawLevelAxis(
     ctx.fillRect(keyRight - keyWidth, top + row, keyWidth, 1)
   }
   ctx.strokeStyle = colors.grid
-  ctx.lineWidth = 1
+  ctx.lineWidth = colors.gridWidth
   ctx.strokeRect(Math.round(keyRight - keyWidth) + 0.5, Math.round(top) + 0.5, keyWidth, Math.round(height))
 
   ctx.font = '11px system-ui, sans-serif'

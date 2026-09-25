@@ -120,9 +120,10 @@ export function exportAxisLabel(interactive: boolean, label: string): Pick<uPlot
 
 /**
  * `exportAxisLabel`, plus the same title on screen when `onScreen` is set — in uPlot's own label
- * style, which is what ImpulseResponseChart and ImpulseHarmonicsChart draw theirs in. The impulse
- * screen titles every view's axes (its gated response is a FrequencyResponseChart), so a chart
- * shared with a screen that does not takes the choice as a prop rather than a constant.
+ * style, which is what ImpulseResponseChart and ImpulseHarmonicsChart draw theirs in. Taken as an
+ * argument rather than baked in because the choice belongs to the chart: a plot stacking several
+ * quantities on several axes needs its titles on screen (FrequencyResponseChart does), while one
+ * whose single y axis the panel beside it already names does not.
  */
 export function axisLabel(onScreen: boolean, interactive: boolean, label: string): Pick<uPlot.Axis, 'label' | 'labelSize' | 'labelFont'> {
   if (!interactive) return exportAxisLabel(false, label)

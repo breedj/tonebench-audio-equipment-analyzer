@@ -12,6 +12,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { freqAxis } from '../freqAxis'
+import { exportGridTheme } from '../charts/palette'
 
 /**
  * The DUT's harmonic distortion against the **fundamental** frequency that produced it, pulled out
@@ -56,16 +57,17 @@ const ORDER_COLORS: Record<number, { dark: string; light: string }> = {
 }
 
 const THEME = {
-  dark: { axis: '#a3a3a3', grid: '#404040' },
-  light: { axis: '#525252', grid: '#e5e5e5' },
+  dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1 },
+  light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1 },
 } as const
 
 type Theme = (typeof THEME)[keyof typeof THEME]
 
 // Threaded through as an argument rather than read at draw time — the export builds a second, light
 // plot while the screen may be dark. See charts/palette.ts.
-function themeFor(dark: boolean): Theme {
-  return dark ? THEME.dark : THEME.light
+function themeFor(dark: boolean, forExport = false): Theme {
+  const theme = dark ? THEME.dark : THEME.light
+  return forExport ? exportGridTheme(theme) : theme
 }
 
 function colorFor(order: number, dark: boolean = isDark.value): string {
@@ -147,8 +149,8 @@ const { zoomed, noteScale, resetZoom } = useZoomBounds(
  * @param dark Which theme to build with — see themeFor.
  * @param interactive False for the export's offscreen plot: no cursor and no zoom bookkeeping.
  */
-function buildOptions(width: number, height: number, dark: boolean, interactive: boolean): uPlot.Options {
-  const t = themeFor(dark)
+function buildOptions(width: number, height: number, dark: boolean, interactive: boolean, forExport = false): uPlot.Options {
+  const t = themeFor(dark, forExport)
   return {
     width,
     height,
@@ -172,15 +174,15 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
         ...freqAxis(),
         label: 'Fundamental (Hz)',
         stroke: t.axis,
-        grid: { stroke: t.grid, width: 1 },
-        ticks: { stroke: t.grid, width: 1 },
+        grid: { stroke: t.grid, width: t.gridWidth },
+        ticks: { stroke: t.grid, width: t.gridWidth },
       },
       {
         label: 'Level (dBc)',
         size: 64,
         stroke: t.axis,
-        grid: { stroke: t.grid, width: 1 },
-        ticks: { stroke: t.grid, width: 1 },
+        grid: { stroke: t.grid, width: t.gridWidth },
+        ticks: { stroke: t.grid, width: t.gridWidth },
       },
     ],
     series: [
@@ -241,7 +243,7 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
 
   let u: uPlot | null = null
   try {
-    u = new uPlot(buildOptions(width, plotHeight, false, false), data.value, host)
+    u = new uPlot(buildOptions(width, plotHeight, false, false, true), data.value, host)
     u.setScale('x', xWindow)
     u.setScale('y', yWindow)
     await nextPaint()

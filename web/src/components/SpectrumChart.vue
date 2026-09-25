@@ -26,6 +26,7 @@ import { FFT_LIVE_COLOR, fftOverlayColor } from '../measurements/spectrumOverlay
 import { api, type MeasurementChannel, type WeightingCurveResponse } from '../api/client'
 import { unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useUserWeighting } from '../composables/useUserWeighting'
+import { exportGridTheme } from '../charts/palette'
 
 const props = defineProps<{
   spectrum: Record<number, SpectrumFrame>
@@ -253,12 +254,14 @@ const THEME = {
   dark: {
     axis: '#a3a3a3',
     grid: '#404040',
+    gridWidth: 1,
     markerLine: 'rgba(234, 179, 8, 0.45)',
     markerText: 'rgba(250, 204, 21, 0.95)',
   },
   light: {
     axis: '#525252',
     grid: '#e5e5e5',
+    gridWidth: 1,
     markerLine: 'rgba(234, 179, 8, 0.5)',
     markerText: 'rgba(161, 98, 7, 0.95)',
   },
@@ -611,16 +614,16 @@ function buildOptions(
         ...freqAxis(),
         ...exportAxisLabel(interactive, 'Frequency (Hz)'),
         stroke: theme.axis,
-        grid: { stroke: theme.grid, width: 1 },
-        ticks: { stroke: theme.grid, width: 1 },
+        grid: { stroke: theme.grid, width: theme.gridWidth },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
       },
       {
         values: (_u, vals) => vals.map(formatDbTick),
         size: 50,
         ...exportAxisLabel(interactive, unitAxisLabel(spectrumUnit.value)),
         stroke: theme.axis,
-        grid: { stroke: theme.grid, width: 1 },
-        ticks: { stroke: theme.grid, width: 1 },
+        grid: { stroke: theme.grid, width: theme.gridWidth },
+        ticks: { stroke: theme.grid, width: theme.gridWidth },
       },
     ],
     series,
@@ -1067,7 +1070,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
   try {
     const dataSlots = 5 + props.overlays.length * 2
     const emptyData = Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData
-    u = new uPlot(buildOptions(width, plotHeight, frame.fullHiFreqHz, props.overlays, THEME.light, false), emptyData, host)
+    u = new uPlot(buildOptions(width, plotHeight, frame.fullHiFreqHz, props.overlays, exportGridTheme(THEME.light), false), emptyData, host)
     u.setData(frame.data)
     u.setScale('x', xWindow)
     await nextPaint()

@@ -31,6 +31,7 @@ import {
 } from '../response/projection'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
+import { EXPORT_GRID_WIDTH_SCALE, exportGridStroke } from '../charts/palette'
 
 /**
  * The complex-plane views of a response measurement: Nyquist (Re/Im), Nichols (phase/gain) and
@@ -125,10 +126,24 @@ const FIT_COLOR = ['#7c3aed', '#a78bfa'] as const
  * state only because everything here draws synchronously; see charts/palette.ts for the uPlot case.
  */
 let paint = { dark: isDark.value, width: 800, height: 400 }
+let paintExport = false
 
 function color(pair: readonly string[]): string {
   return paint.dark ? pair[1] : pair[0]
 }
+
+/**
+ * The grid as this paint should draw it. An export is shown scaled down (see charts/palette.ts), so
+ * its grid is darkened and widened; on screen both are left exactly as they were.
+ */
+function gridStroke(): string {
+  return paintExport ? exportGridStroke(color(GRID_COLOR)) : color(GRID_COLOR)
+}
+
+function gridLineWidth(base = 1): number {
+  return paintExport ? base * EXPORT_GRID_WIDTH_SCALE : base
+}
+
 
 /**
  * Only the Gain curve carries a relationship between two channels, and only that relationship is a
@@ -337,8 +352,10 @@ function renderScene(
   dark: boolean,
   viewport: Viewport,
   showHover: boolean,
+  forExport = false,
 ): PlaneTransform {
   paint = { dark, width, height }
+  paintExport = forExport
   const t = fitTransform(viewport, width, height, INSETS, equalAspect.value)
 
   drawGrid(ctx, width, height, t)
@@ -390,7 +407,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
   if (!ctx) throw new Error('Could not get a 2D context for the chart export.')
 
   try {
-    renderScene(ctx, width, plotHeight, false, (captureZoom ? zoomViewport.value : null) ?? baseViewport(), false)
+    renderScene(ctx, width, plotHeight, false, (captureZoom ? zoomViewport.value : null) ?? baseViewport(), false, true)
   } finally {
     paint = { ...paint, dark: isDark.value }
   }
@@ -490,8 +507,8 @@ function drawLegend(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
   const y = INSETS.top + 6
 
   ctx.fillStyle = paint.dark ? 'rgba(23, 23, 23, 0.85)' : 'rgba(255, 255, 255, 0.88)'
-  ctx.strokeStyle = color(GRID_COLOR)
-  ctx.lineWidth = 1
+  ctx.strokeStyle = gridStroke()
+  ctx.lineWidth = gridLineWidth()
   ctx.beginPath()
   ctx.rect(x + 0.5, y + 0.5, boxWidth, boxHeight)
   ctx.fill()
@@ -605,8 +622,8 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, 
   const yTicks = niceTicks(viewport.yMin, viewport.yMax, 6)
 
   ctx.save()
-  ctx.strokeStyle = color(GRID_COLOR)
-  ctx.lineWidth = 1
+  ctx.strokeStyle = gridStroke()
+  ctx.lineWidth = gridLineWidth()
   ctx.beginPath()
   for (const x of xTicks) {
     const px = Math.round(t.toScreenX(x)) + 0.5

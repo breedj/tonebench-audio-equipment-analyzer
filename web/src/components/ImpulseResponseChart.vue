@@ -13,6 +13,7 @@ import { useZoomBounds } from '../composables/useZoomBounds'
 import { impulseTimeGrid, resampleImpulse } from '../measurements/impulseOverlay'
 import { formatImpulsePeak, impulseUnit } from '../measurements/impulseUnit'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
+import { exportGridTheme } from '../charts/palette'
 
 /**
  * The impulse response itself, on a **linear** time axis with the impulse at t = 0.
@@ -54,8 +55,8 @@ const chartHeight = useResultChartHeight(root, container)
 const plot = shallowRef<uPlot | null>(null)
 
 const THEME = {
-  dark: { axis: '#a3a3a3', grid: '#404040', trace: '#60a5fa', marker: '#f59e0b' },
-  light: { axis: '#525252', grid: '#e5e5e5', trace: '#1d6fd0', marker: '#b45309' },
+  dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1, trace: '#60a5fa', marker: '#f59e0b' },
+  light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1, trace: '#1d6fd0', marker: '#b45309' },
 } as const
 
 type Theme = (typeof THEME)[keyof typeof THEME]
@@ -284,15 +285,15 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
       {
         label: 'Time (ms)',
         stroke: t.axis,
-        grid: { stroke: t.grid, width: 1 },
-        ticks: { stroke: t.grid, width: 1 },
+        grid: { stroke: t.grid, width: t.gridWidth },
+        ticks: { stroke: t.grid, width: t.gridWidth },
       },
       {
         label: props.normalised ? 'Level (dB re peak)' : unit.value.label,
         size: 64,
         stroke: t.axis,
-        grid: { stroke: t.grid, width: 1 },
-        ticks: { stroke: t.grid, width: 1 },
+        grid: { stroke: t.grid, width: t.gridWidth },
+        ticks: { stroke: t.grid, width: t.gridWidth },
       },
     ],
     series: [
@@ -355,7 +356,7 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
     // on screen, so a checked history item has to reach the PNG too.
     const { timeMs, max, overlays } = series.value
     const blank = [[], [], ...overlays.map(() => [])] as unknown as uPlot.AlignedData
-    u = new uPlot(buildOptions(width, plotHeight, THEME.light, false), blank, host)
+    u = new uPlot(buildOptions(width, plotHeight, exportGridTheme(THEME.light), false), blank, host)
     u.setData([timeMs, max, ...overlays.map((o) => o.values)] as uPlot.AlignedData)
     u.setScale('x', xWindow)
     u.setScale('y', yWin)

@@ -27,10 +27,15 @@ public static class AppEndpoints
         // down properly (pump joined, StreamingStop written, interface released -- everything the
         // hard rules on shutdown exist for), the database is checkpointed. 202 rather than 200
         // because the process is still alive when this returns; the caller waits on the pid.
+        // The message says what happened and not why: this endpoint has three callers and cannot
+        // tell them apart -- a second instance replacing this one, the launch scripts clearing the
+        // port before a build that would otherwise fail to overwrite the running exe, and a person
+        // with curl. It claimed "another instance is starting" for every one of them, which reads
+        // in the log as a second app that never existed.
         group.MapPost("/shutdown", (IHostApplicationLifetime lifetime, ILoggerFactory loggers) =>
         {
             loggers.CreateLogger("Qa403.App.Lifecycle").LogInformation(
-                "Shutdown requested over the API (another instance is starting) — running graceful shutdown");
+                "Shutdown requested over the API — running graceful shutdown");
             lifetime.StopApplication();
             return Results.Accepted(value: new AppIdentity(ProductId, Environment.ProcessId, UpdateCheckService.CurrentVersion));
         });

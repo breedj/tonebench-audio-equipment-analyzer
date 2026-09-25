@@ -20,9 +20,9 @@ const { showPage } = useManual()
     </p>
 
     <WiringDiagram
-      :terminate="['in-r-']"
+      :terminate="['in-l-', 'in-r-']"
       :height="430"
-      alt="Output L plus drives the amplifier; its two output terminals go to Input L plus and Input L minus; Output R plus loops to Input R plus as a reference; the load is fitted at the output terminals and swapped part way through."
+      alt="Output L plus drives the amplifier; its plus terminal goes to Input L plus and its minus terminal is the cable's shell; Output R plus loops to Input R plus as a reference; the load is fitted at the output terminals and swapped part way through."
       caption="Load 1 first. When the run pauses, swap it for Load 2 and press CONTINUE."
     >
       <template #default="{ cable, link, path }">
@@ -48,31 +48,42 @@ const { showPage } = useManual()
 
         <path class="w-cable w-drive" :d="cable('out-l+', 270, [242, 270])" />
         <path class="w-cable w-measure" :d="cable('in-l+', 290, [445, 290])" />
-        <path class="w-cable w-measure" :d="cable('in-l-', 250, [490, 330])" />
         <circle cx="445" cy="290" r="3.2" class="w-node" />
-        <circle cx="490" cy="330" r="3.2" class="w-node" />
+        <text x="452" y="284" class="w-note">+ terminal</text>
+
+        <!-- The − terminal is the same cable's shell, i.e. the analyzer's ground. -->
+        <circle cx="470" cy="330" r="3.2" class="w-node" />
+        <path class="w-thin" :d="path([[470, 330], [470, 360]])" />
+        <path class="w-thin" :d="path([[460, 360], [480, 360]])" />
+        <path class="w-thin" :d="path([[464, 365], [476, 365]])" />
+        <path class="w-thin" :d="path([[467, 370], [473, 370]])" />
+        <text x="452" y="324" class="w-note">− terminal</text>
+        <text x="470" y="384" text-anchor="middle" class="w-note">the cable's shell</text>
 
         <path class="w-cable w-reference" :d="link('out-r+', 'in-r+', 190)" />
         <text x="478" y="186" class="w-label w-reference">Reference</text>
 
         <text x="250" y="216" class="w-label w-drive">Drive</text>
         <text x="330" y="246" text-anchor="end" class="w-label w-measure">Measure</text>
-        <text x="320" y="400" text-anchor="middle" class="w-note">
-          Take the measurement pair from the terminals; fit the load on top of it.
+        <text x="320" y="412" text-anchor="middle" class="w-note">
+          Take the measuring cable from the terminals; fit the load on top of it.
         </text>
       </template>
     </WiringDiagram>
 
     <ul>
       <li>
-        <strong>OUT L+ to the amplifier's input</strong>, and the two output terminals to
-        <strong>IN L+</strong> and <strong>IN L−</strong>.
+        <strong>OUT L+ to the amplifier's input</strong>, and the amplifier's <strong>+</strong>
+        terminal to <strong>IN L+</strong> with the same cable's shell on its <strong>−</strong>
+        terminal — one coaxial cable, as on every other measurement.
       </li>
       <li>
-        <strong>Take the measurement pair from the terminals themselves and fit the load on top
+        <strong>Take the measuring cable from the terminals themselves and fit the load on top
         of it.</strong> This is a Kelvin connection, and here it is not a refinement: the whole
         answer is the difference between two gains a few hundredths of a decibel apart, so any
-        resistance between the tap and the terminal is added straight onto the result.
+        resistance between the tap and the terminal is added straight onto the result — and that
+        includes the shell's end of it, so clamp the connector's ground at the terminal rather than
+        somewhere along the load's lead.
       </li>
       <li>
         <strong>Both load resistors non-inductive and within a few tens of centimetres.</strong> One
@@ -85,7 +96,10 @@ const { showPage } = useManual()
         <strong>Right channel is reference</strong> and each gain is measured with its phase, so the
         result separates into a resistance and a reactance.
       </li>
-      <li><strong>A shorting plug on IN R−.</strong> Everything else is in use.</li>
+      <li>
+        <strong>Shorting plugs on IN L− and IN R−.</strong> Both inputs are read single-ended; only
+        their + connectors carry a cable.
+      </li>
     </ul>
 
     <h2>Two loads, not an open circuit</h2>

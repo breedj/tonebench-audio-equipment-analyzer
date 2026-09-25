@@ -71,13 +71,13 @@ const { showPage } = useManual()
       internal attenuator.
     </p>
 
-    <h2>Balanced loopback</h2>
+    <h2>Both − inputs keep their plugs</h2>
     <p>
-      For a balanced loop, run a second cable from <strong>OUT L−</strong> to
-      <strong>IN L−</strong> instead of fitting a plug, and the same on the right. It exercises both
-      legs of each pair and is what you want if the DUT you are about to measure is balanced. For
-      everything else the single-ended loop above is simpler and quieter, because one cable encloses
-      a smaller loop than two.
+      Do not run a second cable from <strong>OUT L−</strong> to <strong>IN L−</strong> to make a
+      balanced loop. Every measurement in this app is single-ended, so a loopback measured
+      differentially is not the floor under anything you will do next — and it is the wrong floor in
+      the flattering direction, since a balanced pair rejects the common-mode pickup that a
+      single-ended measurement has to live with.
     </p>
 
     <h2>If the loopback looks wrong</h2>

@@ -13,8 +13,9 @@ const { showPage } = useManual()
       Eight BNCs: two outputs and two inputs, each a <strong>balanced pair</strong> of a
       <strong>+</strong> and a <strong>−</strong> connector. The shell of every one of them is
       chassis ground; the centre pins carry the two legs of the pair. Everything the analyzer
-      measures is the difference between a pair's + and − pins, which is why an input's − connector
-      matters even when you are not using it.
+      measures is the difference between a pair's + and − pins — which is why every input's −
+      connector must be shorted to ground, in use or not. Leave one open and the analyzer subtracts
+      whatever that open pin picks up from your measurement.
     </p>
 
     <WiringDiagram
@@ -30,11 +31,12 @@ const { showPage } = useManual()
       </template>
     </WiringDiagram>
 
-    <h2>Single-ended wiring, which is what most of these pages show</h2>
+    <h2>Everything here is wired single-ended</h2>
     <p>
-      An ordinary coaxial cable carries one signal and a ground. So a single-ended connection uses
+      An ordinary coaxial cable carries one signal and a ground, so a single-ended connection uses
       the <strong>+</strong> connector of a pair and nothing else — the DUT's ground arrives through
-      the shell.
+      the shell. <strong>No measurement in this app is made differentially</strong>, so every page
+      that follows wires it this way and no diagram ever puts a cable on a − input.
     </p>
     <ul>
       <li>
@@ -43,8 +45,9 @@ const { showPage } = useManual()
       </li>
       <li>
         <strong>On an input</strong>, measure on <strong>+</strong> and fit a
-        <strong>shorting plug</strong> to <strong>−</strong>. This is not optional, and it is the
-        single most expensive mistake on this bench.
+        <strong>shorting plug</strong> to <strong>−</strong> — a 0, 50 or 75 Ω BNC terminator.
+        <strong>Always, on every input, whether or not that input is in use.</strong> This is not
+        optional, and it is the single most expensive mistake on this bench.
       </li>
       <li>
         <strong>Never fit a shorting plug to an output.</strong> It is a short across the analyzer's
@@ -123,12 +126,15 @@ const { showPage } = useManual()
         twenty times larger than the same pickup on the output cable.
       </li>
       <li>
-        <strong>One ground path where you can manage it.</strong> The quasi-differential connection
-        on the
+        <strong>As few cables as the measurement needs.</strong> Driving and measuring one channel
+        joins the two chassis twice, and that loop is fixed by the measurement rather than by the
+        wiring — so keep both cables short and run them alongside each other rather than around
+        opposite sides of the bench, which is what makes the loop small. Unplug the cables a
+        measurement is not using; see the
         <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
           power amplifier
         </button>
-        page does exactly this: the drive cable's shell is the only ground between the two boxes.
+        page, where the loop matters most.
       </li>
       <li>
         <strong>Computer and DUT on the same outlet</strong>, and a laptop on its battery is better
@@ -160,6 +166,15 @@ const { showPage } = useManual()
     <p>
       A dark cap on a connector is a shorting plug. A dot where two lines meet is a junction;
       lines that cross without one are not connected.
+    </p>
+    <p>
+      <strong>A ground symbol is a BNC shell.</strong> The analyzer has no separate earth terminal —
+      the shell of every one of its eight connectors is its chassis ground, and that is the only
+      ground connection it has. So wherever a diagram draws a ground, the wire that actually gets
+      there is the outer shell of a cable already in the picture: the return of the coax measuring
+      the amplifier's output, the reference resistor's end of the impedance fixture, the amplifier's
+      own chassis reached back through those same shells. Nothing needs a separate ground lead, and
+      adding one only enlarges the loop that picks up hum.
     </p>
 
     <p>

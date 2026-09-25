@@ -139,9 +139,18 @@ const { showPage } = useManual()
 
     <h2>A balanced DUT</h2>
     <p>
-      If the device has balanced inputs or outputs, use both legs: OUT L+ and OUT L− to the two
-      input legs, and the two output legs to IN L+ and IN L− with no shorting plug. The analyzer is
-      differential on both sides, so nothing in the app changes — only the cabling.
+      Measure it single-ended anyway: <strong>IN L+</strong> on the DUT's hot output leg, the
+      cable's shell on its ground, and the shorting plug left on IN L−. A balanced output whose two
+      legs are referenced to ground reads 6 dB lower this way, which is arithmetic rather than a
+      fault — it is half the signal, and the DUT's distortion and noise figures are unchanged.
+    </p>
+    <p>
+      Two cases where that does not work. A <strong>floating or bridged</strong> output has neither
+      leg at ground, so the shell would ground one of them; measure it through an external
+      differential probe or transformer instead, and enter whatever attenuation that introduces as
+      the external input gain. And a balanced <em>input</em> on the DUT still needs its cold leg
+      taken somewhere: drive from OUT L+ and tie the DUT's cold input to its own ground, exactly as
+      a single-ended source would.
     </p>
 
     <h2>Common mistakes</h2>

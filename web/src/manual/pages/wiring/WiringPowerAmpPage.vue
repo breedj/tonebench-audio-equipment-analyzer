@@ -41,10 +41,10 @@ const { showPage } = useManual()
     <h2>The connection</h2>
 
     <WiringDiagram
-      :terminate="['in-r+', 'in-r-']"
+      :terminate="['in-l-', 'in-r+', 'in-r-']"
       :height="400"
-      alt="Output L plus drives the amplifier's input; the amplifier's two output terminals go to Input L plus and Input L minus, with the load resistor beyond the measurement tap."
-      caption="Single-ended drive, differential measurement, and the load beyond the tap."
+      alt="Output L plus drives the amplifier's input; the amplifier's plus terminal goes to Input L plus and its minus terminal is the cable's shell, with the load resistor beyond the tap. All three unused inputs carry shorting plugs."
+      caption="One coaxial cable at the terminals, the load on top of it, and a plug on IN L−."
     >
       <template #default="{ cable, path }">
         <rect x="190" y="270" width="210" height="70" rx="4" class="w-block-fill" />
@@ -61,15 +61,21 @@ const { showPage } = useManual()
 
         <path class="w-cable w-drive" :d="cable('out-l+', 270, [242, 270])" />
         <path class="w-cable w-measure" :d="cable('in-l+', 295, [445, 295])" />
-        <path class="w-cable w-measure" :d="cable('in-l-', 250, [505, 325])" />
         <circle cx="445" cy="295" r="3.2" class="w-node" />
-        <circle cx="505" cy="325" r="3.2" class="w-node" />
-        <text x="445" y="283" text-anchor="middle" class="w-note">+ terminal</text>
-        <text x="505" y="345" text-anchor="middle" class="w-note">− terminal</text>
+        <text x="452" y="289" class="w-note">+ terminal — centre conductor</text>
+
+        <!-- The − terminal is the same cable's shell, i.e. the analyzer's ground. -->
+        <circle cx="530" cy="325" r="3.2" class="w-node" />
+        <path class="w-thin" :d="path([[530, 325], [530, 352]])" />
+        <path class="w-thin" :d="path([[520, 352], [540, 352]])" />
+        <path class="w-thin" :d="path([[524, 357], [536, 357]])" />
+        <path class="w-thin" :d="path([[527, 362], [533, 362]])" />
+        <text x="452" y="320" class="w-note">− terminal</text>
+        <text x="530" y="376" text-anchor="middle" class="w-note">the cable's shell</text>
 
         <text x="250" y="212" class="w-label w-drive">Drive</text>
         <text x="330" y="246" text-anchor="end" class="w-label w-measure">Measure</text>
-        <text x="320" y="382" text-anchor="middle" class="w-note">
+        <text x="300" y="394" text-anchor="middle" class="w-note">
           The load hangs beyond the tap, as close to the terminals as it will go.
         </text>
       </template>
@@ -82,12 +88,18 @@ const { showPage } = useManual()
         arrives at the analyzer twenty times larger than the same pickup on the output cable.
       </li>
       <li>
-        <strong>The amplifier's two output terminals to IN L+ and IN L−.</strong> Using both legs
-        rather than + and a shell means the only ground between the two boxes is the drive cable's
-        shield, which is the single most effective thing you can do about hum.
+        <strong>The amplifier's + terminal to IN L+</strong>, with the same cable's shell on the
+        amplifier's − terminal. One ordinary coaxial cable, exactly as on the line-level page: the
+        centre conductor carries the signal and the shell is the ground the analyzer measures it
+        against.
       </li>
       <li>
-        <strong>The load goes beyond the measurement tap.</strong> Take the measurement pair from
+        <strong>A shorting plug stays on IN L−</strong>, as on every measurement. Nothing here is
+        measured differentially, and an open − input costs 33 dB of noise floor whatever is on the
+        + one.
+      </li>
+      <li>
+        <strong>The load goes beyond the measurement tap.</strong> Take the measuring cable from
         the terminals themselves and fit the load resistor on top of it — a Kelvin connection, so
         load current does not show up as a voltage in what you are measuring. It matters most for
         <button type="button" class="manual-link" @click="showPage('wiring-output-impedance')">
@@ -102,13 +114,24 @@ const { showPage } = useManual()
       <li><strong>Shorting plugs on IN R+ and IN R−</strong> while the right channel is idle.</li>
     </ul>
 
-    <h3>If you only have single-ended cables</h3>
+    <h3>Never ground one side of a bridged output</h3>
     <p>
-      Take the amplifier's + terminal to <strong>IN L+</strong> and leave the shorting plug on
-      IN L−, exactly as on the line-level page. It works, and on most amplifiers it is a decibel or
-      two worse in the bottom of the band because the two chassis are now joined twice. Twisted pair
-      to both legs is the better arrangement, with the screen connected at the analyzer end
-      <em>only</em>.
+      A bridged or BTL amplifier drives both of its speaker terminals, and neither is at ground. The
+      measuring cable's shell puts one of them on the analyzer's chassis — which shorts half the
+      amplifier and can destroy it. The same is true of most class-D modules. If the output is
+      bridged, measure it through an external differential probe or an isolating transformer that
+      presents a ground-referenced signal to the analyzer, and set any attenuation it introduces as
+      the external gain below.
+    </p>
+
+    <h3>Two cables means two ground paths</h3>
+    <p>
+      The drive cable's shell and the measuring cable's shell both join the two chassis, and the
+      loop they enclose is where mains hum gets in. Nothing about the wiring can remove the second
+      path, so manage the loop instead: keep both cables short, run them together rather than around
+      opposite sides of the bench, keep the drive cable away from the output stage, and put the
+      computer and the amplifier on the same outlet. A laptop on its battery is the quickest way to
+      find out how much of a floor is the mains and how much is the amplifier.
     </p>
 
     <h2>When the amplifier is bigger than the analyzer</h2>

@@ -40,8 +40,8 @@ const { showPage } = useManual()
     <ul>
       <li>
         <strong>Left output to the amplifier's input, amplifier output to the left input</strong> —
-        the ordinary single-channel arrangement. Use the input divider or a quasi-differential
-        connection at the power levels involved, as on every amplifier measurement.
+        the ordinary single-channel arrangement, single-ended, with a shorting plug on IN L− as
+        always. Past 40 V rms use an external divider, as on every amplifier measurement.
       </li>
       <li>
         <strong>Both load resistors must be non-inductive and within a few tens of centimetres of
@@ -180,11 +180,20 @@ const { showPage } = useManual()
     <h2>What the chart shows</h2>
     <p>
       The impedance chart, in ohms against frequency, with a <strong>damping factor</strong> axis on
-      the right whose window is the ohms window inverted — so the two curves mirror each other on a
-      logarithmic scale and either can be read. <strong>Show phase</strong> is offered only for a
+      the right. There is one curve: the damping factor is <code>nominal / |Z|</code>, the same
+      measurement read the other way round, so the right-hand axis labels round damping factors at
+      the impedance each one corresponds to — the way a chart carries °C and °F. Read ohms on the
+      left, damping factor on the right, and the impedance window and its <strong>Autofit</strong>
+      drive both. The cursor readout gives the pair together. <strong>Show phase</strong> is offered only for a
       referenced run. The display panel is the impedance panel's without the Nyquist view and the
       calibration curves: the ohms window and scale with <strong>Autofit</strong>, the phase window,
       the frequency window and the style toggles.
+    </p>
+    <p>
+      Checking a saved run in <strong>History</strong> draws it with its own nominal load and its own
+      reference setting, so the damping-factor axis and the <strong>Show phase</strong> box describe
+      that run rather than whatever was last measured — a stored referenced run offers its phase even
+      with nothing on the bench.
     </p>
     <p>
       The <strong>Measurements</strong> panel quotes Zout and DF at the points nearest

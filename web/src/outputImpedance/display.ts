@@ -105,3 +105,40 @@ export function outputImpedanceDisplayToParams(display: Readonly<OutputImpedance
     chartAutofitOnDone: display.autofitOnDone,
   }
 }
+
+/**
+ * The two facts about a run that decide how its Zout curve may be read, rather than how it is drawn:
+ * whether the right channel was the reference (only then is there a phase), and the nominal load the
+ * damping factor is quoted against.
+ *
+ * <p>They live on the runner while a measurement is on screen, and nowhere else — which is why a
+ * stored result checked on from History showed no damping factor and a greyed-out Phase box: the
+ * screen asked an idle runner, got `false` and `0`, and `nominal / |Z|` cannot be formed from zero.
+ * Read from the result's own params instead, the way the response screen reads its phase kind.</p>
+ *
+ * <p>Nulls for anything absent or unparseable, so a caller can fall back to the live values rather
+ * than assert something the row does not say.</p>
+ */
+export interface OutputImpedanceRunFacts {
+  rightChannelIsReference: boolean | null
+  nominalOhms: number | null
+}
+
+export function outputImpedanceRunFactsFromParams(paramsJson: string | null | undefined): OutputImpedanceRunFacts {
+  const absent: OutputImpedanceRunFacts = { rightChannelIsReference: null, nominalOhms: null }
+  if (!paramsJson) return absent
+
+  let stored: { rightChannelIsReference?: unknown; nominalOhms?: unknown }
+  try {
+    stored = JSON.parse(paramsJson) as { rightChannelIsReference?: unknown; nominalOhms?: unknown }
+  } catch {
+    return absent
+  }
+  if (!stored || typeof stored !== 'object') return absent
+
+  return {
+    rightChannelIsReference: typeof stored.rightChannelIsReference === 'boolean' ? stored.rightChannelIsReference : null,
+    // A nominal load of zero is no load at all, and would leave the damping factor undefined.
+    nominalOhms: typeof stored.nominalOhms === 'number' && stored.nominalOhms > 0 ? stored.nominalOhms : null,
+  }
+}

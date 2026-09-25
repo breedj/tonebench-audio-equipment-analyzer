@@ -100,6 +100,7 @@ import {
   DEFAULT_OUTPUT_IMPEDANCE_DISPLAY,
   outputImpedanceDisplayFromParams,
   outputImpedanceDisplayToParams,
+  outputImpedanceRunFactsFromParams,
   type OutputImpedanceDisplay,
 } from './outputImpedance/display'
 import { useOutputImpedance } from './composables/useOutputImpedance'
@@ -567,8 +568,27 @@ const visibleResponseOverlays = computed(() =>
   overlays.value.filter((o) => o.visible && o.responseTraces?.length),
 )
 
+/**
+ * Checked history items carrying an ohms curve — and split by **kind**, not by shape alone.
+ *
+ * <p>An output-impedance result's `zout` row is an `ImpedanceTrace` like any other (that is what lets
+ * one chart draw both), so a filter on `impedanceTraces` alone matches it from the impedance screen
+ * too. Overlays deliberately stay loaded when you move between measurements, so after a damping-factor
+ * run its curve appeared on the Jamo's impedance chart, legend and all, with no row in that screen's
+ * History to uncheck it from — an amplifier's source impedance drawn as a loudspeaker's. Reported
+ * 2026-09-25.</p>
+ *
+ * <p>These two are different quantities that share a unit, so unlike the response screens — where a
+ * crosstalk overlay is skipped because the chart asks for a `Gain` trace it does not have — nothing
+ * downstream can tell them apart. The kind is the only thing that can.</p>
+ */
 const visibleImpedanceOverlays = computed(() =>
-  overlays.value.filter((o) => o.visible && o.impedanceTraces?.length),
+  overlays.value.filter((o) => o.visible && o.impedanceTraces?.length && isImpedanceKind(o.detail.kind)),
+)
+
+/** The same for the damping-factor screen: its own kind's runs, and never a one-port impedance. */
+const visibleOutputImpedanceOverlays = computed(() =>
+  overlays.value.filter((o) => o.visible && o.impedanceTraces?.length && isOutputImpedanceKind(o.detail.kind)),
 )
 
 /**
@@ -1224,6 +1244,34 @@ watch(
 const outputImpedanceZTopOhms = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.zTopOhms)
 const outputImpedanceZBottomOhms = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.zBottomOhms)
 const outputImpedanceZScale = ref<import('./api/client').ImpedanceZScale>(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.zScale)
+/**
+ * Whether the right channel was the reference, and the nominal load the damping factor is quoted
+ * against — for the run actually on screen. The live one when there is one, otherwise the first
+ * checked history item, read from its own params.
+ *
+ * <p>Both live only on the runner. Asking it while idle returned `false` and `0`, so a saved result
+ * checked on from History drew its Zout curve and then offered no damping factor (the axis needs
+ * `nominal / |Z|`, which zero cannot form) with the Phase box greyed out — even for a run whose own
+ * settings say it measured one. Reported 2026-09-24 against "DF 8-4 ohm, right channel as
+ * reference".</p>
+ */
+const outputImpedanceRunFacts = computed(() => {
+  const live = {
+    rightChannelIsReference: outputImpedanceReferenced.value,
+    nominalOhms: outputImpedanceNominalOhms.value,
+  }
+  if (outputImpedanceTraces.value.length > 0) return live
+
+  const stored = visibleOutputImpedanceOverlays.value[0]
+  if (!stored) return live
+
+  const facts = outputImpedanceRunFactsFromParams(stored.detail.paramsJson)
+  return {
+    rightChannelIsReference: facts.rightChannelIsReference ?? live.rightChannelIsReference,
+    nominalOhms: facts.nominalOhms ?? live.nominalOhms,
+  }
+})
+
 const outputImpedanceShowDampingFactor = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.showDampingFactor)
 const outputImpedanceShowPhase = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.showPhase)
 const outputImpedanceXFromHz = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.xFromHz)
@@ -3659,8 +3707,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 <ImpedanceChart
                   ref="outputImpedanceChart"
                   :traces="outputImpedanceTraces"
-                  :overlays="visibleImpedanceOverlays"
-                  :show-phase="outputImpedanceReferenced && outputImpedanceShowPhase"
+                  :overlays="visibleOutputImpedanceOverlays"
+                  :show-phase="outputImpedanceRunFacts.rightChannelIsReference && outputImpedanceShowPhase"
                   :show-coherence="false"
                   :show-short-cal="false"
                   :thick-lines="outputImpedanceThickLines"
@@ -3673,7 +3721,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :phase-top-deg="outputImpedancePhaseTopDeg"
                   :phase-bottom-deg="outputImpedancePhaseBottomDeg"
                   :show-damping-factor="outputImpedanceShowDampingFactor"
-                  :damping-factor-nominal-ohms="outputImpedanceNominalOhms"
+                  :damping-factor-nominal-ohms="outputImpedanceRunFacts.nominalOhms"
                 />
 
                 <MeasurementNotesPanel />
@@ -3683,7 +3731,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               <template #aside>
                 <OutputImpedanceDisplayPanel
                   :traces="outputImpedanceTraces"
-                  :phase-available="outputImpedanceReferenced"
+                  :phase-available="outputImpedanceRunFacts.rightChannelIsReference"
                   v-model:z-top-ohms="outputImpedanceZTopOhms"
                   v-model:z-bottom-ohms="outputImpedanceZBottomOhms"
                   v-model:z-scale="outputImpedanceZScale"

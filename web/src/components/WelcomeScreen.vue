@@ -62,6 +62,20 @@ onMounted(async () => {
         </button>
       </div>
 
+      <!-- The one place a first-time user is certain to look. The manual's own switcher is inside a
+           dialog nobody opens until they have a reason to, so the entrance is offered here. -->
+      <p class="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+        New to audio measurement?
+        <button
+          type="button"
+          class="text-blue-700 underline underline-offset-2 dark:text-blue-300"
+          @click="openManual('guide-welcome')"
+        >
+          Start with the simple guide
+        </button>
+        — what to plug in, what to press, and what the numbers mean.
+      </p>
+
       <h2 class="mt-8 text-sm font-semibold text-neutral-600 dark:text-neutral-300">Recent projects</h2>
       <p v-if="recentError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ recentError }}</p>
       <p v-else-if="recent.length === 0" class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">

@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { MANUAL_GROUPS, MANUAL_PAGES, manualPageById } from './pages'
+import {
+  MANUAL_EDITIONS,
+  manualCounterpart,
+  manualEdition,
+  manualPageById,
+  manualPagesIn,
+  manualPagesInGroup,
+  type ManualGroup,
+} from './pages'
 import { useManual } from './useManual'
 
 // Its own <dialog> rather than Modal.vue: the manual needs a two-column layout and far more width
@@ -8,21 +16,31 @@ import { useManual } from './useManual'
 // index beside it. The native element still gives Escape-to-close, a backdrop and focus
 // containment for free, exactly as Modal.vue explains.
 
-const { open, pageId, closeManual, showPage } = useManual()
+const { open, pageId, edition, closeManual, showPage, showEdition } = useManual()
 
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 
 const page = computed(() => manualPageById(pageId.value))
 
-const pageIndex = computed(() => (page.value ? MANUAL_PAGES.indexOf(page.value) : -1))
-const previousPage = computed(() => (pageIndex.value > 0 ? MANUAL_PAGES[pageIndex.value - 1] : null))
+// The two manuals are two books, so the sidebar, the contents and the ← → links all stay inside one
+// edition; without that, "next" off the last page of the guide walks into the full manual's Basics.
+const editionInfo = computed(() => manualEdition(edition.value))
+const editionPages = computed(() => manualPagesIn(edition.value))
+
+const pageIndex = computed(() => (page.value ? editionPages.value.indexOf(page.value) : -1))
+const previousPage = computed(() => (pageIndex.value > 0 ? editionPages.value[pageIndex.value - 1] : null))
 const nextPage = computed(() =>
-  pageIndex.value >= 0 && pageIndex.value < MANUAL_PAGES.length - 1 ? MANUAL_PAGES[pageIndex.value + 1] : null,
+  pageIndex.value >= 0 && pageIndex.value < editionPages.value.length - 1
+    ? editionPages.value[pageIndex.value + 1]
+    : null,
 )
 
-function pagesIn(group: (typeof MANUAL_GROUPS)[number]) {
-  return MANUAL_PAGES.filter((p) => p.group === group)
+/** The same page in the other manual, when there is one. Rendered as the banner above every page. */
+const counterpart = computed(() => manualCounterpart(page.value))
+
+function pagesIn(group: ManualGroup) {
+  return manualPagesInGroup(group)
 }
 
 watch(
@@ -76,7 +94,7 @@ function onBackdropClick(e: MouseEvent) {
             :class="{ 'pointer-events-none': page === null }"
             @click="showPage(null)"
           >
-            Manual
+            {{ editionInfo.title }}
           </button>
           <template v-if="page">
             <span class="text-neutral-300 dark:text-neutral-700">/</span>
@@ -97,6 +115,25 @@ function onBackdropClick(e: MouseEvent) {
         <!-- Index. Always present, so a page is never a dead end and the whole manual stays one
              click away from wherever a measurement's own help button dropped you. -->
         <nav class="hidden w-56 shrink-0 overflow-y-auto border-r border-neutral-200 p-3 md:block dark:border-neutral-800">
+          <!-- Which manual. Always both, always visible: the simple guide is only useful if it is
+               found, and the reader who has outgrown it needs the way back to be just as obvious. -->
+          <div class="mb-3 flex rounded border border-neutral-200 p-0.5 text-xs dark:border-neutral-700">
+            <button
+              v-for="e in MANUAL_EDITIONS"
+              :key="e.id"
+              type="button"
+              class="flex-1 rounded px-1.5 py-1 text-center"
+              :class="
+                e.id === edition
+                  ? 'bg-blue-600 font-medium text-white'
+                  : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              "
+              :title="e.blurb"
+              @click="showEdition(e.id)"
+            >
+              {{ e.title }}
+            </button>
+          </div>
           <button
             type="button"
             class="mb-2 w-full rounded px-2 py-1 text-left text-xs font-medium"
@@ -109,7 +146,7 @@ function onBackdropClick(e: MouseEvent) {
           >
             Contents
           </button>
-          <template v-for="group in MANUAL_GROUPS" :key="group">
+          <template v-for="group in editionInfo.groups" :key="group">
             <p
               class="mt-3 mb-1 px-2 text-[10px] font-semibold tracking-wide text-neutral-400 uppercase dark:text-neutral-600"
             >
@@ -136,13 +173,35 @@ function onBackdropClick(e: MouseEvent) {
           <!-- The index page. The sidebar carries the same links, but it is hidden on a narrow
                window and it has no room for the one-line summaries. -->
           <template v-if="page === null">
-            <h1>QA403 audio analyzer</h1>
-            <p>
-              This manual has one chapter per measurement, plus the parts every measurement shares.
-              Each measurement screen also carries its own <strong>?</strong> button, which opens
-              that measurement's chapter directly.
+            <h1>QA403 audio analyzer — {{ editionInfo.title.toLowerCase() }}</h1>
+            <p>{{ editionInfo.blurb }}</p>
+            <p v-if="edition === 'reference'">
+              One chapter per measurement, plus the parts every measurement shares. Each measurement
+              screen also carries its own <strong>?</strong> button, which opens that measurement's
+              chapter directly.
             </p>
-            <template v-for="group in MANUAL_GROUPS" :key="group">
+            <p v-else>
+              Thirteen short pages, in the order it is worth reading them. Nothing here needs any
+              maths, and nothing here is a different app — every page names the chapter in the full
+              manual that goes further on the same subject.
+            </p>
+            <p class="manual-edition-invite">
+              <template v-if="edition === 'reference'">
+                New to audio measurement? The
+                <button type="button" class="manual-link" @click="showEdition('guide')">
+                  simple guide
+                </button>
+                covers the same bench in plain language, without the conventions and the measured
+                figures.
+              </template>
+              <template v-else>
+                Everything in more detail — every control, every setting, every convention — is in the
+                <button type="button" class="manual-link" @click="showEdition('reference')">
+                  full manual</button
+                >.
+              </template>
+            </p>
+            <template v-for="group in editionInfo.groups" :key="group">
               <h2>{{ group }}</h2>
               <ul class="manual-index">
                 <li v-for="p in pagesIn(group)" :key="p.id">
@@ -154,6 +213,26 @@ function onBackdropClick(e: MouseEvent) {
           </template>
 
           <template v-else>
+            <!-- The cross-edition link. Rendered by the shell rather than written into each page, so
+                 both directions exist wherever a counterpart is declared and neither can rot: the
+                 page bodies never mention the other manual's page titles. -->
+            <p v-if="counterpart" class="manual-edition-switch">
+              <template v-if="page.edition === 'reference'">
+                Simpler version of this page:
+                <button type="button" class="manual-link" @click="showPage(counterpart.id)">
+                  {{ counterpart.title }}
+                </button>
+                <span class="manual-edition-switch-tag">simple guide</span>
+              </template>
+              <template v-else>
+                In full detail:
+                <button type="button" class="manual-link" @click="showPage(counterpart.id)">
+                  {{ counterpart.title }}
+                </button>
+                <span class="manual-edition-switch-tag">full manual</span>
+              </template>
+            </p>
+
             <component :is="page.component" />
 
             <div
@@ -276,6 +355,13 @@ function onBackdropClick(e: MouseEvent) {
 .dark .manual-prose td:first-child {
   color: rgb(245 245 245);
 }
+/* A table whose first column is a phrase rather than a label — "what you see" against "what to do",
+   which is most of the simple guide's tables. Left to the rule above, a sentence there is held on one
+   line: it takes two thirds of the width on a wide window and overflows the dialog on a narrow one. */
+.manual-prose table.manual-wrap td:first-child {
+  white-space: normal;
+  width: 40%;
+}
 .manual-prose .manual-note {
   border-left: 3px solid rgb(217 119 6);
   background: rgb(255 251 235);
@@ -351,6 +437,45 @@ function onBackdropClick(e: MouseEvent) {
 .dark .manual-prose .manual-wiring-links {
   border-left-color: rgb(64 64 64);
   color: rgb(163 163 163);
+}
+/* The cross-edition banner above a page, and the same invitation on a contents page. Quiet on
+   purpose: it is a signpost to the other manual, not part of the page it sits on. */
+.manual-prose .manual-edition-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  color: rgb(115 115 115);
+  border-bottom: 1px solid rgb(229 229 229);
+  padding-bottom: 0.5rem;
+  margin-bottom: 1rem;
+}
+.dark .manual-prose .manual-edition-switch {
+  color: rgb(163 163 163);
+  border-bottom-color: rgb(64 64 64);
+}
+.manual-prose .manual-edition-switch-tag {
+  border: 1px solid rgb(229 229 229);
+  border-radius: 0.25rem;
+  padding: 0 0.3rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: rgb(140 140 140);
+}
+.dark .manual-prose .manual-edition-switch-tag {
+  border-color: rgb(64 64 64);
+  color: rgb(140 140 140);
+}
+.manual-prose .manual-edition-invite {
+  border-left: 3px solid rgb(191 219 254);
+  background: rgb(239 246 255);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+.dark .manual-prose .manual-edition-invite {
+  border-left-color: rgb(30 64 175);
+  background: rgb(23 37 84 / 0.4);
 }
 .manual-prose .manual-index {
   list-style: none;

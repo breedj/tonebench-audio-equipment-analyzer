@@ -2,6 +2,14 @@
 // own help button to the right page (see manualPageForKind), so a new measurement kind needs a
 // page here as well as an entry in measurements/kinds.ts.
 //
+// There are two *editions* of the manual over one page list. The `reference` edition is the full
+// manual: every control, every convention, the measured figures behind them. The `guide` edition is
+// a second, shorter manual in plain language for someone meeting an audio analyzer for the first
+// time — fewer numbers, no formulas, one job per page. Neither replaces the other, and a page in
+// either one may name its `counterpart` in the other, which is what puts the cross-link banner at
+// the top of both (see manualCounterpart): the link is declared once, on the guide page, and the
+// reference page finds it by searching backwards.
+//
 // Page bodies are plain-markup Vue components under ./pages, loaded lazily by ManualDialog so the
 // manual costs nothing until it is opened.
 import type { Component } from 'vue'
@@ -19,16 +27,43 @@ import {
   THD_VS_FREQUENCY_KIND,
 } from '../measurements/kinds'
 
+/** Which of the two manuals a page belongs to. */
+export type ManualEdition = 'guide' | 'reference'
+
+/** Grouping headers of the plain-language guide. */
+export type GuideGroup = 'Start here' | 'What the numbers mean' | 'Things to measure' | 'Afterwards'
+
+/** Grouping headers of the full manual. */
+export type ReferenceGroup = 'Basics' | 'Wiring' | 'Measurements' | 'Simulator' | 'Reference'
+
+export type ManualGroup = GuideGroup | ReferenceGroup
+
 export interface ManualPage {
   id: string
   title: string
   /** One line under the title in the index. */
   summary: string
-  /** Which measurement kind's help button lands here, if any. */
+  /** Which measurement kind's help button lands here, if any. Reference pages only. */
   kind?: string
-  /** Grouping header in the index sidebar. */
-  group: 'Basics' | 'Wiring' | 'Measurements' | 'Simulator' | 'Reference'
+  /** Grouping header in the index sidebar. One of its own edition's groups. */
+  group: ManualGroup
+  /** Which manual this page is part of. Stamped by the arrays below, never written per page. */
+  edition: ManualEdition
+  /** The page in the other edition that covers the same ground, if there is one. */
+  counterpart?: string
   component: Component
+}
+
+/** A page as the arrays below declare it: the edition comes from which array it is in. */
+type ManualPageEntry = Omit<ManualPage, 'edition'>
+
+export interface ManualEditionInfo {
+  id: ManualEdition
+  /** On the edition switcher. */
+  title: string
+  /** Under the title on that edition's contents page, and as the switcher's tooltip. */
+  blurb: string
+  groups: readonly ManualGroup[]
 }
 
 /**
@@ -72,7 +107,119 @@ function manualPage(loader: () => Promise<Component>): Component {
   return defineAsyncComponent({ loader, errorComponent: ManualPageUnavailable })
 }
 
-export const MANUAL_PAGES: ManualPage[] = [
+/**
+ * The plain-language guide.
+ *
+ * Written for someone whose first question is "what do I plug in and what am I looking at", not
+ * "which convention is this figure referred to". Each page states the few numbers it needs and
+ * hands the reader to its `counterpart` in the full manual for the rest, so the two stay in one
+ * relationship rather than drifting into two half-manuals.
+ */
+const GUIDE_PAGES: ManualPageEntry[] = [
+  {
+    id: 'guide-welcome',
+    title: 'What this app does',
+    summary: 'What an audio analyzer measures, what you need on the bench, and how to try it with no hardware.',
+    group: 'Start here',
+    counterpart: 'getting-started',
+    component: manualPage(() => import('./pages/guide/GuideWelcomePage.vue')),
+  },
+  {
+    id: 'guide-connecting',
+    title: 'Plugging everything in',
+    summary: 'The eight sockets, the four plugs that must always be fitted, and the two ways to damage something.',
+    group: 'Start here',
+    counterpart: 'wiring-basics',
+    component: manualPage(() => import('./pages/guide/GuideConnectingPage.vue')),
+  },
+  {
+    id: 'guide-first-measurement',
+    title: 'Your first measurement',
+    summary: 'A loopback, a 1 kHz tone, and a spectrum on screen — ten minutes, step by step.',
+    group: 'Start here',
+    counterpart: 'fft-spectrum',
+    component: manualPage(() => import('./pages/guide/GuideFirstMeasurementPage.vue')),
+  },
+  {
+    id: 'guide-screen',
+    title: 'Finding your way around',
+    summary: 'The three columns, the green button, the chart, and where your results go.',
+    group: 'Start here',
+    counterpart: 'charts',
+    component: manualPage(() => import('./pages/guide/GuideScreenPage.vue')),
+  },
+  {
+    id: 'guide-decibels',
+    title: 'Decibels and volts',
+    summary: 'What dB, dBV and a minus sign in front of a level actually tell you — with a table instead of a formula.',
+    group: 'What the numbers mean',
+    component: manualPage(() => import('./pages/guide/GuideDecibelsPage.vue')),
+  },
+  {
+    id: 'guide-distortion',
+    title: 'Distortion in plain words',
+    summary: 'Harmonics, THD, THD+N — what they are, which numbers are good, and what they sound like.',
+    group: 'What the numbers mean',
+    counterpart: 'thd-vs-frequency',
+    component: manualPage(() => import('./pages/guide/GuideDistortionPage.vue')),
+  },
+  {
+    id: 'guide-noise',
+    title: 'Noise, hum and the floor',
+    summary: 'The grass along the bottom of the chart, the spikes at 50 Hz, and how to tell whose fault they are.',
+    group: 'What the numbers mean',
+    component: manualPage(() => import('./pages/guide/GuideNoisePage.vue')),
+  },
+  {
+    id: 'guide-words',
+    title: 'Words you will see',
+    summary: 'Twenty-odd terms from the panels and the axes, one line each.',
+    group: 'What the numbers mean',
+    counterpart: 'glossary',
+    component: manualPage(() => import('./pages/guide/GuideWordsPage.vue')),
+  },
+  {
+    id: 'guide-response',
+    title: 'Measuring frequency response',
+    summary: 'Whether your amplifier treats the bass the same as the treble — one sweep, one curve.',
+    group: 'Things to measure',
+    counterpart: 'frequency-response',
+    component: manualPage(() => import('./pages/guide/GuideResponsePage.vue')),
+  },
+  {
+    id: 'guide-amplifier',
+    title: 'Checking an amplifier',
+    summary: 'Five measurements in the order to make them, with the settings to use and what a healthy result looks like.',
+    group: 'Things to measure',
+    component: manualPage(() => import('./pages/guide/GuideAmplifierPage.vue')),
+  },
+  {
+    id: 'guide-loudspeaker',
+    title: 'Measuring a loudspeaker',
+    summary: 'A resistor, two clips and an impedance curve — the easiest useful measurement on the bench.',
+    group: 'Things to measure',
+    counterpart: 'impedance',
+    component: manualPage(() => import('./pages/guide/GuideLoudspeakerPage.vue')),
+  },
+  {
+    id: 'guide-keeping-results',
+    title: 'Keeping your results',
+    summary: 'Projects, measurements and results — which is which, and how to compare last week with today.',
+    group: 'Afterwards',
+    counterpart: 'saving',
+    component: manualPage(() => import('./pages/guide/GuideKeepingResultsPage.vue')),
+  },
+  {
+    id: 'guide-problems',
+    title: 'When something looks wrong',
+    summary: 'The dozen things that go wrong most often, what each looks like on screen, and what to do.',
+    group: 'Afterwards',
+    component: manualPage(() => import('./pages/guide/GuideProblemsPage.vue')),
+  },
+]
+
+/** The full manual. */
+const REFERENCE_PAGES: ManualPageEntry[] = [
   {
     id: 'getting-started',
     title: 'Getting started',
@@ -421,15 +568,71 @@ export const MANUAL_PAGES: ManualPage[] = [
   },
 ]
 
-export const MANUAL_GROUPS: ManualPage['group'][] = ['Basics', 'Wiring', 'Measurements', 'Simulator', 'Reference']
+export const MANUAL_EDITIONS: readonly ManualEditionInfo[] = [
+  {
+    id: 'guide',
+    title: 'Simple guide',
+    blurb: 'Plain language, no formulas: what to plug in, what to press, and what the numbers mean.',
+    groups: ['Start here', 'What the numbers mean', 'Things to measure', 'Afterwards'],
+  },
+  {
+    id: 'reference',
+    title: 'Full manual',
+    blurb: 'Every screen, every control and every convention, with the measured figures behind them.',
+    groups: ['Basics', 'Wiring', 'Measurements', 'Simulator', 'Reference'],
+  },
+]
+
+/** The edition a page belongs to is stamped here, so no entry above can claim the wrong one. */
+function inEdition(edition: ManualEdition, pages: ManualPageEntry[]): ManualPage[] {
+  return pages.map((page) => ({ ...page, edition }))
+}
+
+export const MANUAL_PAGES: ManualPage[] = [
+  ...inEdition('guide', GUIDE_PAGES),
+  ...inEdition('reference', REFERENCE_PAGES),
+]
+
+export function manualEdition(id: ManualEdition): ManualEditionInfo {
+  return MANUAL_EDITIONS.find((e) => e.id === id) ?? MANUAL_EDITIONS[0]
+}
+
+/** The pages of one edition, in reading order — which is also the order the ← → links walk. */
+export function manualPagesIn(edition: ManualEdition): ManualPage[] {
+  return MANUAL_PAGES.filter((p) => p.edition === edition)
+}
+
+export function manualPagesInGroup(group: ManualGroup): ManualPage[] {
+  return MANUAL_PAGES.filter((p) => p.group === group)
+}
+
+/**
+ * The page in the other edition covering the same ground, in either direction.
+ *
+ * The relationship is declared once, on the guide page, and followed backwards from the reference
+ * page — so the fifty pages of the full manual need no edit to gain their link, and a link cannot
+ * exist in one direction only.
+ */
+export function manualCounterpart(page: ManualPage | null): ManualPage | null {
+  if (page === null) return null
+  if (page.counterpart) return manualPageById(page.counterpart)
+  return MANUAL_PAGES.find((p) => p.counterpart === page.id) ?? null
+}
 
 export function manualPageById(id: string | null): ManualPage | null {
   if (id === null) return null
   return MANUAL_PAGES.find((p) => p.id === id) ?? null
 }
 
-/** The help page a measurement screen's own "?" button opens. Null for a kind with no page yet — the caller falls back to the index. */
+/**
+ * The help page a measurement screen's own "?" button opens. Null for a kind with no page yet — the
+ * caller falls back to the index.
+ *
+ * Deliberately the *full* manual's page: that button means "what does this control do", which is the
+ * question the reference edition answers. A reader who wants the simpler version reaches it from the
+ * banner at the top of that page, which is one press away and says what it is.
+ */
 export function manualPageForKind(kind: string | null | undefined): ManualPage | null {
   if (!kind) return null
-  return MANUAL_PAGES.find((p) => p.kind === kind) ?? null
+  return MANUAL_PAGES.find((p) => p.edition === 'reference' && p.kind === kind) ?? null
 }

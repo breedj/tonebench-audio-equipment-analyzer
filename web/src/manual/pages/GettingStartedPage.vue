@@ -159,6 +159,14 @@ const { showPage } = useManual()
     <h2>Where to go next</h2>
     <ul>
       <li>
+        <button type="button" class="manual-link" @click="showPage('guide-welcome')">
+          The simple guide
+        </button>
+        — the other manual, in plain language and without the conventions and measured figures. If any
+        of this chapter assumed something you have not met before, start there instead; every one of
+        its pages links back here.
+      </li>
+      <li>
         <button type="button" class="manual-link" @click="showPage('wiring-basics')">
           Connections and cables
         </button>

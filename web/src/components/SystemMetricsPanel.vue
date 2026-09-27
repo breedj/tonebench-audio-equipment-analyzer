@@ -29,7 +29,7 @@ const tiles = computed(() =>
 </script>
 
 <template>
-  <section class="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section class="panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <div class="mb-2 text-xs text-neutral-500 dark:text-neutral-400">System</div>
     <div v-if="tiles.length" class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
       <div v-for="tile in tiles" :key="tile.label">

@@ -121,4 +121,50 @@ public class OutputRangeSelectorTests
         double expected = Math.Sqrt(2.0) * Math.Pow(10.0, -20.0 / 20.0);
         Assert.Equal(expected, OutputRangeSelector.RequiredPeakVolts(channel), precision: 10);
     }
+
+    /// <summary>
+    /// Clips is not "Select would have picked something bigger". Select keeps HeadroomDb in hand, so
+    /// the band between a range's full scale and its full scale less the headroom is a range Select
+    /// declines to choose and that also does not clip — and reporting that band as clipping to
+    /// someone who pinned the range by hand would be crying wolf on most of their choices.
+    /// </summary>
+    [Fact]
+    public void Clips_IsAboutFullScale_NotTheMarginSelectKeeps()
+    {
+        // The 8 dBV range's full scale is sqrt(2)*10^(8/20) = 3.552 V peak. A 6.5 dBV tone peaks at
+        // 2.99 V: inside it, but inside it by less than the 2 dB Select insists on.
+        var tone = new GeneratorConfig(
+            new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 6.5)]), ChannelGeneratorConfig.Off);
+
+        Assert.Equal(18.0, OutputRangeSelector.Select(tone, DeviceCapabilities.Qa403.OutputRangesDbv));
+        Assert.False(OutputRangeSelector.Clips(tone, 8.0));
+        Assert.True(OutputRangeSelector.Clips(tone, -2.0));
+    }
+
+    /// <summary>
+    /// A tone exactly at a range's full scale is the common case, not a corner one — the ranges are
+    /// 10 dB apart and users pick round numbers — so it must not report clipping off a float
+    /// rounding either way. What can still push it over is the per-channel calibration factor, which
+    /// is what HeadroomDb covers and why Select would not have chosen this range.
+    /// </summary>
+    [Fact]
+    public void Clips_IsFalseForALevelExactlyAtFullScale()
+    {
+        var tone = new GeneratorConfig(
+            new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 8.0)]), ChannelGeneratorConfig.Off);
+
+        Assert.False(OutputRangeSelector.Clips(tone, 8.0));
+    }
+
+    [Fact]
+    public void Clips_AnswersForTheLouderChannel()
+    {
+        // One register serves both outputs, so the quiet channel cannot make a clipped one safe.
+        var config = new GeneratorConfig(
+            new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, -40.0)]),
+            new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 8.6)]));
+
+        Assert.True(OutputRangeSelector.Clips(config, -12.0));
+        Assert.False(OutputRangeSelector.Clips(config, 18.0));
+    }
 }

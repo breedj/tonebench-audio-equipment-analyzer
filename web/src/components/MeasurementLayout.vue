@@ -46,8 +46,11 @@ const {
 } = useUiLayout()
 void load()
 
+// `panel-surface` is what keeps the two strips reading as the edge of the rail they fold rather than
+// as a gap in the page — they carry the same ground as every panel (style.css). The hover background
+// still wins over it: a `:hover` utility outranks a plain class.
 const STRIP =
-  'shrink-0 items-start justify-center rounded border border-neutral-200 pt-2 text-neutral-500 ' +
+  'panel-surface shrink-0 items-start justify-center rounded border border-neutral-200 pt-2 text-neutral-500 ' +
   'hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-400 ' +
   'dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
 </script>

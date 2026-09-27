@@ -7,6 +7,7 @@ import {
   modelLevelDb,
   passbandReferenceDb,
   polyAbs2,
+  relativeLevelLabel,
   surfaceWindow,
   type SurfaceField,
 } from './surfaceField'
@@ -170,6 +171,43 @@ describe('surfaceWindow', () => {
   it('never collapses to zero span', () => {
     const w = surfaceWindow(0, 5, 5)
     expect(w.topDb).toBeGreaterThan(w.bottomDb)
+  })
+})
+
+describe('relativeLevelLabel', () => {
+  it('labels the reference 0, however the level was rounded on its way here', () => {
+    // The reported bug: the key read "-1.07e-13" where it should read 0. The residue is real —
+    // contourLevels rounds to 12 significant digits — so the label has to snap it, not hope for it.
+    for (const referenceDb of [0, 26.58, -13.371, 41.6667, 1.0000000001]) {
+      const levels = contourLevels(surfaceWindow(referenceDb, 40, -50))
+      const atReference = levels.filter((l) => Math.abs(l - referenceDb) < 1e-9)
+      expect(atReference).toHaveLength(1)
+      expect(relativeLevelLabel(atReference[0]!, referenceDb)).toBe('0')
+    }
+  })
+
+  it('reproduces the screenshot exactly', () => {
+    // 20*log10 of an ordinary gain lands here; the subtraction below leaves -1.07e-13.
+    const referenceDb = 20 * Math.log10(21.3)
+    const level = Number(referenceDb.toPrecision(12))
+    expect(level - referenceDb).not.toBe(0)
+    expect(relativeLevelLabel(level, referenceDb)).toBe('0')
+  })
+
+  it('signs a real offset and keeps three significant digits', () => {
+    expect(relativeLevelLabel(30, 0)).toBe('+30')
+    expect(relativeLevelLabel(-3, 0)).toBe('-3')
+    expect(relativeLevelLabel(-50, 0)).toBe('-50')
+    expect(relativeLevelLabel(23.58, 26.58)).toBe('-3')
+    expect(relativeLevelLabel(0.001234, 0)).toBe('+0.00123')
+  })
+
+  it('never returns a label long enough to push the caption off the canvas', () => {
+    // Nine characters was the failing one. The whole label set of a normal window fits in four.
+    const w = surfaceWindow(26.58, 40, -50)
+    for (const level of contourLevels(w)) {
+      expect(relativeLevelLabel(level, w.referenceDb).length).toBeLessThanOrEqual(4)
+    }
   })
 })
 

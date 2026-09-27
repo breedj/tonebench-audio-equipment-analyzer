@@ -6,6 +6,7 @@ import type { DeviceStatus } from '../api/client'
 import type { ScopeFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { MAX_SCOPE_PERIODS, useScopeDisplay } from '../composables/useScopeDisplay'
+import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { exportGridTheme } from '../charts/palette'
 import {
   CHART_EXPORT_HEADER_PX,
@@ -119,15 +120,26 @@ function ensurePlot() {
   plotIsResidual = residualMode.value
 }
 
+// The staged stimulus, for the fallback in generatorFreqHz below.
+const { kind: stagedKind, tones: stagedTones } = useGeneratorStimulus()
+
 // The generator's own configured tone frequency — not something re-derived from the captured
 // signal (e.g. via FFT or crossing spacing), since the generator already knows it exactly and a
 // re-derivation would just be a noisier copy of the same number. Left and right always share one
 // stimulus (see GeneratorPanel.vue), so either channel's config is the same answer; which one is
 // enabled doesn't matter for the frequency itself, only for which trace gets drawn.
+//
+// Falls back to the *staged* stimulus when the live status has no tone, which is the state every
+// stopped capture ends in: Stop silences the generator (deviceControl.ts's stopRun), so the moment a
+// SINGLE auto-stopped, the trigger frequency went null and the trace re-drew as the whole
+// 2048-sample buffer — 42 ms of 1 kHz rendered as a solid band, instead of the four periods the
+// Periods field asks for. Same source and same reason as the Gen tile and the noise figures, which
+// both read the staged form for exactly this: it survives Stop.
 function generatorFreqHz(status: DeviceStatus | null): number | null {
   const gen = status?.generatorLeft ?? status?.generatorRight
-  if (!gen || gen.kind !== 'Tones' || gen.tones.length === 0) return null
-  return gen.tones[0].freqHz > 0 ? gen.tones[0].freqHz : null
+  if (gen && gen.kind === 'Tones' && gen.tones.length > 0 && gen.tones[0].freqHz > 0) return gen.tones[0].freqHz
+  if (stagedKind.value !== 'Tones' || stagedTones.length === 0) return null
+  return stagedTones[0].freqHz > 0 ? stagedTones[0].freqHz : null
 }
 
 // How many whole periods the Periods field asks for — see findTriggerWindow's fallback ladder
@@ -385,6 +397,10 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
   darkQuery.addEventListener('change', handleThemeChange)
+  // Draw what the store already holds. Every update is driven by a watcher on changing data, so a
+  // remount with *unchanged* data drew nothing at all: leaving one measurement and coming back
+  // showed an empty chart until the next frame arrived, though the capture was still in the store.
+  update()
 })
 onBeforeUnmount(() => {
   clearTimeout(liveCommitTimer)
@@ -396,7 +412,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section class="flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <div class="flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span>Oscilloscope</span>
       <label class="flex items-center gap-1.5" title="How many whole periods of the generator tone to show. Stepped down automatically when the captured frame is too short to hold that many.">

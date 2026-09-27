@@ -325,6 +325,32 @@ function stateForFrame(flags: number): ResponseState {
   return (flags & STREAM_FLAG_STEPPED_RESPONSE) !== 0 ? states.Stepped : states.Chirp
 }
 
+function targetForFrame(flags: number): ResponseTarget {
+  if ((flags & STREAM_FLAG_CROSSTALK) !== 0) return 'Crosstalk'
+  return (flags & STREAM_FLAG_STEPPED_RESPONSE) !== 0 ? 'Stepped' : 'Chirp'
+}
+
+/**
+ * Fetch the status once, when a run ends.
+ *
+ * Nothing polls status during a run — the progress frames carry everything the screen needs while it
+ * is moving. But a few fields are only *finished* at the end, and `latencySamples` is one: the frames
+ * never carry it, so it reached the screen only when something else happened to fetch a status.
+ * Pressing STOP did, because cancelling applies one; a SINGLE has no STOP to press, so the measured
+ * DUT delay could stay invisible indefinitely — and with it the **Restore removed delay** checkbox,
+ * which is exactly the control a chirp needs before its poles are read. The runner had the number
+ * the whole time (its own log line prints it on every pass, SINGLE included); only the client did not.
+ */
+function refreshAfterRun(flags: number, wasRunning: boolean, isRunning: boolean) {
+  if (!wasRunning || isRunning) return
+  const t = targetForFrame(flags)
+  void statusFor(t)
+    .then((status) => applyStatus(states[t], status))
+    // A failed refresh leaves the screen exactly as the frames left it, which is the old behaviour;
+    // it is not worth an error banner over a field the user may never look at.
+    .catch(() => {})
+}
+
 function applyStatus(state: ResponseState, status: FrequencyResponseStatus) {
   state.running.value = status.running
   state.phase.value = phaseNames[status.phase] ?? ResponsePhase.Idle
@@ -368,6 +394,7 @@ function ingestProgress(frame: FrequencyResponseProgressFrame) {
   // Everything but the chirp counts points: a stepped response or a crosstalk pass.
   const stepped = state !== states.Chirp
 
+  const wasRunning = state.running.value
   state.phase.value = frame.phase
   state.generatorAmpDbv.value = frame.generatorAmpDbv
   state.running.value =
@@ -375,6 +402,9 @@ function ingestProgress(frame: FrequencyResponseProgressFrame) {
     frame.phase === ResponsePhase.Sweeping ||
     frame.phase === ResponsePhase.DeterminingLevel ||
     frame.phase === ResponsePhase.DeterminingRange
+
+  // The one status fetch a run gets, on the edge where it stops — see refreshAfterRun.
+  refreshAfterRun(frame.header.flags, wasRunning, state.running.value)
 
   // Both probes reuse this frame with their own pass counts, which are neither records nor points —
   // taking their total would rewrite the readout with a probe's numbers and leave it wrong for the
@@ -554,6 +584,15 @@ export function useFrequencyResponse() {
 
     async clear() {
       applyStatus(active.value, await clearFor(target.value))
+    },
+
+    /**
+     * Clears one named measurement rather than the selected one — App.vue's
+     * `discardForeignLiveState`, which runs *before* the selection (and therefore `target`) moves,
+     * precisely so nothing races the re-attach that follows it. See measurements/liveOwner.ts.
+     */
+    async clearTarget(t: ResponseTarget) {
+      applyStatus(states[t], await clearFor(t))
     },
   }
 }

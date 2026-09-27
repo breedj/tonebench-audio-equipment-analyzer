@@ -53,7 +53,12 @@ const delaySuffix = computed(() => (props.phaseKind === 'ChannelDifference' ? ' 
          the corners on the curves already on screen (see BandwidthReferenceControls). -->
     <BandwidthReferenceControls :stepped="stepped" />
 
-    <table v-if="trace" class="w-full text-left text-[11px] whitespace-nowrap">
+    <!-- Sized to its content, not to the panel: this moved into the chart column on 2026-09-27, and
+         a full-width table there spread five short columns across 700 px, so the ±1 dB label and its
+         figures sat a hand's width apart. `self-start` is what does it — dropping `w-full` alone
+         changes nothing, because the panel body is a flex column and a flex item stretches across
+         the cross axis by default. Nothing below stretches either, for the same reason. -->
+    <table v-if="trace" class="self-start text-left text-[11px] whitespace-nowrap">
       <thead class="text-neutral-500 dark:text-neutral-400">
         <tr>
           <th class="font-normal"></th>
@@ -85,9 +90,13 @@ const delaySuffix = computed(() => (props.phaseKind === 'ChannelDifference' ? ' 
       </tbody>
     </table>
 
-    <!-- The label column is the one that gives: a value split over two lines ("4.41" / "dB") reads
-         as two numbers, a label split over two does not. -->
-    <dl v-if="trace" class="mt-2 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-3 gap-y-1 text-xs">
+    <!-- `justify-start` is load-bearing, not tidiness: grid's default `justify-content: normal`
+         behaves as `stretch`, which grows *auto* tracks to fill the container — so without it these
+         three columns spread across the whole chart column and every label sat far from its value.
+         With it the leftover width is simply left empty. The label column is still the one that
+         gives when the panel is narrow (`auto` may shrink to min-content and wrap): a value split
+         over two lines ("4.41" / "dB") reads as two numbers, a label split over two does not. -->
+    <dl v-if="trace" class="mt-2 grid grid-cols-[auto_auto_auto] justify-start gap-x-4 gap-y-1 text-xs">
       <dt class="text-neutral-500 dark:text-neutral-400">{{ peakLabel }}</dt>
       <dd class="whitespace-nowrap font-mono">{{ formatDb(trace.peakDb) }}</dd>
       <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ formatRatio(trace.peakDb) }}</dd>

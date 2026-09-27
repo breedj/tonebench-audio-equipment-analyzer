@@ -90,28 +90,58 @@ const outputImpedance = useOutputImpedance()
   // (ProcessLeft/ProcessRight, single-shot hold, the averaging hop gate). Publishing on the next
   // frame's arrival cannot deadlock the way waiting for an expected partner could, and costs one
   // tick (~50 ms) of latency on a live display, which is not perceptible.
+  //
+  // ...except that there is not always a next tick. A SINGLE capture holds the channel as soon as
+  // its record completes (SpectrumPipeline.ProcessTick skips a held channel), so the very frames the
+  // user asked for were the last to arrive and sat in `pendingScope` for ever: the oscilloscope
+  // stayed on "Waiting for data…" after a SINGLE with Averages = 1, while the spectrum, the meters
+  // and the harmonics — none of which are grouped — all filled in. With 8 averages it *looked* right
+  // and was not: what stood on screen was the second-to-last tick, the last one still pending.
+  // Reported 2026-09-27. So a group also publishes itself after a short idle, which is the "looks
+  // complete" test the comment above says cannot be made exact — but it does not have to be: it only
+  // has to outlast the gap between one tick's L and R, which are two adjacent sends on one socket.
+  // Well under 40 ms, and a live stream never reaches the timer anyway because the next tick's first
+  // frame publishes the group first.
+  const SCOPE_GROUP_IDLE_MS = 40
   let pendingScope: Record<number, ScopeFrame> = {}
   let pendingScopeResidual: Record<number, ScopeFrame> = {}
   let pendingScopeSeq: number | null = null
+  let pendingScopeTimer: ReturnType<typeof setTimeout> | undefined
+
+  function publishPendingScope() {
+    if (pendingScopeTimer !== undefined) {
+      clearTimeout(pendingScopeTimer)
+      pendingScopeTimer = undefined
+    }
+    if (pendingScopeSeq === null) return
+    scope.value = pendingScope
+    scopeResidual.value = pendingScopeResidual
+    pendingScope = {}
+    pendingScopeResidual = {}
+    pendingScopeSeq = null
+  }
 
   function ingestScopeFrame(seq: number, channel: number, frame: ScopeFrame, residual: boolean) {
-    if (pendingScopeSeq !== null && seq !== pendingScopeSeq) {
-      scope.value = pendingScope
-      scopeResidual.value = pendingScopeResidual
-      pendingScope = {}
-      pendingScopeResidual = {}
-    }
+    if (pendingScopeSeq !== null && seq !== pendingScopeSeq) publishPendingScope()
     pendingScopeSeq = seq
     if (residual) pendingScopeResidual = { ...pendingScopeResidual, [channel]: frame }
     else pendingScope = { ...pendingScope, [channel]: frame }
+    // Armed on the frame that opens a group and left alone afterwards, so the deadline is measured
+    // from the group's own start rather than being pushed out by each channel that joins it.
+    if (pendingScopeTimer === undefined) pendingScopeTimer = setTimeout(publishPendingScope, SCOPE_GROUP_IDLE_MS)
   }
 
   /**
    * Resets the oscilloscope display — use this rather than assigning `scope.value = {}`, which
    * would clear only what is on screen and leave the half-built group above intact, so the next
-   * frame to arrive would publish a tick captured before the clear.
+   * frame to arrive would publish a tick captured before the clear. The idle timer goes with it, or
+   * a group abandoned by the clear would publish itself a moment later.
    */
   function clearScope() {
+    if (pendingScopeTimer !== undefined) {
+      clearTimeout(pendingScopeTimer)
+      pendingScopeTimer = undefined
+    }
     pendingScope = {}
     pendingScopeResidual = {}
     pendingScopeSeq = null
@@ -223,6 +253,7 @@ const outputImpedance = useOutputImpedance()
   onUnmounted(() => {
     stopped = true
     if (reconnectHandle) clearTimeout(reconnectHandle)
+    if (pendingScopeTimer !== undefined) clearTimeout(pendingScopeTimer)
     socket?.close()
   })
 

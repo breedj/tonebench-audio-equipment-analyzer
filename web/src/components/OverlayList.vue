@@ -29,7 +29,7 @@ function foreignNameFor(o: (typeof overlays.value)[number]): string | null {
 </script>
 
 <template>
-  <section v-if="fftOnlyOverlays.length > 0" class="flex flex-col gap-1.5 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section v-if="fftOnlyOverlays.length > 0" class="flex flex-col gap-1.5 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Overlays</h2>
     <div
       v-for="overlay in fftOnlyOverlays"

@@ -54,11 +54,14 @@ const { showPage } = useManual()
         </tr>
         <tr>
           <td>Attenuation / input range</td>
-          <td>How much the analyzer turns the incoming signal down before measuring it. It chooses this itself.</td>
+          <td>
+            How much the analyzer turns the incoming signal down before measuring it. It chooses
+            this itself unless you set Ranging to Manual.
+          </td>
         </tr>
         <tr>
           <td>Output range</td>
-          <td>The same idea on the generator side. Also chosen for you.</td>
+          <td>The same idea on the generator side. Also chosen for you, on the same terms.</td>
         </tr>
         <tr>
           <td>Load (Ω)</td>

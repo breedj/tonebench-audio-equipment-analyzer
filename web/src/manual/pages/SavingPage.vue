@@ -68,6 +68,14 @@ const { showPage } = useManual()
       flickers.
     </p>
     <p>
+      Selecting another measurement stops whatever is running and silences the generator, restores
+      that measurement's own settings, and clears any curve or spectrum the <em>other</em>
+      measurement had left on the screen you are arriving at. A measurement's own last run stays: go
+      to something else and come back and your sweep is still there, unless something else has been
+      run in the meantime. Nothing is thrown away that was ever saved — a run you want to keep goes
+      into History first.
+    </p>
+    <p>
       Above every screen's History details sits a <strong>Notes</strong> box: free text about the
       measurement itself — the DUT, the wiring, what to look for. It is saved with the measurement
       by the same Save and Save as…, and typing in it marks the measurement unsaved like any

@@ -5,6 +5,23 @@
    dialog can override the OS setting; Auto mode just mirrors the OS onto the class itself. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Every panel's ground: the settings and display sections (CollapsibleSection), the chart cards
+   (SpectrumChart, ThdSweepChart, WaterfallChart, the oscilloscope and the sweep previews), the
+   overlay list, the Sys tiles, and the two strips a collapsed rail folds to (MeasurementLayout's
+   STRIP). One class rather than a `bg-[#F7F7F7]` copied into eleven templates, so a panel cannot
+   drift away from the rest. Joost's request, 2026-09-27.
+
+   Light theme only. The dark theme's panels are told apart from the page by their border alone and
+   sit on a near-black ground; a light grey there would not be a subtler panel, it would be a white
+   box. `:where` keeps the override at zero specificity, so a Tailwind `hover:bg-*` on a strip still
+   wins in both themes. */
+.panel-surface {
+  background-color: #f7f7f7;
+}
+:where(.dark) .panel-surface {
+  background-color: transparent;
+}
+
 /* An expanded chart (ExpandToggle, useExpandedChart) is pinned over the whole window: it gets
    the page's ground, a little padding, and no rounded corners against the window edge. Above the
    sidebar's floating menu (z-30), below the dialogs (z-50). The padding is what

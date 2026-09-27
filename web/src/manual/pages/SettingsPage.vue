@@ -143,6 +143,26 @@
           <td>A QA403 is open and ready. Serial number and firmware version are shown beside it.</td>
         </tr>
         <tr>
+          <td>Rail voltage, current, temperature</td>
+          <td>
+            <p>
+              The analyzer's own housekeeping sensors, read from the unit: its USB supply rail in
+              volts, what it is drawing from that rail, and its internal temperature. Nothing here
+              measures anything on the bench — a rail sagging well below 5&nbsp;V points at the
+              cable or the port rather than at the DUT. QuantAsylum's own software shows a fourth
+              figure, <strong>ISO Current</strong>, as <code>---</code> on a QA403; the register
+              behind it answers a fixed number rather than a measurement on this model, so it is
+              left out here instead of being printed.
+            </p>
+            <p>
+              Reading them needs the same control channel the samples do not use, so they are
+              refreshed about once a second while the analyzer is idle and <strong>left alone for
+              the length of an acquisition</strong> — during a measurement the row dims and holds
+              the last reading. The simulator has no sensors, so it shows no row at all.
+            </p>
+          </td>
+        </tr>
+        <tr>
           <td>Disconnected</td>
           <td>
             No device found. The app starts fine without one, so this is a normal state; press
@@ -345,19 +365,42 @@
           </td>
         </tr>
         <tr>
+          <td>Ranging</td>
+          <td>
+            Who picks the two analog ranges. <strong>Auto</strong> is the default and is what a
+            measurement wants: the input range tracks the signal and the output range follows the
+            generator amplitude. <strong>Manual</strong> pins both to whatever the two dropdowns
+            beside it say, and nothing moves them — not Run, not a stimulus change, not the
+            device's own ranger. One mode for both ranges because they are the two ends of the same
+            analog path and the reasons to pin either are the same reason. It is not saved: every
+            launch starts on Auto, because an app that came up pinned would silently clip or
+            under-range the first thing plugged into it.
+          </td>
+        </tr>
+        <tr>
           <td>Attenuation</td>
           <td>
-            The input range in use. Read-only — it is kept matched to the signal automatically.
+            The input range in use — a readout under Auto, a dropdown under Manual. It sets both the
+            clipping point and the input-referred noise floor, and a range the signal sits closer to
+            full scale on also distorts more: measured on a QA403 in loopback, an 8.6 dBV tone reads
+            H3 at −122 dBc on the 12 dBV range and −127 dBc on the 18 dBV one, with the noise floor
+            1.7 dB the other way (−144.3 against −142.6 dBV/√Hz). Auto keeps 5 dB of headroom, which
+            for that tone chooses 18 dBV; QuantAsylum's own software keeps about 3 and chooses 12.
+            Neither is wrong, but they do not read the same — so pin the range when you are
+            comparing this app against another analyzer, or against your own earlier measurement.
           </td>
         </tr>
         <tr>
           <td>Output range</td>
           <td>
-            The output attenuator in use. Read-only, and derived from the generator's amplitude: it
-            is an analog attenuator whose setting sets the DAC's noise floor, so the lowest range
-            with enough headroom is always chosen. This is also why the measured noise floor can
-            step when you change the generator level across one of its boundaries — that is the
-            attenuator changing, not the DSP.
+            The output attenuator in use — again a readout under Auto and a dropdown under Manual.
+            It is an analog attenuator whose setting sets the DAC's noise floor, so Auto picks the
+            lowest range with enough headroom rather than parking on the widest. This is also why
+            the measured noise floor can step when you change the generator level across one of its
+            boundaries — that is the attenuator changing, not the DSP. Pinned, a level the range
+            cannot carry turns the readout red and adds <strong>clipping</strong>: the DAC is being
+            asked for more than full scale, so what reaches the DUT is a clipped tone. Nothing else
+            on screen says so — the generator panel still reads the level you asked for.
           </td>
         </tr>
       </tbody>

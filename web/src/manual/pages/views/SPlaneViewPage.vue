@@ -120,10 +120,15 @@ const markers: ManualMarker[] = [{ x: 0, color: 'grey' }]
     axis to the corner and then turns away — that turn is the roll-off.
   </p>
 
+  <!-- x-log false is load-bearing: ManualChart defaults to a logarithmic frequency axis, which is
+       right for every other figure in the manual and impossible here — half of the s-plane is at
+       negative sigma, so on a log axis every point falls out of range and the figure comes out
+       empty. -->
   <ManualChart
     :series="contours"
     :height="SQUARE_HEIGHT"
     :markers="markers"
+    :x-log="false"
     :x-min="-EXTENT_HZ"
     :x-max="EXTENT_HZ"
     :y-min="-EXTENT_HZ"

@@ -154,7 +154,7 @@ export function responseDisplayFromParams(
   if (typeof stored.chartHideOutOfBandRoots === 'boolean') display.hideOutOfBandRoots = stored.chartHideOutOfBandRoots
   if (stored.chartSurfaceScale === 'Linear' || stored.chartSurfaceScale === 'LogModulus')
     display.surfaceScale = stored.chartSurfaceScale
-  if (stored.chartSurfaceMode === 'Heatmap' || stored.chartSurfaceMode === 'Relief')
+  if (stored.chartSurfaceMode === 'Heatmap' || stored.chartSurfaceMode === 'Relief' || stored.chartSurfaceMode === 'Slice')
     display.surfaceMode = stored.chartSurfaceMode
   if (typeof stored.chartSurfaceTopDb === 'number' && Number.isFinite(stored.chartSurfaceTopDb))
     display.surfaceTopDb = stored.chartSurfaceTopDb

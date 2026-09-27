@@ -39,6 +39,47 @@ public class DeviceSessionServiceTests
     }
 
     /// <summary>
+    /// The analyzer's own sensors reach the status response, and reach it whole: three figures in
+    /// three different units, where a mapping that crossed two of them would still serialize happily.
+    /// </summary>
+    [Fact]
+    public async Task GetStatus_ReportsTheDevicesTelemetry()
+    {
+        var device = new StubDevice
+        {
+            TelemetryReading = new DeviceTelemetry(
+                UsbVoltageV: 4.864, UsbCurrentMa: 830.0, TemperatureC: 25.0),
+        };
+        var session = new DeviceSessionService(
+            device,
+            new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
+            NullLogger<DeviceSessionService>.Instance);
+
+        await session.ConnectAsync(CancellationToken.None);
+        var telemetry = session.GetStatus().Telemetry;
+
+        Assert.NotNull(telemetry);
+        Assert.Equal(4.864, telemetry.UsbVoltageV, 6);
+        Assert.Equal(830.0, telemetry.UsbCurrentMa, 6);
+        Assert.Equal(25.0, telemetry.TemperatureC, 6);
+    }
+
+    /// <summary>
+    /// A device with no sensors reports none — null, not a record of zeroes. The status bar hides
+    /// the readout on null, and zeroes would instead put "0.000 V" beside a perfectly healthy
+    /// simulator, which reads as a fault rather than as an absence.
+    /// </summary>
+    [Fact]
+    public async Task GetStatus_WithoutTelemetry_ReportsNoneRatherThanZeroes()
+    {
+        var session = CreateService();
+
+        await session.ConnectAsync(CancellationToken.None);
+
+        Assert.Null(session.GetStatus().Telemetry);
+    }
+
+    /// <summary>
     /// The external input gain rides on the status so the status bar can say a divider is in the
     /// path -- a fixture the user must not forget about, since every level on screen is corrected by it.
     /// </summary>
@@ -608,6 +649,203 @@ public class DeviceSessionServiceTests
         }
     }
 
+    private static DeviceSessionService CreateStubService(StubDevice device) => new(
+        device,
+        new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
+        NullLogger<DeviceSessionService>.Instance);
+
+    /// <summary>8.6 dBV on the left — the bench tone the ranging comparison was made with. Needs the 18 dBV output range and clips against anything below it.</summary>
+    private static GeneratorConfig LoudTone() =>
+        new(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 8.6)]), ChannelGeneratorConfig.Off);
+
+    /// <summary>-40 dBV: quiet enough that the derivation picks the *smallest* output range, so a pinned wide one is visibly not it.</summary>
+    private static GeneratorConfig QuietTone() =>
+        new(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, -40.0)]), ChannelGeneratorConfig.Off);
+
+    /// <summary>
+    /// The point of manual ranging: the output range stops following the generator. Auto derives it
+    /// on every generator change (an analog attenuator whose setting sets the DAC's noise floor, so
+    /// the app normally picks the quietest one that fits), and a "Manual" that kept doing that would
+    /// pin nothing at all — the next generator change would take the range straight back.
+    /// </summary>
+    [Fact]
+    public async Task ManualRanging_StopsTheOutputRangeFollowingTheGenerator()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+        await session.SetOutputRangeAsync(18.0, CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(QuietTone(), CancellationToken.None);
+
+        Assert.Equal(18.0, session.OutputRangeDbv);
+    }
+
+    /// <summary>
+    /// And the same call under Auto still derives, so the test above is pinning behaviour rather
+    /// than recording that the derivation was deleted.
+    /// </summary>
+    [Fact]
+    public async Task AutoRanging_StillDerivesTheOutputRangeFromTheGenerator()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(QuietTone(), CancellationToken.None);
+        Assert.Equal(-12.0, session.OutputRangeDbv);
+
+        await session.ConfigureGeneratorAsync(LoudTone(), CancellationToken.None);
+        Assert.Equal(18.0, session.OutputRangeDbv);
+    }
+
+    /// <summary>
+    /// Going back to Auto re-derives immediately rather than at the next generator change. Waiting
+    /// would leave a pinned range in force under a status bar that had gone back to saying "Auto" —
+    /// and in the direction that matters, a narrow pin left behind a loud tone keeps clipping.
+    /// </summary>
+    [Fact]
+    public async Task SwitchingBackToAuto_RederivesTheOutputRangeAtOnce()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+        await session.SetOutputRangeAsync(18.0, CancellationToken.None);
+        await session.ConfigureGeneratorAsync(QuietTone(), CancellationToken.None);
+        Assert.Equal(18.0, session.OutputRangeDbv);
+
+        await session.SetRangingModeAsync(RangingMode.Auto, CancellationToken.None);
+
+        Assert.Equal(-12.0, session.OutputRangeDbv);
+    }
+
+    /// <summary>
+    /// Switching to Manual while stopped must pin the range the last stimulus ran on, not the one
+    /// silence left behind.
+    ///
+    /// <para>Stop disables both generator channels, and Auto then derives the smallest output range
+    /// — right for a noise-floor measurement, useless as a starting point for a pinned one. Since
+    /// Manual is almost always selected while stopped, the dropdown opened on -12 dBV every time and
+    /// the first Run after it clipped against it. Reported from the bench as "it jumps always to
+    /// -12 dBV".</para>
+    /// </summary>
+    [Fact]
+    public async Task SelectingManual_WhileStopped_PinsTheRangeTheLastStimulusUsed()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(LoudTone(), CancellationToken.None);
+        Assert.Equal(18.0, session.OutputRangeDbv);
+
+        // What Stop does: both channels off. Auto correctly parks on the quietest range.
+        await session.ConfigureGeneratorAsync(GeneratorConfig.Off, CancellationToken.None);
+        Assert.Equal(-12.0, session.OutputRangeDbv);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+
+        Assert.Equal(18.0, session.OutputRangeDbv);
+    }
+
+    /// <summary>
+    /// And the seeding happens once, on the way in. A second Manual is not a reset — the pinned
+    /// range is the user's by then, and re-deriving it would undo the choice they just made.
+    /// </summary>
+    [Fact]
+    public async Task SelectingManual_Twice_DoesNotReseedThePinnedRange()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+        await session.ConfigureGeneratorAsync(LoudTone(), CancellationToken.None);
+        await session.ConfigureGeneratorAsync(GeneratorConfig.Off, CancellationToken.None);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+        await session.SetOutputRangeAsync(-2.0, CancellationToken.None);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+
+        Assert.Equal(-2.0, session.OutputRangeDbv);
+    }
+
+    /// <summary>
+    /// With nothing ever played there is no stimulus to seed from, so the connect's own choice — the
+    /// widest range, maximum headroom — stands. Guessing a narrow one for a stimulus nobody has
+    /// described yet is the clipping case again, from the other direction.
+    /// </summary>
+    [Fact]
+    public async Task SelectingManual_WithNothingEverPlayed_KeepsTheWidestOutputRange()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+
+        Assert.Equal(18.0, session.OutputRangeDbv);
+    }
+
+    /// <summary>
+    /// The other half of the mode. Without this the device's own ranger walks the pinned input range
+    /// away within a block or two, and every runner's "leave a manually pinned range alone" branch
+    /// (they all test <c>AutoRangeEnabled != false</c>) never fires.
+    /// </summary>
+    [Fact]
+    public async Task ManualRanging_TurnsTheDevicesOwnRangerOff_AndAutoTurnsItBackOn()
+    {
+        var device = new StubDevice();
+        var session = CreateStubService(device);
+        await session.ConnectAsync(CancellationToken.None);
+        Assert.True(device.AutoRangeEnabled);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+        Assert.False(device.AutoRangeEnabled);
+        Assert.Equal(RangingMode.Manual, session.RangingMode);
+
+        await session.SetRangingModeAsync(RangingMode.Auto, CancellationToken.None);
+        Assert.True(device.AutoRangeEnabled);
+    }
+
+    /// <summary>
+    /// A device brought up while the session is already in Manual has to arrive with its ranger off.
+    /// Devices have their own field defaults and a connect that only pushed the two range values
+    /// would leave the third unsynced — the same reasoning that makes ConnectAsync write the input
+    /// and output ranges rather than only caching them.
+    /// </summary>
+    [Fact]
+    public async Task Connecting_AppliesTheRangingModeTheSessionIsAlreadyIn()
+    {
+        var device = new StubDevice { AutoRangeEnabled = true };
+        var session = CreateStubService(device);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+        await session.ConnectAsync(CancellationToken.None);
+
+        Assert.False(device.AutoRangeEnabled);
+        Assert.Equal("Manual", session.GetStatus().RangingMode);
+    }
+
+    /// <summary>
+    /// A pinned range the generator overruns clips the DAC, and nothing else on screen says so: the
+    /// generator panel still reads the level that was asked for and the spectrum still shows a tone
+    /// at the right frequency. Only reachable under Manual — under Auto the range is derived from
+    /// this very config, which is what the second half asserts.
+    /// </summary>
+    [Fact]
+    public async Task OutputRangeClipping_IsReportedWhenAPinnedRangeCannotCarryTheGenerator()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.SetRangingModeAsync(RangingMode.Manual, CancellationToken.None);
+        await session.SetOutputRangeAsync(-12.0, CancellationToken.None);
+        await session.ConfigureGeneratorAsync(LoudTone(), CancellationToken.None);
+
+        Assert.True(session.GetStatus().OutputRangeClipping);
+
+        await session.SetRangingModeAsync(RangingMode.Auto, CancellationToken.None);
+        Assert.False(session.GetStatus().OutputRangeClipping);
+    }
+
     /// <summary>Stands in for real hardware: an <see cref="IAnalyzerDevice"/> that is not the simulator.</summary>
     private sealed class StubDevice : IAnalyzerDevice
     {
@@ -624,6 +862,11 @@ public class DeviceSessionServiceTests
         public Task<bool> PingAsync(CancellationToken ct) => Task.FromResult(true);
 
         public double InputRangeDbv { get; private set; }
+
+        /// <summary>What <see cref="IAnalyzerDevice.Telemetry"/> answers; null stands in for a device with no sensors.</summary>
+        public DeviceTelemetry? TelemetryReading { get; init; }
+
+        public DeviceTelemetry? Telemetry => TelemetryReading;
 
         /// <summary>Settable, and independently of <see cref="BlockDrops"/>, so a status response that summed the two could not pass this test.</summary>
         public long RxChunkDrops { get; init; }

@@ -146,7 +146,9 @@ const { showPage } = useManual()
       <button type="button" class="manual-link" @click="showPage('view-nichols')">the Nichols view</button>
       and
       <button type="button" class="manual-link" @click="showPage('view-pole-zero')">the pole–zero map</button>
-      for the three projections in detail. One difference there: a stepped run removes no bulk
+      and
+      <button type="button" class="manual-link" @click="showPage('view-s-plane')">the |H(s)| surface</button>
+      for the four projections in detail. One difference there: a stepped run removes no bulk
       delay, so <strong>Restore removed delay</strong> is not offered and the phase it plots is
       already the physical one.
     </p>

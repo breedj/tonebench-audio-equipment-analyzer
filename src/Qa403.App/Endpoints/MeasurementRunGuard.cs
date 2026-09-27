@@ -16,6 +16,17 @@ public sealed class MeasurementRunGuard(DeviceSessionService session, IEnumerabl
 {
     public const string Message = "Another measurement is still running — stop or cancel it first.";
 
+    /// <summary>
+    /// Why a run is refused while the ranges are pinned by hand. Every runner ranges for itself —
+    /// a probe from the widest range, a prediction from the target, a per-point ratchet — and
+    /// <see cref="RangingMode.Manual"/> switches off both halves of what they rely on: the device's
+    /// own ranger (their clip backstop) and the output-range derivation. A THD-vs-amplitude sweep
+    /// stepping the generator from −60 to +10 dBV against an output range pinned at −12 clips every
+    /// point above −14 with nothing on screen saying so, and the curve it draws is a plausible one.
+    /// </summary>
+    public const string ManualRangingMessage =
+        "Ranging is set to Manual, and a measurement needs to choose its own ranges — set ranging back to Auto first.";
+
     public static bool AnotherRunIsActive(DeviceSessionService session, IEnumerable<IMeasurementRun> runs) =>
         runs.Any(run => !ReferenceEquals(run, session) && run.Running);
 
@@ -23,6 +34,9 @@ public sealed class MeasurementRunGuard(DeviceSessionService session, IEnumerabl
     {
         if (AnotherRunIsActive(session, runs))
             return Results.Conflict(Message);
+
+        if (session.RangingMode != RangingMode.Auto)
+            return Results.Conflict(ManualRangingMessage);
 
         return await next(context);
     }

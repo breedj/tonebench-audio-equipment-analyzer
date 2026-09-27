@@ -550,7 +550,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section class="flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <div class="flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span>Waterfall</span>
 

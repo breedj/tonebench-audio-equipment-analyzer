@@ -333,7 +333,8 @@ const { showPage } = useManual()
       the fundamental and its harmonics. With <strong>Min/max</strong> on, each screen column is
       drawn as a band between the loudest and quietest bin it covers — see
       <button type="button" class="manual-link" @click="showPage('charts')">Reading the charts</button>
-      for why that band, and not the line above it, is the true noise floor.
+      for why that band, and not the line above it, is the true noise floor, and why it opens out
+      into a pale haze towards the right of the plot without the noise having changed at all.
       <strong>Peak-hold</strong> keeps the highest level seen per bin since it was last reset, which
       is how you catch an intermittent spur.
     </p>

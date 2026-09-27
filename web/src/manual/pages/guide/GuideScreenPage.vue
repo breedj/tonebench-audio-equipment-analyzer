@@ -124,10 +124,14 @@ const { showPage } = useManual()
           <td>Real hardware or the simulator, and which pretend device the simulator uses.</td>
         </tr>
         <tr>
-          <td><strong>Attenuation</strong> and <strong>Output range</strong></td>
           <td>
-            Readouts, not controls. The app chooses both for you and it is better at it than you are —
-            leave them alone and just read them.
+            <strong>Ranging</strong>, <strong>Attenuation</strong> and <strong>Output range</strong>
+          </td>
+          <td class="manual-wrap">
+            Leave Ranging on <strong>Auto</strong> and the other two are readouts: the app chooses
+            both for you and it is better at it than you are. <strong>Manual</strong> lets you pick
+            them by hand, which is only worth doing when you are comparing a reading against another
+            analyzer and need it set up exactly the same way.
           </td>
         </tr>
       </tbody>

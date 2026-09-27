@@ -172,6 +172,31 @@ export function contourLevels(w: SurfaceWindow, maxLines = MAX_CONTOUR_LINES): n
 }
 
 /**
+ * How close to the reference a level has to be to *be* the reference.
+ *
+ * <p>`contourLevels` rounds every level to 12 significant digits, so the reference's own level comes
+ * back a whisker away from `referenceDb` rather than equal to it — 1e-13 or so for an amplifier's
+ * +26 dB passband. Both readers of that list need the same tolerance, and they must have the same
+ * one: the heavy contour line and the "0" on the colour key have to name one level.</p>
+ */
+export const REFERENCE_LEVEL_EPSILON_DB = 1e-9
+
+/**
+ * A contour level as the colour key labels it: signed dB relative to the reference, with the
+ * reference itself reading `0`.
+ *
+ * <p>Without the snap the residue above *is* the whole value at the reference, and three significant
+ * digits of 1e-13 is the string `-1.07e-13` — nine characters where the other labels are three, so
+ * it also pushed the key's rotated caption off the right edge of the canvas. Reported with a
+ * screenshot, 2026-09-27.</p>
+ */
+export function relativeLevelLabel(levelDb: number, referenceDb: number): string {
+  const raw = levelDb - referenceDb
+  const relative = Math.abs(raw) < REFERENCE_LEVEL_EPSILON_DB ? 0 : raw
+  return `${relative > 0 ? '+' : ''}${Number(relative.toPrecision(3))}`
+}
+
+/**
  * Evaluate the model over a grid of cell centres spanning `viewport` in **mapped** coordinates.
  *
  * Sampling is per *screen* cell, and each cell is mapped back to a real s through `toHz`. That is

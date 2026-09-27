@@ -895,8 +895,13 @@ public class ThdSweepRunnerTests
     [Fact]
     public async Task AmplitudeSweep_WithAutorangeOff_LeavesTheUsersInputRangeAlone()
     {
-        var device = new RangeRecordingDevice { AutoRangeEnabled = false };
+        var device = new RangeRecordingDevice();
         var harness = await CreateAsync(device);
+        // After the connect, not on the device up front: ConnectAsync applies the session's ranging
+        // mode to whatever device it just brought up (it has its own field default, and an unsynced
+        // one is a device ranging while the session says it is pinned), so a flag set before the
+        // connect is overwritten by it.
+        harness.Session.SetAutoRangeEnabled(false);
         device.InputRangeWrites.Clear();
 
         await harness.Runner.StartAsync(AmplitudeRequest(startVolt: 0.01, endVolt: 1.0, stepsPerOctave: 1), CancellationToken.None);

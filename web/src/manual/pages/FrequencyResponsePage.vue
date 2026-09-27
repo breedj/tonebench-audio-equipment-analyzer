@@ -361,13 +361,15 @@ const { showPage } = useManual()
       than quoting figures against a band it never measured.
     </p>
 
-    <h3 id="projections">Nyquist, Nichols and the pole–zero map</h3>
+    <h3 id="projections">Nyquist, Nichols, the pole–zero map and the |H(s)| surface</h3>
     <p>
       Each has a page of its own:
       <button type="button" class="manual-link" @click="showPage('view-nyquist')">the Nyquist view</button>,
       <button type="button" class="manual-link" @click="showPage('view-nichols')">the Nichols view</button>
       and
       <button type="button" class="manual-link" @click="showPage('view-pole-zero')">the pole–zero map</button>
+      and
+      <button type="button" class="manual-link" @click="showPage('view-s-plane')">the |H(s)| surface</button>
       — what each one plots, what every mark on it means, and how to read a margin off it. In
       summary:
     </p>
@@ -461,7 +463,7 @@ const { showPage } = useManual()
       remembers its own), <strong>Frequency range (Hz)</strong>, <strong>Phase range (°)</strong>
       while the Phase trace is on, and <strong>Delay range</strong> (in µs or ms, following the
       window's size) while a delay trace is selected. Under them, <strong>Display</strong>:
-      <strong>Projection</strong> chooses Bode, Nyquist, Nichols or Poles/zeros, and under Bode
+      <strong>Projection</strong> chooses Bode, Nyquist, Nichols, Poles/zeros or |H(s)|, and under Bode
       <strong>View</strong> switches FR (dBV) against Gain (dB); then the channel checkboxes, the
       bandwidth markers and the extra traces — the Phase and Coherence checkboxes and the
       <strong>Delay</strong> selector (None, Group delay, Phase delay).

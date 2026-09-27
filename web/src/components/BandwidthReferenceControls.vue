@@ -83,7 +83,10 @@ defineExpose({ invalid })
 </script>
 
 <template>
-  <div class="mb-2 flex flex-col gap-2">
+  <!-- Capped rather than full width: the Measurements panel lives in the chart column since
+       2026-09-27, where a dropdown and two number boxes stretched to 600 px read as a form that has
+       lost its layout. Still fluid below that, so the narrow (two-column) shell is unaffected. -->
+  <div class="mb-2 flex max-w-sm flex-col gap-2">
     <label
       class="flex flex-col gap-1 text-xs"
       title="What the bandwidth corners are measured down from. Passband median is right for an amplifier: its output transformer's HF resonance is often taller than the passband, and referencing the peak then measures the resonance instead. Pick Peak for a DUT whose response is itself a peak. A change is applied to the curves on screen at once."

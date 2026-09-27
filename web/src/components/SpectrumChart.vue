@@ -22,7 +22,7 @@ import ToolbarIcon from './ToolbarIcon.vue'
 import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
-import { FFT_LIVE_COLOR, fftOverlayColor } from '../measurements/spectrumOverlayColors'
+import { FFT_LIVE_COLOR, fftOverlayColor, spectrumAxisOverlay } from '../measurements/spectrumOverlayColors'
 import { api, type MeasurementChannel, type WeightingCurveResponse } from '../api/client'
 import { unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useUserWeighting } from '../composables/useUserWeighting'
@@ -930,7 +930,9 @@ function computeFrame(): FrameData | null {
   // on "Waiting for data…" while Waterfall/Oscilloscope (which have no such L-only assumption) kept
   // working off the very same stream.
   const primary = ch0 ?? ch1
-  const firstOverlay = props.overlays[0]?.detail
+  // The overlay the x grid falls back to when nothing is streaming — deliberately not `overlays[0]`,
+  // see spectrumAxisOverlay for what that cost.
+  const firstOverlay = spectrumAxisOverlay(props.overlays)?.detail
   const firstOverlayChannel = firstOverlay && (channelByIndex(firstOverlay, 0) ?? channelByIndex(firstOverlay, 1))
 
   if (!primary && !firstOverlayChannel) return null
@@ -1160,6 +1162,10 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
   void refreshWeightingCurve()
+  // Draw what the store already holds. Every path into `update` is a watcher on changing data, so a
+  // remount with *unchanged* data drew nothing: leaving an FFT measurement and coming back showed
+  // empty charts until the next frame, although the spectrum was still in the store the whole time.
+  update()
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
@@ -1170,7 +1176,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="rootRef" class="relative flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
     <!-- Three slots — title, cursor readout, zoom state — that never take each other's place, and a
          min-height the Reset zoom button fits inside: the readout used to *replace* the button while

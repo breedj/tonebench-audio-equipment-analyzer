@@ -20,11 +20,27 @@ public interface IAnalyzerDevice
     /// something was pressed, and then failed from deep inside a register write. Implementations
     /// that are already watching the device continuously (a running stream) should answer true
     /// without adding traffic of their own.</para>
+    ///
+    /// <para>Also where <see cref="Telemetry"/> is refreshed, on implementations that have any —
+    /// this is the one exchange that already runs on an idle device at a throttled rate.</para>
     /// </summary>
     Task<bool> PingAsync(CancellationToken ct);
 
     /// <summary>Sample rates and gain ranges the device supports. Valid only after <see cref="ConnectAsync"/> has completed.</summary>
     DeviceCapabilities Capabilities { get; }
+
+    /// <summary>
+    /// The analyzer's own housekeeping sensors (USB rail, temperature), or null on a device that
+    /// has none — which is the default, so only real hardware implements this.
+    ///
+    /// <para>A cached <i>last reading</i>, never a live read: taking one costs three register
+    /// exchanges on the control endpoint, and a register exchange with data transfers in flight is
+    /// the documented way to wedge this device's USB stack. So it is refreshed exactly where the
+    /// liveness check already runs — inside <see cref="PingAsync"/>, which is throttled and skipped
+    /// while a stream is running — and a reading therefore goes stale for the length of an
+    /// acquisition. Callers display it; nothing measures with it.</para>
+    /// </summary>
+    DeviceTelemetry? Telemetry => null;
 
     /// <summary>
     /// Raised when the transport detects the physical device is gone (e.g. unplugged mid-stream).

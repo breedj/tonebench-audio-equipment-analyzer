@@ -39,7 +39,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(DeviceKindRequest))]
 [JsonSerializable(typeof(InputRangeRequest))]
 [JsonSerializable(typeof(OutputRangeRequest))]
-[JsonSerializable(typeof(AutoRangeRequest))]
+[JsonSerializable(typeof(RangingModeRequest))]
 [JsonSerializable(typeof(AutoRangeStepDownDelayRequest))]
 [JsonSerializable(typeof(SimulatedProfileRequest))]
 [JsonSerializable(typeof(GeneratorRequest))]

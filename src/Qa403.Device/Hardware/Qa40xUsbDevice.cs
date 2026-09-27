@@ -124,9 +124,30 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// <summary>Block drops from an ended stream, kept until the next one starts and zeroes them. Live drops come off <see cref="_activeAssembler"/> — see <see cref="DroppedBlocks"/>.</summary>
     private long _droppedBlocks;
 
+    /// <summary>
+    /// Last telemetry reading, or null until the first one lands (<see cref="ConnectAsync"/> takes
+    /// it, <see cref="PingAsync"/> refreshes it). Written and read from different threads — a
+    /// request thread behind a status poll, and whichever thread connected — so the reference is
+    /// published atomically and the record is immutable; readers get either the previous reading or
+    /// the new one, never a half-updated set of four numbers.
+    /// </summary>
+    private volatile DeviceTelemetry? _telemetry;
+
+    /// <summary>
+    /// Cleared the first time a telemetry read fails for a reason other than the device being gone,
+    /// and not tried again until the next <see cref="ConnectAsync"/>. These are tier-2 registers
+    /// (see <see cref="Qa40xRegisters.TelemetryUsbVoltage"/>): a firmware that does not implement
+    /// them may simply not answer, and four one-second timeouts on every status poll would turn a
+    /// cosmetic readout into a stalled status bar.
+    /// </summary>
+    private volatile bool _telemetryAvailable = true;
+
     public event EventHandler? DeviceLost;
 
     public DeviceCapabilities Capabilities => DeviceCapabilities.Qa403;
+
+    /// <inheritdoc/>
+    public DeviceTelemetry? Telemetry => _telemetry;
 
     /// <summary>
     /// Whether <see cref="StreamAsync"/> is allowed to step the input range on its own (clip /
@@ -267,6 +288,12 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             // worst case is a cosmetic string, not a protocol violation.
             uint firmwareRaw = await transport.ReadRegisterAsync(Qa40xRegisters.FirmwareVersion, ct).ConfigureAwait(false);
             uint serialRaw = await transport.ReadRegisterAsync(Qa40xRegisters.SerialNumber, ct).ConfigureAwait(false);
+
+            // Taken here as well as on the ping so the status bar has numbers from the first poll
+            // rather than from the first ping 1.5 s later. A replug may be a different unit, so the
+            // "don't ask again" latch is reset with the connection it belongs to.
+            _telemetryAvailable = true;
+            await RefreshTelemetryAsync(transport, ct).ConfigureAwait(false);
 
             _transport = transport;
             _calibration = calibration;
@@ -597,6 +624,12 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         try
         {
             await transport.ReadRegisterAsync(Qa40xRegisters.FirmwareVersion, ct).ConfigureAwait(false);
+
+            // Rides along with the liveness exchange rather than running on a timer of its own: it
+            // needs exactly the conditions this method has already established — connected, no
+            // pump, throttled by the caller — and a second path onto the control endpoint would be
+            // a second chance to get it wrong.
+            await RefreshTelemetryAsync(transport, ct).ConfigureAwait(false);
             return true;
         }
         catch (Qa40xDeviceLostException)
@@ -719,9 +752,53 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             diagnostics.SuppressedStalls > 0 ? $", {diagnostics.SuppressedStalls} further events not logged" : string.Empty);
     }
 
+    /// <summary>
+    /// Reads the telemetry registers and publishes the decoded reading. Callers must already
+    /// hold the conditions that make a control exchange safe — connected, and no transfer pump
+    /// running (see <see cref="PingAsync"/>).
+    ///
+    /// <para>A device-lost failure is rethrown so the caller reacts to it the way it reacts to any
+    /// other dead exchange. Anything else is swallowed and latches the readout off for this
+    /// connection: telemetry is a status-bar convenience, and no reading at all is a better outcome
+    /// than a status poll that spends three timeouts every 1.5 s discovering the same thing.</para>
+    /// </summary>
+    private async Task RefreshTelemetryAsync(Qa40xTransport transport, CancellationToken ct)
+    {
+        if (!_telemetryAvailable)
+            return;
+
+        try
+        {
+            // Three reads, not four: 0x13 is skipped because a QA403 does not answer it with a
+            // measurement — see Qa40xRegisters.TelemetryIsoCurrent.
+            uint usbVoltageRaw = await transport.ReadRegisterAsync(Qa40xRegisters.TelemetryUsbVoltage, ct).ConfigureAwait(false);
+            uint usbCurrentRaw = await transport.ReadRegisterAsync(Qa40xRegisters.TelemetryUsbCurrent, ct).ConfigureAwait(false);
+            uint temperatureRaw = await transport.ReadRegisterAsync(Qa40xRegisters.TelemetryTemperature, ct).ConfigureAwait(false);
+
+            _telemetry = Qa40xRegisters.DecodeTelemetry(usbVoltageRaw, usbCurrentRaw, temperatureRaw);
+        }
+        catch (Qa40xDeviceLostException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _telemetryAvailable = false;
+            logger.LogDebug(ex, "QA403 telemetry registers did not answer — not asking again on this connection");
+        }
+    }
+
     private void HandleDeviceLost(string context)
     {
         _connected = false;
+
+        // Sensor readings from a device that is no longer there. Dropped rather than left to go
+        // quietly stale, so nothing can put a plausible rail voltage beside a disconnected unit.
+        _telemetry = null;
 
         if (_activePump is not null)
         {

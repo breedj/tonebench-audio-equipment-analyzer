@@ -70,6 +70,19 @@ const hasDirty = computed(() => types.value.some((t) => dirtyTypeIds.value.has(t
  */
 let autosaveFlush: (() => Promise<void>) | null = null
 
+/**
+ * Discards live measurement state belonging to a *different* measurement — App.vue's
+ * `discardForeignLiveState`, registered through `setLiveStateReset`. See measurements/liveOwner.ts
+ * for what counts as foreign and why.
+ *
+ * <p>Called by `selectType` and awaited <b>before</b> `currentTypeId` changes, which is the whole
+ * reason it is a hook here rather than a watcher in App.vue. Several watchers re-attach to the
+ * server's runners the moment the selection changes (`refreshResponse`, `refreshSweep`, ...), so a
+ * clear issued from a watcher would be one in-flight request racing another, and the loser decides
+ * whether the previous measurement's curves stay on screen. Run first, nothing races.</p>
+ */
+let liveStateReset: ((nextTypeId: number) => Promise<void>) | null = null
+
 export function useProjects() {
   /**
    * Reads which project the server has open and rebuilds the client state around it: types
@@ -142,6 +155,11 @@ export function useProjects() {
   async function selectType(id: number) {
     if (id !== currentTypeId.value && !(await confirmDiscardCurrentIfDirty())) return
     await stopRun()
+    // After the stop and before the selection moves — see `liveStateReset`. A failure here is not
+    // worth refusing the selection over: the worst case is the previous measurement's spectrum
+    // staying on screen, which is what this whole path is a fix for and not a reason to strand the
+    // user on a measurement they have navigated away from.
+    if (liveStateReset) await liveStateReset(id).catch(() => undefined)
     currentTypeId.value = id
     typeNotes.value = types.value.find((t) => t.id === id)?.notes ?? ''
     appliedTypeId.value = null
@@ -182,6 +200,11 @@ export function useProjects() {
   /** Registers the autosave flush — see `autosaveFlush`. App.vue calls this once. */
   function setAutosaveFlush(flush: (() => Promise<void>) | null) {
     autosaveFlush = flush
+  }
+
+  /** Registers the foreign-live-state discard — see `liveStateReset`. App.vue calls this once. */
+  function setLiveStateReset(reset: ((nextTypeId: number) => Promise<void>) | null) {
+    liveStateReset = reset
   }
 
   /** Flags the currently-open type as having live edits not yet reflected in its stored params_json. */
@@ -387,6 +410,7 @@ export function useProjects() {
     applyMeasurementType,
     markDirty,
     setAutosaveFlush,
+    setLiveStateReset,
     saveMeasurementType,
     saveMeasurementTypeAs,
     saveProject,

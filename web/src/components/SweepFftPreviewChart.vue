@@ -119,7 +119,7 @@ const theme = computed(() => currentTheme())
 </script>
 
 <template>
-  <section class="flex flex-col gap-1 rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
+  <section class="flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
     <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>{{ label ? `${label} — Spectrum (dBV)` : 'Spectrum (dBV)' }}</span>
       <span class="flex items-center gap-2">

@@ -8,7 +8,7 @@ import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from
 import { EXPORT_GRID_WIDTH_SCALE, exportGridStroke } from '../charts/palette'
 import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
-import { fitTransform, thinPositions, type PlaneTransform, type Viewport } from '../charts/planeTransform'
+import { fitTransform, niceTicks, thinPositions, type PlaneTransform, type Viewport } from '../charts/planeTransform'
 import { dragZoomViewport } from '../charts/dragZoom'
 import { useResponseComplexCurve } from '../composables/useResponseComplexCurve'
 import { fitRootPoints, nearestRoot, visibleRoots, type RootPoint } from '../response/poleZeroMap'
@@ -19,6 +19,8 @@ import {
   marchingSquares,
   modelLevelDb,
   passbandReferenceDb,
+  relativeLevelLabel,
+  REFERENCE_LEVEL_EPSILON_DB,
   surfaceWindow,
   type SurfaceField,
   type SurfaceWindow,
@@ -73,6 +75,8 @@ const props = defineProps<{
   surfaceBottomDb: number
   palette: DecayPalette
   showContours: boolean
+  /** Style only, shared with the other response charts. */
+  thickLines: boolean
   hideOutOfBandRoots: boolean
   invertSign: boolean
   restoreDelay: boolean
@@ -101,6 +105,7 @@ const POLE_COLOR = ['#dc2626', '#f87171'] as const
 const ZERO_COLOR = ['#2563eb', '#60a5fa'] as const
 const AXIS_COLOR = ['#4b5563', '#9ca3af'] as const
 const MARKER_COLOR = ['#d97706', '#fbbf24'] as const
+const SLICE_COLOR = ['#111827', '#f3f4f6'] as const
 const CONTOUR_COLOR = ['rgba(17,24,39,0.55)', 'rgba(243,244,246,0.55)'] as const
 const CONTOUR_REFERENCE_COLOR = ['rgba(17,24,39,0.9)', 'rgba(255,255,255,0.9)'] as const
 
@@ -208,6 +213,20 @@ function baseViewport(): Viewport {
 }
 
 /**
+ * The unzoomed window for whichever view is on screen.
+ *
+ * The slice is not a picture of the plane — its axes are frequency and *linear* magnitude — so it has
+ * a window of its own, and the two are not interchangeable. Every caller that reaches for a base
+ * window has to come through here: `renderScene`'s slice branch used to call `sliceViewport` itself
+ * and ignore the window it was handed, so a dragged box was stored, flipped the header to "Reset
+ * zoom", and was then thrown away on the very next paint — the slice looked as though a zoom simply
+ * bounced back to the original view. Reported 2026-09-27.
+ */
+function baseViewportForMode(): Viewport {
+  return props.mode === 'Slice' ? sliceViewport() : baseViewport()
+}
+
+/**
  * The palette a paint should use: the prop, except during a monochrome export.
  *
  * Declared before `exportPng` reads it rather than beside it, since a `const` in a temporal dead zone
@@ -230,13 +249,39 @@ function resetZoom() {
  * on the polar chart: `sPlaneMap`'s reference frequency comes from the measured band, so changing the
  * plotted window — or the traces — re-warps every point under `LogModulus`. Not cleared when the
  * *fit* changes, because the plane does not move when the order does.
+ *
+ * `mode` is in the list because the slice's axes are frequency and linear magnitude while the map's
+ * are σ and jω: carrying a zoom across that switch would apply one view's numbers to the other's
+ * plot. Harmless while the slice ignored its window; load-bearing now that it honours it.
+ *
+ * What is watched of the traces is the **measured band**, not the traces themselves. The band is the
+ * whole of what the plane's geometry depends on — it is `sPlaneMap`'s reference frequency, and it is
+ * what `surfaceViewport` fits to — while the curve's *values* change on every pass of a continuous
+ * run without moving the plane by a hair. Watching the array meant a RUN threw the zoom away on
+ * every pass, on all three views, which is indistinguishable from zoom not working at all. Same
+ * reasoning that already keeps the fit out of this list.
+ *
+ * The source is **joined into a string**, and that is not tidiness. Reading `band.value` tracks the
+ * computed, and therefore the traces behind it, so the effect still re-runs on every pass — and a
+ * getter returning a fresh array is never `Object.is`-equal to the last one, so Vue fires the
+ * callback on every one of those runs whatever the contents. (The old `deep: true` had the same
+ * effect for the same reason.) A string compares by value, so an unchanged band is a no-op.
  */
 watch(
-  () => [props.scale, props.invertSign, props.restoreDelay, props.xFromHz, props.xToHz, props.traces],
+  () =>
+    [
+      props.mode,
+      props.scale,
+      props.invertSign,
+      props.restoreDelay,
+      props.xFromHz,
+      props.xToHz,
+      band.value?.lowHz ?? null,
+      band.value?.highHz ?? null,
+    ].join('|'),
   () => {
     zoomViewport.value = null
   },
-  { deep: true },
 )
 
 let transform: PlaneTransform | null = null
@@ -303,7 +348,7 @@ function draw() {
   ctx.save()
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, width, height)
-  transform = renderScene(ctx, width, height, isDark.value, zoomViewport.value ?? baseViewport(), true, false, dpr)
+  transform = renderScene(ctx, width, height, isDark.value, zoomViewport.value ?? baseViewportForMode(), true, false, dpr)
   ctx.restore()
 }
 
@@ -319,8 +364,21 @@ function renderScene(
 ): PlaneTransform {
   paint = { dark, width, height, dpr }
   paintExport = forExport
-  const t = fitTransform(viewport, width, height, INSETS, true)
 
+  // The slice is not a picture of the plane, so it gets its own axes: frequency and magnitude, no
+  // equal-aspect lock, and none of the plane's decorations.
+  if (props.mode === 'Slice') {
+    // `viewport` — the caller's, so a dragged box zooms here too. It arrives in *this* view's
+    // coordinates because that is what the transform returned below was built from, which is also
+    // why a mode change has to clear the zoom (see the watcher on it).
+    const st = fitTransform(viewport, width, height, INSETS, false)
+    drawSliceAxes(ctx, width, height, st)
+    drawSlice(ctx, st)
+    drawLegend(ctx)
+    return st
+  }
+
+  const t = fitTransform(viewport, width, height, INSETS, true)
   const w = window_.value
   const relief = props.mode === 'Relief'
   if (w) {
@@ -361,6 +419,139 @@ function clipToPlot(ctx: CanvasRenderingContext2D) {
   ctx.beginPath()
   ctx.rect(box.x, box.y, box.w, box.h)
   ctx.clip()
+}
+
+/**
+ * The jω-axis slice: |H| against frequency, on linear axes, with the measurement over it.
+ *
+ * This is the one line of the plane where the model and the measurement are the same thing, so it is
+ * both the most ordinary view here and the one that falsifies the other two: if the solid curve and
+ * the faint one part company, the surface beside them is describing a model that does not fit.
+ *
+ * Linear in both axes rather than dB against log f, which is what the Bode view already is. A linear
+ * magnitude is how a filter is specified and how a textbook draws one — a passband at 1, a stopband
+ * at 0, and a corner you can point at — and it is the only place in this app that shows it that way.
+ *
+ * It does not use the plane's transform: the axes are frequency and magnitude, not σ and jω, so it
+ * builds its own and hands it back for the cursor and the drag-zoom to share.
+ */
+function sliceViewport(): Viewport {
+  const fit = effectiveFit.value
+  const b = band.value
+  const highHz = b?.highHz ?? props.xToHz
+  let peak = 1
+  if (fit) {
+    for (let i = 0; i <= SLICE_SAMPLES; i++) {
+      const level = modelLevelDb(fit.model, 0, (highHz * i) / SLICE_SAMPLES)
+      if (Number.isFinite(level)) peak = Math.max(peak, Math.pow(10, level / 20))
+    }
+  }
+  for (const p of readCurve.value) peak = Math.max(peak, Math.pow(10, p.magDb / 20))
+  // From zero on both axes: a linear magnitude plot that did not include 0 would misstate every
+  // ratio the eye reads off it, which is the whole reason to draw one.
+  return { xMin: 0, xMax: highHz > 0 ? highHz : 1, yMin: 0, yMax: peak * 1.08 }
+}
+
+/** How finely the slice is sampled — one point per two pixels is past what a screen can show. */
+const SLICE_SAMPLES = 600
+
+function drawSlice(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
+  const fit = effectiveFit.value
+  if (!fit) return
+
+  const box = plotBox(paint.width, paint.height)
+  ctx.save()
+  clipToPlot(ctx)
+
+  // The measurement first, so the model is read over it rather than under it.
+  const measured = readCurve.value
+  if (measured.length > 1) {
+    ctx.strokeStyle = color(MARKER_COLOR)
+    ctx.lineWidth = paintExport ? 2.5 : props.thickLines ? 2 : 1.5
+    ctx.globalAlpha = 0.55
+    ctx.beginPath()
+    measured.forEach((p, i) => {
+      const x = t.toScreenX(p.freqHz)
+      const y = t.toScreenY(Math.pow(10, p.magDb / 20))
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    ctx.stroke()
+    ctx.globalAlpha = 1
+  }
+
+  ctx.strokeStyle = color(SLICE_COLOR)
+  ctx.lineWidth = paintExport ? 2.5 : props.thickLines ? 2 : 1.5
+  ctx.beginPath()
+  for (let i = 0; i <= SLICE_SAMPLES; i++) {
+    const f = t.viewport.xMin + ((t.viewport.xMax - t.viewport.xMin) * i) / SLICE_SAMPLES
+    const level = modelLevelDb(fit.model, 0, f)
+    const y = t.toScreenY(Number.isFinite(level) ? Math.pow(10, level / 20) : t.viewport.yMax)
+    const x = t.toScreenX(f)
+    if (i === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  }
+  ctx.stroke()
+
+  // Where the data stops. Everything right of it is the model extrapolating, exactly as on the map.
+  if (band.value && band.value.highHz < t.viewport.xMax) {
+    const x = t.toScreenX(band.value.highHz)
+    ctx.strokeStyle = color(MARKER_COLOR)
+    ctx.setLineDash([4, 3])
+    ctx.lineWidth = gridLineWidth(1)
+    ctx.beginPath()
+    ctx.moveTo(x, box.y)
+    ctx.lineTo(x, box.y + box.h)
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+  ctx.restore()
+}
+
+/** Linear axes for the slice: frequency across, magnitude up. */
+function drawSliceAxes(ctx: CanvasRenderingContext2D, width: number, height: number, t: PlaneTransform) {
+  const xTicks = niceTicks(t.viewport.xMin, t.viewport.xMax, 8)
+  const yTicks = niceTicks(t.viewport.yMin, t.viewport.yMax, 6)
+
+  ctx.save()
+  ctx.strokeStyle = gridStroke()
+  ctx.lineWidth = gridLineWidth()
+  ctx.beginPath()
+  for (const x of xTicks) {
+    const px = Math.round(t.toScreenX(x)) + 0.5
+    ctx.moveTo(px, INSETS.top)
+    ctx.lineTo(px, height - INSETS.bottom)
+  }
+  for (const y of yTicks) {
+    const py = Math.round(t.toScreenY(y)) + 0.5
+    ctx.moveTo(INSETS.left, py)
+    ctx.lineTo(width - INSETS.right, py)
+  }
+  ctx.stroke()
+
+  ctx.fillStyle = color(AXIS_COLOR)
+  ctx.font = '11px ui-sans-serif, system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'top'
+  for (const tick of thinPositions(xTicks.map((x) => ({ at: t.toScreenX(x), v: x })), 34)) {
+    ctx.fillText(tickLabel(tick.v), tick.at, height - INSETS.bottom + 6)
+  }
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'middle'
+  for (const tick of thinPositions(yTicks.map((y) => ({ at: t.toScreenY(y), v: y })), 14)) {
+    ctx.fillText(String(Number(tick.v.toPrecision(3))), INSETS.left - 6, tick.at)
+  }
+
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'bottom'
+  ctx.fillText('frequency (Hz)', (INSETS.left + width - INSETS.right) / 2, height - 2)
+  ctx.save()
+  ctx.translate(10, (INSETS.top + height - INSETS.bottom) / 2)
+  ctx.rotate(-Math.PI / 2)
+  ctx.textBaseline = 'top'
+  ctx.fillText('|H(jω)|', 0, 0)
+  ctx.restore()
+  ctx.restore()
 }
 
 /** Rows and columns the relief is built from — coarse, because it is drawn as profiles, not pixels. */
@@ -534,7 +725,7 @@ function drawContours(
   for (const level of contourLevels(w)) {
     const segments = marchingSquares(field, level, 2)
     if (segments.length === 0) continue
-    const isReference = Math.abs(level - w.referenceDb) < 1e-9
+    const isReference = Math.abs(level - w.referenceDb) < REFERENCE_LEVEL_EPSILON_DB
     ctx.strokeStyle = isReference ? color(CONTOUR_REFERENCE_COLOR) : color(CONTOUR_COLOR)
     ctx.lineWidth = gridLineWidth(isReference ? 1.75 : 1)
     ctx.beginPath()
@@ -737,16 +928,18 @@ function drawColourKey(ctx: CanvasRenderingContext2D, width: number, height: num
   for (const level of contourLevels(w)) {
     const fraction = (level - w.bottomDb) / Math.max(1e-9, w.topDb - w.bottomDb)
     const py = bottom - 1 - fraction * (bottom - top - 1)
-    const relative = level - w.referenceDb
-    const label = `${relative > 0 ? '+' : ''}${Number(relative.toPrecision(3))}`
-    ctx.fillText(label, keyX + keyW + 4, py)
+    ctx.fillText(relativeLevelLabel(level, w.referenceDb), keyX + keyW + 4, py)
   }
 
+  // `textBaseline` is what keeps this caption on the canvas. After the -90° rotation the local +y
+  // axis points to screen *right*, so 'top' — which grows the glyphs along local +y — drew them off
+  // the right edge from x = width - 4; 'bottom' grows them the other way, back into the plot. The
+  // left caption in drawAxisLabels has the mirror problem and so keeps 'top'.
   ctx.save()
-  ctx.translate(width - 4, (top + bottom) / 2)
+  ctx.translate(width - 3, (top + bottom) / 2)
   ctx.rotate(-Math.PI / 2)
   ctx.textAlign = 'center'
-  ctx.textBaseline = 'top'
+  ctx.textBaseline = 'bottom'
   ctx.fillText('dB re passband', 0, 0)
   ctx.restore()
   ctx.restore()
@@ -754,13 +947,20 @@ function drawColourKey(ctx: CanvasRenderingContext2D, width: number, height: num
 
 /** What every mark means, on the canvas so an export carries it. */
 function drawLegend(ctx: CanvasRenderingContext2D) {
-  const entries: { label: string; sample: 'pole' | 'zero' | 'band' | 'none' }[] = [
-    { label: 'Pole', sample: 'pole' },
-    { label: 'Zero', sample: 'zero' },
-    { label: 'Measured band', sample: 'band' },
-    { label: 'Fitted model — |H(σ+jω)|, not measured off the axis', sample: 'none' },
-  ]
-  if (hiddenRootCount.value > 0) {
+  const entries: { label: string; sample: 'pole' | 'zero' | 'band' | 'slice' | 'none' }[] =
+    props.mode === 'Slice'
+      ? [
+          { label: 'Fitted model', sample: 'slice' },
+          { label: 'Measured', sample: 'band' },
+          { label: 'The jω axis of the surface — where model and measurement meet', sample: 'none' },
+        ]
+      : [
+          { label: 'Pole', sample: 'pole' },
+          { label: 'Zero', sample: 'zero' },
+          { label: 'Measured band', sample: 'band' },
+          { label: 'Fitted model — |H(σ+jω)|, not measured off the axis', sample: 'none' },
+        ]
+  if (props.mode !== 'Slice' && hiddenRootCount.value > 0) {
     entries.push({ label: `${hiddenRootCount.value} out of band, hidden`, sample: 'none' })
   }
 
@@ -810,6 +1010,13 @@ function drawLegend(ctx: CanvasRenderingContext2D) {
       ctx.lineTo(sx + 8, cy)
       ctx.stroke()
       ctx.globalAlpha = 1
+    } else if (entry.sample === 'slice') {
+      ctx.strokeStyle = color(SLICE_COLOR)
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(sx, cy)
+      ctx.lineTo(sx + 8, cy)
+      ctx.stroke()
     }
     ctx.fillStyle = color(AXIS_COLOR)
     ctx.fillText(entry.label, sx + 14, cy)
@@ -855,6 +1062,14 @@ function updateHover(point: { x: number; y: number }) {
   if (!t || !fit) {
     hoverRoot.value = null
     hoverPoint.value = null
+    return
+  }
+  // On the slice the axes are frequency and magnitude, so the readout is the frequency under the
+  // cursor and the model's level there — not a point in the plane.
+  if (props.mode === 'Slice') {
+    hoverRoot.value = null
+    const freqHz = t.toWorldX(point.x)
+    hoverPoint.value = { sigmaHz: 0, omegaHz: freqHz, levelDb: modelLevelDb(fit.model, 0, freqHz) }
     return
   }
   hoverRoot.value = nearestRoot(roots.value, point.x, point.y, (r) => {
@@ -946,7 +1161,7 @@ async function exportPng({
       width,
       plotHeight,
       false,
-      (captureZoom ? zoomViewport.value : null) ?? baseViewport(),
+      (captureZoom ? zoomViewport.value : null) ?? baseViewportForMode(),
       false,
       true,
       1,
@@ -987,6 +1202,10 @@ watch(
     props.overlays,
     props.fit,
     props.fitOrder,
+    // `mode` belongs here for the same reason every other prop does, and its absence was invisible:
+    // switching Map/Relief changed the prop but nothing repainted, so the new mode only appeared
+    // once some *other* control happened to trigger a draw.
+    props.mode,
     props.scale,
     props.surfaceTopDb,
     props.surfaceBottomDb,

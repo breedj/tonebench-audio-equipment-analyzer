@@ -140,6 +140,16 @@ import {
   isCrosstalkKind,
   isOutputImpedanceKind,
 } from './measurements/kinds'
+import {
+  claimLive,
+  foreignLiveStores,
+  liveOwnerKey,
+  liveScreenStore,
+  liveStoreForKind,
+  releaseLive,
+  type LiveOwners,
+  type LiveStore,
+} from './measurements/liveOwner'
 
 const { status, ranges, error, refreshStatus } = useDevice()
 const { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, setViewport, clearScope } = useSpectrumStream()
@@ -275,6 +285,7 @@ const {
   hasDirty: hasAnyDirtyInProject,
   markDirty,
   setAutosaveFlush,
+  setLiveStateReset,
   saveMeasurementType,
   saveMeasurementTypeAs,
   saveProject,
@@ -392,6 +403,7 @@ const {
   startCrosstalk,
   cancel: cancelResponseRun,
   clear: clearResponseRun,
+  clearTarget: clearResponseTarget,
   refresh: refreshResponse,
   setTarget: setResponseTarget,
   phaseKind: responsePhaseKind,
@@ -1655,6 +1667,28 @@ function setDeviceKind(kind: import('./api/client').DeviceKindName) {
   })
 }
 
+// The status bar's Ranging control. All three write through the server and take the status it
+// returns rather than setting anything locally: the input range in particular is the *device's*
+// answer, and a range it refuses or a mode change it declines has to show up as the dropdown
+// snapping back rather than as a UI that believes something the hardware never did.
+function setRangingMode(mode: import('./api/client').RangingModeName) {
+  return withErrorReporting(async () => {
+    status.value = await api.setRangingMode(mode)
+  })
+}
+
+function setInputRangeManually(dbv: number) {
+  return withErrorReporting(async () => {
+    status.value = await api.setInputRange(dbv)
+  })
+}
+
+function setOutputRangeManually(dbv: number) {
+  return withErrorReporting(async () => {
+    status.value = await api.setOutputRange(dbv)
+  })
+}
+
 // The status bar's Connect button: the app starts with no device rather than refusing to start, so
 // this is how a QA403 plugged in afterwards gets picked up. Failure is just an error line in the
 // status bar — nothing else about the session changes, and pressing it again is safe. The line is
@@ -1708,12 +1742,11 @@ function runMeasurement(runConfig: RunConfig, singleShot = false) {
     // sends nothing further for the watcher to react to. A plain Run disarms a pending Single.
     singleShotArmed.value = singleShot
 
-    // Gated on the *device* actually having auto-ranging (status.autoRangeEnabled null means it
-    // doesn't — the simulator, currently) rather than unconditionally requesting it: the server
-    // 400s a device with no such capability, same reasoning as the live monitor's own
-    // hardwareAutoActive check below.
-    if (status.value?.autoRangeEnabled !== null && status.value?.autoRangeEnabled !== undefined)
-      status.value = await api.setAutoRange(true)
+    // No auto-ranging request here any more. RUN used to force the device's ranger back on every
+    // time, which was harmless while nothing could ever turn it off — and is exactly what would
+    // undo the status bar's Manual pin on the first press of the button the user pinned it for.
+    // The ranging mode is now the only thing that writes AutoRangeEnabled (see RangingMode), and
+    // it is applied when the mode is set and again on every connect.
 
     const generator = generatorPanel.value?.buildRequest()
     if (generator) {
@@ -1888,7 +1921,11 @@ const runnerActive = computed(
 
 watch(meters, (m) => {
   const hardwareAutoActive = status.value?.autoRangeEnabled !== null && status.value?.autoRangeEnabled !== undefined
-  if (!status.value?.acquiring || hardwareAutoActive || runnerActive.value) {
+  // Manual is the third reason not to range, and it is the one this watcher has to obey itself:
+  // on the simulator there is no hardware ranger for the server to switch off, so this loop *is*
+  // the auto-ranging, and a pinned range would be walked away from within three meters frames.
+  const pinned = status.value?.rangingMode === 'Manual'
+  if (!status.value?.acquiring || hardwareAutoActive || pinned || runnerActive.value) {
     pendingRangeTarget = null
     pendingRangeCount = 0
     return
@@ -2201,6 +2238,103 @@ function clearMeasurement() {
     clearScope()
   })
 }
+
+// ---------------------------------------------------------------------------
+// One measurement's live state never reaches another's screen
+// ---------------------------------------------------------------------------
+// See measurements/liveOwner.ts for the whole reasoning. In short: every runner drives the one
+// SpectrumPipeline, so every run — a stepped sweep, an impedance calibration, anything — fills the
+// live FFT display and the server's retained snapshot, and selecting an unrelated FFT measurement
+// then drew that record inside its own axis ranges. Reported 2026-09-27.
+const liveOwners = ref<LiveOwners>({})
+
+/** Who the live state on screen belongs to right now — project *and* type, see liveOwnerKey. */
+const liveOwnerNow = computed(() => liveOwnerKey(currentProjectId.value, currentTypeId.value))
+
+/**
+ * Stamps the open measurement as the owner of whatever is now being filled.
+ *
+ * <p>One watcher rather than a line in each of the ten run functions, and it watches "is anything
+ * live" rather than `status.acquiring` alone: the status poll is 1 Hz and a short chirp run can
+ * start and finish between two polls, so the acquiring transition on its own is missable. Each
+ * runner's `running` is set from its start call's own response, which is not.</p>
+ */
+watch(
+  () =>
+    status.value?.acquiring === true ||
+    sweepRunning.value ||
+    responseRunning.value ||
+    impedanceRunning.value ||
+    impulseRunning.value ||
+    outputImpedanceRunning.value,
+  (live) => {
+    if (live) liveOwners.value = claimLive(liveOwners.value, liveStoreForKind(currentType.value?.kind), liveOwnerNow.value)
+  },
+)
+
+/**
+ * Discards the live state that belongs to a measurement other than the one about to be selected.
+ *
+ * <p>Registered with useProjects and awaited by `selectType` <b>before</b> `currentTypeId` moves —
+ * see `liveStateReset` there for why a watcher would race the re-attach instead. Nothing is running
+ * by this point: `selectType` has already called `stopRun`.</p>
+ *
+ * <p>Exactly one store is a candidate: the one the screen being switched *to* draws from (see
+ * `liveScreenStore`). Whatever the screen being switched away *from* was showing is left alone —
+ * that is what keeps a five-minute sweep, or a settled FFT capture, on screen when you click its own
+ * measurement away and back, which is the reason this is an ownership question and not a blanket
+ * clear.</p>
+ */
+async function discardForeignLiveState(nextTypeId: number) {
+  const nextOwner = liveOwnerKey(currentProjectId.value, nextTypeId)
+  const nextStore = liveScreenStore(types.value.find((t) => t.id === nextTypeId)?.kind)
+  const stale = foreignLiveStores(liveOwners.value, nextOwner, [nextStore])
+  if (stale.length === 0) return
+
+  // Released first: a clear that fails (a runner still unwinding answers 409) must not leave the
+  // owner behind for the next switch to try again on state it has already reported as wrong.
+  liveOwners.value = releaseLive(liveOwners.value, stale)
+
+  await Promise.all(stale.map((store) => discardLiveStore(store).catch(() => undefined)))
+}
+
+function discardLiveStore(store: LiveStore): Promise<unknown> {
+  switch (store) {
+    case 'fft':
+      // The client's own display *and* the server's retained snapshot: leaving the latter would let
+      // Save write the other measurement's capture as this one's result.
+      meters.value = {}
+      intermodulation.value = {}
+      imdUnresolved.value = {}
+      multitone.value = {}
+      noise.value = {}
+      spectrum.value = {}
+      clearScope()
+      // The two histories the charts keep themselves, which no frame can re-derive — the same pair
+      // the weighting/unit watcher near the top of this file clears, and for the same reason.
+      requestChartResetPeakHold()
+      waterfallChart.value?.clearHistory()
+      return api.clearSpectrum()
+    case 'sweep':
+      return clearSweepRun()
+    case 'imdSweep':
+      return imdSweep.clear()
+    case 'chirp':
+      return clearResponseTarget('Chirp')
+    case 'stepped':
+      return clearResponseTarget('Stepped')
+    case 'crosstalk':
+      return clearResponseTarget('Crosstalk')
+    case 'impedance':
+      return clearImpedanceRun()
+    case 'impulse':
+      return clearImpulse()
+    case 'outputImpedance':
+      return clearOutputImpedanceRun()
+  }
+}
+
+setLiveStateReset(discardForeignLiveState)
 
 // The FFT settings/Generator panels' current on-screen values, whether or not they've ever reached
 // the device — same values runMeasurement uses to gather what Run would send, just packaged for a
@@ -3449,31 +3583,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:invert-sign="responseInvertLoopSign"
                 />
 
-                <ResponsePoleZeroPanel
-                  v-if="activeResponseProjection !== 'Bode' && responseComplexChart"
-                  ref="responsePoleZeroPanel"
-                  :curve="responseComplexChart.curve"
-                  v-model:order="responseFitOrder"
-                  v-model:zero-order="responseFitZeroOrder"
-                  v-model:auto-order="responseFitAutoOrder"
-                />
-                <ResponseFormulaPanel
-                  v-if="activeResponseProjection !== 'Bode' && responseComplexChart"
-                  :curve="responseComplexChart.curve"
-                  :order="responseFitOrder"
-                  :zero-order="responseFitZeroOrder"
-                  :auto-order="responseFitAutoOrder"
-                />
-
-                <ResponseMeasurementsPanel
-                  v-model:show-one-db="responseShowOneDb"
-                  v-model:show-three-db="responseShowThreeDb"
-                  :traces="responseTraces"
-                  :view="responseView"
-                  :show-left="responseShowLeft"
-                  :phase-kind="effectiveResponsePhaseKind"
-                  :stepped="!isChirpResponse"
-                />
               </template>
 
               <template #default>
@@ -3534,6 +3643,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :overlays="visibleResponseOverlays"
                   :fit="responsePoleZeroPanel?.fit ?? null"
                   :mode="responseSurfaceMode"
+                  :thick-lines="responseThickLines"
                   :scale="responseSurfaceScale"
                   :surface-top-db="responseSurfaceTopDb"
                   :surface-bottom-db="responseSurfaceBottomDb"
@@ -3570,6 +3680,39 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :fit="responsePoleZeroPanel?.fit ?? null"
                   :show-fitted-model="responseShowFittedModel"
                   :hide-out-of-band-roots="responseHideOutOfBandRoots"
+                />
+
+                <!-- Measurements, then the roots, then the formula — all in the chart column, where
+                     a table of readings and a factored H(s) have the width they need. Joost's request,
+                     2026-09-27; the rail keeps only what is genuinely a display choice. -->
+                <ResponseMeasurementsPanel
+                  v-model:show-one-db="responseShowOneDb"
+                  v-model:show-three-db="responseShowThreeDb"
+                  :traces="responseTraces"
+                  :view="responseView"
+                  :show-left="responseShowLeft"
+                  :phase-kind="effectiveResponsePhaseKind"
+                  :stepped="!isChirpResponse"
+                />
+                <ResponsePoleZeroPanel
+                  v-if="activeResponseProjection !== 'Bode' && responseComplexChart"
+                  ref="responsePoleZeroPanel"
+                  :curve="responseComplexChart.curve"
+                  :restore-delay="responseRestoreDelay"
+                  :latency-samples="responseLatencySamples"
+                  v-model:order="responseFitOrder"
+                  v-model:zero-order="responseFitZeroOrder"
+                  v-model:auto-order="responseFitAutoOrder"
+                />
+                <!-- In the chart column rather than the rail: the factored formula of a fifth-order
+                     fit is far wider than a 16rem rail, and wrapping it made it unreadable.
+                     Joost's request, 2026-09-27 — provisional, may move back. -->
+                <ResponseFormulaPanel
+                  v-if="activeResponseProjection !== 'Bode' && responseComplexChart"
+                  :curve="responseComplexChart.curve"
+                  :order="responseFitOrder"
+                  :zero-order="responseFitZeroOrder"
+                  :auto-order="responseFitAutoOrder"
                 />
 
                 <MeasurementNotesPanel />
@@ -4335,8 +4478,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       :status="status"
       :error="error"
       :connecting="connecting"
+      :ranges="ranges"
+      :runner-active="runnerActive"
       @set-device-kind="setDeviceKind"
       @set-simulated-profile="setSimulatedProfile"
+      @set-ranging-mode="setRangingMode"
+      @set-input-range="setInputRangeManually"
+      @set-output-range="setOutputRangeManually"
       @connect="connectDevice"
     />
 

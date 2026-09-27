@@ -45,6 +45,19 @@ export interface DeviceStatus {
   /** Input autoranging on/off; null when the device has no autoranging (the simulator). */
   autoRangeEnabled: boolean | null
   /**
+   * Who is choosing the two analog ranges — see the status bar's Ranging control. Unlike
+   * `autoRangeEnabled` this is never null: the simulator has no hardware ranger but it does have
+   * both attenuators, so the mode means the same thing on either analyzer. Always 'Auto' at
+   * startup; nothing persists it.
+   */
+  rangingMode: RangingModeName
+  /**
+   * The generator is asking for more than the output range's full scale, so what reaches the DUT is
+   * clipped. Only reachable under manual ranging — under Auto the range is derived from the
+   * generator itself, so it is false by construction.
+   */
+  outputRangeClipping: boolean
+  /**
    * How long, in ms, a peak must stay under-range before autoranging steps to a more sensitive
    * range. Same null-means-no-autoranging convention as autoRangeEnabled.
    */
@@ -78,6 +91,25 @@ export interface DeviceStatus {
   externalGainLeftDb: number
   /** The same for the right input. */
   externalGainRightDb: number
+  /**
+   * The analyzer's housekeeping sensors, or null on a device that has none (the simulator) and
+   * before the first reading. A cached *last* reading: the server refreshes it on the same
+   * throttled liveness exchange this poll already triggers, and never while a stream is running —
+   * so during an acquisition these numbers are whatever they were when it started.
+   */
+  telemetry: DeviceTelemetry | null
+}
+
+/**
+ * The figures QuantAsylum's own software shows beside the firmware version, less the isolated-rail
+ * current — a QA403 answers that register with a constant rather than a measurement, which is why
+ * the vendor's own status bar shows `---` for it. Units are settled server-side — volts, milliamps,
+ * degrees Celsius — so this is formatting only.
+ */
+export interface DeviceTelemetry {
+  usbVoltageV: number
+  usbCurrentMa: number
+  temperatureC: number
 }
 
 /**
@@ -118,6 +150,12 @@ export type SimulatedDutModel =
 
 /** Real QA403 over USB, or the synthetic device. Switchable at runtime — no restart, no flag. */
 export type DeviceKindName = 'Hardware' | 'Simulated'
+
+/**
+ * Who picks the input and output attenuators. One mode for both: they are the two ends of the same
+ * analog path, and the reasons to pin either are the same reason. Mirrors Qa403.App's RangingMode.
+ */
+export type RangingModeName = 'Auto' | 'Manual'
 
 /** Patch for the simulated DUT's signal profile — omitted fields are left alone. */
 export interface SimulatedProfileRequest {
@@ -720,7 +758,7 @@ export type SPlaneScaleName = 'Linear' | 'LogModulus'
  * How the |H(s)| surface lays the same field out: flat, or as an oblique relief with a pole as a
  * spike. Both read one evaluated field and one colour window, so they cannot disagree about a level.
  */
-export type SurfaceModeName = 'Heatmap' | 'Relief'
+export type SurfaceModeName = 'Heatmap' | 'Relief' | 'Slice'
 
 /**
  * Which delay curve the Bode chart draws on its own right-hand axis. One at a time, because they
@@ -2328,8 +2366,13 @@ export const api = {
   setOutputRange: (dbv: number) =>
     request<DeviceStatus>('/device/output-range', { method: 'POST', body: JSON.stringify({ dbv }) }),
 
-  setAutoRange: (enabled: boolean) =>
-    request<DeviceStatus>('/device/auto-range', { method: 'POST', body: JSON.stringify({ enabled }) }),
+  /**
+   * Switches who chooses both analog ranges. Replaces the old setAutoRange, which spoke only for
+   * the input attenuator — two calls for one mode would be two ways to reach half a state each.
+   * Refused (409) while a measurement is running.
+   */
+  setRangingMode: (mode: RangingModeName) =>
+    request<DeviceStatus>('/device/ranging', { method: 'POST', body: JSON.stringify({ mode }) }),
 
   setAutoRangeStepDownDelay: (delayMs: number) =>
     request<DeviceStatus>('/device/auto-range-step-down-delay', { method: 'POST', body: JSON.stringify({ delayMs }) }),

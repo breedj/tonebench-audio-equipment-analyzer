@@ -22,6 +22,30 @@ export function fftOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
 }
 
 /**
+ * The overlay whose stored frequency axis the spectrum chart draws on when nothing is streaming —
+ * the first visible FFT overlay that actually carries a channel, or null when there is none.
+ *
+ * <p>SpectrumChart.computeFrame used `overlays[0]` for this, and that list is app-wide: it is never
+ * cleared when the measurement changes (unchecking an item only hides it), so its first entry is
+ * routinely a sweep, a response curve or an impedance run belonging to a different screen. Those
+ * carry no spectrum channels, so the chart concluded it had nothing to draw and destroyed itself
+ * while a perfectly good FFT overlay sat checked underneath. Reported 2026-09-27 — check a history
+ * item on the stepped-response screen, then check one on an FFT measurement, and nothing appears.
+ * Latent until a measurement switch stopped leaving a live frame behind (measurements/liveOwner.ts),
+ * which is what had been supplying the axis.</p>
+ *
+ * <p>Here rather than in the chart so it can be tested: nothing in a `.vue` file is, under the node
+ * environment vitest runs in.</p>
+ */
+export function spectrumAxisOverlay(overlays: OverlayEntry[]): OverlayEntry | null {
+  return (
+    fftOverlays(overlays).find(
+      (o) => o.visible && o.detail.channelsData.some((c) => c.channel === 0 || c.channel === 1),
+    ) ?? null
+  )
+}
+
+/**
  * The color one FFT overlay draws in, by its position among the other currently-*visible* FFT
  * overlays — recomputed on every call rather than assigned once when the overlay was added, the
  * same convention ThdSweepChart's OVERLAY_DASH indexing uses. That is what guarantees the up-to-3

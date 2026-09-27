@@ -73,6 +73,55 @@ internal static class Qa40xRegisters
     /// <summary>Unit serial number, packed u32, read-only. Same Tier-2 caveat as <see cref="FirmwareVersion"/> (docs/protocol.md §2.4).</summary>
     public const byte SerialNumber = 0x1d;
 
+    /// <summary>
+    /// USB rail voltage in millivolts, read-only. Tier-2 source: qa40x-rs-main only
+    /// (register.rs:39-42, doc/device-notes.md:66-75 — "telemetry decodings (mV / mA / deci-°C)
+    /// were validated on hardware"), not cross-checked against PyQa40x or qa40x-baremetal, neither
+    /// of which touches this register. Same caveat as <see cref="FirmwareVersion"/>
+    /// (docs/protocol.md §2.4). Read-only, so the worst case is a nonsense number on screen.
+    /// </summary>
+    public const byte TelemetryUsbVoltage = 0x11;
+
+    /// <summary>USB rail current in milliamps, read-only. Same Tier-2 source and caveat as <see cref="TelemetryUsbVoltage"/>.</summary>
+    public const byte TelemetryUsbCurrent = 0x12;
+
+    /// <summary>
+    /// Isolated-rail current, read-only — documented by qa40x-rs-main as milliamps, and
+    /// <b>deliberately not read by this app</b>, which is why the constant exists only to record
+    /// that decision.
+    ///
+    /// <para>QuantAsylum's own software shows <c>ISO Current: ---</c> on a QA403 rather than a
+    /// figure. Measured here on a real QA403 (2026-09-27) while the other two registers tracked a
+    /// live load — 4.844/4.845 V and 877-882 mA over five polls — this one answered a constant
+    /// <c>4626</c>, which is <c>0x1212</c>. Not 4.6 A of anything, and not a sensor: the QA402 that
+    /// the reference's capture came from has an isolated rail and this model evidently does not.
+    /// Displaying it would put a fabricated ampere reading in the status bar, so the readout has
+    /// three figures and not four.</para>
+    /// </summary>
+    public const byte TelemetryIsoCurrent = 0x13;
+
+    /// <summary>
+    /// Internal temperature in deci-degrees Celsius, read-only. Same Tier-2 source and caveat as
+    /// <see cref="TelemetryUsbVoltage"/>.
+    ///
+    /// <para>Note the gap: 0x14 and 0x15 sit between the currents and this register but are
+    /// <i>not</i> telemetry — they are the firmware trace buffer's readout and its length
+    /// (constant 0x418 on a healthy unit). qa40x-rs-main polled 0x15 as a fifth telemetry word for
+    /// a long time before a USB capture identified it, so do not "complete the range".</para>
+    /// </summary>
+    public const byte TelemetryTemperature = 0x16;
+
+    /// <summary>
+    /// Raw telemetry registers -> <see cref="DeviceTelemetry"/>. Split out from the device so the
+    /// scaling can be tested without hardware; the decodings are qa40x-rs-main's
+    /// (device.rs:2077-2088), which that project states were validated against a real unit.
+    /// </summary>
+    public static DeviceTelemetry DecodeTelemetry(uint usbVoltageRaw, uint usbCurrentRaw, uint temperatureRaw)
+        => new(
+            UsbVoltageV: usbVoltageRaw / 1000.0,
+            UsbCurrentMa: usbCurrentRaw,
+            TemperatureC: temperatureRaw / 10.0);
+
     /// <summary>Read-request flag: OR this into a register address to turn a write frame into a two-step read (Usb.cs:223, protocol.md §2.2).</summary>
     public const byte ReadFlag = 0x80;
 

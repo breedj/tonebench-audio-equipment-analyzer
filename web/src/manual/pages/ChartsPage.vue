@@ -1,3 +1,7 @@
+<script setup lang="ts">
+import SettingsTable from '../components/SettingsTable.vue'
+</script>
+
 <template>
   <div>
     <h1>Reading the charts</h1>
@@ -133,6 +137,47 @@
       the maximum; the <strong>Min/max</strong> checkbox draws the band down to the minimum
       alongside it. With that band off, the noise floor reads a few dB higher than it really is —
       the honest picture is the band, not the line.
+    </p>
+
+    <h3>Why the band widens towards the top of the spectrum</h3>
+    <p>
+      On an FFT plot the pale band hugging the noise floor is thin at the left and opens out into a
+      broad haze at the right, which looks like the DUT getting noisier with frequency. It is not.
+      It is an artefact of the frequency axis, and nothing about the noise has changed.
+    </p>
+    <p>
+      The columns are spaced <em>logarithmically</em>, to match the axis. The FFT's bins are spaced
+      <em>linearly</em>. So each column covers a fixed <em>percentage</em> of its own frequency, and
+      that is a wildly different number of bins at the two ends. With the usual 1600 columns from
+      10 Hz to 96 kHz, a column spans about 0.58 % of its centre frequency — and at a 131072-point
+      FFT at 192 kHz, where a bin is 1.47 Hz:
+    </p>
+    <SettingsTable
+      :rows="[
+        ['At 100 Hz', 'under one bin per column — min equals max, so no band at all'],
+        ['At 1 kHz', 'about 4 bins, band about 7 dB tall'],
+        ['At 10 kHz', 'about 39 bins, band about 22 dB tall'],
+        ['At 20 kHz', 'about 79 bins, band about 25 dB tall'],
+        ['At 50 kHz', 'about 196 bins, band about 30 dB tall'],
+      ]"
+    />
+    <p>
+      Noise is random bin to bin, so the more bins a column holds, the further apart its loudest and
+      quietest are bound to fall — the band's height is that spread, and nothing else. At the left of
+      the plot one column is one bin, min equals max, and the band collapses to the line.
+    </p>
+    <p>
+      The same arithmetic tilts the <em>line</em>, because the line is each column's maximum and the
+      largest of many random draws is bigger than the largest of a few. A flat noise floor therefore
+      reads as gently rising towards the right even though it is flat. Two ways not to be fooled:
+      read the floor from the body of the band rather than its upper edge, or read it from the
+      <strong>Noise dBV/√Hz</strong> tile, which integrates bins instead of picking extremes and so
+      gives the same answer wherever in the band you ask.
+    </p>
+    <p>
+      Widening the span or shortening the FFT puts fewer bins in each column and narrows the band;
+      zooming in does the same, because the columns are then spread over a smaller range. None of
+      that changes the measurement — only how many bins are being summarised per pixel.
     </p>
 
     <h2>Comparing runs</h2>

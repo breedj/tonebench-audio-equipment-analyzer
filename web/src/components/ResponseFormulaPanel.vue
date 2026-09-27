@@ -128,8 +128,12 @@ async function copy() {
         describes the fit rather than the DUT.
       </p>
 
-      <!-- The exports. -->
-      <div class="flex items-center gap-2 text-xs">
+      <!-- The exports, folded away by default: the formula above is what a reader wants on screen,
+           while the dropdown and the text box are there for the one time you copy it out. -->
+      <CollapsibleSection title="Copy as…" size="xs" :default-open="false">
+      <!-- Capped: a format dropdown stretched across the whole chart column reads as a mistake. The
+           text box below is not — a formula is long, and the width is what stops it wrapping. -->
+      <div class="flex max-w-sm items-center gap-2 text-xs">
         <select
           v-model="format"
           class="flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
@@ -152,7 +156,7 @@ async function copy() {
         ref="textarea"
         :value="text"
         readonly
-        rows="4"
+        rows="7"
         spellcheck="false"
         class="w-full resize-y rounded border border-neutral-300 bg-neutral-50 p-2 font-mono text-[10px] leading-4 dark:border-neutral-700 dark:bg-neutral-900"
       />
@@ -160,6 +164,7 @@ async function copy() {
       <p v-if="copyState === 'manual'" class="text-[11px] text-amber-600 dark:text-amber-400">
         This window will not write to the clipboard — the text is selected, so copy it by hand.
       </p>
+      </CollapsibleSection>
     </template>
   </CollapsibleSection>
 </template>

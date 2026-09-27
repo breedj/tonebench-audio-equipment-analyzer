@@ -69,7 +69,9 @@ async function onSave() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Save measurement" @close="emit('close')">
+  <!-- No backdrop dismissal: this dialog holds a typed name and notes, and a stray click beside it
+       threw both away with no warning and no undo. Escape and the X button still close it. -->
+  <Modal :open="props.open" title="Save measurement" :close-on-backdrop="false" @close="emit('close')">
     <div class="flex flex-col gap-3 text-sm">
       <p class="text-xs text-neutral-500 dark:text-neutral-400">
         Saving into <span class="font-medium text-neutral-700 dark:text-neutral-300">{{ currentProject?.name }} / {{ currentType?.name }}</span>

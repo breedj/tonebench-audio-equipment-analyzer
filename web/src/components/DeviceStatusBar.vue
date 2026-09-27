@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { DeviceKindName, DeviceStatus, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
+import type { DeviceKindName, DeviceRanges, DeviceStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
 
 const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
   { value: 'Hardware', label: 'QA403' },
@@ -185,16 +185,85 @@ const props = defineProps<{
   error: string | null
   /** True while a connect attempt is in flight — the emit is fire-and-forget, so the button can't tell on its own. */
   connecting: boolean
+  /** The device's own range ladders, for the manual dropdowns. Null until the first /device/ranges read returns. */
+  ranges: DeviceRanges | null
+  /** True while any measurement runner owns the session — see App.vue's runnerActive. */
+  runnerActive: boolean
 }>()
 
 const emit = defineEmits<{
   setSimulatedProfile: [patch: SimulatedProfileRequest]
   setDeviceKind: [kind: DeviceKindName]
+  setRangingMode: [mode: RangingModeName]
+  setInputRange: [dbv: number]
+  setOutputRange: [dbv: number]
   connect: []
 }>()
 
 function onDeviceKindChange(e: Event) {
   emit('setDeviceKind', (e.target as HTMLSelectElement).value as DeviceKindName)
+}
+
+const RANGING_MODES: { value: RangingModeName; label: string }[] = [
+  { value: 'Auto', label: 'Auto' },
+  { value: 'Manual', label: 'Manual' },
+]
+
+const manual = computed(() => props.status?.rangingMode === 'Manual')
+
+/**
+ * Both ranges belong to whatever measurement is running — every runner probes, predicts or ratchets
+ * its own, and the server refuses these three calls with a 409 while one is. Disabled rather than
+ * left live to be refused, the same reasoning as the analyzer switch: a control that answers with an
+ * error line is a worse way to state a rule than one that is visibly unavailable and says why.
+ */
+const rangesLocked = computed(() => props.runnerActive)
+
+const rangingTitle = computed(() => {
+  if (props.runnerActive)
+    return 'Stop the measurement first — it is choosing the ranges itself while it runs.'
+  return manual.value
+    ? 'Both ranges are pinned to what you pick here. A measurement run is refused while this is Manual: every sweep needs to choose its own ranges.'
+    : 'The input range tracks the signal and the output range follows the generator amplitude. Switch to Manual to pin both — for reproducing another analyzer, or for holding one operating point still.'
+})
+
+const attenuationTitle = computed(() =>
+  manual.value
+    ? 'The input range the ADC is on, pinned. It sets both the clipping point and the input-referred noise floor, and a hotter range distorts more: on this QA403 an 8.6 dBV tone reads H3 at -122 dBc on the 12 dBV range and -127 dBc on the 18 dBV one.'
+    : "Automatically kept matched to the input signal — by the device's own auto-ranging where available, otherwise by continuously monitoring the peak level.",
+)
+
+const outputRangeTitle = computed(() => {
+  if (props.status?.outputRangeClipping)
+    return 'The generator is asking for more than this range’s full scale, so what reaches the DUT is clipped. Pick a wider range, or lower the generator level.'
+  return manual.value
+    ? 'The output attenuator, pinned. It sets the DAC’s noise floor, so wider is quieter at the DUT but noisier in the measurement.'
+    : 'Selected automatically from the generator amplitude — the lowest range with enough headroom, for the lowest DAC noise.'
+})
+
+const outputRangeClass = computed(() =>
+  props.status?.outputRangeClipping
+    ? 'text-red-600 dark:text-red-400'
+    : 'text-neutral-500 dark:text-neutral-400',
+)
+
+/**
+ * Falls back to the standard QA403 ladders so the dropdowns are never empty in the window between
+ * mount and the first /device/ranges response — the same ladders DeviceCapabilities.Qa403 declares.
+ */
+const inputRanges = computed(() => props.ranges?.inputRangesDbv ?? [0, 6, 12, 18, 24, 30, 36, 42])
+const outputRanges = computed(() => props.ranges?.outputRangesDbv ?? [-12, -2, 8, 18])
+
+function onRangingModeChange(e: Event) {
+  emit('setRangingMode', (e.target as HTMLSelectElement).value as RangingModeName)
+}
+
+function onInputRangeChange(e: Event) {
+  emit('setInputRange', Number((e.target as HTMLSelectElement).value))
+}
+
+function onOutputRangeChange(e: Event) {
+  emit('setOutputRange', Number((e.target as HTMLSelectElement).value))
 }
 
 /**
@@ -274,6 +343,33 @@ function onSimulatedDutChange(e: Event) {
 function formatGain(db: number): string {
   return `${db > 0 ? '+' : ''}${db.toFixed(db % 1 === 0 ? 0 : 1)}`
 }
+
+/**
+ * The analyzer's own sensors, formatted the way the front panel's own software shows them. Absent
+ * on the simulator and until the first reading lands, and the whole group is hidden in that case
+ * rather than showing dashes for something the device is not measuring at all.
+ *
+ * Three figures where the vendor's status bar has four: its ISO Current reads `---` on a QA403, and
+ * the register behind it answers a constant (4626, i.e. 0x1212) rather than a current on this
+ * model, so there is nothing to show.
+ */
+const telemetry = computed(() => {
+  const t = props.status?.telemetry
+  if (!t) return null
+  return {
+    usbVoltage: `${t.usbVoltageV.toFixed(3)} V`,
+    usbCurrent: `${t.usbCurrentMa.toFixed(0)} mA`,
+    temperature: `${t.temperatureC.toFixed(1)} °C`,
+  }
+})
+
+/**
+ * Reading these costs three register exchanges on the control endpoint, which is the one thing that
+ * must not happen with transfers in flight — so the server stops refreshing them for the length of
+ * an acquisition. Dimmed rather than hidden while that is true: the numbers are still the last real
+ * reading, and a row that disappears whenever a measurement starts reads as a fault.
+ */
+const telemetryStale = computed(() => props.status?.acquiring === true)
 </script>
 
 <template>
@@ -432,6 +528,25 @@ function formatGain(db: number): string {
       <span>S/N {{ status.serialNumber }}</span>
       <span>FW {{ status.firmwareVersion }}</span>
       <!--
+        The analyzer's own housekeeping sensors, in the vendor software's order. Not a measurement
+        of anything on the bench: they say whether the USB port is feeding the unit properly and how
+        warm it has become. Hidden entirely on a device that has no sensors (the simulator).
+      -->
+      <span
+        v-if="telemetry"
+        class="flex items-center gap-3"
+        :class="telemetryStale ? 'opacity-50' : ''"
+        :title="
+          telemetryStale
+            ? 'The analyzer\'s own sensors — last read before this acquisition started. Reading them needs the control endpoint, which is left alone while samples are streaming.'
+            : 'The analyzer\'s own sensors: its USB supply rail, what it draws from it, and its internal temperature.'
+        "
+      >
+        <span>{{ telemetry.usbVoltage }}</span>
+        <span>{{ telemetry.usbCurrent }}</span>
+        <span>{{ telemetry.temperature }}</span>
+      </span>
+      <!--
         Only shown once it happens, because it should never happen. A dropped chunk splices the
         sample stream, which lifts the measured noise floor and smears tones — so this is a warning
         that the numbers on screen are wrong, not a throughput statistic.
@@ -476,34 +591,73 @@ function formatGain(db: number): string {
         </span>
       </span>
       <!--
-        Read-only: auto-ranging is always on (see AcquisitionPanel's former Auto checkbox, now
-        removed) — either the device's own hardware ranger or, where that's not available (the
-        simulator), App.vue's live peak-level monitor (see determineAttenuation in attenuation.ts).
-        Either way this is never something to pick by hand anymore, only to watch.
+        Auto is the default and is what every measurement needs: the input range tracks the signal
+        (the device's own hardware ranger, or App.vue's live peak monitor where there is none — see
+        determineAttenuation in attenuation.ts) and the output range is derived from the generator
+        amplitude (OutputRangeSelector). Manual pins both, which is what reproducing another
+        analyzer's reading takes — the same 8.6 dBV loopback measured on the 12 dBV input range and
+        on the 18 dBV one differs by 5 dB of H3 and 1.7 dB of noise floor, and nothing but the range
+        explains it.
       -->
-      <span
-        class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"
-        title="Automatically kept matched to the input signal — by the device's own auto-ranging where available, otherwise by continuously monitoring the peak level."
-      >
+      <label v-if="status" class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400" :title="rangingTitle">
+        Ranging
+        <select
+          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
+          :value="status.rangingMode"
+          :disabled="rangesLocked"
+          @change="onRangingModeChange"
+        >
+          <option v-for="mode in RANGING_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+        </select>
+      </label>
+      <span class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400" :title="attenuationTitle">
         Attenuation
-        <span class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
+        <!--
+          The dropdown replaces the readout rather than sitting beside it: two widgets showing one
+          number invite the question of which is the truth. Both read status.inputRangeDbv, which is
+          the device's own answer (IAnalyzerDevice.InputRangeDbv) rather than what was last asked
+          for — so a range the device declines to take shows up as the select snapping back.
+        -->
+        <select
+          v-if="manual"
+          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
+          :value="String(status?.inputRangeDbv ?? '')"
+          :disabled="rangesLocked || !status?.connected"
+          @change="onInputRangeChange"
+        >
+          <option v-for="dbv in inputRanges" :key="dbv" :value="String(dbv)">{{ dbv }} dB</option>
+        </select>
+        <span v-else class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
           {{ status?.inputRangeDbv ?? '--' }} dB
         </span>
       </span>
       <!--
-        Read-only: the output range is derived from the generator's own amplitude
-        (OutputRangeSelector), the way QuantAsylum's software does it, because it is an analog
-        attenuator whose setting sets the DAC's noise floor. Leaving it on 18 dBV for a -15 dBV tone
-        wasted 33 dB of headroom and put that noise straight into every loopback measurement.
+        The output range is an analog attenuator whose setting sets the DAC's noise floor, which is
+        why Auto derives it rather than parking on 18 dBV: that wasted 33 dB of headroom on a -15 dBV
+        tone and put the noise straight into every loopback measurement. Manual hands the choice
+        over, and a level the chosen range cannot carry is said out loud rather than quietly
+        corrected — correcting it would make "Manual" mean "manual until the app disagrees".
       -->
-      <span
-        class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"
-        title="Selected automatically from the generator amplitude — the lowest range with enough headroom, for the lowest DAC noise."
-      >
+      <span class="flex items-center gap-2" :class="outputRangeClass" :title="outputRangeTitle">
         Output range
-        <span class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
+        <select
+          v-if="manual"
+          class="rounded border bg-transparent px-1 py-0.5 font-mono text-xs disabled:opacity-50"
+          :class="
+            status?.outputRangeClipping
+              ? 'border-red-400 dark:border-red-600'
+              : 'border-neutral-300 dark:border-neutral-700'
+          "
+          :value="String(status?.outputRangeDbv ?? '')"
+          :disabled="rangesLocked || !status?.connected"
+          @change="onOutputRangeChange"
+        >
+          <option v-for="dbv in outputRanges" :key="dbv" :value="String(dbv)">{{ dbv }} dBV</option>
+        </select>
+        <span v-else class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
           {{ status?.outputRangeDbv ?? '--' }} dBV
         </span>
+        <span v-if="status?.outputRangeClipping" class="text-xs font-medium">clipping</span>
       </span>
     </div>
 

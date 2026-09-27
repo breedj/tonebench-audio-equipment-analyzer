@@ -52,4 +52,31 @@ public class Qa40xRegistersTests
     [Fact]
     public void OutputRangesDbv_MatchesDeviceCapabilities() =>
         Assert.Equal(DeviceCapabilities.Qa403.OutputRangesDbv, Qa40xRegisters.OutputRangesDbv);
+
+    /// <summary>
+    /// The raw values behind a real QA403 status bar reading "USB Voltage: 4.864V | USB Current:
+    /// 0.830A | 25.0C" — the vendor screenshot this readout was built from. Pinned as a set rather
+    /// than as three scalings because the units differ per register (mV, mA, deci-°C) and getting
+    /// one of them wrong produces a number that still looks plausible on screen. There is no
+    /// isolated-rail figure: see <see cref="Qa40xRegisters.TelemetryIsoCurrent"/>.
+    /// </summary>
+    [Fact]
+    public void DecodeTelemetry_MatchesTheVendorStatusBarReading()
+    {
+        var telemetry = Qa40xRegisters.DecodeTelemetry(
+            usbVoltageRaw: 4864, usbCurrentRaw: 830, temperatureRaw: 250);
+
+        Assert.Equal(4.864, telemetry.UsbVoltageV, 6);
+        Assert.Equal(830.0, telemetry.UsbCurrentMa, 6);
+        Assert.Equal(25.0, telemetry.TemperatureC, 6);
+    }
+
+    /// <summary>
+    /// Temperature is the one register whose raw value is not already in the unit it is displayed
+    /// in, so a decode that forgot the divide-by-ten still reads as a believable rack temperature
+    /// for the first digit and as nonsense afterwards. A non-round tenth is what catches it.
+    /// </summary>
+    [Fact]
+    public void DecodeTelemetry_ReadsTemperatureInDeciDegrees() =>
+        Assert.Equal(31.7, Qa40xRegisters.DecodeTelemetry(0, 0, temperatureRaw: 317).TemperatureC, 6);
 }

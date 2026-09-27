@@ -106,6 +106,14 @@ public sealed class DeviceSessionService(
     private double _inputRangeDbv;
     private double _outputRangeDbv;
 
+    /// <summary>
+    /// Survives a device switch and a reconnect deliberately — it describes what the person at the
+    /// bench asked for, not the handle. A reconnect re-applies it to the new device rather than
+    /// silently reverting to <see cref="RangingMode.Auto"/> behind a status bar still showing
+    /// "Manual". It does not survive a restart: see <see cref="Services.RangingMode"/>.
+    /// </summary>
+    private RangingMode _rangingMode = RangingMode.Auto;
+
     /// <summary>The effective generator config — tone frequencies already snapped, if snapping is on. This is what the device is playing and what status reports.</summary>
     private GeneratorConfig _generatorConfig = GeneratorConfig.Off;
 
@@ -115,6 +123,19 @@ public sealed class DeviceSessionService(
     /// previously snapped frequency would let it drift a bin at a time.
     /// </summary>
     private GeneratorConfig _requestedGeneratorConfig = GeneratorConfig.Off;
+
+    /// <summary>
+    /// The last generator config that actually played something — i.e. with a channel enabled. Null
+    /// until the first one.
+    ///
+    /// <para>Exists for one job: seeding the output range when <see cref="SetRangingModeAsync"/>
+    /// switches into <see cref="RangingMode.Manual"/>. Stop disables both channels, and a silent
+    /// generator correctly derives the <i>smallest</i> output range — the quietest state the DAC
+    /// has, which is what a noise-floor measurement wants. Pinning that is useless: switching to
+    /// Manual while stopped handed the user -12 dBV every time, and the next Run then clipped
+    /// against it. The stimulus that was playing is the honest answer to "what was Auto using".</para>
+    /// </summary>
+    private GeneratorConfig? _lastVoicedGeneratorConfig;
 
     /// <summary>Last sample rate the client told us about, for snapping tones while no stream is running.</summary>
     private double _lastSampleRateHz = 48000.0;
@@ -199,6 +220,25 @@ public sealed class DeviceSessionService(
     public long DroppedBlocks => _device.DroppedBlocks;
 
     public double OutputRangeDbv => _outputRangeDbv;
+
+    /// <summary>
+    /// Who is choosing the two analog ranges — see <see cref="Services.RangingMode"/>. Always
+    /// <see cref="RangingMode.Auto"/> at startup; nothing persists it.
+    /// </summary>
+    public RangingMode RangingMode => _rangingMode;
+
+    /// <summary>
+    /// True when the generator is asking for more than the output range's full scale, which only
+    /// <see cref="RangingMode.Manual"/> can produce — in <see cref="RangingMode.Auto"/> the range is
+    /// derived from this very config, so it is false by construction.
+    ///
+    /// <para>On the status so the status bar can say it. A clipped DAC is not visible anywhere else:
+    /// the generator panel still reads the level that was asked for, the spectrum shows a tone at
+    /// roughly the right frequency, and only the harmonics give it away — which is precisely the
+    /// measurement the user is looking at.</para>
+    /// </summary>
+    public bool OutputRangeClipping =>
+        _info is not null && OutputRangeSelector.Clips(_generatorConfig, _outputRangeDbv);
 
     /// <summary>
     /// The device state to stamp on a diagnostic record, read at the instant the record is analyzed
@@ -352,6 +392,11 @@ public sealed class DeviceSessionService(
         await _device.SetInputRangeAsync(_inputRangeDbv, ct);
         await _device.SetOutputRangeAsync(_outputRangeDbv, ct);
 
+        // Same reasoning one line up, for the third thing the device has its own default for. A
+        // device brought up while the session is in Manual would otherwise arrive autoranging, and
+        // walk the range the user pinned back to wherever it liked.
+        ApplyRangingModeToDevice();
+
         // A fresh handle: whatever was lost before belonged to the previous connection.
         _deviceLost = false;
         _connectionGeneration++;
@@ -447,6 +492,10 @@ public sealed class DeviceSessionService(
         _deviceLost = false;
         _generatorConfig = GeneratorConfig.Off;
         _requestedGeneratorConfig = GeneratorConfig.Off;
+
+        // Cleared with the rest: it seeds a range on *this* analyzer's ladder, and the one being
+        // stood up in its place may not have the same rungs.
+        _lastVoicedGeneratorConfig = null;
     }
 
     /// <summary>
@@ -553,7 +602,8 @@ public sealed class DeviceSessionService(
                 _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks,
                 SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled,
                 SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
-                ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb);
+                ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb,
+                RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
@@ -562,8 +612,20 @@ public sealed class DeviceSessionService(
             _deviceLost, AutoRangeEnabled, AutoRangeStepDownDelayMs, _generatorConfig.SnapToBin, _device.DroppedRxChunks, _device.DroppedBlocks,
             SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled,
             SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
-            ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb);
+            ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb,
+            RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping,
+            Telemetry: ToResponse(_device.Telemetry));
     }
+
+    /// <summary>
+    /// Read straight off the device rather than cached here: it is a last reading taken on the
+    /// liveness ping, and a second copy in this service could only ever be staler than that one.
+    /// </summary>
+    private static DeviceTelemetryResponse? ToResponse(DeviceTelemetry? telemetry)
+        => telemetry is null
+            ? null
+            : new DeviceTelemetryResponse(
+                telemetry.UsbVoltageV, telemetry.UsbCurrentMa, telemetry.TemperatureC);
 
     /// <summary>
     /// Runs on whichever thread noticed the disconnect — the stream's pump thread, or the request
@@ -648,7 +710,94 @@ public sealed class DeviceSessionService(
     /// </summary>
     public bool? AutoRangeEnabled => _device is SimulatedDevice ? null : _device.AutoRangeEnabled;
 
+    /// <summary>
+    /// Switches who chooses the two analog ranges. Going back to <see cref="RangingMode.Auto"/>
+    /// re-derives the output range from whatever the generator is currently playing, so the derived
+    /// value is right again the moment the switch is thrown rather than at the next generator
+    /// change — a pinned −12 dBV range left behind an 18 dBV tone would otherwise keep clipping
+    /// under a status bar that had gone back to saying "Auto". The input range needs no equivalent:
+    /// re-enabling the ranger is enough, since it steps to the right one from the next block.
+    /// </summary>
+    public async Task SetRangingModeAsync(RangingMode mode, CancellationToken ct)
+    {
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var previous = _rangingMode;
+            _rangingMode = mode;
+            if (_info is null)
+                return;
+
+            ApplyRangingModeToDevice();
+
+            if (mode == RangingMode.Manual)
+            {
+                if (previous == RangingMode.Auto)
+                    await SeedManualOutputRangeAsync(ct);
+
+                return;
+            }
+
+            double derived = OutputRangeSelector.Select(_generatorConfig, Capabilities.OutputRangesDbv);
+            if (derived != _outputRangeDbv)
+                await SetOutputRangeCoreAsync(derived, ct);
+        }
+        catch (Qa40xDeviceLostException ex)
+        {
+            throw DeviceLostError(ex);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// What the pinned output range starts at when Manual is first selected: the range Auto was
+    /// using for the last stimulus that actually played.
+    ///
+    /// <para>Not simply "whatever Auto has right now", although that is the value the user sees and
+    /// the one they mean. Stop disables both generator channels, and Auto then derives the
+    /// <i>smallest</i> range, because a silent generator wants the quietest DAC state — correct for
+    /// the noise-floor measurement that rule exists for, and useless to pin. Since Manual is almost
+    /// always selected while stopped, the dropdown opened on -12 dBV every single time, and the
+    /// first Run after it clipped against it.</para>
+    ///
+    /// <para>The input range needs no equivalent: nothing parks it on a silent generator, so it is
+    /// already the range the last measurement ran on.</para>
+    /// </summary>
+    private async Task SeedManualOutputRangeAsync(CancellationToken ct)
+    {
+        // A generator that is playing is its own best answer, and already the range in force.
+        if (_generatorConfig.Left.Enabled || _generatorConfig.Right.Enabled)
+            return;
+
+        // Nothing has ever played: keep what the connect chose (the widest range, maximum headroom),
+        // rather than guessing a narrow one for a stimulus nobody has described yet.
+        if (_lastVoicedGeneratorConfig is not { } voiced)
+            return;
+
+        double seeded = OutputRangeSelector.Select(voiced, Capabilities.OutputRangesDbv);
+        if (seeded != _outputRangeDbv)
+            await SetOutputRangeCoreAsync(seeded, ct);
+    }
+
+    /// <summary>
+    /// Whether the device may step the input range on its own. No endpoint of its own — the API
+    /// expresses this through <see cref="SetRangingModeAsync"/>, because a second control for half
+    /// the mode is a second way to reach a state the status bar then has no word for. Public all the
+    /// same, like <see cref="SetAutoRangeStepDownEnabled"/>: every runner branches on
+    /// <see cref="AutoRangeEnabled"/> to leave a pinned range alone, and their tests set it directly.
+    /// </summary>
     public void SetAutoRangeEnabled(bool enabled) => _device.AutoRangeEnabled = enabled;
+
+    /// <summary>
+    /// The one place the mode reaches the device's own ranger. A plain property write, no await:
+    /// <see cref="IAnalyzerDevice.AutoRangeEnabled"/> is a setting the device reads on its next
+    /// block, not a register exchange, so this is safe to call mid-stream where a write on EP1
+    /// would not be.
+    /// </summary>
+    private void ApplyRangingModeToDevice() => SetAutoRangeEnabled(_rangingMode == RangingMode.Auto);
 
     /// <summary>
     /// How long a peak must stay under-range before hardware autoranging steps to a more sensitive
@@ -875,6 +1024,9 @@ public sealed class DeviceSessionService(
         _lastSampleRateHz = streamConfigHint?.SampleRateHz ?? _streamConfig?.SampleRateHz ?? _lastSampleRateHz;
         _requestedGeneratorConfig = config;
 
+        if (config.Left.Enabled || config.Right.Enabled)
+            _lastVoicedGeneratorConfig = config;
+
         config = SnapTones(config);
         SetMultitoneSpec(config);
 
@@ -891,12 +1043,20 @@ public sealed class DeviceSessionService(
             return;
         }
 
-        // The output range is derived from what the generator is about to play, never chosen by the
-        // user — see OutputRangeSelector. Ordering matters: program a *larger* range before the new
-        // config reaches the DAC (otherwise the louder signal spends a chunk clipping against the old
+        // The output range is derived from what the generator is about to play — see
+        // OutputRangeSelector. Ordering matters: program a *larger* range before the new config
+        // reaches the DAC (otherwise the louder signal spends a chunk clipping against the old
         // smaller full scale), and a *smaller* one after (so the old louder signal isn't the thing
         // being squeezed into it).
-        double nextOutputRangeDbv = OutputRangeSelector.Select(config, Capabilities.OutputRangesDbv);
+        //
+        // Under Manual ranging the range is the user's and this derivation is the whole thing being
+        // switched off, so nextOutputRangeDbv is the range already programmed and both branches
+        // below are no-ops. A level that overruns it is reported on the status (OutputRangeClipping)
+        // rather than quietly corrected: correcting it would make "Manual" mean "manual until the
+        // app disagrees".
+        double nextOutputRangeDbv = _rangingMode == RangingMode.Auto
+            ? OutputRangeSelector.Select(config, Capabilities.OutputRangesDbv)
+            : _outputRangeDbv;
         bool widening = nextOutputRangeDbv > _outputRangeDbv;
 
         if (widening && nextOutputRangeDbv != _outputRangeDbv)

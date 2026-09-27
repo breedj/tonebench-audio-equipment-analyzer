@@ -972,7 +972,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="rootRef" class="relative flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
     <div class="min-h-6 pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Distortion vs {{ sweepXLabel(props.xAxis).toLowerCase() }}</span>

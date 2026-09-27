@@ -21,7 +21,7 @@ const open = ref(props.defaultOpen)
 </script>
 
 <template>
-  <section class="rounded-lg border border-neutral-200 dark:border-neutral-800" :class="padding">
+  <section class="panel-surface rounded-lg border border-neutral-200 dark:border-neutral-800" :class="padding">
     <div class="flex flex-wrap items-center justify-between gap-2" :class="{ 'mb-2': size === 'xs' && open, 'mb-3': size === 'sm' && open }">
       <button type="button" class="flex min-w-0 items-center gap-2 text-left" @click="open = !open">
         <h2

@@ -20,7 +20,24 @@ import CollapsibleSection from './CollapsibleSection.vue'
  * Fits the *same* `ComplexPoint[]` the chart draws — windowed, sign-corrected, delay-corrected — so
  * the table can never describe a curve other than the one on screen.
  */
-const props = defineProps<{ curve: ComplexPoint[] }>()
+const props = defineProps<{
+  curve: ComplexPoint[]
+  /** Whether the chirp's removed delay has been put back — the display panel's own checkbox. */
+  restoreDelay: boolean
+  /** How much delay the estimator removed, or null when it removed none (no measured reference). */
+  latencySamples: number | null
+}>()
+
+/**
+ * The delay the fit is being asked to swallow, or null when there is none to worry about.
+ *
+ * Only a chirp run against a measured reference reports a latency at all, and there the rotation is
+ * the DUT's own delay rather than the record's arbitrary start point — so a non-null value with the
+ * box unticked is always worth saying out loud.
+ */
+const delayStillRemoved = computed(() =>
+  !props.restoreDelay && props.latencySamples !== null ? props.latencySamples : null,
+)
 
 /** The denominator order — how many poles the model has. */
 const order = defineModel<number>('order', { required: true })
@@ -106,7 +123,9 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
     </div>
 
     <template v-else>
-      <div class="flex flex-col gap-1 text-xs">
+      <!-- Capped: this panel moved into the chart column on 2026-09-27, and a `justify-between` row
+           in a 600 px box puts "Poles" and its spinner at opposite ends of the screen. -->
+      <div class="flex max-w-[14rem] flex-col gap-1 text-xs">
         <label class="flex items-center gap-1.5">
           <input v-model="autoOrder" type="checkbox" />
           <span title="Takes the lowest order that fits about as well as the best one tried, rather than the lowest error — which is almost always the highest order.">
@@ -138,7 +157,10 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
         <span v-else class="text-neutral-500 dark:text-neutral-400">Order {{ activeOrder }} (poles and zeros)</span>
       </div>
 
-      <table class="w-full text-left text-[11px] whitespace-nowrap">
+      <!-- Content-sized, like the Measurements panel's: four short columns spread over the chart
+           column's width read as a table with its cells missing. `self-start` is the part that does
+           it; see that panel for why dropping `w-full` on its own is not enough. -->
+      <table class="self-start text-left text-[11px] whitespace-nowrap">
         <thead class="text-neutral-500 dark:text-neutral-400">
           <tr>
             <th class="font-normal"></th>
@@ -181,6 +203,17 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
       <!-- The residual is what makes the table falsifiable. A pole list from a model that does not
            match the measurement is a description of nothing, so it is said plainly rather than left
            for the reader to work out from a number. -->
+      <!-- First, because it explains most of the others. A chirp run whose removed delay is still
+           out hands the fit a phase lead that is not a rational function of s, and the fit spends
+           poles imitating it: the order climbs and a pair usually lands in the right half-plane.
+           The |H(s)| surface said this from the start and the map did not, which is exactly how a
+           2 kHz Butterworth came to be read as an order-7 model with a right-half-plane pair. -->
+      <p v-if="delayStillRemoved" class="text-[11px] text-amber-600 dark:text-amber-400">
+        The chirp's removed delay ({{ delayStillRemoved.toFixed(1) }} samples) is still out, so these
+        roots are partly an artefact of it — expect too high an order and a right-half-plane pair.
+        Tick <strong>Restore removed delay</strong> before reading them.
+      </p>
+
       <p v-if="fit.rmsErrorDb > POOR_FIT_DB" class="text-[11px] text-amber-600 dark:text-amber-400">
         The model does not follow the measurement ({{ fit.rmsErrorDb.toFixed(2) }} dB rms). Treat these
         values as meaningless until the fitted curve tracks the measured one — raise the order, or

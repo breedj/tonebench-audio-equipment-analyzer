@@ -206,6 +206,7 @@ export async function renderView(
             traces,
             overlays: overlayEntries,
             mode: display.surfaceMode,
+            thickLines: display.thickLines,
             scale: display.surfaceScale,
             surfaceTopDb: display.surfaceTopDb,
             surfaceBottomDb: display.surfaceBottomDb,

@@ -75,8 +75,20 @@ public static class DeviceEndpoints
             }
         });
 
-        group.MapPost("/output-range", async (OutputRangeRequest request, DeviceSessionService session, CancellationToken ct) =>
+        group.MapPost("/output-range", async (
+            OutputRangeRequest request, DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
         {
+            // Refused under Auto rather than accepted and forgotten: the range would survive exactly
+            // until the next generator change, which ConfigureGeneratorAsync re-derives it on. A
+            // setting that silently reverts within a second is worse than one that says no.
+            if (session.RangingMode == RangingMode.Auto)
+                return Results.Conflict(
+                    "The output range is derived from the generator amplitude while ranging is Auto. Switch to Manual to set it.");
+
+            // Same rule and same reasoning as /input-range: a measurement owns both ranges while it runs.
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict("A measurement is running and controls the output range; stop it first.");
+
             try
             {
                 await session.SetOutputRangeAsync(request.Dbv, ct);
@@ -92,13 +104,27 @@ public static class DeviceEndpoints
             }
         });
 
-        group.MapPost("/auto-range", (AutoRangeRequest request, DeviceSessionService session) =>
+        // Replaces the old /auto-range, which spoke only for the input attenuator. Both ranges move
+        // together now (see RangingMode), and two endpoints for one mode would be two ways to reach
+        // half a state each.
+        group.MapPost("/ranging", async (
+            RangingModeRequest request, DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
         {
-            if (session.AutoRangeEnabled is null)
-                return Results.BadRequest("The connected device has no input autoranging.");
+            if (!EnumParsing.TryParse(request.Mode, RangingMode.Auto, out RangingMode mode, out var error))
+                return Results.BadRequest(error);
 
-            session.SetAutoRangeEnabled(request.Enabled);
-            return Results.Ok(session.GetStatus());
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict("A measurement is running and controls the ranges; stop it first.");
+
+            try
+            {
+                await session.SetRangingModeAsync(mode, ct);
+                return Results.Ok(session.GetStatus());
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
         });
 
         group.MapPost("/auto-range-step-down-delay", (AutoRangeStepDownDelayRequest request, DeviceSessionService session) =>
@@ -265,7 +291,40 @@ public sealed record DeviceStatusResponse(
     /// </summary>
     double ExternalGainLeftDb = 0.0,
     /// <summary>The same for the right input.</summary>
-    double ExternalGainRightDb = 0.0);
+    double ExternalGainRightDb = 0.0,
+    /// <summary>
+    /// Who is choosing the two analog ranges — "Auto" or "Manual", see
+    /// <see cref="Services.RangingMode"/>. Not null-when-unavailable like
+    /// <see cref="AutoRangeEnabled"/>: the simulator has no hardware ranger but it does have both
+    /// attenuators, so the mode means the same thing on either analyzer.
+    /// </summary>
+    string RangingMode = "Auto",
+    /// <summary>
+    /// The generator is asking for more than the output range's full scale, so what reaches the DUT
+    /// is clipped. Only reachable under manual ranging — see
+    /// <see cref="Services.DeviceSessionService.OutputRangeClipping"/>.
+    /// </summary>
+    bool OutputRangeClipping = false,
+    /// <summary>
+    /// The analyzer's housekeeping sensors, or null on a device that has none (the simulator) or
+    /// before the first reading has landed — the UI hides the readout in that case rather than
+    /// showing zeroes. A cached last reading: it is refreshed on the same throttled liveness
+    /// exchange this response already triggers, and deliberately not while a stream is running, so
+    /// during an acquisition it holds whatever it last read. See
+    /// <see cref="Qa403.Device.IAnalyzerDevice.Telemetry"/>.
+    /// </summary>
+    DeviceTelemetryResponse? Telemetry = null);
+
+/// <summary>
+/// Wire shape of <see cref="Qa403.Device.DeviceTelemetry"/>: the figures QuantAsylum's own software
+/// shows beside the firmware version, less the isolated-rail current, which a QA403 does not report
+/// (see <see cref="Qa403.Device.Hardware.Qa40xRegisters.TelemetryIsoCurrent"/>). Units are settled
+/// here — volts, milliamps and degrees Celsius — so the client formats rather than scales.
+/// </summary>
+public sealed record DeviceTelemetryResponse(
+    double UsbVoltageV,
+    double UsbCurrentMa,
+    double TemperatureC);
 
 /// <summary>Wire shape matches the request-side <c>GeneratorToneRequest</c> in GeneratorEndpoints.cs (freqHz/ampDbv), not the internal <c>Qa403.Device.GeneratorTone</c>'s property names.</summary>
 public sealed record GeneratorToneResponse(double FreqHz, double AmpDbv);
@@ -300,7 +359,8 @@ public sealed record InputRangeRequest(double Dbv);
 
 public sealed record OutputRangeRequest(double Dbv);
 
-public sealed record AutoRangeRequest(bool Enabled);
+/// <param name="Mode">"Auto" or "Manual" — see <see cref="Qa403.App.Services.RangingMode"/>.</param>
+public sealed record RangingModeRequest(string? Mode);
 
 public sealed record AutoRangeStepDownDelayRequest(double DelayMs);
 

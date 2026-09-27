@@ -66,6 +66,27 @@ public static class OutputRangeSelector
     }
 
     /// <summary>
+    /// Whether <paramref name="config"/> would clip against a range of <paramref name="rangeDbv"/>
+    /// — i.e. whether the DAC is being asked for more than that range's full scale.
+    ///
+    /// <para>Separate from <see cref="Select"/>, and deliberately not "Select returned something
+    /// bigger": Select keeps <see cref="HeadroomDb"/> in hand, so a range only 1 dB above the peak
+    /// is one Select would not have chosen and is also not clipping. This is the question a
+    /// <see cref="Qa403.App.Services.RangingMode.Manual"/> output range has to be asked — the user
+    /// picked it, so the app's own margin is not theirs to enforce, but silent clipping is worth
+    /// saying out loud. Exact equality does not clip: a tone at precisely a range's full scale is
+    /// the common case (the ranges are 10 dB apart and users pick round numbers), and the
+    /// calibration factor that can push it over is what <see cref="HeadroomDb"/> covers.</para>
+    /// </summary>
+    public static bool Clips(GeneratorConfig config, double rangeDbv)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        double requiredPeakV = Math.Max(RequiredPeakVolts(config.Left), RequiredPeakVolts(config.Right));
+        return requiredPeakV > PeakVolts(rangeDbv) * (1.0 + 1e-9);
+    }
+
+    /// <summary>
     /// Worst-case instantaneous peak, in volts, that one channel's generator can produce. Zero for a
     /// disabled or Off channel — which is why a silent generator selects the *smallest* range, the
     /// quietest state the DAC has.

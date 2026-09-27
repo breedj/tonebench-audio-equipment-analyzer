@@ -147,13 +147,23 @@ const { showPage } = useManual()
       </p>
     </div>
 
-    <h2>Ranges are automatic</h2>
+    <h2>Ranges are automatic, until you say otherwise</h2>
     <p>
       The two figures at the right of the status bar — <strong>Attenuation</strong> (input range)
-      and <strong>Output range</strong> — are readouts, not controls. The input range tracks the
-      signal automatically, and the output range is derived from the generator amplitude, because it
-      is an analog attenuator whose setting sets the noise floor of the DAC. Leaving it wide for a
+      and <strong>Output range</strong> — are readouts while <strong>Ranging</strong> is on
+      <strong>Auto</strong>, which is how the app starts and what every measurement wants. The input
+      range tracks the signal, and the output range is derived from the generator amplitude, because
+      it is an analog attenuator whose setting sets the noise floor of the DAC. Leaving it wide for a
       quiet tone would put that noise into every measurement, so the app never does.
+    </p>
+    <p>
+      Switch Ranging to <strong>Manual</strong> and both become dropdowns, pinned until you change
+      them. That is worth doing for one job: comparing a reading against another analyzer, or
+      against an earlier measurement of your own. The input range in particular changes what you
+      measure — the analyzer's own distortion rises as its ADC runs closer to full scale — so two
+      programs that choose different ranges for the same signal report different harmonics and are
+      both right. A measurement run is refused while Manual is selected, because every sweep has to
+      choose its own ranges as it goes; set Ranging back to Auto first.
     </p>
 
     <h2>Where to go next</h2>

@@ -123,6 +123,11 @@ const SURFACE_MODES: { value: SurfaceModeName; label: string; title: string }[] 
     label: 'Relief',
     title: 'The same field as an oblique surface, where a pole is a spike. Evocative rather than readable — the map is the one to take a number off.',
   },
+  {
+    value: 'Slice',
+    label: 'Slice',
+    title: 'The jω axis of the same surface: |H| against frequency on linear axes, with the measurement drawn over it. The one line where the model and the measurement are the same thing, so it is where a bad fit shows.',
+  },
 ]
 const { overlays } = useMeasurements()
 
@@ -405,133 +410,8 @@ watch(running, (isRunning, wasRunning) => {
 </script>
 
 <template>
-  <!-- The axis windows are their own sections ahead of Display, laid out the way the FFT screen's
-       dBV range / Frequency range are (ChartDisplayPanel.vue): label over a full-width field,
-       Autofit under. Multi-root, so they flow into MeasurementLayout's aside grid one by one like
-       SweepDisplayPanel's. -->
-  <CollapsibleSection v-if="bodeShowing" :title="view === 'Dbv' ? 'dBV range' : 'Gain range'" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      Top
-      <input
-        :value="yTopDb"
-        type="number"
-        :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        @change="onTopDbChange"
-      />
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      Bottom
-      <input
-        :value="yBottomDb"
-        type="number"
-        :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        @change="onBottomDbChange"
-      />
-    </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      @click="autofitDb"
-    >
-      Autofit
-    </button>
-  </CollapsibleSection>
-
-  <CollapsibleSection title="Frequency range (Hz)" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      From
-      <select
-        v-model.number="xFromHz"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-      >
-        <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      To
-      <select
-        v-model.number="xToHz"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-      >
-        <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      @click="autofitX"
-    >
-      Autofit
-    </button>
-  </CollapsibleSection>
-
-  <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
-       shown-but-inert, since the axis it configures is not drawn otherwise. -->
-  <CollapsibleSection v-if="bodeShowing && showPhase && phaseAvailable" title="Phase range (°)" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      Top
-      <input
-        :value="phaseTopDeg"
-        type="number"
-        :step="PHASE_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        @change="onTopPhaseChange"
-      />
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      Bottom
-      <input
-        :value="phaseBottomDeg"
-        type="number"
-        :step="PHASE_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        @change="onBottomPhaseChange"
-      />
-    </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
-      @click="autofitPhase"
-    >
-      Autofit
-    </button>
-  </CollapsibleSection>
-
-  <!-- Same shape as the phase range, in the unit the axis is reading in. -->
-  <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      Top
-      <input
-        :value="usToUnit(delayTopUs, delayUnit)"
-        type="number"
-        :step="usToUnit(delayStepUs, delayUnit)"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        @change="onTopDelayChange"
-      />
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      Bottom
-      <input
-        :value="usToUnit(delayBottomUs, delayUnit)"
-        type="number"
-        :step="usToUnit(delayStepUs, delayUnit)"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-        @change="onBottomDelayChange"
-      />
-    </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits the window to the delay curve inside the plotted frequency range, in whichever unit its size calls for."
-      @click="autofitDelay"
-    >
-      Autofit
-    </button>
-  </CollapsibleSection>
-
+  <!-- Display first: it is the section a reader reaches for on every visit, and the axis
+       ranges below it are set once and then left alone. Joost's request, 2026-09-27. -->
   <CollapsibleSection title="Display">
     <!-- The toggle groups here (Projection, Radius, View) highlight the selected option the way the
          sweep screens' Units toggle does, black on white: one look for "which of these is on" across
@@ -675,6 +555,10 @@ watch(running, (isRunning, wasRunning) => {
           {{ option.label }}
         </button>
       </div>
+      <!-- The colour window, the palette and the contours describe a field over the plane. The slice
+           is a line plot on its own axes and has none of them, so they are hidden rather than left
+           sitting there doing nothing. -->
+      <template v-if="surfaceMode !== 'Slice'">
       <label class="flex items-center justify-between gap-2">
         Top (dB)
         <input
@@ -710,6 +594,7 @@ watch(running, (isRunning, wasRunning) => {
           Contours
         </span>
       </label>
+      </template>
     </div>
 
     <!-- Only the chirp removes a delay, so only the chirp can put one back. -->
@@ -838,4 +723,132 @@ watch(running, (isRunning, wasRunning) => {
       </label>
     </div>
   </CollapsibleSection>
+
+  <!-- The axis windows are their own sections ahead of Display, laid out the way the FFT screen's
+       dBV range / Frequency range are (ChartDisplayPanel.vue): label over a full-width field,
+       Autofit under. Multi-root, so they flow into MeasurementLayout's aside grid one by one like
+       SweepDisplayPanel's. -->
+  <CollapsibleSection v-if="bodeShowing" :title="view === 'Dbv' ? 'dBV range' : 'Gain range'" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      Top
+      <input
+        :value="yTopDb"
+        type="number"
+        :step="DB_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onTopDbChange"
+      />
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      Bottom
+      <input
+        :value="yBottomDb"
+        type="number"
+        :step="DB_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onBottomDbChange"
+      />
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      @click="autofitDb"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Frequency range (Hz)" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      From
+      <select
+        v-model.number="xFromHz"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+      </select>
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      To
+      <select
+        v-model.number="xToHz"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+      >
+        <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+      </select>
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      @click="autofitX"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
+       shown-but-inert, since the axis it configures is not drawn otherwise. -->
+  <CollapsibleSection v-if="bodeShowing && showPhase && phaseAvailable" title="Phase range (°)" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      Top
+      <input
+        :value="phaseTopDeg"
+        type="number"
+        :step="PHASE_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onTopPhaseChange"
+      />
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      Bottom
+      <input
+        :value="phaseBottomDeg"
+        type="number"
+        :step="PHASE_STEP"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onBottomPhaseChange"
+      />
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
+      @click="autofitPhase"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <!-- Same shape as the phase range, in the unit the axis is reading in. -->
+  <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
+    <label class="flex flex-col gap-1 text-xs">
+      Top
+      <input
+        :value="usToUnit(delayTopUs, delayUnit)"
+        type="number"
+        :step="usToUnit(delayStepUs, delayUnit)"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onTopDelayChange"
+      />
+    </label>
+    <label class="flex flex-col gap-1 text-xs">
+      Bottom
+      <input
+        :value="usToUnit(delayBottomUs, delayUnit)"
+        type="number"
+        :step="usToUnit(delayStepUs, delayUnit)"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        @change="onBottomDelayChange"
+      />
+    </label>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+      title="Fits the window to the delay curve inside the plotted frequency range, in whichever unit its size calls for."
+      @click="autofitDelay"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
 </template>

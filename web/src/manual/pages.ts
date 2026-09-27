@@ -546,6 +546,13 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/views/PoleZeroViewPage.vue')),
   },
   {
+    id: 'view-s-plane',
+    title: 'The |H(s)| surface',
+    summary: 'The fitted model’s magnitude over the whole s-plane — and the formula behind it.',
+    group: 'Reference',
+    component: manualPage(() => import('./pages/views/SPlaneViewPage.vue')),
+  },
+  {
     id: 'saving',
     title: 'Projects, saving and history',
     summary: 'What gets stored where, overlays, CSV export, screenshots and PDF reports, deleting.',

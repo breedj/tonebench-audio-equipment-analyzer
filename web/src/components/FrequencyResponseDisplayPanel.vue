@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import type { NyquistRadiusName, ResponseDelayView, ResponseProjection, ResponseView } from '../api/client'
+import type {
+  DecayPalette,
+  NyquistRadiusName,
+  ResponseDelayView,
+  ResponseProjection,
+  ResponseView,
+  SPlaneScaleName,
+  SurfaceModeName,
+} from '../api/client'
+import { PALETTE_NAMES } from '../measurements/decay'
 import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
 import { useMeasurements, type OverlayEntry } from '../composables/useMeasurements'
 import { autofitRange } from '../measurements/autofitRange'
@@ -29,6 +38,12 @@ const nyquistRadius = defineModel<NyquistRadiusName>('nyquistRadius', { required
 const nyquistRadiusFloorDb = defineModel<number>('nyquistRadiusFloorDb', { required: true })
 const showFittedModel = defineModel<boolean>('showFittedModel', { required: true })
 const hideOutOfBandRoots = defineModel<boolean>('hideOutOfBandRoots', { required: true })
+const surfaceScale = defineModel<SPlaneScaleName>('surfaceScale', { required: true })
+const surfaceMode = defineModel<SurfaceModeName>('surfaceMode', { required: true })
+const surfaceTopDb = defineModel<number>('surfaceTopDb', { required: true })
+const surfaceBottomDb = defineModel<number>('surfaceBottomDb', { required: true })
+const surfacePalette = defineModel<DecayPalette>('surfacePalette', { required: true })
+const surfaceContours = defineModel<boolean>('surfaceContours', { required: true })
 const restoreDelay = defineModel<boolean>('restoreDelay', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
@@ -70,7 +85,7 @@ const complexAvailable = computed(
 
 const projectionHint = computed(() =>
   complexAvailable.value
-    ? 'Bode is magnitude and phase against frequency; Nyquist and Nichols are the same data as one complex curve; Poles/zeros is the fitted model’s roots in the s-plane.'
+    ? 'Bode is magnitude and phase against frequency; Nyquist and Nichols are the same data as one complex curve; Poles/zeros is the fitted model’s roots in the s-plane, and |H(s)| is that same model’s magnitude over the whole plane.'
     : phaseKind.value === 'ChannelDifference'
       ? 'This run measures gain against the generator but phase against the right input, so it has no single complex response. Make the right channel the reference.'
       : 'This run measured no phase. Turn the right-channel generator on and make it the reference.',
@@ -84,6 +99,30 @@ const PROJECTIONS: { value: ResponseProjection; label: string }[] = [
   { value: 'Nyquist', label: 'Nyquist' },
   { value: 'Nichols', label: 'Nichols' },
   { value: 'PoleZero', label: 'Poles/zeros' },
+  { value: 'SPlane', label: '|H(s)|' },
+]
+
+/** The two s-plane views, which share the radius scale. */
+const sPlaneShowing = computed(() => projection.value === 'PoleZero' || projection.value === 'SPlane')
+/** The surface's own controls. */
+const surfaceShowing = computed(() => projection.value === 'SPlane')
+
+const S_PLANE_SCALES: { value: SPlaneScaleName; label: string }[] = [
+  { value: 'Linear', label: 'Linear' },
+  { value: 'LogModulus', label: 'Log' },
+]
+
+const SURFACE_MODES: { value: SurfaceModeName; label: string; title: string }[] = [
+  {
+    value: 'Heatmap',
+    label: 'Map',
+    title: 'The plane seen from above, as colour with iso-dB contours. Levels are readable off the key.',
+  },
+  {
+    value: 'Relief',
+    label: 'Relief',
+    title: 'The same field as an oblique surface, where a pole is a spike. Evocative rather than readable — the map is the one to take a number off.',
+  },
 ]
 const { overlays } = useMeasurements()
 
@@ -499,20 +538,27 @@ watch(running, (isRunning, wasRunning) => {
          every display rail. -->
     <div class="flex flex-col gap-1 text-xs">
       <span class="text-neutral-500 dark:text-neutral-400">Projection</span>
+      <!-- Two rows of a six-column grid, not one flex row: five labels need 278 px and the rail is
+           256, so a single row put |H(s)| behind `overflow-hidden` and the view looked as though it
+           had never shipped. Three spanning two columns over two spanning three fills both rows
+           exactly, with no empty cell to explain. -->
       <div
-        class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700"
+        class="grid grid-cols-6 overflow-hidden rounded border border-neutral-300 dark:border-neutral-700"
         :title="projectionHint"
       >
         <button
-          v-for="option in PROJECTIONS"
+          v-for="(option, index) in PROJECTIONS"
           :key="option.value"
           type="button"
-          class="flex-1 border-l border-neutral-300 px-2 py-1 first:border-l-0 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700"
-          :class="
+          class="border-neutral-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700"
+          :class="[
+            index < 3 ? 'col-span-2' : 'col-span-3',
+            index === 0 || index === 3 ? '' : 'border-l',
+            index >= 3 ? 'border-t' : '',
             projection === option.value
               ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800',
+          ]"
           :disabled="option.value !== 'Bode' && !complexAvailable"
           @click="projection = option.value"
         >
@@ -565,22 +611,106 @@ watch(running, (isRunning, wasRunning) => {
       </label>
     </div>
 
-    <!-- The contour views only: on the map the fit is the content rather than an overlay on it. -->
-    <label v-if="!bodeShowing && projection !== 'PoleZero'" class="flex items-center gap-1.5 text-xs">
+    <!-- The contour views only: on both s-plane views the fit *is* the content rather than an overlay
+         on a measured curve, so there is nothing for this to turn off. -->
+    <label v-if="!bodeShowing && !sPlaneShowing" class="flex items-center gap-1.5 text-xs">
       <input v-model="showFittedModel" type="checkbox" />
       <span title="Draws the Poles and zeros panel's rational model over the measurement, dashed. It is the check on that panel — a root list whose model does not follow the measured contour describes nothing — and it is worth hiding once you have looked, since a poor fit can wander far across the plot.">
         Show fitted model
       </span>
     </label>
 
-    <!-- The map only: a root outside the measured band is the fit's extrapolation, and since the
+    <!-- Both s-plane views: a root outside the measured band is the fit's extrapolation, and since the
          window is fitted to the roots, one of them squeezes every real one into the origin. -->
-    <label v-if="!bodeShowing && projection === 'PoleZero'" class="flex items-center gap-1.5 text-xs">
+    <label v-if="!bodeShowing && sPlaneShowing" class="flex items-center gap-1.5 text-xs">
       <input v-model="hideOutOfBandRoots" type="checkbox" />
       <span title="Leaves the roots the fit placed outside the swept band off the plot, and rescales it to what is left. They are extrapolation — the sweep constrains the response between its endpoints and says nothing beyond them. The fit itself is unchanged, and the Poles and zeros panel goes on listing them, flagged.">
         Remove out of band
       </span>
     </label>
+
+    <!-- Both s-plane views share the radius scale, so a root is in the same place on each. -->
+    <div v-if="!bodeShowing && sPlaneShowing" class="flex flex-col gap-1 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">s-plane radius</span>
+      <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+        <button
+          v-for="option in S_PLANE_SCALES"
+          :key="option.value"
+          type="button"
+          class="flex-1 border-l border-neutral-300 px-2 py-1 first:border-l-0 dark:border-neutral-700"
+          :class="
+            surfaceScale === option.value
+              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
+          "
+          :title="
+            option.value === 'Linear'
+              ? 'The plane as a textbook draws it. A DUT whose roots span decades puts its lowest one inside the origin marker.'
+              : 'Scales |s| logarithmically and leaves the angle alone, so every decade of roots is visible and ζ still reads as an angle. The plane is distorted; nothing about a root changes.'
+          "
+          @click="surfaceScale = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+    </div>
+
+    <!-- The |H(s)| surface's own controls. -->
+    <div v-if="!bodeShowing && surfaceShowing" class="flex flex-col gap-1 text-xs">
+      <span class="text-neutral-500 dark:text-neutral-400">Surface</span>
+      <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+        <button
+          v-for="option in SURFACE_MODES"
+          :key="option.value"
+          type="button"
+          class="flex-1 border-l border-neutral-300 px-2 py-1 first:border-l-0 dark:border-neutral-700"
+          :class="
+            surfaceMode === option.value
+              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
+          "
+          :title="option.title"
+          @click="surfaceMode = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+      <label class="flex items-center justify-between gap-2">
+        Top (dB)
+        <input
+          v-model.number="surfaceTopDb"
+          type="number"
+          step="10"
+          title="How far above the passband level the colour ramp reaches. A pole runs to infinity, so this is where it saturates rather than a level anything reaches."
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        />
+      </label>
+      <label class="flex items-center justify-between gap-2">
+        Bottom (dB)
+        <input
+          v-model.number="surfaceBottomDb"
+          type="number"
+          step="10"
+          title="How far below the passband level the colour ramp reaches. Both are offsets from the passband, so the window means the same thing on a 0 dB filter and a +26 dB amplifier."
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        />
+      </label>
+      <label class="flex items-center justify-between gap-2">
+        Palette
+        <select
+          v-model="surfacePalette"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-1.5">
+        <input v-model="surfaceContours" type="checkbox" />
+        <span title="Iso-dB lines from the passband level, labelled on the colour key. They are what makes the surface quantitative rather than decorative, and what keeps it readable once a report has desaturated the colours.">
+          Contours
+        </span>
+      </label>
+    </div>
 
     <!-- Only the chirp removes a delay, so only the chirp can put one back. -->
     <label v-if="!bodeShowing && latencySamples !== null" class="flex items-center gap-1.5 text-xs">

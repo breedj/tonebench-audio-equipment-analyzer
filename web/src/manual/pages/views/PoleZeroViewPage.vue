@@ -71,6 +71,13 @@ const markers: ManualMarker[] = [{ x: 0, color: 'grey' }]
       and no gain at all.
     </p>
 
+    <p>
+      The <button type="button" class="manual-link" @click="showPage('view-s-plane')">|H(s)| surface</button>
+      is this same plane with the model's <em>magnitude</em> drawn across it, so the roots below
+      appear as the hills and hollows they are. It shares this view's <strong>s-plane radius</strong>
+      setting, and its panel writes the model out as a formula you can copy.
+    </p>
+
     <h2>What it plots</h2>
     <p>
       The axes are in <strong>hertz</strong>: σ/2π across and jω/2π up, so a pole at 2 kHz sits

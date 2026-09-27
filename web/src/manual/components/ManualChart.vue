@@ -21,8 +21,10 @@ export interface ManualSeries {
   /**
    * `stem` draws a vertical line from the bottom of the plot to each point — a tone in a spectrum.
    * `points` draws a dot per point and no line — a stepped sweep's readings.
+   * `segments` reads the points in pairs, each an unconnected line — a set of contours, which
+   * marching squares emits unjoined and which would otherwise need one series per segment.
    */
-  kind?: 'line' | 'stem' | 'points'
+  kind?: 'line' | 'stem' | 'points' | 'segments'
   dashed?: boolean
 }
 
@@ -264,6 +266,24 @@ const clipId = `manual-chart-clip-${Math.random().toString(36).slice(2, 9)}`
           <g v-else-if="s.kind === 'points'" :class="colorClass(s.color, i)" class="manual-chart-points">
             <template v-for="([x, y], j) in s.points" :key="j">
               <circle v-if="inRange(x, y, s.axis ?? 'y')" :cx="xPos(x)" :cy="yPos(y, s.axis ?? 'y')" r="2.4" />
+            </template>
+          </g>
+          <!-- `segments` reads the points in PAIRS, each an unconnected line. One series can then
+               carry a whole contour set, which is otherwise hundreds of series: marching squares
+               emits unjoined segments, and joining them buys nothing a manual figure needs. -->
+          <g
+            v-else-if="s.kind === 'segments'"
+            :class="[colorClass(s.color, i), { dashed: s.dashed }]"
+            class="manual-chart-line"
+            fill="none"
+          >
+            <template v-for="(_, j) in Math.floor(s.points.length / 2)" :key="j">
+              <line
+                :x1="xPos(s.points[j * 2]![0])"
+                :y1="yPos(s.points[j * 2]![1], s.axis ?? 'y')"
+                :x2="xPos(s.points[j * 2 + 1]![0])"
+                :y2="yPos(s.points[j * 2 + 1]![1], s.axis ?? 'y')"
+              />
             </template>
           </g>
           <path v-else :class="[colorClass(s.color, i), { dashed: s.dashed }]" class="manual-chart-line" :d="linePath(s)" />

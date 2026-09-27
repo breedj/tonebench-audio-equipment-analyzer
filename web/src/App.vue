@@ -86,8 +86,10 @@ import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
 import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
 import LoopbackReferenceDialog from './components/LoopbackReferenceDialog.vue'
 import ResponsePolarChart from './components/ResponsePolarChart.vue'
+import ResponseSPlaneChart from './components/ResponseSPlaneChart.vue'
 import ResponseStabilityPanel from './components/ResponseStabilityPanel.vue'
 import ResponsePoleZeroPanel from './components/ResponsePoleZeroPanel.vue'
+import ResponseFormulaPanel from './components/ResponseFormulaPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import ReportDialog from './components/ReportDialog.vue'
 import ProjectReportDialog from './components/ProjectReportDialog.vue'
@@ -921,6 +923,15 @@ const responseInvertLoopSign = ref(false)
 const responseRestoreDelay = ref(false)
 const responseShowFittedModel = ref(DEFAULT_RESPONSE_DISPLAY.showFittedModel)
 const responseHideOutOfBandRoots = ref(DEFAULT_RESPONSE_DISPLAY.hideOutOfBandRoots)
+// Linear stays the default s-plane for the same reason Linear is the default Nyquist radius: it is
+// the plane a reader expects, and switching the scale must change where a root is drawn and nothing
+// about what it is.
+const responseSurfaceScale = ref<import('./api/client').SPlaneScaleName>(DEFAULT_RESPONSE_DISPLAY.surfaceScale)
+const responseSurfaceMode = ref<import('./api/client').SurfaceModeName>(DEFAULT_RESPONSE_DISPLAY.surfaceMode)
+const responseSurfaceTopDb = ref(DEFAULT_RESPONSE_DISPLAY.surfaceTopDb)
+const responseSurfaceBottomDb = ref(DEFAULT_RESPONSE_DISPLAY.surfaceBottomDb)
+const responseSurfacePalette = ref<import('./api/client').DecayPalette>(DEFAULT_RESPONSE_DISPLAY.surfacePalette)
+const responseSurfaceContours = ref(DEFAULT_RESPONSE_DISPLAY.surfaceContours)
 
 /**
  * Whether the measurement on screen has a complex response at all.
@@ -959,7 +970,16 @@ const activeResponseProjection = computed(() =>
 )
 
 const responsePolarChart = ref<InstanceType<typeof ResponsePolarChart> | null>(null)
+const responseSPlaneChart = ref<InstanceType<typeof ResponseSPlaneChart> | null>(null)
 const responsePoleZeroPanel = ref<InstanceType<typeof ResponsePoleZeroPanel> | null>(null)
+
+/**
+ * The s-plane chart on screen, whichever of the two it is.
+ *
+ * `ResponsePoleZeroPanel` takes its curve from the mounted chart rather than from a store, so this is
+ * what keeps the table describing the same points the picture draws — see `useResponseComplexCurve`.
+ */
+const responseComplexChart = computed(() => responsePolarChart.value ?? responseSPlaneChart.value)
 
 // Fit settings. Persisted into params_json since 2026-09-24, at Joost's request. They were left out
 // originally on the grounds that they describe an *analysis* rather than how the screen is set up,
@@ -1004,6 +1024,12 @@ function currentResponseDisplay(): ResponseDisplay {
     restoreDelay: responseRestoreDelay.value,
     showFittedModel: responseShowFittedModel.value,
     hideOutOfBandRoots: responseHideOutOfBandRoots.value,
+    surfaceScale: responseSurfaceScale.value,
+    surfaceMode: responseSurfaceMode.value,
+    surfaceTopDb: responseSurfaceTopDb.value,
+    surfaceBottomDb: responseSurfaceBottomDb.value,
+    surfacePalette: responseSurfacePalette.value,
+    surfaceContours: responseSurfaceContours.value,
   }
 }
 
@@ -1050,6 +1076,12 @@ function applyStoredResponseDisplay(paramsJson: string) {
   responseNyquistRadiusFloorDb.value = display.nyquistRadiusFloorDb
   responseShowFittedModel.value = display.showFittedModel
   responseHideOutOfBandRoots.value = display.hideOutOfBandRoots
+  responseSurfaceScale.value = display.surfaceScale
+  responseSurfaceMode.value = display.surfaceMode
+  responseSurfaceTopDb.value = display.surfaceTopDb
+  responseSurfaceBottomDb.value = display.surfaceBottomDb
+  responseSurfacePalette.value = display.surfacePalette
+  responseSurfaceContours.value = display.surfaceContours
   responseInvertLoopSign.value = display.invertLoopSign
   responseRestoreDelay.value = display.restoreDelay
   if (typeof stored.chartAutofitOnDone === 'boolean') responseAutofitOnDone.value = stored.chartAutofitOnDone
@@ -1913,7 +1945,10 @@ const waterfallChart = ref<InstanceType<typeof WaterfallChart> | null>(null)
 
 /** The chart on screen — whichever view or projection the screen is showing. */
 function chartOnScreen() {
-  if (isFrequencyResponse.value) return activeResponseProjection.value === 'Bode' ? responseChart.value : responsePolarChart.value
+  if (isFrequencyResponse.value) {
+    if (activeResponseProjection.value === 'Bode') return responseChart.value
+    return activeResponseProjection.value === 'SPlane' ? responseSPlaneChart.value : responsePolarChart.value
+  }
   if (isCrosstalk.value) return responseChart.value
   if (isOutputImpedance.value) return outputImpedanceChart.value
   if (isSweepKind.value) return sweepChart.value
@@ -2679,6 +2714,12 @@ function buildTypeParamsJson(): string | undefined {
       chartRestoreDelay: responseRestoreDelay.value,
       chartShowFittedModel: responseShowFittedModel.value,
       chartHideOutOfBandRoots: responseHideOutOfBandRoots.value,
+      chartSurfaceScale: responseSurfaceScale.value,
+      chartSurfaceMode: responseSurfaceMode.value,
+      chartSurfaceTopDb: responseSurfaceTopDb.value,
+      chartSurfaceBottomDb: responseSurfaceBottomDb.value,
+      chartSurfacePalette: responseSurfacePalette.value,
+      chartSurfaceContours: responseSurfaceContours.value,
       chartFitAutoOrder: responseFitAutoOrder.value,
       chartFitPoles: responseFitOrder.value,
       chartFitZeros: responseFitZeroOrder.value,
@@ -3409,12 +3450,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 />
 
                 <ResponsePoleZeroPanel
-                  v-if="activeResponseProjection !== 'Bode' && responsePolarChart"
+                  v-if="activeResponseProjection !== 'Bode' && responseComplexChart"
                   ref="responsePoleZeroPanel"
-                  :curve="responsePolarChart.curve"
+                  :curve="responseComplexChart.curve"
                   v-model:order="responseFitOrder"
                   v-model:zero-order="responseFitZeroOrder"
                   v-model:auto-order="responseFitAutoOrder"
+                />
+                <ResponseFormulaPanel
+                  v-if="activeResponseProjection !== 'Bode' && responseComplexChart"
+                  :curve="responseComplexChart.curve"
+                  :order="responseFitOrder"
+                  :zero-order="responseFitZeroOrder"
+                  :auto-order="responseFitAutoOrder"
                 />
 
                 <ResponseMeasurementsPanel
@@ -3478,6 +3526,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :delay-bottom-us="responseDelayBottomUs"
                   :axis-titles="true"
                 />
+                <ResponseSPlaneChart
+                  v-else-if="activeResponseProjection === 'SPlane'"
+                  ref="responseSPlaneChart"
+                  :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
+                  :traces="responseTraces"
+                  :overlays="visibleResponseOverlays"
+                  :fit="responsePoleZeroPanel?.fit ?? null"
+                  :mode="responseSurfaceMode"
+                  :scale="responseSurfaceScale"
+                  :surface-top-db="responseSurfaceTopDb"
+                  :surface-bottom-db="responseSurfaceBottomDb"
+                  :palette="responseSurfacePalette"
+                  :show-contours="responseSurfaceContours"
+                  :hide-out-of-band-roots="responseHideOutOfBandRoots"
+                  :invert-sign="responseInvertLoopSign"
+                  :restore-delay="responseRestoreDelay"
+                  :latency-samples="responseLatencySamples"
+                  :sample-rate-hz="responseSampleRateHz"
+                  :phase-kind="effectiveResponsePhaseKind"
+                  :x-from-hz="responseXFromHz"
+                  :x-to-hz="responseXToHz"
+                />
                 <ResponsePolarChart
                   v-else
                   ref="responsePolarChart"
@@ -3485,6 +3555,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
                   :projection="activeResponseProjection"
+                  :scale="responseSurfaceScale"
                   :radius-mode="responseNyquistRadius"
                   :radius-floor-db="responseNyquistRadiusFloorDb"
                   :invert-sign="responseInvertLoopSign"
@@ -3514,6 +3585,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:nyquist-radius-floor-db="responseNyquistRadiusFloorDb"
                   v-model:show-fitted-model="responseShowFittedModel"
                   v-model:hide-out-of-band-roots="responseHideOutOfBandRoots"
+                  v-model:surface-scale="responseSurfaceScale"
+                  v-model:surface-mode="responseSurfaceMode"
+                  v-model:surface-top-db="responseSurfaceTopDb"
+                  v-model:surface-bottom-db="responseSurfaceBottomDb"
+                  v-model:surface-palette="responseSurfacePalette"
+                  v-model:surface-contours="responseSurfaceContours"
                   v-model:restore-delay="responseRestoreDelay"
                   v-model:show-left="responseShowLeft"
                   v-model:show-right="responseShowRight"

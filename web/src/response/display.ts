@@ -1,12 +1,16 @@
 import type {
+  DecayPalette,
   FrequencyResponseParameters,
   NyquistRadiusName,
   ResponseDelayView,
   ResponsePhaseKindName,
   ResponseView,
+  SPlaneScaleName,
+  SurfaceModeName,
   SteppedResponseParameters,
 } from '../api/client'
 import { isSteppedResponseKind } from '../measurements/kinds'
+import { PALETTE_NAMES } from '../measurements/decay'
 import { isDelayView } from './delayAxis'
 
 /**
@@ -48,6 +52,15 @@ export interface ResponseDisplay {
   showFittedModel: boolean
   /** Pole-zero map: leave the fit's extrapolated roots off the plot. */
   hideOutOfBandRoots: boolean
+  /** Both s-plane views: how radius is laid out — see response/splaneScale.ts. */
+  surfaceScale: SPlaneScaleName
+  /** The |H(s)| surface's layout: flat heat map, or oblique relief. */
+  surfaceMode: SurfaceModeName
+  /** The |H(s)| surface's colour window, as dB offsets from the passband reference. */
+  surfaceTopDb: number
+  surfaceBottomDb: number
+  surfacePalette: DecayPalette
+  surfaceContours: boolean
 }
 
 /** What a fresh measurement type shows before anything is stored — the literals App.vue starts from. */
@@ -78,6 +91,12 @@ export const DEFAULT_RESPONSE_DISPLAY: Readonly<ResponseDisplay> = Object.freeze
   restoreDelay: false,
   showFittedModel: true,
   hideOutOfBandRoots: false,
+  surfaceScale: 'Linear',
+  surfaceMode: 'Heatmap',
+  surfaceTopDb: 40,
+  surfaceBottomDb: -60,
+  surfacePalette: 'Jet',
+  surfaceContours: true,
 })
 
 type StoredDisplay = Partial<FrequencyResponseParameters & SteppedResponseParameters>
@@ -133,8 +152,23 @@ export function responseDisplayFromParams(
   if (typeof stored.chartRestoreDelay === 'boolean') display.restoreDelay = stored.chartRestoreDelay
   if (typeof stored.chartShowFittedModel === 'boolean') display.showFittedModel = stored.chartShowFittedModel
   if (typeof stored.chartHideOutOfBandRoots === 'boolean') display.hideOutOfBandRoots = stored.chartHideOutOfBandRoots
+  if (stored.chartSurfaceScale === 'Linear' || stored.chartSurfaceScale === 'LogModulus')
+    display.surfaceScale = stored.chartSurfaceScale
+  if (stored.chartSurfaceMode === 'Heatmap' || stored.chartSurfaceMode === 'Relief')
+    display.surfaceMode = stored.chartSurfaceMode
+  if (typeof stored.chartSurfaceTopDb === 'number' && Number.isFinite(stored.chartSurfaceTopDb))
+    display.surfaceTopDb = stored.chartSurfaceTopDb
+  if (typeof stored.chartSurfaceBottomDb === 'number' && Number.isFinite(stored.chartSurfaceBottomDb))
+    display.surfaceBottomDb = stored.chartSurfaceBottomDb
+  if (isDecayPalette(stored.chartSurfacePalette)) display.surfacePalette = stored.chartSurfacePalette
+  if (typeof stored.chartSurfaceContours === 'boolean') display.surfaceContours = stored.chartSurfaceContours
 
   return display
+}
+
+/** A stored palette name is only honoured when it is one the app still has a ramp for. */
+function isDecayPalette(value: unknown): value is DecayPalette {
+  return typeof value === 'string' && (PALETTE_NAMES as readonly string[]).includes(value)
 }
 
 /**

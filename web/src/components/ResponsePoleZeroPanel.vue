@@ -5,6 +5,7 @@ import {
   CANCELLATION_SWING_DB,
   dcGainExtrapolation,
   fitRational,
+  POOR_FIT_DB,
   singularityInBand,
   suggestOrder,
   type Singularity,
@@ -96,8 +97,6 @@ function rowsOf(list: Singularity[]) {
 const poleRows = computed(() => (fit.value ? rowsOf(fit.value.poles) : []))
 const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
 
-/** Above this the model is not describing the measurement, whatever the table says. */
-const POOR_FIT_DB = 0.5
 </script>
 
 <template>

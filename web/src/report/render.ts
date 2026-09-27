@@ -9,6 +9,7 @@ import ImpulseHarmonicsChart from '../components/ImpulseHarmonicsChart.vue'
 import ImpulseResponseChart from '../components/ImpulseResponseChart.vue'
 import OscilloscopeChart from '../components/OscilloscopeChart.vue'
 import ResponsePolarChart from '../components/ResponsePolarChart.vue'
+import ResponseSPlaneChart from '../components/ResponseSPlaneChart.vue'
 import SpectrumChart from '../components/SpectrumChart.vue'
 import ThdSweepChart from '../components/ThdSweepChart.vue'
 import { monochromeChartPng } from '../charts/exportChart'
@@ -188,6 +189,7 @@ export async function renderView(
             showDataPoints: display.showDataPoints,
             showFittedModel: display.showFittedModel,
             hideOutOfBandRoots: display.hideOutOfBandRoots,
+            scale: display.surfaceScale,
             // No panel exists for a report, so the chart fits its own (see effectiveFit) — at the
             // order this measurement was saved with when it pinned one, and automatically otherwise.
             fit: null,
@@ -196,6 +198,34 @@ export async function renderView(
           options,
         )
         return { png, caption: view === 'Nyquist' ? 'Nyquist plot' : view === 'Nichols' ? 'Nichols plot' : 'Poles and zeros of the fitted model' }
+      }
+      if (view === 'SPlane') {
+        const png = await renderChartPng(
+          ResponseSPlaneChart,
+          {
+            traces,
+            overlays: overlayEntries,
+            mode: display.surfaceMode,
+            scale: display.surfaceScale,
+            surfaceTopDb: display.surfaceTopDb,
+            surfaceBottomDb: display.surfaceBottomDb,
+            palette: display.surfacePalette,
+            showContours: display.surfaceContours,
+            hideOutOfBandRoots: display.hideOutOfBandRoots,
+            invertSign: display.invertLoopSign,
+            restoreDelay: display.restoreDelay,
+            latencySamples,
+            sampleRateHz: primary.sampleRateHz,
+            phaseKind,
+            xFromHz: display.xFromHz,
+            xToHz: display.xToHz,
+            // As above: no panel, so the chart fits its own at the stored order.
+            fit: null,
+            fitOrder: storedFitOrder(primary.paramsJson),
+          },
+          options,
+        )
+        return { png, caption: 'Magnitude of the fitted model over the s-plane' }
       }
       return null
     }

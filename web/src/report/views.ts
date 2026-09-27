@@ -30,6 +30,9 @@ const RESPONSE_VIEWS: ReportView[] = [
   { id: 'Nyquist', label: 'Nyquist', combinable: true },
   { id: 'Nichols', label: 'Nichols', combinable: true },
   { id: 'PoleZero', label: 'Poles and zeros', combinable: true },
+  // Not combinable: a raster is one fitted model's field, and two measurements cannot share it any
+  // more than two can share a decay surface.
+  { id: 'SPlane', label: '|H(s)| surface', combinable: false },
 ]
 const IMPULSE_VIEWS: ReportView[] = [
   { id: 'Impulse', label: 'Impulse', combinable: false },

@@ -8,15 +8,24 @@ import { useResultChartHeight } from '../charts/useResultChartHeight'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
-import { fitTransform, niceTicks, type PlaneTransform, type Viewport } from '../charts/planeTransform'
-import { toComplexCurve, type ComplexPoint } from '../response/complexPlane'
+import { fitTransform, niceTicks, thinPositions, type PlaneTransform, type Viewport } from '../charts/planeTransform'
+import { dragZoomViewport } from '../charts/dragZoom'
+import {
+  axisTickHz,
+  mappedRadius,
+  plainRadius,
+  sPlaneMap,
+  surfaceViewport,
+  toMapped,
+  type SPlaneScale,
+} from '../response/splaneScale'
+import { useResponseComplexCurve } from '../composables/useResponseComplexCurve'
+import type { ComplexPoint } from '../response/complexPlane'
 import { stabilityMargins } from '../response/margins'
 import { evaluateModel, fitRational, suggestOrder, type FitResult } from '../response/rationalFit'
 import {
   fitRootPoints,
-  measuredBand,
   nearestRoot,
-  poleZeroViewport,
   visibleRoots,
   type RootPoint,
 } from '../response/poleZeroMap'
@@ -57,6 +66,12 @@ const props = defineProps<{
   projection: 'Nyquist' | 'Nichols' | 'PoleZero'
   radiusMode: NyquistRadiusMode
   radiusFloorDb: number
+  /**
+   * How the **pole–zero map** lays out radius; Nyquist and Nichols ignore it, since neither is an
+   * s-plane. Shared with the |H(s)| surface so the two s-plane views cannot disagree about where a
+   * root sits — see `response/splaneScale.ts` for why a DUT with decades of roots needs it.
+   */
+  scale: SPlaneScale
   /** Adds 180°: the summing-junction inversion the measurement cannot see. */
   invertSign: boolean
   /**
@@ -93,12 +108,6 @@ const props = defineProps<{
    */
   fit?: FitResult | null
 }>()
-
-/**
- * Whether the live measurement occupies run 0 — see runDash. A stored result opened from History
- * has none, and there the first overlay is the curve being read, so it is drawn solid.
- */
-const liveDrawn = computed(() => props.traces.length > 0)
 
 const { isDark } = useAppTheme()
 
@@ -146,66 +155,22 @@ function gridLineWidth(base = 1): number {
 
 
 /**
- * Only the Gain curve carries a relationship between two channels, and only that relationship is a
- * transfer function. A stepped run's Left and Right traces hold an all-zero phase array by
- * construction — the same trap `FrequencyResponseChart`'s `phaseTrace` documents, which there drew
- * a flat 0° line and here would draw a tidy straight line along the positive real axis.
+ * The complex curve, derived by `useResponseComplexCurve` rather than here.
+ *
+ * Shared with `ResponseSPlaneChart` because `ResponsePoleZeroPanel` takes its curve from whichever of
+ * the two is mounted, so both have to produce the identical points for the table and the picture to
+ * agree. See that composable for why each step is the way it is.
  */
-const gainTrace = computed(() => props.traces.find((t) => t.kind === 'Gain') ?? null)
-
-/** A chirp's low-coherence bins whip around the origin and manufacture phantom crossings; a stepped run's coherence is a constant 1. */
-const MIN_COHERENCE = 0.5
-
-const curveOptions = computed(() => ({
-  fromHz: props.xFromHz,
-  toHz: props.xToHz,
+const { liveDrawn, curve, overlayCurves, readCurve, band } = useResponseComplexCurve(() => ({
+  traces: props.traces,
+  overlays: props.overlays,
+  xFromHz: props.xFromHz,
+  xToHz: props.xToHz,
   invertSign: props.invertSign,
-  minCoherence: MIN_COHERENCE,
-  latencySamples: props.restoreDelay ? props.latencySamples : null,
+  restoreDelay: props.restoreDelay,
+  latencySamples: props.latencySamples,
   sampleRateHz: props.sampleRateHz,
 }))
-
-const curve = computed<ComplexPoint[]>(() =>
-  gainTrace.value ? toComplexCurve(gainTrace.value, curveOptions.value) : [],
-)
-
-/**
- * Stored runs, restricted twice over: to the Gain curve, for the reason above, and to runs whose
- * own phase kind is one this plot can represent. An overlay is drawn without the live run's delay
- * correction — `StoredResponseTrace` carries neither a latency nor a sample rate — which is why the
- * header says so when the live curve is being corrected.
- */
-const overlayCurves = computed(() =>
-  props.overlays
-    .filter((o) => o.visible && o.responseTraces?.length)
-    .map((overlay) => {
-      const trace = overlay.responseTraces?.find((t) => t.kind === 'Gain')
-      if (!trace) return null
-      const points = toComplexCurve(trace, { ...curveOptions.value, latencySamples: null })
-      if (points.length < 2) return null
-      return { id: overlay.id, name: overlay.detail.name, points }
-    })
-    .filter((entry): entry is { id: number; name: string; points: ComplexPoint[] } => entry !== null),
-)
-
-/**
- * The curve everything *derived* reads — the fit, the stability margins, the measured-band marker
- * and the cursor — as opposed to the contour the plot strokes for the live run.
- *
- * <p>The live measurement when there is one, and otherwise the first checked history item: the same
- * "run 0 is the curve you are meant to read" rule the dash allocation follows, so the solid line and
- * the fitted model are always the same run. Without it a stored result opened from History drew its
- * contour and then reported no poles, no zeros, no margins and no band — every derived number came
- * from a live curve that was not there, which is exactly what a saved pole-zero measurement looks
- * like when it is reopened.</p>
- *
- * <p>Note an overlay carries no latency or sample rate, so a promoted curve is fitted without the
- * delay correction the live one would get; the header already says so whenever an overlay is drawn
- * beside a corrected live run.</p>
- */
-const readCurve = computed<ComplexPoint[]>(() =>
-  curve.value.length > 0 ? curve.value : (overlayCurves.value[0]?.points ?? []),
-)
 
 const margins = computed(() => stabilityMargins(readCurve.value))
 
@@ -226,8 +191,6 @@ const effectiveFit = computed<FitResult | null>(() => {
   return fitRational(readCurve.value, order, order)
 })
 
-const band = computed(() => measuredBand(readCurve.value))
-
 /** Every root of the fit; `roots` is what the map actually draws. */
 const allRoots = computed<RootPoint[]>(() => (effectiveFit.value ? fitRootPoints(effectiveFit.value) : []))
 const roots = computed<RootPoint[]>(() => visibleRoots(allRoots.value, band.value, props.hideOutOfBandRoots))
@@ -239,9 +202,13 @@ function toPlane(point: ComplexPoint): PlanePoint {
     : nicholsPoint(point)
 }
 
-/** A root's place on the map: σ/2π along x, ω/2π up y. */
+/** How the map lays out radius. Rebuilt when the plotted window moves, since its reference is the band. */
+const sMap = computed(() => sPlaneMap(props.scale, band.value))
+
+/** A root's place on the map: σ/2π along x, ω/2π up y, through the radius warp. */
 function rootToPlane(root: RootPoint): PlanePoint {
-  return { x: root.re, y: root.im, clamped: false }
+  const p = toMapped(sMap.value, root.re, root.im)
+  return { x: p.x, y: p.y, clamped: false }
 }
 
 const equalAspect = computed(() => props.projection !== 'Nichols')
@@ -258,7 +225,10 @@ const equalAspect = computed(() => props.projection !== 'Nichols')
  * quantity, so it fits to the data with a margin.
  */
 function baseViewport(): Viewport {
-  if (props.projection === 'PoleZero') return poleZeroViewport(roots.value)
+  // `surfaceViewport` with no band is the warped equivalent of `poleZeroViewport` — square, fitted to
+  // the roots and not to the measured band, so the band segment still clips the way it is meant to.
+  // Under `Linear` the two are identical by construction, which `splaneScale.test.ts` pins.
+  if (props.projection === 'PoleZero') return surfaceViewport(sMap.value, roots.value, null)
 
   const points = [...curve.value, ...overlayCurves.value.flatMap((o) => o.points)]
 
@@ -306,7 +276,18 @@ function resetZoom() {
 // A zoom belongs to the window it was drawn in. Changing projection, radius map or sign moves every
 // point, so a box dragged around the old contour frames nothing in the new one.
 watch(
-  () => [props.projection, props.radiusMode, props.radiusFloorDb, props.invertSign, props.restoreDelay],
+  () => [
+    props.projection,
+    props.radiusMode,
+    props.radiusFloorDb,
+    props.invertSign,
+    props.restoreDelay,
+    // The radius warp moves every root, and its own reference comes from the measured band — so the
+    // plotted window changing re-warps the map even though no root moved.
+    props.scale,
+    props.xFromHz,
+    props.xToHz,
+  ],
   () => {
     zoomViewport.value = null
   },
@@ -417,7 +398,8 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
       ? `Nyquist — real vs imaginary (${props.radiusMode === 'Linear' ? 'linear' : 'log'} radius)`
       : props.projection === 'Nichols'
         ? 'Nichols — gain (dB) vs phase (°)'
-        : `Poles and zeros — s-plane in Hz${effectiveFit.value ? `, order ${effectiveFit.value.denominatorOrder}` : ''}` +
+        : `Poles and zeros — s-plane in Hz, ${props.scale === 'LogModulus' ? 'log-modulus' : 'linear'} radius` +
+          (effectiveFit.value ? `, order ${effectiveFit.value.denominatorOrder}` : '') +
           (hiddenRootCount.value > 0 ? `, ${hiddenRootCount.value} out of band hidden` : '')
   const legend =
     props.projection === 'PoleZero'
@@ -575,15 +557,16 @@ function drawPoleZeroMap(ctx: CanvasRenderingContext2D, t: PlaneTransform) {
 
   const measured = readCurve.value
   if (measured.length >= 2) {
-    const lowHz = measured[0].freqHz
-    const highHz = measured[measured.length - 1].freqHz
+    // Warped like the roots are, or the band would mark the wrong stretch of the axis.
+    const lowRho = mappedRadius(sMap.value, measured[0].freqHz)
+    const highRho = mappedRadius(sMap.value, measured[measured.length - 1].freqHz)
     ctx.strokeStyle = color(MARKER_COLOR)
     ctx.lineWidth = 4
     ctx.globalAlpha = 0.6
     ctx.beginPath()
     for (const sign of [1, -1]) {
-      ctx.moveTo(t.toScreenX(0), t.toScreenY(sign * lowHz))
-      ctx.lineTo(t.toScreenX(0), t.toScreenY(sign * highHz))
+      ctx.moveTo(t.toScreenX(0), t.toScreenY(sign * lowRho))
+      ctx.lineTo(t.toScreenX(0), t.toScreenY(sign * highRho))
     }
     ctx.stroke()
     ctx.globalAlpha = 1
@@ -618,8 +601,17 @@ function clipToPlot(ctx: CanvasRenderingContext2D, width: number, height: number
 
 function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, t: PlaneTransform) {
   const { viewport } = t
-  const xTicks = niceTicks(viewport.xMin, viewport.xMax, 8)
-  const yTicks = niceTicks(viewport.yMin, viewport.yMax, 6)
+  // Under a warped radius an equal screen step is not an equal frequency step, so the ticks are
+  // frequencies placed through the warp rather than round numbers in drawing coordinates. Mirrored to
+  // ±, because both halves of each axis are real parts of the plane.
+  const warped = props.projection === 'PoleZero' && props.scale !== 'Linear'
+  const radii = warped
+    ? axisTickHz(sMap.value, Math.max(Math.abs(viewport.xMax), Math.abs(viewport.yMax))).map((hz) =>
+        mappedRadius(sMap.value, hz),
+      )
+    : null
+  const xTicks = radii ? [0, ...radii, ...radii.map((r) => -r)] : niceTicks(viewport.xMin, viewport.xMax, 8)
+  const yTicks = radii ? [0, ...radii, ...radii.map((r) => -r)] : niceTicks(viewport.yMin, viewport.yMax, 6)
 
   ctx.save()
   ctx.strokeStyle = gridStroke()
@@ -641,11 +633,17 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, 
   ctx.font = '11px ui-sans-serif, system-ui, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
-  for (const x of xTicks) ctx.fillText(tickLabel(x), t.toScreenX(x), height - INSETS.bottom + 6)
+  // Thinned, because a warped axis crowds its near-origin decades into a few pixels by design.
+  // `niceTicks` is evenly spaced and loses nothing to this.
+  for (const tick of thinPositions(xTicks.map((x) => ({ at: t.toScreenX(x), v: x })), 30)) {
+    ctx.fillText(tickLabel(tick.v), tick.at, height - INSETS.bottom + 6)
+  }
 
   ctx.textAlign = 'right'
   ctx.textBaseline = 'middle'
-  for (const y of yTicks) ctx.fillText(tickLabel(y), INSETS.left - 6, t.toScreenY(y))
+  for (const tick of thinPositions(yTicks.map((y) => ({ at: t.toScreenY(y), v: y })), 14)) {
+    ctx.fillText(tickLabel(tick.v), INSETS.left - 6, tick.at)
+  }
 
   // Axis captions, so the three projections are never confused for one another.
   ctx.textAlign = 'center'
@@ -666,6 +664,13 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, 
 
 function tickLabel(v: number): string {
   if (v === 0) return '0'
+  // Under a warped radius the tick's own coordinate is a ρ and means nothing to a reader; the label is
+  // the frequency it stands for, so the axis reads in hertz whichever scale is in force.
+  if (props.projection === 'PoleZero' && props.scale !== 'Linear') {
+    const hz = plainRadius(sMap.value, Math.abs(v))
+    const sign = v < 0 ? '−' : ''
+    return hz >= 1000 ? `${sign}${Number((hz / 1000).toPrecision(3))}k` : `${sign}${Number(hz.toPrecision(3))}`
+  }
   const abs = Math.abs(v)
   // The map's axes are hertz, and "1e+4" is not how anyone reads a frequency axis.
   if (props.projection === 'PoleZero' && abs >= 1000) return `${Number((v / 1000).toPrecision(3))}k`
@@ -1005,12 +1010,9 @@ function onPointerUp(event: PointerEvent) {
   dragNow.value = null
 
   if (start && transform) {
-    // A click, not a drag: too small a box would zoom to a meaningless sliver.
-    if (Math.abs(point.x - start.x) > 8 && Math.abs(point.y - start.y) > 8) {
-      const xs = [transform.toWorldX(start.x), transform.toWorldX(point.x)].sort((a, b) => a - b)
-      const ys = [transform.toWorldY(start.y), transform.toWorldY(point.y)].sort((a, b) => a - b)
-      zoomViewport.value = { xMin: xs[0], xMax: xs[1], yMin: ys[0], yMax: ys[1] }
-    }
+    // Null for a click rather than a drag — too small a box would zoom to a meaningless sliver.
+    const selected = dragZoomViewport(start, point, transform)
+    if (selected) zoomViewport.value = selected
   }
   draw()
 }

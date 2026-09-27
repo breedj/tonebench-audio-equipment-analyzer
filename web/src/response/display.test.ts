@@ -36,6 +36,12 @@ describe('responseDisplayFromParams', () => {
       chartRestoreDelay: true,
       chartShowFittedModel: false,
       chartHideOutOfBandRoots: true,
+      chartSurfaceScale: 'LogModulus',
+      chartSurfaceMode: 'Relief',
+      chartSurfaceTopDb: 20,
+      chartSurfaceBottomDb: -80,
+      chartSurfacePalette: 'Grey',
+      chartSurfaceContours: false,
     })
 
     expect(responseDisplayFromParams(json)).toEqual({
@@ -65,7 +71,36 @@ describe('responseDisplayFromParams', () => {
       restoreDelay: true,
       showFittedModel: false,
       hideOutOfBandRoots: true,
+      surfaceScale: 'LogModulus',
+      surfaceMode: 'Relief',
+      surfaceTopDb: 20,
+      surfaceBottomDb: -80,
+      surfacePalette: 'Grey',
+      surfaceContours: false,
     })
+  })
+
+  it('keeps the linear s-plane for a type saved before the scale existed', () => {
+    // Linear is the default precisely so that nothing already stored changes appearance.
+    expect(responseDisplayFromParams(JSON.stringify({ chartView: 'Gain' })).surfaceScale).toBe('Linear')
+  })
+
+  it('keeps the heat map for a type saved before the relief existed', () => {
+    expect(responseDisplayFromParams(JSON.stringify({ chartView: 'Gain' })).surfaceMode).toBe('Heatmap')
+    expect(responseDisplayFromParams(JSON.stringify({ chartSurfaceMode: 'relief' })).surfaceMode).toBe('Heatmap')
+  })
+
+  it('ignores an s-plane scale or a palette it does not know', () => {
+    expect(responseDisplayFromParams(JSON.stringify({ chartSurfaceScale: 'logmodulus' })).surfaceScale).toBe('Linear')
+    // A palette that was removed, or a hand-edited name, must not reach `paletteLut`.
+    expect(responseDisplayFromParams(JSON.stringify({ chartSurfacePalette: 'Viridis' })).surfacePalette).toBe('Jet')
+    expect(responseDisplayFromParams(JSON.stringify({ chartSurfacePalette: 'Hot' })).surfacePalette).toBe('Hot')
+  })
+
+  it('ignores a non-finite surface window', () => {
+    // JSON has no NaN, so this arrives as a string or null from a hand-edited type.
+    expect(responseDisplayFromParams(JSON.stringify({ chartSurfaceTopDb: 'loud' })).surfaceTopDb).toBe(40)
+    expect(responseDisplayFromParams(JSON.stringify({ chartSurfaceBottomDb: null })).surfaceBottomDb).toBe(-60)
   })
 
   it('ignores a delay view it does not know, so an older or hand-edited type opens with no delay curve', () => {

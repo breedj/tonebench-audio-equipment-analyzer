@@ -945,6 +945,34 @@ public sealed record FrequencyResponseParameters(
     /// </summary>
     bool? ChartHideOutOfBandRoots = null,
     /// <summary>
+    /// How both s-plane views lay out radius: "Linear" or "LogModulus". Null on a type saved before
+    /// the |H(s)| surface existed, treated as linear -- which is what those builds drew, so an
+    /// existing type opens looking untouched.
+    /// </summary>
+    string? ChartSurfaceScale = null,
+    /// <summary>
+    /// |H(s)| surface: how the same field is laid out -- "Heatmap" (the plane from above, with
+    /// contours) or "Relief" (an oblique surface where a pole is a spike). One evaluated field
+    /// serves both, so they cannot disagree about a level. Null means the heat map.
+    /// </summary>
+    string? ChartSurfaceMode = null,
+    /// <summary>
+    /// |H(s)| surface: dB above the passband reference that the colour ramp reaches. A pole runs to
+    /// infinity, so this is where it saturates rather than a level anything attains. An offset from
+    /// the passband and not an absolute level, so the window means the same on a 0 dB filter and a
+    /// +26 dB amplifier.
+    /// </summary>
+    double? ChartSurfaceTopDb = null,
+    /// <summary>|H(s)| surface: dB below the passband reference that the colour ramp reaches.</summary>
+    double? ChartSurfaceBottomDb = null,
+    /// <summary>|H(s)| surface: which colour ramp, from the same set the decay surfaces offer.</summary>
+    string? ChartSurfacePalette = null,
+    /// <summary>
+    /// |H(s)| surface: draw the iso-dB contour lines. They are what makes the surface quantitative
+    /// rather than decorative, and what keeps it readable after a report desaturates the colours.
+    /// </summary>
+    bool? ChartSurfaceContours = null,
+    /// <summary>
     /// What the ±1 dB and −3 dB corners were measured down from: "BandMedian" or "Peak". Null on a
     /// type saved before the reference was configurable, where the peak is what that build did.
     /// </summary>
@@ -1073,6 +1101,34 @@ public sealed record SteppedResponseParameters(
     /// before the map existed, treated as false.
     /// </summary>
     bool? ChartHideOutOfBandRoots = null,
+    /// <summary>
+    /// How both s-plane views lay out radius: "Linear" or "LogModulus". Null on a type saved before
+    /// the |H(s)| surface existed, treated as linear -- which is what those builds drew, so an
+    /// existing type opens looking untouched.
+    /// </summary>
+    string? ChartSurfaceScale = null,
+    /// <summary>
+    /// |H(s)| surface: how the same field is laid out -- "Heatmap" (the plane from above, with
+    /// contours) or "Relief" (an oblique surface where a pole is a spike). One evaluated field
+    /// serves both, so they cannot disagree about a level. Null means the heat map.
+    /// </summary>
+    string? ChartSurfaceMode = null,
+    /// <summary>
+    /// |H(s)| surface: dB above the passband reference that the colour ramp reaches. A pole runs to
+    /// infinity, so this is where it saturates rather than a level anything attains. An offset from
+    /// the passband and not an absolute level, so the window means the same on a 0 dB filter and a
+    /// +26 dB amplifier.
+    /// </summary>
+    double? ChartSurfaceTopDb = null,
+    /// <summary>|H(s)| surface: dB below the passband reference that the colour ramp reaches.</summary>
+    double? ChartSurfaceBottomDb = null,
+    /// <summary>|H(s)| surface: which colour ramp, from the same set the decay surfaces offer.</summary>
+    string? ChartSurfacePalette = null,
+    /// <summary>
+    /// |H(s)| surface: draw the iso-dB contour lines. They are what makes the surface quantitative
+    /// rather than decorative, and what keeps it readable after a report desaturates the colours.
+    /// </summary>
+    bool? ChartSurfaceContours = null,
     /// <summary>
     /// What the ±1 dB and −3 dB corners were measured down from: "BandMedian" or "Peak". Null on a
     /// type saved before the reference was configurable, where the peak is what that build did.

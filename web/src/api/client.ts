@@ -672,6 +672,18 @@ export interface FrequencyResponseParameters {
   chartFitZeros?: number | null
   /** Pole-zero map: hide the roots the fit placed outside the measured band. */
   chartHideOutOfBandRoots?: boolean | null
+  /** How both s-plane views lay out radius. Absent on a type saved before it existed, i.e. linear. */
+  chartSurfaceScale?: SPlaneScaleName | null
+  /** |H(s)| surface: flat heat map, or oblique relief. */
+  chartSurfaceMode?: SurfaceModeName | null
+  /** |H(s)| surface: dB above the passband reference that the colour ramp reaches, where poles saturate. */
+  chartSurfaceTopDb?: number | null
+  /** |H(s)| surface: dB below the passband reference that the colour ramp reaches. */
+  chartSurfaceBottomDb?: number | null
+  /** |H(s)| surface: which colour ramp, shared with the decay surfaces. */
+  chartSurfacePalette?: DecayPalette | null
+  /** |H(s)| surface: draw the iso-dB contour lines, which are what make it quantitative and printable. */
+  chartSurfaceContours?: boolean | null
   /**
    * A *run* setting, not a chart one: it changes the numbers in the Measurements table rather than
    * how they are drawn. Absent on a type saved before the reference was configurable — those runs
@@ -693,7 +705,22 @@ export type ResponseView = 'Dbv' | 'Gain'
  * quantity the Bode chart shows*, and everything branching on it carries that meaning. Widening it
  * would add a silent third case to each of those.
  */
-export type ResponseProjection = 'Bode' | 'Nyquist' | 'Nichols' | 'PoleZero'
+export type ResponseProjection = 'Bode' | 'Nyquist' | 'Nichols' | 'PoleZero' | 'SPlane'
+
+/**
+ * How the s-plane views lay out radius — the pole–zero map's and the |H(s)| surface's.
+ *
+ * `Linear` is the plane as a textbook draws it and stays the default, so nothing already saved
+ * changes meaning. `LogModulus` scales |s| and leaves arg(s) alone, which is the only way a DUT whose
+ * roots span decades fits in one square window; see `response/splaneScale.ts`.
+ */
+export type SPlaneScaleName = 'Linear' | 'LogModulus'
+
+/**
+ * How the |H(s)| surface lays the same field out: flat, or as an oblique relief with a pole as a
+ * spike. Both read one evaluated field and one colour window, so they cannot disagree about a level.
+ */
+export type SurfaceModeName = 'Heatmap' | 'Relief'
 
 /**
  * Which delay curve the Bode chart draws on its own right-hand axis. One at a time, because they
@@ -977,6 +1004,18 @@ export interface SteppedResponseParameters {
   chartFitZeros?: number | null
   /** Pole-zero map: hide the roots the fit placed outside the measured band. */
   chartHideOutOfBandRoots?: boolean | null
+  /** How both s-plane views lay out radius. Absent on a type saved before it existed, i.e. linear. */
+  chartSurfaceScale?: SPlaneScaleName | null
+  /** |H(s)| surface: flat heat map, or oblique relief. */
+  chartSurfaceMode?: SurfaceModeName | null
+  /** |H(s)| surface: dB above the passband reference that the colour ramp reaches, where poles saturate. */
+  chartSurfaceTopDb?: number | null
+  /** |H(s)| surface: dB below the passband reference that the colour ramp reaches. */
+  chartSurfaceBottomDb?: number | null
+  /** |H(s)| surface: which colour ramp, shared with the decay surfaces. */
+  chartSurfacePalette?: DecayPalette | null
+  /** |H(s)| surface: draw the iso-dB contour lines, which are what make it quantitative and printable. */
+  chartSurfaceContours?: boolean | null
   /**
    * A *run* setting, not a chart one: it changes the numbers in the Measurements table rather than
    * how they are drawn. Absent on a type saved before the reference was configurable — those runs

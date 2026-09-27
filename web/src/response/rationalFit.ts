@@ -19,8 +19,17 @@ import { cAbs, cDiv, cMul, cx, polyEval, polyRoots, trimLeading, type Cx } from 
  *
  * The model is continuous-time (s-domain), which is what an analog filter is. Two things it cannot
  * represent, and which therefore come back as spurious pole/zero pairs rather than as an error: a
- * pure delay (e^{-sT} is not rational — for a chirp run leave the delay *removed*), and a
- * non-minimum-phase response measured with the wrong phase sign.
+ * pure delay (e^{-sT} is not rational), and a non-minimum-phase response measured with the wrong
+ * phase sign.
+ *
+ * **On a chirp run that means the delay wants *restoring* before the fit is read**, which is the
+ * opposite of what this comment said until 2026-09-26. The chirp estimator removes a bulk delay per
+ * record, and on a filter that delay is the filter's own, so leaving it out hands the fit a phase
+ * *lead* that is not rational in s — and the fit spends poles imitating it. Measured on the
+ * simulated fifth-order Butterworth over 100 Hz–5 kHz: delay removed gives a right-half-plane pair
+ * and Q 0.616/1.057 at 1.94 dB rms, delay restored gives Q 0.616/1.621 against the alignment's
+ * 0.618/1.618, all in the left half-plane, at 0.013 dB rms. The manual's pole–zero page says the
+ * same, and says it first.
  */
 
 export interface RationalModel {
@@ -95,6 +104,17 @@ export interface FitResult {
  * the out-of-band flag instead.
  */
 export const CANCELLATION_SWING_DB = 1
+
+/**
+ * Above this residual the model is not describing the measurement, whatever its table of roots says.
+ *
+ * Lived in `ResponsePoleZeroPanel` until the |H(s)| surface needed the same judgement: a surface is a
+ * far more persuasive picture than a table of numbers, so the one thing it must not do is look
+ * authoritative about a fit the panel is calling poor. Two readouts disagreeing about whether the
+ * same fit is good would be worse than either. `KNEE_NEGLIGIBLE_ERROR_DB` is deliberately well under
+ * it, so an order the knee's floor stops at is still a fit both of them call good.
+ */
+export const POOR_FIT_DB = 0.5
 
 /**
  * At most this many frequencies are used to evaluate a pair's swing.

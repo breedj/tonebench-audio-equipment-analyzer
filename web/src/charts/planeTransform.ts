@@ -89,6 +89,26 @@ export function fitTransform(
 }
 
 /**
+ * Drop the entries that would overlap one already kept, in the order given.
+ *
+ * For an axis whose ticks are not evenly spaced on screen — a log-modulus s-plane, where a decade
+ * near the origin occupies a few pixels by design — so the labels that have room are drawn and the
+ * ones that would collide are silently lost. Order is the priority: pass zero, or whichever label
+ * matters most, first, and it is the one that survives a crowd.
+ *
+ * Returns the kept entries rather than mutating, so the caller can use it for both axes.
+ */
+export function thinPositions<T extends { at: number }>(entries: readonly T[], minGap: number): T[] {
+  const kept: T[] = []
+  for (const entry of entries) {
+    if (!Number.isFinite(entry.at)) continue
+    if (kept.some((other) => Math.abs(other.at - entry.at) < minGap)) continue
+    kept.push(entry)
+  }
+  return kept
+}
+
+/**
  * "Nice" tick values covering a span — 1/2/5 x a power of ten, the same family uPlot's linear axes
  * use, so the hand-drawn charts read like the rest of the app.
  */

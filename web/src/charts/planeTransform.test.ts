@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fitTransform, niceTicks, type Viewport } from './planeTransform'
+import { fitTransform, niceTicks, thinPositions, type Viewport } from './planeTransform'
 
 const NO_INSETS = { left: 0, right: 0, top: 0, bottom: 0 }
 const UNIT: Viewport = { xMin: -1, xMax: 1, yMin: -1, yMax: 1 }
@@ -103,5 +103,36 @@ describe('niceTicks', () => {
   it('returns nothing for a degenerate span', () => {
     expect(niceTicks(1, 1, 5)).toEqual([])
     expect(niceTicks(0, Number.NaN, 5)).toEqual([])
+  })
+})
+
+describe('thinPositions', () => {
+  it('keeps the first of a crowd and drops the rest', () => {
+    const kept = thinPositions(
+      [
+        { at: 0, label: '0' },
+        { at: 3, label: 'a' },
+        { at: 40, label: 'b' },
+        { at: 45, label: 'c' },
+        { at: 90, label: 'd' },
+      ],
+      20,
+    )
+    expect(kept.map((k) => k.label)).toEqual(['0', 'b', 'd'])
+  })
+
+  it('treats order as priority, so a caller can protect the label that matters', () => {
+    // Zero passed first survives; passed last it is the one dropped.
+    expect(thinPositions([{ at: 0 }, { at: 2 }], 10).map((k) => k.at)).toEqual([0])
+    expect(thinPositions([{ at: 2 }, { at: 0 }], 10).map((k) => k.at)).toEqual([2])
+  })
+
+  it('keeps everything when nothing collides, and ignores a non-finite position', () => {
+    expect(thinPositions([{ at: 0 }, { at: 50 }, { at: 100 }], 20)).toHaveLength(3)
+    expect(thinPositions([{ at: 0 }, { at: Number.NaN }, { at: 50 }], 20)).toHaveLength(2)
+  })
+
+  it('handles an empty list', () => {
+    expect(thinPositions([], 10)).toEqual([])
   })
 })

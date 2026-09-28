@@ -712,9 +712,27 @@ public sealed class SpectrumPipeline(
                 if (meters.Multitone is { } multitone)
                     hub.Broadcast(StreamFrame.EncodeMultitone(channel, seq, multitone, singleShotComplete));
             }
+            // The sine fit is taken here, *ahead* of the raw scope frame, although its own frame is
+            // sent after it: the client pairs the two by seq and closes the group on a 40 ms idle,
+            // so anything slow standing between the two sends splits them -- and the fit is the
+            // slow half by three orders of magnitude (ResidualFitMaxSamples has the numbers). With
+            // the fit already taken, all that remains between the frames is a 2048-sample subtract.
+            // Measured on a QA403 at 1,048,576 points and 192 kHz, 1 kHz snapped: the residual
+            // arrived 403-700 ms after its raw frame with the fit between the sends, and in the
+            // same millisecond with the fit ahead of them. Wire order is unchanged: raw first, so
+            // the client still has something to trigger on.
+            double fundamentalFreqHz = meters?.FundamentalFreqHz ?? 0.0;
+            SineFitResult? residualFit = null;
+            int residualFitCount = 0;
+            if (options.ScopeResidual && fundamentalFreqHz > 0.0 && fundamentalFreqHz < _sampleRateHz / 2.0)
+            {
+                residualFitCount = ResidualFitCount(n, _sampleRateHz, fundamentalFreqHz);
+                residualFit = SineFit.Fit(timeBuf.AsSpan(n - residualFitCount, residualFitCount), _sampleRateHz, fundamentalFreqHz);
+            }
+
             BroadcastScopeFrame(channel, seq, timeBuf.AsSpan(0, n), _sampleRateHz);
-            if (options.ScopeResidual && meters is not null)
-                BroadcastScopeResidualFrame(channel, seq, timeBuf.AsSpan(0, n), _sampleRateHz, meters.FundamentalFreqHz);
+            if (residualFit is { } fit)
+                BroadcastScopeResidualFrame(channel, seq, timeBuf.AsSpan(n - residualFitCount, residualFitCount), _sampleRateHz, fit);
         }
         finally
         {
@@ -1073,6 +1091,42 @@ public sealed class SpectrumPipeline(
     private const int ScopeSampleCount = 2048;
 
     /// <summary>
+    /// How many whole periods of the fundamental <see cref="ResidualFitCount"/> asks for. Measured
+    /// on a deliberately dirty 20 Hz record (tone + 2 % DC offset + a wandering LF component + the
+    /// simulator's harmonic stack), against the stack's own RMS over the subtracted tail: 0.4
+    /// periods reads −14.4 dB (the fit has eaten the harmonics), 0.9 periods −2.7 dB, 2.2 periods
+    /// −0.8 dB, and from 3.4 periods up it is within 0.2 dB at every window out to the whole
+    /// record. Four is the first setting comfortably inside that.
+    /// </summary>
+    private const int ResidualFitPeriods = 4;
+
+    /// <summary>
+    /// The shortest residual fit window. Well above <see cref="ScopeSampleCount"/> (the tail has to
+    /// lie *inside* the window) and already 42 periods of 1 kHz at 192 kHz, so the periods term
+    /// above only binds below about 94 Hz there.
+    /// </summary>
+    private const int ResidualFitMinSamples = 8192;
+
+    /// <summary>
+    /// The longest residual fit window, and the reason this bound exists at all: the fit is O(n) per
+    /// Gauss–Newton iteration with two <see cref="Math.SinCos(double)"/> calls and twenty
+    /// multiply-accumulates per sample, and it runs inline on the pipeline's tick worker. Over a
+    /// whole 1,048,576-point record that measured <b>2.65 s per channel</b> — against a 50 ms tick —
+    /// so the worker never came up for air, the scope updated once every few seconds, and the
+    /// residual frame reached the browser seconds after the raw frame of its own tick, past the
+    /// client's 40 ms scope-group deadline: the oscilloscope alternated between a residual it could
+    /// not pair with a raw frame and a raw frame with no residual, which is the "flickering, and it
+    /// says no fundamental to remove" report of 2026-09-28. At this cap one fit is ~32 ms, and the
+    /// cap only binds below about 47 Hz at 192 kHz, where it still buys 3.4 periods at 20 Hz.
+    /// <para>Bounding is not a compromise against the whole-record fit, it is better at the tail:
+    /// on the dirty record above, the whole-record fit read <b>+0.44 to +0.75 dB</b> over the
+    /// harmonic stack it should have left behind, because it averages a wandering LF component over
+    /// the entire record instead of tracking it where the subtraction actually happens, while every
+    /// bounded window from 3.4 periods up stayed within 0.2 dB.</para>
+    /// </summary>
+    private const int ResidualFitMaxSamples = 32768;
+
+    /// <summary>
     /// Broadcasts the tail of this tick's already-captured time-domain window as a scope frame —
     /// reuses <paramref name="timeDomainSamples"/> (the same raw, unwindowed snapshot
     /// <see cref="ComputeTimeDomainLevels"/> reads) rather than touching the ring buffer again, so
@@ -1099,24 +1153,45 @@ public sealed class SpectrumPipeline(
     }
 
     /// <summary>
-    /// The raw scope tail with the fundamental removed. The fit is over the <em>whole</em> record,
-    /// not the 2048-sample tail: a 20 Hz tone is under one period in the tail at 48 kHz, where the
-    /// three linear parameters are barely separable, and the frequency refinement needs the length
-    /// to resolve a fraction of a bin. The subtraction is then evaluated on the tail alone. Started
-    /// from the meters' bin frequency, which is exact for a snapped tone and within half a bin for
-    /// anything else -- inside the refinement's reach.
+    /// The window the residual's fundamental is fitted over: a slice at the <em>end</em> of the
+    /// record, long enough to hold <see cref="ResidualFitPeriods"/> whole periods of the
+    /// fundamental and never shorter than <see cref="ResidualFitMinSamples"/> or longer than
+    /// <see cref="ResidualFitMaxSamples"/>.
+    ///
+    /// <para>It is a slice of the end rather than of the beginning because the tail this fit is
+    /// subtracted from is at the end: evaluating the fit inside the window it was made on keeps a
+    /// frequency error from integrating into a phase error across a gap. It is longer than that
+    /// tail because the tail alone cannot carry the fit — a 20 Hz tone is under one period in 2048
+    /// samples at 48 kHz, where amplitude, phase and the DC term are barely separable. And it is
+    /// bounded because the whole record can be 1,048,576 samples; see
+    /// <see cref="ResidualFitMaxSamples"/> for what that cost and what it broke.</para>
     /// </summary>
-    private void BroadcastScopeResidualFrame(StreamChannel channel, uint seq, ReadOnlySpan<double> record, double sampleRateHz, double fundamentalFreqHz)
+    internal static int ResidualFitCount(int recordLength, double sampleRateHz, double fundamentalFreqHz)
     {
-        if (!(fundamentalFreqHz > 0.0) || fundamentalFreqHz >= sampleRateHz / 2.0)
-            return;
+        long forPeriods = (long)Math.Ceiling(ResidualFitPeriods * sampleRateHz / fundamentalFreqHz);
+        int count = (int)Math.Clamp(forPeriods, ResidualFitMinSamples, ResidualFitMaxSamples);
 
-        int count = Math.Min(ScopeSampleCount, record.Length);
+        // A record shorter than the window is the whole window there is. It can never fall below
+        // the tail this way: the tail is itself clamped to the record length below, and the floor
+        // above is four times ScopeSampleCount.
+        return Math.Min(count, recordLength);
+    }
+
+    /// <summary>
+    /// The raw scope tail with the fundamental removed. <paramref name="fitWindow"/> is the slice
+    /// <see cref="ResidualFitCount"/> chose -- the end of the record -- and the subtraction is
+    /// evaluated on that window's own tail. <paramref name="fit"/> was taken by the caller, before
+    /// the raw scope frame went out, so that the expensive half of this does not sit between the
+    /// two frames of one tick; see the call site.
+    /// </summary>
+    private void BroadcastScopeResidualFrame(
+        StreamChannel channel, uint seq, ReadOnlySpan<double> fitWindow, double sampleRateHz, in SineFitResult fit)
+    {
+        int count = Math.Min(ScopeSampleCount, fitWindow.Length);
         float[] samples = ArrayPool<float>.Shared.Rent(count);
         try
         {
-            var fit = SineFit.Fit(record, sampleRateHz, fundamentalFreqHz);
-            SineFit.Subtract(record, fit, sampleRateHz, record.Length - count, samples.AsSpan(0, count));
+            SineFit.Subtract(fitWindow, fit, sampleRateHz, fitWindow.Length - count, samples.AsSpan(0, count));
             hub.Broadcast(StreamFrame.EncodeScope(channel, seq, (float)(1.0 / sampleRateHz), samples.AsSpan(0, count), StreamFlags.ScopeResidual));
         }
         finally

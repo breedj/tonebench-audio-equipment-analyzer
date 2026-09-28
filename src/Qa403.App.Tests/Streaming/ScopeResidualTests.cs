@@ -68,6 +68,74 @@ public class ScopeResidualTests
         }
     }
 
+    /// <summary>
+    /// The fit window is bounded, and the bound is what keeps the residual on the same tick as the
+    /// raw frame it belongs to. Fitting the whole record took 2.65 s per channel at 1,048,576
+    /// points -- against a 50 ms tick and the client's 40 ms scope-group deadline -- so the
+    /// oscilloscope alternated between an unpairable residual and a raw frame reported as having
+    /// "no fundamental to remove". See SpectrumPipeline.ResidualFitMaxSamples.
+    /// </summary>
+    [Theory]
+    [InlineData(1048576, 192000.0, 1000.0)]
+    [InlineData(1048576, 48000.0, 1000.0)]
+    [InlineData(131072, 192000.0, 20.0)]
+    [InlineData(65536, 48000.0, 19000.0)]
+    public void TheFitWindow_IsBounded_AndAlwaysHoldsTheTailItIsSubtractedFrom(int recordLength, double sampleRateHz, double fundamentalFreqHz)
+    {
+        int count = SpectrumPipeline.ResidualFitCount(recordLength, sampleRateHz, fundamentalFreqHz);
+
+        Assert.InRange(count, 2048, 32768);
+        Assert.True(count <= recordLength, $"the window ({count}) reaches past the record ({recordLength})");
+    }
+
+    /// <summary>
+    /// The one thing the window may not trade away: a fit over much less than a period cannot
+    /// separate amplitude, phase and the DC term, and absorbs the distortion it was meant to leave
+    /// behind. Measured on a dirty 20 Hz record, the residual read 14.4 dB *under* the harmonic
+    /// stack at 0.4 periods and 2.7 dB under at 0.9, reaching 0.2 dB from 3.4 periods up.
+    /// </summary>
+    [Theory]
+    [InlineData(20.0)]
+    [InlineData(50.0)]
+    [InlineData(1000.0)]
+    public void TheFitWindow_HoldsSeveralWholePeriodsOfTheFundamental(double fundamentalFreqHz)
+    {
+        const double sampleRateHz = 192000.0;
+        int count = SpectrumPipeline.ResidualFitCount(1048576, sampleRateHz, fundamentalFreqHz);
+
+        double periods = count * fundamentalFreqHz / sampleRateHz;
+        Assert.True(periods >= 3.0, $"{fundamentalFreqHz} Hz gets only {periods:0.0} periods of fit window");
+    }
+
+    /// <summary>A record shorter than the window is the whole window there is.</summary>
+    [Fact]
+    public void TheFitWindow_OnARecordShorterThanItself_IsTheWholeRecord()
+    {
+        Assert.Equal(4096, SpectrumPipeline.ResidualFitCount(4096, 48000.0, 1000.0));
+    }
+
+    /// <summary>
+    /// The bound's other half: cancellation must survive it. At 65536 points the fit sees 8192 --
+    /// an eighth of the record -- and the fundamental still has to go, as
+    /// <see cref="WithNothingToRemoveButTheTone_TheResidualIsTheFloor"/> demands at 4096 where the
+    /// window was the whole record.
+    /// </summary>
+    [Fact]
+    public async Task OverARecordFarLongerThanTheFitWindow_TheFundamentalStillCancels()
+    {
+        Assert.True(SpectrumPipeline.ResidualFitCount(65536, SampleRateHz, ToneFreqHz) < 65536, "the window must be shorter than the record for this to test anything");
+
+        var groups = await CaptureAsync(groupCount: 1, harmonics: false, residual: true, fftSize: 65536);
+
+        foreach (var (_, frames) in groups)
+        {
+            double rawRms = Rms(frames[(StreamChannel.Left, false)]);
+            double resRms = Rms(frames[(StreamChannel.Left, true)]);
+            double db = 20.0 * Math.Log10(resRms / rawRms);
+            Assert.True(db < -100.0, $"residual sits at {db:0.#} dB re the raw record with no distortion to show");
+        }
+    }
+
     private static double Rms(float[] x)
     {
         double sum = 0.0;
@@ -85,7 +153,7 @@ public class ScopeResidualTests
     /// (channel, residual flag); only groups closed by a later seq are returned.
     /// </summary>
     private static async Task<List<(uint Seq, Dictionary<(StreamChannel Channel, bool Residual), float[]> Frames)>> CaptureAsync(
-        int groupCount, bool harmonics, bool residual)
+        int groupCount, bool harmonics, bool residual, int fftSize = 4096)
     {
         var device = new SimulatedDevice(randomSeed: 1);
         device.SignalProfile = device.SignalProfile with { HarmonicsEnabled = harmonics, NoiseEnabled = false, HumEnabled = false };
@@ -99,7 +167,7 @@ public class ScopeResidualTests
         {
             Options = new SpectrumPipelineOptions
             {
-                FftSize = 4096, TargetFrameRateHz = 40, DisplayColumns = 200,
+                FftSize = fftSize, TargetFrameRateHz = 40, DisplayColumns = 200,
                 ProcessLeft = true, ProcessRight = true, ScopeResidual = residual,
             },
         };

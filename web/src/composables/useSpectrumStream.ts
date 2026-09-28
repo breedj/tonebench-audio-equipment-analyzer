@@ -107,6 +107,7 @@ const outputImpedance = useOutputImpedance()
   let pendingScopeResidual: Record<number, ScopeFrame> = {}
   let pendingScopeSeq: number | null = null
   let pendingScopeTimer: ReturnType<typeof setTimeout> | undefined
+  let publishedScopeSeq: number | null = null
 
   function publishPendingScope() {
     if (pendingScopeTimer !== undefined) {
@@ -116,12 +117,26 @@ const outputImpedance = useOutputImpedance()
     if (pendingScopeSeq === null) return
     scope.value = pendingScope
     scopeResidual.value = pendingScopeResidual
+    publishedScopeSeq = pendingScopeSeq
     pendingScope = {}
     pendingScopeResidual = {}
     pendingScopeSeq = null
   }
 
   function ingestScopeFrame(seq: number, channel: number, frame: ScopeFrame, residual: boolean) {
+    // A residual frame for a tick that has already been published joins it, rather than opening a
+    // group of its own. Without this a residual that misses the deadline is not merely late, it is
+    // destructive: the group it starts has no *raw* frame, so the next publish replaces a complete
+    // tick with a residual-only one, OscilloscopeChart finds nothing to trigger on and draws an
+    // empty plot, and the display alternates between that and a raw frame whose missing residual is
+    // announced as "no fundamental to remove". The server no longer lets the two drift that far
+    // apart (SpectrumPipeline takes the sine fit before either frame goes out), so this is a
+    // backstop for a slow client rather than the fix; a residual older than the last published tick
+    // still falls through to be dropped as stale.
+    if (residual && pendingScopeSeq === null && seq === publishedScopeSeq) {
+      scopeResidual.value = { ...scopeResidual.value, [channel]: frame }
+      return
+    }
     if (pendingScopeSeq !== null && seq !== pendingScopeSeq) publishPendingScope()
     pendingScopeSeq = seq
     if (residual) pendingScopeResidual = { ...pendingScopeResidual, [channel]: frame }
@@ -145,6 +160,9 @@ const outputImpedance = useOutputImpedance()
     pendingScope = {}
     pendingScopeResidual = {}
     pendingScopeSeq = null
+    // Or a residual frame still in flight for the tick that was on screen would merge itself back
+    // into the display this just cleared.
+    publishedScopeSeq = null
     scope.value = {}
     scopeResidual.value = {}
   }
@@ -178,6 +196,7 @@ const outputImpedance = useOutputImpedance()
       // first tick, and the server restarts its sequence numbering on Start() anyway.
       pendingScope = {}
       pendingScopeSeq = null
+      publishedScopeSeq = null
       if (viewport) sendViewport()
     }
 

@@ -41,7 +41,7 @@ public sealed class SpectrumPipeline(
     private (WeightingSpec Spec, int UserVersion, int SpecLen, double BinSizeHz)? _weightingKey;
     private double[]? _weightingPowerGain;
 
-    private readonly IFftBackend _fft = new MathNetBackend();
+    private readonly IFftBackend _fft = new FftFlatBackend();
     private readonly SpectrumAverager[] _ampAveragers = [new(), new()];
     private readonly SpectrumAverager[] _psdAveragers = [new(), new()];
     private readonly object _ringBufferLock = new();

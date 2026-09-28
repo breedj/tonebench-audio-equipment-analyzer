@@ -70,7 +70,7 @@ public sealed class ImpedanceRunner(
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateLock = new();
-    private readonly IFftBackend _fft = new MathNetBackend();
+    private readonly IFftBackend _fft = new FftFlatBackend();
 
     private CancellationTokenSource? _cts;
     private Task? _runTask;

@@ -76,14 +76,14 @@ public sealed class ImpulseResponseRunner(
     private readonly object _stateLock = new();
 
     /// <summary>For the reference spectra and the estimators, all at the analysis size.</summary>
-    private readonly IFftBackend _fft = new MathNetBackend();
+    private readonly IFftBackend _fft = new FftFlatBackend();
 
     /// <summary>
     /// Its own backend for the packet extractor, which transforms at several shorter lengths. Both
     /// implementations cache one scratch array sized to the last call, so sharing would reallocate
     /// on every switch.
     /// </summary>
-    private readonly IFftBackend _packetFft = new MathNetBackend();
+    private readonly IFftBackend _packetFft = new FftFlatBackend();
 
     private CancellationTokenSource? _cts;
     private Task? _runTask;
@@ -147,7 +147,7 @@ public sealed class ImpulseResponseRunner(
         return Task.Run(
             () => CumulativeSpectralDecay.Compute(
                 impulse.Gated, impulse.PeakIndex, request.SampleRateHz,
-                AvailablePostSamples(request), settings, new MathNetBackend()),
+                AvailablePostSamples(request), settings, new FftFlatBackend()),
             ct);
     }
 

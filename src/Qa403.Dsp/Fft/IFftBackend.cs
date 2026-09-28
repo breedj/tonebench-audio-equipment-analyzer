@@ -3,8 +3,14 @@ using System.Numerics;
 namespace Qa403.Dsp.Fft;
 
 /// <summary>
-/// Real-input forward FFT and its inverse. The FFT library choice is not settled — nothing outside
-/// this interface (and its implementations) may reference FftSharp or MathNet.Numerics types.
+/// Real-input forward FFT and its inverse. Nothing outside this interface (and its implementations)
+/// may reference FftFlat, FftSharp or MathNet.Numerics types.
+///
+/// <para><see cref="FftFlatBackend"/> is the one every production call site constructs. The other
+/// two are kept because <c>FftBackendTests</c> runs the whole conformance suite against all three
+/// and cross-checks each against the others bin for bin, which is what makes a backend swap a
+/// decision rather than a leap — see <c>FftBackendBenchmarks</c> for the numbers behind the
+/// choice.</para>
 /// </summary>
 public interface IFftBackend
 {

@@ -9,6 +9,7 @@ public class FftBackendTests
     {
         yield return [new FftSharpBackend()];
         yield return [new MathNetBackend()];
+        yield return [new FftFlatBackend()];
     }
 
     [Theory]
@@ -85,20 +86,30 @@ public class FftBackendTests
         }
     }
 
-    [Fact]
-    public void BothBackends_AgreeOnCoherentTone()
+    /// <summary>
+    /// Every backend against the one the app actually runs (<see cref="MathNetBackend"/>), bin for
+    /// bin and complex rather than by magnitude -- a backend whose imaginary sign is flipped agrees
+    /// on every magnitude and is wrong about every phase, which is the whole of the frequency
+    /// response, impedance and impulse measurements.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Backends))]
+    public void EveryBackend_AgreesWithTheOneInProduction_OnACoherentTone(IFftBackend backend)
     {
         const int n = 4096;
         const int bin = 137;
         var samples = TestSignals.CoherentTone(n, (0.73, bin));
 
-        var specA = new Complex[n / 2 + 1];
-        var specB = new Complex[n / 2 + 1];
-        new FftSharpBackend().Forward(samples, specA);
-        new MathNetBackend().Forward(samples, specB);
+        var expected = new Complex[n / 2 + 1];
+        var actual = new Complex[n / 2 + 1];
+        new MathNetBackend().Forward(samples, expected);
+        backend.Forward(samples, actual);
 
-        for (int k = 0; k < specA.Length; k++)
-            Assert.Equal(specA[k].Magnitude, specB[k].Magnitude, 6);
+        for (int k = 0; k < expected.Length; k++)
+        {
+            Assert.Equal(expected[k].Real, actual[k].Real, 6);
+            Assert.Equal(expected[k].Imaginary, actual[k].Imaginary, 6);
+        }
     }
 
     [Theory]

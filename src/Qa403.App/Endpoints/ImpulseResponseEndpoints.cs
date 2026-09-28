@@ -213,7 +213,7 @@ public static class ImpulseResponseEndpoints
                 var (ir, left, available) = stored.Value;
                 var settings = request.ToSettings(windowMode);
                 return Results.Ok(await Task.Run(
-                    () => CumulativeSpectralDecay.Compute(ir, left.PeakIndex, left.SampleRateHz, available, settings, new MathNetBackend()),
+                    () => CumulativeSpectralDecay.Compute(ir, left.PeakIndex, left.SampleRateHz, available, settings, new FftFlatBackend()),
                     ct));
             }
             catch (ArgumentOutOfRangeException ex)

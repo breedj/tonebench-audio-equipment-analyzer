@@ -74,7 +74,7 @@ public sealed class SpectrumPipeline(
 
     // SampleRingBuffer.SamplesWritten as it stood when each channel last committed an average, or 0
     // for "no average yet in this epoch". Drives SpectrumPipelineOptions.AverageHopFraction; see
-    // HasFreshSignalForAverage. Reset by Flush and by a ring-buffer resize, both of which restart
+    // HasFreshSignal. Reset by Flush and by a ring-buffer resize, both of which restart
     // the counter it is compared against.
     private readonly long[] _lastAverageWritten = new long[MaxChannels];
 
@@ -484,7 +484,7 @@ public sealed class SpectrumPipeline(
 
                 // Checked here rather than inside ProcessChannel so a tick that has nothing new to
                 // add skips the FFT entirely instead of computing one and throwing it away.
-                if (!HasFreshSignalForAverage(ch, rb, options))
+                if (!HasFreshSignal(ch, rb, options))
                     continue;
 
                 double[] timeBuf = ArrayPool<double>.Shared.Rent(n);
@@ -531,16 +531,73 @@ public sealed class SpectrumPipeline(
     }
 
     /// <summary>
-    /// Whether enough new signal has arrived since this channel's last committed average to justify
-    /// another one, per <see cref="SpectrumPipelineOptions.AverageHopFraction"/>.
+    /// The least fresh signal, as a fraction of one record, that a <em>free-running</em> channel is
+    /// re-analyzed for — a floor under <see cref="SpectrumPipelineOptions.AverageHopFraction"/>, and
+    /// the only thing that ties the live display's cost to the record length rather than to the
+    /// tick rate.
     ///
-    /// <para>Always true at the historical default of 0, and always true for the first analysis of
-    /// an epoch — <c>IsFull</c> has already established that a complete, post-flush record exists,
-    /// and there is no previous average for it to overlap with.</para>
+    /// <para><b>Why.</b> <see cref="SpectrumPipelineOptions.TargetFrameRateHz"/> paces the worker at
+    /// 20 Hz whatever <see cref="SpectrumPipelineOptions.FftSize"/> is, so at a long record almost
+    /// every tick re-transformed almost the same samples. Measured against the simulator at
+    /// 192 kHz, both channels, on this machine: 1,048,576 points ran <b>10.5 FFTs per record</b>,
+    /// each carrying <b>9.6 % new signal</b>, for <b>169 % of one core</b> — and it never reached
+    /// 20 Hz anyway (1.92, against 8.0 at 262,144 and 12.8 at 65,536), because past about 65,536
+    /// points the worker is simply saturated and the achieved frame rate is a property of the
+    /// machine rather than of the setting.</para>
+    ///
+    /// <para><b>And the fresh samples were not worth transforming for.</b> They arrive at the
+    /// <em>end</em> of the record, which is exactly where a taper has thrown them away: under a
+    /// Hann window the newest 9.6 % of a record carries <b>0.041 %</b> of the window's power, so
+    /// those ten extra transforms per record answered the same question to four decimal places.
+    /// The weight climbs very steeply — 0.15 % at a hop of 1/8, 1.4 % at 1/5, <b>3.8 % at 1/4</b>,
+    /// 12.7 % at 1/3 — and a quarter is the first of them at which a tick shows the user something
+    /// a taper has not already suppressed. It still leaves four updates per record, so a long
+    /// record's display moves several times while it fills rather than appearing to stall.</para>
+    ///
+    /// <para>It cannot bind on a short record, which is the case the 20 Hz tick exists for: at
+    /// 4096 points and 192 kHz a tick already brings about three whole records of new signal.
+    /// At 192 kHz it starts to bind above roughly 48,000 points, and at 48 kHz above 12,000.
+    /// Measured on a QA403 at 192 kHz with both channels, before and after: 4096 points 15.9
+    /// updates/s either way, 65,536 12.8 -> 9.9, 262,144 8.0 -> 2.75, 1,048,576 1.92 -> 0.75, with
+    /// CPU falling from 169 % of one core to 59 % (85 % over real USB) and no dropped chunks or
+    /// blocks.</para>
+    ///
+    /// <para><b>It slows only the free-running redraw, never the response to anything the user
+    /// does.</b> Every stimulus change flushes, and <see cref="Flush"/> zeroes
+    /// <c>_lastAverageWritten</c>, so the first full record after any generator, range, FFT-size or
+    /// start change is analyzed the moment it exists — the first-analysis rule below. What the
+    /// floor removes is the redraw of a window the user has not touched, which is the only case
+    /// where the answer was already known. Verified on hardware: a SINGLE capture at 1,048,576
+    /// points still holds after 6.14 s, i.e. one 5.46 s record plus the 300 ms capture delay.</para>
     /// </summary>
-    private bool HasFreshSignalForAverage(int channelIndex, SampleRingBuffer rb, SpectrumPipelineOptions options)
+    private const double DisplayHopFloor = 0.25;
+
+    /// <summary>
+    /// Whether enough new signal has arrived since this channel's last committed record to justify
+    /// analyzing another, per <see cref="SpectrumPipelineOptions.AverageHopFraction"/> and, for a
+    /// free-running channel, <see cref="DisplayHopFloor"/>.
+    ///
+    /// <para>Always true for the first analysis of an epoch — <c>IsFull</c> has already established
+    /// that a complete, post-flush record exists, and there is no previous record for it to overlap
+    /// with.</para>
+    ///
+    /// <para>The floor is applied only when <see cref="SpectrumPipelineOptions.SingleShot"/> is
+    /// off, and that is what keeps it off every measurement path: <em>every</em> runner sets
+    /// SingleShot, so the only free-running consumer of this pipeline is the live FFT screen. The
+    /// four runners that pin the hop to 0 (frequency response, impedance twice, impulse response)
+    /// also set <c>AverageCount = 1</c>, so they take exactly one record per flush and the
+    /// first-analysis rule above already lets it straight through — but gating on SingleShot says
+    /// so outright rather than leaving a new runner to discover it.</para>
+    ///
+    /// <para>Note the floor moves the live screen's <em>averaging</em> as well, and in the
+    /// direction <see cref="SpectrumPipelineOptions.AverageHopFraction"/>'s own remarks ask for: at
+    /// a long record, tick-paced averages overlapped so heavily that eight of them spanned under
+    /// two records of independent signal. Eight now span 2.75 and take proportionally longer on the
+    /// clock, which is the honest price of an average that means something.</para>
+    /// </summary>
+    private bool HasFreshSignal(int channelIndex, SampleRingBuffer rb, SpectrumPipelineOptions options)
     {
-        double hop = options.AverageHopFraction;
+        double hop = EffectiveHopFraction(options);
         if (hop <= 0.0)
             return true;
 
@@ -551,6 +608,15 @@ public sealed class SpectrumPipeline(
         long needed = (long)Math.Ceiling(options.FftSize * Math.Min(hop, 1.0));
         return rb.SamplesWritten - last >= needed;
     }
+
+    /// <summary>
+    /// The hop <see cref="HasFreshSignal"/> actually enforces: the caller's
+    /// <see cref="SpectrumPipelineOptions.AverageHopFraction"/>, raised to
+    /// <see cref="DisplayHopFloor"/> for a free-running channel. Separated out so the rule can be
+    /// asserted without timing a pipeline.
+    /// </summary>
+    internal static double EffectiveHopFraction(SpectrumPipelineOptions options) =>
+        options.SingleShot ? options.AverageHopFraction : Math.Max(options.AverageHopFraction, DisplayHopFloor);
 
     /// <summary>
     /// Analyzes a window already captured by <see cref="ProcessTick"/> -- <paramref name="timeBuf"/>

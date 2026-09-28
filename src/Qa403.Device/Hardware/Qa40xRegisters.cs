@@ -32,6 +32,27 @@ internal static class Qa40xRegisters
     public const uint StreamingStop = 0x0;
 
     /// <summary>
+    /// Front-panel I2S expansion port: 1 starts the generation stream, 0 stops it. This app only
+    /// ever writes <see cref="I2sStop"/>, at connect, as part of putting the unit in a defined
+    /// state — nothing here drives the port.
+    ///
+    /// <para>Tier-2 source: qa40x-rs-main only (register.rs:9-14, doc/device-notes.md §10, from a
+    /// USB capture of the vendor app's I2S feature on a QA402), like <see cref="FirmwareVersion"/>
+    /// and the telemetry block — neither PyQa40x nor qa40x-baremetal touches it (docs/protocol.md
+    /// §2.4). Both the vendor app and qa40x-rs write this 0 early in their own connect sequence.</para>
+    ///
+    /// <para>It matters because the port is <i>device</i> state, the way register 8 is: a vendor-app
+    /// session that left the expansion port playing keeps it playing across that process exiting and
+    /// across this one opening the device, and nothing this app does would ever stop it. Writing 0 is
+    /// also what makes it safe for this app to leave EP3 unopened — the port is known-silent rather
+    /// than merely untouched.</para>
+    /// </summary>
+    public const byte I2sControl = 0x0a;
+
+    /// <summary>Stop value for <see cref="I2sControl"/>; the only value this app writes there.</summary>
+    public const uint I2sStop = 0x0;
+
+    /// <summary>
     /// Sample rate index register. Not touched by qa40x-baremetal at all; sourced from
     /// reference/PyQa40x-main/PyQa40x-main/src/PyQa40x/control.py:40-49, corroborated by
     /// reference/qa40x-rs-main (docs/protocol.md §2.4). Write the index (0/1/2/3), never the Hz

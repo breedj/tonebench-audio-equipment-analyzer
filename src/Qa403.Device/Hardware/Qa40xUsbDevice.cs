@@ -281,6 +281,31 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 throw new InvalidOperationException("QA403 connection verification failed (register 0 readback did not match).");
             }
 
+            // Front-panel I2S expansion port off, in the reference's own position: after the stream
+            // stop, before the calibration read. It is the same kind of leftover state as register 8
+            // — a vendor-app session that left the port playing keeps playing across that process
+            // exiting and across this one opening the device — and this app never drives it, so
+            // without this write it could only ever be silenced by someone else's software.
+            //
+            // After the verify rather than beside the StreamingStop above: that recovery is placed
+            // where it is because it must reach a wedged device, and this write has no such claim on
+            // it. Failures are swallowed for the reason the telemetry reads are (tier-2, sourced from
+            // one project's USB capture of a QA402) — a firmware that does not implement 0x0A must
+            // not be a firmware this app refuses to connect to.
+            try
+            {
+                await transport.WriteRegisterAsync(Qa40xRegisters.I2sControl, Qa40xRegisters.I2sStop, ct).ConfigureAwait(false);
+
+                // Logged on the way through, at Debug, because there is no other way to see this
+                // happen: the port is write-only, nothing on screen reflects it, and a write that was
+                // swallowed above looks exactly like one that was never reached.
+                logger.LogDebug("QA403 front-panel I2S stopped at connect (register 0x0A = 0)");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not Qa40xDeviceLostException)
+            {
+                logger.LogDebug(ex, "QA403 did not accept the front-panel I2S stop at connect — continuing");
+            }
+
             var calibration = await Qa40xCalibration.LoadAsync(transport, ct).ConfigureAwait(false);
 
             // Tier-2 registers (docs/protocol.md §2.4: sourced from qa40x-rs-main's own USB-traffic

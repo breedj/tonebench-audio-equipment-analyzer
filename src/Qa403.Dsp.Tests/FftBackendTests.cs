@@ -87,7 +87,7 @@ public class FftBackendTests
     }
 
     /// <summary>
-    /// Every backend against the one the app actually runs (<see cref="MathNetBackend"/>), bin for
+    /// Every backend against the one the app actually runs (<see cref="FftFlatBackend"/>), bin for
     /// bin and complex rather than by magnitude -- a backend whose imaginary sign is flipped agrees
     /// on every magnitude and is wrong about every phase, which is the whole of the frequency
     /// response, impedance and impulse measurements.
@@ -102,7 +102,7 @@ public class FftBackendTests
 
         var expected = new Complex[n / 2 + 1];
         var actual = new Complex[n / 2 + 1];
-        new MathNetBackend().Forward(samples, expected);
+        new FftFlatBackend().Forward(samples, expected);
         backend.Forward(samples, actual);
 
         for (int k = 0; k < expected.Length; k++)

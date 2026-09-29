@@ -164,7 +164,7 @@ watch(running, (isRunning, wasRunning) => {
       title="Logarithmic is the one scale that fits a solid-state amplifier's milliohms and a tube amplifier's ohms in one window, and puts the damping-factor curve on a mirrored axis. Linear reads a flat Zout as flat."
     >
       Scale
-      <select v-model="zScale" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+      <select v-model="zScale" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
         <option value="Linear">Linear</option>
         <option value="Log">Logarithmic</option>
       </select>
@@ -172,11 +172,11 @@ watch(running, (isRunning, wasRunning) => {
     <div class="grid grid-cols-2 gap-2 text-xs">
       <label class="flex flex-col gap-1">
         Top (Ω)
-        <input :value="zTopOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onTopZChange" />
+        <input :value="zTopOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onTopZChange" />
       </label>
       <label class="flex flex-col gap-1">
         Bottom (Ω)
-        <input :value="zBottomOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onBottomZChange" />
+        <input :value="zBottomOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onBottomZChange" />
       </label>
     </div>
     <button
@@ -205,11 +205,11 @@ watch(running, (isRunning, wasRunning) => {
     <div class="grid grid-cols-2 gap-2 text-xs">
       <label class="flex flex-col gap-1">
         Top (°)
-        <input :value="phaseTopDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onTopPhaseChange" />
+        <input :value="phaseTopDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onTopPhaseChange" />
       </label>
       <label class="flex flex-col gap-1">
         Bottom (°)
-        <input :value="phaseBottomDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800" @change="onBottomPhaseChange" />
+        <input :value="phaseBottomDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onBottomPhaseChange" />
       </label>
     </div>
     <button
@@ -224,13 +224,13 @@ watch(running, (isRunning, wasRunning) => {
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
     <label class="flex flex-col gap-1 text-xs">
       From
-      <select v-model.number="xFromHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+      <select v-model.number="xFromHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
         <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
     </label>
     <label class="flex flex-col gap-1 text-xs">
       To
-      <select v-model.number="xToHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+      <select v-model.number="xToHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
         <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
     </label>

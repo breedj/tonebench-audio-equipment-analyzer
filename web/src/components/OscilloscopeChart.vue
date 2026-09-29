@@ -423,7 +423,7 @@ onBeforeUnmount(() => {
           min="1"
           :max="MAX_SCOPE_PERIODS"
           step="1"
-          class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs dark:border-neutral-700"
           @input="onPeriodsInput"
           @change="onPeriodsChange"
         />

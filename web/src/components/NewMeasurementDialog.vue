@@ -69,7 +69,7 @@ async function onCreate() {
           v-model="name"
           type="text"
           placeholder="e.g. FFT analysis"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
 

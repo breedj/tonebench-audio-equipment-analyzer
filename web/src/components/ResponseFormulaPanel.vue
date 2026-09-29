@@ -88,7 +88,7 @@ async function copy() {
 
     <template v-else>
       <!-- The formula itself. Rendered as spans rather than an image so it selects and scales. -->
-      <div class="overflow-x-auto rounded border border-neutral-200 bg-neutral-50 p-2 font-mono text-[11px] leading-5 dark:border-neutral-800 dark:bg-neutral-900">
+      <div class="overflow-x-auto rounded border border-neutral-200 bg-[var(--surface-control)] p-2 font-mono text-[11px] leading-5 dark:border-neutral-800 dark:bg-neutral-900">
         <div class="flex items-center gap-1.5 whitespace-nowrap">
           <span class="text-neutral-500 dark:text-neutral-400">H(s) =</span>
           <span class="text-neutral-900 dark:text-neutral-100">{{ rendered.gain }}</span>
@@ -136,7 +136,7 @@ async function copy() {
       <div class="flex max-w-sm items-center gap-2 text-xs">
         <select
           v-model="format"
-          class="flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="option in TRANSFER_FUNCTION_FORMATS" :key="option.id" :value="option.id">
             {{ option.label }}
@@ -158,7 +158,7 @@ async function copy() {
         readonly
         rows="7"
         spellcheck="false"
-        class="w-full resize-y rounded border border-neutral-300 bg-neutral-50 p-2 font-mono text-[10px] leading-4 dark:border-neutral-700 dark:bg-neutral-900"
+        class="w-full resize-y rounded border border-neutral-300 p-2 font-mono text-[10px] leading-4 dark:border-neutral-700"
       />
 
       <p v-if="copyState === 'manual'" class="text-[11px] text-amber-600 dark:text-amber-400">

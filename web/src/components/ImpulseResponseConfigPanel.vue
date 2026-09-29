@@ -291,7 +291,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <select
         v-model="form.levelMode"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
@@ -305,7 +305,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
           type="number"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label v-if="!isPowerMode" class="flex flex-col gap-1">
@@ -313,7 +313,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         <select
           v-model="form.levelUnit"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
@@ -328,7 +328,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         step="any"
         min="0.1"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -340,7 +340,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <select
         v-model.number="form.frequencySpanHz"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span }}</option>
       </select>
@@ -354,7 +354,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <select
         v-model.number="form.resolutionMultiplier"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="option in RESPONSE_RESOLUTIONS" :key="option.multiplier" :value="option.multiplier">
           {{ option.label }}
@@ -371,7 +371,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         max="1000"
         step="0.5"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -383,7 +383,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         min="1"
         max="10"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -413,7 +413,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
           min="0.05"
           step="0.05"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1" title="Kept after the impulse. This is what decides the lowest frequency the gated response can describe.">
@@ -424,7 +424,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
           min="0.1"
           step="0.5"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -437,7 +437,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <select
         v-model="form.gateWindow"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="option in IMPULSE_GATE_WINDOWS" :key="option.value" :value="option.value">
           {{ option.label }}
@@ -450,7 +450,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <select
         v-model.number="form.smoothingDenominator"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="option in RESPONSE_SMOOTHING" :key="option.denominator" :value="option.denominator">
           {{ option.label }}
@@ -475,7 +475,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <select
         v-model="form.referenceMode"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="mode in IMPULSE_REFERENCE_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
@@ -487,7 +487,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         <select
           v-model.number="form.referenceCalibrationId"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option :value="null">— none —</option>
           <option v-for="reference in references" :key="reference.id" :value="reference.id">
@@ -534,7 +534,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <select
         v-model.number="form.maxHarmonicOrder"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="order in [2, 3, 4, 5]" :key="order" :value="order">H{{ order }}</option>
       </select>

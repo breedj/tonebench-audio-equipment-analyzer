@@ -94,7 +94,7 @@ defineExpose({ invalid })
       Bandwidth reference
       <select
         v-model="reference"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="option in BANDWIDTH_REFERENCES" :key="option.value" :value="option.value">
           {{ option.label }}
@@ -110,7 +110,7 @@ defineExpose({ invalid })
           type="number"
           min="1"
           max="96000"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1" title="Top of the band the reference level is the median of.">
@@ -120,7 +120,7 @@ defineExpose({ invalid })
           type="number"
           min="1"
           max="96000"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>

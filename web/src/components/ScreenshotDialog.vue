@@ -60,7 +60,7 @@ function confirm() {
           v-model="form.title"
           type="text"
           placeholder="Printed above the chart; leave empty for none"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @keyup.enter="confirm"
         />
       </label>
@@ -86,7 +86,7 @@ function confirm() {
         <span class="whitespace-nowrap">Image size</span>
         <select
           v-model.number="form.widthPx"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="size in SCREENSHOT_SIZES" :key="size.widthPx" :value="size.widthPx">
             {{ size.label }} ({{ size.widthPx }} px)
@@ -96,7 +96,7 @@ function confirm() {
         <span class="whitespace-nowrap">Destination</span>
         <select
           v-model="form.destination"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="d in SCREENSHOT_DESTINATIONS" :key="d.id" :value="d.id">{{ d.label }}</option>
         </select>
@@ -104,7 +104,7 @@ function confirm() {
         <span class="whitespace-nowrap">Aspect ratio</span>
         <select
           v-model="form.aspectRatio"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="r in SCREENSHOT_ASPECT_RATIOS" :key="r.id" :value="r.id">{{ r.label }}</option>
         </select>

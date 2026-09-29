@@ -93,7 +93,7 @@ function onConfirm() {
           v-model="form.name"
           type="text"
           autofocus
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @keyup.enter="onConfirm"
         />
       </label>
@@ -103,7 +103,7 @@ function onConfirm() {
         <textarea
           v-model="form.notes"
           rows="3"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         ></textarea>
       </label>
 
@@ -114,7 +114,7 @@ function onConfirm() {
             v-model="form.location"
             type="text"
             spellcheck="false"
-            class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 font-mono text-xs dark:border-neutral-700 dark:bg-neutral-800"
+            class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 font-mono text-xs dark:border-neutral-700"
             title="Where the .qa403 file is written. Follows the name until you change it."
             @input="onLocationInput"
             @keyup.enter="onConfirm"

@@ -140,7 +140,7 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
               type="number"
               min="1"
               max="10"
-              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
           </label>
           <label class="flex items-center justify-between gap-2" title="The numerator order: how many zeros the model may have, never more than poles. 0 for an all-pole DUT — a low-pass filter, an amplifier without an output transformer — which is otherwise fitted with as many zeros as poles and spends them on noise.">
@@ -150,7 +150,7 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
               type="number"
               min="0"
               :max="activeOrder"
-              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
           </label>
         </template>

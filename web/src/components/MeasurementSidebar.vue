@@ -169,8 +169,8 @@ async function onDelete(id: number) {
       class="flex flex-col gap-2 p-2"
       :class="
         pinned
-          ? 'h-full'
-          : 'absolute inset-y-0 left-0 z-30 w-[15.4rem] overflow-y-auto border-r border-neutral-200 bg-neutral-50 shadow-xl dark:border-neutral-800 dark:bg-neutral-950'
+          ? 'h-full bg-[var(--surface-panel)]'
+          : 'absolute inset-y-0 left-0 z-30 w-[15.4rem] overflow-y-auto border-r border-neutral-200 bg-[var(--surface-panel)] shadow-xl dark:border-neutral-800'
       "
     >
       <div class="flex items-center gap-1">

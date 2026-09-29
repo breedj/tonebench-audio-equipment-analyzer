@@ -32,7 +32,7 @@ function onConfirm() {
           v-model="name"
           type="text"
           autofocus
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @keyup.enter="onConfirm"
         />
       </label>

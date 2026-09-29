@@ -230,7 +230,7 @@ function run() {
         min="1"
         step="any"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -244,7 +244,7 @@ function run() {
           :max="MAX_AMPLITUDE_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1" title="Highest generator voltage measured. 7.9 V is the most the output stage can produce.">
@@ -256,7 +256,7 @@ function run() {
           :max="MAX_AMPLITUDE_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -272,7 +272,7 @@ function run() {
         min="1"
         max="48"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -289,7 +289,7 @@ function run() {
         step="any"
         min="0.1"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -313,7 +313,7 @@ function run() {
           min="1"
           max="64"
           :disabled="running"
-          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -338,7 +338,7 @@ function run() {
         min="0.001"
         step="0.1"
         :disabled="running || !form.stopOnThd"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
       %
     </label>

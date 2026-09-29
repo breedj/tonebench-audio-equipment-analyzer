@@ -486,7 +486,7 @@ watch(running, (isRunning, wasRunning) => {
           type="number"
           max="-6"
           step="10"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -566,7 +566,7 @@ watch(running, (isRunning, wasRunning) => {
           type="number"
           step="10"
           title="How far above the passband level the colour ramp reaches. A pole runs to infinity, so this is where it saturates rather than a level anything reaches."
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex items-center justify-between gap-2">
@@ -576,14 +576,14 @@ watch(running, (isRunning, wasRunning) => {
           type="number"
           step="10"
           title="How far below the passband level the colour ramp reaches. Both are offsets from the passband, so the window means the same thing on a 0 dB filter and a +26 dB amplifier."
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex items-center justify-between gap-2">
         Palette
         <select
           v-model="surfacePalette"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
         </select>
@@ -681,7 +681,7 @@ watch(running, (isRunning, wasRunning) => {
         <span>{{ delayLabel('None') }}</span>
         <select
           v-model="delayView"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="option in DELAY_VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
@@ -735,7 +735,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="yTopDb"
         type="number"
         :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onTopDbChange"
       />
     </label>
@@ -745,7 +745,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="yBottomDb"
         type="number"
         :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onBottomDbChange"
       />
     </label>
@@ -763,7 +763,7 @@ watch(running, (isRunning, wasRunning) => {
       From
       <select
         v-model.number="xFromHz"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
@@ -772,7 +772,7 @@ watch(running, (isRunning, wasRunning) => {
       To
       <select
         v-model.number="xToHz"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
@@ -795,7 +795,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="phaseTopDeg"
         type="number"
         :step="PHASE_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onTopPhaseChange"
       />
     </label>
@@ -805,7 +805,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="phaseBottomDeg"
         type="number"
         :step="PHASE_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onBottomPhaseChange"
       />
     </label>
@@ -827,7 +827,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="usToUnit(delayTopUs, delayUnit)"
         type="number"
         :step="usToUnit(delayStepUs, delayUnit)"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onTopDelayChange"
       />
     </label>
@@ -837,7 +837,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="usToUnit(delayBottomUs, delayUnit)"
         type="number"
         :step="usToUnit(delayStepUs, delayUnit)"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onBottomDelayChange"
       />
     </label>

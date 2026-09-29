@@ -227,7 +227,7 @@ function run() {
       <select
         v-model="form.preset"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onPresetChange"
       >
         <option v-for="p in IMD_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
@@ -243,7 +243,7 @@ function run() {
           min="1"
           step="any"
           :disabled="running || presetActive"
-          class="rounded border border-neutral-300 px-2 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 disabled:opacity-60 dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1" title="The upper tone — SMPTE's carrier, CCIF's f2.">
@@ -254,7 +254,7 @@ function run() {
           min="1"
           step="any"
           :disabled="running || presetActive"
-          class="rounded border border-neutral-300 px-2 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 disabled:opacity-60 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -270,7 +270,7 @@ function run() {
         min="0.01"
         step="any"
         :disabled="running || presetActive"
-        class="w-20 rounded border border-neutral-300 px-2 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-20 rounded border border-neutral-300 px-2 py-1 disabled:opacity-60 dark:border-neutral-700"
       />
     </label>
 
@@ -282,7 +282,7 @@ function run() {
       <select
         v-model="form.method"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onMethodChange"
       >
         <option v-for="m in METHODS" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -300,7 +300,7 @@ function run() {
         min="2"
         max="12"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -317,7 +317,7 @@ function run() {
           :max="MAX_LEVEL_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1" title="Highest generator level. 7.9 V is the most the output stage can produce at the pair's peak.">
@@ -329,7 +329,7 @@ function run() {
           :max="MAX_LEVEL_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -345,7 +345,7 @@ function run() {
         min="1"
         max="48"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -360,7 +360,7 @@ function run() {
         step="any"
         min="0.1"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -384,7 +384,7 @@ function run() {
           min="1"
           max="64"
           :disabled="running"
-          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -408,7 +408,7 @@ function run() {
         min="1"
         step="any"
         :disabled="running"
-        class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 

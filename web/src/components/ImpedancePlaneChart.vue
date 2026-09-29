@@ -404,7 +404,7 @@ watch([isDark, () => props.thickLines], () => draw())
 
     <div
       ref="container"
-      class="relative w-full"
+      class="plot-surface relative w-full"
       :style="{ height: `${chartHeight}px` }"
       @mousemove="onMove"
       @mouseleave="onLeave"

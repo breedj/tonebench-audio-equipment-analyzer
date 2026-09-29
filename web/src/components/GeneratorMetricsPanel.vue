@@ -17,7 +17,7 @@ const tile = computed(() => (selectedMetrics.value.includes(GEN_METRIC_LABEL) ? 
 <template>
   <div
     v-if="tile"
-    class="min-w-[9rem] rounded-xl border border-l-4 border-neutral-200 border-l-violet-500 bg-white px-3 py-2 shadow-sm dark:border-neutral-800 dark:border-l-violet-400 dark:bg-neutral-900"
+    class="min-w-[9rem] rounded-xl border border-l-4 border-neutral-200 border-l-violet-500 bg-[var(--surface-panel)] px-3 py-2 shadow-sm dark:border-neutral-800 dark:border-l-violet-400"
   >
     <div class="mb-1 flex items-center justify-between gap-3">
       <span class="text-xs text-neutral-500 dark:text-neutral-400">{{ tile.label }}</span>

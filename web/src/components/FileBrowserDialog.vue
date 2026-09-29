@@ -147,7 +147,7 @@ function formatModified(iso: string | null): string {
           v-model="pathInput"
           type="text"
           spellcheck="false"
-          class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 font-mono text-xs dark:border-neutral-700 dark:bg-neutral-800"
+          class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 font-mono text-xs dark:border-neutral-700"
           title="A folder to list, or a project file to pick. Enter applies it."
           @keyup.enter="onPathEnter"
         />
@@ -202,7 +202,7 @@ function formatModified(iso: string | null): string {
           v-model="fileName"
           type="text"
           spellcheck="false"
-          class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @keyup.enter="confirm"
         />
       </label>

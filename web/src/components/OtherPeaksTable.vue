@@ -37,7 +37,7 @@ const rows = computed(() => {
           min="1"
           :max="Math.max(1, available.length)"
           v-model.number="requestedCount"
-          class="w-16 rounded border border-neutral-300 px-2 py-0.5 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-2 py-0.5 dark:border-neutral-700"
         />
       </label>
     </template>

@@ -1119,7 +1119,7 @@ defineExpose({ margins, curve: readCurve, exportPng })
       <span v-else class="shrink-0">Drag a box to zoom</span>
     </div>
 
-    <div ref="container" class="relative w-full" :style="{ height: `${chartHeight}px` }">
+    <div ref="container" class="plot-surface relative w-full" :style="{ height: `${chartHeight}px` }">
       <canvas
         ref="canvas"
         class="h-full w-full touch-none"

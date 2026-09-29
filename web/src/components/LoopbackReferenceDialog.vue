@@ -94,7 +94,7 @@ async function remove(id: number) {
           v-model="form.name"
           type="text"
           :disabled="capturingReference"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
 
@@ -104,7 +104,7 @@ async function remove(id: number) {
           <select
             v-model.number="form.frequencySpanHz"
             :disabled="capturingReference"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           >
             <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span }}</option>
           </select>
@@ -114,7 +114,7 @@ async function remove(id: number) {
           <select
             v-model.number="form.resolutionMultiplier"
             :disabled="capturingReference"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           >
             <option v-for="option in RESPONSE_RESOLUTIONS" :key="option.multiplier" :value="option.multiplier">
               {{ option.label }}
@@ -131,7 +131,7 @@ async function remove(id: number) {
             type="number"
             step="1"
             :disabled="capturingReference"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
         <label class="flex flex-col gap-1" :title="`At least ${MIN_AVERAGES}: this is divided into every measurement that uses it, so its own noise lands in all of them.`">
@@ -142,7 +142,7 @@ async function remove(id: number) {
             :min="MIN_AVERAGES"
             max="10"
             :disabled="capturingReference"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
       </div>

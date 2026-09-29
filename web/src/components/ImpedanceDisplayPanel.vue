@@ -266,7 +266,7 @@ watch(
       Chart
       <select
         v-model="view"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option value="Bode">|Z| and phase</option>
         <option value="Nyquist">Complex plane (R vs X)</option>
@@ -312,7 +312,7 @@ watch(
       Scale
       <select
         v-model="zScale"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option value="Linear">Linear</option>
         <option value="Log">Logarithmic</option>
@@ -325,7 +325,7 @@ watch(
           :value="zTopOhms"
           type="number"
           step="any"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onTopZChange"
         />
       </label>
@@ -335,7 +335,7 @@ watch(
           :value="zBottomOhms"
           type="number"
           step="any"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onBottomZChange"
         />
       </label>
@@ -357,7 +357,7 @@ watch(
           :value="phaseTopDeg"
           type="number"
           step="15"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onTopPhaseChange"
         />
       </label>
@@ -367,7 +367,7 @@ watch(
           :value="phaseBottomDeg"
           type="number"
           step="15"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onBottomPhaseChange"
         />
       </label>
@@ -387,7 +387,7 @@ watch(
         From (Hz)
         <select
           v-model.number="xFromHz"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
         </select>
@@ -396,7 +396,7 @@ watch(
         To (Hz)
         <select
           v-model.number="xToHz"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
         </select>

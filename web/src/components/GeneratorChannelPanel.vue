@@ -194,7 +194,7 @@ defineExpose({ currentConfig, syncFromStatus })
       Stimulus
       <select
         v-model="kind"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onKindChange"
       >
         <option v-for="k in KINDS" :key="k.value" :value="k.value">{{ k.label }}</option>
@@ -206,7 +206,7 @@ defineExpose({ currentConfig, syncFromStatus })
         IMD preset
         <select
           v-model="imd.preset"
-          class="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
           @change="onPresetChange"
         >
           <option v-for="p in IMD_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
@@ -219,7 +219,7 @@ defineExpose({ currentConfig, syncFromStatus })
           type="number"
           step="0.5"
           :value="presetLevelDbv"
-          class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700"
           @change="onPresetLevelChange"
         />
         <span class="text-neutral-500">dBV sine-eq.</span>
@@ -232,7 +232,7 @@ defineExpose({ currentConfig, syncFromStatus })
               type="number"
               v-model.number="tone.freqHz"
               :disabled="presetActive"
-              class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700"
               :class="{ [NO_SPINNER]: presetActive }"
               placeholder="Freq (Hz)"
               @change="onToneEdit"
@@ -252,7 +252,7 @@ defineExpose({ currentConfig, syncFromStatus })
             type="number"
             v-model.number="tone.ampDbv"
             :disabled="presetActive"
-            class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800"
+            class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700"
             :class="{ [NO_SPINNER]: presetActive }"
             placeholder="Amp (dBV)"
             @change="onToneEdit"
@@ -283,7 +283,7 @@ defineExpose({ currentConfig, syncFromStatus })
           IMD method
           <select
             v-model="imd.method"
-            class="w-full rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+            class="w-full rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
             @change="onMethodChange"
           >
             <option v-for="m in IMD_METHODS" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -296,7 +296,7 @@ defineExpose({ currentConfig, syncFromStatus })
             min="2"
             max="12"
             v-model.number="imd.maxOrder"
-            class="w-16 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="w-16 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700"
             @change="emit('change')"
           />
         </label>
@@ -310,7 +310,7 @@ defineExpose({ currentConfig, syncFromStatus })
           type="number"
           min="1"
           v-model.number="multitone.tonesPerOctave"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         />
       </label>
@@ -319,7 +319,7 @@ defineExpose({ currentConfig, syncFromStatus })
         <input
           type="number"
           v-model.number="multitone.totalRmsDbv"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         />
       </label>
@@ -328,7 +328,7 @@ defineExpose({ currentConfig, syncFromStatus })
         <input
           type="number"
           v-model.number="multitone.rolloffDbPerOctave"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         />
       </label>
@@ -341,7 +341,7 @@ defineExpose({ currentConfig, syncFromStatus })
         <input
           type="number"
           v-model.number="noise.levelDbv"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         />
       </label>
@@ -353,7 +353,7 @@ defineExpose({ currentConfig, syncFromStatus })
         <input
           type="number"
           v-model.number="chirp.amplitudeDbv"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         />
       </label>
@@ -363,7 +363,7 @@ defineExpose({ currentConfig, syncFromStatus })
           type="number"
           min="1"
           v-model.number="chirp.startFreqHz"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         />
       </label>
@@ -372,7 +372,7 @@ defineExpose({ currentConfig, syncFromStatus })
         <input
           type="number"
           v-model.number="chirp.endFreqHz"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         />
       </label>
@@ -380,7 +380,7 @@ defineExpose({ currentConfig, syncFromStatus })
         Smoothing (octaves)
         <select
           v-model="chirp.smoothing"
-          class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="emit('change')"
         >
           <option v-for="s in SMOOTHING" :key="s.value" :value="s.value">{{ s.label }}</option>

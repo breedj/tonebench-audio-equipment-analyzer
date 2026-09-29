@@ -580,7 +580,7 @@ onBeforeUnmount(() => {
           type="number"
           step="10"
           :disabled="autoLevels"
-          class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
           title="Level mapped to the coldest colour, in the chart's unit."
         />
         <span class="h-3 w-24 rounded-sm" :style="{ background: legendGradient }" aria-hidden="true"></span>
@@ -589,7 +589,7 @@ onBeforeUnmount(() => {
           type="number"
           step="10"
           :disabled="autoLevels"
-          class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-1.5 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
           title="Level mapped to the hottest colour, in the chart's unit."
         />
         <span>{{ unitSuffix(spectrumUnit) }}</span>

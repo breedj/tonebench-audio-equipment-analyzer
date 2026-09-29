@@ -355,7 +355,7 @@ function run() {
           type="number"
           min="1"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1" title="Highest frequency measured. Anything above 98% of Nyquist is dropped.">
@@ -365,7 +365,7 @@ function run() {
           type="number"
           min="2"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -381,7 +381,7 @@ function run() {
         min="1"
         max="48"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -393,7 +393,7 @@ function run() {
       <select
         v-model="form.levelMode"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
@@ -407,7 +407,7 @@ function run() {
           type="number"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label v-if="!isPowerMode" class="flex flex-col gap-1">
@@ -415,7 +415,7 @@ function run() {
         <select
           v-model="form.levelUnit"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
@@ -436,7 +436,7 @@ function run() {
         step="any"
         min="0.1"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 
@@ -460,7 +460,7 @@ function run() {
           min="1"
           max="64"
           :disabled="running"
-          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>
@@ -473,7 +473,7 @@ function run() {
       <select
         v-model="form.thdMethod"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="method in THD_METHODS" :key="method.value" :value="method.value">{{ method.label }}</option>
       </select>

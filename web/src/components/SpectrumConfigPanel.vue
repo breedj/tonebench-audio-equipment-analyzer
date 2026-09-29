@@ -129,7 +129,7 @@ defineExpose({ getSampleRateHz })
           Sample rate
           <select
             v-model.number="sampleRateHz"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             @change="onSampleRateChange"
           >
             <option v-for="fs in props.ranges?.sampleRatesHz" :key="fs" :value="fs">{{ fs }} Hz</option>
@@ -140,7 +140,7 @@ defineExpose({ getSampleRateHz })
           FFT size
           <select
             v-model.number="form.fftSize"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             @change="apply"
           >
             <option v-for="n in FFT_SIZES" :key="n" :value="n">{{ n }}</option>
@@ -151,7 +151,7 @@ defineExpose({ getSampleRateHz })
           Window
           <select
             v-model="form.window"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             @change="apply"
           >
             <option v-for="w in WINDOWS" :key="w.value" :value="w.value">{{ w.label }}</option>
@@ -165,7 +165,7 @@ defineExpose({ getSampleRateHz })
             Averaging
             <select
               v-model="form.averaging"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
               @change="apply"
             >
               <option v-for="m in AVERAGING_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -182,7 +182,7 @@ defineExpose({ getSampleRateHz })
               type="number"
               min="1"
               v-model.number="form.averageCount"
-              class="w-12 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-12 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700"
               @change="apply"
             />
           </label>

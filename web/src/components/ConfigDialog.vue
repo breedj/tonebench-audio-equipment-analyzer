@@ -210,7 +210,7 @@ async function clearStoredCalibration() {
             Style
             <select
               v-model="themeMode"
-              class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             >
               <option v-for="o in THEME_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
@@ -223,7 +223,7 @@ async function clearStoredCalibration() {
             Date and time format
             <select
               :value="dateTimeFormat"
-              class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
               @change="setDateTimeFormat(($event.target as HTMLSelectElement).value as DateTimeFormatId)"
             >
               <option v-for="o in dateFormatOptions" :key="o.id" :value="o.id">{{ o.label }}</option>
@@ -304,7 +304,7 @@ async function clearStoredCalibration() {
               step="10"
               :value="captureDelayMs"
               @change="onCaptureDelayChange"
-              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
           </label>
 
@@ -323,7 +323,7 @@ async function clearStoredCalibration() {
                   step="1"
                   :value="externalGainLeftDb"
                   @change="onExternalGainChange('left', $event)"
-                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
                 />
               </label>
               <label class="flex items-center gap-1.5">
@@ -335,7 +335,7 @@ async function clearStoredCalibration() {
                   step="1"
                   :value="externalGainRightDb"
                   @change="onExternalGainChange('right', $event)"
-                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
                 />
               </label>
             </div>
@@ -352,7 +352,7 @@ async function clearStoredCalibration() {
               min="0"
               step="100"
               v-model.number="autoRangeStepDownDelayMs.value"
-              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
               @change="applyAutoRangeStepDownDelay"
             />
           </label>
@@ -369,7 +369,7 @@ async function clearStoredCalibration() {
                 type="number"
                 min="0"
                 v-model.number="bandwidth.loFreqHz"
-                class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+                class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
                 @change="applyBandwidth"
               />
               <span class="text-neutral-400">–</span>
@@ -377,7 +377,7 @@ async function clearStoredCalibration() {
                 type="number"
                 min="1"
                 v-model.number="bandwidth.hiFreqHz"
-                class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+                class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
                 @change="applyBandwidth"
               />
             </span>
@@ -406,7 +406,7 @@ async function clearStoredCalibration() {
               step="any"
               :disabled="resistorLocked"
               v-model.number="impedance.referenceOhms"
-              class="w-32 rounded border border-neutral-300 px-2 py-1 disabled:bg-neutral-100 disabled:text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:disabled:bg-neutral-900 dark:disabled:text-neutral-400"
+              class="w-32 rounded border border-neutral-300 px-2 py-1 disabled:bg-neutral-100 disabled:text-neutral-500 dark:border-neutral-700 dark:disabled:bg-neutral-900 dark:disabled:text-neutral-400"
               @change="applyFixtureField"
             />
           </label>
@@ -420,7 +420,7 @@ async function clearStoredCalibration() {
               type="number"
               step="any"
               v-model.number="impedance.calibrationLevelValue"
-              class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
               @change="applyFixtureField"
             />
           </label>

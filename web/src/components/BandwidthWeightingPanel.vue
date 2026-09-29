@@ -111,7 +111,7 @@ onMounted(() => {
           Bandwidth
           <select
             v-model="form.bandwidth"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             @change="applyBandwidth"
           >
             <option v-for="p in BANDWIDTH_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
@@ -126,7 +126,7 @@ onMounted(() => {
           Weighting
           <select
             v-model="form.weighting"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             @change="applyWeighting"
           >
             <option v-for="w in WEIGHTING_OPTIONS" :key="w.value" :value="w.value">{{ w.label }}</option>

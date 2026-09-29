@@ -101,8 +101,11 @@ interface ChartTheme {
   text: string
 }
 
+// `background` is the plot well, and it has to be a constant here rather than read from
+// `--surface-plot`: an export forces the light theme whatever the app is showing, so the two
+// grounds must both be available at once. Keep the dark one in step with that token (style.css).
 const THEME: { dark: ChartTheme; light: ChartTheme } = {
-  dark: { background: '#0a0a0a', axis: '#a3a3a3', grid: '#333333', gridWidth: 1, plain: '#60a5fa', text: '#d4d4d4' },
+  dark: { background: '#15181d', axis: '#a3a3a3', grid: '#333333', gridWidth: 1, plain: '#60a5fa', text: '#d4d4d4' },
   light: { background: '#ffffff', axis: '#525252', grid: '#d4d4d4', gridWidth: 1, plain: '#1d6fd0', text: '#404040' },
 }
 

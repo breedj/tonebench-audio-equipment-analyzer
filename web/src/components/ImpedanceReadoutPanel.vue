@@ -218,7 +218,7 @@ const equivalentBlock = computed(() => equivalentRows(atCursor.value))
       </span>
       <select
         v-model="dutType"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="option in DUT_TYPES" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
@@ -368,7 +368,7 @@ const equivalentBlock = computed(() => equivalentRows(atCursor.value))
         type="number"
         min="1"
         step="any"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
 

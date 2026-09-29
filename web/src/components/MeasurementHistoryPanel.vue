@@ -75,7 +75,7 @@ async function onConfirmDelete(item: MeasurementSummary) {
           <input
             v-model="form.fromDate"
             type="date"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             @change="applyFilter"
           />
         </label>
@@ -85,7 +85,7 @@ async function onConfirmDelete(item: MeasurementSummary) {
           <input
             v-model="form.toDate"
             type="date"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             @change="applyFilter"
           />
         </label>

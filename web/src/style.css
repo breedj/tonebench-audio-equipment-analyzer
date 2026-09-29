@@ -5,21 +5,68 @@
    dialog can override the OS setting; Auto mode just mirrors the OS onto the class itself. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Every panel's ground: the settings and display sections (CollapsibleSection), the chart cards
+/* THE THREE SURFACE TONES. Every background in the app is one of these, in both themes, and they
+   are the colours Joost's two mockups measure out (2026-09-28):
+
+       ground   the page behind everything, and the gutters between panels   #f5f5f4 / #121417
+       panel    every card that sits on it                                   #ffffff / #1b1e23
+       control  the well inside a text box, a dropdown or a text area        #fafaf9 / #23272e
+       plot     the box a chart is drawn in, axis gutters and all            #ffffff / #15181d
+
+   The panel is *lighter* than the ground in both themes, so a card reads as raised rather than as
+   a grey patch, and the control steps away from its panel again — down in the light theme, up in
+   the dark one, which is how a recess reads when the ground is nearly black. They are variables
+   rather than three sets of Tailwind classes because each tone is used from both plain CSS (the
+   rules below) and from templates (`bg-[var(--surface-panel)]`), and the two must not drift.
+
+   One consequence worth knowing: `dark:bg-*` disappeared from the templates along with this. A
+   control carrying its own dark background would beat the rule below — that is how the 238
+   `dark:bg-neutral-800`s used to work — so the colour now lives here only. */
+:root {
+  --surface-ground: #f5f5f4;
+  --surface-panel: #ffffff;
+  --surface-control: #fafaf9;
+  --surface-plot: #ffffff;
+}
+.dark {
+  --surface-ground: #121417;
+  --surface-panel: #1b1e23;
+  --surface-control: #23272e;
+  --surface-plot: #15181d;
+}
+
+/* Every panel: the settings and display sections (CollapsibleSection), the chart cards
    (SpectrumChart, ThdSweepChart, WaterfallChart, the oscilloscope and the sweep previews), the
    overlay list, the Sys tiles, and the two strips a collapsed rail folds to (MeasurementLayout's
-   STRIP). One class rather than a `bg-[#F7F7F7]` copied into eleven templates, so a panel cannot
-   drift away from the rest. Joost's request, 2026-09-27.
+   STRIP). One class rather than a colour copied into eleven templates, so a panel cannot drift away
+   from the rest. The metric tiles, the status bar, the sidebar and the dialogs paint themselves with
+   `bg-[var(--surface-panel)]` instead, because each of those already carries a border, a shadow or a
+   radius of its own that this class would have no business setting.
 
-   Light theme only. The dark theme's panels are told apart from the page by their border alone and
-   sit on a near-black ground; a light grey there would not be a subtler panel, it would be a white
-   box. `:where` keeps the override at zero specificity, so a Tailwind `hover:bg-*` on a strip still
-   wins in both themes. */
-.panel-surface {
-  background-color: #f7f7f7;
+   `:where` keeps it at zero specificity, so a Tailwind `hover:bg-*` on a strip still wins. */
+:where(.panel-surface) {
+  background-color: var(--surface-panel);
 }
-:where(.dark) .panel-surface {
-  background-color: transparent;
+
+/* Text boxes, number fields, dropdowns and text areas, in both themes — Tailwind preflight gives
+   them `background-color: transparent`, which would hand them whatever panel they sit on. `button`
+   is deliberately left out: a great many buttons here are borderless and are *meant* to pick up
+   their ground (the project menu's rows, the rail's fold strips, every icon button).
+
+   Two things about the selector are load-bearing. It sits in `@layer base` **after** the Tailwind
+   import, so it outranks preflight's own `input, select, textarea { background-color: transparent }`
+   — that rule is element-specificity, so an unlayered `:where()` rule could not win it — while
+   still losing to every utility in the `utilities` layer: that is what keeps the read-only fields'
+   `bg-neutral-100`, `ConfigDialog`'s `disabled:bg-neutral-100` and the status bar's deliberate
+   `bg-transparent` (its controls sit on the bar itself) in charge of their own backgrounds. And the
+   exclusions are wrapped in `:where()` so the attribute selectors contribute no specificity;
+   spelled `input:not([type="button"])` the rule would score (0,1,1) and start beating those. */
+@layer base {
+  input:not(:where([type="button"], [type="submit"], [type="reset"])),
+  select,
+  textarea {
+    background-color: var(--surface-control);
+  }
 }
 
 /* An expanded chart (ExpandToggle, useExpandedChart) is pinned over the whole window: it gets
@@ -27,5 +74,26 @@
    sidebar's floating menu (z-30), below the dialogs (z-50). The padding is what
    useResultChartHeight corrects for when it fits the plot to the window. */
 [data-chart-expanded] {
-  @apply fixed inset-0 z-40 overflow-auto rounded-none bg-neutral-50 p-3 dark:bg-neutral-950;
+  @apply fixed inset-0 z-40 overflow-auto rounded-none p-3;
+  background-color: var(--surface-ground);
+}
+
+/* The plot well. A chart's box is a step *away* from its card in the dark theme, the way a text box
+   is — so a chart reads as something let into the panel rather than as the panel with lines on it.
+   In the light theme it is the panel's own white, i.e. deliberately no well at all: white is already
+   the end of the scale, and a grey plot under white cards would read as a disabled chart. That
+   asymmetry is Joost's two mockups, measured (2026-09-28).
+
+   `.u-wrap` is uPlot's plotting box — the canvas plus the axis gutters, without the title and legend
+   slots — which is the extent the mockup shows. Every uPlot chart here turns the legend off and
+   titles itself in Vue, so in practice this is the whole instance. `.plot-surface` is the same thing
+   for the four charts that are hand-drawn on a canvas instead (ResponseSPlaneChart,
+   ResponsePolarChart, ImpedancePlaneChart, and DecaySurfaceChart, which paints its own ground and so
+   carries the colour in its theme table rather than this class).
+
+   PNG export is unaffected either way: `exportChart` fills `EXPORT_BACKGROUND` itself, because a
+   report is always light and a canvas copied without a fill would come out transparent. */
+:where(.u-wrap),
+:where(.plot-surface) {
+  background-color: var(--surface-plot);
 }

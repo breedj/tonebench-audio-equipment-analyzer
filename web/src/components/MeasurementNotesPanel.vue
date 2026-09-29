@@ -22,7 +22,7 @@ const { currentTypeId, typeNotes, setTypeNotes } = useProjects()
       :value="typeNotes"
       rows="3"
       placeholder="About this measurement — the DUT, the wiring, what to look for. Saved with the measurement, and copied onto every result saved from it."
-      class="w-full resize-y rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+      class="w-full resize-y rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
       @input="setTypeNotes(($event.target as HTMLTextAreaElement).value)"
     />
   </CollapsibleSection>

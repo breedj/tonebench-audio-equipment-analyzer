@@ -68,7 +68,7 @@ function onUnitChange() {
         Units
         <select
           v-model="spectrumUnit"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
           @change="onUnitChange"
         >
           <option v-for="u in SPECTRUM_UNIT_OPTIONS" :key="u.value" :value="u.value">{{ u.label }}</option>
@@ -80,7 +80,7 @@ function onUnitChange() {
           v-model.number="yTop"
           type="number"
           step="10"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1 text-xs">
@@ -89,7 +89,7 @@ function onUnitChange() {
           v-model.number="yBottom"
           type="number"
           step="10"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
         />
       </label>
       <button
@@ -107,7 +107,7 @@ function onUnitChange() {
         From
         <select
           v-model.number="xFrom"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
         >
           <option v-for="f in fromOptions" :key="f" :value="f">{{ f }}</option>
         </select>
@@ -116,7 +116,7 @@ function onUnitChange() {
         To
         <select
           v-model.number="xTo"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
         >
           <option v-for="f in toOptions" :key="f" :value="f">{{ f }}</option>
         </select>

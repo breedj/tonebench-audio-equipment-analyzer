@@ -100,7 +100,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="yTopDb"
         type="number"
         :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onTopChange"
       />
     </label>
@@ -110,7 +110,7 @@ watch(running, (isRunning, wasRunning) => {
         :value="yBottomDb"
         type="number"
         :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         @change="onBottomChange"
       />
     </label>
@@ -127,13 +127,13 @@ watch(running, (isRunning, wasRunning) => {
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
     <label class="flex flex-col gap-1 text-xs">
       From
-      <select v-model.number="xFromHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+      <select v-model.number="xFromHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
         <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
     </label>
     <label class="flex flex-col gap-1 text-xs">
       To
-      <select v-model.number="xToHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800">
+      <select v-model.number="xToHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
         <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
     </label>

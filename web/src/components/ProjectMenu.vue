@@ -151,7 +151,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
     <ul
       v-if="isOpen"
       role="menu"
-      class="absolute left-0 top-full z-30 mt-1 min-w-[12rem] rounded border border-neutral-200 bg-white py-1 text-sm shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+      class="absolute left-0 top-full z-30 mt-1 min-w-[12rem] rounded border border-neutral-200 bg-[var(--surface-panel)] py-1 text-sm shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
       @keydown="onMenuKeydown"
     >
       <template v-for="(item, index) in items" :key="item.action">

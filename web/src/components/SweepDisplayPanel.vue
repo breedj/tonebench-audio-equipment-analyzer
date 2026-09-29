@@ -362,7 +362,7 @@ function onXToChange(event: Event) {
           :min="yBottomDb + DB_MIN_SPAN"
           :max="DB_MAX"
           :step="DB_STEP"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onTopDbChange"
         />
       </label>
@@ -374,7 +374,7 @@ function onXToChange(event: Event) {
           :min="DB_MIN"
           :max="yTopDb - DB_MIN_SPAN"
           :step="DB_STEP"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onBottomDbChange"
         />
       </label>
@@ -384,7 +384,7 @@ function onXToChange(event: Event) {
         Top
         <select
           v-model.number="yMaxPercent"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="v in Y_MAX_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
         </select>
@@ -393,7 +393,7 @@ function onXToChange(event: Event) {
         Bottom
         <select
           v-model.number="yMinPercent"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="v in Y_MIN_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
         </select>
@@ -416,7 +416,7 @@ function onXToChange(event: Event) {
       X axis
       <select
         v-model="xAxis"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="a in AMPLITUDE_X_AXES" :key="a.value" :value="a.value">{{ a.label }}</option>
       </select>
@@ -426,7 +426,7 @@ function onXToChange(event: Event) {
         From
         <select
           v-model.number="xFrom"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
         </select>
@@ -435,7 +435,7 @@ function onXToChange(event: Event) {
         To
         <select
           v-model.number="xTo"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
         </select>
@@ -449,7 +449,7 @@ function onXToChange(event: Event) {
           type="number"
           step="any"
           :min="X_MIN_VALUE"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onXFromChange"
         />
       </label>
@@ -460,7 +460,7 @@ function onXToChange(event: Event) {
           type="number"
           step="any"
           :min="X_MIN_VALUE"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           @change="onXToChange"
         />
       </label>

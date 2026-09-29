@@ -288,7 +288,7 @@ const referenceLabel = computed(() => {
       View
       <select
         v-model="view"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
         <option v-for="option in VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
@@ -315,7 +315,7 @@ const referenceLabel = computed(() => {
             v-model.number="timeFromMs"
             type="number"
             step="0.5"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -324,7 +324,7 @@ const referenceLabel = computed(() => {
             v-model.number="timeToMs"
             type="number"
             step="0.5"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
       </div>
@@ -356,7 +356,7 @@ const referenceLabel = computed(() => {
             v-model.number="phaseTopDeg"
             type="number"
             step="45"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -365,7 +365,7 @@ const referenceLabel = computed(() => {
             v-model.number="phaseBottomDeg"
             type="number"
             step="45"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
       </div>
@@ -379,7 +379,7 @@ const referenceLabel = computed(() => {
         Delay
         <select
           v-model="delayView"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="option in DELAY_VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
@@ -392,7 +392,7 @@ const referenceLabel = computed(() => {
             v-model.number="delayTopInUnit"
             type="number"
             :step="delayUnit === 'ms' ? 0.1 : 10"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -401,7 +401,7 @@ const referenceLabel = computed(() => {
             v-model.number="delayBottomInUnit"
             type="number"
             :step="delayUnit === 'ms' ? 0.1 : 10"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
       </div>
@@ -420,7 +420,7 @@ const referenceLabel = computed(() => {
             v-model.number="freqFromHz"
             type="number"
             step="1"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -429,7 +429,7 @@ const referenceLabel = computed(() => {
             v-model.number="freqToHz"
             type="number"
             step="100"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
       </div>
@@ -452,7 +452,7 @@ const referenceLabel = computed(() => {
         Chart
         <select
           v-model="decayMode"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           title="Stacked curves in oblique projection, or the same surface as a flat colour map. Waterfall (f) puts frequency across the curves and recedes in time, which shows where in the band something rings; Waterfall (p) puts time across and recedes in frequency, so each curve is one frequency's decay envelope. The sonogram shows exactly where in frequency it is, flat."
         >
           <option v-for="option in CHART_MODES" :key="option.value" :value="option.value">{{ option.label }}</option>
@@ -463,7 +463,7 @@ const referenceLabel = computed(() => {
         Palette
         <select
           v-model="decayPalette"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         >
           <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
         </select>
@@ -486,7 +486,7 @@ const referenceLabel = computed(() => {
           min="10"
           max="70"
           step="5"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           title="How far below 0 dB the chart reaches. 0 dB is whatever this surface normalised to — the loudest point of the whole surface for a cumulative spectral decay, each frequency's own maximum for a burst decay."
         />
       </label>
@@ -498,7 +498,7 @@ const referenceLabel = computed(() => {
             v-model.number="freqFromHz"
             type="number"
             step="1"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -507,7 +507,7 @@ const referenceLabel = computed(() => {
             v-model.number="freqToHz"
             type="number"
             step="100"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           />
         </label>
       </div>
@@ -517,7 +517,7 @@ const referenceLabel = computed(() => {
           Analysis
           <select
             v-model="csdWindowMode"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             title="The classical cumulative-spectral-decay window has a short rise and a long fall, so the front slice reads the impulse at full weight. A Hann window is an ordinary short-time transform, centred on its own slice time — it reads a resonance building up as well as dying away, and smears the impulse across half a window."
           >
             <option v-for="option in CSD_WINDOW_MODES" :key="option.value" :value="option.value">
@@ -530,7 +530,7 @@ const referenceLabel = computed(() => {
           FFT length (samples)
           <select
             v-model.number="csdFftLength"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           >
             <option v-for="length in CSD_FFT_LENGTHS" :key="length" :value="length">{{ length }}</option>
           </select>
@@ -545,7 +545,7 @@ const referenceLabel = computed(() => {
               type="number"
               min="1"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
               title="Samples between one slice and the next — the surface's time step."
             />
           </label>
@@ -557,7 +557,7 @@ const referenceLabel = computed(() => {
               min="2"
               max="200"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
           </label>
         </div>
@@ -571,7 +571,7 @@ const referenceLabel = computed(() => {
             min="0.02"
             max="1"
             step="0.02"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             title="How long the window takes to open. Short keeps the leading edge sharp; too short and the edge itself is a step, whose leakage buries the decay being looked for."
           />
         </label>
@@ -587,7 +587,7 @@ const referenceLabel = computed(() => {
               min="2"
               max="100"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
           </label>
           <label class="flex flex-col gap-1">
@@ -598,7 +598,7 @@ const referenceLabel = computed(() => {
               min="1"
               max="8"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
           </label>
         </div>
@@ -607,7 +607,7 @@ const referenceLabel = computed(() => {
           Time-frequency resolution
           <select
             v-model="burstResolution"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             title="How wide the analysis wavelet is. Preferring frequency separates resonances that sit close together, at the cost of taking twice as many periods to open up — so the first cycles of every decay are the analysis rather than the DUT."
           >
             <option v-for="option in BURST_RESOLUTIONS" :key="option.value" :value="option.value">
@@ -636,7 +636,7 @@ const referenceLabel = computed(() => {
           v-model.number="yTopDb"
           type="number"
           step="1"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
       <label class="flex flex-col gap-1">
@@ -645,7 +645,7 @@ const referenceLabel = computed(() => {
           v-model.number="yBottomDb"
           type="number"
           step="1"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
     </div>

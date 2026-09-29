@@ -104,7 +104,7 @@ defineExpose({ buildRequest, resyncTones })
           min="0.1"
           step="0.1"
           v-model.number="loadOhms"
-          class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700"
         />
         Ω
       </label>
@@ -117,7 +117,7 @@ defineExpose({ buildRequest, resyncTones })
           type="number"
           step="0.1"
           v-model.number="dutGainDb"
-          class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700 dark:bg-neutral-800"
+          class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700"
         />
         dB
       </label>

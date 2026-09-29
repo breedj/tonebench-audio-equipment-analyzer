@@ -3013,9 +3013,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 </script>
 
 <template>
-  <div class="flex h-screen flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+  <div class="flex h-screen flex-col bg-[var(--surface-ground)] text-neutral-900 dark:text-neutral-100">
     <UpdateBanner />
-    <header class="flex items-center gap-3 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
+    <header class="flex items-center gap-3 border-b border-neutral-200 bg-[var(--surface-panel)] px-4 py-2 dark:border-neutral-800">
       <span class="text-sm font-semibold">QA403 audio analyzer</span>
       <ProjectMenu
         :project-name="currentProject?.name ?? null"

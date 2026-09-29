@@ -83,7 +83,7 @@ async function onSave() {
           v-model="form.name"
           type="text"
           placeholder="e.g. before mod"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
 
@@ -92,7 +92,7 @@ async function onSave() {
         <textarea
           v-model="form.notes"
           rows="3"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
         />
       </label>
 

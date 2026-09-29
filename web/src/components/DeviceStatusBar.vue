@@ -374,7 +374,7 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
 
 <template>
   <footer
-    class="flex flex-wrap items-center gap-4 border-t border-neutral-200 bg-white px-4 py-2 text-xs dark:border-neutral-800 dark:bg-neutral-900"
+    class="flex flex-wrap items-center gap-4 border-t border-neutral-200 bg-[var(--surface-panel)] px-4 py-2 text-xs dark:border-neutral-800"
   >
     <div class="flex items-center gap-2">
       <span class="h-2.5 w-2.5 rounded-full" :class="status?.connected ? 'bg-emerald-500' : 'bg-neutral-400'" />

@@ -179,4 +179,99 @@ public class SpectrumPipelineFlushTests
 
         await pipeline.StopAsync();
     }
+
+    /// <summary>
+    /// The device reports an autorange step in band, on the first block captured after it, so the
+    /// news reaches <c>DeviceSessionService.PumpAsync</c> a block late — measured 47 ms on a QA403
+    /// at 192 kHz. By then a sweep runner has programmed the next point's range, configured its
+    /// tone, and booked <c>StimulusLatencyFrames + CaptureDelayFrames</c> for it. The bug this
+    /// pins: answering that late flag with a bare <see cref="SpectrumPipeline.Flush()"/> ran
+    /// <c>SampleRingBuffer.Reset(0)</c>, whose assignment <i>overwrites</i> the counter, so the
+    /// discard was deleted and nothing re-booked it. The point's eight averages then began at the
+    /// tone step rather than a capture delay after it.
+    ///
+    /// <para>On an EL84 amplifier that was a 500x THD spike and SNR down from 109 dB to 32 on
+    /// exactly the two points of a 122-point sweep that followed a range change — the amplifier's
+    /// settling transient at the front of the first averaged record. See
+    /// <see cref="SpectrumPipeline.FlushAfterRangeStep"/>.</para>
+    ///
+    /// <para>Structural, like the discard test above: what is owed must still delay the first
+    /// frame by exactly that many samples afterwards.</para>
+    /// </summary>
+    [Fact]
+    public async Task FlushAfterRangeStep_DoesNotCancelADiscardTheStimulusPathAlreadyBooked()
+    {
+        const int discardFrames = FftSize / 4;
+        const int lateBy = FftSize / 16;
+
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = NewPipeline(hub);
+        var (_, reader) = hub.Subscribe();
+        long phase = 0;
+
+        pipeline.Start(SampleRateHz, channelCount: 1);
+        EnqueueTone(pipeline, FftSize, amplitudeV: 1.0, ref phase);
+        Assert.True(await SawMetersWithinAsync(reader, TimeSpan.FromSeconds(5)));
+
+        // The runner's next point: the range is programmed, then the tone, and the tone's flush
+        // books the in-flight audio plus the DUT's settle time.
+        pipeline.Flush(discardFrames);
+        DrainPending(reader);
+
+        // Part of that discard drains while the device's report is still in transit...
+        EnqueueTone(pipeline, lateBy, amplitudeV: 0.1, ref phase);
+        Assert.Equal(discardFrames - lateBy, pipeline.PendingDiscardFrames);
+
+        // ...and then it lands. The window is emptied; what is still owed is not.
+        pipeline.FlushAfterRangeStep();
+        Assert.Equal(discardFrames - lateBy, pipeline.PendingDiscardFrames);
+
+        // A full window, of which the first (discardFrames - lateBy) are still discarded, so the
+        // record is short and nothing may frame. With the bug this alone framed.
+        EnqueueTone(pipeline, FftSize, amplitudeV: 0.1, ref phase);
+        Assert.False(
+            await SawMetersWithinAsync(reader, TimeSpan.FromMilliseconds(400)),
+            "the discard the stimulus change booked must survive the device's late range-step report");
+
+        EnqueueTone(pipeline, discardFrames - lateBy, amplitudeV: 0.1, ref phase);
+        Assert.True(
+            await SawMetersWithinAsync(reader, TimeSpan.FromSeconds(5)),
+            "once the whole owed discard plus a window has arrived, frames resume");
+
+        await pipeline.StopAsync();
+    }
+
+    /// <summary>
+    /// And with nothing owed it is an ordinary flush — otherwise the test above would pass against
+    /// a <see cref="SpectrumPipeline.FlushAfterRangeStep"/> that had quietly stopped emptying the
+    /// window, which is the whole reason the device reports the step at all: the quiesce that
+    /// performed it punched a ~110 ms hole in the sample stream, and a record spliced across that
+    /// hole is not a measurement.
+    /// </summary>
+    [Fact]
+    public async Task FlushAfterRangeStep_WithNothingOwed_StillEmptiesTheWindow()
+    {
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = NewPipeline(hub);
+        var (_, reader) = hub.Subscribe();
+        long phase = 0;
+
+        pipeline.Start(SampleRateHz, channelCount: 1);
+        EnqueueTone(pipeline, FftSize, amplitudeV: 1.0, ref phase);
+        Assert.True(await SawMetersWithinAsync(reader, TimeSpan.FromSeconds(5)));
+
+        pipeline.FlushAfterRangeStep();
+        Assert.Equal(0, pipeline.PendingDiscardFrames);
+        DrainPending(reader);
+
+        EnqueueTone(pipeline, FftSize / 2, amplitudeV: 0.1, ref phase);
+        Assert.False(
+            await SawMetersWithinAsync(reader, TimeSpan.FromMilliseconds(400)),
+            "a range step still empties the window — the quiesce that made it left a hole in the stream");
+
+        EnqueueTone(pipeline, FftSize, amplitudeV: 0.1, ref phase);
+        Assert.True(await SawMetersWithinAsync(reader, TimeSpan.FromSeconds(5)));
+
+        await pipeline.StopAsync();
+    }
 }

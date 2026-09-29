@@ -62,11 +62,15 @@ public sealed class PcmBlock : IDisposable
     /// here. <c>SampleRingBuffer</c> concatenates unconditionally, so a record spanning this splice
     /// shows the tone smeared into a broad skirt and the whole broadband floor lifted for exactly
     /// one record — the visible "glitch". <c>DeviceSessionService.PumpAsync</c> answers it with
-    /// <c>SpectrumPipeline.Flush()</c>, which trades that record for a brief pause in updates.</para>
+    /// <c>SpectrumPipeline.FlushAfterRangeStep()</c>, which trades that record for a brief pause in
+    /// updates.</para>
     ///
-    /// <para>Flushed bare, with no stimulus-latency discard: unlike a generator or output-range
-    /// change this is not a change on the way *out*, so there is no pre-change audio still queued
-    /// for the DAC to outrun. Everything from this block on is already post-step.</para>
+    /// <para>That flush books no stimulus-latency discard of its own: unlike a generator or
+    /// output-range change this is not a change on the way *out*, so there is no pre-change audio
+    /// still queued for the DAC to outrun. Everything from this block on is already post-step. It
+    /// must not <i>cancel</i> one either, which is why it is not a bare <c>Flush()</c> — this flag
+    /// is late by a block and a whole sweep point's stimulus change can have happened in between.
+    /// See <c>SpectrumPipeline.FlushAfterRangeStep</c>.</para>
     /// </summary>
     public bool StartsAfterDiscontinuity { get; }
 

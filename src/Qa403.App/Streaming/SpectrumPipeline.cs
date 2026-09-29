@@ -176,6 +176,14 @@ public sealed class SpectrumPipeline(
     internal int LastFlushDiscardFrames { get; private set; }
 
     /// <summary>
+    /// Discard frames still owed on the first processed channel. Test observability only, for the
+    /// one rule that cannot be read off <see cref="LastFlushDiscardFrames"/>: that
+    /// <see cref="FlushAfterRangeStep"/> leaves a stimulus discard booked by an *earlier* flush
+    /// standing rather than zeroing it.
+    /// </summary>
+    internal int PendingDiscardFrames => _ringBuffers[0]?.DiscardRemaining ?? 0;
+
+    /// <summary>
     /// Drops every buffered sample and all averaging state, so the next broadcast frame is built
     /// only from samples captured after the change that prompted this call actually reached the wire.
     ///
@@ -194,11 +202,45 @@ public sealed class SpectrumPipeline(
     /// +41 dB of broadband floor on a 1 dB amplitude change. Worse, the contaminated record then
     /// becomes average #1, so with 8 averages it stays on screen for eight frames rather than one.
     /// See <see cref="SampleRingBuffer.Reset"/> for the measurements.</para>
+    ///
+    /// <para>This overwrites the booked discard, which is right for every caller that knows what the
+    /// change was and when it happened. The device's own in-band autorange report is neither — use
+    /// <see cref="FlushAfterRangeStep"/> there.</para>
     /// </summary>
     public void Flush(int discardFrames = 0)
     {
         LastFlushDiscardFrames = discardFrames;
+        FlushCore(discardFrames, keepPendingDiscard: false);
+    }
 
+    /// <summary>
+    /// The flush for a discontinuity the *device* reports in band — an autorange step, announced on
+    /// the first block captured after it (<c>PcmBlock.StartsAfterDiscontinuity</c>). Empties the
+    /// window and resets the averagers like any flush, but never <i>reduces</i> a discard already
+    /// booked.
+    ///
+    /// <para>That distinction is the whole method. The news is late by construction: the step's
+    /// settle frames have to be consumed and a whole block assembled before the flag can ride out,
+    /// so it reaches <c>DeviceSessionService.PumpAsync</c> tens of milliseconds after the register
+    /// write returned — measured 47 ms on a QA403 at 192 kHz. A sweep runner has moved on by then:
+    /// <c>ThdSweepRunner</c> programs the next point's range and then immediately configures its
+    /// tone, and that configure books <c>StimulusLatencyFrames + CaptureDelayFrames</c>. A bare
+    /// <see cref="Flush"/> arriving afterwards ran <c>SampleRingBuffer.Reset(0)</c>, which
+    /// <i>overwrites</i> the counter, so the discard was deleted and nothing re-booked it: the
+    /// point's averages began at the tone step instead of a capture delay later.</para>
+    ///
+    /// <para>Measured on an EL84 amplifier, 2026-09-29, a 122-point THD-vs-frequency sweep at 0 dBV
+    /// (a 6 dBV input range leaves 1 dB of margin, so the hardware step-up backstop trips on
+    /// ordinary transients). Both points that followed a range change were wrecked and no others
+    /// were: 404.3 Hz read THD 0.0374 % and SNR 34.1 dB against 0.00007 % and 109 dB either side of
+    /// it, 1160.2 Hz read 0.0617 % and 31.4 dB, and both showed the fundamental a few tenths of a
+    /// dB low — the amplifier's settling transient sitting at the front of the first averaged
+    /// record, which the configured 300 ms capture delay existed to exclude.</para>
+    /// </summary>
+    public void FlushAfterRangeStep() => FlushCore(0, keepPendingDiscard: true);
+
+    private void FlushCore(int discardFrames, bool keepPendingDiscard)
+    {
         // Before anything else, so a tick already running is guaranteed to see the new value by the
         // time it reaches its commit check.
         Interlocked.Increment(ref _flushGeneration);
@@ -211,7 +253,7 @@ public sealed class SpectrumPipeline(
         lock (_sampleSetLock)
         {
             for (int ch = 0; ch < MaxChannels; ch++)
-                ringBuffers[ch]?.Reset(discardFrames);
+                ringBuffers[ch]?.Reset(discardFrames, keepPendingDiscard);
         }
 
         for (int ch = 0; ch < MaxChannels; ch++)

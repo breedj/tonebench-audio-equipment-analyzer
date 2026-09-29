@@ -1202,8 +1202,12 @@ public sealed class DeviceSessionService(
                     // SetInputRangeCoreAsync's flush for a manual range change; the difference is
                     // that the news arrives on the block rather than from the caller.
                     //
-                    // Bare, with no stimulus-latency discard: nothing changed on the way *out*, so
-                    // there is no in-flight DAC audio to outrun. See PcmBlock.StartsAfterDiscontinuity.
+                    // No stimulus-latency discard of its own: nothing changed on the way *out*, so
+                    // there is no in-flight DAC audio to outrun. But it must not *cancel* one
+                    // either, which a bare Flush() did — this news is late by a block, and a sweep
+                    // runner that programmed the range and then its next tone has already booked a
+                    // discard by the time it lands. See SpectrumPipeline.FlushAfterRangeStep and
+                    // PcmBlock.StartsAfterDiscontinuity.
                     if (block.StartsAfterDiscontinuity)
                     {
                         // Information, not Debug, and logged here rather than at the step itself:
@@ -1216,7 +1220,7 @@ public sealed class DeviceSessionService(
                                 + "analysis window, since the step discarded the RX transfers in flight",
                             _device.InputRangeDbv);
 
-                        spectrumPipeline.Flush();
+                        spectrumPipeline.FlushAfterRangeStep();
                     }
 
                     spectrumPipeline.Enqueue(block); // takes ownership — disposes the block itself

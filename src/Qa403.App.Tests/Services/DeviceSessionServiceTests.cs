@@ -1,5 +1,6 @@
 ﻿using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
@@ -392,6 +393,58 @@ public class DeviceSessionServiceTests
     }
 
     /// <summary>
+    /// An autorange step is reported in band, on the first block captured after it, so the news
+    /// reaches <c>PumpAsync</c> a block late — measured 47 ms on a QA403 at 192 kHz. A sweep runner
+    /// has moved on by then: <c>ThdSweepRunner</c> programs the next point's input range and then
+    /// immediately configures its tone, and that configure books the stimulus latency plus the
+    /// capture delay. Answering the late flag with a bare <c>Flush()</c> ran
+    /// <c>SampleRingBuffer.Reset(0)</c>, which <i>overwrites</i> the counter, so the discard was
+    /// deleted and nothing re-booked it — the point's averages began at the tone step instead of a
+    /// capture delay after it.
+    ///
+    /// <para>On a real EL84 amplifier, 2026-09-29, that was a 500x THD spike and SNR down from
+    /// 109 dB to 32 on exactly the two points of a 122-point sweep that followed a range change
+    /// (404.3 Hz: THD 0.0374 %, SNR 34.1 dB; 1160.2 Hz: 0.0617 %, 31.4 dB), and on no others. The
+    /// mechanism is pinned in <c>SpectrumPipelineFlushTests</c>; this pins the call site, which is
+    /// the half that has to be the range-step flush rather than the bare one.</para>
+    /// </summary>
+    [Fact]
+    public async Task ALateRangeStepReport_DoesNotCancelTheDiscardTheNextPointsToneBooked()
+    {
+        var device = new RecordingDevice { LatencyFrames = 3584, ScriptedBlocks = true };
+        var pipeline = new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance);
+        var delay = new CaptureDelaySetting { Ms = 100.0 };
+        var session = new DeviceSessionService(device, pipeline, delay, NullLogger<DeviceSessionService>.Instance);
+        await session.ConnectAsync(CancellationToken.None);
+
+        var config = new AcquisitionConfig(SampleRateHz: 48_000, ChannelCount: 2, BlockFrameCount: 4096);
+        await session.StartAcquisitionAsync(config, CancellationToken.None);
+
+        // The next sweep point, in the runner's order: program the predicted range, then the tone.
+        await session.SetInputRangeAsync(6.0, CancellationToken.None);
+        var tone = new GeneratorConfig(
+            new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, -20.0)]), ChannelGeneratorConfig.Off);
+        await session.ConfigureGeneratorAsync(tone, CancellationToken.None);
+
+        const int booked = 3584 + 4800;
+        Assert.Equal(booked, pipeline.LastFlushDiscardFrames);
+        Assert.Equal(booked, pipeline.PendingDiscardFrames);
+
+        // ...and only now does the device's report of that range step arrive.
+        device.PushBlock(config, startsAfterDiscontinuity: true);
+
+        // The flagged block is enqueued after the flush, so it consumes its own 4096 frames of the
+        // discard and no more. With the bug the flush zeroed the counter first and the block landed
+        // in the record instead.
+        for (int i = 0; i < 500 && pipeline.PendingDiscardFrames == booked; i++)
+            await Task.Delay(10);
+
+        Assert.Equal(booked - config.BlockFrameCount, pipeline.PendingDiscardFrames);
+
+        await session.ShutdownAsync();
+    }
+
+    /// <summary>
     /// The FFT screen's Run configures the generator <i>before</i> acquisition starts, so the
     /// generator change has no window to flush and the settle would be applied to nothing. The
     /// acquisition start applies it instead — the settle alone, with no stimulus latency, since
@@ -629,11 +682,42 @@ public class DeviceSessionServiceTests
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Hands the stream over to <see cref="PushBlock"/> instead of free-running, so a test can
+        /// place one block at one instant relative to the session calls around it — which is what
+        /// the in-band range-step report needs: its whole point is that it arrives <i>late</i>.
+        /// Opt-in, and <c>init</c>-only, so every other test keeps the free-running stream.
+        /// </summary>
+        public bool ScriptedBlocks { get; init; }
+
+        private readonly Channel<PcmBlock> _scripted = Channel.CreateUnbounded<PcmBlock>();
+
+        /// <summary>Queues one silent block for a scripted stream to yield.</summary>
+        public void PushBlock(AcquisitionConfig config, bool startsAfterDiscontinuity = false)
+        {
+            int sampleCount = config.BlockFrameCount * config.ChannelCount;
+            float[] buffer = ArrayPool<float>.Shared.Rent(sampleCount);
+            Array.Clear(buffer, 0, sampleCount);
+            _scripted.Writer.TryWrite(new PcmBlock(
+                buffer, sampleCount, config.SampleRateHz, config.ChannelCount, 0, 0, startsAfterDiscontinuity));
+        }
+
         public async IAsyncEnumerable<PcmBlock> StreamAsync(AcquisitionConfig config, [EnumeratorCancellation] CancellationToken ct)
         {
             StreamStartCount++;
             try
             {
+                if (ScriptedBlocks)
+                {
+                    while (await _scripted.Reader.WaitToReadAsync(ct))
+                    {
+                        while (_scripted.Reader.TryRead(out var scripted))
+                            yield return scripted;
+                    }
+
+                    yield break;
+                }
+
                 while (!ct.IsCancellationRequested)
                 {
                     float[] buffer = ArrayPool<float>.Shared.Rent(config.BlockFrameCount * config.ChannelCount);

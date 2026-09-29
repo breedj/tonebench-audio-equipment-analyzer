@@ -83,7 +83,16 @@ internal sealed class SampleRingBuffer(int capacity)
     /// is stopped, the generator changed, and acquisition restarted: by then the stale audio is long
     /// gone and the buffer fills entirely from post-change samples.</para>
     /// </summary>
-    public void Reset(int discardSamples = 0)
+    /// <param name="keepPendingDiscard">
+    /// Keeps whatever discard is already booked when it is larger than <paramref name="discardSamples"/>,
+    /// instead of overwriting it. For a reset whose <i>cause</i> is in the past but whose <i>news</i>
+    /// arrived late: the device's own in-band autorange report, which reaches
+    /// <c>DeviceSessionService.PumpAsync</c> a block after the step, by which time a sweep runner
+    /// has already moved to the next point and booked a stimulus discard of its own. Overwriting it
+    /// there deletes a discard nothing will re-book — see <c>SpectrumPipeline.FlushAfterRangeStep</c>
+    /// for what that measured.
+    /// </param>
+    public void Reset(int discardSamples = 0, bool keepPendingDiscard = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(discardSamples);
 
@@ -91,7 +100,9 @@ internal sealed class SampleRingBuffer(int capacity)
         {
             Array.Clear(_buffer);
             Interlocked.Exchange(ref _writeIndex, 0);
-            _discardRemaining = discardSamples;
+            _discardRemaining = keepPendingDiscard
+                ? Math.Max(discardSamples, _discardRemaining)
+                : discardSamples;
         }
     }
 

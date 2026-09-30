@@ -53,8 +53,9 @@ const { showPage } = useManual()
       show them, because there is nothing to choose.
     </p>
     <p>
-      Then choose a <strong>Sample rate</strong>. Only rates your card can really do are offered.
-      48 kHz is fine for almost everything.
+      Underneath, <strong>Sample rates</strong> shows what the card can do — it is something the app
+      asks the card, not something you choose here. You pick the rate later, on the measurement
+      screen itself, and 48 kHz is fine for almost everything.
     </p>
     <p>Press <strong>Use this card</strong>.</p>
 

@@ -49,7 +49,6 @@ const form = reactive({
   outputKey: '',
   inputChannelOffset: 0,
   outputChannelOffset: 0,
-  sampleRateHz: 48000,
   minStimulusFrequencyHz: 20,
 })
 
@@ -213,7 +212,6 @@ watch(
       form.outputKey = keyOf(config.value.outputHostApi, config.value.outputDeviceName)
       form.inputChannelOffset = config.value.inputChannelOffset
       form.outputChannelOffset = config.value.outputChannelOffset
-      form.sampleRateHz = config.value.sampleRateHz
       form.minStimulusFrequencyHz = config.value.minStimulusFrequencyHz
     }
     await reprobe()
@@ -235,8 +233,6 @@ async function reprobe() {
   }
 
   await probePairing(draft)
-  if (rates.value.length > 0 && !rates.value.includes(form.sampleRateHz))
-    form.sampleRateHz = rates.value[0]!
 }
 
 function toConfig(): SoundCardConfig | null {
@@ -251,7 +247,6 @@ function toConfig(): SoundCardConfig | null {
     outputDeviceName: output.name,
     inputChannelOffset: form.inputChannelOffset,
     outputChannelOffset: form.outputChannelOffset,
-    sampleRateHz: form.sampleRateHz,
     minStimulusFrequencyHz: form.minStimulusFrequencyHz,
   }
 }
@@ -389,16 +384,25 @@ function mv(value: number | null | undefined) {
           </select>
         </label>
 
-        <label class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Sample rate</span>
-          <select
-            v-model.number="form.sampleRateHz"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          >
-            <option v-if="rates.length === 0" :value="form.sampleRateHz">—</option>
-            <option v-for="rate in rates" :key="rate" :value="rate">{{ rate / 1000 }} kHz</option>
-          </select>
-        </label>
+<!-- Read-only, deliberately. The rate a measurement runs at is the measurement's, and every
+             screen's rate and span dropdowns are already filtered to this list -- so a selector here
+             would be a second place to set one thing, and the one that nothing read. What the probe
+             is for is telling you what the card can do before you commit to it. -->
+        <div class="flex items-start justify-between gap-3">
+          <span class="text-neutral-600 dark:text-neutral-300">Sample rates</span>
+          <span class="w-96">
+            <span class="font-mono">{{
+              rates.length > 0 ? rates.map((r) => `${r / 1000}`).join(', ') + ' kHz' : '—'
+            }}</span>
+            <span class="mt-0.5 block text-xs text-neutral-500">
+              {{
+                rates.length > 0
+                  ? 'Chosen per measurement — the screens offer only these.'
+                  : 'Pick a card to probe what it accepts.'
+              }}
+            </span>
+          </span>
+        </div>
 
         <label
           class="flex items-center justify-between gap-3"

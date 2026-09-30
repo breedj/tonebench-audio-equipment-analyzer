@@ -94,7 +94,6 @@ public class SoundCardRoutingHardwareTests(ITestOutputHelper output)
             OutputDeviceName = card.Name,
             InputChannelOffset = inOffset,
             OutputChannelOffset = outOffset,
-            SampleRateHz = 48_000.0,
         };
 
         using var device = new SoundCardDevice(

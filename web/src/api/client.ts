@@ -234,7 +234,6 @@ export interface SoundCardConfig {
   outputDeviceName: string
   inputChannelOffset: number
   outputChannelOffset: number
-  sampleRateHz: number
   /** Null until that step has run: an uncalibrated card reports dBFS and says so. */
   outputFullScalePeakMv: number | null
   inputFullScalePeakMvLeft: number | null

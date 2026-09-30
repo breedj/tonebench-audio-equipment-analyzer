@@ -1,4 +1,4 @@
-using Qa403.Data;
+﻿using Qa403.Data;
 using Qa403.Device.SoundCard;
 
 namespace Qa403.App.Services;
@@ -52,7 +52,6 @@ public sealed class SoundCardSetting
                 OutputDeviceName = c.OutputDeviceName,
                 InputChannelOffset = c.InputChannelOffset,
                 OutputChannelOffset = c.OutputChannelOffset,
-                SampleRateHz = c.SampleRateHz,
                 FrontEndGainLeftDb = c.FrontEndGainLeftDb,
                 FrontEndGainRightDb = c.FrontEndGainRightDb,
                 GainDisplayUnit = c.GainDisplayUnit,

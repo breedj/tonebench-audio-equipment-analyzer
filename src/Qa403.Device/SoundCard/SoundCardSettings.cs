@@ -1,4 +1,4 @@
-namespace Qa403.Device.SoundCard;
+﻿namespace Qa403.Device.SoundCard;
 
 /// <summary>
 /// Which card the analyzer is, and how it is wired. The calibration that turns its samples into
@@ -36,8 +36,6 @@ public sealed record SoundCardSettings
 
     /// <summary>Index of the first of the two output channels. See <see cref="InputChannelOffset"/>.</summary>
     public int OutputChannelOffset { get; init; }
-
-    public double SampleRateHz { get; init; } = 48_000.0;
 
     /// <summary>
     /// The front-end gain in front of the left input, in dB — a 10:1 divider is −20. Stored here so

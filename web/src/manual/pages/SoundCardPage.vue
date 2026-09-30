@@ -124,13 +124,23 @@ const { showPage } = useManual()
       pairs are usually separate <em>devices</em> instead, so you pick them in the device lists.
     </p>
 
-    <h3>Sample rate</h3>
+    <h3>Sample rates</h3>
     <p>
-      Only the rates the card actually accepts are offered, probed from the hardware rather than
-      assumed, and only from the three the app measures at: <strong>48, 96 and 192 kHz</strong>. A
-      card that cannot do 192 kHz does not offer it, and the frequency-span dropdowns on the
-      measurement screens drop the spans that would need it — a 96 kHz span needs a 192 kHz rate,
-      because the sweep is analysed to Nyquist.
+      The dialog <em>reports</em> the rates the card accepts rather than asking you to pick one: it
+      probes the hardware, in the mode the app actually opens it in, for the three rates the app
+      measures at — <strong>48, 96 and 192 kHz</strong>.
+    </p>
+    <p>
+      <strong>The rate a measurement runs at is the measurement's own setting</strong>, on its
+      screen, exactly as it is for the QA403. What the card's list does is limit what those screens
+      offer: a card that cannot do 192 kHz does not offer it, and the frequency-span dropdowns drop
+      the spans that would need it — a 96 kHz span needs a 192 kHz rate, because the sweep is
+      analysed to Nyquist.
+    </p>
+    <p class="manual-callout">
+      This is worth checking before you calibrate rather than after. A card advertising a rate its
+      converters do not really run at is a real thing on consumer hardware, and the probe is the
+      only place the app can show you what the driver claims.
     </p>
 
     <h2 id="calibration">Calibrating the card</h2>

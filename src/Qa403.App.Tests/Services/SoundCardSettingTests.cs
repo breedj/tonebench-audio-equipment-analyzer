@@ -1,4 +1,4 @@
-using Qa403.App.Services;
+﻿using Qa403.App.Services;
 using Qa403.Data;
 
 namespace Qa403.App.Tests.Services;
@@ -59,7 +59,6 @@ public class SoundCardSettingTests
                 OutputHostApi = "ASIO",
                 OutputDeviceName = "MOTU M Series",
                 InputChannelOffset = 2,
-                SampleRateHz = 192_000.0,
                 FrontEndGainLeftDb = -20.0,
             },
         };
@@ -69,7 +68,6 @@ public class SoundCardSettingTests
         Assert.True(device.IsConfigured);
         Assert.Equal("MOTU M Series", device.InputDeviceName);
         Assert.Equal(2, device.InputChannelOffset);
-        Assert.Equal(192_000.0, device.SampleRateHz);
         Assert.Equal(-20.0, device.FrontEndGainLeftDb);
     }
 

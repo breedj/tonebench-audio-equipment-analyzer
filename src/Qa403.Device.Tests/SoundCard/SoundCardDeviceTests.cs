@@ -29,7 +29,6 @@ public class SoundCardDeviceTests
             OutputDeviceName = "Test Card",
             InputChannelOffset = inputOffset,
             OutputChannelOffset = outputOffset,
-            SampleRateHz = 48_000.0,
         };
 
         var device = new SoundCardDevice(

@@ -55,7 +55,6 @@ public class SoundCardDeviceHardwareTests(ITestOutputHelper output)
             OutputDeviceName = card.Name,
             InputChannelOffset = inputOffset,
             OutputChannelOffset = outputOffset,
-            SampleRateHz = sampleRateHz,
         };
 
         return new SoundCardDevice(

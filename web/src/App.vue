@@ -131,6 +131,7 @@ import {
 import { SWEEP_POINTS_KEY, useSweep } from './composables/useSweep'
 import { useImdSweep } from './composables/useImdSweep'
 import { nearestSweepPoint } from './sweep/points'
+import { fitPreviewAxis, fitScopePreviewAxis, useSweepPreviewFit } from './sweep/previewAxis'
 import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
 import {
   isAmplitudeSweepKind,
@@ -590,6 +591,36 @@ const sweepSelectedRight = computed(() => selectedSweepPointFor(1))
 const visibleSweepOverlays = computed(() => overlays.value.filter((o) => o.visible && o.sweepPoints?.length))
 
 /**
+ * The one y window the spectrum previews share while their Fit-all toggle is on: every point of
+ * every sweep the main chart is drawing — the live run's and each checked overlay's — so hovering
+ * from point to point, and reading one stacked preview against another, are both comparisons of
+ * curves on the same axis. Computed whether or not the toggle is on, so switching it costs no
+ * rescan and the charts never render a frame against a window that has not arrived yet; it is a
+ * computed over the same arrays the chart itself watches, so it only ever recomputes when a point
+ * or an overlay does.
+ */
+const sweepPreviewFitRange = computed(() =>
+  fitPreviewAxis([
+    ...sweepPoints.value.map((p) => p.previewFft),
+    ...visibleSweepOverlays.value.flatMap((o) => (o.sweepPoints ?? []).map((p) => p.previewFft)),
+  ]),
+)
+
+/** The same, in volts, for the oscilloscope previews underneath them. */
+const sweepScopeFitRange = computed(() =>
+  fitScopePreviewAxis([
+    ...sweepPoints.value.map((p) => p.previewScope),
+    ...visibleSweepOverlays.value.flatMap((o) => (o.sweepPoints ?? []).map((p) => p.previewScope)),
+  ]),
+)
+
+// The two Fit-all toggles themselves live in the module store the preview charts read (one window
+// shared by the live pair and every overlay's), but they are this screen's display state like the
+// sweep* refs below: saved into the measurement type's params_json, restored with it, and dirtying
+// it when changed.
+const { fitAllSpectra: sweepFitPreviewSpectrum, fitAllScopes: sweepFitPreviewScope } = useSweepPreviewFit()
+
+/**
  * The checked history items one curve screen may draw: visible, carrying curves, and of a kind that
  * belongs on that screen — see measurements/overlayScope.ts for why the last clause is not optional.
  */
@@ -780,6 +811,7 @@ watch(
     sweepShowD4, sweepShowD5, sweepShowD6Plus, sweepShowLeft, sweepShowRight, sweepThickLines,
     sweepShowDataPoints, sweepYMaxPercent, sweepYMinPercent, sweepXFromHz, sweepXToHz, sweepYTopDb,
     sweepYBottomDb, sweepAutofitOnDone, sweepAmplitudeXAxis, sweepAmplitudeBounds,
+    sweepFitPreviewSpectrum, sweepFitPreviewScope,
   ],
   () => {
     if (!sweepDisplayRestoring) markDirty()
@@ -862,6 +894,12 @@ function applyStoredSweepDisplay(paramsJson: string) {
   sweepYTopDb.value = display.yTopDb
   sweepYBottomDb.value = display.yBottomDb
   if (typeof stored.chartAutofitOnDone === 'boolean') sweepAutofitOnDone.value = stored.chartAutofitOnDone
+  // Absent on a type saved before the previews had a Fit all button, which is off -- the behaviour
+  // that type was saved with. Written straight rather than through sweepDisplayFromParams: these
+  // belong to the rail's previews, which no report draws, so SweepDisplay has nothing to say about
+  // them.
+  sweepFitPreviewSpectrum.value = stored.chartFitPreviewSpectrum === true
+  sweepFitPreviewScope.value = stored.chartFitPreviewScope === true
 
   void nextTick(() => {
     sweepDisplayRestoring = false
@@ -2926,6 +2964,8 @@ function buildTypeParamsJson(): string | undefined {
     chartYTopDb: sweepYTopDb.value,
     chartYBottomDb: sweepYBottomDb.value,
     chartAutofitOnDone: sweepAutofitOnDone.value,
+    chartFitPreviewSpectrum: sweepFitPreviewSpectrum.value,
+    chartFitPreviewScope: sweepFitPreviewScope.value,
   }
   return JSON.stringify(withDisplay)
 }
@@ -4261,8 +4301,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                      is cleared (or before the first run) rather than showing an empty "No data"
                      chart — Clear should make these disappear, not just go blank. -->
                 <template v-if="sweepPoints.length > 0">
-                  <SweepFftPreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
-                  <SweepScopePreviewChart :point-left="sweepSelectedLeft" :point-right="sweepSelectedRight" />
+                  <SweepFftPreviewChart
+                    :point-left="sweepSelectedLeft"
+                    :point-right="sweepSelectedRight"
+                    :fit-range="sweepPreviewFitRange"
+                  />
+                  <SweepScopePreviewChart
+                    :point-left="sweepSelectedLeft"
+                    :point-right="sweepSelectedRight"
+                    :fit-range="sweepScopeFitRange"
+                  />
                 </template>
 
                 <!-- One more Spectrum/Oscilloscope pair per history item checked on in the
@@ -4273,11 +4321,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     :label="overlay.detail.name"
                     :point-left="selectedSweepPointForOverlay(overlay, 0)"
                     :point-right="selectedSweepPointForOverlay(overlay, 1)"
+                    :fit-range="sweepPreviewFitRange"
                   />
                   <SweepScopePreviewChart
                     :label="overlay.detail.name"
                     :point-left="selectedSweepPointForOverlay(overlay, 0)"
                     :point-right="selectedSweepPointForOverlay(overlay, 1)"
+                    :fit-range="sweepScopeFitRange"
                   />
                 </template>
               </template>

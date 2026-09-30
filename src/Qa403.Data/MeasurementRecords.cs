@@ -219,7 +219,16 @@ public sealed record ThdVsFrequencyParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The two <strong>Fit all</strong> toggles on the rail's point previews -- the spectrum's
+    /// level axis and the oscilloscope's volts axis held to one window covering every point of
+    /// every sweep on the chart, instead of scaling to the selected point. Display preferences
+    /// like the <c>Chart*</c> fields above, never fed into the runner, and null on a type saved
+    /// before they existed -- which is read as off, the behaviour that type was saved with.
+    /// </summary>
+    bool? ChartFitPreviewSpectrum = null,
+    bool? ChartFitPreviewScope = null);
 
 /// <summary>
 /// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a
@@ -352,7 +361,10 @@ public sealed record ThdVsAmplitudeParameters(
     /// A type setting like the rest of the grid, saved with the result so a curve that stops short
     /// can say it did so on purpose.
     /// </summary>
-    double? StopThdPercent = null);
+    double? StopThdPercent = null,
+    /// <summary>See <see cref="ThdVsFrequencyParameters.ChartFitPreviewSpectrum"/> -- the rail previews' Fit all toggles.</summary>
+    bool? ChartFitPreviewSpectrum = null,
+    bool? ChartFitPreviewScope = null);
 
 /// <summary>
 /// Configured or as-run parameters for the 'ImdVsAmplitude' measurement kind: a two-tone pair
@@ -419,7 +431,10 @@ public sealed record ImdVsAmplitudeParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null,
+    /// <summary>See <see cref="ThdVsFrequencyParameters.ChartFitPreviewSpectrum"/> -- the rail previews' Fit all toggles.</summary>
+    bool? ChartFitPreviewSpectrum = null,
+    bool? ChartFitPreviewScope = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm

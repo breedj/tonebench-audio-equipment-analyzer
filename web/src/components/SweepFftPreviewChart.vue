@@ -7,6 +7,13 @@ import { useAppTheme } from '../composables/useAppTheme'
 import { formatHz } from '../composables/useSweep'
 import { freqAxis } from '../freqAxis'
 import { mergePreviewSeries } from '../sweep/points'
+import {
+  PREVIEW_GRID_STEP_DB,
+  previewAxisSplits,
+  previewAxisTickLabels,
+  useSweepPreviewFit,
+  type PreviewAxisRange,
+} from '../sweep/previewAxis'
 
 /**
  * A small spectrum snapshot alongside the sweep's THD-vs-frequency chart -- a decimated FFT around
@@ -22,10 +29,22 @@ import { mergePreviewSeries } from '../sweep/points'
  * `label`, when given, names whose points these are (a checked history item's own name) so several
  * of these stacked underneath each other -- the live one plus one per checked overlay -- can still
  * be told apart. Omitted for the live pair, whose header stays the plain "Spectrum (dBV)" it always was.
+ *
+ * `fitRange` is the y window covering every spectrum the main chart is showing (see
+ * sweep/previewAxis.ts), used while the header's Fit-all toggle is on. The toggle itself is shared
+ * by every instance, so the live pair and each overlay's preview are drawn against one scale and
+ * neither re-scales as the cursor moves from point to point -- which is what made two points
+ * impossible to compare by eye.
  */
-const props = defineProps<{ pointLeft: ThdSweepPoint | null; pointRight: ThdSweepPoint | null; label?: string }>()
+const props = defineProps<{
+  pointLeft: ThdSweepPoint | null
+  pointRight: ThdSweepPoint | null
+  label?: string
+  fitRange?: PreviewAxisRange | null
+}>()
 
 const { isDark } = useAppTheme()
+const { fitAllSpectra } = useSweepPreviewFit()
 const containerRef = ref<HTMLDivElement | null>(null)
 const CHART_HEIGHT = 150
 
@@ -42,13 +61,46 @@ function currentTheme() {
 
 function buildOptions(width: number): uPlot.Options {
   const theme = currentTheme()
+  const fitted = fitAllSpectra.value
   return {
     width,
     height: CHART_HEIGHT,
-    scales: { x: { time: false, distr: 3, log: 10 }, y: {} },
+    scales: {
+      x: { time: false, distr: 3, log: 10 },
+      // Fitted, the window is the caller's rather than this point's own -- and it is read inside
+      // the callback rather than baked into the options, because uPlot re-derives the scale on
+      // every setData: a range that grows as the sweep adds points therefore lands on the next
+      // redraw without the plot being rebuilt. The fallback keeps the chart drawable in the moment
+      // between the toggle going on and the first range arriving.
+      y: fitted
+        ? {
+            range: (_u, dataMin, dataMax) => {
+              const bounds = props.fitRange
+              if (bounds) return [bounds.min, bounds.max]
+              return uPlot.rangeNum(dataMin ?? -160, dataMax ?? 0, 0.1, true)
+            },
+          }
+        : {},
+    },
     axes: [
       { ...freqAxis(), stroke: theme.axis, grid: { stroke: theme.grid, width: 1 }, ticks: { stroke: theme.grid, width: 1 } },
-      { size: 46, stroke: theme.axis, grid: { stroke: theme.grid, width: 1 }, ticks: { stroke: theme.grid, width: 1 } },
+      {
+        size: 46,
+        stroke: theme.axis,
+        grid: { stroke: theme.grid, width: 1 },
+        ticks: { stroke: theme.grid, width: 1 },
+        // A fixed dB ladder rather than uPlot's "nice" increments, which move with the data and so
+        // put the grid in a different place on every point -- the same thing the fitted scale
+        // exists to stop. Both ends of that scale already sit on a line (fitPreviewAxis snaps
+        // them outwards), so the axis starts and ends on one.
+        ...(fitted
+          ? {
+              splits: (_u, _axisIdx, scaleMin, scaleMax) => previewAxisSplits(scaleMin, scaleMax),
+              // Every line is drawn; only as many as fit are numbered. bbox is in canvas pixels.
+              values: (u, splits) => previewAxisTickLabels(splits, u.bbox.height / uPlot.pxRatio),
+            }
+          : {}),
+      },
     ],
     // One line per channel, not a min/max pair: at this chart's small size a min+max band read as
     // two separate wiggly traces per channel (visibly four with both channels on) rather than the
@@ -66,17 +118,26 @@ function buildOptions(width: number): uPlot.Options {
 }
 
 let plot: uPlot | null = null
-let plotIsDark = isDark.value
+/**
+ * What the live instance was built for. The scale's `range` and the axis's `splits` are functions
+ * on the options object, so switching the fitted axis on or off is a rebuild rather than a redraw
+ * -- cheap, since this chart holds no zoom or viewport state of its own, and once per user click.
+ * A *changed* fit range is not a rebuild; see the watcher below.
+ */
+function plotSignature() {
+  return `${isDark.value}|${fitAllSpectra.value}`
+}
+let builtFor = plotSignature()
 
 function ensurePlot() {
   const el = containerRef.value
   if (!el) return
-  if (plot && plotIsDark === isDark.value) return
+  if (plot && builtFor === plotSignature()) return
 
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 300
   plot = new uPlot(buildOptions(width), [[], [], []], el)
-  plotIsDark = isDark.value
+  builtFor = plotSignature()
 }
 
 function update() {
@@ -88,11 +149,13 @@ function update() {
 }
 
 watch(() => [props.pointLeft, props.pointRight], update)
-watch(isDark, () => {
-  plot?.destroy()
-  plot = null
-  update()
-})
+// A new fit window -- the sweep gained a point, or an overlay was checked on -- is one setData
+// away, because the y scale's range callback reads it. Compared by value rather than by identity:
+// the parent recomputes the object, so watching the prop itself would redraw on every pass of a
+// running sweep whether the window moved or not.
+watch(() => [props.fitRange?.min, props.fitRange?.max], update)
+// The theme and the toggle change the options object itself, which ensurePlot notices.
+watch([isDark, fitAllSpectra], update)
 
 // Observes the container rather than the window: the column this chart sits in also changes width
 // when the measurement sidebar is pinned or unpinned, which is not a window resize — measured, the
@@ -120,9 +183,34 @@ const theme = computed(() => currentTheme())
 
 <template>
   <section class="flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
-    <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>{{ label ? `${label} — Spectrum (dBV)` : 'Spectrum (dBV)' }}</span>
-      <span class="flex items-center gap-2">
+    <div class="flex items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+      <!-- min-w-0 so the label is what gives way when an overlay's name is long: a flex item will
+           not shrink below its content without it, and the button and the per-channel readout were
+           pushed off the panel's edge instead. -->
+      <span class="flex min-w-0 items-center gap-2">
+        <span class="truncate">{{ label ? `${label} — Spectrum (dBV)` : 'Spectrum (dBV)' }}</span>
+        <!-- Shared by every one of these charts on the screen, so the live pair and each overlay's
+             preview are drawn against one window. -->
+        <button
+          type="button"
+          class="shrink-0 rounded border px-1.5 py-0 leading-5"
+          :class="
+            fitAllSpectra
+              ? 'btn-action'
+              : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
+          "
+          :title="
+            fitAllSpectra
+              ? `Fixed axis: one ${PREVIEW_GRID_STEP_DB} dB grid fitting every spectrum the sweep chart is showing. Click to scale each point on its own again.`
+              : `Fix the axis to a ${PREVIEW_GRID_STEP_DB} dB grid fitting every spectrum the sweep chart is showing, so points can be compared as the cursor moves.`
+          "
+          :aria-pressed="fitAllSpectra"
+          @click="fitAllSpectra = !fitAllSpectra"
+        >
+          Fit all
+        </button>
+      </span>
+      <span class="flex shrink-0 items-center gap-2">
         <span v-if="pointLeft" class="flex items-center gap-1">
           <span class="h-1.5 w-1.5 rounded-full" :style="{ background: theme.left }"></span>
           {{ formatHz(pointLeft.freqHz) }}

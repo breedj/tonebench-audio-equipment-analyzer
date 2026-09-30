@@ -194,6 +194,23 @@ const { showPage } = useManual()
       clipped waveform, or hum that wandered into the harmonic being counted, and the preview says
       which. Each checked history run gets its own preview pair below.
     </p>
+    <p>
+      <strong>Fit all</strong>, in the spectrum preview's header, fixes its level axis instead of
+      scaling it to the point on screen: the window then covers every point of every sweep the
+      chart is drawing — the live run's and each checked history run's — with a grid line every
+      20 dB and both ends on a line. That is what makes two points comparable, since an axis that
+      re-scales as the cursor moves draws a harmonic that grew by 10 dB exactly like one that did
+      not. The button is shared by all the spectrum previews on screen, so a run and its
+      comparisons are read against one scale. Off, each preview scales to its own point.
+    </p>
+    <p>
+      The oscilloscope preview has its own <strong>Fit all</strong>, doing the same to its volts
+      axis: one window, symmetric about zero, covering every waveform the chart's points hold, with
+      a grid at a round number of volts. Fixed, a point measured at a tenth of the drive is drawn a
+      tenth the height instead of filling the chart like every other point. The two toggles are
+      separate — a spectrum and a waveform are read for different things — and both are saved with
+      the measurement, so a screen set up for comparing comes back that way.
+    </p>
 
     <h2>Display panel</h2>
     <table>

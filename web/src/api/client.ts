@@ -2096,6 +2096,13 @@ export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
   chartYBottomDb?: number | null
   /** Off unless the user opts in — see SweepDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
+  /**
+   * The rail previews' two **Fit all** toggles — the spectrum's level axis and the oscilloscope's
+   * volts axis held to one window covering every point of every sweep on the chart. Display state
+   * like the fields above; null on a type saved before they existed, read as off.
+   */
+  chartFitPreviewSpectrum?: boolean | null
+  chartFitPreviewScope?: boolean | null
 }
 
 /**
@@ -2167,6 +2174,9 @@ export interface ThdVsAmplitudeParameters {
   chartAutofitOnDone?: boolean | null
   /** End the sweep once a channel's THD exceeds this many percent. Absent or null on a type saved without it, meaning sweep to the end. */
   stopThdPercent?: number | null
+  /** The rail previews' Fit all toggles — see ThdVsFrequencyParameters.chartFitPreviewSpectrum. */
+  chartFitPreviewSpectrum?: boolean | null
+  chartFitPreviewScope?: boolean | null
 }
 
 /** The three x-axis choices a THD-vs-amplitude chart offers. Mirrors the old app's E_X_AxisType. */
@@ -2331,6 +2341,9 @@ export interface ImdVsAmplitudeParameters {
   chartYBottomDb?: number | null
   chartAutofitOnDone?: boolean | null
   captureDelayMs?: number | null
+  /** The rail previews' Fit all toggles — see ThdVsFrequencyParameters.chartFitPreviewSpectrum. */
+  chartFitPreviewSpectrum?: boolean | null
+  chartFitPreviewScope?: boolean | null
 }
 
 export interface StoredSweepPoint {

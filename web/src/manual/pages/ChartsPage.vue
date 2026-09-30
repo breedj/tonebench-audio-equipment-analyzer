@@ -77,7 +77,11 @@ import SettingsTable from '../components/SettingsTable.vue'
       <li>
         <strong>Distortion sweeps:</strong> moving the cursor selects the measured point nearest to
         it. Its full set of readings appears in the table under the chart, and the FFT and
-        oscilloscope previews in the left rail switch to that point's own capture.
+        oscilloscope previews in the left rail switch to that point's own capture. Each of those
+        previews has a <strong>Fit all</strong> button that holds its axis still across the switch
+        — one window covering every point of every sweep on the chart, a 20 dB grid for the
+        spectrum and a round number of volts for the waveform — and both are saved with the
+        measurement.
       </li>
     </ul>
 

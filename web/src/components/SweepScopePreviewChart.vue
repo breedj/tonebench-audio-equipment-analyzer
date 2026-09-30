@@ -6,6 +6,12 @@ import type { ThdSweepPoint } from '../api/client'
 import { useAppTheme } from '../composables/useAppTheme'
 import { formatHz } from '../composables/useSweep'
 import { mergePreviewSeries } from '../sweep/points'
+import {
+  previewAxisSplits,
+  scopeAxisTickLabels,
+  useSweepPreviewFit,
+  type ScopeAxisRange,
+} from '../sweep/previewAxis'
 
 /**
  * A small oscilloscope snapshot alongside the sweep chart -- the time-domain waveform behind
@@ -16,10 +22,21 @@ import { mergePreviewSeries } from '../sweep/points'
  * convention: left blue, right red.
  *
  * `label`, when given, names whose points these are -- see SweepFftPreviewChart's own doc on why.
+ *
+ * `fitRange` is the volts window covering every waveform the main chart's points hold, used while
+ * the header's Fit-all toggle is on -- the spectrum preview's arrangement exactly, with its own
+ * toggle because a waveform and a spectrum are read for different things. Symmetric about zero and
+ * on a 1-2-5 grid; see sweep/previewAxis.ts.
  */
-const props = defineProps<{ pointLeft: ThdSweepPoint | null; pointRight: ThdSweepPoint | null; label?: string }>()
+const props = defineProps<{
+  pointLeft: ThdSweepPoint | null
+  pointRight: ThdSweepPoint | null
+  label?: string
+  fitRange?: ScopeAxisRange | null
+}>()
 
 const { isDark } = useAppTheme()
+const { fitAllScopes } = useSweepPreviewFit()
 const containerRef = ref<HTMLDivElement | null>(null)
 const CHART_HEIGHT = 150
 
@@ -33,10 +50,24 @@ function currentTheme() {
 
 function buildOptions(width: number): uPlot.Options {
   const theme = currentTheme()
+  const fitted = fitAllScopes.value
   return {
     width,
     height: CHART_HEIGHT,
-    scales: { x: { time: false }, y: {} },
+    scales: {
+      x: { time: false },
+      // Read inside the callback rather than baked into the options, so a window that grows as the
+      // sweep adds points lands on the next setData -- see SweepFftPreviewChart, same arrangement.
+      y: fitted
+        ? {
+            range: (_u, dataMin, dataMax) => {
+              const bounds = props.fitRange
+              if (bounds) return [bounds.min, bounds.max]
+              return uPlot.rangeNum(dataMin ?? -1, dataMax ?? 1, 0.1, true)
+            },
+          }
+        : {},
+    },
     axes: [
       {
         space: 50,
@@ -45,7 +76,30 @@ function buildOptions(width: number): uPlot.Options {
         grid: { stroke: theme.grid, width: 1 },
         ticks: { stroke: theme.grid, width: 1 },
       },
-      { size: 46, stroke: theme.axis, grid: { stroke: theme.grid, width: 1 }, ticks: { stroke: theme.grid, width: 1 } },
+      {
+        size: 46,
+        stroke: theme.axis,
+        grid: { stroke: theme.grid, width: 1 },
+        ticks: { stroke: theme.grid, width: 1 },
+        // A fixed volts ladder rather than uPlot's own increments, which move with the data and so
+        // put the grid somewhere else on every point. Every line is drawn; only as many as fit are
+        // numbered (bbox is in canvas pixels).
+        // The `?? span/4` is not decoration: these callbacks outlive the window they were built
+        // for by however long it takes the watcher below to rebuild the plot, and a grid of four
+        // divisions is the right shape to draw in the meantime.
+        ...(fitted && props.fitRange
+          ? {
+              splits: (_u, _axisIdx, scaleMin, scaleMax) =>
+                previewAxisSplits(scaleMin, scaleMax, props.fitRange?.stepV ?? (scaleMax - scaleMin) / 4),
+              values: (u, splits) =>
+                scopeAxisTickLabels(
+                  splits,
+                  u.bbox.height / uPlot.pxRatio,
+                  props.fitRange?.stepV ?? scopeStepFromSplits(splits),
+                ),
+            }
+          : {}),
+      },
     ],
     series: [
       {},
@@ -59,18 +113,35 @@ function buildOptions(width: number): uPlot.Options {
   }
 }
 
+/** The spacing a set of splits already has — the label formatter's fallback, see buildOptions. */
+function scopeStepFromSplits(splits: readonly (number | null)[]): number {
+  const first = splits[0]
+  const second = splits[1]
+  return first !== null && first !== undefined && second !== null && second !== undefined
+    ? Math.abs(second - first)
+    : 1
+}
+
 let plot: uPlot | null = null
-let plotIsDark = isDark.value
+/**
+ * What the live instance was built for -- the theme, the toggle, and whether a window exists at
+ * all, since the axis carries a `splits`/`values` pair only once one does. Options hold functions,
+ * so those are rebuilds; a *changed* window is not (see the watcher below).
+ */
+function plotSignature() {
+  return `${isDark.value}|${fitAllScopes.value}|${props.fitRange !== null && props.fitRange !== undefined}`
+}
+let builtFor = plotSignature()
 
 function ensurePlot() {
   const el = containerRef.value
   if (!el) return
-  if (plot && plotIsDark === isDark.value) return
+  if (plot && builtFor === plotSignature()) return
 
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 300
   plot = new uPlot(buildOptions(width), [[], [], [], [], []], el)
-  plotIsDark = isDark.value
+  builtFor = plotSignature()
 }
 
 function update() {
@@ -82,11 +153,11 @@ function update() {
 }
 
 watch(() => [props.pointLeft, props.pointRight], update)
-watch(isDark, () => {
-  plot?.destroy()
-  plot = null
-  update()
-})
+// A new window is one setData away: the y scale's range callback reads it. Compared by value
+// rather than by identity -- the parent recomputes the object on every pass of a running sweep.
+watch(() => [props.fitRange?.min, props.fitRange?.max, props.fitRange?.stepV], update)
+// The theme and the toggle change the options object itself, which ensurePlot notices.
+watch([isDark, fitAllScopes], update)
 
 // Observes the container rather than the window: the column this chart sits in also changes width
 // when the measurement sidebar is pinned or unpinned, which is not a window resize — measured, the
@@ -124,9 +195,32 @@ const rightSpan = computed(() => spanMs(props.pointRight))
 
 <template>
   <section class="flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
-    <div class="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>{{ label ? `${label} — Oscilloscope (ms)` : 'Oscilloscope (ms)' }}</span>
-      <span class="flex items-center gap-2">
+    <div class="flex items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+      <!-- min-w-0 so the label is what gives way when an overlay's name is long -- see the
+           spectrum preview's own header. -->
+      <span class="flex min-w-0 items-center gap-2">
+        <span class="truncate">{{ label ? `${label} — Oscilloscope (ms)` : 'Oscilloscope (ms)' }}</span>
+        <!-- Shared by every oscilloscope preview on the screen, and separate from the spectrum's. -->
+        <button
+          type="button"
+          class="shrink-0 rounded border px-1.5 py-0 leading-5"
+          :class="
+            fitAllScopes
+              ? 'btn-action'
+              : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
+          "
+          :title="
+            fitAllScopes
+              ? 'Fixed axis: one volts window fitting every waveform the sweep chart is showing. Click to scale each point on its own again.'
+              : 'Fix the volts axis to a window fitting every waveform the sweep chart is showing, so a level change between points is visible instead of scaled away.'
+          "
+          :aria-pressed="fitAllScopes"
+          @click="fitAllScopes = !fitAllScopes"
+        >
+          Fit all
+        </button>
+      </span>
+      <span class="flex shrink-0 items-center gap-2">
         <span v-if="pointLeft" class="flex items-center gap-1">
           <span class="h-1.5 w-1.5 rounded-full" :style="{ background: theme.left }"></span>
           {{ formatHz(pointLeft.freqHz) }}<span v-if="leftSpan"> · {{ leftSpan }}</span>

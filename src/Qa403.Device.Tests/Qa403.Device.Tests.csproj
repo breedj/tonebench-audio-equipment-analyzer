@@ -23,10 +23,12 @@
     <ProjectReference Include="..\Qa403.Dsp\Qa403.Dsp.csproj" />
   </ItemGroup>
 
-  <!-- Needed for the [Trait("Category","Hardware")] tests, which talk to a real Qa40xUsbDevice.
-       See Qa403.App.csproj for why this is vendored here instead of coming from NuGet. -->
+  <!-- Needed for the [Trait("Category","Hardware")] tests, which talk to a real Qa40xUsbDevice and
+       a real sound card. See Qa403.App.csproj for why these are vendored here instead of coming
+       from NuGet, and packaging/native/portaudio.md for how portaudio.dll is built. -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <None Include="..\..\native\win-x64\libusb-1.0.dll" Link="libusb-1.0.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\native\win-x64\portaudio.dll" Link="portaudio.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -29,12 +29,27 @@ internal sealed class FakePortAudio : IPortAudio
 
     public bool IsFormatSupported(SoundCardStreamRequest request) => FormatSupported(request);
 
-    public IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer) =>
-        throw new NotSupportedException("Streaming is exercised by SoundCardDeviceTests, not the enumerator's.");
+    private StaDispatcher? _dispatcher;
 
-    public void Dispose()
+    /// <summary>Created on demand so an enumerator-only test never starts a thread it does not need.</summary>
+    public StaDispatcher Dispatcher => _dispatcher ??= new StaDispatcher("FakePortAudio");
+
+    /// <summary>The stream the next OpenStream hands out, so a test can arm it before the pump starts.</summary>
+    public FakePortAudioStream NextStream { get; set; } = new();
+
+    public SoundCardStreamRequest? OpenedWith { get; private set; }
+
+    public int OpenedFramesPerBuffer { get; private set; }
+
+    public IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer)
     {
+        OpenedWith = request;
+        OpenedFramesPerBuffer = framesPerBuffer;
+        NextStream.SampleRateHz = request.SampleRateHz;
+        return NextStream;
     }
+
+    public void Dispose() => _dispatcher?.Dispose();
 
     public SoundCardHostApi AddHostApi(string name, SoundCardHostApiKind kind)
     {

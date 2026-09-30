@@ -63,7 +63,7 @@ internal sealed class PortAudioNative : IPortAudio
     }
 
     /// <summary>The thread every native call runs on, so a stream can run its loop there too.</summary>
-    internal StaDispatcher Dispatcher => _dispatcher;
+    public StaDispatcher Dispatcher => _dispatcher;
 
     public string VersionText { get; private set; } = string.Empty;
 

@@ -84,6 +84,14 @@ internal interface IPortAudio : IDisposable
 
     IReadOnlyList<SoundCardDeviceDescriptor> Devices { get; }
 
+    /// <summary>
+    /// The thread every native call is made on. Exposed because a stream's transfer loop has to run
+    /// there too — both for the apartment ASIO needs and because a dedicated thread is what the
+    /// DAC-gap rule asks for — and because a fake needs to supply one so the loop is testable
+    /// without a card.
+    /// </summary>
+    StaDispatcher Dispatcher { get; }
+
     /// <summary>Re-reads the device list. PortAudio caches it at initialise, so a card plugged in since then is invisible until this runs.</summary>
     void Refresh();
 

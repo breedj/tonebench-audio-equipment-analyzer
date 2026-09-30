@@ -1920,6 +1920,17 @@ export interface UpdateMeasurementRequest {
   notes?: string | null
 }
 
+/**
+ * Mirrors Qa403.App.Endpoints.AppIdentity — what a second instance of the app reads off port 8399
+ * to decide whether the listener there is us. `version` is this build's informational version, read
+ * from the assembly, so it is available with no network and whatever the update check is set to.
+ */
+export interface AppIdentity {
+  product: string
+  pid: number
+  version: string
+}
+
 /** Mirrors Qa403.App.Services.UpdateCheckResult. latestVersion/latestUrl are null when the check failed or found nothing newer. */
 export interface UpdateStatus {
   currentVersion: string
@@ -2739,4 +2750,10 @@ export const api = {
     request<StoredResponseTracesResponse>(`/measurements/${measurementId}/response-traces`),
 
   getUpdateStatus: () => request<UpdateStatus>('/update-check'),
+
+  // The about dialog's version, and deliberately not `getUpdateStatus().currentVersion`: the update
+  // check is opt-out (an air-gapped bench machine turns it off in Configuration) and short-circuits
+  // before it ever fills that field in, which would leave the about dialog blank on exactly the
+  // machines least able to look the version up elsewhere. This one touches no network.
+  getAppInfo: () => request<AppIdentity>('/app'),
 }

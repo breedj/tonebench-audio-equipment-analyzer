@@ -5,6 +5,7 @@ import { useRecentProjects } from '../composables/useRecentProjects'
 import { useStartupConfig } from '../composables/useStartupConfig'
 import { useManual } from '../manual/useManual'
 import { formatLastOpened } from '../projects/recent'
+import { splitVersion } from '../about/version'
 
 // What the app shows while no project is open: the ten most recently opened project files, the
 // two ways to get one (open a file, make a new one), the startup preference, and the manual. The
@@ -21,9 +22,14 @@ onMounted(async () => {
   void loadRecent()
   void loadStartup()
   try {
-    version.value = (await api.getUpdateStatus()).currentVersion
+    // The release number only — the assembly's informational version carries the full forty-character
+    // source revision after a '+', which this line printed verbatim until 2026-09-30. The about
+    // dialog is where the build hash belongs, beside the rest of what a bug report needs.
+    version.value = splitVersion((await api.getAppInfo()).version).release
   } catch {
-    // The version line is decoration; a bench without a network has no reason to see an error here.
+    // The version line is decoration, so a failure just leaves it out rather than showing an error.
+    // (It used to read the update check's copy of the version, which is opt-out and touches GitHub;
+    // /api/app answers from the assembly, so an air-gapped bench sees its version like anyone else.)
   }
 })
 </script>

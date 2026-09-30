@@ -1,25 +1,55 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- QA403 Audio Analyzer app icon: a dark tile carrying a sine wave over a spectrum's bars.
+  <!-- QA403 Audio Analyzer app icon: the harmonic comb — a fundamental with its peak marker and
+       five harmonics falling into the noise floor — on a dark tile. Chosen from five proposals on
+       2026-09-30; it is the one that still reads at 16 px, which is the only size the taskbar and
+       the favicon ever get.
+
        Source of packaging/windows/qa403.ico, packaging/linux/qa403-audio-analyzer.png and
-       web/public/favicon.svg; regenerate all three with `npm run icons` in web/. Kept to large
-       shapes so the 16 px taskbar rendering still reads as a waveform. -->
+       web/public/favicon.svg; regenerate all three with `npm run icons` in web/.
+
+       TWO THINGS HERE ARE LOAD-BEARING.
+
+       (1) The tile is not decoration. `web/src/components/Qa403Logo.vue` draws the same comb as a
+       bare glyph whose structure is `currentColor`, which is right inside the app where there is a
+       theme to follow; an icon has no theme and no known background, and `currentColor` rasterises
+       to black. So the shipped icon carries its own ground and its own literal colours — the
+       brighter #38bdf8/#4ade80 pair, which is what reads against a dark tile, rather than the
+       #0ea5e9/#22c55e the in-app glyph uses against a light or dark panel.
+
+       (2) The comb geometry below is the glyph's own coordinates, placed by one transform rather
+       than re-drawn at tile scale. The glyph's real bounds are x 18..238 and y 18.5..207 (strokes
+       and round caps included, not just the nominal rects), fitted to x 36..220 and centred
+       vertically: scale 184/220 = 0.8364, hence the translate. Qa403Logo.vue applies the same
+       transform for its own tile variant, so the two cannot drift apart — edit the numbers in
+       both, or in neither. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#1f2937"/>
-      <stop offset="1" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#0b1220"/>
     </linearGradient>
   </defs>
-  <rect x="8" y="8" width="240" height="240" rx="48" fill="url(#bg)"/>
-  <!-- spectrum bars: fundamental and falling harmonics -->
-  <g fill="#38bdf8" opacity="0.55">
-    <rect x="44" y="150" width="18" height="62" rx="4"/>
-    <rect x="76" y="118" width="18" height="94" rx="4"/>
-    <rect x="108" y="164" width="18" height="48" rx="4"/>
-    <rect x="140" y="178" width="18" height="34" rx="4"/>
-    <rect x="172" y="188" width="18" height="24" rx="4"/>
-    <rect x="204" y="196" width="18" height="16" rx="4"/>
+
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tile)"/>
+
+  <g transform="translate(20.94 33.73) scale(0.8364)">
+    <!-- noise floor -->
+    <path d="M20 192 H236" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"
+          stroke-dasharray="10 12" opacity="0.3"/>
+
+    <!-- baseline -->
+    <rect x="20" y="202" width="216" height="5" rx="2.5" fill="#ffffff" opacity="0.22"/>
+
+    <!-- fundamental, then five falling harmonics -->
+    <rect x="27" y="54" width="22" height="148" rx="6" fill="#38bdf8"/>
+    <g fill="#38bdf8" opacity="0.55">
+      <rect x="63"  y="114" width="22" height="88" rx="6"/>
+      <rect x="99"  y="142" width="22" height="60" rx="6"/>
+      <rect x="135" y="160" width="22" height="42" rx="6"/>
+      <rect x="171" y="172" width="22" height="30" rx="6"/>
+      <rect x="207" y="180" width="22" height="22" rx="6"/>
+    </g>
+
+    <!-- peak marker on the fundamental -->
+    <circle cx="38" cy="34" r="12" fill="none" stroke="#4ade80" stroke-width="7"/>
   </g>
-  <!-- one period of a sine wave -->
-  <path d="M40 96 C 62 40, 84 40, 106 96 S 150 152, 172 96 S 208 40, 220 96"
-        fill="none" stroke="#4ade80" stroke-width="16" stroke-linecap="round"/>
 </svg>

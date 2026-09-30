@@ -53,6 +53,8 @@ import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
+import AboutDialog from './components/AboutDialog.vue'
+import Qa403Logo from './components/Qa403Logo.vue'
 import ManualDialog from './manual/ManualDialog.vue'
 import { useManual } from './manual/useManual'
 import UpdateBanner from './components/UpdateBanner.vue'
@@ -347,6 +349,7 @@ const metricPickerOpen = ref(false)
 // The FFT screen's metrics block, handed to SpectrumChart so its height fit leaves room for it.
 const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
+const aboutDialogOpen = ref(false)
 // The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
 // because the header's button and the per-measurement help button have to drive one dialog.
 const { openManual, openManualForKind } = useManual()
@@ -3016,7 +3019,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
   <div class="flex h-screen flex-col bg-[var(--surface-ground)] text-neutral-900 dark:text-neutral-100">
     <UpdateBanner />
     <header class="flex items-center gap-3 border-b border-neutral-200 bg-[var(--surface-panel)] px-4 py-2 dark:border-neutral-800">
-      <span class="text-sm font-semibold">QA403 audio analyzer</span>
+      <!-- The mark and the name are one unit, so they sit in their own flex box: the header's own
+           gap-3 is the spacing between the *controls* on the bar, and applied between these two it
+           reads as an icon that belongs to nothing in particular.
+
+           `glyph` and not `tile`: the tile's own ground (#1f2937..#0b1220) is within a few counts of
+           the dark theme's panel, so at 20 px it reads as a muddy box around a comb that the tile's
+           own inset has already shrunk — and the glyph, whose structure is `currentColor`, picks up
+           the header's ink in both themes instead. The tile belongs where the mark stands alone.
+
+           `aria-hidden` because the name is right beside it: it overrides the component's own
+           role/aria-label, which exist for the about dialog, where the mark is on its own. -->
+      <div class="flex items-center gap-2">
+        <Qa403Logo :size="20" variant="glyph" class="shrink-0" aria-hidden="true" />
+        <span class="text-sm font-semibold">QA403 audio analyzer</span>
+      </div>
       <ProjectMenu
         :project-name="currentProject?.name ?? null"
         :dirty="hasAnyDirtyInProject"
@@ -3036,6 +3053,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+        </svg>
+      </button>
+      <!-- About: the version, the credits and the open-source libraries. Beside the manual rather
+           than inside Configuration — it answers questions rather than changing anything. -->
+      <button
+        type="button"
+        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        aria-label="About"
+        title="About"
+        @click="aboutDialogOpen = true"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4M12 8h.01" stroke-linecap="round" />
         </svg>
       </button>
       <button
@@ -4526,6 +4557,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       @close="projectReportOpen = false"
     />
     <ConfigDialog :open="configDialogOpen" @close="configDialogOpen = false" />
+    <AboutDialog :open="aboutDialogOpen" @close="aboutDialogOpen = false" />
     <ManualDialog />
   </div>
 </template>

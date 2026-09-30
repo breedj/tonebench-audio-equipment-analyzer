@@ -113,6 +113,13 @@ const { showPage } = useManual()
       Each has its own chapter in this manual, reachable from the index or from the
       <strong>?</strong> button on the measurement screen itself.
     </p>
+    <p>
+      Three buttons sit at the top right of the window, in that order: the <strong>book</strong>
+      opens this manual at its contents, the <strong>i</strong> opens <strong>About</strong> — the
+      version, the build this was made from, and the open-source libraries the application is built
+      on — and the <strong>gear</strong> opens
+      <button type="button" class="manual-link" @click="showPage('settings')">Configuration</button>.
+    </p>
 
     <h2>Running a measurement</h2>
     <p>

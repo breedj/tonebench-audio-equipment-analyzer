@@ -4,6 +4,7 @@ import {
   type SoundCardCalibrationResult,
   type SoundCardConfig,
   type SoundCardInventory,
+  type SoundCardLevels,
   type SoundCardProbe,
   type VoltageEntryUnitName,
 } from '../api/client'
@@ -25,6 +26,7 @@ const inventory = ref<SoundCardInventory | null>(null)
 const probe = ref<SoundCardProbe | null>(null)
 const calibrationResult = ref<SoundCardCalibrationResult | null>(null)
 const playingDbFs = ref<number | null>(null)
+const levels = ref<SoundCardLevels | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
 let loadPromise: Promise<void> | null = null
@@ -184,11 +186,15 @@ export function useSoundCard() {
     }
   }
 
-  /** The same step through a patch cable, with the known voltage coming from the output calibration. */
-  async function measureInputViaLoopback(dbFs: number, channel: 'Left' | 'Right') {
+  /**
+   * Both inputs at once through patch cables, with the known voltage coming from the output
+   * calibration. Both together because a stereo loopback makes it possible: one press, both figures
+   * measured under identical conditions, and the difference between them available immediately.
+   */
+  async function measureInputViaLoopback(dbFs: number) {
     busy.value = true
     try {
-      calibrationResult.value = await api.measureSoundCardInputViaLoopback(dbFs, channel)
+      calibrationResult.value = await api.measureSoundCardInputViaLoopback(dbFs)
       error.value = calibrationResult.value.warning
       await load(true)
       return true
@@ -216,7 +222,36 @@ export function useSoundCard() {
     }
   }
 
+  /**
+   * Starts polling what the inputs are hearing, for the level bars, and returns a stop function.
+   *
+   * A poll rather than the spectrum socket: useSpectrumStream is not a singleton, so reading it here
+   * would open a second WebSocket, and the levels wanted are the calibration's own derivation rather
+   * than anything that stream already carries.
+   */
+  function watchLevels(intervalMs = 120) {
+    let stopped = false
+    const tick = async () => {
+      if (stopped) return
+      try {
+        levels.value = await api.getSoundCardLevels()
+      } catch {
+        levels.value = null
+      }
+    }
+
+    void tick()
+    const handle = setInterval(() => void tick(), intervalMs)
+    return () => {
+      stopped = true
+      clearInterval(handle)
+      levels.value = null
+    }
+  }
+
   return {
+    levels,
+    watchLevels,
     config,
     inventory,
     probe,

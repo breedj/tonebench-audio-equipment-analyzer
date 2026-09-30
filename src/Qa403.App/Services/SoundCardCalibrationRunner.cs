@@ -1,4 +1,4 @@
-using Qa403.App.Streaming;
+﻿using Qa403.App.Streaming;
 using Qa403.Data;
 using Qa403.Device;
 using Qa403.Device.SoundCard;
@@ -54,6 +54,9 @@ public sealed class SoundCardCalibrationRunner(
 
     private readonly Lock _gate = new();
     private bool _running;
+
+    /// <summary>What the measurement screen had before a step turned both channels on for itself.</summary>
+    private SpectrumPipelineOptions? _savedOptions;
     private double _playingDbFs;
 
     public bool Running
@@ -112,6 +115,12 @@ public sealed class SoundCardCalibrationRunner(
             {
                 Kind = GeneratorKind.Tones,
             };
+
+            // Both channels analysed while the tone plays, so the dialog's level bars show both.
+            // ProcessRight is off by default -- the FFT screen's own left-only default, which the
+            // pipeline keeps -- so without this the right bar never moves.
+            _savedOptions ??= pipeline.Options;
+            pipeline.Options = pipeline.Options with { ProcessLeft = true, ProcessRight = true };
 
             if (!session.Acquiring)
                 await session.StartAcquisitionAsync(new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
@@ -183,8 +192,22 @@ public sealed class SoundCardCalibrationRunner(
     /// rather than cancelling — any error in the output figure lands directly in the input figure —
     /// which is why the external-source step stays, and stays the more trustworthy of the two.</para>
     /// </summary>
+    /// <summary>
+    /// Measures <b>both</b> inputs at once against the card's own output, through loopback cables.
+    ///
+    /// <para>Both together rather than one at a time, which is what a stereo loopback makes
+    /// possible and what the two level bars show: it is one press instead of two, the two figures
+    /// are measured under identical conditions, and the difference between them is available
+    /// immediately — that difference is the reading that catches a wiring mistake.</para>
+    ///
+    /// <para><b>It refuses while the output is uncalibrated</b>, and that is the whole safety of it:
+    /// the known voltage is derived from the output's full scale, so running this against a guessed
+    /// one would write an input calibration that looks measured and is invented. The error compounds
+    /// rather than cancelling — any error in the output figure lands directly in both input figures
+    /// — which is why the external-source step stays, and stays the more trustworthy of the two.</para>
+    /// </summary>
     public async Task<SoundCardCalibrationResult> MeasureInputViaLoopbackAsync(
-        double dbFs, StreamChannel channel, CancellationToken ct)
+        double dbFs, CancellationToken ct)
     {
         RequireSoundCard();
 
@@ -195,7 +218,7 @@ public sealed class SoundCardCalibrationRunner(
         if (!calibration.IsOutputCalibrated)
         {
             throw new InvalidOperationException(
-                "Calibrate the output first. This measures the input against what the card is playing, and until the output is calibrated that voltage is not known — the result would look measured and be invented.");
+                "Calibrate the output first. This measures the inputs against what the card is playing, and until the output is calibrated that voltage is not known — the result would look measured and be invented.");
         }
 
         // What the card is about to play, in volts, from the output calibration.
@@ -206,10 +229,16 @@ public sealed class SoundCardCalibrationRunner(
             _running = true;
         }
 
+        SpectrumPipelineOptions savedOptions = pipeline.Options;
+
         try
         {
-            // On the channel being measured and nowhere else: a loopback pairs one output with one
-            // input, and a tone on the other side would only reach this one as crosstalk.
+            // Both channels analysed, explicitly. ProcessRight is off by default -- the FFT screen's
+            // own left-only default, which the pipeline keeps -- so inheriting it meant the right
+            // input was never analysed at all and the step came back "no reading to calibrate
+            // against". Every runner sets its own options for this reason; this one has to as well.
+            pipeline.Options = savedOptions with { ProcessLeft = true, ProcessRight = true };
+
             var tone = new ChannelGeneratorConfig(
                 Enabled: true,
                 Tones: [new GeneratorTone(ToneHz, session.Capabilities.OutputRangesDbv[0] + dbFs)])
@@ -217,59 +246,70 @@ public sealed class SoundCardCalibrationRunner(
                 Kind = GeneratorKind.Tones,
             };
 
-            GeneratorConfig generator = channel == StreamChannel.Right
-                ? new GeneratorConfig(ChannelGeneratorConfig.Off, tone)
-                : new GeneratorConfig(tone, ChannelGeneratorConfig.Off);
-
             if (!session.Acquiring)
                 await session.StartAcquisitionAsync(new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
 
-            await session.ConfigureGeneratorAsync(generator, ct);
+            await session.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), ct);
 
-            double measuredDbFs = await ReadPeakDbFsAsync(channel, ct);
+            double leftDbFs = await ReadPeakDbFsAsync(StreamChannel.Left, ct);
+            double rightDbFs = await ReadPeakDbFsAsync(StreamChannel.Right, ct);
             await SilenceAsync(ct);
 
-            if (measuredDbFs > ClippingGuardDb)
+            RequireUsableLevel(leftDbFs, StreamChannel.Left);
+            RequireUsableLevel(rightDbFs, StreamChannel.Right);
+
+            double leftMv = SoundCardCalibration.InputFullScaleFromMeasurement(knownPeakV, leftDbFs) * 1000.0;
+            double rightMv = SoundCardCalibration.InputFullScaleFromMeasurement(knownPeakV, rightDbFs) * 1000.0;
+
+            SoundCardConfig updated = soundCard.Config with
             {
-                throw new InvalidOperationException(
-                    $"That input is at {measuredDbFs:0.0} dBFS, which is clipping. Pick a quieter output level and measure again.");
-            }
-
-            if (measuredDbFs < SilenceGuardDbFs)
-            {
-                throw new InvalidOperationException(
-                    $"The {channel} input read {measuredDbFs:0.0} dBFS while the card was playing — that is silence. Check the loopback cable runs from the output channel to the input channel being calibrated.");
-            }
-
-            double fullScaleMv = SoundCardCalibration.InputFullScaleFromMeasurement(knownPeakV, measuredDbFs) * 1000.0;
-
-            SoundCardConfig updated = channel == StreamChannel.Right
-                ? soundCard.Config with { InputFullScalePeakMvRight = fullScaleMv, CalibratedUtc = DateTimeOffset.UtcNow }
-                : soundCard.Config with { InputFullScalePeakMvLeft = fullScaleMv, CalibratedUtc = DateTimeOffset.UtcNow };
+                InputFullScalePeakMvLeft = leftMv,
+                InputFullScalePeakMvRight = rightMv,
+                CalibratedUtc = DateTimeOffset.UtcNow,
+            };
 
             await SaveAndReopenAsync(updated, ct);
 
             logger.LogInformation(
-                "Sound card calibration: {Channel} input full scale {Mv:0.0} mV peak, from a loopback of {Known:0.0} mV peak measured at {DbFs:0.00} dBFS",
-                channel, fullScaleMv, knownPeakV * 1000.0, measuredDbFs);
+                "Sound card calibration: input full scale {Left:0.0} / {Right:0.0} mV peak, from a loopback of {Known:0.0} mV peak measured at {LeftDb:0.00} / {RightDb:0.00} dBFS",
+                leftMv, rightMv, knownPeakV * 1000.0, leftDbFs, rightDbFs);
 
-            double? difference = updated.InputFullScalePeakMvLeft is { } l && updated.InputFullScalePeakMvRight is { } r
-                ? 20.0 * Math.Log10(r / l)
-                : null;
+            double difference = 20.0 * Math.Log10(rightMv / leftMv);
 
             return new SoundCardCalibrationResult(
                 updated.OutputFullScalePeakMv,
-                updated.InputFullScalePeakMvLeft,
-                updated.InputFullScalePeakMvRight,
-                measuredDbFs,
+                leftMv,
+                rightMv,
+                // The louder of the two, which is the one a clipping check would care about.
+                Math.Max(leftDbFs, rightDbFs),
                 difference,
-                difference is { } d && Math.Abs(d) > 3.0
-                    ? $"The two inputs differ by {d:0.00} dB, which is more than two channels of one card usually do — check the wiring and the channel pair."
+                Math.Abs(difference) > 3.0
+                    ? $"The two inputs differ by {difference:0.00} dB, which is more than two channels of one card usually do — check the cables and the channel pair."
                     : null);
         }
         finally
         {
+            pipeline.Options = savedOptions;
             await SilenceAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a reading that cannot mean what it says: one at the clip point is not the source's
+    /// level, and one in the noise floor usually means nothing is connected to that input.
+    /// </summary>
+    private static void RequireUsableLevel(double measuredDbFs, StreamChannel channel)
+    {
+        if (measuredDbFs > ClippingGuardDb)
+        {
+            throw new InvalidOperationException(
+                $"The {channel} input is at {measuredDbFs:0.0} dBFS, which is clipping. Pick a quieter output level and measure again.");
+        }
+
+        if (measuredDbFs < SilenceGuardDbFs)
+        {
+            throw new InvalidOperationException(
+                $"The {channel} input read {measuredDbFs:0.0} dBFS while the card was playing — that is silence. Check the loopback cable on that channel: both inputs are measured together, so both need one.");
         }
     }
 
@@ -291,6 +331,10 @@ public sealed class SoundCardCalibrationRunner(
 
         try
         {
+            // Both channels analysed, for the same reason as the loopback step above: ProcessRight
+            // is off by default, so the right input would never be analysed.
+            pipeline.Options = pipeline.Options with { ProcessLeft = true, ProcessRight = true };
+
             var off = new GeneratorConfig(ChannelGeneratorConfig.Off, ChannelGeneratorConfig.Off);
             if (!session.Acquiring)
                 await session.StartAcquisitionAsync(new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
@@ -366,6 +410,15 @@ public sealed class SoundCardCalibrationRunner(
         }
         finally
         {
+            // Hand the pipeline back whatever the measurement screen had. The steps turn both
+            // channels on for themselves, and leaving that behind would quietly switch the right
+            // channel on for an FFT screen the user had set to left only.
+            if (_savedOptions is { } saved)
+            {
+                pipeline.Options = saved;
+                _savedOptions = null;
+            }
+
             lock (_gate)
             {
                 _running = false;
@@ -382,9 +435,54 @@ public sealed class SoundCardCalibrationRunner(
     /// actually there. That makes the step self-correcting — running it twice converges rather than
     /// compounding.</para>
     /// </summary>
+    /// <summary>
+    /// What each input is seeing right now, as dB below full scale, or null where nothing has been
+    /// analysed yet. Drives the dialog's level bars, and is the same derivation the calibration
+    /// itself uses -- one definition, so the bars and the stored figure cannot disagree.
+    /// </summary>
+    public (double? LeftDbFs, double? RightDbFs) CurrentInputLevels()
+    {
+        double? left = null;
+        double? right = null;
+
+        foreach (SpectrumSnapshot snapshot in pipeline.LatestSnapshots())
+        {
+            if (snapshot.Meters is not { } meters)
+                continue;
+
+            double dbFs = ToDbFs(meters.AnalyzerPeakDbv, snapshot.Channel);
+            if (snapshot.Channel == StreamChannel.Right)
+                right = dbFs;
+            else
+                left = dbFs;
+        }
+
+        return (left, right);
+    }
+
+    /// <summary>
+    /// An analyzer-referred level as a fraction of this card's full scale, in dB.
+    ///
+    /// <para>Derived rather than read directly, because the pipeline deals in volts: the meters
+    /// report the DUT's level, adding the external gain back gives the analyzer's, and dividing by
+    /// whatever full scale the current calibration claims gives the fraction of full scale that was
+    /// actually there. That is what makes the calibration self-correcting -- running it twice
+    /// converges rather than compounding.</para>
+    /// </summary>
+    private double ToDbFs(double analyzerPeakDbv, StreamChannel channel)
+    {
+        double fullScaleV = soundCard.Calibration.InputFullScalePeakV(channel == StreamChannel.Right ? 1 : 0);
+
+        // AnalyzerPeakDbv is RMS-referenced peak dBV at the jack; root two takes it back to peak
+        // volts, which is the unit full scale is expressed in.
+        double analyzerPeakV = Math.Pow(10.0, analyzerPeakDbv / 20.0) * Math.Sqrt(2.0);
+        double fraction = analyzerPeakV / fullScaleV;
+
+        return fraction > 0.0 ? 20.0 * Math.Log10(fraction) : double.NegativeInfinity;
+    }
+
     private async Task<double> ReadPeakDbFsAsync(StreamChannel channel, CancellationToken ct)
     {
-        double currentFullScaleV = soundCard.Calibration.InputFullScalePeakV(channel == StreamChannel.Right ? 1 : 0);
         double best = double.NegativeInfinity;
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         int seen = 0;
@@ -399,13 +497,7 @@ public sealed class SoundCardCalibrationRunner(
                     continue;
 
                 seen++;
-
-                // AnalyzerPeakDbv is RMS-referenced peak dBV at the jack; √2 takes it back to peak
-                // volts, which is the unit full scale is expressed in.
-                double analyzerPeakV = Math.Pow(10.0, meters.AnalyzerPeakDbv / 20.0) * Math.Sqrt(2.0);
-                double fraction = analyzerPeakV / currentFullScaleV;
-                if (fraction > 0.0)
-                    best = Math.Max(best, 20.0 * Math.Log10(fraction));
+                best = Math.Max(best, ToDbFs(meters.AnalyzerPeakDbv, channel));
             }
         }
 

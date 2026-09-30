@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Data;
@@ -61,7 +61,7 @@ public class SoundCardCalibrationRunnerTests
         await session.ConnectAsync(CancellationToken.None);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => runner.MeasureInputViaLoopbackAsync(-20.0, StreamChannel.Left, CancellationToken.None));
+            () => runner.MeasureInputViaLoopbackAsync(-20.0, CancellationToken.None));
 
         Assert.Contains("Calibrate the output first", ex.Message);
     }
@@ -73,7 +73,7 @@ public class SoundCardCalibrationRunnerTests
         await session.ConnectAsync(CancellationToken.None);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => runner.MeasureInputViaLoopbackAsync(-7.0, StreamChannel.Left, CancellationToken.None));
+            () => runner.MeasureInputViaLoopbackAsync(-7.0, CancellationToken.None));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class SoundCardCalibrationRunnerTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => runner.StartOutputToneAsync(-6.0, CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => runner.MeasureInputViaLoopbackAsync(-20.0, StreamChannel.Left, CancellationToken.None));
+            () => runner.MeasureInputViaLoopbackAsync(-20.0, CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => runner.MeasureInputAsync(500.0, VoltageEntryUnit.Rms, StreamChannel.Left, CancellationToken.None));
     }

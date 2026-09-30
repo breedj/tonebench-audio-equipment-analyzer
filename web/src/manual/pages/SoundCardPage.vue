@@ -47,9 +47,17 @@ const { showPage } = useManual()
 
     <h2>Picking the card</h2>
     <p>
-      The dialog lists every input and every output the machine has, grouped by <em>host API</em> —
-      the driver family the card is reached through. The order is deliberate: the ones that reach the
-      hardware come first, the ones that resample last.
+      The <strong>Sound card</strong> dropdown comes first, and it lists <em>cards</em> rather than
+      devices: one entry per physical interface per <em>host API</em> — the driver family the card is
+      reached through. The order is deliberate: the ones that reach the hardware come first, the ones
+      that resample last.
+    </p>
+    <p>
+      Choosing a card is what fills the <strong>Input</strong> and <strong>Output</strong> lists, and
+      they only ever offer that card's own devices — which is how both directions are guaranteed to
+      be one piece of hardware, and therefore <a href="#duplex">one clock</a>. Where the card has
+      only one device on a side, as an ASIO card does, that list is not shown at all: there is
+      nothing to choose.
     </p>
     <table>
       <thead>
@@ -173,31 +181,39 @@ const { showPage } = useManual()
 
     <h3>Step 2 — Full scale input</h3>
     <p>
-      Each input is measured on its own, so run this once per channel using the
-      <strong>Input channel</strong> selector. There are two ways to give it a known voltage, chosen
-      with the <strong>Known source</strong> dropdown.
+      There are two ways to give the inputs a known voltage, chosen with the
+      <strong>Known source</strong> dropdown. The patch cable does both channels in one press; a
+      separate generator does one channel at a time, since you have only one generator to connect.
     </p>
 
     <h4>With a patch cable (easiest)</h4>
     <ol>
       <li>Calibrate the output first — this option is refused until you have.</li>
       <li>
-        Patch the <strong>output</strong> channel straight back to the <strong>input</strong>
-        channel being calibrated.
+        Patch <strong>both</strong> outputs straight back to their own inputs. Both are measured
+        together, so both need a cable; an input left unconnected reads as silence and the step
+        refuses it, naming the channel.
       </li>
       <li>Choose <strong>This card's output, through a patch cable</strong>.</li>
       <li>
         Pick a <strong>Play at</strong> level. −20 dB is a good default: quiet enough that the input
         cannot clip, loud enough to sit well clear of the card's noise floor.
       </li>
-      <li>Press <strong>Estimate peak input mV</strong>. It plays, measures and stores in one step.</li>
-      <li>Move the cable to the other channel, switch <strong>Input channel</strong>, and repeat.</li>
+      <li>
+        Press <strong>Estimate peak input mV</strong>. Both outputs play, both inputs are measured,
+        and both figures are stored in one step.
+      </li>
     </ol>
     <p>
-      Because the output is calibrated, the app knows what it is playing in volts — so the cable is
+      Both channels together rather than one at a time is not only fewer presses: the two figures are
+      measured under identical conditions, so the <strong>Diff</strong> between them is meaningful
+      immediately — and that difference is the reading that catches a wiring mistake.
+    </p>
+    <p>
+      Because the output is calibrated, the app knows what it is playing in volts — so the cables are
       a source of known voltage and no second generator is needed. The one cost:
-      <strong>the two figures are linked</strong>. Any error in the output calibration lands directly
-      in this one, where a separate generator would be independent of it.
+      <strong>the figures are linked</strong>. Any error in the output calibration lands directly
+      in both of these, where a separate generator would be independent of it.
     </p>
 
     <h4>With a signal generator</h4>
@@ -206,13 +222,32 @@ const { showPage } = useManual()
         Feed the input from a generator whose output voltage you know — measured with the same
         voltmeter, ideally.
       </li>
-      <li>Choose <strong>A generator of known voltage</strong>.</li>
+      <li>
+        Choose <strong>A generator of known voltage</strong>, and pick which
+        <strong>Input channel</strong> it is connected to. This is the only route that asks, because
+        it is the only one that does a channel at a time.
+      </li>
       <li>Enter that voltage, with the right <strong>mV rms</strong> / <strong>mV peak</strong> unit.</li>
       <li>Press <strong>Estimate peak input mV</strong>.</li>
     </ol>
     <p>
       The app silences its own generator while it measures — anything it were playing would be
-      measured along with your source.
+      measured along with your source. Move the generator to the other channel, switch
+      <strong>Input channel</strong>, and repeat.
+    </p>
+
+    <h3>The level bars</h3>
+    <p>
+      Two bars above the results table show what each input is hearing, live, on a
+      −90…0 dBFS scale — the range a calibration cares about: the clip point at the top, the card's
+      noise floor off the bottom. They move while a tone is playing or a measurement is running, and
+      they turn <span class="text-red-500">red</span> past −0.5 dBFS, which is the point at which a
+      reading is no longer the source's level and the step refuses it.
+    </p>
+    <p>
+      They are worth watching before pressing anything: a bar that stays at the bottom while the tone
+      plays is a cable on the wrong channel, which is far quicker to see here than to deduce from the
+      Diff afterwards.
     </p>
 
     <h3>Reading the result</h3>

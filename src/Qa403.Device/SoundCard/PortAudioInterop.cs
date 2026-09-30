@@ -208,6 +208,13 @@ internal static class PaError
     internal const int NoError = 0;
     internal const int InvalidSampleRate = -9997;
     internal const int DeviceUnavailable = -9985;
+    /// <summary>
+    /// The blocking interface waited longer than the stream's own timeout. <b>Not fatal</b>: the
+    /// device is still there and the next transfer usually succeeds — see the transfer loop, which
+    /// counts these rather than tearing the session down over one.
+    /// </summary>
+    internal const int TimedOut = -9987;
+
     internal const int InputOverflowed = -9981;
     internal const int OutputUnderflowed = -9980;
 }

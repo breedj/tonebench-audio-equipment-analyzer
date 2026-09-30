@@ -6,6 +6,18 @@ namespace Qa403.Device.SoundCard;
 public sealed record SoundCardOption(
     string HostApi,
     string Name,
+    /// <summary>
+    /// The physical interface this device belongs to, so the picker can offer a card first and its
+    /// inputs and outputs second — which is what keeps both sides on one card, and therefore on one
+    /// clock.
+    ///
+    /// <para>Under ASIO the device <i>is</i> the card, so this is its name. Under WASAPI,
+    /// DirectSound and MME it is the interface buried in the device name —
+    /// <c>In 1-2 (MOTU M Series)</c> is the MOTU. Under WDM-KS the name carries no interface at all
+    /// (<c>In 1-2 (In 1-2)</c>), so each device stands alone and the grouping cannot help; that is
+    /// honest rather than a gap, and the pairing warning still covers it.</para>
+    /// </summary>
+    string InterfaceName,
     string HostApiKind,
     int MaxInputChannels,
     int MaxOutputChannels,
@@ -126,9 +138,21 @@ public static class SoundCardCatalog
         }
     }
 
+    /// <summary>
+    /// The card a device belongs to: the interface buried in its name where there is one, and the
+    /// device's own name where there is not — which is ASIO, whose device is the card, and WDM-KS,
+    /// whose names name nothing.
+    /// </summary>
+    private static string InterfaceOf(SoundCardDeviceDescriptor d)
+    {
+        string stem = SoundCardEnumerator.InterfaceStem(d.Name);
+        return stem.Length > 0 ? stem : d.Name;
+    }
+
     private static SoundCardOption Describe(SoundCardDeviceDescriptor d) => new(
         HostApi: d.HostApiName,
         Name: d.Name,
+        InterfaceName: InterfaceOf(d),
         HostApiKind: d.HostApiKind.ToString(),
         MaxInputChannels: d.MaxInputChannels,
         MaxOutputChannels: d.MaxOutputChannels,

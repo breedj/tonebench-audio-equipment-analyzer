@@ -35,6 +35,18 @@ public static class SoundCardEndpoints
                 inputHostApi, inputDevice, inputChannelOffset ?? 0,
                 outputHostApi, outputDevice, outputChannelOffset ?? 0)));
 
+        // What the inputs are hearing right now, for the dialog's level bars. A small poll rather
+        // than a socket: it is only read while that dialog is open, and the levels it wants are the
+        // calibration's own derivation rather than anything the spectrum stream already carries.
+        group.MapGet("/levels", (SoundCardCalibrationRunner runner, DeviceSessionService session) =>
+        {
+            (double? left, double? right) = session.Acquiring
+                ? runner.CurrentInputLevels()
+                : (null, null);
+
+            return Results.Ok(new SoundCardLevels(left, right, session.Acquiring));
+        });
+
         // The two calibration steps. Sequenced here rather than in the dialog so the run guard sees
         // them: a calibration tone playing is a measurement in progress, and a sweep started over it
         // would take the generator away mid-step.
@@ -130,12 +142,9 @@ public static class SoundCardEndpoints
             if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
                 return Results.Conflict(MeasurementRunGuard.Message);
 
-            if (!EnumParsing.TryParse(request.Channel, StreamChannel.Left, out StreamChannel channel, out string channelError))
-                return Results.BadRequest(channelError);
-
             try
             {
-                return Results.Ok(await runner.MeasureInputViaLoopbackAsync(request.DbFs, channel, ct));
+                return Results.Ok(await runner.MeasureInputViaLoopbackAsync(request.DbFs, ct));
             }
             catch (ArgumentOutOfRangeException ex)
             {
@@ -168,9 +177,11 @@ public sealed record SoundCardMeasurementRequest(double Value, string Unit);
 /// <param name="Channel">"Left" or "Right": which input the known source is on.</param>
 public sealed record SoundCardInputMeasurementRequest(double Value, string Unit, string Channel);
 
-/// <param name="DbFs">How far below full scale to play into the loopback.</param>
-/// <param name="Channel">Which output/input pair the patch cable joins.</param>
-public sealed record SoundCardLoopbackRequest(double DbFs, string Channel);
+/// <param name="DbFs">How far below full scale to play. Both channels are driven and both inputs measured.</param>
+public sealed record SoundCardLoopbackRequest(double DbFs);
+
+/// <param name="Acquiring">False when nothing is streaming, so the bars read as idle rather than as silence.</param>
+public sealed record SoundCardLevels(double? LeftDbFs, double? RightDbFs, bool Acquiring);
 
 /// <param name="PlayingDbFs">The level currently playing, or null when no tone is up.</param>
 public sealed record SoundCardCalibrationState(

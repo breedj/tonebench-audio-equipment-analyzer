@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import type { SoundCardConfig, VoltageEntryUnitName } from '../api/client'
 import { useSoundCard } from '../composables/useSoundCard'
 import Modal from './Modal.vue'
@@ -35,12 +35,16 @@ const {
   applyOutput,
   measureInput,
   measureInputViaLoopback,
+  levels,
+  watchLevels,
 } = useSoundCard()
 
 /** ARTA's levels, and the server's. */
 const OUTPUT_LEVELS = [-3, -6, -9, -12, -20]
 
 const form = reactive({
+  /** Which physical card, as "host API\u0000interface". Both device lists are filtered to it. */
+  cardKey: '',
   inputKey: '',
   outputKey: '',
   inputChannelOffset: 0,
@@ -64,10 +68,31 @@ const inputStep = reactive({
 })
 
 const saved = ref(false)
+let stopLevels: (() => void) | null = null
+
+onUnmounted(() => stopLevels?.())
+
+/** Where a level sits on the bar, as a fraction of a −90…0 dBFS scale. */
+function barFraction(dbFs: number | null | undefined) {
+  if (dbFs == null || !Number.isFinite(dbFs)) return 0
+  return Math.max(0, Math.min(1, (dbFs + 90) / 90))
+}
+
+function barLabel(dbFs: number | null | undefined) {
+  return dbFs == null || !Number.isFinite(dbFs) ? '—' : `${dbFs.toFixed(1)} dBFS`
+}
 
 /** Host API and name together: the same device name exists under several host APIs, and they are different devices. */
 function keyOf(hostApi: string, name: string) {
   return `${hostApi}\u0000${name}`
+}
+
+/** The card a saved device belongs to, found in the listing rather than re-derived here. */
+function cardKeyFor(hostApi: string, deviceName: string) {
+  const match = [...(inventory.value?.inputs ?? []), ...(inventory.value?.outputs ?? [])].find(
+    (o) => o.hostApi === hostApi && o.name === deviceName,
+  )
+  return match ? keyOf(match.hostApi, match.interfaceName) : ''
 }
 
 function splitKey(key: string) {
@@ -75,11 +100,65 @@ function splitKey(key: string) {
   return { hostApi, name }
 }
 
+/**
+ * The cards the machine has, each a host API and an interface within it.
+ *
+ * Picking the card first is what guarantees the input and the output are the same piece of
+ * hardware — and therefore one clock. Two cards run on two, and the drift between them is not
+ * reported as a fault but as DUT response.
+ */
+const cards = computed(() => {
+  const seen = new Map<string, { key: string; hostApi: string; interfaceName: string; trust: string; duplex: boolean; preference: number }>()
+
+  for (const o of [...(inventory.value?.inputs ?? []), ...(inventory.value?.outputs ?? [])]) {
+    const key = keyOf(o.hostApi, o.interfaceName)
+    const existing = seen.get(key)
+    if (existing) {
+      existing.duplex ||= o.isFullDuplex
+      continue
+    }
+
+    seen.set(key, {
+      key,
+      hostApi: o.hostApi,
+      interfaceName: o.interfaceName,
+      trust: o.trust,
+      duplex: o.isFullDuplex,
+      preference: o.preference,
+    })
+  }
+
+  return [...seen.values()].sort(
+    (a, b) => a.preference - b.preference || a.interfaceName.localeCompare(b.interfaceName),
+  )
+})
+
+/** Only this card's devices, so the two sides cannot be put on different hardware. */
+const cardInputs = computed(() =>
+  (inventory.value?.inputs ?? []).filter((o) => keyOf(o.hostApi, o.interfaceName) === form.cardKey),
+)
+const cardOutputs = computed(() =>
+  (inventory.value?.outputs ?? []).filter((o) => keyOf(o.hostApi, o.interfaceName) === form.cardKey),
+)
+
 const selectedInput = computed(() =>
-  inventory.value?.inputs.find((o) => keyOf(o.hostApi, o.name) === form.inputKey) ?? null,
+  cardInputs.value.find((o) => keyOf(o.hostApi, o.name) === form.inputKey) ?? null,
 )
 const selectedOutput = computed(() =>
-  inventory.value?.outputs.find((o) => keyOf(o.hostApi, o.name) === form.outputKey) ?? null,
+  cardOutputs.value.find((o) => keyOf(o.hostApi, o.name) === form.outputKey) ?? null,
+)
+
+// Choosing a card picks its only input and output for you, which on an ASIO card is the whole job:
+// there is one device and it carries both directions.
+watch(
+  () => form.cardKey,
+  () => {
+    if (!cardInputs.value.some((o) => keyOf(o.hostApi, o.name) === form.inputKey))
+      form.inputKey = cardInputs.value.length > 0 ? keyOf(cardInputs.value[0]!.hostApi, cardInputs.value[0]!.name) : ''
+
+    if (!cardOutputs.value.some((o) => keyOf(o.hostApi, o.name) === form.outputKey))
+      form.outputKey = cardOutputs.value.length > 0 ? keyOf(cardOutputs.value[0]!.hostApi, cardOutputs.value[0]!.name) : ''
+  },
 )
 
 /** Channel pairs the chosen device can actually offer, as offsets. */
@@ -126,7 +205,10 @@ watch(
     // The tone state comes from the server, not from what this tab last did: another tab, or this
     // one before a reload, may have left one playing.
     await Promise.all([load(true), loadDevices(), syncCalibrationState()])
+    stopLevels?.()
+    stopLevels = watchLevels()
     if (config.value) {
+      form.cardKey = cardKeyFor(config.value.inputHostApi, config.value.inputDeviceName)
       form.inputKey = keyOf(config.value.inputHostApi, config.value.inputDeviceName)
       form.outputKey = keyOf(config.value.outputHostApi, config.value.outputDeviceName)
       form.inputChannelOffset = config.value.inputChannelOffset
@@ -190,7 +272,7 @@ async function acceptOutput() {
 }
 
 async function acceptInput() {
-  if (inputStep.source === 'Loopback') await measureInputViaLoopback(inputStep.dbFs, inputStep.channel)
+  if (inputStep.source === 'Loopback') await measureInputViaLoopback(inputStep.dbFs)
   else await measureInput(inputStep.known, inputStep.unit, inputStep.channel)
 }
 
@@ -203,6 +285,8 @@ const canMeasureInput = computed(
 
 // The tone must never outlive the dialog: it is the generator, and the user has walked away.
 async function close() {
+  stopLevels?.()
+  stopLevels = null
   if (playingDbFs.value !== null) await stopTone()
   emit('close')
 }
@@ -237,19 +321,34 @@ function mv(value: number | null | undefined) {
           </button>
         </div>
 
+        <!-- The card first, the channels second. Picking the interface is what guarantees both
+             directions are one piece of hardware, and therefore one clock: two cards run on two,
+             and the drift between them is reported as DUT response rather than as a fault. -->
         <label class="flex items-center justify-between gap-3">
+          <span class="text-neutral-600 dark:text-neutral-300">Sound card</span>
+          <select
+            v-model="form.cardKey"
+            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          >
+            <option value="">—</option>
+            <option v-for="c in cards" :key="c.key" :value="c.key">
+              {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
+            </option>
+          </select>
+        </label>
+
+        <label v-if="cardInputs.length > 1" class="flex items-center justify-between gap-3">
           <span class="text-neutral-600 dark:text-neutral-300">Input</span>
           <select
             v-model="form.inputKey"
             class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           >
-            <option value="">—</option>
             <option
-              v-for="o in inventory?.inputs ?? []"
+              v-for="o in cardInputs"
               :key="keyOf(o.hostApi, o.name)"
               :value="keyOf(o.hostApi, o.name)"
             >
-              {{ o.hostApi }} — {{ o.name }}{{ o.isFullDuplex ? ' (full duplex)' : '' }}
+              {{ o.name }}
             </option>
           </select>
         </label>
@@ -264,19 +363,18 @@ function mv(value: number | null | undefined) {
           </select>
         </label>
 
-        <label class="flex items-center justify-between gap-3">
+        <label v-if="cardOutputs.length > 1" class="flex items-center justify-between gap-3">
           <span class="text-neutral-600 dark:text-neutral-300">Output</span>
           <select
             v-model="form.outputKey"
             class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           >
-            <option value="">—</option>
             <option
-              v-for="o in inventory?.outputs ?? []"
+              v-for="o in cardOutputs"
               :key="keyOf(o.hostApi, o.name)"
               :value="keyOf(o.hostApi, o.name)"
             >
-              {{ o.hostApi }} — {{ o.name }}{{ o.isFullDuplex ? ' (full duplex)' : '' }}
+              {{ o.name }}
             </option>
           </select>
         </label>
@@ -448,11 +546,13 @@ function mv(value: number | null | undefined) {
           v-else
           class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
         >
-          <strong>Patch the output channel straight back to the input channel</strong>, then measure.
-          Once the output is calibrated the app knows what it is playing in volts, so the cable is a
-          source of known voltage and no second generator is needed. Note the two figures are linked:
-          any error in the output calibration lands directly in this one, where a separate generator
-          would be independent of it.
+          <strong>Patch both outputs straight back to their own inputs</strong>, then measure.
+          Both channels are done in one press: the two figures are then measured under identical
+          conditions, and the difference between them — the reading that catches a wiring mistake —
+          is available immediately. Once the output is calibrated the app knows what it is playing in
+          volts, so the cables are a source of known voltage and no second generator is needed. Note
+          the figures are linked: any error in the output calibration lands directly in these, where
+          a separate generator would be independent of it.
         </p>
         <p
           v-if="inputStep.source === 'Loopback' && !outputCalibrated"
@@ -462,10 +562,8 @@ function mv(value: number | null | undefined) {
           and the result would look measured without being it.
         </p>
 
-        <label class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">
-            {{ inputStep.source === 'Loopback' ? 'Output/input pair' : 'Input channel' }}
-          </span>
+        <label v-if="inputStep.source === 'External'" class="flex items-center justify-between gap-3">
+          <span class="text-neutral-600 dark:text-neutral-300">Input channel</span>
           <select
             v-model="inputStep.channel"
             class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
@@ -522,6 +620,39 @@ function mv(value: number | null | undefined) {
           <span v-if="calibrationResult?.measuredDbFs != null" class="text-neutral-500">
             measured {{ calibrationResult.measuredDbFs.toFixed(2) }} dBFS
           </span>
+        </div>
+
+        <!-- What each input is hearing, live. The scale is −90…0 dBFS, which is the range a
+             calibration cares about: the clip point at the top, the card's noise floor off the
+             bottom. Red past −0.5 dBFS, because a reading taken at the clip point is not the
+             source's level and the step refuses it. -->
+        <div class="mt-2 flex flex-col gap-1">
+          <div v-for="side in (['Left', 'Right'] as const)" :key="side" class="flex items-center gap-2">
+            <span class="w-10 text-[11px] uppercase tracking-wide text-neutral-500">{{ side }}</span>
+            <div class="relative h-3 flex-1 overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+              <div
+                class="h-full transition-[width] duration-75"
+                :class="
+                  (side === 'Left' ? levels?.leftDbFs : levels?.rightDbFs) != null &&
+                  (side === 'Left' ? levels!.leftDbFs! : levels!.rightDbFs!) > -0.5
+                    ? 'bg-red-500'
+                    : 'bg-emerald-500'
+                "
+                :style="{
+                  width: `${barFraction(side === 'Left' ? levels?.leftDbFs : levels?.rightDbFs) * 100}%`,
+                }"
+              />
+            </div>
+            <span class="w-20 text-right font-mono text-[11px] text-neutral-600 dark:text-neutral-300">
+              {{ barLabel(side === 'Left' ? levels?.leftDbFs : levels?.rightDbFs) }}
+            </span>
+          </div>
+          <div class="flex justify-between pl-12 pr-20 text-[10px] text-neutral-400">
+            <span>−90</span><span>−60</span><span>−30</span><span>0 dBFS</span>
+          </div>
+          <p v-if="levels && !levels.acquiring" class="pl-12 text-[10px] text-neutral-400">
+            Idle — the bars move while a tone is playing or a measurement is running.
+          </p>
         </div>
 
         <table class="mt-1 w-full max-w-md text-left font-mono">

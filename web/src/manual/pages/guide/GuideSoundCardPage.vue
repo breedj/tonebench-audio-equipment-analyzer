@@ -31,9 +31,8 @@ const { showPage } = useManual()
 
     <h2>Step 1: choose the card</h2>
     <p>
-      Open the cogwheel. You will see a list of <strong>Input</strong> devices and a list of
-      <strong>Output</strong> devices. The same card usually appears several times, once per
-      "driver" — that is normal.
+      Open the cogwheel. The first dropdown is <strong>Sound card</strong>. The same card usually
+      appears in it several times, once per "driver" — that is normal.
     </p>
     <p class="manual-callout">
       <strong>Pick the ASIO entry if there is one.</strong> It is listed first, and it is the only
@@ -42,10 +41,16 @@ const { showPage } = useManual()
       usually means that driver is not installed.
     </p>
     <p>
-      Pick the same card for input and output. They have to be one physical device: if the app plays
-      through one card and records through another, the two run at very slightly different speeds and
-      the measurement slowly goes wrong — and it will not look wrong, it will look like a fault in
-      whatever you are testing. The app warns you if the two do not look like the same card.
+      Once you pick a card, everything else in the dialog belongs to that card, so the app plays and
+      records through one piece of hardware. That matters more than it sounds: if it played through
+      one card and recorded through another, the two would run at very slightly different speeds and
+      the measurement would slowly go wrong — and it would not look wrong, it would look like a fault
+      in whatever you are testing.
+    </p>
+    <p>
+      If the card has more than one pair of sockets you will see <strong>Input</strong> and
+      <strong>Output</strong> dropdowns too, to say which pair. A card with just one pair does not
+      show them, because there is nothing to choose.
     </p>
     <p>
       Then choose a <strong>Sample rate</strong>. Only rates your card can really do are offered.
@@ -86,32 +91,37 @@ const { showPage } = useManual()
     </p>
     <ol>
       <li>
-        Take a cable from the card's <strong>left output</strong> to its <strong>left
-        input</strong>. Nothing else in between.
+        Take <strong>two</strong> cables: left output to left input, right output to right input.
+        Nothing else in between. Both channels are done at once, so both need a cable.
       </li>
       <li>
         Set <strong>Known source</strong> to <strong>This card's output, through a patch
         cable</strong>.
       </li>
-      <li>Leave <strong>Input channel</strong> on <strong>Left</strong>, and <strong>Play at</strong> on <strong>−20 dB</strong>.</li>
-      <li>Press <strong>Estimate peak input mV</strong>. It plays, listens and saves, all at once.</li>
+      <li>Leave <strong>Play at</strong> on <strong>−20 dB</strong>.</li>
       <li>
-        Move the cable to the <strong>right</strong> output and the <strong>right</strong> input,
-        change <strong>Input channel</strong> to <strong>Right</strong>, and press it again.
+        Press <strong>Estimate peak input mV</strong>. It plays, listens to both channels and saves,
+        all at once.
       </li>
     </ol>
     <p>
-      The table fills in as you go. When both rows have numbers, the card is calibrated and the
-      orange <strong>Uncalibrated</strong> label at the bottom of the window disappears.
+      Both rows of the table fill in together, and the orange <strong>Uncalibrated</strong> label at
+      the bottom of the window disappears.
     </p>
     <p class="manual-callout">
-      If the two numbers are wildly different, something is wrong with the cable or you calibrated
-      the same channel twice. The app tells you when they differ by more than a few dB.
+      If the two numbers are wildly different, something is wrong with one of the cables — and the
+      app tells you when they differ by more than a few dB. If one channel reads as silence it says
+      which, which is usually a cable in the wrong socket.
+    </p>
+    <p>
+      The two bars just above the table show what each input is hearing while the tone plays. If one
+      of them stays flat on the bottom, that is the cable to check.
     </p>
     <p>
       If you happen to own a signal generator you can use that instead — set
       <strong>Known source</strong> to <strong>A generator of known voltage</strong>, feed it into
-      the input, and type in its voltage. It is slightly more trustworthy, because it does not depend
+      one input, say which with <strong>Input channel</strong>, type in its voltage, and then do the
+      other channel the same way. It is slightly more trustworthy, because it does not depend
       on step 2 being right.
     </p>
 

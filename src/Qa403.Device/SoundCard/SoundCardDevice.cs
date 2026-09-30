@@ -265,7 +265,10 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         IPortAudioStream stream = _portAudio.OpenStream(request, TransferFrames);
         var pumpFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _stimulusLatencyFrames = QueueFramesFor(config.SampleRateHz) + TransferFrames;
+        // What the stream actually holds, read from it rather than chosen: with one transfer of
+        // priming the committed audio is PortAudio's own output latency plus the transfer in hand.
+        _stimulusLatencyFrames =
+            (int)Math.Ceiling(stream.OutputLatencyS * config.SampleRateHz) + TransferFrames;
 
         // The loop runs on the dispatcher's own thread -- the apartment ASIO needs, and a dedicated
         // thread rather than the pool, which is what the DAC-gap rule asks for.
@@ -341,19 +344,45 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         {
             stream.Start();
 
-            // Prime the queue before the first read, so the DAC starts with the budget in hand
-            // rather than catching up to it.
-            for (int i = 0; i < QueueFramesFor(config.SampleRateHz) / frames; i++)
-            {
-                Synthesize(outBuffer, frames, waveform, frameIndex);
-                frameIndex += frames;
-                if (stream.Write(outBuffer, frames))
-                    Interlocked.Increment(ref _droppedRxChunks);
-            }
+            // Exactly one transfer of priming, so the DAC has something before the first read
+            // returns -- and no more than one.
+            //
+            // A duplex blocking stream has to be read and written in lockstep: both directions are
+            // serviced by one callback, so writing several transfers ahead without reading backs the
+            // input up until the callback stalls and the write times out. Measured on a MOTU M4 over
+            // ASIO, priming a 64 ms queue killed the stream about a second in with
+            // "Wait timed out" from Pa_WriteStream. The queue depth this device reports is
+            // PortAudio's own output latency instead -- what it actually holds, rather than what we
+            // would like it to.
+            Synthesize(outBuffer, frames, waveform, frameIndex);
+            frameIndex += frames;
+            stream.Write(outBuffer, frames);
+
+            int consecutiveTimeouts = 0;
 
             while (!_stopRequested && !ct.IsCancellationRequested)
             {
-                if (stream.Read(inBuffer, frames))
+                bool overflowed;
+                try
+                {
+                    overflowed = stream.Read(inBuffer, frames);
+                    consecutiveTimeouts = 0;
+                }
+                catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
+                {
+                    // The device is still there and the next transfer usually succeeds. Tearing the
+                    // session down over one would be worse than the hiccup -- the same judgement the
+                    // QA403's liveness ping makes about a timeout or a short read. Only a run of
+                    // them means the card has actually stopped.
+                    if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
+                        throw;
+
+                    Interlocked.Increment(ref _droppedRxChunks);
+                    discontinuity = true;
+                    continue;
+                }
+
+                if (overflowed)
                 {
                     // Samples the driver discarded before this transfer: a hole in the stream, not
                     // a skipped display frame. The next block must say so, or a record spanning the
@@ -383,7 +412,21 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
                 Synthesize(outBuffer, frames, waveform, frameIndex);
                 frameIndex += frames;
-                stream.Write(outBuffer, frames);
+
+                try
+                {
+                    stream.Write(outBuffer, frames);
+                }
+                catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
+                {
+                    // As above, and the more common of the two: the output side is the one that
+                    // backs up. The audio for this transfer is lost, which is a gap in the stimulus,
+                    // so the next block says the stream broke.
+                    if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
+                        throw;
+
+                    discontinuity = true;
+                }
             }
         }
         finally
@@ -444,6 +487,12 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     }
 
     private const int BlockChannelCapacity = 64;
+
+    /// <summary>
+    /// How many transfers in a row may time out before the card is treated as gone. One is a
+    /// hiccup; a run of them is a device that has stopped answering.
+    /// </summary>
+    private const int MaxConsecutiveTimeouts = 20;
 
     private void RequireChannels(SoundCardDeviceDescriptor input, SoundCardDeviceDescriptor output)
     {

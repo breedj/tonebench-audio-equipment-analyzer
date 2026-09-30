@@ -88,6 +88,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(Qa403.Device.SoundCard.SoundCardProbe))]
 [JsonSerializable(typeof(SoundCardCalibrationResult))]
 [JsonSerializable(typeof(Endpoints.SoundCardCalibrationState))]
+[JsonSerializable(typeof(Endpoints.SoundCardLevels))]
 [JsonSerializable(typeof(Endpoints.SoundCardToneRequest))]
 [JsonSerializable(typeof(Endpoints.SoundCardMeasurementRequest))]
 [JsonSerializable(typeof(Endpoints.SoundCardInputMeasurementRequest))]

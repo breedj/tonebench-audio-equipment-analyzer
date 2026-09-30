@@ -192,6 +192,11 @@ export type VoltageEntryUnitName = 'Rms' | 'Peak'
 export interface SoundCardOption {
   hostApi: string
   name: string
+  /**
+   * The physical interface this device belongs to. The picker offers a card first and its inputs
+   * and outputs second, which is what keeps both sides on one card and therefore on one clock.
+   */
+  interfaceName: string
   hostApiKind: string
   maxInputChannels: number
   maxOutputChannels: number
@@ -240,6 +245,14 @@ export interface SoundCardConfig {
   gainDisplayUnit: string
   /** Below this a sweep reports the card's own AC coupling as DUT response. */
   minStimulusFrequencyHz: number
+}
+
+export interface SoundCardLevels {
+  /** Peak on that input as dB below full scale, or null when nothing has been analysed. */
+  leftDbFs: number | null
+  rightDbFs: number | null
+  /** False when nothing is streaming, so the bars read as idle rather than as silence. */
+  acquiring: boolean
 }
 
 export interface SoundCardCalibrationState {
@@ -2538,12 +2551,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ value, unit, channel }),
     }),
-  /** The same step against the card's own output through a patch cable. Needs the output calibrated. */
-  measureSoundCardInputViaLoopback: (dbFs: number, channel: 'Left' | 'Right') =>
+  /**
+   * Both inputs at once, against the card's own output through patch cables. Needs the output
+   * calibrated, and a cable on each channel.
+   */
+  measureSoundCardInputViaLoopback: (dbFs: number) =>
     request<SoundCardCalibrationResult>('/soundcard/calibration/input/loopback', {
       method: 'POST',
-      body: JSON.stringify({ dbFs, channel }),
+      body: JSON.stringify({ dbFs }),
     }),
+  /** What the inputs are hearing right now, for the level bars. */
+  getSoundCardLevels: () => request<SoundCardLevels>('/soundcard/levels'),
   cancelSoundCardCalibration: () =>
     request<SoundCardCalibrationState>('/soundcard/calibration/cancel', { method: 'POST' }),
 

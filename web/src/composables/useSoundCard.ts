@@ -30,6 +30,7 @@ const levels = ref<SoundCardLevels | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
 let loadPromise: Promise<void> | null = null
+const controlPanelOpen = ref(false)
 
 /** Both steps done. Until then every ratio is still exact, but no level is a voltage. */
 const isCalibrated = computed(
@@ -249,7 +250,30 @@ export function useSoundCard() {
     }
   }
 
+  /**
+   * Raises the card's own driver panel and waits for it to be closed.
+   *
+   * <p>`controlPanelOpen` is separate from `busy` because this wait is unbounded — the panel stays
+   * up until the user dismisses it, which may be minutes — and a dialog that merely looked busy
+   * for minutes reads as a hang. The server refuses it while acquiring, and that refusal arrives
+   * as an ordinary error.</p>
+   */
+  async function showControlPanel(hostApi: string, deviceName: string) {
+    if (controlPanelOpen.value) return
+    controlPanelOpen.value = true
+    error.value = null
+    try {
+      await api.showSoundCardControlPanel(hostApi, deviceName)
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      controlPanelOpen.value = false
+    }
+  }
+
   return {
+    controlPanelOpen,
+    showControlPanel,
     levels,
     watchLevels,
     config,

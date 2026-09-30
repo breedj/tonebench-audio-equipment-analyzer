@@ -84,6 +84,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(CaptureDelayConfig))]
 [JsonSerializable(typeof(ExternalGainConfig))]
 [JsonSerializable(typeof(SoundCardConfig))]
+[JsonSerializable(typeof(AnalyzerKindConfig))]
 [JsonSerializable(typeof(Qa403.Device.SoundCard.SoundCardInventory))]
 [JsonSerializable(typeof(Qa403.Device.SoundCard.SoundCardProbe))]
 [JsonSerializable(typeof(SoundCardCalibrationResult))]
@@ -93,6 +94,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(Endpoints.SoundCardMeasurementRequest))]
 [JsonSerializable(typeof(Endpoints.SoundCardInputMeasurementRequest))]
 [JsonSerializable(typeof(Endpoints.SoundCardLoopbackRequest))]
+[JsonSerializable(typeof(Endpoints.SoundCardControlPanelRequest))]
 // The user weighting tables: the config document (a Qa403.Data record, registered by hand like the
 // others) and the endpoints' own DTOs.
 [JsonSerializable(typeof(UserWeightingTable))]

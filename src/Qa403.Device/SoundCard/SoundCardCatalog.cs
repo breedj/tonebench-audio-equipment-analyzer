@@ -1,4 +1,4 @@
-namespace Qa403.Device.SoundCard;
+﻿namespace Qa403.Device.SoundCard;
 
 /// <summary>One device as the picker offers it, with the judgements the app has about its host API.</summary>
 /// <param name="Trust">Whether a measurement through this host API can be believed — see <see cref="SoundCardHostApiTrust"/>.</param>
@@ -23,7 +23,15 @@ public sealed record SoundCardOption(
     int MaxOutputChannels,
     bool IsFullDuplex,
     string Trust,
-    int Preference);
+    int Preference,
+    /// <summary>
+    /// Whether this device's driver has a settings panel of its own that the app can raise. ASIO
+    /// only: buffer size, clock source and often the sample rate live there and PortAudio cannot
+    /// set any of them. The other host APIs have nothing equivalent — Windows' own sound control
+    /// panel configures the <i>mixer</i>, which exclusive mode bypasses, so offering it would point
+    /// at settings that do not apply.
+    /// </summary>
+    bool HasControlPanel);
 
 /// <summary>What the picker needs to draw itself.</summary>
 /// <param name="Available">
@@ -139,6 +147,27 @@ public static class SoundCardCatalog
     }
 
     /// <summary>
+    /// Raises an ASIO driver's own control panel for the named device and <b>blocks until the user
+    /// closes it</b>, because that is the only way the driver offers it.
+    ///
+    /// <para>Two consequences the caller has to respect. The wait happens on the one STA thread
+    /// every PortAudio call is made on — the thread a running stream's transfer loop also lives on
+    /// — so this must not be called while acquiring, or the panel would queue behind a loop that
+    /// never ends. And while it is open, every other sound-card call queues behind it.</para>
+    ///
+    /// <para>Returns false when that device has no panel, which is every host API but ASIO.</para>
+    /// </summary>
+    public static bool ShowControlPanel(string hostApi, string deviceName)
+    {
+        PortAudioNative pa = PortAudioNative.Shared;
+        SoundCardDeviceDescriptor device = new SoundCardEnumerator(pa).Find(hostApi, deviceName)
+            ?? throw new SoundCardNotFoundException(
+                $"'{deviceName}' ({hostApi}) is not there any more. Refresh the list and pick it again.");
+
+        return device.HostApiKind == SoundCardHostApiKind.Asio && pa.ShowControlPanel(device.Index);
+    }
+
+    /// <summary>
     /// The card a device belongs to: the interface buried in its name where there is one, and the
     /// device's own name where there is not — which is ASIO, whose device is the card, and WDM-KS,
     /// whose names name nothing.
@@ -158,5 +187,6 @@ public static class SoundCardCatalog
         MaxOutputChannels: d.MaxOutputChannels,
         IsFullDuplex: d.IsFullDuplex,
         Trust: SoundCardEnumerator.Trust(d.HostApiKind).ToString(),
-        Preference: SoundCardEnumerator.PreferenceOf(d.HostApiKind));
+        Preference: SoundCardEnumerator.PreferenceOf(d.HostApiKind),
+        HasControlPanel: d.HostApiKind == SoundCardHostApiKind.Asio);
 }

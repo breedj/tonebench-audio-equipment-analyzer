@@ -37,6 +37,8 @@ const {
   measureInputViaLoopback,
   levels,
   watchLevels,
+  controlPanelOpen,
+  showControlPanel,
 } = useSoundCard()
 
 /** ARTA's levels, and the server's. */
@@ -55,15 +57,24 @@ const form = reactive({
 const outputStep = reactive({ dbFs: -6, reading: 1000, unit: 'Rms' as VoltageEntryUnitName })
 const inputStep = reactive({
   /**
-   * Where the known voltage comes from. 'External' is ARTA's: a second signal generator. 'Loopback'
-   * uses the card's own output through a patch cable, which is only possible once the output has
-   * been calibrated — and is the easier of the two on a bench that has a cable.
+   * Where the known voltage comes from. 'External' is ARTA's: a second signal generator.
+   * 'Loopback' uses the card's own output through a patch cable, which is only possible once the
+   * output has been calibrated.
+   *
+   * <p>Loopback is the default because it is the one that needs nothing the bench does not already
+   * have — the cable is already there from step 1 — and because it does both channels in one
+   * press. The external route is the more trustworthy of the two (it does not inherit the output
+   * calibration's error) and stays one dropdown away.</p>
    */
-  source: 'External' as 'External' | 'Loopback',
+  source: 'Loopback' as 'External' | 'Loopback',
   known: 500,
   unit: 'Rms' as VoltageEntryUnitName,
   channel: 'Left' as 'Left' | 'Right',
-  dbFs: -20,
+
+  // The same level step 1 defaults to. -20 dB was chosen for headroom, but a card whose input is
+  // much less sensitive than its output then measures 20 dB down into its own noise; -6 dB is
+  // clear of that and still 6 dB off clipping, which the guard checks anyway.
+  dbFs: -6,
 })
 
 const saved = ref(false)
@@ -107,13 +118,17 @@ function splitKey(key: string) {
  * reported as a fault but as DUT response.
  */
 const cards = computed(() => {
-  const seen = new Map<string, { key: string; hostApi: string; interfaceName: string; trust: string; duplex: boolean; preference: number }>()
+  const seen = new Map<
+    string,
+    { key: string; hostApi: string; interfaceName: string; trust: string; duplex: boolean; preference: number; hasControlPanel: boolean }
+  >()
 
   for (const o of [...(inventory.value?.inputs ?? []), ...(inventory.value?.outputs ?? [])]) {
     const key = keyOf(o.hostApi, o.interfaceName)
     const existing = seen.get(key)
     if (existing) {
       existing.duplex ||= o.isFullDuplex
+      existing.hasControlPanel ||= o.hasControlPanel
       continue
     }
 
@@ -124,6 +139,7 @@ const cards = computed(() => {
       trust: o.trust,
       duplex: o.isFullDuplex,
       preference: o.preference,
+      hasControlPanel: o.hasControlPanel,
     })
   }
 
@@ -131,6 +147,8 @@ const cards = computed(() => {
     (a, b) => a.preference - b.preference || a.interfaceName.localeCompare(b.interfaceName),
   )
 })
+
+const selectedCard = computed(() => cards.value.find((c) => c.key === form.cardKey) ?? null)
 
 /** Only this card's devices, so the two sides cannot be put on different hardware. */
 const cardInputs = computed(() =>
@@ -226,6 +244,16 @@ watch(
   () => void reprobe(),
 )
 
+/**
+ * The panel belongs to the input device, which under ASIO is the card itself — there is one
+ * device and it carries both directions, which is the only case this button appears in.
+ */
+async function openControlPanel() {
+  const input = splitKey(form.inputKey)
+  if (!input.name) return
+  await showControlPanel(input.hostApi, input.name)
+}
+
 async function reprobe() {
   const draft = toConfig()
   if (!draft) {
@@ -319,18 +347,38 @@ function mv(value: number | null | undefined) {
         <!-- The card first, the channels second. Picking the interface is what guarantees both
              directions are one piece of hardware, and therefore one clock: two cards run on two,
              and the drift between them is reported as DUT response rather than as a fault. -->
-        <label class="flex items-center justify-between gap-3">
+<div class="flex items-center justify-between gap-3">
           <span class="text-neutral-600 dark:text-neutral-300">Sound card</span>
-          <select
-            v-model="form.cardKey"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          >
-            <option value="">—</option>
-            <option v-for="c in cards" :key="c.key" :value="c.key">
-              {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
-            </option>
-          </select>
-        </label>
+          <span class="flex w-96 items-center gap-2">
+            <select
+              v-model="form.cardKey"
+              class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            >
+              <option value="">—</option>
+              <option v-for="c in cards" :key="c.key" :value="c.key">
+                {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
+              </option>
+            </select>
+
+            <!-- Only ASIO has one. The other host APIs have nothing equivalent: Windows' own
+                 sound panel configures the mixer, which exclusive mode bypasses, so offering it
+                 would point at settings that do not apply to anything measured here. -->
+            <button
+              v-if="selectedCard?.hasControlPanel"
+              type="button"
+              :disabled="controlPanelOpen || busy"
+              :title="
+                controlPanelOpen
+                  ? 'The panel is open — close it to carry on here.'
+                  : 'Opens the driver settings: buffer size, clock source and often the sample rate, none of which this app can set.'
+              "
+              class="shrink-0 rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              @click="openControlPanel"
+            >
+              {{ controlPanelOpen ? 'Panel open…' : 'Control panel' }}
+            </button>
+          </span>
+        </div>
 
         <label v-if="cardInputs.length > 1" class="flex items-center justify-between gap-3">
           <span class="text-neutral-600 dark:text-neutral-300">Input</span>

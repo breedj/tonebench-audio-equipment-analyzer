@@ -143,6 +143,42 @@ const { showPage } = useManual()
       only place the app can show you what the driver claims.
     </p>
 
+    <h3>Control panel</h3>
+    <p>
+      Beside the card dropdown, for an <strong>ASIO</strong> card only, is a
+      <strong>Control panel</strong> button. It raises the driver's own settings — buffer size,
+      clock source and often the sample rate — none of which this app can set and some of which it
+      has to live with.
+    </p>
+    <p>
+      It is <strong>refused while a measurement is running</strong>, and that is not politeness:
+      the panel is a modal dialog owned by the driver, and it holds the one thread every audio call
+      here is made on, which is the thread the transfer loop runs on. Raising it mid-stream would
+      stop the transfers for as long as it stayed open.
+    </p>
+    <p class="manual-callout">
+      <strong>Not every ASIO driver has one.</strong> Measured on a MOTU M4 (2026-09-30): the call
+      returns success immediately and nothing appears, because that driver keeps its settings in a
+      separate application instead. There is no way to tell that apart from a panel that opened, so
+      a button that seems to do nothing means your driver is one of those — look for the
+      manufacturer's own control application.
+    </p>
+
+    <h3>Settle time</h3>
+    <p>
+      Converters take a moment to settle when a stream opens, and other analyzer software offers a
+      dedicated "AD/DA transient time" for it. There is no separate setting here because
+      <strong>Configuration ▸ Acquisition ▸ Capture delay</strong> already covers it, and covers
+      more: those frames are discarded when acquisition starts — which is also what a rate change
+      is, since it opens a new stream — <em>and</em> after every generator change, which no
+      dedicated startup setting reaches.
+    </p>
+    <p>
+      It <strong>defaults to 0</strong>, so on a sound card it is worth setting. 300 ms is what the
+      bench notes here use; it has to cover the DUT's own settling as well as the converters', and
+      on a valve amplifier the DUT is much the larger of the two.
+    </p>
+
     <h2 id="calibration">Calibrating the card</h2>
     <p>
       Calibration answers one question per side: <strong>how many volts is digital full scale
@@ -192,8 +228,10 @@ const { showPage } = useManual()
     <h3>Step 2 — Full scale input</h3>
     <p>
       There are two ways to give the inputs a known voltage, chosen with the
-      <strong>Known source</strong> dropdown. The patch cable does both channels in one press; a
-      separate generator does one channel at a time, since you have only one generator to connect.
+      <strong>Known source</strong> dropdown. The patch cable is the default and does both channels
+      in one press; a separate generator does one channel at a time, since you have only one
+      generator to connect, and is the more trustworthy of the two because it does not inherit
+      step 1's error.
     </p>
 
     <h4>With a patch cable (easiest)</h4>

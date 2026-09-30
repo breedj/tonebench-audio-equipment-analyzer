@@ -46,6 +46,39 @@ public static class ConfigEndpoints
 
     /// <summary>The stored external input gain, or the default -- the same contract as the capture delay.</summary>
     /// <summary>
+    /// Reads which analyzer was last selected, falling back to the QA403.
+    ///
+    /// <para>An unrecognised name falls back rather than failing: the document outlives the build
+    /// that wrote it, and a kind that has been renamed or removed must not stop the app starting.
+    /// </para>
+    /// </summary>
+    public static async Task<DeviceKind> ReadAnalyzerKindAsync(ConfigRepository repo, CancellationToken ct)
+    {
+        string? json = await repo.GetAsync(ConfigRepository.AnalyzerKindKey, ct);
+        if (string.IsNullOrWhiteSpace(json))
+            return DeviceKind.Hardware;
+
+        try
+        {
+            AnalyzerKindConfig? config = JsonSerializer.Deserialize(json, AppJsonContext.Default.AnalyzerKindConfig);
+            if (!Enum.TryParse(config?.Kind, ignoreCase: true, out DeviceKind kind) || !Enum.IsDefined(kind))
+                return DeviceKind.Hardware;
+
+            // The parsed value has to spell itself back, because Enum.TryParse also accepts a
+            // *number*: "1" parses happily as Simulated. Storing a name rather than a number is
+            // the whole point here, so a document holding a number is not a document this build
+            // wrote and its number means nothing -- exactly the reinterpretation being avoided.
+            return string.Equals(kind.ToString(), config!.Kind, StringComparison.OrdinalIgnoreCase)
+                ? kind
+                : DeviceKind.Hardware;
+        }
+        catch (JsonException)
+        {
+            return DeviceKind.Hardware;
+        }
+    }
+
+    /// <summary>
     /// Reads the sound-card document, falling back to the default on anything unreadable — the same
     /// rule every setting here follows, because a configuration that will not parse must not stop
     /// the app starting.

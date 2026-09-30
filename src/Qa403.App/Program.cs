@@ -100,9 +100,14 @@ try
     // can replace it at runtime — see POST /api/device/kind. Registering IAnalyzerDevice as a
     // singleton here would give the container a handle it cannot replace and must not dispose out
     // from under a swap.
+    //
+    // Which analyzer it starts on is the one remembered from last time (AnalyzerKindSetting,
+    // loaded from the configuration database below) unless --simulate says otherwise. Read here
+    // rather than at registration because this lambda runs lazily, after that load -- the same
+    // arrangement SoundCardSetting relies on, and the reason both loads sit in one block.
     builder.Services.AddSingleton(sp => new AnalyzerDeviceFactory(
         sp.GetRequiredService<ILoggerFactory>(),
-        simulate ? DeviceKind.Simulated : DeviceKind.Hardware,
+        simulate ? DeviceKind.Simulated : sp.GetRequiredService<AnalyzerKindSetting>().Kind,
         sp.GetRequiredService<SoundCardSetting>()));
 
     // WindowType/AveragingMode read back as "Hann"/"Linear" etc, matching what /spectrum-config
@@ -134,6 +139,7 @@ try
     builder.Services.AddSingleton<CaptureDelaySetting>();
     builder.Services.AddSingleton<ExternalGainSetting>();
     builder.Services.AddSingleton<SoundCardSetting>();
+    builder.Services.AddSingleton<AnalyzerKindSetting>();
     builder.Services.AddSingleton<SoundCardCalibrationRunner>();
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SoundCardCalibrationRunner>());
     builder.Services.AddSingleton<UserWeightingSetting>();
@@ -238,6 +244,12 @@ try
         // and because a card that has been calibrated must not come up claiming dBFS.
         app.Services.GetRequiredService<SoundCardSetting>().Config =
             await ConfigEndpoints.ReadSoundCardAsync(
+                scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
+
+        // Which analyzer to come up on. Must be read before anything resolves the session, since
+        // that is what builds the first device; --simulate overrides it at the registration above.
+        app.Services.GetRequiredService<AnalyzerKindSetting>().Kind =
+            await ConfigEndpoints.ReadAnalyzerKindAsync(
                 scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
 
         // The user weighting tables, for the same reason: the pipeline reads them on its worker

@@ -58,6 +58,12 @@ const { showPage } = useManual()
       screen itself, and 48 kHz is fine for almost everything.
     </p>
     <p>Press <strong>Use this card</strong>.</p>
+    <p class="manual-callout">
+      If a <strong>Control panel</strong> button appears beside the dropdown, that opens your
+      card's own driver settings — buffer size and the like. You do not need it to measure
+      anything; it is there for when the card needs setting up. Some drivers keep their settings in
+      a separate program instead, and then the button does nothing.
+    </p>
 
     <h2>Step 2: teach it what a volt is — the output</h2>
     <p>You need a multimeter that can measure AC volts. Almost any will do.</p>

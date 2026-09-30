@@ -206,6 +206,12 @@ export interface SoundCardOption {
   trust: string
   /** Sort key: the host APIs that reach the hardware first, the ones that resample last. */
   preference: number
+  /**
+   * Whether the driver has a settings panel of its own — ASIO only, where the buffer size, the
+   * clock source and often the sample rate live, none of which PortAudio can set. Windows' own
+   * sound panel is not an equivalent: it configures the mixer, which exclusive mode bypasses.
+   */
+  hasControlPanel: boolean
 }
 
 export interface SoundCardInventory {
@@ -2561,6 +2567,15 @@ export const api = {
     }),
   /** What the inputs are hearing right now, for the level bars. */
   getSoundCardLevels: () => request<SoundCardLevels>('/soundcard/levels'),
+  /**
+   * Raises the ASIO driver's own panel. **Does not resolve until the user closes it** — the panel
+   * is modal and PortAudio offers no other way to show it — so the caller shows that it is open.
+   */
+  showSoundCardControlPanel: (hostApi: string, deviceName: string) =>
+    request<void>('/soundcard/control-panel', {
+      method: 'POST',
+      body: JSON.stringify({ hostApi, deviceName }),
+    }),
   cancelSoundCardCalibration: () =>
     request<SoundCardCalibrationState>('/soundcard/calibration/cancel', { method: 'POST' }),
 

@@ -223,6 +223,20 @@ public sealed record ExternalGainConfig(double LeftDb = 0.0, double RightDb = 0.
 }
 
 /// <summary>
+/// Which analyzer the app came up on last, so it comes up on it again.
+/// </summary>
+/// <param name="Kind">
+/// The <c>DeviceKind</c> name — "Hardware", "Simulated" or "SoundCard". Stored as a string rather
+/// than the enum's number because the number is an implementation detail that a reordering would
+/// silently change the meaning of, and because an unrecognised name can then fall back rather than
+/// selecting whatever kind happens to sit at that index.
+/// </param>
+public sealed record AnalyzerKindConfig(string Kind = "Hardware")
+{
+    public static AnalyzerKindConfig Default { get; } = new();
+}
+
+/// <summary>
 /// Which sound card the analyzer is, how it is wired, and where its full scale sits in volts.
 ///
 /// <para><b>One document, not several.</b> A calibration only means anything against the device,
@@ -364,6 +378,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The sound-card analyzer's key. One document, see <see cref="SoundCardConfig"/>.</summary>
     public const string SoundCardKey = "soundcard.settings";
+
+    /// <summary>Which analyzer was last selected. One document, see <see cref="AnalyzerKindConfig"/>.</summary>
+    public const string AnalyzerKindKey = "device.analyzer";
 
     /// <summary>A user weighting table's key, one document per slot (1 or 2) — see <see cref="UserWeightingTable"/>.</summary>
     public static string UserWeightingKey(int slot)

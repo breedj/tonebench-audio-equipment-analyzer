@@ -8,6 +8,7 @@ import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
 import { useDiagnosticLogging } from '../composables/useDiagnosticLogging'
 import { useDevice } from '../composables/useDevice'
+import { commitNumber } from '../config/numberField'
 import { useExternalGain } from '../composables/useExternalGain'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
@@ -80,25 +81,56 @@ async function applyAutoRangeStepDownDelay() {
   deviceStatus.value = await api.setAutoRangeStepDownDelay(autoRangeStepDownDelayMs.value)
 }
 
+/**
+ * The three numeric settings are edited through their own draft strings, and that is not a style
+ * choice — it is the fix for a bug that made them look broken.
+ *
+ * <p>Bound as <c>:value="theStoredRef"</c>, a field is overwritten on <b>every re-render</b>, not
+ * merely when the stored value changes: Vue's prop patching carries an explicit
+ * <c>next !== prev || key === "value"</c>, so an unchanged <c>value</c> prop is still written back
+ * to the element. This dialog re-renders about once a second, because it reads the polled device
+ * status — so typing "-3" into External gain put it back to 0 before it could be committed, and
+ * emptying a field made a 0 appear under the cursor. Reported 2026-09-30.</p>
+ *
+ * <p>With <c>v-model</c> on a draft the element's value <i>is</i> the bound value, so the patch is
+ * a no-op and the text survives. The drafts are strings rather than numbers so a field can be
+ * genuinely empty while it is being retyped, which <c>v-model.number</c> cannot express.</p>
+ */
+const captureDelayDraft = ref('')
+const externalGainLeftDraft = ref('')
+const externalGainRightDraft = ref('')
+
+watch(captureDelayMs, (ms) => (captureDelayDraft.value = String(ms)), { immediate: true })
+watch(externalGainLeftDb, (db) => (externalGainLeftDraft.value = String(db)), { immediate: true })
+watch(externalGainRightDb, (db) => (externalGainRightDraft.value = String(db)), { immediate: true })
+
 // On change rather than on every keystroke: each write is a round trip that lands in the
 // configuration database, and a half-typed "3" applied to the next sweep point is not a setting.
-async function onCaptureDelayChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const ms = Number(input.value)
-  await setCaptureDelay(Number.isFinite(ms) && ms >= 0 ? Math.min(ms, 10000) : 0)
-  input.value = String(captureDelayMs.value)
+async function onCaptureDelayChange() {
+  await setCaptureDelay(commitNumber(captureDelayDraft.value, { min: 0, max: 10000, fallback: 0 }))
+
+  // Explicitly, not through the watcher: a draft that parsed back to the value already stored
+  // ("abc" over a 0) changes nothing for the watcher to react to, and the field would keep the
+  // text that was rejected.
+  captureDelayDraft.value = String(captureDelayMs.value)
 }
 
 // Same on-change discipline as the capture delay: each write lands in the configuration database
 // and a half-typed "-2" applied to every level on screen is not a setting either.
-async function onExternalGainChange(channel: 'left' | 'right', event: Event) {
-  const input = event.target as HTMLInputElement
-  const db = Number(input.value)
+async function onExternalGainChange(channel: 'left' | 'right') {
+  const bounds = { min: -60, max: 60, fallback: 0 }
+  const db = commitNumber(
+    channel === 'left' ? externalGainLeftDraft.value : externalGainRightDraft.value,
+    bounds,
+  )
+
   await setExternalGain({
     leftDb: channel === 'left' ? db : externalGainLeftDb.value,
     rightDb: channel === 'right' ? db : externalGainRightDb.value,
   })
-  input.value = String(channel === 'left' ? externalGainLeftDb.value : externalGainRightDb.value)
+
+  externalGainLeftDraft.value = String(externalGainLeftDb.value)
+  externalGainRightDraft.value = String(externalGainRightDb.value)
 }
 
 // The dropdown's rows carry a live example of "now" in each format, taken once per open: the
@@ -302,7 +334,7 @@ async function clearStoredCalibration() {
               min="0"
               max="10000"
               step="10"
-              :value="captureDelayMs"
+              v-model="captureDelayDraft"
               @change="onCaptureDelayChange"
               class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
@@ -321,8 +353,8 @@ async function clearStoredCalibration() {
                   min="-60"
                   max="60"
                   step="1"
-                  :value="externalGainLeftDb"
-                  @change="onExternalGainChange('left', $event)"
+                  v-model="externalGainLeftDraft"
+                  @change="onExternalGainChange('left')"
                   class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
                 />
               </label>
@@ -333,8 +365,8 @@ async function clearStoredCalibration() {
                   min="-60"
                   max="60"
                   step="1"
-                  :value="externalGainRightDb"
-                  @change="onExternalGainChange('right', $event)"
+                  v-model="externalGainRightDraft"
+                  @change="onExternalGainChange('right')"
                   class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
                 />
               </label>

@@ -1,4 +1,7 @@
-﻿using Qa403.App.Services;
+﻿using System.Text.Json;
+using Qa403.App.Json;
+using Qa403.App.Services;
+using Qa403.Data;
 using Qa403.Device;
 using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
@@ -141,7 +144,8 @@ public static class DeviceEndpoints
         // rather than part of /connect: connect retries whatever is already selected, while this
         // tears one analyzer down and stands another up in its place.
         group.MapPost("/kind", async (
-            DeviceKindRequest request, DeviceSessionService session, CancellationToken ct) =>
+            DeviceKindRequest request, DeviceSessionService session, AnalyzerKindSetting selected,
+            ConfigRepository config, CancellationToken ct) =>
         {
             if (!EnumParsing.TryParse(request.Kind, DeviceKind.Hardware, out DeviceKind kind, out var error))
                 return Results.BadRequest(error);
@@ -149,13 +153,32 @@ public static class DeviceEndpoints
             try
             {
                 await session.SwitchDeviceAsync(kind, ct);
-                return Results.Ok(session.GetStatus());
             }
             catch (InvalidOperationException ex)
             {
                 // A measurement is running, or the session is pinned — both states the UI can reach.
                 return Results.Conflict(ex.Message);
             }
+
+            // Remembered for the next run, and only after the switch has actually succeeded: a
+            // kind that was refused is not the one the user ended up on, and storing it would put
+            // the app on an analyzer nobody chose. The write is not allowed to fail the request —
+            // the switch has already happened, and a configuration database that cannot be written
+            // is a separate problem the status bar already reports.
+            selected.Kind = kind;
+            try
+            {
+                await config.SetAsync(
+                    ConfigRepository.AnalyzerKindKey,
+                    JsonSerializer.Serialize(new AnalyzerKindConfig(kind.ToString()), AppJsonContext.Default.AnalyzerKindConfig),
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogWarning(ex, "Could not remember the selected analyzer.");
+            }
+
+            return Results.Ok(session.GetStatus());
         });
 
         // Simulator-only: shapes the synthesized input signal, which real hardware cannot do.

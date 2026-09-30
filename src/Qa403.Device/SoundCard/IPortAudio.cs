@@ -1,4 +1,4 @@
-namespace Qa403.Device.SoundCard;
+﻿namespace Qa403.Device.SoundCard;
 
 /// <summary>
 /// One of PortAudio's host APIs — ASIO, WASAPI, WDM-KS, DirectSound, MME on Windows; ALSA, JACK,
@@ -100,6 +100,16 @@ internal interface IPortAudio : IDisposable
 
     /// <summary>Opens a duplex stream in PortAudio's blocking read/write mode.</summary>
     IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer);
+
+    /// <summary>
+    /// Shows an ASIO driver's own control panel and <b>blocks until the user closes it</b> — it is
+    /// a modal dialog owned by the driver, and PortAudio offers no way to show it otherwise.
+    ///
+    /// <para>The block is on the STA dispatcher thread, which is also where a running stream's
+    /// transfer loop lives, so the caller must refuse while acquiring. Returns false, rather than
+    /// throwing, for a device whose host API has no such panel.</para>
+    /// </summary>
+    bool ShowControlPanel(int deviceIndex);
 }
 
 /// <summary>An open duplex stream. Read before write each iteration — the documented way not to deadlock one.</summary>

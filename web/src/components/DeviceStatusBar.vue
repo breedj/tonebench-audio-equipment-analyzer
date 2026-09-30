@@ -3,10 +3,12 @@ import { computed } from 'vue'
 import type { DeviceKindName, DeviceRanges, DeviceStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
 import { fromDisplay, toDisplay, type GainUnit } from '../soundcard/gainUnits'
 
+// Real instruments first, the synthetic one last: the two entries above it are things on the
+// bench, and the simulator is the odd one out rather than the middle of a scale.
 const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
   { value: 'Hardware', label: 'QA403' },
-  { value: 'Simulated', label: 'Simulator' },
   { value: 'SoundCard', label: 'Sound card' },
+  { value: 'Simulated', label: 'Simulator' },
 ]
 
 type DutGroup =

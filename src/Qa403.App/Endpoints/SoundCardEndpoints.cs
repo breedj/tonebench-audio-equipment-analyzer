@@ -1,4 +1,4 @@
-using Qa403.App.Services;
+﻿using Qa403.App.Services;
 using Qa403.App.Streaming;
 using Qa403.Device.SoundCard;
 
@@ -34,6 +34,36 @@ public static class SoundCardEndpoints
             Results.Ok(SoundCardCatalog.Probe(
                 inputHostApi, inputDevice, inputChannelOffset ?? 0,
                 outputHostApi, outputDevice, outputChannelOffset ?? 0)));
+
+        // The driver's own settings panel. A POST although it reads nothing, because it is an
+        // action with a side effect on the machine, and it does not return until the user closes
+        // the panel -- there is no non-blocking way to raise it.
+        //
+        // Refused while acquiring, and that is not politeness: the panel blocks the one STA thread
+        // PortAudio is driven from, which is the thread a running stream's transfer loop lives on.
+        // Raising it mid-stream would stop the transfers for as long as the dialog stayed up.
+        group.MapPost("/control-panel", (
+            SoundCardControlPanelRequest request, DeviceSessionService session,
+            IEnumerable<IMeasurementRun> runs) =>
+        {
+            if (session.Acquiring || MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict("Stop the measurement first — the card's control panel holds the audio thread while it is open.");
+
+            try
+            {
+                return SoundCardCatalog.ShowControlPanel(request.HostApi, request.DeviceName)
+                    ? Results.Ok()
+                    : Results.Conflict("That card has no control panel of its own. Only an ASIO driver provides one.");
+            }
+            catch (SoundCardNotFoundException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+            catch (PortAudioException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
 
         // What the inputs are hearing right now, for the dialog's level bars. A small poll rather
         // than a socket: it is only read while that dialog is open, and the levels it wants are the
@@ -179,6 +209,10 @@ public sealed record SoundCardInputMeasurementRequest(double Value, string Unit,
 
 /// <param name="DbFs">How far below full scale to play. Both channels are driven and both inputs measured.</param>
 public sealed record SoundCardLoopbackRequest(double DbFs);
+
+/// <param name="HostApi">The host API the device was listed under — an ASIO device's panel is the only kind there is.</param>
+/// <param name="DeviceName">The device's name, as the listing gives it. Resolved afresh, because PortAudio's indices move.</param>
+public sealed record SoundCardControlPanelRequest(string HostApi, string DeviceName);
 
 /// <param name="Acquiring">False when nothing is streaming, so the bars read as idle rather than as silence.</param>
 public sealed record SoundCardLevels(double? LeftDbFs, double? RightDbFs, bool Acquiring);

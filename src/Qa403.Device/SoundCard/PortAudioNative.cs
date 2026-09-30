@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Qa403.Device.SoundCard;
 
@@ -17,7 +17,6 @@ public sealed class PortAudioException(string message, int errorCode) : Exceptio
 internal sealed class PortAudioNative : IPortAudio
 {
     private readonly StaDispatcher _dispatcher = new("PortAudio");
-    private bool _initialised;
     private SoundCardHostApi[] _hostApis = [];
     private SoundCardDeviceDescriptor[] _devices = [];
 
@@ -113,6 +112,28 @@ internal sealed class PortAudioNative : IPortAudio
         return _dispatcher.Invoke<IPortAudioStream>(() => OpenStreamCore(request, framesPerBuffer));
     }
 
+    public bool ShowControlPanel(int deviceIndex)
+    {
+        // On the dispatcher, like everything else: the panel is a COM dialog belonging to the
+        // driver, and it has to be raised from the apartment the driver was initialised in.
+        return _dispatcher.Invoke(() =>
+        {
+            int error = PortAudioInterop.PaAsio_ShowControlPanel(deviceIndex, IntPtr.Zero);
+            if (error == PaError.NoError)
+                return true;
+
+            // No panel here, which is not a fault: the button is offered only for ASIO, so
+            // reaching this means the device list moved underneath the dialog. Both codes are
+            // checked because they mean the same thing from two different places -- the device
+            // belongs to another host API, or this build has no ASIO at all.
+            if (error is PaError.InvalidDevice or PaError.HostApiNotFound)
+                return false;
+
+            throw new PortAudioException(
+                $"The card's control panel could not be opened: {PortAudioInterop.ErrorText(error)}", error);
+        });
+    }
+
     private IPortAudioStream OpenStreamCore(SoundCardStreamRequest request, int framesPerBuffer)
     {
         var input = BuildParameters(request, output: false, out IntPtr inputExtra);
@@ -156,7 +177,6 @@ internal sealed class PortAudioNative : IPortAudio
         if (error != PaError.NoError)
             throw new PortAudioException($"PortAudio could not start: {PortAudioInterop.ErrorText(error)}", error);
 
-        _initialised = true;
         VersionText = PortAudioInterop.ReadUtf8(PortAudioInterop.Pa_GetVersionText());
     }
 

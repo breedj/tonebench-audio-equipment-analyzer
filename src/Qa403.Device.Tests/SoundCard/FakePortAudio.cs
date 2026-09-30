@@ -1,4 +1,4 @@
-using Qa403.Device.SoundCard;
+﻿using Qa403.Device.SoundCard;
 
 namespace Qa403.Device.Tests.SoundCard;
 
@@ -26,6 +26,20 @@ internal sealed class FakePortAudio : IPortAudio
     public Func<SoundCardStreamRequest, bool> FormatSupported { get; set; } = _ => true;
 
     public void Refresh() => RefreshCount++;
+
+    /// <summary>Devices whose driver this fake claims has a control panel. Empty by default: most host APIs have none.</summary>
+    public HashSet<int> DevicesWithAControlPanel { get; } = [];
+
+    public int ControlPanelsShown { get; private set; }
+
+    public bool ShowControlPanel(int deviceIndex)
+    {
+        if (!DevicesWithAControlPanel.Contains(deviceIndex))
+            return false;
+
+        ControlPanelsShown++;
+        return true;
+    }
 
     public bool IsFormatSupported(SoundCardStreamRequest request) => FormatSupported(request);
 

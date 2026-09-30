@@ -1,5 +1,4 @@
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Qa403.Device.SoundCard;
 
@@ -23,8 +22,17 @@ internal static class PortAudioInterop
     /// </summary>
     private const string Library = "portaudio";
 
-    [ModuleInitializer]
-    internal static void Register() =>
+    /// <summary>
+    /// Registers the resolver below before the first <c>DllImport</c> in this class can run.
+    ///
+    /// <para>A <b>static constructor</b> rather than a <c>[ModuleInitializer]</c>: the attribute is
+    /// meant for application code and an analyzer says so (CA2255), and it is more than is needed.
+    /// Every import is a static method <i>of this type</i>, and an explicit static constructor
+    /// makes the type not <c>beforefieldinit</c> — so the CLR guarantees this has run before the
+    /// first of them is invoked, which is exactly the ordering the resolver requires. It also stops
+    /// the registration happening for any assembly load that never touches a sound card.</para>
+    /// </summary>
+    static PortAudioInterop() =>
         NativeLibrary.SetDllImportResolver(typeof(PortAudioInterop).Assembly, Resolve);
 
     private static IntPtr Resolve(string name, System.Reflection.Assembly assembly, DllImportSearchPath? path)
@@ -154,6 +162,24 @@ internal static class PortAudioInterop
         IntPtr streamCallback,
         IntPtr userData);
 
+    /// <summary>
+    /// Opens the ASIO driver's own control panel — where the buffer size, the clock source and
+    /// often the sample rate live, none of which PortAudio can set.
+    ///
+    /// <para>ASIO only; there is no equivalent for the other host APIs. Called for a device that
+    /// is not an ASIO device it returns <c>paInvalidDevice</c> — or <c>paHostApiNotFound</c> if the
+    /// library was built without ASIO — rather than doing something surprising.</para>
+    ///
+    /// <para><c>systemSpecific</c> is the owner window on Windows. <see cref="IntPtr.Zero"/> is
+    /// passed: this process has no window — the UI is a browser — so there is nothing to own it
+    /// with, and the driver puts up a top-level dialog instead. <b>That dialog is modal and runs
+    /// its own message loop on the calling thread</b>, which is why the caller refuses while a
+    /// stream is running: the calling thread is the STA dispatcher, and the transfer loop lives
+    /// on it.</para>
+    /// </summary>
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int PaAsio_ShowControlPanel(int device, IntPtr systemSpecific);
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Pa_StartStream(IntPtr stream);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Pa_StopStream(IntPtr stream);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Pa_AbortStream(IntPtr stream);
@@ -217,6 +243,16 @@ internal static class PaError
 
     internal const int InputOverflowed = -9981;
     internal const int OutputUnderflowed = -9980;
+
+    /// <summary>
+    /// The two ways <c>PaAsio_ShowControlPanel</c> says "there is no ASIO panel here": the device
+    /// belongs to another host API, or ASIO is not in this build of the library at all. Derived
+    /// from <c>PaErrorCode</c>'s ordering (contiguous from -10000), like the codes above, and
+    /// confirmed against the vendored DLL — both mean "no panel", neither means a fault.
+    /// </summary>
+    internal const int InvalidDevice = -9996;
+
+    internal const int HostApiNotFound = -9979;
 }
 
 /// <summary>

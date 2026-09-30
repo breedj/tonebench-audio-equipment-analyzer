@@ -251,8 +251,8 @@ public sealed class SoundCardCalibrationRunner(
 
             await session.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), ct);
 
-            double leftDbFs = await ReadPeakDbFsAsync(StreamChannel.Left, ct);
-            double rightDbFs = await ReadPeakDbFsAsync(StreamChannel.Right, ct);
+            double leftDbFs = await ReadPeakDbFsAsync(StreamChannel.Left, LoopbackAdvice, ct);
+            double rightDbFs = await ReadPeakDbFsAsync(StreamChannel.Right, LoopbackAdvice, ct);
             await SilenceAsync(ct);
 
             RequireUsableLevel(leftDbFs, StreamChannel.Left);
@@ -341,7 +341,7 @@ public sealed class SoundCardCalibrationRunner(
 
             await session.ConfigureGeneratorAsync(off, ct);
 
-            double measuredDbFs = await ReadPeakDbFsAsync(channel, ct);
+            double measuredDbFs = await ReadPeakDbFsAsync(channel, ExternalSourceAdvice, ct);
 
             if (measuredDbFs > ClippingGuardDb)
             {
@@ -481,7 +481,19 @@ public sealed class SoundCardCalibrationRunner(
         return fraction > 0.0 ? 20.0 * Math.Log10(fraction) : double.NegativeInfinity;
     }
 
-    private async Task<double> ReadPeakDbFsAsync(StreamChannel channel, CancellationToken ct)
+    /// <summary>
+    /// What to tell the user when a step hears nothing at all. The two routes fail for different
+    /// physical reasons and the message is the only place that can say which, so each passes its
+    /// own — the generic "check it is connected and streaming" named the analyzer, which is the one
+    /// thing that is almost never the problem here: this runner started the stream itself.
+    /// </summary>
+    private const string ExternalSourceAdvice =
+        "Nothing is arriving on the {0} input. This step measures the voltage your generator is producing, so it needs that generator connected to the {0} input and switched on — check the cable and the level, then try again.";
+
+    private const string LoopbackAdvice =
+        "Nothing is arriving on the {0} input. Both inputs are measured together, so both need a patch cable from their own output — check the cable on the {0} channel, then try again.";
+
+    private async Task<double> ReadPeakDbFsAsync(StreamChannel channel, string advice, CancellationToken ct)
     {
         double best = double.NegativeInfinity;
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
@@ -502,7 +514,7 @@ public sealed class SoundCardCalibrationRunner(
         }
 
         if (double.IsNegativeInfinity(best))
-            throw new InvalidOperationException("The analyzer produced no reading to calibrate against — check it is connected and streaming.");
+            throw new InvalidOperationException(string.Format(advice, channel.ToString().ToLowerInvariant()));
 
         return best;
     }

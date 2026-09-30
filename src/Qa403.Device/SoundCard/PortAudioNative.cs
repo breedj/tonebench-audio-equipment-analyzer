@@ -9,22 +9,61 @@ public sealed class PortAudioException(string message, int errorCode) : Exceptio
 }
 
 /// <summary>
-/// <see cref="IPortAudio"/> over the real library. Owns the one process-wide
-/// <c>Pa_Initialize</c>/<c>Pa_Terminate</c> pair.
+/// <see cref="IPortAudio"/> over the real library. Owns the one <c>Pa_Initialize</c>/
+/// <c>Pa_Terminate</c> pair, and - the part that is not optional - makes every native call on a
+/// single STA thread. See <see cref="StaDispatcher"/> for what happens without one: no ASIO
+/// devices at all, and an access violation on the second initialise.
 /// </summary>
 internal sealed class PortAudioNative : IPortAudio
 {
-    private readonly Lock _gate = new();
+    private readonly StaDispatcher _dispatcher = new("PortAudio");
     private bool _initialised;
-    private bool _disposed;
     private SoundCardHostApi[] _hostApis = [];
     private SoundCardDeviceDescriptor[] _devices = [];
 
-    public PortAudioNative()
+    private static readonly Lock SharedGate = new();
+    private static PortAudioNative? _shared;
+
+    /// <summary>
+    /// The one instance for the process, created on first use and never torn down.
+    ///
+    /// <para><b>PortAudio is initialised exactly once here, deliberately.</b> Measured 2026-09-30
+    /// with ASIO compiled in: a <c>Pa_Terminate</c> followed by another <c>Pa_Initialize</c> faults
+    /// with an access violation that takes the whole process down, on a fresh STA thread as much as
+    /// on the original one. Real ASIO hosts initialise once for the same reason, and the app has no
+    /// need to do otherwise: <c>DeviceSessionService</c> builds and disposes a device on every
+    /// analyzer switch, and without this a QA403 to sound card and back would be a crash.</para>
+    /// </summary>
+    public static PortAudioNative Shared
     {
-        Initialise();
-        ReadTopology();
+        get
+        {
+            lock (SharedGate)
+            {
+                return _shared ??= new PortAudioNative();
+            }
+        }
     }
+
+    private PortAudioNative()
+    {
+        try
+        {
+            _dispatcher.Invoke(() =>
+            {
+                Initialise();
+                ReadTopology();
+            });
+        }
+        catch
+        {
+            _dispatcher.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>The thread every native call runs on, so a stream can run its loop there too.</summary>
+    internal StaDispatcher Dispatcher => _dispatcher;
 
     public string VersionText { get; private set; } = string.Empty;
 
@@ -37,22 +76,22 @@ internal sealed class PortAudioNative : IPortAudio
     /// invisible until the library is torn down and brought back up. That is what the dialog's
     /// Refresh does.
     /// </summary>
-    public void Refresh()
+    /// <summary>
+    /// Re-reads the device table. <b>It cannot pick up a card plugged in since start-up</b>:
+    /// PortAudio caches the list at <c>Pa_Initialize</c>, and the only way to rebuild it -
+    /// terminate and initialise again - crashes the process once ASIO is compiled in (see
+    /// <see cref="Shared"/>). WASAPI offers its own rescan and that is used where it exists; for
+    /// ASIO the app has to be restarted, which is what every other ASIO host asks for too.
+    /// </summary>
+    public void Refresh() => _dispatcher.Invoke(() =>
     {
-        lock (_gate)
-        {
-            if (_initialised)
-            {
-                PortAudioInterop.Pa_Terminate();
-                _initialised = false;
-            }
+        if (PortAudioInterop.Pa_HostApiTypeIdToHostApiIndex(PaHostApiTypeId.Wasapi) >= 0)
+            PortAudioInterop.PaWasapi_UpdateDeviceList();
 
-            Initialise();
-            ReadTopology();
-        }
-    }
+        ReadTopology();
+    });
 
-    public bool IsFormatSupported(SoundCardStreamRequest request)
+    public bool IsFormatSupported(SoundCardStreamRequest request) => _dispatcher.Invoke(() =>
     {
         var input = BuildParameters(request, output: false, out IntPtr inputExtra);
         var outputParams = BuildParameters(request, output: true, out IntPtr outputExtra);
@@ -66,12 +105,16 @@ internal sealed class PortAudioNative : IPortAudio
             Free(inputExtra);
             Free(outputExtra);
         }
-    }
+    });
 
     public IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(framesPerBuffer);
+        return _dispatcher.Invoke<IPortAudioStream>(() => OpenStreamCore(request, framesPerBuffer));
+    }
 
+    private IPortAudioStream OpenStreamCore(SoundCardStreamRequest request, int framesPerBuffer)
+    {
         var input = BuildParameters(request, output: false, out IntPtr inputExtra);
         var outputParams = BuildParameters(request, output: true, out IntPtr outputExtra);
 
@@ -94,23 +137,17 @@ internal sealed class PortAudioNative : IPortAudio
                 error);
         }
 
-        return new NativeStream(handle, inputExtra, outputExtra);
+        return new NativeStream(handle, inputExtra, outputExtra, _dispatcher);
     }
 
+    /// <summary>
+    /// Deliberately does nothing. The library is initialised once per process and never terminated
+    /// (see <see cref="Shared"/>), so there is nothing here to release - an open stream is closed by
+    /// its own Dispose. This exists only to satisfy <see cref="IPortAudio"/>, whose fake
+    /// implementation in the tests does have state to drop.
+    /// </summary>
     public void Dispose()
     {
-        lock (_gate)
-        {
-            if (_disposed)
-                return;
-
-            _disposed = true;
-            if (_initialised)
-            {
-                PortAudioInterop.Pa_Terminate();
-                _initialised = false;
-            }
-        }
     }
 
     private void Initialise()
@@ -226,7 +263,13 @@ internal sealed class PortAudioNative : IPortAudio
             Marshal.FreeHGlobal(p);
     }
 
-    private sealed class NativeStream(IntPtr handle, IntPtr inputExtra, IntPtr outputExtra) : IPortAudioStream
+    /// <summary>
+    /// Every call here runs on the dispatcher thread. Read and Write are the hot path and are
+    /// expected to be called from a loop that is already running there, where
+    /// <see cref="StaDispatcher.Invoke{T}"/> is a direct call and costs nothing.
+    /// </summary>
+    private sealed class NativeStream(IntPtr handle, IntPtr inputExtra, IntPtr outputExtra, StaDispatcher dispatcher)
+        : IPortAudioStream
     {
         private IntPtr _handle = handle;
         private bool _started;
@@ -237,13 +280,13 @@ internal sealed class PortAudioNative : IPortAudio
 
         public double SampleRateHz { get; private set; } = ReadInfo(handle).SampleRate;
 
-        public void Start()
+        public void Start() => dispatcher.Invoke(() =>
         {
             Check(PortAudioInterop.Pa_StartStream(_handle), "start");
             _started = true;
-        }
+        });
 
-        public void Stop()
+        public void Stop() => dispatcher.Invoke(() =>
         {
             if (!_started)
                 return;
@@ -256,9 +299,9 @@ internal sealed class PortAudioNative : IPortAudio
             // stream left open is what a user reads as "it needs a power cycle".
             if (PortAudioInterop.Pa_StopStream(_handle) != PaError.NoError)
                 PortAudioInterop.Pa_AbortStream(_handle);
-        }
+        });
 
-        public bool Read(float[] buffer, int frames)
+        public bool Read(float[] buffer, int frames) => dispatcher.Invoke(() =>
         {
             int error = PortAudioInterop.Pa_ReadStream(_handle, buffer, new CULong((nuint)frames));
             if (error == PaError.InputOverflowed)
@@ -266,9 +309,9 @@ internal sealed class PortAudioNative : IPortAudio
 
             Check(error, "read from");
             return false;
-        }
+        });
 
-        public bool Write(float[] buffer, int frames)
+        public bool Write(float[] buffer, int frames) => dispatcher.Invoke(() =>
         {
             int error = PortAudioInterop.Pa_WriteStream(_handle, buffer, new CULong((nuint)frames));
             if (error == PaError.OutputUnderflowed)
@@ -276,9 +319,9 @@ internal sealed class PortAudioNative : IPortAudio
 
             Check(error, "write to");
             return false;
-        }
+        });
 
-        public void Dispose()
+        public void Dispose() => dispatcher.Invoke(() =>
         {
             if (_handle == IntPtr.Zero)
                 return;
@@ -288,7 +331,7 @@ internal sealed class PortAudioNative : IPortAudio
             _handle = IntPtr.Zero;
             Free(inputExtra);
             Free(outputExtra);
-        }
+        });
 
         private static PortAudioInterop.PaStreamInfo ReadInfo(IntPtr handle)
         {

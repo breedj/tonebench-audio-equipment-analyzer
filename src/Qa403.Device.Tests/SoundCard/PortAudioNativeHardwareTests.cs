@@ -13,6 +13,11 @@ namespace Qa403.Device.Tests.SoundCard;
 /// and <c>PaStreamFlags</c> are C <c>unsigned long</c>, which is four bytes on Windows and eight on
 /// Linux (so <c>CULong</c>, not <c>uint</c>), and <c>PaWasapiStreamInfo</c> has to be exactly the
 /// 72 bytes PortAudio checks.</para>
+///
+/// <para>Every test here takes <see cref="PortAudioNative.Shared"/> rather than building its own.
+/// That is not tidiness: with ASIO compiled in, a second <c>Pa_Initialize</c> after a
+/// <c>Pa_Terminate</c> faults with an access violation and takes the test host with it, so a
+/// per-test instance turns the whole class into one aborted run.</para>
 /// </summary>
 [Trait("Category", "Hardware")]
 public class PortAudioNativeHardwareTests(ITestOutputHelper output)
@@ -20,7 +25,7 @@ public class PortAudioNativeHardwareTests(ITestOutputHelper output)
     [Fact]
     public void Initialise_LoadsTheVendoredLibrary_AndReportsItsVersion()
     {
-        using var pa = new PortAudioNative();
+        var pa = PortAudioNative.Shared;
 
         output.WriteLine(pa.VersionText);
         Assert.StartsWith("PortAudio", pa.VersionText, StringComparison.OrdinalIgnoreCase);
@@ -29,7 +34,7 @@ public class PortAudioNativeHardwareTests(ITestOutputHelper output)
     [Fact]
     public void Enumerate_FindsHostApisAndDevices()
     {
-        using var pa = new PortAudioNative();
+        var pa = PortAudioNative.Shared;
 
         Assert.NotEmpty(pa.HostApis);
         Assert.NotEmpty(pa.Devices);
@@ -49,7 +54,7 @@ public class PortAudioNativeHardwareTests(ITestOutputHelper output)
     [Fact]
     public void OnThisMachine_BothDirectionsExist_EvenIfNoSingleDeviceCarriesBoth()
     {
-        using var pa = new PortAudioNative();
+        var pa = PortAudioNative.Shared;
         var enumerator = new SoundCardEnumerator(pa);
 
         var duplex = pa.Devices.Where(d => d.IsFullDuplex).ToArray();
@@ -69,7 +74,7 @@ public class PortAudioNativeHardwareTests(ITestOutputHelper output)
     [Fact]
     public void UnderWasapi_ExclusiveModeReachesRatesSharedModeRefuses()
     {
-        using var pa = new PortAudioNative();
+        var pa = PortAudioNative.Shared;
         var enumerator = new SoundCardEnumerator(pa);
 
         var inputDevice = pa.Devices.FirstOrDefault(d => d.HostApiKind == SoundCardHostApiKind.Wasapi && d.HasInput);
@@ -102,7 +107,7 @@ public class PortAudioNativeHardwareTests(ITestOutputHelper output)
     [Fact]
     public void ADuplexStreamAcrossOneInterface_OpensAndReportsItsLatency()
     {
-        using var pa = new PortAudioNative();
+        var pa = PortAudioNative.Shared;
         var enumerator = new SoundCardEnumerator(pa);
 
         var pair = (from i in enumerator.InputDevices

@@ -160,6 +160,11 @@ internal static class PortAudioInterop
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Pa_CloseStream(IntPtr stream);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr Pa_GetStreamInfo(IntPtr stream);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Pa_HostApiTypeIdToHostApiIndex(PaHostApiTypeId type);
+
+    /// <summary>WASAPI-only rescan. The only way to notice a card plugged in after Pa_Initialize, since re-initialising is fatal once ASIO is in the build.</summary>
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int PaWasapi_UpdateDeviceList();
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int Pa_ReadStream(IntPtr stream, [Out] float[] buffer, CULong frames);
 

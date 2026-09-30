@@ -481,7 +481,13 @@ public sealed record FrequencyResponseStatus(
     /// field from <see cref="PhaseKind"/> even though the two coincide today: a future mode with a
     /// reference but no phase would make a phase-derived answer to this question wrong.
     /// </summary>
-    bool RightChannelIsReference = false);
+    bool RightChannelIsReference = false,
+    /// <summary>
+    /// Something the run needs to say that is not an error: it produced a measurement, and there is
+    /// a caveat on reading it. Today that is a chirp start raised to the analyzer's own floor — see
+    /// <see cref="StimulusFloor"/>. Null when there is nothing to say.
+    /// </summary>
+    string? Warning = null);
 
 /// <summary>The immediate answer to a start request — what the run will do, before it does it.</summary>
 public sealed record FrequencyResponseStarted(

@@ -12,9 +12,16 @@ import {
 import { useBandwidthReference } from '../composables/useBandwidthReference'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
+import { stimulusFloorNotice } from '../stimulusFloor'
 import CollapsibleSection from './CollapsibleSection.vue'
 
-defineProps<{ running: boolean }>()
+const props = defineProps<{
+  running: boolean
+  /** The connected analyzer's lowest usable stimulus frequency, in Hz; 0 on one with no floor. */
+  minStimulusFrequencyHz?: number
+}>()
+
+
 
 const { types, currentTypeId, markDirty } = useProjects()
 
@@ -64,6 +71,9 @@ const form = reactive({
 
 // Edited in the Measurements panel next to the corners they define, saved and sent from here —
 // see useBandwidthReference. Watched with the form below, since they are part of the stored type.
+/** Warns before the run that the sweep will start higher than asked. See stimulusFloor.ts. */
+const floorNotice = computed(() => stimulusFloorNotice(form.chirpStartHz, props.minStimulusFrequencyHz))
+
 const { bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz } = useBandwidthReference()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
@@ -342,6 +352,15 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       />
     </label>
+    <!-- Said before the run rather than only after it: the server clamps and reports, but a sweep
+         that quietly starts somewhere else is a surprise worth heading off. A notice, not a
+         problem — the measurement is good over the band the card can drive. -->
+    <p
+      v-if="floorNotice"
+      class="rounded border border-amber-300 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+    >
+      {{ floorNotice }}
+    </p>
 
     <label
       class="flex flex-col gap-1 text-xs"

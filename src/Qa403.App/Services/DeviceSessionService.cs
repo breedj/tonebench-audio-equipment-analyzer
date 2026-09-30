@@ -477,6 +477,12 @@ public sealed class DeviceSessionService(
     public DeviceKind Kind => _kind;
 
     /// <summary>
+    /// The lowest frequency the analyzer in use can actually excite, in Hz — 0 on a device with no
+    /// floor. Read by the chirp runners, which clamp a sweep start to it rather than refusing one.
+    /// </summary>
+    public double MinStimulusFrequencyHz => _device.MinStimulusFrequencyHz;
+
+    /// <summary>
     /// One of the sound card's settings, or null when that is not the analyzer in use — the null
     /// convention the <c>Simulated*</c> fields established, so the UI can gate on the field rather
     /// than on a device-kind string.

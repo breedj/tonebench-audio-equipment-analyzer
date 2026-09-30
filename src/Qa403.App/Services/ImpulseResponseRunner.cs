@@ -253,6 +253,19 @@ public sealed class ImpulseResponseRunner(
         if (!session.Connected)
             throw new InvalidOperationException("No device is connected.");
 
+        // Raised to the analyzer's own floor if it has one -- see StimulusFloor. Before anything
+        // derives from the start frequency, so the gate, the stimulus and the saved parameters all
+        // describe the sweep that was actually played.
+        (double clampedStartHz, string? floorWarning) =
+            StimulusFloor.Clamp(request.ChirpStartHz, session.MinStimulusFrequencyHz);
+
+        if (floorWarning is not null)
+        {
+            request = request with { ChirpStartHz = clampedStartHz };
+            logger.LogInformation(
+                "{Measurement}: chirp start raised to the analyzer's floor of {Floor:0.#} Hz", "Impulse response", clampedStartHz);
+        }
+
         // Resolved before anything is started, so a missing or mismatched calibration is a 400 on the
         // start request rather than a run that fails a minute in.
         LoopbackReference? loopback = null;
@@ -384,6 +397,12 @@ public sealed class ImpulseResponseRunner(
         if (string.IsNullOrWhiteSpace(request.Name))
             throw new ArgumentOutOfRangeException(nameof(request), "A loopback reference needs a name.");
 
+        // The floor matters more here than on an ordinary run: a reference captured below it has the
+        // analyzer's own high-pass in it, and that then divides into every measurement corrected
+        // with it -- silently, and as though it were the DUT's.
+        (double referenceStartHz, _) =
+            StimulusFloor.Clamp(request.ChirpStartHz, session.MinStimulusFrequencyHz);
+
         var measurement = new ImpulseResponseRequest(
             request.FrequencySpanHz,
             request.ResolutionMultiplier,
@@ -400,7 +419,7 @@ public sealed class ImpulseResponseRunner(
             ExtractHarmonics: false,
             MaxHarmonicOrder: ImpulseResponseRequest.DefaultMaxHarmonicOrder,
             Continuous: false,
-            ChirpStartHz: request.ChirpStartHz);
+            ChirpStartHz: referenceStartHz);
 
         await StartAsync(measurement, ct);
 

@@ -42,7 +42,8 @@ public static class DeviceEndpoints
         {
             var caps = session.Capabilities;
             return Results.Ok(new DeviceRangesResponse(
-                caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount));
+                caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount,
+                session.MinStimulusFrequencyHz));
         });
 
         group.MapPost("/input-range", async (
@@ -373,7 +374,12 @@ public sealed record DeviceRangesResponse(
     IReadOnlyList<double> SampleRatesHz,
     IReadOnlyList<double> InputRangesDbv,
     IReadOnlyList<double> OutputRangesDbv,
-    int MaxChannelCount);
+    int MaxChannelCount,
+    /// <summary>
+    /// The lowest frequency this analyzer can excite, in Hz; 0 on one with no floor. The chirp
+    /// panels warn against it before a run, so the raising is not a surprise afterwards.
+    /// </summary>
+    double MinStimulusFrequencyHz = 0.0);
 
 public sealed record InputRangeRequest(double Dbv);
 

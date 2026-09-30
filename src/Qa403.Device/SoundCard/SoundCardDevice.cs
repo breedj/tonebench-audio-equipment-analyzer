@@ -89,6 +89,10 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// <remarks>One fixed range, so there is nothing to step and no runner should try.</remarks>
     public bool HasInputAutoRanging => false;
 
+    /// <inheritdoc />
+    /// <remarks>Declared per card, because a front-end changes where the corner is.</remarks>
+    public double MinStimulusFrequencyHz => _settings.MinStimulusFrequencyHz;
+
     public double InputRangeDbv => _calibration.InputRangeDbv;
 
     public bool AutoRangeEnabled { get => false; set { } }

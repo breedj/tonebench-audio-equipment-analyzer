@@ -1545,6 +1545,8 @@ export interface DeviceRanges {
   inputRangesDbv: number[]
   outputRangesDbv: number[]
   maxChannelCount: number
+  /** The lowest frequency this analyzer can excite, in Hz; 0 on one with no floor. See stimulusFloor.ts. */
+  minStimulusFrequencyHz: number
 }
 
 export interface GeneratorTone {

@@ -148,6 +148,19 @@ public sealed class ImpedanceRunner(
         if (!session.Connected)
             throw new InvalidOperationException("No device is connected.");
 
+        // Raised to the analyzer's own floor if it has one -- see StimulusFloor. Before anything
+        // derives from the start frequency, so the gate, the stimulus and the saved parameters all
+        // describe the sweep that was actually played.
+        (double clampedStartHz, string? floorWarning) =
+            StimulusFloor.Clamp(request.ChirpStartHz, session.MinStimulusFrequencyHz);
+
+        if (floorWarning is not null)
+        {
+            request = request with { ChirpStartHz = clampedStartHz };
+            logger.LogInformation(
+                "{Measurement}: chirp start raised to the analyzer's floor of {Floor:0.#} Hz", "Impedance", clampedStartHz);
+        }
+
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {

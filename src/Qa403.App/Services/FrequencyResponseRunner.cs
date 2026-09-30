@@ -84,6 +84,7 @@ public sealed class FrequencyResponseRunner(
     private bool _rightChannelIsReference;
     private List<FrequencyResponseTrace> _traces = [];
     private FrequencyResponseRequest? _lastRequest;
+    private string? _warning;
 
     /// <summary>
     /// The full-resolution estimates behind <see cref="_traces"/>, kept so the bandwidth reference
@@ -129,7 +130,8 @@ public sealed class FrequencyResponseRunner(
                     Running, _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     [.. _traces], PointsMeasured: 0, PointCount: 0,
-                    PhaseKind: ResponsePhaseKind.PerTrace, RightChannelIsReference: _rightChannelIsReference);
+                    PhaseKind: ResponsePhaseKind.PerTrace, RightChannelIsReference: _rightChannelIsReference,
+                    Warning: _warning);
             }
         }
     }
@@ -147,6 +149,20 @@ public sealed class FrequencyResponseRunner(
 
         if (!session.Connected)
             throw new InvalidOperationException("No device is connected.");
+
+        // Before the gate and before anything derives from the start frequency: AnalysisLowHz, the
+        // stimulus, the time estimate and the saved parameters all read it, so a value clamped later
+        // would leave some of them describing a sweep that was never played.
+        (double clampedStartHz, string? floorWarning) =
+            StimulusFloor.Clamp(request.ChirpStartHz, session.MinStimulusFrequencyHz);
+
+        if (floorWarning is not null)
+        {
+            request = request with { ChirpStartHz = clampedStartHz };
+            logger.LogInformation(
+                "Frequency response: chirp start raised from {Requested:0.#} Hz to the analyzer's floor of {Floor:0.#} Hz",
+                request.ChirpStartHz, clampedStartHz);
+        }
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -176,6 +192,7 @@ public sealed class FrequencyResponseRunner(
             }
 
             _lastRequest = request;
+            _warning = floorWarning;
 
             var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _cts = cts;

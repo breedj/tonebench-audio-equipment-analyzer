@@ -1,4 +1,4 @@
-namespace Qa403.Device;
+﻿namespace Qa403.Device;
 
 /// <summary>
 /// Abstraction over a QA403-class audio analyzer: connect, configure input/output ranges and
@@ -60,6 +60,19 @@ public interface IAnalyzerDevice
     /// explicitly, the same way <see cref="Telemetry"/> works the other way round.</para>
     /// </summary>
     bool HasInputAutoRanging => true;
+
+    /// <summary>
+    /// The lowest frequency this analyzer can actually excite, in Hz. 0 means no floor, which is the
+    /// default and is the QA403's answer — it is DC-coupled, so the 2 Hz chirp starts used for
+    /// transformer work all reach the DUT.
+    ///
+    /// <para>A sound card is AC-coupled at <b>both</b> ends, and below its corner nothing fails: the
+    /// deconvolution divides by the stimulus it meant to play, so the card's own high-pass lands on
+    /// the trace as the DUT's roll-off with normal coherence. A DC-coupled front-end fixes only the
+    /// input side, because the card's output coupling still limits the stimulus — which is why this
+    /// belongs to the device rather than to the wiring.</para>
+    /// </summary>
+    double MinStimulusFrequencyHz => 0.0;
 
     /// <summary>
     /// Raised when the transport detects the physical device is gone (e.g. unplugged mid-stream).

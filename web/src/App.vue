@@ -3693,6 +3693,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-if="isChirpResponse"
                   ref="responseConfigPanel"
                   :running="responseRunning"
+                  :min-stimulus-frequency-hz="ranges?.minStimulusFrequencyHz ?? 0"
                 />
                 <SteppedResponseConfigPanel
                   v-else

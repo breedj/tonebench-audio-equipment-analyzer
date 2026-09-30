@@ -23,11 +23,18 @@ public class SimulatedImpedanceFixtureTests
 {
     private const double SampleRateHz = 48_000.0;
 
-    /// <summary>Whole seconds at 48 kHz, so any integer frequency lands exactly on a bin and the single-bin DFT has no leakage.</summary>
-    private const int AnalysisFrames = 48_000;
+    /// <summary>
+    /// A fifth of a second at 48 kHz, so the bin spacing is 5 Hz and every frequency this class measures
+    /// at -- 20, 45, 50, 100, 955, 1000, 10000, 20000 -- is a multiple of it and lands exactly on a bin,
+    /// which is what keeps the single-bin DFT free of leakage. It was a whole second until 2026-09-30;
+    /// the simulator streams at real-time cadence on purpose, so a record here costs its own duration in
+    /// wall clock, and this class was 57 s of a 9 m 28 s suite. Shortening it is only safe while every
+    /// frequency above stays a multiple of 48000/AnalysisFrames.
+    /// </summary>
+    private const int AnalysisFrames = 9_600;
 
-    /// <summary>Discarded before analysis. The sharpest fixture here rings for about 18 ms, so half a second is some 28 time constants.</summary>
-    private const int SettleFrames = 24_000;
+    /// <summary>Discarded before analysis. The sharpest fixture here rings for about 18 ms, so a quarter of a second is some 14 time constants -- and the assertions here run to six decimal places, so this is the constant that fails first if it is cut too far.</summary>
+    private const int SettleFrames = 12_000;
 
     /// <summary>Low enough that neither clipper in the simulated signal path is anywhere near being reached.</summary>
     private const double GeneratorDbv = -20.0;
@@ -236,8 +243,8 @@ public class SimulatedImpedanceFixtureTests
     }
 
     /// <summary>
-    /// Both channels at one frequency, as complex numbers. A single-bin DFT over a whole number of
-    /// seconds rather than an FFT: the ratio is all that is wanted, and every scale factor cancels in
+    /// Both channels at one frequency, as complex numbers. A single-bin DFT over a whole number of periods of
+    /// the tone rather than an FFT: the ratio is all that is wanted, and every scale factor cancels in
     /// it.
     /// </summary>
     private static async Task<(Complex Left, Complex Right)> CaptureAsync(SimulatedDutModel model, double freqHz)

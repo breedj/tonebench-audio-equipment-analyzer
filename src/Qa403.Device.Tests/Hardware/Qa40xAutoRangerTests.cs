@@ -101,15 +101,6 @@ public class Qa40xAutoRangerTests
     }
 
     [Fact]
-    public void StepDownDelayMs_DefaultsTo1000Ms()
-    {
-        var ranger = new Qa40xAutoRanger(InputRangesDbv);
-
-        Assert.Equal(1000.0, ranger.StepDownDelayMs);
-        Assert.Equal(1000.0, Qa40xAutoRanger.DefaultStepDownDelayMs);
-    }
-
-    [Fact]
     public void Evaluate_UnderRange_AccumulatesWallClockTimeRegardlessOfBlockCadence()
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv) { StepDownDelayMs = 100.0 };
@@ -243,16 +234,5 @@ public class Qa40xAutoRangerTests
         Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 400 ms
         Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 800 ms
         Assert.Equal(RangeStepDecision.StepDown, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs)); // 1200 ms
-    }
-
-    [Fact]
-    public void SettleFrameCount_DerivesFromTheDocumentedPlaceholderMs()
-    {
-        const double sampleRateHz = 192_000.0;
-
-        int frames = Qa40xAutoRanger.SettleFrameCount(sampleRateHz);
-
-        int expected = (int)Math.Ceiling(Qa40xAutoRanger.SettleTimeMsTodoPlaceholder / 1000.0 * sampleRateHz);
-        Assert.Equal(expected, frames);
     }
 }

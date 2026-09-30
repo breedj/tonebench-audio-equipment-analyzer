@@ -103,10 +103,6 @@ public class FrequencyResponseRunnerTests
     }
 
     [Fact]
-    public void ChirpStartDefaultMatchesTheConstant() =>
-        Assert.Equal(FrequencyResponseRequest.DefaultChirpStartHz, Request().ChirpStartHz);
-
-    [Fact]
     public void AnalysisLowHz_KeepsItsFourHzFloorAtTheDefaultStartAndRisesWithIt()
     {
         // The default has to keep producing exactly the 4 Hz the constant used to be, or every

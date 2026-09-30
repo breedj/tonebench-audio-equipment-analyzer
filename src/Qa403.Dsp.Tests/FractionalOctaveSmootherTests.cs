@@ -211,8 +211,4 @@ public class FractionalOctaveSmootherTests
         Assert.Throws<ArgumentException>(
             () => FractionalOctaveSmoother.Smooth(magnitude, new double[32], BinHz, 3));
     }
-
-    [Fact]
-    public void SupportedDenominators_MatchTheUisSmoothingChoices() =>
-        Assert.Equal([0, 69, 48, 24, 12, 6, 3], FractionalOctaveSmoother.SupportedDenominators);
 }

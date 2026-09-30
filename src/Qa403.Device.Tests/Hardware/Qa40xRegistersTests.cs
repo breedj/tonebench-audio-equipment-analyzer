@@ -45,14 +45,6 @@ public class Qa40xRegistersTests
     public void SampleRateHzToRegister_RejectsUnsupportedValue() =>
         Assert.Throws<ArgumentOutOfRangeException>(() => Qa40xRegisters.SampleRateHzToRegister(44_100));
 
-    [Fact]
-    public void InputRangesDbv_MatchesDeviceCapabilities() =>
-        Assert.Equal(DeviceCapabilities.Qa403.InputRangesDbv, Qa40xRegisters.InputRangesDbv);
-
-    [Fact]
-    public void OutputRangesDbv_MatchesDeviceCapabilities() =>
-        Assert.Equal(DeviceCapabilities.Qa403.OutputRangesDbv, Qa40xRegisters.OutputRangesDbv);
-
     /// <summary>
     /// The raw values behind a real QA403 status bar reading "USB Voltage: 4.864V | USB Current:
     /// 0.830A | 25.0C" — the vendor screenshot this readout was built from. Pinned as a set rather

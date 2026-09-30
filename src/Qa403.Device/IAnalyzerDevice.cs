@@ -43,6 +43,25 @@ public interface IAnalyzerDevice
     DeviceTelemetry? Telemetry => null;
 
     /// <summary>
+    /// Whether this device steps its own input range while streaming. False on anything whose range
+    /// is chosen for it: the simulator, whose range the browser's own peak watcher steps, and any
+    /// device with a single fixed range.
+    ///
+    /// <para>This exists so <see cref="Qa403.App"/>'s session can stop asking a device-shaped
+    /// question by naming one device — three properties there decided "no hardware ranger" with
+    /// <c>_device is SimulatedDevice</c>, and a third analyzer falls on the wrong side of all
+    /// three.</para>
+    ///
+    /// <para><b>The default is true, and that is load-bearing.</b> The app's test doubles wrap a
+    /// <see cref="Simulation.SimulatedDevice"/> while carrying their own
+    /// <see cref="AutoRangeEnabled"/> = true — they stand in for hardware with a ranger, and they
+    /// are not <c>SimulatedDevice</c>, so they already bypassed those type tests. Inheriting this
+    /// default keeps them doing exactly that. A device that genuinely has no ranger says so
+    /// explicitly, the same way <see cref="Telemetry"/> works the other way round.</para>
+    /// </summary>
+    bool HasInputAutoRanging => true;
+
+    /// <summary>
     /// Raised when the transport detects the physical device is gone (e.g. unplugged mid-stream).
     /// Implementations must never throw this condition into <see cref="StreamAsync"/>'s
     /// <c>await foreach</c> — they end the enumeration cleanly and raise this event instead, so

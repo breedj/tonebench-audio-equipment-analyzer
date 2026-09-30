@@ -103,6 +103,14 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     public int StimulusLatencyFrames(double sampleRateHz) => _activeBlockFrameCount;
 
     /// <summary>
+    /// There is no ranger here, so the session reports <c>AutoRangeEnabled</c> as null rather than
+    /// false and the UI hides the auto/manual control. Declared rather than inferred from the type:
+    /// the app's test doubles wrap this device while standing in for hardware that <i>does</i>
+    /// range, and they keep the interface's <c>true</c> default.
+    /// </summary>
+    public bool HasInputAutoRanging => false;
+
+    /// <summary>
     /// The simulator has no autoranging, so this stays false however it is set — the UI reads it to
     /// decide whether to offer the auto/manual checkbox at all.
     /// </summary>

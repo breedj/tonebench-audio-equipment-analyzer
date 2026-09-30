@@ -1,4 +1,4 @@
-using Qa403.App.Streaming;
+﻿using Qa403.App.Streaming;
 using Qa403.Device;
 using Qa403.Dsp;
 
@@ -176,7 +176,7 @@ public sealed class ImdSweepRunner(
             double predictorPeakDbv = double.NegativeInfinity;
             double predictorGenDbv = steps[0].SineEquivalentDbv;
 
-            bool predictionOwnsRange = session.AutoRangeEnabled != false;
+            bool predictionOwnsRange = session.RunnerOwnsInputRange;
 
             // Monotone on an ascending ladder — never a more sensitive range than one already used
             // (see ThdSweepRunner.ApplyPredictedInputRangeAsync's remarks).

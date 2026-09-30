@@ -519,7 +519,7 @@ public sealed class ImpulseResponseRunner(
             // Manual range control means manual: with the Auto checkbox off the user has picked a
             // range deliberately, and a measurement quietly reprogramming it would be the same class
             // of surprise autoranging used to be before that checkbox existed.
-            ownsInputRange = session.AutoRangeEnabled != false && session.Capabilities.InputRangesDbv.Count > 0;
+            ownsInputRange = session.RunnerOwnsInputRange;
 
             if (ownsInputRange && session.AutoRangeStepDownEnabled is true)
             {

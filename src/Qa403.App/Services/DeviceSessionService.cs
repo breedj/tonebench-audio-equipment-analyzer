@@ -705,10 +705,38 @@ public sealed class DeviceSessionService(
 
     /// <summary>
     /// Whether the device is autoranging its input. Null when the device has no autoranging of its
-    /// own (the simulator), so the UI can hide the checkbox — same null convention as
+    /// own, so the UI can hide the checkbox — same null convention as
     /// <see cref="SimulatedNoiseEnabled"/>.
+    ///
+    /// <para>The device declares that through <see cref="IAnalyzerDevice.HasInputAutoRanging"/>
+    /// rather than being recognised by type here. It used to read
+    /// <c>_device is SimulatedDevice</c>, which answers a device-shaped question by naming one
+    /// device — and a third analyzer with no ranger of its own falls on the wrong side of it.</para>
     /// </summary>
-    public bool? AutoRangeEnabled => _device is SimulatedDevice ? null : _device.AutoRangeEnabled;
+    public bool? AutoRangeEnabled => _device.HasInputAutoRanging ? _device.AutoRangeEnabled : null;
+
+    /// <summary>
+    /// Whether a measurement runner should take the input range over for the length of its run.
+    /// Two conditions, and they are different questions that coincided until a third analyzer
+    /// existed.
+    ///
+    /// <para>(1) <b>Manual means manual.</b> With the Auto control off the user pinned a range
+    /// deliberately, and a measurement quietly reprogramming it would be the same class of surprise
+    /// autoranging was before that control existed. Note null — a device with no ranger of its own,
+    /// like the simulator — counts as rangeable here, because someone still has to choose.</para>
+    ///
+    /// <para>(2) <b>A ladder with one rung is not a ladder.</b> A sound card has exactly one input
+    /// full scale, so there is nothing to predict, nothing to probe and nothing to ratchet. This is
+    /// not merely wasted work: <see cref="FrequencyResponseRunner"/>'s output-voltage mode spends a
+    /// whole extra chirp capture in its range probe to conclude that the only range is the only
+    /// range, once per run.</para>
+    ///
+    /// <para>One property rather than the same pair of clauses at eight call sites, so the
+    /// invariant has one place to be documented and one place to be tested — and so a ninth runner
+    /// cannot be written against the old predicate.</para>
+    /// </summary>
+    public bool RunnerOwnsInputRange =>
+        AutoRangeEnabled != false && Capabilities.InputRangesDbv.Count > 1;
 
     /// <summary>
     /// Switches who chooses the two analog ranges. Going back to <see cref="RangingMode.Auto"/>
@@ -804,7 +832,7 @@ public sealed class DeviceSessionService(
     /// range, in milliseconds. Null with the same convention as <see cref="AutoRangeEnabled"/> — the
     /// simulator has no hardware ranger to configure.
     /// </summary>
-    public double? AutoRangeStepDownDelayMs => _device is SimulatedDevice ? null : _device.AutoRangeStepDownDelayMs;
+    public double? AutoRangeStepDownDelayMs => _device.HasInputAutoRanging ? _device.AutoRangeStepDownDelayMs : null;
 
     public void SetAutoRangeStepDownDelayMs(double delayMs) => _device.AutoRangeStepDownDelayMs = delayMs;
 
@@ -817,7 +845,7 @@ public sealed class DeviceSessionService(
     /// of a sweep, restoring whatever it found. A checkbox for it would be a second, slower way to
     /// express what the Auto checkbox already covers, and one a sweep would then have to fight.</para>
     /// </summary>
-    public bool? AutoRangeStepDownEnabled => _device is SimulatedDevice ? null : _device.AutoRangeStepDownEnabled;
+    public bool? AutoRangeStepDownEnabled => _device.HasInputAutoRanging ? _device.AutoRangeStepDownEnabled : null;
 
     public void SetAutoRangeStepDownEnabled(bool enabled) => _device.AutoRangeStepDownEnabled = enabled;
 

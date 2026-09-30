@@ -271,7 +271,7 @@ public sealed class SteppedResponseRunner(
     /// checkbox existed.
     /// </summary>
     private bool WillOwnInputRange() =>
-        session.AutoRangeEnabled != false && session.Capabilities.InputRangesDbv.Count > 0;
+        session.RunnerOwnsInputRange;
 
     private async Task RunAsync(SteppedResponseRequest request, SteppedStepPlan[] steps, CancellationToken ct)
     {

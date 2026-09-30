@@ -310,7 +310,7 @@ public sealed class ThdSweepRunner(
             // Manual range control means manual: with the Auto checkbox off the user has picked a
             // range deliberately, and a sweep quietly reprogramming it would be the same class of
             // surprise autoranging used to be before that checkbox existed.
-            bool predictionOwnsRange = session.AutoRangeEnabled != false;
+            bool predictionOwnsRange = session.RunnerOwnsInputRange;
 
             // Never steps back down within one sweep on the amplitude axis -- see
             // ApplyPredictedInputRangeAsync.

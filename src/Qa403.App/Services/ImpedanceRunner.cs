@@ -295,7 +295,7 @@ public sealed class ImpedanceRunner(
             }
 
             // Manual range control means manual, exactly as the chirp runner treats it.
-            ownsInputRange = session.AutoRangeEnabled != false && session.Capabilities.InputRangesDbv.Count > 0;
+            ownsInputRange = session.RunnerOwnsInputRange;
 
             if (ownsInputRange && session.AutoRangeStepDownEnabled is true)
             {

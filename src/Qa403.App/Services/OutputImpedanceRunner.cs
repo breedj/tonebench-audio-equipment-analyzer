@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Qa403.App.Streaming;
 using Qa403.Device;
 using Qa403.Dsp;
@@ -260,7 +260,7 @@ public sealed class OutputImpedanceRunner(
     }
 
     private bool WillOwnInputRange() =>
-        session.AutoRangeEnabled != false && session.Capabilities.InputRangesDbv.Count > 0;
+        session.RunnerOwnsInputRange;
 
     private async Task RunAsync(OutputImpedanceRequest request, SteppedStepPlan[] steps, CancellationToken ct)
     {

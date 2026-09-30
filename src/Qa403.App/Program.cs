@@ -102,7 +102,8 @@ try
     // from under a swap.
     builder.Services.AddSingleton(sp => new AnalyzerDeviceFactory(
         sp.GetRequiredService<ILoggerFactory>(),
-        simulate ? DeviceKind.Simulated : DeviceKind.Hardware));
+        simulate ? DeviceKind.Simulated : DeviceKind.Hardware,
+        sp.GetRequiredService<SoundCardSetting>()));
 
     // WindowType/AveragingMode read back as "Hann"/"Linear" etc, matching what /spectrum-config
     // already accepts on the way in — one representation, not int-in/string-out. Enum-as-string
@@ -132,6 +133,7 @@ try
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<CaptureDelaySetting>();
     builder.Services.AddSingleton<ExternalGainSetting>();
+    builder.Services.AddSingleton<SoundCardSetting>();
     builder.Services.AddSingleton<UserWeightingSetting>();
     builder.Services.AddSingleton<UserWeightingService>();
     builder.Services.AddSingleton<DeviceSessionService>();
@@ -229,6 +231,13 @@ try
         externalGainSetting.LeftDb = externalGain.LeftDb;
         externalGainSetting.RightDb = externalGain.RightDb;
 
+        // The sound card's settings and calibration. Loaded here because AnalyzerDeviceFactory
+        // reads them to build a device, which happens the moment anything resolves the session --
+        // and because a card that has been calibrated must not come up claiming dBFS.
+        app.Services.GetRequiredService<SoundCardSetting>().Config =
+            await ConfigEndpoints.ReadSoundCardAsync(
+                scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
+
         // The user weighting tables, for the same reason: the pipeline reads them on its worker
         // thread. A damaged document leaves its slot empty and is logged.
         await scope.ServiceProvider.GetRequiredService<UserWeightingService>().LoadAllAsync(CancellationToken.None);
@@ -286,6 +295,7 @@ try
     app.MapOutputImpedanceEndpoints();
     app.MapImpedanceEndpoints();
     app.MapConfigEndpoints();
+    app.MapSoundCardEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapProjectSessionEndpoints();

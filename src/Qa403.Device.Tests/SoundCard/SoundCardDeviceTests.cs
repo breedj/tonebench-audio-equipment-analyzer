@@ -238,6 +238,10 @@ public class SoundCardDeviceTests
             Assert.Equal(i, blocks[i].Sequence);
             Assert.Equal(2, blocks[i].Channels);
         }
+
+        // Contiguous because nothing was dropped. A producer outrunning the consumer would drop the
+        // oldest and leave a gap here, which is the fake pacing its reads is there to prevent.
+        Assert.Equal(0, device.DroppedBlocks);
     }
 
     /// <summary>

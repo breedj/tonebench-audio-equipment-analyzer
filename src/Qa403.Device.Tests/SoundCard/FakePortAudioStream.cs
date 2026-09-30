@@ -7,9 +7,12 @@ namespace Qa403.Device.Tests.SoundCard;
 /// <see cref="InputSample"/> says, writes are captured, and both can be told to report the driver's
 /// two non-fatal overflow conditions.
 ///
-/// <para>Reads do <b>not</b> block for real time. A pump paced by a real card's clock would make
-/// every test take as long as the audio it moves; here the read returns at once and the test
-/// decides how many transfers to let through.</para>
+/// <para><b>Reads pace themselves</b>, because that is the property the pump is built on: a real
+/// card's read blocks until it has a transfer's worth, which is what stops the loop outrunning the
+/// consumer. Returning at once instead let the producer race ahead until the drop-oldest channel
+/// began discarding, which showed up as non-contiguous sequence numbers and a discontinuity flag on
+/// the wrong block — intermittently, and only under load. <see cref="PaceReads"/> turns it off for
+/// a test that wants the race.</para>
 /// </summary>
 internal sealed class FakePortAudioStream : IPortAudioStream
 {
@@ -70,8 +73,14 @@ internal sealed class FakePortAudioStream : IPortAudioStream
         Stopped = true;
     }
 
+    /// <summary>Whether a read takes as long as the audio it returns, as a real card's does.</summary>
+    public bool PaceReads { get; set; } = true;
+
     public bool Read(float[] buffer, int frames)
     {
+        if (PaceReads)
+            Thread.Sleep(TimeSpan.FromSeconds(frames / Math.Max(1.0, SampleRateHz)));
+
         int index = ReadCount++;
         int channels = buffer.Length / Math.Max(1, frames);
 

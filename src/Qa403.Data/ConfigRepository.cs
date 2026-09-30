@@ -223,6 +223,77 @@ public sealed record ExternalGainConfig(double LeftDb = 0.0, double RightDb = 0.
 }
 
 /// <summary>
+/// Which sound card the analyzer is, how it is wired, and where its full scale sits in volts.
+///
+/// <para><b>One document, not several.</b> A calibration only means anything against the device,
+/// the channel pair and the rate it was taken on; splitting them lets a card be swapped while its
+/// predecessor's millivolts survive, which is a wrong answer that looks like a right one. Same
+/// reasoning as <see cref="ImpedanceFixtureConfig"/>.</para>
+///
+/// <para><b>Devices are named, never indexed.</b> PortAudio's indices renumber whenever anything is
+/// plugged in or a driver updates, and an index that silently resolves to a different card is a
+/// calibration quietly applied to the wrong hardware.</para>
+///
+/// <para>It lives in the configuration database rather than a project file: the card is a property
+/// of this bench, and a project copied to another machine must not carry it.</para>
+/// </summary>
+/// <param name="OutputFullScalePeakMv">
+/// Peak millivolts at digital full scale on the output, or null before that step has been run. Null
+/// is not zero and not a guess: an uncalibrated card reports its levels as dBFS and says so.
+/// </param>
+/// <param name="GainDisplayUnit">
+/// Whether the status bar shows the two front-end gains in dB or as a plain ratio. Display only --
+/// the stored value is always dB, which is what every measurement's parameters record.
+/// </param>
+public sealed record SoundCardConfig(
+    string InputHostApi = "",
+    string InputDeviceName = "",
+    string OutputHostApi = "",
+    string OutputDeviceName = "",
+    int InputChannelOffset = 0,
+    int OutputChannelOffset = 0,
+    double SampleRateHz = 48_000.0,
+    double? OutputFullScalePeakMv = null,
+    double? InputFullScalePeakMvLeft = null,
+    double? InputFullScalePeakMvRight = null,
+    DateTimeOffset? CalibratedUtc = null,
+    double FrontEndGainLeftDb = 0.0,
+    double FrontEndGainRightDb = 0.0,
+    string GainDisplayUnit = "Db",
+    double MinStimulusFrequencyHz = 20.0)
+{
+    /// <summary>The same bound the external gain uses, and for the same reason: past it, it is a typo rather than a fixture.</summary>
+    public const double MaxAbsGainDb = ExternalGainConfig.MaxAbsDb;
+
+    /// <summary>A card's full scale outside this is a mis-entered voltmeter reading, not a card.</summary>
+    public const double MinFullScaleMv = 0.1;
+
+    public const double MaxFullScaleMv = 1_000_000.0;
+
+    public static SoundCardConfig Default { get; } = new();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(InputDeviceName) && !string.IsNullOrWhiteSpace(OutputDeviceName);
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid =>
+        InputChannelOffset >= 0 && InputChannelOffset <= 64
+        && OutputChannelOffset >= 0 && OutputChannelOffset <= 64
+        && double.IsFinite(SampleRateHz) && SampleRateHz > 0.0
+        && double.IsFinite(FrontEndGainLeftDb) && Math.Abs(FrontEndGainLeftDb) <= MaxAbsGainDb
+        && double.IsFinite(FrontEndGainRightDb) && Math.Abs(FrontEndGainRightDb) <= MaxAbsGainDb
+        && double.IsFinite(MinStimulusFrequencyHz) && MinStimulusFrequencyHz >= 0.0 && MinStimulusFrequencyHz <= 1_000.0
+        && (GainDisplayUnit == "Db" || GainDisplayUnit == "Times")
+        && IsFullScaleValid(OutputFullScalePeakMv)
+        && IsFullScaleValid(InputFullScalePeakMvLeft)
+        && IsFullScaleValid(InputFullScalePeakMvRight);
+
+    private static bool IsFullScaleValid(double? mv) =>
+        mv is null || (double.IsFinite(mv.Value) && mv.Value >= MinFullScaleMv && mv.Value <= MaxFullScaleMv);
+}
+
+/// <summary>
 /// One user weighting table, stored parsed: the QA40x-style "frequency, dB" file's rows, with the
 /// file's sign convention (positive = attenuation, see <see cref="Qa403.Dsp.WeightingPoint"/>).
 /// Stored as its points and not as a path, because the file is the user's and may move; the
@@ -292,6 +363,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The external input gain's key. One document, see <see cref="ExternalGainConfig"/>.</summary>
     public const string ExternalGainKey = "acquisition.externalGain";
+
+    /// <summary>The sound-card analyzer's key. One document, see <see cref="SoundCardConfig"/>.</summary>
+    public const string SoundCardKey = "soundcard.settings";
 
     /// <summary>A user weighting table's key, one document per slot (1 or 2) — see <see cref="UserWeightingTable"/>.</summary>
     public static string UserWeightingKey(int slot)

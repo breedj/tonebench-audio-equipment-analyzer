@@ -1,6 +1,7 @@
-using Qa403.Device;
+﻿using Qa403.Device;
 using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
+using Qa403.Device.SoundCard;
 
 namespace Qa403.App.Services;
 
@@ -12,6 +13,12 @@ public enum DeviceKind
 
     /// <summary>The synthetic device — see <see cref="SimulatedDevice"/> and <see cref="SimulatedDutModel"/>.</summary>
     Simulated = 1,
+
+    /// <summary>
+    /// A sound card with an analog front-end, over PortAudio — see <see cref="SoundCardDevice"/>.
+    /// Which card, and where its full scale sits, is <c>SoundCardConfig</c>.
+    /// </summary>
+    SoundCard = 2,
 }
 
 /// <summary>
@@ -40,18 +47,29 @@ public class AnalyzerDeviceFactory
 {
     private readonly ILoggerFactory _loggerFactory;
     private readonly IAnalyzerDevice? _pinned;
+    private readonly SoundCardSetting _soundCard;
 
-    public AnalyzerDeviceFactory(ILoggerFactory loggerFactory, DeviceKind initialKind)
+    public AnalyzerDeviceFactory(ILoggerFactory loggerFactory, DeviceKind initialKind, SoundCardSetting? soundCard = null)
     {
         _loggerFactory = loggerFactory;
+        _soundCard = soundCard ?? new SoundCardSetting();
         InitialKind = initialKind;
     }
 
     private AnalyzerDeviceFactory(IAnalyzerDevice pinned)
     {
         _loggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        _soundCard = new SoundCardSetting();
         _pinned = pinned;
-        InitialKind = pinned is SimulatedDevice ? DeviceKind.Simulated : DeviceKind.Hardware;
+
+        // A three-way test, not "simulator or else": a pinned sound card reported itself as
+        // Hardware while the status bar showed a QA403 that was not there.
+        InitialKind = pinned switch
+        {
+            SimulatedDevice => DeviceKind.Simulated,
+            SoundCardDevice => DeviceKind.SoundCard,
+            _ => DeviceKind.Hardware,
+        };
     }
 
     /// <summary>Which kind the app starts on — <c>--simulate</c>'s only remaining job.</summary>
@@ -75,6 +93,15 @@ public class AnalyzerDeviceFactory
         ?? kind switch
         {
             DeviceKind.Simulated => CreateSimulator(),
+
+            // Built from the settings as they stand right now rather than from a captured copy: a
+            // card chosen or calibrated since the last switch must be the one that opens, and the
+            // session reconnects through this factory after every change for exactly that reason.
+            DeviceKind.SoundCard => new SoundCardDevice(
+                _soundCard.DeviceSettings,
+                _soundCard.Calibration,
+                _loggerFactory.CreateLogger<SoundCardDevice>()),
+
             _ => new Qa40xUsbDevice(_loggerFactory.CreateLogger<Qa40xUsbDevice>()),
         };
 

@@ -16,10 +16,24 @@ namespace Qa403.App.Services;
 /// </summary>
 public sealed class DeviceSessionService(
     AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
-    ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null)
+    ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
+    SoundCardSetting? soundCard = null)
     : IDisposable, IMeasurementRun
 {
     private readonly ExternalGainSetting _externalGain = externalGain ?? new ExternalGainSetting();
+
+    /// <summary>
+    /// The sound card's own front-end gain, which is remembered separately from the QA403's — see
+    /// <see cref="ApplyEffectiveExternalGain"/>.
+    /// </summary>
+    private readonly SoundCardSetting _soundCard = soundCard ?? new SoundCardSetting();
+
+    /// <summary>
+    /// The external gain to fall back to when the analyzer is not the sound card, i.e. the one
+    /// <c>acquisition.externalGain</c> holds. Seeded from whatever the setting carries at
+    /// construction, which is what <c>Program</c> loaded from that document at startup.
+    /// </summary>
+    private (double Left, double Right)? _sharedExternalGainDb;
 
     /// <summary>
     /// The device this session is talking to. A <b>field</b> rather than a constructor parameter
@@ -29,6 +43,60 @@ public sealed class DeviceSessionService(
     private IAnalyzerDevice _device = deviceFactory.Create(deviceFactory.InitialKind);
 
     private DeviceKind _kind = deviceFactory.InitialKind;
+
+    /// <summary>
+    /// Copies whichever front-end gain belongs to the analyzer now in use into the one setting the
+    /// pipeline reads.
+    ///
+    /// <para>There is exactly one place that undoes an input gain — <c>SpectrumPipeline.Enqueue</c>,
+    /// via <see cref="ExternalGainSetting"/> — with the three ranging seams and the
+    /// <c>params_json</c> recording already worked out against it. A sound card's front-end is
+    /// remembered separately from the QA403's, because they are different benches, so the choice is
+    /// which document feeds that one setting rather than a second gain concept. Everything
+    /// downstream is untouched.</para>
+    /// </summary>
+    private void ApplyEffectiveExternalGain()
+    {
+        if (_kind == DeviceKind.SoundCard)
+        {
+            // Captured lazily rather than at construction, because Program loads the external-gain
+            // document into the setting after the container has built this service -- seeding it in
+            // a field initializer would bank a zero and lose the QA403's divider on the way back.
+            _sharedExternalGainDb ??= (_externalGain.LeftDb, _externalGain.RightDb);
+
+            Qa403.Device.SoundCard.SoundCardSettings card = _soundCard.DeviceSettings;
+            _externalGain.LeftDb = Clamp(card.FrontEndGainLeftDb);
+            _externalGain.RightDb = Clamp(card.FrontEndGainRightDb);
+            return;
+        }
+
+        if (_sharedExternalGainDb is not { } shared)
+            return;
+
+        _externalGain.LeftDb = Clamp(shared.Left);
+        _externalGain.RightDb = Clamp(shared.Right);
+
+        static double Clamp(double db) =>
+            double.IsFinite(db) ? Math.Clamp(db, -Qa403.Data.ExternalGainConfig.MaxAbsDb, Qa403.Data.ExternalGainConfig.MaxAbsDb) : 0.0;
+    }
+
+    /// <summary>
+    /// Remembers the analyzer-independent external gain and re-applies whichever is effective.
+    /// Called by <c>PUT /api/config/external-gain</c>, whose document does not describe the sound
+    /// card.
+    /// </summary>
+    public void SetSharedExternalGain(double leftDb, double rightDb)
+    {
+        _sharedExternalGainDb = (leftDb, rightDb);
+        ApplyEffectiveExternalGain();
+    }
+
+    /// <summary>Re-applies the sound card's gain after its settings change, without a reconnect.</summary>
+    public void RefreshSoundCardGain()
+    {
+        if (_kind == DeviceKind.SoundCard)
+            ApplyEffectiveExternalGain();
+    }
 
     /// <summary>
     /// A session pinned to one already-constructed device, with nothing to switch to. Every test in
@@ -409,6 +477,14 @@ public sealed class DeviceSessionService(
     public DeviceKind Kind => _kind;
 
     /// <summary>
+    /// One of the sound card's settings, or null when that is not the analyzer in use — the null
+    /// convention the <c>Simulated*</c> fields established, so the UI can gate on the field rather
+    /// than on a device-kind string.
+    /// </summary>
+    private string? SoundCardField(Func<Qa403.Data.SoundCardConfig, string> select) =>
+        _kind == DeviceKind.SoundCard ? select(_soundCard.Config) : null;
+
+    /// <summary>
     /// Replaces the analyzer with one of the requested kind: real QA403 or simulator, chosen at
     /// runtime rather than by a command-line flag.
     ///
@@ -426,6 +502,54 @@ public sealed class DeviceSessionService(
     /// here: switching to Hardware with no QA403 attached leaves the session disconnected and the
     /// Connect button live, which is the same state the app starts in when nothing is plugged in.</para>
     /// </summary>
+    /// <summary>
+    /// Rebuilds the current analyzer from its settings as they now stand — what a sound card needs
+    /// after its card, rate, channel pair or calibration changes.
+    ///
+    /// <para><see cref="SwitchDeviceAsync"/> cannot do this: it returns early when the kind has
+    /// not changed, which is right for a dropdown and wrong here. And a settings change genuinely
+    /// needs the device rebuilt rather than poked — <see cref="Capabilities"/> is documented as
+    /// valid only after <c>ConnectAsync</c>, and a sound card derives both of its range rungs from
+    /// the calibration.</para>
+    /// </summary>
+    public async Task ReopenAsync(CancellationToken ct)
+    {
+        if (!deviceFactory.CanSwitch)
+            return;
+
+        await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_isAcquiring)
+                throw new InvalidOperationException("Stop the running measurement before changing the analyzer's settings.");
+
+            DeviceKind kind = _kind;
+            logger.LogInformation("Reopening analyzer {Kind} with its current settings", kind);
+
+            await TearDownDeviceAsync();
+
+            _device = deviceFactory.Create(kind);
+            ApplyEffectiveExternalGain();
+
+            try
+            {
+                await ConnectCoreAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("Reopened {Kind} but could not connect ({Reason}) — press Connect once it is available.", kind, ex.Message);
+            }
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
     public async Task SwitchDeviceAsync(DeviceKind kind, CancellationToken ct)
     {
         if (!deviceFactory.CanSwitch)
@@ -446,6 +570,10 @@ public sealed class DeviceSessionService(
 
             _kind = kind;
             _device = deviceFactory.Create(kind);
+
+            // Before the connect, so the first block the pipeline sees is already scaled by the new
+            // analyzer's own front-end rather than the previous one's.
+            ApplyEffectiveExternalGain();
 
             try
             {
@@ -614,7 +742,13 @@ public sealed class DeviceSessionService(
             SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
             ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb,
             RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping,
-            Telemetry: ToResponse(_device.Telemetry));
+            Telemetry: ToResponse(_device.Telemetry),
+            SoundCardInputDevice: SoundCardField(c => c.InputDeviceName),
+            SoundCardOutputDevice: SoundCardField(c => c.OutputDeviceName),
+            SoundCardCalibrated: _kind == DeviceKind.SoundCard
+                ? _soundCard.Calibration is { IsInputCalibrated: true, IsOutputCalibrated: true }
+                : null,
+            SoundCardGainUnit: SoundCardField(c => c.GainDisplayUnit));
     }
 
     /// <summary>

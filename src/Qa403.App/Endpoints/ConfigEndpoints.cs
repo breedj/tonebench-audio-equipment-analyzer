@@ -45,6 +45,29 @@ public static class ConfigEndpoints
     }
 
     /// <summary>The stored external input gain, or the default -- the same contract as the capture delay.</summary>
+    /// <summary>
+    /// Reads the sound-card document, falling back to the default on anything unreadable — the same
+    /// rule every setting here follows, because a configuration that will not parse must not stop
+    /// the app starting.
+    /// </summary>
+    public static async Task<SoundCardConfig> ReadSoundCardAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? json = await repo.GetAsync(ConfigRepository.SoundCardKey, ct);
+        if (string.IsNullOrWhiteSpace(json))
+            return SoundCardConfig.Default;
+
+        try
+        {
+            SoundCardConfig? config = JsonSerializer.Deserialize(json, AppJsonContext.Default.SoundCardConfig);
+            return config is { IsValid: true } ? config : SoundCardConfig.Default;
+        }
+        catch (JsonException)
+        {
+            return SoundCardConfig.Default;
+        }
+    }
+
     public static async Task<ExternalGainConfig> ReadExternalGainAsync(
         ConfigRepository repo, CancellationToken ct)
     {
@@ -183,7 +206,7 @@ public static class ConfigEndpoints
             Results.Ok(await ReadExternalGainAsync(repo, ct)));
 
         group.MapPut("/external-gain", async (
-            ExternalGainConfig config, ConfigRepository repo, ExternalGainSetting setting,
+            ExternalGainConfig config, ConfigRepository repo, DeviceSessionService session,
             SpectrumPipeline pipeline, CancellationToken ct) =>
         {
             if (!config.IsValid)
@@ -193,9 +216,60 @@ public static class ConfigEndpoints
                 ConfigRepository.ExternalGainKey,
                 JsonSerializer.Serialize(config, AppJsonContext.Default.ExternalGainConfig),
                 ct);
-            setting.LeftDb = config.LeftDb;
-            setting.RightDb = config.RightDb;
+
+            // Through the session rather than straight into ExternalGainSetting: this document
+            // describes the QA403's bench, and the sound card keeps its own. The session remembers
+            // this as the analyzer-independent value and re-applies whichever is effective, so
+            // editing it while the sound card is selected does not silently swap the card's
+            // divider for this one.
+            session.SetSharedExternalGain(config.LeftDb, config.RightDb);
             pipeline.Flush(0);
+
+            return Results.Ok(config);
+        });
+
+        // The sound-card analyzer: which card, how it is wired, and where its full scale sits. One
+        // document, because a calibration only means anything against the device and channel pair
+        // it was taken on. The live copy is what AnalyzerDeviceFactory builds a device from, so a
+        // write here is followed by a reconnect -- the two ranges are derived from the calibration,
+        // and DeviceCapabilities is only read at connect.
+        group.MapGet("/soundcard", async (
+            ConfigRepository repo, CancellationToken ct) =>
+            Results.Ok(await ReadSoundCardAsync(repo, ct)));
+
+        group.MapPut("/soundcard", async (
+            SoundCardConfig config, ConfigRepository repo, SoundCardSetting setting,
+            DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
+        {
+            if (!config.IsValid)
+                return Results.BadRequest("Those sound-card settings are out of range.");
+
+            // Refused while a measurement owns the session, like every other device change: the
+            // card is about to be reopened underneath it.
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict(MeasurementRunGuard.Message);
+
+            await repo.SetAsync(
+                ConfigRepository.SoundCardKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.SoundCardConfig),
+                ct);
+            setting.Config = config;
+            session.RefreshSoundCardGain();
+
+            if (session.Kind == DeviceKind.SoundCard)
+            {
+                // Rebuild the device so the new card, rate, channel pair and calibration are the
+                // ones in use -- Capabilities is documented as valid only after ConnectAsync, and
+                // the two range rungs come from the calibration.
+                try
+                {
+                    await session.ReopenAsync(ct);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Results.Conflict(ex.Message);
+                }
+            }
 
             return Results.Ok(config);
         });

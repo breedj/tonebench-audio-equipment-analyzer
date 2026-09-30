@@ -313,7 +313,27 @@ public sealed record DeviceStatusResponse(
     /// during an acquisition it holds whatever it last read. See
     /// <see cref="Qa403.Device.IAnalyzerDevice.Telemetry"/>.
     /// </summary>
-    DeviceTelemetryResponse? Telemetry = null);
+    DeviceTelemetryResponse? Telemetry = null,
+    /// <summary>
+    /// The chosen input, or null when the analyzer is not the sound card — the same null convention
+    /// as the <c>Simulated*</c> fields, so the status bar gates its sound-card controls on this
+    /// rather than on a device-kind string comparison.
+    /// </summary>
+    string? SoundCardInputDevice = null,
+    /// <summary>The chosen output, same convention.</summary>
+    string? SoundCardOutputDevice = null,
+    /// <summary>
+    /// False until both calibration steps have been run. An uncalibrated card still measures every
+    /// <i>ratio</i> exactly — THD, IMD, crosstalk, the response shape — because a consistent wrong
+    /// full-scale constant cancels; what it cannot do is name a voltage. The bar says so, because a
+    /// card reading "0.00 dBV" it has never measured is the failure this feature exists to avoid.
+    /// </summary>
+    bool? SoundCardCalibrated = null,
+    /// <summary>
+    /// Whether the bar shows the two front-end gains in dB or as a ratio. Display only: the stored
+    /// value is dB, which is what every measurement's parameters record.
+    /// </summary>
+    string? SoundCardGainUnit = null);
 
 /// <summary>
 /// Wire shape of <see cref="Qa403.Device.DeviceTelemetry"/>: the figures QuantAsylum's own software

@@ -1756,9 +1756,11 @@ export interface MeasurementTypeAppliedResponse {
   chartShowDataPoints?: boolean | null
   chartShowMinMax?: boolean | null
   chartShowPeakHold?: boolean | null
+  /** Whether the live spectrum line itself is drawn — see ChartDisplayPanel.vue's "FFT data" checkbox. Null means drawn. */
+  chartShowFftTrace?: boolean | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
-  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means all four. */
+  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */
   chartShowWaterfall?: boolean | null
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
@@ -1771,12 +1773,14 @@ export interface MeasurementTypeAppliedResponse {
   weighting?: WeightingStandardName | null
   weightingUser1?: boolean | null
   weightingUser2?: boolean | null
-  /** The DUT gain beside Load Ω and the chart's level unit — see useDutGainDb.ts and spectrumUnits.ts. */
+  /** The DUT gain under the chart's unit dropdown, and that unit — see useChartDisplay.ts and spectrumUnits.ts. */
   dutGainDb?: number | null
   chartUnit?: string | null
   chartShowWeightingCurve?: boolean | null
   /** Whether the oscilloscope shows the THD residual — live pipeline state like the IMD spec, re-applied on load. */
   scopeResidual?: boolean | null
+  /** The unit the generator panel's level boxes are typed in — see generatorLevel.ts. Null means dBV; the tones are always dBV. */
+  generatorLevelUnit?: string | null
 }
 
 /**
@@ -1805,9 +1809,11 @@ export interface StagedMeasurementConfig {
   chartShowDataPoints?: boolean | null
   chartShowMinMax?: boolean | null
   chartShowPeakHold?: boolean | null
+  /** Whether the live spectrum line itself is drawn — see ChartDisplayPanel.vue's "FFT data" checkbox. Null means drawn. */
+  chartShowFftTrace?: boolean | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
-  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means all four. */
+  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */
   chartShowWaterfall?: boolean | null
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
@@ -1816,10 +1822,12 @@ export interface StagedMeasurementConfig {
   imdPreset?: string | null
   imdMethod?: ImdMethodName | null
   imdMaxOrder?: number | null
-  /** The DUT gain beside Load Ω and the chart's level unit — see useDutGainDb.ts and spectrumUnits.ts. */
+  /** The DUT gain under the chart's unit dropdown, and that unit — see useChartDisplay.ts and spectrumUnits.ts. */
   dutGainDb?: number | null
   chartUnit?: string | null
   chartShowWeightingCurve?: boolean | null
+  /** The unit the generator panel's level boxes are typed in — see generatorLevel.ts. */
+  generatorLevelUnit?: string | null
 }
 
 export interface SaveMeasurementTypeRequest {

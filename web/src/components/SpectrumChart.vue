@@ -87,6 +87,7 @@ const {
   visibleR,
   showMinMax,
   showPeakHold,
+  showFftTrace,
   spectrumUnit,
   dutGainDb,
   showWeightingCurve,
@@ -221,8 +222,12 @@ const CHANNEL_LABELS = ['L', 'R']
 const LIVE_COLOR = FFT_LIVE_COLOR
 const CHANNEL_DASH: (number[] | undefined)[] = [undefined, [6, 3]]
 // Deliberately not a shade of either run color — peak-hold needs to read as its own thing at a
-// glance, not a dimmer echo of whichever trace it belongs to.
-const PEAK_HOLD_COLOR = '#eab308'
+// glance, not a dimmer echo of whichever trace it belongs to. yellow-600 rather than yellow-500
+// (Joost, 2026-09-29): a 1 px dashed yellow-500 line was hard to follow over the light theme's white
+// plot, and it is the trace most often looked at on its own, with `FFT data` unchecked. Still light
+// enough to read against the dark theme's near-black well, and it is this constant the export legend
+// and the report's light palette take too.
+const PEAK_HOLD_COLOR = '#ca8a04'
 // The min/max band is live-only (see minMaxBandPlugin — it never reads overlay data) and is drawn
 // as a filled stroke per column rather than a uPlot series, so it can't carry a dash the way the
 // line above it now does. It keeps its own two-hue blue/orange distinction rather than switching to
@@ -501,7 +506,10 @@ function harmonicMarkersPlugin(theme: Theme, interactive: boolean): uPlot.Plugin
         (u) => {
           const idx = u.cursor.idx
           const xs = u.data[0]
-          const ys = u.data[1]
+          // Series 1 is live L; series 3 is its peak-hold (see the series layout above). The
+          // fallback is what `FFT data` needs: with the live line hidden, series 1 is all nulls and
+          // the readout would simply stop answering while there is still a curve under the cursor.
+          const ys = showFftTrace.value ? u.data[1] : u.data[3]
           if (idx == null || xs[idx] == null || ys?.[idx] == null) {
             cursorReadout.value = null
             return
@@ -967,7 +975,11 @@ function computeFrame(): FrameData | null {
   // the series themselves are always present (see buildOptions), only their data varies per tick.
   const ch0Offset = ch0 ? frameOffset(ch0) : null
   const ch1Offset = ch1 ? frameOffset(ch1) : null
-  const left = ch0 && channelVisible(0) && ch0Offset !== null ? maxTrace(ch0.columns, ch0.header.nPoints, ch0Offset) : nullFill(nPoints)
+  // `showFftTrace` hides these two lines here; the min/max band is drawn by minMaxBandPlugin off the
+  // frames themselves, and goes with them because useChartDisplay's watcher clears `showMinMax` at
+  // the same time — one checkbox, both halves of the same capture. Peak-hold below is deliberately
+  // not gated on it: leaving that trace legible on its own is the point of the toggle.
+  const left = showFftTrace.value && ch0 && channelVisible(0) && ch0Offset !== null ? maxTrace(ch0.columns, ch0.header.nPoints, ch0Offset) : nullFill(nPoints)
 
   // R can only be drawn when it was decimated over the same span as whatever xs came from (the
   // one frame after a zoom where L has already switched and R has not, is the case this guards).
@@ -976,7 +988,7 @@ function computeFrame(): FrameData | null {
   const rComparable =
     ch1 && channelVisible(1) && ch1.header.nPoints === nPoints && ch1Offset !== null &&
     (!ch0 || (ch1.header.flags & STREAM_FLAG_ZOOMED) === (ch0.header.flags & STREAM_FLAG_ZOOMED))
-  const right = rComparable ? maxTrace(ch1!.columns, ch1!.header.nPoints, ch1Offset!) : nullFill(nPoints)
+  const right = showFftTrace.value && rComparable ? maxTrace(ch1!.columns, ch1!.header.nPoints, ch1Offset!) : nullFill(nPoints)
 
   // Peak-hold: fold this tick's columns into the running maps (only while enabled — leaving it off
   // is how a user keeps yesterday's peak run from bleeding into today's), then read the maps back
@@ -1079,8 +1091,8 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
 
     const own = (label: string) => (primaryLabel ? `${primaryLabel} — ${label}` : label)
     const legend: ExportLegendEntry[] = []
-    if (props.spectrum[0] && channelVisible(0)) legend.push({ label: own('L'), color: LIVE_COLOR })
-    if (props.spectrum[1] && channelVisible(1)) legend.push({ label: own('R'), color: LIVE_COLOR, dash: [6, 3] })
+    if (showFftTrace.value && props.spectrum[0] && channelVisible(0)) legend.push({ label: own('L'), color: LIVE_COLOR })
+    if (showFftTrace.value && props.spectrum[1] && channelVisible(1)) legend.push({ label: own('R'), color: LIVE_COLOR, dash: [6, 3] })
     if (showPeakHold.value) legend.push({ label: own('Peak hold'), color: PEAK_HOLD_COLOR, dash: [2, 2] })
     if (showWeightingCurve.value && weightingCurve.value) legend.push({ label: 'Weighting curve (0 dB at top − 20 dB)', color: WEIGHTING_CURVE_COLOR, dash: [6, 4] })
     for (const overlay of props.overlays) {
@@ -1110,6 +1122,7 @@ watch(visibleL, update)
 watch(visibleR, update)
 watch(showMinMax, update)
 watch(showPeakHold, update)
+watch(showFftTrace, update)
 watch(showWeightingCurve, () => plot?.redraw())
 watch(yTop, () => plot?.redraw())
 watch(thickLines, update)
@@ -1182,7 +1195,7 @@ onBeforeUnmount(() => {
          min-height the Reset zoom button fits inside: the readout used to *replace* the button while
          the cursor was over the plot, and since the button is taller than a line of text the header
          shrank on every hover and the plot below jumped up by the difference. -->
-    <div class="min-h-6 pr-7 flex items-center justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-9 flex items-center justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <!-- Title and the weighting annunciator in one fixed group, and the middle slot always
            flex-1 whatever it holds: with the chip as its own flex item and the readout/spacer
            sized differently, justify-between redistributed the chip every time the cursor entered
@@ -1210,7 +1223,7 @@ onBeforeUnmount(() => {
       <button
         v-if="zoomed"
         type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
         title="Back to the full frequency span."
         @click="resetZoom"
       >

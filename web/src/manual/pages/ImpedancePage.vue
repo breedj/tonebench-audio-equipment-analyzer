@@ -331,19 +331,23 @@ const { showPage } = useManual()
 
     <h2>Fitting the axes</h2>
     <p>
-      <strong>Autofit</strong> beside the impedance bounds sets the ohms window from everything the
+      <strong>Autofit</strong> beside the impedance bounds is the chart's only one — it sets the
+      frequency window to the measured band and then the ohms and phase windows from everything the
       chart is currently drawing, rounded outward to a readable 1/2/5 step and taken only over the
       frequencies in view. On the linear scale the bottom is always zero — fitting it to the data's
       own minimum would stretch a resistor's milliohms of noise to full height — while the
       logarithmic scale fits both ends. That includes the <strong>short calibration</strong> trace whenever it is
       ticked, so switching it on and pressing Autofit brings both it and the DUT into one window —
       expect a much taller window than the DUT alone would give, since a short is a fraction of an
-      ohm. Untick it and fit again for a window around the DUT by itself. Autofit beside the phase
-      bounds does the same for the phase axis, from the measured curve.
+      ohm. Untick it and fit again for a window around the DUT by itself. The phase axis is fitted
+      by the same press, from the measured curve.
     </p>
     <p>
-      <strong>Autofit each measurement</strong> runs both automatically at the end of a
-      run rather than during it, since refitting mid-average makes the trace crawl.
+      <strong>Autofit each measurement</strong> does the same automatically at the end of a run
+      rather than during it, since refitting mid-average makes the trace crawl. It fits once early
+      as well, so a live sweep is not measured against a window left over from another DUT; that
+      first fit leaves the frequency axis alone, because two points of a stepped sweep are not the
+      band it is about to draw.
     </p>
 
     <h2>Zooming and the frequency axis</h2>

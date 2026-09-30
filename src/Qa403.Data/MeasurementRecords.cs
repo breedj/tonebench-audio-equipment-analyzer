@@ -109,7 +109,7 @@ public sealed record FftSpectrumParameters(
     string? WeightingUser1Name = null,
     string? WeightingUser2Name = null,
     /// <summary>
-    /// The DUT's gain in dB, entered beside Load Ω, used to refer the noise density to the DUT's
+    /// The DUT's gain in dB, entered under the chart's unit dropdown, used to refer the noise density to the DUT's
     /// input ("Noise in nV/√Hz") and for the chart's input-referred unit. A type setting, saved
     /// with the result that used it. Null means 0 dB.
     /// </summary>
@@ -124,7 +124,21 @@ public sealed record FftSpectrumParameters(
     /// pipeline state like the IMD spec, so it is read from the options on save and re-applied on
     /// load. Null on a row an older build wrote, meaning off.
     /// </summary>
-    bool? ScopeResidual = null);
+    bool? ScopeResidual = null,
+    /// <summary>
+    /// The unit the generator panel's level boxes are typed in -- <c>Dbv</c>, <c>Volt</c> or
+    /// <c>MilliVolt</c> (see the client's GeneratorLevelUnit). Display only: every stored and
+    /// transmitted level is dBV whatever this says, so it can never disagree with the tones it sits
+    /// beside. A type setting, saved with the result that used it; null means dBV.
+    /// </summary>
+    string? GeneratorLevelUnit = null,
+    /// <summary>
+    /// Whether the spectrum chart draws the live trace itself -- ChartDisplayPanel's "FFT data"
+    /// checkbox. Display only, like the toggles above. Null means drawn, which is what a row saved
+    /// before this existed has to mean. The min/max band and the peak-hold trace have their own
+    /// flags and are unaffected: leaving those two legible on their own is the point of it.
+    /// </summary>
+    bool? ChartShowFftTrace = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for

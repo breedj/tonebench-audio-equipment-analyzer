@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
 import { api, ApiError, type ResponsePhaseKindName, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
+import { generatorLevelUnitOf } from './generatorLevel'
 import { useDevice } from './composables/useDevice'
 import { DEVICE_STATUS_KEY } from './simulator/hints'
 import { useSpectrumStream } from './composables/useSpectrumStream'
@@ -170,6 +171,7 @@ const {
   showDataPoints: chartShowDataPoints,
   showMinMax: chartShowMinMax,
   showPeakHold: chartShowPeakHold,
+  showFftTrace: chartShowFftTrace,
   autofitOnDone: chartAutofitOnDone,
   showWaterfall: chartShowWaterfall,
   showOscilloscope: chartShowOscilloscope,
@@ -211,7 +213,13 @@ watch(
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
 // fundamental (the global-peak-bin search would just lock onto whichever tone happens to read
 // loudest) and White noise has no discrete tone at all, so both would label meaningless content.
-const { kind: stimulusKind, tones: stimulusTones, multitone: stimulusMultitone, imd: stimulusImd } = useGeneratorStimulus()
+const {
+  kind: stimulusKind,
+  tones: stimulusTones,
+  multitone: stimulusMultitone,
+  imd: stimulusImd,
+  levelUnit: stimulusLevelUnit,
+} = useGeneratorStimulus()
 const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
 
 // Whether the pipeline is measuring two-tone IMD right now — what the Intermodulation table
@@ -318,6 +326,9 @@ watch(
       method: params?.imdMethod ?? 'Smpte',
       maxOrder: params?.imdMaxOrder ?? 5,
     })
+    // Which unit the generator's level boxes read in — display only, staged with the tones. A type
+    // saved before this existed has none, which is dBV.
+    stimulusLevelUnit.value = generatorLevelUnitOf(params?.generatorLevelUnit)
   },
   { immediate: true },
 )
@@ -2367,6 +2378,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowDataPoints: chartShowDataPoints.value,
     chartShowMinMax: chartShowMinMax.value,
     chartShowPeakHold: chartShowPeakHold.value,
+    chartShowFftTrace: chartShowFftTrace.value,
     chartAutofitOnDone: chartAutofitOnDone.value,
     chartShowWaterfall: chartShowWaterfall.value,
     chartShowOscilloscope: chartShowOscilloscope.value,
@@ -2378,6 +2390,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     dutGainDb: chartDutGainDb.value,
     chartUnit: chartSpectrumUnit.value,
     chartShowWeightingCurve: chartShowWeightingCurve.value,
+    generatorLevelUnit: stimulusLevelUnit.value,
   }
 }
 
@@ -3101,16 +3114,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
       <main class="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
         <template v-if="currentTypeId !== null">
-          <div class="flex flex-wrap items-center gap-2 text-sm">
+          <!-- THE MEASUREMENT BAR: the name of what is selected, everything that can be done to it,
+               and the help button — the one row every screen shares. A bar rather than a row of
+               loose buttons on the page ground (Joost, 2026-09-30): it bleeds out to the edges of
+               <main> (the negative margins cancel that element's own p-4, which is then re-applied
+               as px-4), carries the panel surface with a rule under it, and sticks to the top while
+               a long screen scrolls, so Save never scrolls away from the settings being changed.
+               `-top-4` and not `top-0`: a sticky element parks against its scroll container's
+               *padding* box, which would leave the bar 16 px down with content sliding through the
+               gap above it. The buttons inside are flat — the bar is the frame now, and sixteen
+               outlined boxes inside another box read as a fence. z-10 sits under the sidebar's
+               floating menu (z-30), an expanded chart (z-40) and the dialogs (z-50). -->
+          <div
+            class="panel-surface sticky -top-4 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-1 border-b border-neutral-200 px-4 py-2 text-sm dark:border-neutral-800"
+          >
             <span class="min-w-0 max-w-xs truncate font-medium" :title="currentType?.name">{{ currentType?.name }}</span>
             <span
               v-if="isCurrentTypeDirty"
               class="h-2 w-2 shrink-0 rounded-full bg-red-500"
               title="Unsaved changes"
             ></span>
+            <!-- Separates what is selected from what can be done to it. Purely a rule: `aria-hidden`
+                 so it is not read out as a control. -->
+            <span class="mx-2 h-5 w-px shrink-0 bg-neutral-200 dark:bg-neutral-800" aria-hidden="true"></span>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="!isCurrentTypeDirty"
               title="Save the current settings into this measurement."
               @click="saveCurrentType"
@@ -3120,7 +3149,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             </button>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
               title="Save the current settings as a new measurement in this project; this one reverts to its own last-saved settings."
               @click="saveTypeAsOpen = true"
             >
@@ -3130,7 +3159,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
               title="Saves the currently displayed (stopped) spectrum as a new measurement result — stop acquisition first."
               @click="openSaveDialog"
@@ -3141,7 +3170,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
               title="Clears the currently displayed spectrum, oscilloscope trace and meters — stop acquisition first. Does not delete anything saved to History."
               @click="clearMeasurement"
@@ -3152,7 +3181,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isSweepKind"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="sweepRunning || sweepPoints.length === 0"
               title="Saves the sweep on screen as a new measurement result — one stored point per frequency. A cancelled sweep can be saved too."
               @click="openSaveDialog"
@@ -3163,7 +3192,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isFrequencyResponse || isCrosstalk"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
               :title="isCrosstalk ? 'Saves the crosstalk curves on screen as a new measurement result.' : 'Saves the curves on screen as a new measurement result, with their bandwidth readings.'"
               @click="openSaveDialog"
@@ -3174,7 +3203,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="impedanceRunning || impedanceTraces.length === 0"
               title="Saves the impedance curve on screen as a new measurement result, together with the fixture calibration that produced it."
               @click="openSaveDialog"
@@ -3185,7 +3214,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="impedanceRunning || impedanceTraces.length === 0"
               title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings and the calibration alone."
               @click="clearImpedance"
@@ -3196,7 +3225,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="outputImpedanceRunning || !outputImpedanceTrace"
               title="Saves the output-impedance curve on screen as a new measurement result, with the two gain passes it was derived from."
               @click="openSaveDialog"
@@ -3207,7 +3236,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="outputImpedanceRunning || !outputImpedanceTrace"
               title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearOutputImpedance"
@@ -3218,7 +3247,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isImpulseResponse"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="impulseRunning || impulseTraces.length === 0"
               title="Saves the impulse response on screen as a new measurement result, with its gated curves and harmonic distortion."
               @click="openSaveDialog"
@@ -3229,7 +3258,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isImpulseResponse"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="impulseRunning || impulseTraces.length === 0"
               title="Clears what is on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearImpulseResponse"
@@ -3240,7 +3269,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isFrequencyResponse || isCrosstalk"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
               title="Clears the curves on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearFrequencyResponse"
@@ -3255,7 +3284,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isSweepKind"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="sweepRunning || sweepPoints.length === 0"
               title="Clears the sweep on screen and its preview traces — cancel a running sweep first. Does not delete anything saved to History, and leaves the sweep settings alone."
               @click="clearSweep"
@@ -3270,7 +3299,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="reportHasChart(currentType?.kind)"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="!screenshotAvailable"
               title="The chart on screen — whichever view or projection is showing — as a PNG in the light colour scheme, at the zoom shown: to the clipboard or a file, at a chosen size, with a title and the date if wanted."
               @click="screenshotDialogOpen = true"
@@ -3280,7 +3309,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             </button>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
               :disabled="!currentType || responseRunning || sweepRunning || impedanceRunning || impulseRunning || outputImpedanceRunning"
               title="A PDF report of what is on screen: chart, notes, settings and readings, as chosen. Stored results have their own Report button in History details."
               @click="openReport(null)"
@@ -3294,7 +3323,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                  of the row, clear of the save buttons. -->
             <button
               type="button"
-              class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               :aria-label="`Help for ${currentType?.kind ? currentType.name : 'this measurement'}`"
               title="Open this measurement's chapter of the manual."
               @click="openManualForKind(currentType?.kind)"
@@ -3530,7 +3559,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <!-- The one screen with a wide settings rail: its generator block carries sentences
                  ("at 5-10 Hz (bandwidth reference)", the stepped sweep's point and time estimate)
                  that wrap to three lines at the default 16rem. -->
-            <MeasurementLayout wide-rail>
+            <MeasurementLayout>
               <template #rail>
                 <!-- RUN / SINGLE / STOP, the same trio and the same shape as the FFT screen's, so
                      the button that starts a measurement sits in one place whichever screen you are
@@ -4332,7 +4361,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
           <!-- FFT Spectrum screen, matching the wireframe: settings rail on the left, chart in the
                center, display options + history checklist on the right. -->
           <template v-else>
-          <MeasurementLayout>
+          <MeasurementLayout roomy-rail>
             <template #rail>
               <div class="flex gap-3">
                 <button

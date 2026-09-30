@@ -5,8 +5,7 @@ import { ref, watch } from 'vue'
 // since showModal() already gives Escape-to-close, a backdrop, and focus containment for free in
 // every evergreen browser.
 
-const props = withDefaults(defineProps<{ open: boolean; title: string; closeOnBackdrop?: boolean; wide?: boolean }>(), {
-  closeOnBackdrop: true,
+const props = withDefaults(defineProps<{ open: boolean; title: string; wide?: boolean }>(), {
   wide: false,
 })
 const emit = defineEmits<{ close: [] }>()
@@ -26,17 +25,18 @@ watch(
 
 function onCancel(e: Event) {
   // Fires on Escape (native <dialog> behaviour), before the element actually closes — prevented
-  // so dismissal always routes through the one @close handler, same as the backdrop and the X
-  // button, rather than the parent's `open` state and the dialog's own state disagreeing.
+  // so dismissal always routes through the one @close handler, same as the X button, rather than
+  // the parent's `open` state and the dialog's own state disagreeing.
   e.preventDefault()
   emit('close')
 }
 
-function onBackdropClick(e: MouseEvent) {
-  // A click that lands on the <dialog> element itself (not a descendant) is the backdrop —
-  // <dialog>'s own box fills the viewport when open, so only clicks outside the visible card hit it directly.
-  if (props.closeOnBackdrop && e.target === dialogRef.value) emit('close')
-}
+// There is deliberately no backdrop-click handler (Joost, 2026-09-30): a dialog here is closed by
+// its own X, its Cancel button or Escape, and nothing else. Half of them already opted out through a
+// `closeOnBackdrop` prop — a report with its elements ticked, a configuration page, a save dialog
+// with a name typed into it — and the ones that had not were the same kind of thing, so the prop is
+// gone rather than defaulted. A stray click beside a dialog is far more often a miss than a
+// dismissal, and there is nothing to undo the discard it used to cause.
 </script>
 
 <template>
@@ -45,7 +45,6 @@ function onBackdropClick(e: MouseEvent) {
     class="m-auto w-full rounded-lg border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 dark:border-neutral-800 dark:text-neutral-100"
     :class="props.wide ? 'max-w-2xl' : 'max-w-lg'"
     @cancel="onCancel"
-    @click="onBackdropClick"
   >
     <div class="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
       <h2 class="text-sm font-semibold">{{ props.title }}</h2>

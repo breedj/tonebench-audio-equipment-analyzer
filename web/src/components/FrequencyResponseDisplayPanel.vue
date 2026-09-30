@@ -91,7 +91,7 @@ const projectionHint = computed(() =>
       : 'This run measured no phase. Turn the right-channel generator on and make it the reference.',
 )
 
-/** Bode-only controls: the dB window, the bandwidth markers, the channel checkboxes and both Autofits. */
+/** Bode-only controls: the dB window, the bandwidth markers, the channel checkboxes and the value-axis half of Autofit. */
 const bodeShowing = computed(() => projection.value === 'Bode' || !complexAvailable.value)
 
 const PROJECTIONS: { value: ResponseProjection; label: string }[] = [
@@ -397,15 +397,26 @@ function autofitX() {
 // autofit functions and the running/traces state are both already local to this file and to
 // useFrequencyResponse() -- this is the same running->not-running transition that flips RUN back
 // to a start-labeled button.
+/**
+ * One Autofit per chart, not one per axis (Joost, 2026-09-30): this one press fits every axis the
+ * view is showing. Frequency first, because each of the three value fits is scoped to the frequency
+ * window — run the other way round and they size themselves to whatever the previous window held.
+ * The phase and delay fits are skipped where their curves are not drawn; each would otherwise write
+ * a window from a curve the user cannot see.
+ */
+function autofitAll() {
+  autofitX()
+  if (!bodeShowing.value) return
+  autofitDb()
+  if (showPhase.value && phaseAvailable.value) autofitPhase()
+  if (delayView.value !== 'None' && phaseAvailable.value) autofitDelay()
+}
+
 watch(running, (isRunning, wasRunning) => {
-  // Gated on the Bode chart actually being up: these fit the dB and frequency windows, and firing
-  // them under a polar projection silently rewrites a window the user cannot see.
-  if (wasRunning && !isRunning && autofitOnDone.value && bodeShowing.value) {
-    autofitDb()
-    autofitX()
-    if (showPhase.value && phaseAvailable.value) autofitPhase()
-    if (delayView.value !== 'None' && phaseAvailable.value) autofitDelay()
-  }
+  // Under a polar projection only the frequency window is fitted — autofitAll's own gate. The dB,
+  // phase and delay windows belong to the Bode chart, and rewriting them from here would change a
+  // window the user cannot see.
+  if (wasRunning && !isRunning && autofitOnDone.value) autofitAll()
 })
 </script>
 
@@ -749,10 +760,14 @@ watch(running, (isRunning, wasRunning) => {
         @change="onBottomDbChange"
       />
     </label>
+    <!-- The chart's one Autofit, in the first axis section rather than a scroll below the fields
+         it overwrites. Under a projection that has no dB window this section is hidden, and the
+         same button appears in Frequency range below instead. -->
     <button
       type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      @click="autofitDb"
+      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      title="Fits every axis the chart is showing to what is drawn: the frequency window to the measured band, then the level window, and the phase and delay windows when those curves are on."
+      @click="autofitAll"
     >
       Autofit
     </button>
@@ -778,9 +793,11 @@ watch(running, (isRunning, wasRunning) => {
       </select>
     </label>
     <button
+      v-if="!bodeShowing"
       type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      @click="autofitX"
+      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      title="Fits the frequency window to the measured band. This projection has no other axis to fit."
+      @click="autofitAll"
     >
       Autofit
     </button>
@@ -809,14 +826,6 @@ watch(running, (isRunning, wasRunning) => {
         @change="onBottomPhaseChange"
       />
     </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits the window to the phase curve. In FR (dBV) view that trace carries no phase at all, so this settles on the narrowest span around 0 deg rather than anything useful -- switch to Gain view to fit a real reading."
-      @click="autofitPhase"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <!-- Same shape as the phase range, in the unit the axis is reading in. -->
@@ -841,14 +850,6 @@ watch(running, (isRunning, wasRunning) => {
         @change="onBottomDelayChange"
       />
     </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits the window to the delay curve inside the plotted frequency range, in whichever unit its size calls for."
-      @click="autofitDelay"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
 </template>

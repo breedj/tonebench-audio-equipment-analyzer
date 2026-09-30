@@ -390,7 +390,7 @@ watch([isDark, () => props.thickLines], () => draw())
 <template>
   <div ref="root" class="relative flex flex-col gap-2">
     <ExpandToggle class="absolute right-0 top-0" :target="root" />
-    <div class="min-h-6 pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-9 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span v-if="hoverText" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
         <span class="text-neutral-800 dark:text-neutral-100">{{ hoverText.freq }}</span>
         <span>R <span class="text-neutral-800 dark:text-neutral-100">{{ hoverText.r }}</span></span>

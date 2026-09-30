@@ -1,6 +1,6 @@
 import type uPlot from 'uplot'
 import type { SweepXAxisName, ThdSweepPoint } from '../api/client'
-import { FREQ_AXIS_SPACE, freqAxis, freqTickSplits, plotWidthPx } from '../freqAxis'
+import { FREQ_AXIS_SPACE, freqAxis, freqMinorSplits, freqTickSplits, plotWidthPx } from '../freqAxis'
 
 /**
  * What a sweep chart plots along x.
@@ -235,6 +235,24 @@ export function sweepXAxis(axis: SweepXAxis): Pick<uPlot.Axis, 'space' | 'splits
  * the caller — the chart owns the theme — and `size: 0` keeps this one out of the layout so it
  * costs no space alongside the plot.
  */
+/**
+ * The same companion axis for a **frequency** scale, whose labelled ticks are freqAxis' 1/2/5 ladder
+ * rather than bare decades. Fills in the mantissas that ladder left out — so a decade reads
+ * 10 · 20 · 30 · … · 90 · 100 in lines, labelled wherever the labels fit — and takes the complement
+ * from {@link freqMinorSplits} so no position is drawn twice. See there for why that matters.
+ */
+export function freqMinorGridAxis(): Pick<uPlot.Axis, 'space' | 'splits' | 'filter' | 'values'> {
+  return {
+    space: 0,
+    splits: (u, axisIdx, scaleMin, scaleMax) => {
+      const scaleKey = u.axes[axisIdx].scale ?? 'x'
+      return freqMinorSplits(scaleMin, scaleMax, plotWidthPx(u, scaleKey, scaleMin, scaleMax))
+    },
+    filter: (_u, splits) => splits,
+    values: (_u, splits) => splits.map(() => null),
+  }
+}
+
 export function logMinorGridAxis(): Pick<uPlot.Axis, 'space' | 'splits' | 'filter' | 'values'> {
   return {
     space: 0,

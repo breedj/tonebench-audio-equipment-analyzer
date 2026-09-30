@@ -749,7 +749,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         <button
           type="button"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          class="rounded border px-2 py-0.5 disabled:opacity-40 btn-action"
           @click="emit('calibrate', 'Open')"
         >
           Measure
@@ -758,7 +758,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
           v-if="hasOpenCal"
           type="button"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          class="rounded border px-2 py-0.5 disabled:opacity-40 btn-action"
           @click="clearCalibration('open')"
         >
           Clear
@@ -774,7 +774,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         <button
           type="button"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          class="rounded border px-2 py-0.5 disabled:opacity-40 btn-action"
           @click="emit('calibrate', 'Short')"
         >
           Measure
@@ -783,7 +783,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
           v-if="hasShortCal"
           type="button"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          class="rounded border px-2 py-0.5 disabled:opacity-40 btn-action"
           @click="clearCalibration('short')"
         >
           Clear

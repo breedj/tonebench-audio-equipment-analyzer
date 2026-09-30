@@ -316,12 +316,21 @@ function requestAutofitX() {
   xTo.value = to > from ? to : from * 10
 }
 
+/**
+ * One Autofit per chart, not one per axis (Joost, 2026-09-30). The frequency window is fitted
+ * first: every level fit below is scoped to it, so fitting the other way round sizes the axis to
+ * whatever the old window happened to hold.
+ */
+function autofitAll() {
+  requestAutofitX()
+  requestAutofitDistortion()
+}
+
 // "Autofit when measurement done": fires on the running->not-running transition, whether the sweep
 // finished, was cancelled, or was stopped manually -- same signal the RUN/STOP button itself uses.
 watch(running, (isRunning, wasRunning) => {
   if (wasRunning && !isRunning && autofitOnDone.value) {
-    requestAutofitDistortion()
-    requestAutofitX()
+    autofitAll()
   }
 })
 
@@ -399,11 +408,13 @@ function onXToChange(event: Event) {
         </select>
       </label>
     </template>
+    <!-- The chart's one Autofit, in the first section rather than a scroll below the fields it
+         overwrites. -->
     <button
       type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits to the highest and lowest value across every currently-checked trace. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
-      @click="requestAutofitDistortion"
+      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      title="Fits both axes to every currently-checked trace: the sweep axis to the measured span, and the distortion axis to the highest and lowest value in it. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
+      @click="autofitAll"
     >
       Autofit
     </button>
@@ -465,14 +476,6 @@ function onXToChange(event: Event) {
         />
       </label>
     </template>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits From/To to the lowest and highest measured value on this axis."
-      @click="requestAutofitX"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">

@@ -181,7 +181,7 @@ async function clearStoredCalibration() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Configuration" :close-on-backdrop="false" @close="emit('close')">
+  <Modal :open="props.open" title="Configuration" @close="emit('close')">
     <div class="flex flex-col gap-4 text-sm">
       <!-- Tabs rather than one long scroll: the settings here have nothing to do with each other,
            and a page that mixes a theme picker with a fixture calibration makes both harder to find. -->

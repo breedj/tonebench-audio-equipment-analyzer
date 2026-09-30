@@ -148,12 +148,18 @@ function autofitX() {
   xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
 }
 
+/**
+ * One Autofit per chart, not one per axis (Joost, 2026-09-30). Frequency first: the ohms and phase
+ * fits are both scoped to the frequency window.
+ */
+function autofitAll() {
+  autofitX()
+  autofitZ()
+  if (props.phaseAvailable) autofitPhase()
+}
+
 watch(running, (isRunning, wasRunning) => {
-  if (wasRunning && !isRunning && autofitOnDone.value) {
-    autofitX()
-    autofitZ()
-    if (props.phaseAvailable) autofitPhase()
-  }
+  if (wasRunning && !isRunning && autofitOnDone.value) autofitAll()
 })
 </script>
 
@@ -179,11 +185,13 @@ watch(running, (isRunning, wasRunning) => {
         <input :value="zBottomOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onBottomZChange" />
       </label>
     </div>
+    <!-- The chart's one Autofit, in the first axis section rather than a scroll below the fields
+         it overwrites. -->
     <button
       type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits the window to every Zout curve on the chart, live and history. The damping-factor axis follows: it is this window inverted."
-      @click="autofitZ"
+      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      title="Fits every axis to what is drawn, live and history: the frequency window to the measured band, then the ohms and phase axes to the curves inside it. The damping-factor axis follows the ohms one — it is that window inverted."
+      @click="autofitAll"
     >
       Autofit
     </button>
@@ -212,13 +220,6 @@ watch(running, (isRunning, wasRunning) => {
         <input :value="phaseBottomDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onBottomPhaseChange" />
       </label>
     </div>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      @click="autofitPhase"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
@@ -234,13 +235,6 @@ watch(running, (isRunning, wasRunning) => {
         <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
     </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      @click="autofitX"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">

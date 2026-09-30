@@ -1117,7 +1117,7 @@ watch(delayRange, () => refresh())
     <ExpandToggle class="absolute right-0 top-0" :target="root" />
     <!-- Cursor readout on the left, zoom state on the right. Both are about the plot below rather
          than about the measurement, so they sit with it and not in the display panel. -->
-    <div class="min-h-6 pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-9 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span v-if="cursorReadout" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
         <span class="text-neutral-800 dark:text-neutral-100">{{ formatHz(cursorReadout.freqHz) }}</span>
         <span v-for="entry in cursorReadout.entries" :key="entry.key" class="flex items-center gap-1">
@@ -1134,7 +1134,7 @@ watch(delayRange, () => refresh())
       <button
         v-if="zoomed"
         type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
         title="Back to the frequency and dB window set in the display panel."
         @click="resetZoom"
       >

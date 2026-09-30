@@ -53,12 +53,16 @@ const delaySuffix = computed(() => (props.phaseKind === 'ChannelDifference' ? ' 
          the corners on the curves already on screen (see BandwidthReferenceControls). -->
     <BandwidthReferenceControls :stepped="stepped" />
 
-    <!-- Sized to its content, not to the panel: this moved into the chart column on 2026-09-27, and
-         a full-width table there spread five short columns across 700 px, so the ±1 dB label and its
-         figures sat a hand's width apart. `self-start` is what does it — dropping `w-full` alone
-         changes nothing, because the panel body is a flex column and a flex item stretches across
-         the cross axis by default. Nothing below stretches either, for the same reason. -->
-    <table v-if="trace" class="self-start text-left text-[11px] whitespace-nowrap">
+    <!-- Half a panel wide, not the whole panel and not its own content: this moved into the chart
+         column on 2026-09-27, and a full-width table there spread five short columns across 700 px,
+         with the ±1 dB label and its figures a hand's width apart. Content-sized was the answer to
+         that and read as cramped (Joost, 2026-09-30), so both blocks here are now `w-full` under a
+         24rem cap — about half again the width they were, with the slack shared out between the
+         columns rather than dumped into one. The cap is what keeps that safe at every width: under
+         it the block simply takes the panel, so a narrow column (the two-wide flow under the chart
+         at lg) shrinks it back to content instead of overflowing, which `whitespace-nowrap` would
+         otherwise turn into a horizontal scrollbar. -->
+    <table v-if="trace" class="w-full max-w-96 text-left text-[11px] whitespace-nowrap">
       <thead class="text-neutral-500 dark:text-neutral-400">
         <tr>
           <th class="font-normal"></th>
@@ -90,13 +94,13 @@ const delaySuffix = computed(() => (props.phaseKind === 'ChannelDifference' ? ' 
       </tbody>
     </table>
 
-    <!-- `justify-start` is load-bearing, not tidiness: grid's default `justify-content: normal`
-         behaves as `stretch`, which grows *auto* tracks to fill the container — so without it these
-         three columns spread across the whole chart column and every label sat far from its value.
-         With it the leftover width is simply left empty. The label column is still the one that
-         gives when the panel is narrow (`auto` may shrink to min-content and wrap): a value split
-         over two lines ("4.41" / "dB") reads as two numbers, a label split over two does not. -->
-    <dl v-if="trace" class="mt-2 grid grid-cols-[auto_auto_auto] justify-start gap-x-4 gap-y-1 text-xs">
+    <!-- The same 24rem as the table above, so the two blocks line up on both edges. The slack goes
+         into the *label* column (`1fr`, the value columns `auto`), which puts every figure on the
+         block's right-hand side under the one above it — spread across three `auto` tracks instead,
+         the columns would land wherever the widest row put them. The label column is also the one
+         that gives when the panel is narrow: a value split over two lines ("4.41" / "dB") reads as
+         two numbers, a label split over two does not. -->
+    <dl v-if="trace" class="mt-2 grid w-full max-w-96 grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1 text-xs">
       <dt class="text-neutral-500 dark:text-neutral-400">{{ peakLabel }}</dt>
       <dd class="whitespace-nowrap font-mono">{{ formatDb(trace.peakDb) }}</dd>
       <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ formatRatio(trace.peakDb) }}</dd>

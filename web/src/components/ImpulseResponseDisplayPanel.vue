@@ -150,25 +150,32 @@ function fitToHarmonics() {
 }
 
 /**
- * Whether Autofit has anything to do. The impulse view in volts already fits its own data
+ * Whether Autofit has anything to do. In the volts impulse view the level axis fits itself
  * continuously — its magnitude spans six decades across DUTs, so a stored window would be wrong far
- * more often than right — and offering a button that cannot change anything is worse than not
- * offering one.
+ * more often than right — but the *time* axis is still the button's to set, which is why a live
+ * impulse qualifies whatever the normalisation says. Offering a button that cannot change anything
+ * is worse than not offering one.
  */
 const canAutofit = computed(() => {
   // The decay views have a range rather than a window: 0 dB is fixed by the surface's own
   // normalisation, so there is nothing for an autofit to find.
   if (isDecayView.value) return false
-  if (view.value === 'Impulse') return normalisedImpulse.value && (impulse.value !== null || overlayImpulses.value.length > 0)
+  if (view.value === 'Impulse') {
+    return impulse.value !== null || (normalisedImpulse.value && overlayImpulses.value.length > 0)
+  }
   if (view.value === 'Response') return traces.value.length > 0 || overlayGains.value.length > 0
   return harmonics.value.length > 0
 })
 
-const autofitTitle = computed(() =>
-  view.value === 'Impulse' && !normalisedImpulse.value
-    ? 'The volts view already scales to the impulse it is showing.'
-    : 'Fit the level axis to what is currently drawn.',
-)
+const autofitTitle = computed(() => {
+  if (view.value === 'Impulse') {
+    return normalisedImpulse.value
+      ? 'Fits the time axis to the measured gate and the level axis to the impulse drawn in it.'
+      : 'Fits the time axis to the measured gate. The volts view already scales its own level axis.'
+  }
+  if (view.value === 'Harmonics') return 'Fits the frequency range to the band the harmonic curves cover, and the level axis to them.'
+  return 'Fits the level axis, and the phase and delay axes with it, to what is currently drawn.'
+})
 
 /** How far below the peak the impulse view will fit. Past this it is showing the gate, not the DUT. */
 const ImpulseFloorDb = -120
@@ -193,6 +200,10 @@ function impulseLevelsDb(): number[] {
  */
 function autofit() {
   if (view.value === 'Impulse') {
+    // The time axis first — one Autofit per chart rather than one per axis (Joost, 2026-09-30), so
+    // this is what the separate "Fit to gate" button used to do. Harmless with no live impulse.
+    fitToGate()
+    if (!normalisedImpulse.value) return
     // The peak is 0 dB by definition, so only the floor is in question — and it is bounded, not
     // measured: the gate tapers the impulse to nothing at its edges, so the lowest sample says where
     // the dB conversion bottoms out rather than anything about the DUT.
@@ -256,6 +267,10 @@ function autofit() {
     }
     return
   }
+
+  // Harmonics. The frequency window first, for the reason every other panel fits x before y: the
+  // level fit below is scoped to it. This is what the separate "Fit to measured band" button did.
+  fitToHarmonics()
 
   // Every order at once: they share one axis, so fitting the loudest alone would push the rest off.
   const levels: number[] = []
@@ -329,14 +344,6 @@ const referenceLabel = computed(() => {
         </label>
       </div>
 
-      <button
-        type="button"
-        :disabled="!impulse"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        @click="fitToGate"
-      >
-        Fit to gate
-      </button>
     </template>
 
     <template v-else-if="view === 'Response'">
@@ -434,14 +441,6 @@ const referenceLabel = computed(() => {
         </label>
       </div>
 
-      <button
-        type="button"
-        :disabled="harmonics.length === 0"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        @click="fitToHarmonics"
-      >
-        Fit to measured band
-      </button>
     </template>
 
     <!-- The decay surfaces. Everything here is an analysis of the impulse response already
@@ -623,7 +622,7 @@ const referenceLabel = computed(() => {
       type="button"
       :disabled="!canAutofit"
       :title="autofitTitle"
-      class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+      class="rounded border px-2 py-1 text-xs disabled:opacity-50 btn-action"
       @click="autofit"
     >
       Autofit

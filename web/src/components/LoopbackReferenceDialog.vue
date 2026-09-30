@@ -80,7 +80,7 @@ async function remove(id: number) {
 </script>
 
 <template>
-  <Modal :open="open" title="Capture a loopback calibration" :close-on-backdrop="!capturingReference" @close="emit('close')">
+  <Modal :open="open" title="Capture a loopback calibration" @close="emit('close')">
     <div class="flex flex-col gap-3 text-xs">
       <p class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
         <strong>Patch the generator output straight to the analyzer input</strong>, with the device

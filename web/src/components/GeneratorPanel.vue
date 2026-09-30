@@ -2,7 +2,6 @@
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import type { DeviceStatus, GeneratorChannelRequest } from '../api/client'
 import { useProjects } from '../composables/useProjects'
-import { useChartDisplay } from '../composables/useChartDisplay'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import GeneratorChannelPanel from './GeneratorChannelPanel.vue'
@@ -10,9 +9,6 @@ import CollapsibleSection from './CollapsibleSection.vue'
 
 // Shared with both channels' Metrics panels — one amplifier load, edited here instead of twice.
 const { loadOhms } = useLoadOhms()
-// The DUT's gain, for the input-referred noise tile and chart unit. Saved with the measurement
-// type (unlike the load), which is why it lives in useChartDisplay with the other per-type settings.
-const { dutGainDb } = useChartDisplay()
 
 const { loadedParams } = useProjects()
 
@@ -107,19 +103,6 @@ defineExpose({ buildRequest, resyncTones })
           class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700"
         />
         Ω
-      </label>
-      <label
-        class="flex items-center gap-1.5"
-        title="The DUT's gain from its input to the analyzer's input, in dB. The Noise in nV/√Hz tile and the input-referred chart unit divide the measured noise by it. 0 for a loopback."
-      >
-        DUT gain
-        <input
-          type="number"
-          step="0.1"
-          v-model.number="dutGainDb"
-          class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700"
-        />
-        dB
       </label>
     </div>
 

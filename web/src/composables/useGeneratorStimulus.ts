@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue'
 import type { GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
 import type { ImdPresetId } from '../imd/presets'
+import type { GeneratorLevelUnit } from '../generatorLevel'
 
 // Module-level singleton (same pattern as useLoadOhms.ts / useSpectrumConfig.ts): the *staged*
 // generator form — what's typed into GeneratorChannelPanel, not what DeviceStatus reports. Left
@@ -19,6 +20,11 @@ const chirp = reactive<EchoChirpSettings>({
   smoothing: 'None' as SmoothingOctaves,
 })
 
+// The unit the level boxes are typed in -- display only, converted at the input's edge (see
+// generatorLevel.ts). Staged and saved with the tones for the same reason the IMD template is:
+// a measurement whose levels are quoted in mV should still read in mV when it is selected again.
+const levelUnit = ref<GeneratorLevelUnit>('Dbv')
+
 // The two-tone IMD template and analysis choice that go with the tone list — see
 // GeneratorChannelPanel.vue's "IMD preset" and imd/presets.ts. Staged like the tones (saved with
 // the measurement type, restored by App.vue's loadedParams watcher); the analysis itself reaches
@@ -30,5 +36,5 @@ const imd = reactive<{ preset: ImdPresetId; method: ImdMethodName; maxOrder: num
 })
 
 export function useGeneratorStimulus() {
-  return { kind, tones, multitone, noise, chirp, imd }
+  return { kind, tones, multitone, noise, chirp, imd, levelUnit }
 }

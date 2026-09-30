@@ -118,8 +118,9 @@ const { showPage } = useManual()
       in blue, <strong>R→L</strong> in orange, negative numbers with the better figure lower on the
       chart. There is no phase, no coherence and no bandwidth reading — a crosstalk curve has none
       of those to offer — so the display panel is the dB window, the frequency window and the two
-      style toggles. <strong>Autofit</strong> fits the window to every crosstalk curve on the chart,
-      history included, and <strong>Autofit when measurement done</strong> does it as a run ends.
+      style toggles. <strong>Autofit</strong> fits both windows to every crosstalk curve on the
+      chart, history included, and <strong>Autofit when measurement done</strong> does it as a run
+      ends.
     </p>
     <p>
       The <strong>Measurements</strong> panel quotes each direction four ways: the point nearest

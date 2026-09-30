@@ -11,7 +11,7 @@ const open = computed(() => state.value !== null)
 </script>
 
 <template>
-  <Modal :open="open" :title="state?.title ?? ''" :close-on-backdrop="false" @close="answer(false)">
+  <Modal :open="open" :title="state?.title ?? ''" @close="answer(false)">
     <div class="flex flex-col gap-3 text-sm">
       <p class="whitespace-pre-line text-neutral-700 dark:text-neutral-300">{{ state?.message }}</p>
 

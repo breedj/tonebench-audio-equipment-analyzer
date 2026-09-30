@@ -144,7 +144,7 @@ async function copy() {
         </select>
         <button
           type="button"
-          class="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          class="rounded border px-2 py-1 btn-action"
           title="Copies the text below. Some browsers refuse — the in-app preview pane is one — and it is selected for you instead."
           @click="copy"
         >

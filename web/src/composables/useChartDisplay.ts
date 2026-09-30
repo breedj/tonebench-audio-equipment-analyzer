@@ -20,6 +20,12 @@ const visibleL = ref(true)
 const visibleR = ref(true)
 const showMinMax = ref(true)
 const showPeakHold = ref(false)
+// The live spectrum line itself (per channel: the max of each decimated column). On by default, and
+// the one trace here that is normally the whole point of the screen -- it is a checkbox because
+// peak-hold is readable on its own: with the live capture off, the peak-hold trace is a still
+// picture of the worst case so far, with nothing redrawn over the top of it twenty times a second.
+// It takes the min/max band with it (see the watcher below); only peak-hold is left.
+const showFftTrace = ref(true)
 // Off by default so nothing changes for a type saved before this existed -- the SINGLE/STOP
 // running->not-running transition that drives it is watched in App.vue, which already holds
 // device status; see requestAutofitY/requestAutofitX below, which it calls into.
@@ -27,17 +33,23 @@ const autofitOnDone = ref(false)
 
 // Which of the FFT screen's secondary panels are drawn at all. Every one of them is fed by the same
 // live stream as the spectrum chart, so hiding one is purely about how much of the screen a
-// measurement is allowed to take -- nothing here reaches the pipeline. All four default to on, so a
-// measurement saved before these existed (and a freshly created one) looks exactly as it used to.
-const showWaterfall = ref(true)
+// measurement is allowed to take -- nothing here reaches the pipeline.
+//
+// The Oscilloscope and Harmonics default to on; the Waterfall and Other peaks default to *off*
+// (Joost, 2026-09-29) -- they are the two a bench measurement least often wants, and between them
+// they push the harmonics table off the bottom of the screen. Note what a default means here: a
+// stored type carries an explicit boolean per panel, so only a row saved before these fields existed
+// (null) picks the default up, and those two now come back hidden rather than shown.
+const showWaterfall = ref(false)
 const showOscilloscope = ref(true)
 const showHarmonics = ref(true)
-const showOtherPeaks = ref(true)
+const showOtherPeaks = ref(false)
 
 // The chart's level unit (see spectrumUnits.ts) and the DUT gain the input-referred unit and the
-// "Noise in" tile divide by. The gain is edited beside Load Ω in GeneratorPanel rather than in the
-// display panel, but it lives here because it is a per-type setting with exactly this composable's
-// lifecycle: restored with the type, marking it dirty when edited. Both default to what a type saved
+// "Noise in" tile divide by. Both are edited in ChartDisplayPanel's Level range section, the gain
+// directly under the unit dropdown and only while it does something (see showDutGain there), and both
+// are per-type settings with exactly this composable's lifecycle: restored with the type, marking it
+// dirty when edited. Both default to what a type saved
 // before they existed means -- dBV, and a DUT of unity gain.
 const spectrumUnit = ref<SpectrumUnit>(DEFAULT_SPECTRUM_UNIT)
 const dutGainDb = ref(0)
@@ -57,10 +69,31 @@ let restoring = false
 // values themselves instead — same effect as useSpectrumConfig.ts's apply() marking dirty, just
 // triggered by the ref changing rather than a function call.
 watch([
-  yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold, autofitOnDone,
+  yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold, showFftTrace,
+  autofitOnDone,
   showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
 ], () => {
   if (!restoring) useProjects().markDirty()
+})
+
+// Unchecking `FFT data` takes Min/max with it, and re-checking gives it back (Joost, 2026-09-30).
+// The band IS that trace's own data -- the *minimum* of each decimated column, where the line above
+// it is the maximum -- so leaving it drawn is not "hiding the FFT", and what is wanted in that state
+// is the peak-hold trace on its own. The remembered value is put back only if Min/max is still off
+// when the trace returns: a user who ticked the band back on while the line was hidden has made the
+// newer choice, and restoring over it would undo something they just did. `restoring` is the same
+// guard the dirty watcher uses -- applyLoaded writes both refs itself, and a stored type's Min/max
+// must not be overwritten by the order those two writes happen in.
+let minMaxBeforeTraceHidden: boolean | null = null
+watch(showFftTrace, (shown) => {
+  if (restoring) return
+  if (!shown) {
+    minMaxBeforeTraceHidden = showMinMax.value
+    showMinMax.value = false
+    return
+  }
+  if (minMaxBeforeTraceHidden !== null && !showMinMax.value) showMinMax.value = minMaxBeforeTraceHidden
+  minMaxBeforeTraceHidden = null
 })
 
 // The frequency span the spectrum chart is actually showing right now — the net result of the
@@ -97,6 +130,7 @@ export interface StoredSpectrumDisplay {
   chartShowDataPoints?: boolean | null
   chartShowMinMax?: boolean | null
   chartShowPeakHold?: boolean | null
+  chartShowFftTrace?: boolean | null
   chartAutofitOnDone?: boolean | null
   chartShowWaterfall?: boolean | null
   chartShowOscilloscope?: boolean | null
@@ -124,6 +158,8 @@ export interface SpectrumDisplaySource {
   visibleR: Ref<boolean>
   showMinMax: Ref<boolean>
   showPeakHold: Ref<boolean>
+  /** Whether the live spectrum line itself is drawn — the band and peak-hold have their own flags. */
+  showFftTrace: Ref<boolean>
   /** The level unit the chart draws in, and the DUT gain its input-referred unit subtracts -- see spectrumUnits.ts. */
   spectrumUnit: Ref<SpectrumUnit>
   dutGainDb: Ref<number>
@@ -167,6 +203,7 @@ export function createSpectrumDisplaySource(
     showMinMax: ref(loaded?.chartShowMinMax ?? true),
     // Never for a stored result: the peak-hold maps are the screen's own running state.
     showPeakHold: ref(false),
+    showFftTrace: ref(loaded?.chartShowFftTrace ?? true),
     spectrumUnit: ref(parseSpectrumUnit(loaded?.chartUnit)),
     dutGainDb: ref(loaded?.dutGainDb ?? 0),
     // Never for a stored result: the curve is fetched for the *live* weighting, which need not be
@@ -215,11 +252,12 @@ export function useChartDisplay() {
     showDataPoints.value = loaded?.chartShowDataPoints ?? false
     showMinMax.value = loaded?.chartShowMinMax ?? true
     showPeakHold.value = loaded?.chartShowPeakHold ?? false
+    showFftTrace.value = loaded?.chartShowFftTrace ?? true
     autofitOnDone.value = loaded?.chartAutofitOnDone ?? false
-    showWaterfall.value = loaded?.chartShowWaterfall ?? true
+    showWaterfall.value = loaded?.chartShowWaterfall ?? false
     showOscilloscope.value = loaded?.chartShowOscilloscope ?? true
     showHarmonics.value = loaded?.chartShowHarmonics ?? true
-    showOtherPeaks.value = loaded?.chartShowOtherPeaks ?? true
+    showOtherPeaks.value = loaded?.chartShowOtherPeaks ?? false
     spectrumUnit.value = parseSpectrumUnit(loaded?.chartUnit)
     dutGainDb.value = loaded?.dutGainDb ?? 0
     showWeightingCurve.value = loaded?.chartShowWeightingCurve ?? false
@@ -251,6 +289,7 @@ export function useChartDisplay() {
     visibleR,
     showMinMax,
     showPeakHold,
+    showFftTrace,
     autofitOnDone,
     showWaterfall,
     showOscilloscope,

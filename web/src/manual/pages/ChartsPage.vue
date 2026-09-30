@@ -84,9 +84,12 @@ import SettingsTable from '../components/SettingsTable.vue'
     <h2>Axis ranges and Autofit</h2>
     <p>
       Each chart's display rail carries explicit <strong>Top/Bottom</strong> and
-      <strong>From/To</strong> fields, with an <strong>Autofit</strong> button under each. Autofit
-      fits the window to what is currently plotted — including any history overlays that are checked
-      on, so fitting with a comparison visible frames both runs. The FFT screen's level range also
+      <strong>From/To</strong> fields, and one <strong>Autofit</strong> button for the whole chart,
+      in the first range section. It fits <em>every</em> axis at once — level, frequency, and the
+      phase and delay axes where those are drawn — to what is currently plotted, including any
+      history overlays that are checked on, so fitting with a comparison visible frames both runs.
+      The frequency axis is fitted first, since the other windows are measured inside it. The FFT
+      screen's level range also
       has a <strong>Units</strong> choice (dBV, dBV/√Hz, or dBV/√Hz referred to the DUT's input);
       switching it refits the range, since every level moves by the same constant.
     </p>
@@ -136,7 +139,10 @@ import SettingsTable from '../components/SettingsTable.vue'
       mean flattens the noise floor and can erase a narrow harmonic entirely. The line you see is
       the maximum; the <strong>Min/max</strong> checkbox draws the band down to the minimum
       alongside it. With that band off, the noise floor reads a few dB higher than it really is —
-      the honest picture is the band, not the line.
+      the honest picture is the band, not the line. On the FFT screen the pair has a checkbox of its
+      own, <strong>FFT data</strong>: unchecking it clears the line and the band together — they are
+      the maximum and the minimum of the same columns — and leaves the peak-hold curve, if that is
+      on, by itself.
     </p>
 
     <h3>Why the band widens towards the top of the spectrum</h3>

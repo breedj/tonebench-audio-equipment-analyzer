@@ -452,7 +452,7 @@ watch(
 <template>
   <section ref="root" class="relative flex flex-col gap-1">
     <ExpandToggle class="absolute right-0 top-0" :target="root" />
-    <div class="min-h-6 pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-9 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Impulse response</span>
       <span v-if="impulse">
         peak {{ peakLabel }} · gate −{{ impulse.gatePreMs }}/+{{ impulse.gatePostMs }} ms ·
@@ -463,7 +463,7 @@ watch(
       <button
         v-if="zoomed"
         type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
         title="Back to the time and level window set in the display panel."
         @click="resetZoom"
       >

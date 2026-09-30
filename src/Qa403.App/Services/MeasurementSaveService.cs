@@ -485,12 +485,18 @@ public sealed class MeasurementSaveService(
         // The pipeline knows the tones it measured with but not which template put them there;
         // the type does. Carried over only when the type's stored pair is the one that ran.
         parameters = parameters with { ImdPreset = await ResolveImdPresetNameAsync(measurementTypeId, parameters, ct) };
-        // The DUT gain and the chart unit are client-staged and reach the server only when the type
-        // is saved, so a result takes them from its type: the "Noise in nV/sqrt(Hz)" row a report
-        // recomputes needs the gain that was on screen, and the type's is the best record of it.
-        parameters = parameters with { DutGainDb = null, ChartUnit = null };
+        // The DUT gain, the chart unit and the generator panel's level unit are client-staged and
+        // reach the server only when the type is saved, so a result takes them from its type: the
+        // "Noise in nV/sqrt(Hz)" row a report recomputes needs the gain that was on screen, and the
+        // type's is the best record of it.
+        parameters = parameters with { DutGainDb = null, ChartUnit = null, GeneratorLevelUnit = null };
         if (await ReadStoredTypeParametersAsync(measurementTypeId, ct) is { } typeParameters)
-            parameters = parameters with { DutGainDb = typeParameters.DutGainDb, ChartUnit = typeParameters.ChartUnit };
+            parameters = parameters with
+            {
+                DutGainDb = typeParameters.DutGainDb,
+                ChartUnit = typeParameters.ChartUnit,
+                GeneratorLevelUnit = typeParameters.GeneratorLevelUnit,
+            };
 
         // The weighting a result records is the one the saved trace was produced under -- the
         // snapshot's, not the live options', which may have changed since the capture. One
@@ -1552,7 +1558,9 @@ public sealed class MeasurementSaveService(
             parameters.DutGainDb,
             parameters.ChartUnit,
             parameters.ChartShowWeightingCurve,
-            parameters.ScopeResidual);
+            parameters.ScopeResidual,
+            parameters.GeneratorLevelUnit,
+            parameters.ChartShowFftTrace);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -1614,6 +1622,8 @@ public sealed class MeasurementSaveService(
             DutGainDb = staged?.DutGainDb,
             ChartUnit = staged?.ChartUnit,
             ChartShowWeightingCurve = staged?.ChartShowWeightingCurve,
+            ChartShowFftTrace = staged?.ChartShowFftTrace,
+            GeneratorLevelUnit = staged?.GeneratorLevelUnit,
             // Live pipeline state, like the IMD spec: the oscilloscope's Residual checkbox pushes
             // it through spectrum-config the moment it is toggled.
             ScopeResidual = options.ScopeResidual,

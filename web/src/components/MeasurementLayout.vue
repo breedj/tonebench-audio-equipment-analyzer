@@ -4,7 +4,7 @@
 // App.vue renders through this, so a breakpoint decision made here holds everywhere.
 //
 //   < 1024 px   one stacked column: rail, chart, display sections.
-//   1024-1279   two columns: a 16rem rail (18.75rem with `wideRail`) beside the chart, and the
+//   1024-1279   two columns: a 16rem rail (266 px with `roomyRail`) beside the chart, and the
 //               display sections + History checklist flow two-wide UNDER the chart. Three columns
 //               here left the chart ~170 px
 //               with the sidebar pinned (246 + 32 + 304 + 272 of a 1024 px window), narrower than
@@ -29,13 +29,18 @@ import { useUiLayout } from '../composables/useUiLayout'
 import SimulatorHint from './SimulatorHint.vue'
 
 /**
- * `wideRail` gives the settings column 18.75rem instead of 16rem. Only the response screens ask
- * for it, and for one reason: their generator block carries whole sentences rather than labels —
- * the level mode's "at 5-10 Hz (bandwidth reference)" line and the stepped runner's point/time
- * estimate — which wrap to three lines at 16rem. Sixteen stays the default so every other screen's
- * rail, and both display rails, still line up when switching between measurements.
+ * `roomyRail` gives the settings column 266 px instead of 16rem, and only the FFT screen asks for
+ * it: a generator tone row is a frequency field, "Hz", a level field, the level-unit dropdown and
+ * the Remove-tone button, and at 16rem exactly the last of those ran off the end. Ten pixels, not a
+ * size up, so the rail still reads as lined up with every other screen's.
+ *
+ * There used to be a `wideRail` at 18.75rem, for the two frequency-response screens: their generator
+ * block carries whole sentences rather than labels — the level mode's "at 5-10 Hz (bandwidth
+ * reference)" line and the stepped runner's point/time estimate. It is gone (Joost, 2026-09-29),
+ * because a rail and a RUN/SINGLE/STOP trio three quarters of an inch wider than the impulse
+ * response screen's next door was the more visible of the two problems; those sentences wrap.
  */
-const props = withDefaults(defineProps<{ wideRail?: boolean }>(), { wideRail: false })
+const props = withDefaults(defineProps<{ roomyRail?: boolean }>(), { roomyRail: false })
 
 const {
   settingsRailCollapsed,
@@ -68,7 +73,10 @@ const STRIP =
     <div class="flex min-w-0 items-stretch lg:row-span-2 lg:self-stretch xl:row-span-1">
       <div
         class="flex min-w-0 flex-1 flex-col gap-3 lg:flex-none"
-        :class="[props.wideRail ? 'lg:w-75' : 'lg:w-64', settingsRailCollapsed ? 'lg:hidden' : '']"
+        :class="[
+          props.roomyRail ? 'lg:w-[266px]' : 'lg:w-64',
+          settingsRailCollapsed ? 'lg:hidden' : '',
+        ]"
       >
         <slot name="rail" />
       </div>

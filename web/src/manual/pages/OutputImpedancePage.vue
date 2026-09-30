@@ -186,8 +186,8 @@ const { showPage } = useManual()
       left, damping factor on the right, and the impedance window and its <strong>Autofit</strong>
       drive both. The cursor readout gives the pair together. <strong>Show phase</strong> is offered only for a
       referenced run. The display panel is the impedance panel's without the Nyquist view and the
-      calibration curves: the ohms window and scale with <strong>Autofit</strong>, the phase window,
-      the frequency window and the style toggles.
+      calibration curves: the ohms window and scale, the phase window, the frequency window and the
+      style toggles, with the one <strong>Autofit</strong> under the ohms bounds fitting all three.
     </p>
     <p>
       Checking a saved run in <strong>History</strong> draws it with its own nominal load and its own

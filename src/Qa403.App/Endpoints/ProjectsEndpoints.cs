@@ -170,8 +170,12 @@ public sealed record StagedMeasurementConfig(
     bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null,
     /// <summary>The generator panel's IMD template and analysis choice -- see <see cref="Qa403.Data.FftSpectrumParameters.ImdPreset"/>. The tones themselves ride in the generator config.</summary>
     string? ImdPreset = null, string? ImdMethod = null, int? ImdMaxOrder = null,
-    /// <summary>The DUT gain beside Load Ω and the chart's level unit -- see <see cref="Qa403.Data.FftSpectrumParameters.DutGainDb"/>.</summary>
-    double? DutGainDb = null, string? ChartUnit = null, bool? ChartShowWeightingCurve = null);
+    /// <summary>The DUT gain under the chart's unit dropdown, and that unit -- see <see cref="Qa403.Data.FftSpectrumParameters.DutGainDb"/>.</summary>
+    double? DutGainDb = null, string? ChartUnit = null, bool? ChartShowWeightingCurve = null,
+    /// <summary>The unit the generator panel's level boxes are typed in -- see <see cref="Qa403.Data.FftSpectrumParameters.GeneratorLevelUnit"/>. The tones themselves are always dBV.</summary>
+    string? GeneratorLevelUnit = null,
+    /// <summary>Whether the spectrum chart draws the live trace itself -- see <see cref="Qa403.Data.FftSpectrumParameters.ChartShowFftTrace"/>.</summary>
+    bool? ChartShowFftTrace = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -220,4 +224,8 @@ public sealed record MeasurementTypeAppliedResponse(
     string? ChartUnit = null,
     bool? ChartShowWeightingCurve = null,
     /// <summary>Whether the oscilloscope shows the THD residual — see <see cref="Qa403.Data.FftSpectrumParameters.ScopeResidual"/>.</summary>
-    bool? ScopeResidual = null);
+    bool? ScopeResidual = null,
+    /// <summary>The unit the generator panel's level boxes are typed in — see <see cref="Qa403.Data.FftSpectrumParameters.GeneratorLevelUnit"/>.</summary>
+    string? GeneratorLevelUnit = null,
+    /// <summary>Whether the spectrum chart draws the live trace itself — see <see cref="Qa403.Data.FftSpectrumParameters.ChartShowFftTrace"/>.</summary>
+    bool? ChartShowFftTrace = null);

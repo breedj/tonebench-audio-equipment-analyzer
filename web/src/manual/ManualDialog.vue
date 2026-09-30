@@ -71,9 +71,9 @@ function onCancel(e: Event) {
   closeManual()
 }
 
-function onBackdropClick(e: MouseEvent) {
-  if (e.target === dialogRef.value) closeManual()
-}
+// No backdrop-click handler, for the reason Modal.vue gives: a dialog here closes by its own X or
+// by Escape, never by a click that lands beside it. The manual is the one it was worst on — a page
+// read for a while, dismissed by a click meant for the text.
 </script>
 
 <template>
@@ -81,7 +81,6 @@ function onBackdropClick(e: MouseEvent) {
     ref="dialogRef"
     class="m-auto h-[85vh] w-[min(64rem,92vw)] max-w-none rounded-lg border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
     @cancel="onCancel"
-    @click="onBackdropClick"
   >
     <div class="flex h-full flex-col">
       <div

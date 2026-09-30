@@ -136,9 +136,11 @@ const { showPage } = useManual()
       The two <strong>decay surfaces</strong> are heatmaps and cannot show two runs at once, so they
       have one subject: the live measurement when there is one, and otherwise the first checked
       history item — which is what lets you open a saved result and look at its decay without
-      re-measuring. <strong>Autofit</strong> sizes the level axis to everything drawn, overlays
-      included, which matters on the gated response: a stored amplifier run sits tens of dB above a
-      window left at 0 dB and would otherwise be off the top of the plot.
+      re-measuring. <strong>Autofit</strong> is the one button for the chart in every other view: it
+      sizes the level axis to everything drawn, overlays included — which matters on the gated
+      response, where a stored amplifier run sits tens of dB above a window left at 0 dB and would
+      otherwise be off the top of the plot — and it sets the horizontal window with it, to the
+      measured gate on the impulse and to the band the curves cover on Harmonics.
     </p>
     <p>
       On the waveform the overlay is put on the measurement's own time columns, so checking one on

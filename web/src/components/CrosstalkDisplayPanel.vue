@@ -5,7 +5,7 @@ import { useMeasurements } from '../composables/useMeasurements'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
- * The crosstalk chart's display rail: a dB window, a frequency window, both with Autofit, and the
+ * The crosstalk chart's display rail: a dB window, a frequency window, one Autofit for both, and the
  * two style toggles. Its own small panel rather than a `crosstalk` flag on
  * FrequencyResponseDisplayPanel — that panel is a projection/view/phase/coherence/bandwidth rail
  * for a Bode plot, and every one of those controls would be hidden here.
@@ -84,11 +84,18 @@ function autofitX() {
   xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
 }
 
+/**
+ * One Autofit per chart, not one per axis (Joost, 2026-09-30). The frequency window is fitted
+ * first: every level fit below is scoped to it, so fitting the other way round sizes the axis to
+ * whatever the old window happened to hold.
+ */
+function autofitAll() {
+  autofitX()
+  autofitDb()
+}
+
 watch(running, (isRunning, wasRunning) => {
-  if (wasRunning && !isRunning && autofitOnDone.value) {
-    autofitDb()
-    autofitX()
-  }
+  if (wasRunning && !isRunning && autofitOnDone.value) autofitAll()
 })
 </script>
 
@@ -114,11 +121,13 @@ watch(running, (isRunning, wasRunning) => {
         @change="onBottomChange"
       />
     </label>
+    <!-- The chart's one Autofit, in the first section rather than a scroll below the fields it
+         overwrites. -->
     <button
       type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      title="Fits the window to every crosstalk curve on the chart, live and history."
-      @click="autofitDb"
+      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      title="Fits both axes to every crosstalk curve on the chart, live and history: the frequency range to the measured span, the dB window to the curves inside it."
+      @click="autofitAll"
     >
       Autofit
     </button>
@@ -137,13 +146,6 @@ watch(running, (isRunning, wasRunning) => {
         <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
     </label>
-    <button
-      type="button"
-      class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-      @click="autofitX"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">

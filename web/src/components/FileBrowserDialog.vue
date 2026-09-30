@@ -115,7 +115,7 @@ function formatModified(iso: string | null): string {
 </script>
 
 <template>
-  <Modal :open="props.open" :title="title" :close-on-backdrop="false" wide @close="emit('close')">
+  <Modal :open="props.open" :title="title" wide @close="emit('close')">
     <div class="flex flex-col gap-3 text-sm">
       <!-- Roots: drives on Windows, / and home on Linux, plus Documents and the projects folder. -->
       <div v-if="listing" class="flex flex-wrap gap-1">

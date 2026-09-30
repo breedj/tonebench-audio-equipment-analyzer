@@ -217,6 +217,27 @@ function roundUp125(v: number): number {
  */
 let fittedThisRun = false
 
+/** The measured band, snapped out to the dropdowns' own presets — the same shape as every other panel's. */
+function autofitX() {
+  const t = trace.value
+  if (!t || t.freqHz.length === 0) return
+  const from = t.freqHz[0]
+  const to = t.freqHz[t.freqHz.length - 1]
+  xFromHz.value = [...X_FROM_OPTIONS].reverse().find((v) => v <= from) ?? X_FROM_OPTIONS[0]
+  xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
+}
+
+/**
+ * One Autofit per chart, not one per axis (Joost, 2026-09-30). Frequency first: both of the fits
+ * below are scoped to the frequency window, so the other order sizes the axes to whatever the
+ * previous window happened to hold.
+ */
+function autofitAll() {
+  autofitX()
+  autofitZ()
+  autofitPhase()
+}
+
 watch(
   () => props.running,
   (isRunning, wasRunning) => {
@@ -227,10 +248,7 @@ watch(
 
     // Again at the end, because the opening fit was taken from the first point or two and a sweep
     // that later climbs into a resonance would otherwise stay clipped.
-    if (wasRunning && !isRunning && autofitOnDone.value) {
-      autofitZ()
-      autofitPhase()
-    }
+    if (wasRunning && !isRunning && autofitOnDone.value) autofitAll()
   },
 )
 
@@ -254,6 +272,9 @@ watch(
     if (!t || t.freqHz.length === 0) return
 
     fittedThisRun = true
+    // The value axes only: a frequency window fitted to the two or three points a stepped sweep has
+    // published so far would be narrower than the sweep it is about to draw, and this fires once.
+    // The end-of-run fit above takes the frequency axis with it.
     autofitZ()
     autofitPhase()
   },
@@ -340,10 +361,13 @@ watch(
         />
       </label>
     </div>
+    <!-- The chart's one Autofit: impedance, phase and the frequency window together. It sits in
+         the first axis section rather than a scroll below the fields it overwrites. -->
     <button
       type="button"
-      class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-      @click="autofitZ"
+      class="rounded border px-2 py-1 text-xs btn-action"
+      title="Fits every axis to what is drawn: the frequency window to the measured band, then the impedance and phase axes to the curves inside it (including the short standard when it is shown)."
+      @click="autofitAll"
     >
       Autofit
     </button>
@@ -372,13 +396,6 @@ watch(
         />
       </label>
     </div>
-    <button
-      type="button"
-      class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-      @click="autofitPhase"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency axis" size="xs">

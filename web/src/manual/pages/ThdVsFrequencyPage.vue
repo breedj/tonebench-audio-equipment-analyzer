@@ -71,7 +71,12 @@ const { showPage } = useManual()
           <td>Start / End (Hz)</td>
           <td>
             The frequency range, stepped upward from Start. Anything above 98% of Nyquist is
-            dropped, and the panel warns when that will truncate the sweep.
+            dropped, and the panel warns when that will truncate the sweep. Start will not go below
+            <strong>7.3 Hz</strong>: the harmonic analysis sums ±3 bins around each harmonic, so a
+            fundamental fewer than five bins up overlaps its own second harmonic and THD reads near
+            100%. Five bins of the longest record this app takes — 131 072 points at 192 kHz, or
+            32 768 at 48 kHz, both 0.68 s and both 1.465 Hz per bin — is 7.32 Hz, and no sample rate
+            makes it lower.
           </td>
         </tr>
         <tr>
@@ -218,9 +223,9 @@ const { showPage } = useManual()
     <p>
       Above Display sit two sections of their own, the way the FFT screen has them:
       <strong>Distortion range (%)</strong> — <strong>dB range</strong> when the units are dB — is the
-      vertical window, with an Autofit that fits every checked trace, and
-      <strong>Frequency range (Hz)</strong> the horizontal one, with its own Autofit to the measured
-      span. <strong>Autofit when measurement done</strong> is on for a newly created measurement.
+      vertical window and <strong>Frequency range (Hz)</strong> the horizontal one. One
+      <strong>Autofit</strong>, under the distortion range, fits both to every checked trace: the
+      sweep axis to the measured span, the distortion axis to the values inside it. <strong>Autofit when measurement done</strong> is on for a newly created measurement.
     </p>
 
     <h2>Zooming</h2>

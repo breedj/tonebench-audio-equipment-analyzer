@@ -20,6 +20,7 @@ import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, t
 import { sweepMetricColumns, sweepMetricRow } from '../sweep/readings'
 import {
   decadeOrFallbackSplits,
+  freqMinorGridAxis,
   logMinorGridAxis,
   sweepXAxis,
   sweepXLabel,
@@ -230,10 +231,21 @@ function themeFor(dark: boolean, forExport = false): Theme {
 /** Minimum pixels between two labelled distortion ticks, for the sub-decade fallback. Tighter than the x axis': a number is far shorter than it is tall. */
 const Y_AXIS_SPACE = 30
 
-/** One label-less axis whose only job is the thin 2..9 gridlines of a log scale. */
-function minorGridAxis(scale: 'x' | 'y', side: 1 | 2 | 3, theme: Theme): uPlot.Axis {
+/**
+ * One label-less axis whose only job is the thin 2..9 gridlines of a log scale.
+ *
+ * `base` is where those positions come from: {@link logMinorGridAxis} for a decade-labelled scale
+ * (the level and distortion axes), {@link freqMinorGridAxis} for the frequency axis, whose labels
+ * are freqAxis' 1/2/5 ladder and so already own some of the mantissas.
+ */
+function minorGridAxis(
+  scale: 'x' | 'y',
+  side: 1 | 2 | 3,
+  theme: Theme,
+  base: Pick<uPlot.Axis, 'space' | 'splits' | 'filter' | 'values'> = logMinorGridAxis(),
+): uPlot.Axis {
   return {
-    ...logMinorGridAxis(),
+    ...base,
     scale,
     side,
     size: 0,
@@ -543,10 +555,11 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
         grid: { stroke: decadeGridY ? theme.gridMajor : theme.grid, width: (decadeGridY ? 1.5 : 1) * theme.gridWidth },
         ticks: { stroke: theme.grid, width: theme.gridWidth },
       },
-      // The 2..9 lines of each emphasised axis, as their own label-less axis on the same scale --
-      // see logMinorGridAxis on why this cannot be folded into the axis above. Listed after both, so
-      // the lighter strokes are drawn over nothing; the two sets of positions never coincide.
-      ...(decadeGridX ? [minorGridAxis('x', 2, theme)] : []),
+      // The 2..9 lines of each log axis, as their own label-less axis on the same scale -- see
+      // logMinorGridAxis on why this cannot be folded into the axis above. Listed after both, so
+      // the lighter strokes are drawn over nothing; the two sets of positions never coincide (on
+      // the frequency axis that is freqMinorSplits' job, since its labels are not decades).
+      minorGridAxis('x', 2, theme, decadeGridX ? logMinorGridAxis() : freqMinorGridAxis()),
       ...(decadeGridY ? [minorGridAxis('y', 3, theme)] : []),
     ],
     series,
@@ -974,7 +987,7 @@ onBeforeUnmount(() => {
 <template>
   <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
-    <div class="min-h-6 pr-7 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-9 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Distortion vs {{ sweepXLabel(props.xAxis).toLowerCase() }}</span>
       <span v-if="!hasData">No sweep data yet — press Run sweep.</span>
       <!-- The only visible sign that the axes are no longer the window the display panel's
@@ -984,7 +997,7 @@ onBeforeUnmount(() => {
       <button
         v-else-if="zoomed"
         type="button"
-        class="inline-flex items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex items-center gap-1 rounded border px-2 py-0.5 btn-action"
         title="Back to the From/To and distortion-range window set in the display panel."
         @click="resetZoom"
       >

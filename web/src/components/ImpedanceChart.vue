@@ -898,7 +898,7 @@ const outOfRange = computed(() => {
 <template>
   <div ref="root" class="relative flex flex-col gap-2">
     <ExpandToggle class="absolute right-0 top-0" :target="root" />
-    <div class="min-h-6 pr-7 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+    <div class="min-h-6 pr-9 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <!-- One row that is the legend at rest and gains values on hover, rather than a legend and a
            separate readout saying the same names twice. Each swatch is drawn with the series' own
            colour, width and dash pattern, which is the only thing that tells two history overlays
@@ -934,7 +934,7 @@ const outOfRange = computed(() => {
       <button
         v-if="zoomed"
         type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
         title="Back to the frequency and impedance window set in the display panel."
         @click="resetZoom"
       >

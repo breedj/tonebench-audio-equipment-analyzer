@@ -115,7 +115,7 @@ async function onConfirmDelete(item: MeasurementSummary) {
               <div class="flex justify-end gap-1.5 text-xs whitespace-nowrap">
                 <button
                   type="button"
-                  class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                  class="rounded border px-2 py-1 btn-action"
                   @click="onEdit(item)"
                 >
                   Edit
@@ -145,7 +145,7 @@ async function onConfirmDelete(item: MeasurementSummary) {
                   </button>
                   <button
                     type="button"
-                    class="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                    class="rounded border px-2 py-1 btn-action"
                     @click="onCancelDelete"
                   >
                     Cancel

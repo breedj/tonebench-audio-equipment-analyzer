@@ -88,11 +88,8 @@ const { showPage } = useManual()
     <p>
       Left and right play the <em>same</em> stimulus; the two checkboxes at the top only decide
       which outputs are actually driven. The <strong>Load</strong> in ohms is shared with every
-      other screen's power figures. <strong>DUT gain</strong> in dB is the device's gain from its
-      input to the analyzer's input: the <strong>Noise in nV/√Hz</strong> tile divides the measured
-      noise density by it, and so does the chart's input-referred unit, so a preamp's output floor
-      reads as the noise at its input. Leave it at 0 for a loopback. It is saved with the
-      measurement, unlike the load.
+      other screen's power figures. The DUT's own gain is not set here — it lives under the
+      <strong>Units</strong> dropdown in the display panel, described under Level range below.
     </p>
     <table>
       <thead>
@@ -116,7 +113,7 @@ const { showPage } = useManual()
             Sine tones only. A standard two-tone intermodulation test — <strong>SMPTE 60 Hz + 7 kHz
             (4:1)</strong>, <strong>DIN 250 Hz + 8 kHz (4:1)</strong>, <strong>CCIF/ITU-R 19 kHz +
             20 kHz (1:1)</strong> or <strong>CCIF 18.5 + 19.5 kHz (1:1)</strong> — sets both tones up
-            from one <strong>Level</strong> in dBV: the <em>sine-equivalent</em> level, i.e. the level
+            from one <strong>Level</strong>: the <em>sine-equivalent</em> level, i.e. the level
             of a single sine whose peak equals the pair's peak (a 4:1 pair sits 1.94 and 13.98 dB
             below it, a 1:1 pair 6.02 dB below). Picking a preset also turns the IMD reading on and
             adds the <strong>IMD %</strong> and <strong>IMD dB</strong> tiles. <strong>Custom</strong>
@@ -137,9 +134,20 @@ const { showPage } = useManual()
         <tr>
           <td>Tone rows</td>
           <td>
-            Frequency in Hz and amplitude in dBV per tone. <strong>+ Tone</strong> adds another; the
-            bin icon removes one. Read-only while a preset is active. Two tones is the usual
-            intermodulation test.
+            Frequency in Hz and level per tone. <strong>+ Tone</strong> adds another; the bin icon
+            removes one. Read-only while a preset is active. Two tones is the usual intermodulation
+            test.
+          </td>
+        </tr>
+        <tr>
+          <td>Level unit</td>
+          <td>
+            The dropdown beside each level box — <strong>dBV</strong>, <strong>V</strong> or
+            <strong>mV</strong> — sets what every level on the panel is typed in: the tone rows, the
+            preset's sine-equivalent level, the multitone comb's total RMS and the noise level. One
+            choice for all of them, saved with the measurement. <strong>Rolloff per
+            octave</strong> stays in dB — it is a ratio, not a level. It is a display choice only:
+            the generator is always told dBV, so switching units never changes what is playing.
           </td>
         </tr>
         <tr>
@@ -308,7 +316,7 @@ const { showPage } = useManual()
       band with the fundamental's notch and the harmonics taken out, so it reads the same at every
       FFT size — a −150 dBV/√Hz floor over 20 Hz – 20 kHz is −107 dBV of noise.
       <strong>Noise in nV/√Hz</strong> is the same density referred to the DUT's input through the
-      DUT gain in the Generator panel: −150 dBV/√Hz is 31.6 nV/√Hz at 0 dB and 3.16 nV/√Hz through
+      DUT gain in the display panel: −150 dBV/√Hz is 31.6 nV/√Hz at 0 dB and 3.16 nV/√Hz through
       20 dB. All three exist with the generator off, when there is no fundamental to report. When a
       weighting is selected, the tiles it applies to — THD+N, N+D, N-D, SNR and these three — carry
       an amber tag naming it (<code>A</code>, <code>468</code>, <code>A+U1</code>); the fundamental,
@@ -337,6 +345,14 @@ const { showPage } = useManual()
       into a pale haze towards the right of the plot without the noise having changed at all.
       <strong>Peak-hold</strong> keeps the highest level seen per bin since it was last reset, which
       is how you catch an intermittent spur.
+    </p>
+    <p>
+      <strong>FFT data</strong> is the live capture — the trace and the min/max band under it, which
+      is the same data — and it is the one to uncheck once peak-hold has caught what you were waiting
+      for. Unchecking it clears <strong>Min/max</strong> with it and leaves the peak-hold curve on
+      its own: the worst case so far, with nothing redrawn over the top of it twenty times a second.
+      Peak-hold keeps collecting while the trace is hidden, <strong>Reset peak-hold</strong> starts
+      it again, and ticking FFT data back on brings the band back with it.
     </p>
     <p>
       With a weighting selected the trace itself is weighted — the A curve's roll-off below 1 kHz is
@@ -420,22 +436,33 @@ const { showPage } = useManual()
 
     <h2>Display panel</h2>
     <p>
-      <strong>Level range</strong> and <strong>Frequency range</strong> set the spectrum's window,
-      each with its own Autofit. The frequency Autofit goes to 10 Hz and just past Nyquist for the
-      current sample rate. <strong>Units</strong> picks what the level axis reads:
+      <strong>Level range</strong> and <strong>Frequency range</strong> set the spectrum's window.
+      One <strong>Autofit</strong>, under the level range, fits both: the frequency axis to 10 Hz and
+      just past Nyquist for the current sample rate, and the level axis to the highest and lowest
+      point plotted with 10 dB of headroom. <strong>Units</strong> picks what the level axis reads:
       <strong>dBV</strong> per bin; <strong>dBV/√Hz</strong>, a noise density, which is the bin's
       power spread over the window's equivalent noise bandwidth (dBV − 10·log₁₀ ENBW, about
       −6.4 dB for Hann at 65536 points and 192 kHz) so a noise floor sits at the same height
       whatever the FFT size — and a tone, which has no density, reads lower on a coarser grid;
       or <strong>dBV/√Hz (input-referred)</strong>, the same less the DUT gain. Switching units
-      refits the range. A history overlay converts with its own window, so two results taken at
+      refits the range. Picking the input-referred unit reveals a <strong>DUT gain</strong> field
+      under the dropdown: the DUT's gain in dB from its own input to the analyzer's input, so a
+      preamp's output floor reads as the noise at its input. It also divides the
+      <strong>Noise in nV/√Hz</strong> tile, which is why the field stays visible once it is
+      non-zero even if the axis is switched back to dBV — a hidden field always means 0 dB, and
+      nothing on screen is changed by a value you cannot see. Leave it at 0 for a loopback. It is
+      saved with the measurement, unlike the load. Note it is not the same as the
+      <strong>External gain</strong> in Configuration ▸ Acquisition, which describes an attenuator
+      or probe <em>between</em> the DUT's output and the analyzer and corrects every measured level. A history overlay converts with its own window, so two results taken at
       different FFT sizes compare correctly on the density axis. Below those: <strong>Thick lines</strong>,
       <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (on for a
-      newly created measurement), the <strong>Channels</strong> row, the Min/max, Peak-hold and
-      Weighting curve toggles, and finally four checkboxes that show or hide the Waterfall, Oscilloscope, Harmonics
-      and Other peaks panels — so a measurement that only needs the spectrum does not have to scroll
-      past the rest. The waterfall and oscilloscope are only hidden: what they showed is still there
-      when they are ticked back on.
+      newly created measurement), the <strong>Channels</strong> row, the FFT data, Min/max,
+      Peak-hold and Weighting curve toggles, and finally four checkboxes that show or hide the
+      Waterfall, Oscilloscope, Harmonics and Other peaks panels — so a measurement that only needs
+      the spectrum does not have to scroll past the rest. A new measurement starts with the
+      Oscilloscope and Harmonics shown and the Waterfall and Other peaks hidden; tick them on where
+      you want them, and the choice is saved with the measurement. The waterfall and oscilloscope
+      are only hidden: what they showed is still there when they are ticked back on.
     </p>
 
     <h2>Zooming</h2>

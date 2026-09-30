@@ -122,6 +122,42 @@ export function freqTickSplits(min: number, max: number, widthPx: number, minSpa
   return linearTicks(min, max, widthPx, minSpacePx)
 }
 
+/**
+ * Below this pixel gap a second set of gridlines stops being structure and becomes hatching, so
+ * the minor grid is dropped entirely rather than drawn too fine to read.
+ */
+const MINOR_GRID_MIN_GAP_PX = 6
+
+/**
+ * The 2..9 positions of each decade that {@link freqTickSplits} did *not* take for a labelled tick
+ * — the thin, label-less lines a log frequency axis needs to be read as one.
+ *
+ * It is a complement rather than the whole 2..9 set because the two grids are drawn by two axes on
+ * one scale (uPlot styles an axis' whole grid as one stroke; see logMinorGridAxis in sweep/xAxis.ts)
+ * and the minor axis is drawn *after* the major one. A position in both sets would have its heavy
+ * line painted over by a light one, so 20 and 50 would come out thinner than 10 and 100 — the
+ * opposite of what the emphasis is for.
+ *
+ * Empty whenever the labelled ticks already cover every mantissa (nothing left to add) or the
+ * combined grid would be finer than {@link MINOR_GRID_MIN_GAP_PX}, which is what keeps a narrow
+ * chart — where even one label per decade did not fit — from being filled with eight more lines
+ * per decade. A span too narrow for a decade ladder at all (see {@link LOG_LADDER_MIN_RATIO})
+ * contains no round mantissa and so yields nothing on its own.
+ */
+export function freqMinorSplits(min: number, max: number, widthPx: number, minSpacePx = FREQ_AXIS_SPACE): number[] {
+  if (!(min > 0) || !(max > min) || !(widthPx > 0)) return []
+
+  const major = new Set(freqTickSplits(min, max, widthPx, minSpacePx))
+  const minor = decadeTicks([2, 3, 4, 5, 6, 7, 8, 9], min, max).filter((v) => !major.has(v))
+  if (minor.length === 0) return []
+
+  const logMin = Math.log10(min)
+  const logSpan = Math.log10(max) - logMin
+  const posOf = (v: number) => ((Math.log10(v) - logMin) / logSpan) * widthPx
+  const combined = [...major, ...minor].sort((a, b) => a - b)
+  return minGapPx(combined, posOf) >= MINOR_GRID_MIN_GAP_PX ? minor : []
+}
+
 /** Decimals needed for two values `gap` apart to print differently, clamped to something readable. */
 function decimalsFor(gap: number, cap: number): number {
   if (!(gap > 0) || !Number.isFinite(gap)) return cap

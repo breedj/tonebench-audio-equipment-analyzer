@@ -23,7 +23,7 @@ const props = defineProps<{
 }>()
 
 // Shared with the other channel — see useLoadOhms.ts. Edited in the Generator pane, not here; the
-// DUT gain likewise (useChartDisplay, beside Load Ω).
+// DUT gain likewise (useChartDisplay, under the unit dropdown in ChartDisplayPanel).
 const { loadOhms } = useLoadOhms()
 const { dutGainDb } = useChartDisplay()
 const { selectedMetrics, removeMetric } = useMetricSelection()

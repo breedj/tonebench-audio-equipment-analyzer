@@ -85,7 +85,7 @@ function onConfirm() {
 </script>
 
 <template>
-  <Modal :open="props.open" :title="title" :close-on-backdrop="false" @close="emit('close')">
+  <Modal :open="props.open" :title="title" @close="emit('close')">
     <div class="flex flex-col gap-3 text-sm">
       <label class="flex flex-col gap-1">
         Name

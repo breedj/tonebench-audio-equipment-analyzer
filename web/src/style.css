@@ -97,3 +97,23 @@
 :where(.plot-surface) {
   background-color: var(--surface-plot);
 }
+
+/* THE ACTION BUTTON on a settings or display panel, and on a chart's own toolbar: Autofit, Fit to
+   gate, Fit to measured band, Reset peak-hold, Reset zoom, Capture new loopback…, the calibration
+   Measure/Clear pairs, Copy. One class rather than the colour copied into twenty-odd templates, for
+   the same reason `.panel-surface` is one class — a button cannot then drift away from the rest.
+   (It is the blue that five display panels already spelled inline; those lines now say `btn-action`.)
+
+   Colour only, deliberately: every button keeps its own geometry, because a chart toolbar's button
+   is tighter (`py-0.5`, no `text-xs` of its own) than a panel's full-width one, and a few carry
+   `disabled:opacity-50` besides.
+
+   In `@layer components` so the `utilities` layer still wins — that is what lets a template
+   override one of these with a `bg-*` of its own — while still beating preflight's universal
+   `border: 0 solid`, whose border-color is `currentColor`. */
+@layer components {
+  .btn-action {
+    @apply border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100;
+    @apply dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40;
+  }
+}

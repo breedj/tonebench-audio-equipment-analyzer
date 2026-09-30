@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { freqTickLabels, freqTickSplits } from './freqAxis'
+import { freqMinorSplits, freqTickLabels, freqTickSplits } from './freqAxis'
 
 /** Ticks plus their text, the way a chart actually renders them. */
 function axis(min: number, max: number, widthPx = 900): string[] {
@@ -62,5 +62,39 @@ describe('freqTickLabels', () => {
 
   it('rounds a ragged span edge instead of spelling it out', () => {
     expect(freqTickLabels([5.859375], 5.859375, 24000)).toEqual(['5.86'])
+  })
+})
+
+describe('freqMinorSplits', () => {
+  it('fills in the mantissas the 1/2/5 ladder left out', () => {
+    // The labelled ticks over the audio span are 20 · 50 · 100 · … — so a decade reads
+    // 10 · 20 · 30 · … · 90 · 100 in lines, with only some of them named.
+    expect(freqMinorSplits(20, 20000, 900)).toEqual([
+      30, 40, 60, 70, 80, 90,
+      300, 400, 600, 700, 800, 900,
+      3000, 4000, 6000, 7000, 8000, 9000,
+    ])
+  })
+
+  it('never repeats a position the labelled axis already draws', () => {
+    for (const [min, max] of [[20, 20000], [10, 100000], [200, 900], [5, 300]] as const) {
+      const major = new Set(freqTickSplits(min, max, 900))
+      expect(freqMinorSplits(min, max, 900).some((v) => major.has(v))).toBe(false)
+    }
+  })
+
+  it('has nothing to add where every mantissa is already labelled', () => {
+    // 200..900 labels all eight of its own ticks, so there is no complement left.
+    expect(freqMinorSplits(200, 900, 900)).toEqual([])
+  })
+
+  it('stays away from a chart too narrow to carry the extra lines', () => {
+    // At 200 px the labels have already fallen back to bare decades; eight more lines per decade
+    // would be hatching rather than structure.
+    expect(freqMinorSplits(10, 20000, 200)).toEqual([])
+  })
+
+  it('yields nothing inside a window with no round mantissa', () => {
+    expect(freqMinorSplits(990, 1010, 900)).toEqual([])
   })
 })

@@ -16,12 +16,14 @@ const {
   visibleR,
   showMinMax,
   showPeakHold,
+  showFftTrace,
   autofitOnDone,
   showWaterfall,
   showOscilloscope,
   showHarmonics,
   showOtherPeaks,
   spectrumUnit,
+  dutGainDb,
   showWeightingCurve,
   requestAutofitY,
   requestAutofitX,
@@ -56,6 +58,29 @@ const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
 function onUnitChange() {
   requestAutofitY()
 }
+
+/**
+ * One Autofit per chart, not one per axis (Joost, 2026-09-30): it fits every axis at once, so
+ * "show me all of it" is one press wherever you are. The per-axis buttons are gone from every
+ * display panel; the axis fields themselves stay, for a window chosen by hand.
+ *
+ * Order does not matter on this chart — SpectrumChart's own level fit deliberately reads the whole
+ * span rather than the plotted window (see computeYExtent there) — but it is x-then-y everywhere
+ * else, where the level fit is scoped to the frequency window, so it is x-then-y here too.
+ */
+function autofitAll() {
+  requestAutofitX()
+  requestAutofitY()
+}
+
+// The DUT gain is only ever *read* by the input-referred unit and by the "Noise in nV/√Hz" tile, and
+// both of those divide by a gain of 0 dB, i.e. by nothing. So the field is shown when it is selected
+// (the unit) or when it is doing something (a non-zero value) and hidden otherwise — hidden always
+// means 0 dB, so nothing on screen is ever changed by a value the user cannot see. Note the
+// consequence: with the chart in dBV and the gain at 0, the way to reach the field is to pick the
+// input-referred unit; it then stays visible after switching back, because it still divides the tile.
+// The Units tooltip says so.
+const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' || dutGainDb.value !== 0)
 </script>
 
 <template>
@@ -64,7 +89,7 @@ function onUnitChange() {
        screen's display panel. The width is the shell's xl column, the same 16rem as every other screen. -->
   <div class="contents">
     <CollapsibleSection title="Level range" size="xs">
-      <label class="flex flex-col gap-1 text-xs" title="dBV per bin, or a noise density in dBV/√Hz (the bin's power spread over the window's noise bandwidth), optionally referred to the DUT's input by its gain. See the manual's FFT analysis page.">
+      <label class="flex flex-col gap-1 text-xs" title="dBV per bin, or a noise density in dBV/√Hz (the bin's power spread over the window's noise bandwidth), optionally referred to the DUT's input by its gain. Picking the input-referred unit reveals the DUT gain field below, which also divides the Noise in nV/√Hz tile. See the manual's FFT analysis page.">
         Units
         <select
           v-model="spectrumUnit"
@@ -73,6 +98,19 @@ function onUnitChange() {
         >
           <option v-for="u in SPECTRUM_UNIT_OPTIONS" :key="u.value" :value="u.value">{{ u.label }}</option>
         </select>
+      </label>
+      <label
+        v-if="showDutGain"
+        class="flex flex-col gap-1 text-xs"
+        title="The DUT's gain from its input to the analyzer's input, in dB. The input-referred unit and the Noise in nV/√Hz tile divide the measured noise density by it, so a preamp's output floor reads as the noise at its input. 0 for a loopback. Saved with the measurement."
+      >
+        DUT gain (dB)
+        <input
+          v-model.number="dutGainDb"
+          type="number"
+          step="0.1"
+          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+        />
       </label>
       <label class="flex flex-col gap-1 text-xs">
         Top
@@ -92,11 +130,13 @@ function onUnitChange() {
           class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
         />
       </label>
+      <!-- The chart's one Autofit. It sits in the first section rather than in Display below,
+           where it would be a scroll away from the fields it overwrites. -->
       <button
         type="button"
-        class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        title="Fits to the highest and lowest currently-plotted point, with 10 dB of headroom on each side."
-        @click="requestAutofitY"
+        class="w-full rounded border px-2 py-1 text-xs btn-action"
+        title="Fits both axes to everything currently plotted: the level range to the highest and lowest point with 10 dB of headroom, and the frequency range to the full measured span."
+        @click="autofitAll"
       >
         Autofit
       </button>
@@ -121,14 +161,6 @@ function onUnitChange() {
           <option v-for="f in toOptions" :key="f" :value="f">{{ f }}</option>
         </select>
       </label>
-      <button
-        type="button"
-        class="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-        title="Sets From to 10 Hz and To just above the current sample rate's Nyquist frequency."
-        @click="requestAutofitX"
-      >
-        Autofit
-      </button>
     </CollapsibleSection>
 
     <!-- text-xs throughout, the same size SweepDisplayPanel uses, so the two screens' display
@@ -164,6 +196,13 @@ function onUnitChange() {
       </div>
 
       <section class="flex flex-col gap-1.5 text-xs">
+        <label
+          class="flex items-center gap-1.5"
+          title="The live capture: the spectrum line and the min/max band under it, which is the same data. Unchecking it clears Min/max too and leaves the peak-hold trace on its own — a still picture of the worst case so far, with nothing redrawn over the top of it. Ticking it back on restores the band."
+        >
+          <input v-model="showFftTrace" type="checkbox" />
+          FFT data
+        </label>
         <label class="flex items-center gap-1.5">
           <input v-model="showMinMax" type="checkbox" />
           Min/max
@@ -175,7 +214,7 @@ function onUnitChange() {
         <button
           v-if="showPeakHold"
           type="button"
-          class="w-full rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          class="w-full rounded border px-2 py-1 text-xs btn-action"
           title="Clears the peak-hold trace and starts capturing fresh maximums."
           @click="requestResetPeakHold"
         >
@@ -193,8 +232,9 @@ function onUnitChange() {
       <!-- Which of the secondary panels the FFT screen draws at all. Unlike the toggles above,
            these are not about the spectrum chart's own content: they show and hide whole panels
            under it, so a measurement that only needs the spectrum doesn't have to scroll past the
-           three that come with it. All on by default -- see useChartDisplay.ts. Waterfall and
-           Oscilloscope are hidden rather than unmounted (App.vue), so what they showed comes back. -->
+           three that come with it. Oscilloscope and Harmonics are on by default, Waterfall and Other
+           peaks off -- see useChartDisplay.ts. Waterfall and Oscilloscope are hidden rather than
+           unmounted (App.vue), so what they showed comes back. -->
       <section class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 text-xs dark:border-neutral-800">
         <label class="flex items-center gap-1.5">
           <input v-model="showWaterfall" type="checkbox" />

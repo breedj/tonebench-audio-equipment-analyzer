@@ -597,7 +597,7 @@ onBeforeUnmount(() => {
 
       <button
         type="button"
-        class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="rounded border px-2 py-0.5 btn-action"
         title="Throws away the history and starts collecting fresh rows."
         @click="clearHistory"
       >

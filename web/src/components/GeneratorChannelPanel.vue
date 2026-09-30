@@ -4,6 +4,8 @@ import type { GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, Gen
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useMetricSelection } from '../composables/useMetricSelection'
 import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, presetTones, sineEquivalentDbv } from '../imd/presets'
+import { generatorLevelFromDbv, generatorLevelToDbv } from '../generatorLevel'
+import GeneratorLevelUnitSelect from './GeneratorLevelUnitSelect.vue'
 
 const props = defineProps<{
   /**
@@ -48,7 +50,7 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
 // it's a silent no-op for Multitone/WhiteNoise) and with GeneratorMetricsPanel.vue, which needs this
 // staged config reactively even after Stop silences DeviceStatus.generatorLeft/Right — see
 // useGeneratorStimulus.ts.
-const { kind, tones, multitone, noise, chirp, imd } = useGeneratorStimulus()
+const { kind, tones, multitone, noise, chirp, imd, levelUnit } = useGeneratorStimulus()
 const { selectedMetrics, setSelectedMetrics } = useMetricSelection()
 
 const IMD_METHODS: { value: ImdMethodName; label: string }[] = [
@@ -62,14 +64,48 @@ const IMD_METHODS: { value: ImdMethodName; label: string }[] = [
 // method and order chosen here.
 const presetActive = computed(() => kind.value === 'Tones' && imd.preset !== 'Custom')
 
-// A preset's tone fields are read-only, so their spinner arrows do nothing but hide the last
-// digit of "19000" and "-12.02" in a 4rem box; they are dropped while the preset holds the field.
+// Spinner arrows eat the last digit of "19000" or "-12.02" in a 4rem box while stepping by an
+// amount that means nothing on either field -- 1 Hz on a frequency, 1 dB on a level. Dropped
+// throughout: on the frequency boxes always, and on the level boxes while a preset holds them
+// read-only.
 const NO_SPINNER = '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
 const twoTones = computed(() => kind.value === 'Tones' && tones.length === 2)
 const presetLevelDbv = computed(() => {
   const level = sineEquivalentDbv(tones)
   return level === null ? -6 : Math.round(level * 100) / 100
 })
+
+// Every level box below is stored in dBV and typed in `levelUnit` -- see generatorLevel.ts. The
+// level fields therefore bind `:value`/`@change` rather than v-model: an unedited box must keep
+// showing the stored number to the last digit, and a round trip through a unit it is not displayed
+// in would round it.
+const levelStep = computed(() => (levelUnit.value === 'Dbv' ? '0.5' : 'any'))
+
+function displayLevel(ampDbv: number): number {
+  return generatorLevelFromDbv(ampDbv, levelUnit.value)
+}
+
+/** The dBV a level box now means, or null when what was typed has none (blank, or 0 V). */
+function typedLevelDbv(event: Event): number | null {
+  return generatorLevelToDbv(Number((event.target as HTMLInputElement).value), levelUnit.value)
+}
+
+/**
+ * One level box's edit: store the dBV it now means, or -- when what was typed has no dBV at all --
+ * put the stored level back rather than leaving a value on screen that was refused.
+ *
+ * `stored` is what to fall back to, and `assign` where the new dBV goes; every level on the panel
+ * goes through here, so a stimulus kind cannot end up half-converted.
+ */
+function onLevelEdit(event: Event, stored: number, assign: (ampDbv: number) => void) {
+  const dbv = typedLevelDbv(event)
+  if (dbv === null) {
+    ;(event.target as HTMLInputElement).value = String(displayLevel(stored))
+    return
+  }
+  assign(dbv)
+  emit('change')
+}
 
 function applyPreset(levelDbv: number) {
   const preset = imdPreset(imd.preset)
@@ -102,10 +138,7 @@ function onPresetChange() {
 }
 
 function onPresetLevelChange(event: Event) {
-  const value = Number((event.target as HTMLInputElement).value)
-  if (!Number.isFinite(value)) return
-  applyPreset(value)
-  emit('change')
+  onLevelEdit(event, presetLevelDbv.value, applyPreset)
 }
 
 function onMethodChange() {
@@ -213,16 +246,20 @@ defineExpose({ currentConfig, syncFromStatus })
         </select>
       </label>
 
-      <label v-if="presetActive" class="mb-3 flex items-center gap-2 text-sm" title="The level of a single sine whose peak equals the two-tone pair's peak. 4:1 puts the tones 1.94 and 13.98 dB below it, 1:1 puts both 6.02 dB below.">
-        Level
-        <input
-          type="number"
-          step="0.5"
-          :value="presetLevelDbv"
-          class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700"
-          @change="onPresetLevelChange"
-        />
-        <span class="text-neutral-500">dBV sine-eq.</span>
+      <!-- Stacked rather than one row: with the unit dropdown beside the box there is no room left
+           for "sine-eq." on the same line, and it wrapped mid-phrase. -->
+      <label v-if="presetActive" class="mb-3 flex flex-col gap-1 text-sm" title="The level of a single sine whose peak equals the two-tone pair's peak. 4:1 puts the tones 1.94 and 13.98 dB below it, 1:1 puts both 6.02 dB below.">
+        Level (sine-equivalent)
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            :step="levelStep"
+            :value="displayLevel(presetLevelDbv)"
+            class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700"
+            @change="onPresetLevelChange"
+          />
+          <GeneratorLevelUnitSelect @change="emit('change')" />
+        </div>
       </label>
 
       <div class="space-y-2">
@@ -233,11 +270,11 @@ defineExpose({ currentConfig, syncFromStatus })
               v-model.number="tone.freqHz"
               :disabled="presetActive"
               class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700"
-              :class="{ [NO_SPINNER]: presetActive }"
+              :class="NO_SPINNER"
               placeholder="Freq (Hz)"
               @change="onToneEdit"
             />
-            <!-- No unit of its own: the "Hz @" beside the field already names it, and at w-16 the
+            <!-- No unit of its own: the "Hz" beside the field already names it, and at w-16 the
                  unit wrapped onto a second line. -->
             <span
               v-if="actualFreqHz[i] != null"
@@ -247,17 +284,18 @@ defineExpose({ currentConfig, syncFromStatus })
               → {{ actualFreqHz[i]!.toFixed(2) }}
             </span>
           </div>
-          <span class="pt-1.5 text-neutral-500">Hz @</span>
+          <span class="pt-1.5 text-neutral-500">Hz</span>
           <input
             type="number"
-            v-model.number="tone.ampDbv"
+            :step="levelStep"
+            :value="displayLevel(tone.ampDbv)"
             :disabled="presetActive"
             class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700"
             :class="{ [NO_SPINNER]: presetActive }"
-            placeholder="Amp (dBV)"
-            @change="onToneEdit"
+            placeholder="Level"
+            @change="onLevelEdit($event, tone.ampDbv, (v) => (tone.ampDbv = v))"
           />
-          <span class="pt-1.5 text-neutral-500">dBV</span>
+          <GeneratorLevelUnitSelect class="mt-px" @change="emit('change')" />
           <button v-if="!presetActive" type="button" class="pt-1.5 text-neutral-400 hover:text-red-500" title="Remove tone" @click="removeTone(i)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z" />
@@ -315,14 +353,20 @@ defineExpose({ currentConfig, syncFromStatus })
         />
       </label>
       <label class="flex flex-col gap-1">
-        Total RMS level (w/ 0 dB rolloff) (dBV)
-        <input
-          type="number"
-          v-model.number="multitone.totalRmsDbv"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="emit('change')"
-        />
+        Total RMS level (w/ 0 dB rolloff)
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            :step="levelStep"
+            :value="displayLevel(multitone.totalRmsDbv)"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            @change="onLevelEdit($event, multitone.totalRmsDbv, (v) => (multitone.totalRmsDbv = v))"
+          />
+          <GeneratorLevelUnitSelect @change="emit('change')" />
+        </div>
       </label>
+      <!-- Rolloff stays in dB whatever the level unit is: it is a ratio per octave, not a level,
+           and there is no volt figure for it to be expressed as. -->
       <label class="flex flex-col gap-1">
         Rolloff per octave (dB)
         <input
@@ -337,25 +381,33 @@ defineExpose({ currentConfig, syncFromStatus })
 
     <div v-else-if="kind === 'WhiteNoise'" class="space-y-2 text-sm">
       <label class="flex flex-col gap-1">
-        Level (dBV)
-        <input
-          type="number"
-          v-model.number="noise.levelDbv"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="emit('change')"
-        />
+        Level
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            :step="levelStep"
+            :value="displayLevel(noise.levelDbv)"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            @change="onLevelEdit($event, noise.levelDbv, (v) => (noise.levelDbv = v))"
+          />
+          <GeneratorLevelUnitSelect @change="emit('change')" />
+        </div>
       </label>
     </div>
 
     <div v-else-if="kind === 'EchoChirp'" class="space-y-2 text-sm">
       <label class="flex flex-col gap-1">
-        Amplitude (dBV)
-        <input
-          type="number"
-          v-model.number="chirp.amplitudeDbv"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="emit('change')"
-        />
+        Amplitude
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            :step="levelStep"
+            :value="displayLevel(chirp.amplitudeDbv)"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            @change="onLevelEdit($event, chirp.amplitudeDbv, (v) => (chirp.amplitudeDbv = v))"
+          />
+          <GeneratorLevelUnitSelect @change="emit('change')" />
+        </div>
       </label>
       <label class="flex flex-col gap-1">
         Start frequency (Hz)

@@ -498,7 +498,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       <button
         type="button"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        class="rounded border px-2 py-1 text-xs disabled:opacity-50 btn-action"
         @click="emit('capture-reference')"
       >
         Capture new loopback…

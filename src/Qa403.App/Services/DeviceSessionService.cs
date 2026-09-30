@@ -520,8 +520,14 @@ public sealed class DeviceSessionService(
         await _sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_isAcquiring)
-                throw new InvalidOperationException("Stop the running measurement before changing the analyzer's settings.");
+            // Acquisition is stopped rather than refused, unlike SwitchDeviceAsync. A reopen is
+            // always a deliberate settings change on the analyzer already in use, a *measurement*
+            // is already refused by MeasurementRunGuard before the caller gets here, and the live
+            // FFT screen cannot carry on across a device being rebuilt anyway. Refusing instead made
+            // the sound card's own calibration impossible: it starts acquisition to take its
+            // reading and then has to reopen to pick the new full scale up, so it would have been
+            // refused by the acquisition it started itself.
+            await StopAcquisitionCoreAsync();
 
             DeviceKind kind = _kind;
             logger.LogInformation("Reopening analyzer {Kind} with its current settings", kind);

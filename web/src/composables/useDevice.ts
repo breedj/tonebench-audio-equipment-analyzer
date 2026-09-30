@@ -29,6 +29,15 @@ export function useDevice() {
     }
   }
 
+  /**
+   * Re-reads the analyzer's range ladder and rate list.
+   *
+   * Fetched once at mount and, until a third analyzer existed, never again — harmless while both
+   * devices reported the QA403's capabilities. A sound card reports its own: one fixed input rung
+   * whose value moves when the calibration changes, and only the rates the card accepts. Without
+   * re-reading, the browser would keep the previous analyzer's ladder for the rest of the session,
+   * which is also the fallback App.vue's live ranging watcher uses.
+   */
   async function refreshRanges() {
     ranges.value = await api.getDeviceRanges()
   }
@@ -42,5 +51,5 @@ export function useDevice() {
     if (pollHandle) clearInterval(pollHandle)
   })
 
-  return { status, ranges, error, refreshStatus }
+  return { status, ranges, error, refreshStatus, refreshRanges }
 }

@@ -98,6 +98,20 @@ export interface DeviceStatus {
    * so during an acquisition these numbers are whatever they were when it started.
    */
   telemetry: DeviceTelemetry | null
+  /**
+   * The chosen sound-card input, or null when the analyzer is not a sound card — the same null
+   * convention as the `simulated*` fields, so the bar gates on this rather than on a kind string.
+   */
+  soundCardInputDevice: string | null
+  soundCardOutputDevice: string | null
+  /**
+   * False until both calibration steps have run. An uncalibrated card still measures every *ratio*
+   * exactly, because a consistent wrong full-scale constant cancels; what it cannot do is name a
+   * voltage, and the bar says so.
+   */
+  soundCardCalibrated: boolean | null
+  /** Whether the bar shows the two front-end gains in dB or as a ratio. Display only. */
+  soundCardGainUnit: string | null
 }
 
 /**
@@ -148,8 +162,11 @@ export type SimulatedDutModel =
   | 'ImpedanceShort'
   | 'ImpedanceOpen'
 
-/** Real QA403 over USB, or the synthetic device. Switchable at runtime — no restart, no flag. */
-export type DeviceKindName = 'Hardware' | 'Simulated'
+/**
+ * Real QA403 over USB, the synthetic device, or a sound card with an analog front-end. Switchable
+ * at runtime — no restart, no flag.
+ */
+export type DeviceKindName = 'Hardware' | 'Simulated' | 'SoundCard'
 
 /**
  * Who picks the input and output attenuators. One mode for both: they are the two ends of the same
@@ -166,6 +183,81 @@ export interface SimulatedProfileRequest {
   crosstalkEnabled?: boolean
   outputStage?: SimulatedOutputStageModel
   load?: SimulatedLoad
+}
+
+/** How a voltage was entered. A card calibrated against the wrong one is 3.01 dB out. */
+export type VoltageEntryUnitName = 'Rms' | 'Peak'
+
+/** One device the picker can offer. */
+export interface SoundCardOption {
+  hostApi: string
+  name: string
+  hostApiKind: string
+  maxInputChannels: number
+  maxOutputChannels: number
+  /** One device carrying both directions — what ASIO gives, and what nothing else on Windows does. */
+  isFullDuplex: boolean
+  /** 'Trusted', 'RequiresExclusive' or 'Resamples'. A resampling host API cannot be believed. */
+  trust: string
+  /** Sort key: the host APIs that reach the hardware first, the ones that resample last. */
+  preference: number
+}
+
+export interface SoundCardInventory {
+  /** False when PortAudio itself would not start — the dialog says so rather than showing "no cards". */
+  available: boolean
+  version: string
+  inputs: SoundCardOption[]
+  outputs: SoundCardOption[]
+  problem: string | null
+}
+
+export interface SoundCardProbe {
+  sampleRatesHz: number[]
+  /** 'FullDuplexDevice', 'NamesMatch' or 'Unknown'. Advisory — WDM-KS names carry no interface at all. */
+  pairing: string
+  inputTrust: string
+  outputTrust: string
+  problem: string | null
+}
+
+/** Mirrors Qa403.Data.SoundCardConfig. */
+export interface SoundCardConfig {
+  inputHostApi: string
+  inputDeviceName: string
+  outputHostApi: string
+  outputDeviceName: string
+  inputChannelOffset: number
+  outputChannelOffset: number
+  sampleRateHz: number
+  /** Null until that step has run: an uncalibrated card reports dBFS and says so. */
+  outputFullScalePeakMv: number | null
+  inputFullScalePeakMvLeft: number | null
+  inputFullScalePeakMvRight: number | null
+  calibratedUtc: string | null
+  frontEndGainLeftDb: number
+  frontEndGainRightDb: number
+  gainDisplayUnit: string
+  /** Below this a sweep reports the card's own AC coupling as DUT response. */
+  minStimulusFrequencyHz: number
+}
+
+export interface SoundCardCalibrationState {
+  running: boolean
+  /** The level currently playing, or null when no tone is up. */
+  playingDbFs: number | null
+  toneHz: number
+  outputLevelsDbFs: number[]
+}
+
+export interface SoundCardCalibrationResult {
+  outputFullScalePeakMv: number | null
+  inputFullScalePeakMvLeft: number | null
+  inputFullScalePeakMvRight: number | null
+  measuredDbFs: number | null
+  /** How far apart the two inputs are. Several dB is a wiring mistake, which is what it is for. */
+  channelDifferenceDb: number | null
+  warning: string | null
 }
 
 /** Mirrors Qa403.Device.Simulation.SimulatedOutputStageModel. */
@@ -2411,6 +2503,41 @@ export const api = {
 
   setDeviceKind: (kind: DeviceKindName) =>
     request<DeviceStatus>('/device/kind', { method: 'POST', body: JSON.stringify({ kind }) }),
+
+  // ---- sound card -------------------------------------------------------------------------
+  /** What the machine has. A native call, so the dialog asks for it on open rather than on the poll. */
+  getSoundCardDevices: (refresh = false) =>
+    request<SoundCardInventory>(`/soundcard/devices${refresh ? '?refresh=true' : ''}`),
+  /** Whether a pairing works and at which rates. Re-asked whenever either side or either offset changes. */
+  probeSoundCard: (q: {
+    inputHostApi: string
+    inputDevice: string
+    outputHostApi: string
+    outputDevice: string
+    inputChannelOffset?: number
+    outputChannelOffset?: number
+  }) => request<SoundCardProbe>(`/soundcard/probe${toQuery({ ...q })}`),
+  getSoundCardConfig: () => request<SoundCardConfig>('/config/soundcard'),
+  setSoundCardConfig: (config: SoundCardConfig) =>
+    request<SoundCardConfig>('/config/soundcard', { method: 'PUT', body: JSON.stringify(config) }),
+  getSoundCardCalibration: () => request<SoundCardCalibrationState>('/soundcard/calibration'),
+  startSoundCardTone: (dbFs: number) =>
+    request<SoundCardCalibrationState>('/soundcard/calibration/output/start', {
+      method: 'POST',
+      body: JSON.stringify({ dbFs }),
+    }),
+  applySoundCardOutput: (value: number, unit: VoltageEntryUnitName) =>
+    request<SoundCardCalibrationResult>('/soundcard/calibration/output/apply', {
+      method: 'POST',
+      body: JSON.stringify({ value, unit }),
+    }),
+  measureSoundCardInput: (value: number, unit: VoltageEntryUnitName, channel: 'Left' | 'Right') =>
+    request<SoundCardCalibrationResult>('/soundcard/calibration/input', {
+      method: 'POST',
+      body: JSON.stringify({ value, unit, channel }),
+    }),
+  cancelSoundCardCalibration: () =>
+    request<SoundCardCalibrationState>('/soundcard/calibration/cancel', { method: 'POST' }),
 
   setSimulatedProfile: (patch: SimulatedProfileRequest) =>
     request<DeviceStatus>('/device/sim-profile', { method: 'POST', body: JSON.stringify(patch) }),

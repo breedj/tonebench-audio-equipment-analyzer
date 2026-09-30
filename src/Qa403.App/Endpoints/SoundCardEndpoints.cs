@@ -1,4 +1,5 @@
 using Qa403.App.Services;
+using Qa403.App.Streaming;
 using Qa403.Device.SoundCard;
 
 namespace Qa403.App.Endpoints;
@@ -33,5 +34,112 @@ public static class SoundCardEndpoints
             Results.Ok(SoundCardCatalog.Probe(
                 inputHostApi, inputDevice, inputChannelOffset ?? 0,
                 outputHostApi, outputDevice, outputChannelOffset ?? 0)));
+
+        // The two calibration steps. Sequenced here rather than in the dialog so the run guard sees
+        // them: a calibration tone playing is a measurement in progress, and a sweep started over it
+        // would take the generator away mid-step.
+        //
+        // The output step holds a tone across requests because the user is reading a voltmeter while
+        // it plays; the input step is one request because nothing happens during its capture.
+        var calibration = group.MapGroup("/calibration");
+
+        calibration.MapGet("/", (SoundCardCalibrationRunner runner) =>
+            Results.Ok(new SoundCardCalibrationState(
+                runner.Running, runner.PlayingDbFs, SoundCardCalibrationRunner.ToneHz,
+                SoundCardCalibrationRunner.OutputLevelsDbFs)));
+
+        calibration.MapPost("/output/start", async (
+            SoundCardToneRequest request, SoundCardCalibrationRunner runner, DeviceSessionService session,
+            IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
+        {
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict(MeasurementRunGuard.Message);
+
+            try
+            {
+                await runner.StartOutputToneAsync(request.DbFs, ct);
+                return Results.Ok(new SoundCardCalibrationState(
+                    runner.Running, runner.PlayingDbFs, SoundCardCalibrationRunner.ToneHz,
+                    SoundCardCalibrationRunner.OutputLevelsDbFs));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
+        calibration.MapPost("/output/apply", async (
+            SoundCardMeasurementRequest request, SoundCardCalibrationRunner runner, CancellationToken ct) =>
+        {
+            if (!EnumParsing.TryParse(request.Unit, VoltageEntryUnit.Rms, out VoltageEntryUnit unit, out string unitError))
+                return Results.BadRequest(unitError);
+
+            try
+            {
+                return Results.Ok(await runner.ApplyOutputAsync(request.Value, unit, ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
+        calibration.MapPost("/input", async (
+            SoundCardInputMeasurementRequest request, SoundCardCalibrationRunner runner,
+            DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
+        {
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict(MeasurementRunGuard.Message);
+
+            if (!EnumParsing.TryParse(request.Unit, VoltageEntryUnit.Rms, out VoltageEntryUnit unit, out string unitError))
+                return Results.BadRequest(unitError);
+
+            if (!EnumParsing.TryParse(request.Channel, StreamChannel.Left, out StreamChannel channel, out string channelError))
+                return Results.BadRequest(channelError);
+
+            try
+            {
+                return Results.Ok(await runner.MeasureInputAsync(request.Value, unit, channel, ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
+        // Also reached from the client's own teardown, so a dialog closed mid-step never leaves a
+        // tone playing.
+        calibration.MapPost("/cancel", async (SoundCardCalibrationRunner runner, CancellationToken ct) =>
+        {
+            await runner.SilenceAsync(ct);
+            return Results.Ok(new SoundCardCalibrationState(
+                runner.Running, runner.PlayingDbFs, SoundCardCalibrationRunner.ToneHz,
+                SoundCardCalibrationRunner.OutputLevelsDbFs));
+        });
     }
 }
+
+/// <param name="DbFs">How far below full scale to play, one of <see cref="SoundCardCalibrationRunner.OutputLevelsDbFs"/>.</param>
+public sealed record SoundCardToneRequest(double DbFs);
+
+/// <param name="Unit">"Rms" or "Peak" — a card calibrated against the wrong one is 3.01 dB out.</param>
+public sealed record SoundCardMeasurementRequest(double Value, string Unit);
+
+/// <param name="Channel">"Left" or "Right": which input the known source is on.</param>
+public sealed record SoundCardInputMeasurementRequest(double Value, string Unit, string Channel);
+
+/// <param name="PlayingDbFs">The level currently playing, or null when no tone is up.</param>
+public sealed record SoundCardCalibrationState(
+    bool Running, double? PlayingDbFs, double ToneHz, IReadOnlyList<double> OutputLevelsDbFs);

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { DeviceKindName, DeviceRanges, DeviceStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
+import { fromDisplay, toDisplay, type GainUnit } from '../soundcard/gainUnits'
 
 const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
   { value: 'Hardware', label: 'QA403' },
   { value: 'Simulated', label: 'Simulator' },
+  { value: 'SoundCard', label: 'Sound card' },
 ]
 
 type DutGroup =
@@ -196,6 +198,8 @@ const emit = defineEmits<{
   setDeviceKind: [kind: DeviceKindName]
   setRangingMode: [mode: RangingModeName]
   setInputRange: [dbv: number]
+  openSoundCard: []
+  setSoundCardGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
   setOutputRange: [dbv: number]
   connect: []
 }>()
@@ -370,6 +374,47 @@ const telemetry = computed(() => {
  * reading, and a row that disappears whenever a measurement starts reads as a fault.
  */
 const telemetryStale = computed(() => props.status?.acquiring === true)
+/**
+ * The sound card's controls stand in for the QA403's two attenuators, because a card has neither:
+ * one fixed full scale on each side. What varies on that bench is the front-end in front of it, so
+ * that is what the bar offers instead.
+ */
+const isSoundCard = computed(() => props.status?.deviceKind === 'SoundCard')
+
+/** dB or a plain ratio. The stored value is always dB — see soundcard/gainUnits. */
+const gainUnit = computed<GainUnit>(() => (props.status?.soundCardGainUnit === 'Times' ? 'Times' : 'Db'))
+
+const gainLeft = computed(() => toDisplay(props.status?.externalGainLeftDb ?? 0, gainUnit.value))
+const gainRight = computed(() => toDisplay(props.status?.externalGainRightDb ?? 0, gainUnit.value))
+
+const gainStep = computed(() => (gainUnit.value === 'Times' ? 0.01 : 0.1))
+
+const soundCardTitle = computed(() => {
+  const s = props.status
+  if (!s) return ''
+  if (!s.soundCardInputDevice) return 'No sound card chosen yet — open the settings to pick one.'
+  return s.soundCardCalibrated
+    ? `${s.soundCardInputDevice} — calibrated, so every level is a voltage.`
+    : `${s.soundCardInputDevice} — not calibrated, so levels are dBFS rather than volts. Ratios (THD, IMD, response shape) are exact either way.`
+})
+
+function emitGain(which: 'left' | 'right', event: Event) {
+  const raw = Number((event.target as HTMLInputElement).value)
+  const db = fromDisplay(raw, gainUnit.value)
+  emit('setSoundCardGain', {
+    leftDb: which === 'left' ? db : (props.status?.externalGainLeftDb ?? 0),
+    rightDb: which === 'right' ? db : (props.status?.externalGainRightDb ?? 0),
+    unit: gainUnit.value,
+  })
+}
+
+function onGainUnitChange(event: Event) {
+  emit('setSoundCardGain', {
+    leftDb: props.status?.externalGainLeftDb ?? 0,
+    rightDb: props.status?.externalGainRightDb ?? 0,
+    unit: (event.target as HTMLSelectElement).value as GainUnit,
+  })
+}
 </script>
 
 <template>
@@ -500,6 +545,31 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
           </select>
         </label>
       </template>
+      <!-- Sound-card settings. Keyed on the selected analyzer rather than on a connection, for the
+           same reason the simulator's controls are: the card has to be choosable before it is up,
+           and when nothing is chosen yet this button is the only way to get anywhere. -->
+      <button
+        v-if="isSoundCard"
+        type="button"
+        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        aria-label="Sound card settings"
+        :title="soundCardTitle"
+        @click="emit('openSoundCard')"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+        </svg>
+      </button>
+      <!-- Said out loud rather than left to be discovered: every ratio is still exact, but nothing
+           on screen is a voltage until both calibration steps have run. -->
+      <span
+        v-if="isSoundCard && status?.connected && status.soundCardCalibrated === false"
+        class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+        title="Levels are dBFS, not volts. THD, IMD, crosstalk and the response shape are exact regardless — a consistent full-scale constant cancels out of every ratio."
+      >
+        Uncalibrated
+      </span>
       <!--
         The app starts whether or not a QA403 is attached (a missing one used to abort startup
         outright), so "Disconnected" is a normal state to arrive in rather than a failure. Covers the
@@ -599,7 +669,7 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
         on the 18 dBV one differs by 5 dB of H3 and 1.7 dB of noise floor, and nothing but the range
         explains it.
       -->
-      <label v-if="status" class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400" :title="rangingTitle">
+      <label v-if="status && !isSoundCard" class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400" :title="rangingTitle">
         Ranging
         <select
           class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
@@ -610,7 +680,7 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
           <option v-for="mode in RANGING_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
         </select>
       </label>
-      <span class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400" :title="attenuationTitle">
+      <span v-if="!isSoundCard" class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400" :title="attenuationTitle">
         Attenuation
         <!--
           The dropdown replaces the readout rather than sitting beside it: two widgets showing one
@@ -638,7 +708,7 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
         over, and a level the chosen range cannot carry is said out loud rather than quietly
         corrected — correcting it would make "Manual" mean "manual until the app disagrees".
       -->
-      <span class="flex items-center gap-2" :class="outputRangeClass" :title="outputRangeTitle">
+      <span v-if="!isSoundCard" class="flex items-center gap-2" :class="outputRangeClass" :title="outputRangeTitle">
         Output range
         <select
           v-if="manual"
@@ -658,6 +728,55 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
           {{ status?.outputRangeDbv ?? '--' }} dBV
         </span>
         <span v-if="status?.outputRangeClipping" class="text-xs font-medium">clipping</span>
+      </span>
+      <!--
+        A sound card has no attenuator on either side: one fixed full scale, which the calibration
+        measured. So the two range dropdowns above have nothing to offer, and what does vary on that
+        bench takes their place — the analog front-end in front of each input.
+
+        The value stored is always dB, which is what every measurement's parameters record and what
+        the pipeline divides by; the × unit exists because that is how a divider reads on a bench
+        (a 10:1 divider is 0.1, not −20). The conversion is in soundcard/gainUnits.ts rather than
+        here, because nothing in a .vue is testable under the node environment vitest runs in.
+      -->
+      <span
+        v-if="isSoundCard"
+        class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"
+        title="The gain of whatever sits between the DUT and each input — a 10:1 divider is −20 dB, or ×0.1. Every level shown is the DUT's, with this undone. Remembered separately from the QA403's."
+      >
+        Gain
+        <label class="flex items-center gap-1">
+          <span class="text-[11px] uppercase tracking-wide">L</span>
+          <input
+            type="number"
+            class="w-20 rounded border border-neutral-300 px-1 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
+            :value="gainLeft"
+            :step="gainStep"
+            :disabled="rangesLocked"
+            @change="emitGain('left', $event)"
+          />
+        </label>
+        <label class="flex items-center gap-1">
+          <span class="text-[11px] uppercase tracking-wide">R</span>
+          <input
+            type="number"
+            class="w-20 rounded border border-neutral-300 px-1 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
+            :value="gainRight"
+            :step="gainStep"
+            :disabled="rangesLocked"
+            @change="emitGain('right', $event)"
+          />
+        </label>
+        <select
+          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
+          :value="gainUnit"
+          :disabled="rangesLocked"
+          title="How the two boxes are read. The stored value is dB either way."
+          @change="onGainUnitChange"
+        >
+          <option value="Db">dB</option>
+          <option value="Times">×</option>
+        </select>
       </span>
     </div>
 

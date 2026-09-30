@@ -285,6 +285,85 @@ public class SoundCardDeviceTests
         Assert.All(written, buffer => Assert.All(buffer, v => Assert.InRange(v, -1.0f, 1.0f)));
     }
 
+    /// <summary>
+    /// A channel offset selects a pair *within* one device, which under ASIO is the only way to
+    /// reach channels 3/4 at all — the whole card is one device. The slots outside the pair must be
+    /// left silent, or the tone goes out of outputs the bench is not patched to.
+    /// </summary>
+    [Fact]
+    public async Task WithAChannelOffset_TheToneGoesOutOfThatPairAndNoOther()
+    {
+        var (device, pa) = Build(
+            new SoundCardCalibration
+            {
+                OutputFullScalePeakV = 1.0,
+                InputFullScalePeakVLeft = 1.0,
+                InputFullScalePeakVRight = 1.0,
+            },
+            outputOffset: 2,
+            outputChannels: 4);
+        await device.ConnectAsync(CancellationToken.None);
+
+        var tone = new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(1_000.0, -6.0)]);
+        await device.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), CancellationToken.None);
+
+        await TakeAsync(device, count: 3);
+
+        var written = pa.NextStream.Written.Where(b => b.Length >= 4 * 4).ToList();
+        Assert.NotEmpty(written);
+
+        double[] peak = new double[4];
+        foreach (float[] buffer in written)
+        {
+            for (int f = 0; f + 3 < buffer.Length; f += 4)
+            {
+                for (int c = 0; c < 4; c++)
+                    peak[c] = Math.Max(peak[c], Math.Abs(buffer[f + c]));
+            }
+        }
+
+        Assert.Equal(0.0, peak[0], 1e-9);
+        Assert.Equal(0.0, peak[1], 1e-9);
+        Assert.True(peak[2] > 0.1, $"channel 3 carried nothing (peak {peak[2]})");
+        Assert.True(peak[3] > 0.1, $"channel 4 carried nothing (peak {peak[3]})");
+    }
+
+    /// <summary>
+    /// A disabled generator channel must be silent, and separately so: the whole of the
+    /// channel-order check on real hardware rests on being able to play one side alone.
+    /// </summary>
+    [Fact]
+    public async Task WithOnlyTheLeftGeneratorEnabled_TheRightOutputStaysSilent()
+    {
+        var (device, pa) = Build(new SoundCardCalibration
+        {
+            OutputFullScalePeakV = 1.0,
+            InputFullScalePeakVLeft = 1.0,
+            InputFullScalePeakVRight = 1.0,
+        });
+        await device.ConnectAsync(CancellationToken.None);
+
+        var tone = new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(1_000.0, -6.0)]);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(tone, ChannelGeneratorConfig.Off), CancellationToken.None);
+
+        await TakeAsync(device, count: 3);
+
+        double left = 0.0;
+        double right = 0.0;
+        foreach (float[] buffer in pa.NextStream.Written)
+        {
+            for (int f = 0; f + 1 < buffer.Length; f += 2)
+            {
+                left = Math.Max(left, Math.Abs(buffer[f]));
+                right = Math.Max(right, Math.Abs(buffer[f + 1]));
+            }
+        }
+
+        Assert.True(left > 0.1, $"the left output carried nothing (peak {left})");
+        Assert.Equal(0.0, right, 1e-9);
+    }
+
     /// <summary>Reads the first <paramref name="count"/> blocks and then leaves, which also exercises the teardown.</summary>
     private static async Task<List<(float[] Samples, long Sequence, int Channels, bool Discontinuity)>> TakeAsync(
         SoundCardDevice device, int count)

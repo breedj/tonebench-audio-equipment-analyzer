@@ -134,6 +134,8 @@ try
     builder.Services.AddSingleton<CaptureDelaySetting>();
     builder.Services.AddSingleton<ExternalGainSetting>();
     builder.Services.AddSingleton<SoundCardSetting>();
+    builder.Services.AddSingleton<SoundCardCalibrationRunner>();
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SoundCardCalibrationRunner>());
     builder.Services.AddSingleton<UserWeightingSetting>();
     builder.Services.AddSingleton<UserWeightingService>();
     builder.Services.AddSingleton<DeviceSessionService>();

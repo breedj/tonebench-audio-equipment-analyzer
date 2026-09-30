@@ -15,7 +15,8 @@ namespace Qa403.Device.Tests.SoundCard;
 [Trait("Category", "Hardware")]
 public class SoundCardDeviceHardwareTests(ITestOutputHelper output)
 {
-    private SoundCardDevice? BuildForAFullDuplexCard(out string name, double sampleRateHz = 48_000.0)
+    private SoundCardDevice? BuildForAFullDuplexCard(
+        out string name, double sampleRateHz = 48_000.0, int inputOffset = 0, int outputOffset = 0)
     {
         var pa = PortAudioNative.Shared;
         var enumerator = new SoundCardEnumerator(pa);
@@ -40,12 +41,20 @@ public class SoundCardDeviceHardwareTests(ITestOutputHelper output)
             return null;
         }
 
+        if (card.MaxInputChannels < inputOffset + 2 || card.MaxOutputChannels < outputOffset + 2)
+        {
+            output.WriteLine($"{name} has no channel pair at offset {inputOffset}/{outputOffset} — skipping");
+            return null;
+        }
+
         var settings = new SoundCardSettings
         {
             InputHostApi = card.HostApiName,
             InputDeviceName = card.Name,
             OutputHostApi = card.HostApiName,
             OutputDeviceName = card.Name,
+            InputChannelOffset = inputOffset,
+            OutputChannelOffset = outputOffset,
             SampleRateHz = sampleRateHz,
         };
 
@@ -172,5 +181,111 @@ public class SoundCardDeviceHardwareTests(ITestOutputHelper output)
         output.WriteLine($"  peak left  {peakLeft:0.00000}");
         output.WriteLine($"  peak right {peakRight:0.00000}");
         output.WriteLine("  (equal and tiny means no loopback cable is fitted)");
+    }
+
+    /// <summary>Which channel pair carries the loopback patch on this bench (offset 2 = channels 3/4).</summary>
+    private const int LoopbackOffset = 2;
+
+    /// <summary>
+    /// The channel-order claim, measured rather than assumed. The QA403's own version of this test
+    /// exists because "it should not swap" is exactly what was wrong there for a while, and a sound
+    /// card deserves the same treatment rather than an inherited assumption.
+    ///
+    /// <para><b>Needs a loopback cable</b> on the pair named by <see cref="LoopbackOffset"/>. Without
+    /// one the inputs read silence, which this reports and skips rather than failing, so the class
+    /// stays runnable on an unpatched bench.</para>
+    ///
+    /// <para>It also exercises the channel-offset path, which under ASIO is the only way to reach a
+    /// pair other than 1/2: the whole card is one device and the offset selects within it.</para>
+    /// </summary>
+    [Fact]
+    public async Task SoundCardLoopback_ToneOnLeftOnly_ArrivesOnLeftAndNotOnRight()
+    {
+        var device = BuildForAFullDuplexCard(
+            out string name, inputOffset: LoopbackOffset, outputOffset: LoopbackOffset);
+        if (device is null)
+            return;
+
+        await device.ConnectAsync(CancellationToken.None);
+
+        var tone = new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(1_000.0, -20.0)]);
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(tone, ChannelGeneratorConfig.Off), CancellationToken.None);
+
+        (double leftOnlyL, double leftOnlyR) = await PeaksAsync(device);
+
+        // The mirror is measured before anything is asserted, because the three cases together say
+        // *which* fault it is. Left-only landing on the right alone is a swap; both channels equal
+        // in both cases is a patch that sums, which is what an interface's own internal loopback
+        // does and is not a fault in this code at all.
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(ChannelGeneratorConfig.Off, tone), CancellationToken.None);
+        (double rightOnlyL, double rightOnlyR) = await PeaksAsync(device);
+
+        output.WriteLine($"{name}, channels {LoopbackOffset + 1}/{LoopbackOffset + 2}, tone at -20 dBFS");
+        output.WriteLine($"  played LEFT  -> left {Db(leftOnlyL)}, right {Db(leftOnlyR)}");
+        output.WriteLine($"  played RIGHT -> left {Db(rightOnlyL)}, right {Db(rightOnlyR)}");
+
+        if (leftOnlyL < 0.002 && leftOnlyR < 0.002)
+        {
+            output.WriteLine("  nothing came back — no loopback on this pair, skipping the assertions");
+            return;
+        }
+
+        bool sums = leftOnlyL > 0.002 && leftOnlyR > 0.002 && rightOnlyL > 0.002 && rightOnlyR > 0.002;
+        if (sums)
+        {
+            output.WriteLine(
+                "  both inputs carry either channel, so this patch sums — an interface's internal loopback does that. Channel order cannot be judged through it.");
+            return;
+        }
+
+        // −20 dBFS is 0.1 of full scale. Each channel must come back on its own side.
+        Assert.InRange(leftOnlyL, 0.02, 0.5);
+        Assert.True(
+            leftOnlyL > leftOnlyR * 10.0,
+            $"a tone played on left alone came back on right (left {Db(leftOnlyL)}, right {Db(leftOnlyR)}) — a channel swap or a crossed patch.");
+        Assert.True(
+            rightOnlyR > rightOnlyL * 10.0,
+            $"a tone played on right alone came back on left (left {Db(rightOnlyL)}, right {Db(rightOnlyR)}).");
+    }
+
+    private static string Db(double peak) =>
+        peak > 0 ? $"{peak:0.00000} ({20.0 * Math.Log10(peak):0.0} dBFS)" : "0";
+
+    /// <summary>
+    /// The loudest each input saw over about a second, ignoring the first quarter: the queue primed
+    /// before a stimulus change still carries the previous one, which is what
+    /// <c>StimulusLatencyFrames</c> describes.
+    /// </summary>
+    private static async Task<(double Left, double Right)> PeaksAsync(SoundCardDevice device, int frames = 48_000)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        double left = 0.0;
+        double right = 0.0;
+        long seen = 0;
+
+        await foreach (PcmBlock block in device.StreamAsync(new AcquisitionConfig(48_000.0, 2), cts.Token))
+        {
+            using (block)
+            {
+                Span<float> s = block.Samples;
+                if (seen >= frames / 4)
+                {
+                    for (int i = 0; i + 1 < s.Length; i += 2)
+                    {
+                        left = Math.Max(left, Math.Abs(s[i]));
+                        right = Math.Max(right, Math.Abs(s[i + 1]));
+                    }
+                }
+
+                seen += block.FrameCount;
+            }
+
+            if (seen >= frames)
+                break;
+        }
+
+        return (left, right);
     }
 }

@@ -54,6 +54,8 @@ import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
+import SoundCardDialog from './components/SoundCardDialog.vue'
+import { useSoundCard } from './composables/useSoundCard'
 import AboutDialog from './components/AboutDialog.vue'
 import Qa403Logo from './components/Qa403Logo.vue'
 import ManualDialog from './manual/ManualDialog.vue'
@@ -155,7 +157,8 @@ import {
   type LiveStore,
 } from './measurements/liveOwner'
 
-const { status, ranges, error, refreshStatus } = useDevice()
+const { status, ranges, error, refreshStatus, refreshRanges } = useDevice()
+const soundCard = useSoundCard()
 const { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, setViewport, clearScope } = useSpectrumStream()
 const { overlays } = useMeasurements()
 const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig()
@@ -361,6 +364,7 @@ const metricPickerOpen = ref(false)
 // The FFT screen's metrics block, handed to SpectrumChart so its height fit leaves room for it.
 const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
+const soundCardDialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
 // The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
 // because the header's button and the per-measurement help button have to drive one dialog.
@@ -1709,13 +1713,36 @@ function setSimulatedProfile(patch: SimulatedProfileRequest) {
 }
 
 /**
- * Swaps the analyzer between the real QA403 and the simulator. The server tears the old one down
- * and stands the new one up, so a failure here is a refusal (a measurement is running) rather than
- * a half-switched session — the error line is the whole response.
+ * Swaps the analyzer between the QA403, the simulator and a sound card. The server tears the old
+ * one down and stands the new one up, so a failure here is a refusal (a measurement is running)
+ * rather than a half-switched session — the error line is the whole response.
+ *
+ * The range ladder is re-read afterwards. Every analyzer has its own: a sound card reports one
+ * fixed rung where the QA403 has eight, and `ranges` is otherwise fetched once at mount, so
+ * without this the browser would keep the previous analyzer's ladder for the rest of the session —
+ * which is also what the live ranging watcher falls back to.
  */
 function setDeviceKind(kind: import('./api/client').DeviceKindName) {
   return withErrorReporting(async () => {
     status.value = await api.setDeviceKind(kind)
+    await refreshRanges()
+  })
+}
+
+/**
+ * Closing the sound-card dialog re-reads the range ladder: a calibration accepted in there moves the
+ * card's single input rung, and the ladder is otherwise only fetched at mount.
+ */
+function closeSoundCardDialog() {
+  soundCardDialogOpen.value = false
+  void refreshRanges()
+}
+
+/** The status bar's Gain boxes, which stand in for the two attenuators a sound card does not have. */
+function setSoundCardGain(gain: { leftDb: number; rightDb: number; unit: 'Db' | 'Times' }) {
+  return withErrorReporting(async () => {
+    await soundCard.setFrontEndGain(gain.leftDb, gain.rightDb, gain.unit)
+    status.value = await api.getDevice()
   })
 }
 
@@ -4594,6 +4621,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       @set-simulated-profile="setSimulatedProfile"
       @set-ranging-mode="setRangingMode"
       @set-input-range="setInputRangeManually"
+      @open-sound-card="soundCardDialogOpen = true"
+      @set-sound-card-gain="setSoundCardGain"
       @set-output-range="setOutputRangeManually"
       @connect="connectDevice"
     />
@@ -4636,6 +4665,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       @close="projectReportOpen = false"
     />
     <ConfigDialog :open="configDialogOpen" @close="configDialogOpen = false" />
+    <SoundCardDialog :open="soundCardDialogOpen" @close="closeSoundCardDialog" />
     <AboutDialog :open="aboutDialogOpen" @close="aboutDialogOpen = false" />
     <ManualDialog />
   </div>

@@ -3694,6 +3694,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   ref="responseConfigPanel"
                   :running="responseRunning"
                   :min-stimulus-frequency-hz="ranges?.minStimulusFrequencyHz ?? 0"
+                  :sample-rates-hz="ranges?.sampleRatesHz"
                 />
                 <SteppedResponseConfigPanel
                   v-else

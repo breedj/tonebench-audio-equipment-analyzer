@@ -133,6 +133,14 @@ const GUIDE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/guide/GuideConnectingPage.vue')),
   },
   {
+    id: 'guide-sound-card',
+    title: 'Using a sound card instead',
+    summary: 'No QA403? Use an audio interface: choosing it, and the five minutes with a multimeter that teach it what a volt is.',
+    group: 'Start here',
+    counterpart: 'sound-card',
+    component: manualPage(() => import('./pages/guide/GuideSoundCardPage.vue')),
+  },
+  {
     id: 'guide-first-measurement',
     title: 'Your first measurement',
     summary: 'A loopback, a 1 kHz tone, and a spectrum on screen — ten minutes, step by step.',
@@ -369,6 +377,13 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     kind: IMPULSE_RESPONSE_KIND,
     group: 'Measurements',
     component: manualPage(() => import('./pages/ImpulseResponsePage.vue')),
+  },
+  {
+    id: 'sound-card',
+    title: 'Using a sound card',
+    summary: 'A sound card as a calibrated analyzer: choosing the card and host API, both calibration steps, and what it cannot do that a QA403 can.',
+    group: 'Basics',
+    component: manualPage(() => import('./pages/SoundCardPage.vue')),
   },
   {
     id: 'simulator',

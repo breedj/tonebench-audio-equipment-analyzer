@@ -483,6 +483,33 @@ public sealed class DeviceSessionService(
     public double MinStimulusFrequencyHz => _device.MinStimulusFrequencyHz;
 
     /// <summary>
+    /// Refuses a rate the analyzer in use does not have, here rather than at the device.
+    ///
+    /// <para>This is the one place every measurement passes through, which is why the check lives
+    /// here instead of in eight runners. And it has to be <b>synchronous with the caller</b>: the
+    /// stream is started on a pump task, so a rate the device rejects surfaces as an
+    /// <c>ArgumentOutOfRangeException</c> on a task nobody awaits — the run simply never produces a
+    /// point, with nothing to say why. Thrown here it is an ordinary refusal the endpoints turn into
+    /// a 409 carrying this message.</para>
+    ///
+    /// <para>It only bites on an analyzer whose rates are not the QA403's three, which today means a
+    /// sound card: its rates are probed from the hardware, so a card that cannot do 192 kHz does not
+    /// offer it and a span that implies 192 kHz is refused rather than half-measured.</para>
+    /// </summary>
+    private void RequireSupportedSampleRate(double sampleRateHz)
+    {
+        IReadOnlyList<double> supported = Capabilities.SampleRatesHz;
+        foreach (double rate in supported)
+        {
+            if (Math.Abs(rate - sampleRateHz) < 1e-6)
+                return;
+        }
+
+        throw new InvalidOperationException(
+            $"This analyzer cannot run at {sampleRateHz / 1000.0:0.###} kHz. It supports {string.Join(", ", supported.Select(r => $"{r / 1000.0:0.###} kHz"))} — pick a frequency span that asks for one of those.");
+    }
+
+    /// <summary>
     /// One of the sound card's settings, or null when that is not the analyzer in use — the null
     /// convention the <c>Simulated*</c> fields established, so the UI can gate on the field rather
     /// than on a device-kind string.
@@ -1294,6 +1321,7 @@ public sealed class DeviceSessionService(
     private async Task StartAcquisitionCoreAsync(AcquisitionConfig config, CancellationToken ct)
     {
         EnsureConnected();
+        RequireSupportedSampleRate(config.SampleRateHz);
 
         // A config change (sample rate, channel count, block size) while already acquiring restarts
         // the stream in place rather than making the caller Stop then Start — the UI applies these

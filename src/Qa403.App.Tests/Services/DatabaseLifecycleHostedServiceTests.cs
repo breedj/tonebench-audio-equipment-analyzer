@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.App.Services;
 using Qa403.Data;
@@ -12,6 +12,18 @@ namespace Qa403.App.Tests.Services;
 /// The project file's check moved with the open, to <see cref="ProjectSessionService"/>; at
 /// shutdown this service checkpoints whichever project is open at that moment.
 /// </summary>
+/// <summary>
+/// Runs alone. <see cref="SqliteConnection.ClearAllPools"/> is <b>process-wide</b>, and both
+/// <c>Cleanup</c> here and <c>DatabaseLifecycleHostedService.StopAsync</c> call it — so a parallel
+/// test doing the same thing closes this one's connection, SQLite checkpoints and truncates the WAL
+/// on the last connection closing, and the assertion that the WAL is non-empty <i>before</i>
+/// shutdown fails. Intermittently, and more often on a busy machine, which is exactly how it
+/// presented: green alone, roughly one full-suite run in three red.
+/// </summary>
+[CollectionDefinition(nameof(DatabaseLifecycleCollection), DisableParallelization = true)]
+public sealed class DatabaseLifecycleCollection;
+
+[Collection(nameof(DatabaseLifecycleCollection))]
 public class DatabaseLifecycleHostedServiceTests
 {
     private static (DatabaseLifecycleHostedService Service, DatabaseHealth Health, CurrentProjectFile Current, string DbPath, string ConfigPath) Create()

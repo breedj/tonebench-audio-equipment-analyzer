@@ -13,12 +13,15 @@ import { useBandwidthReference } from '../composables/useBandwidthReference'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
 import { stimulusFloorNotice } from '../stimulusFloor'
+import { spanFallback, supportedSpans } from '../supportedSpans'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const props = defineProps<{
   running: boolean
   /** The connected analyzer's lowest usable stimulus frequency, in Hz; 0 on one with no floor. */
   minStimulusFrequencyHz?: number
+  /** The rates the connected analyzer accepts. A span implies a rate, so this decides which spans are offered. */
+  sampleRatesHz?: number[]
 }>()
 
 
@@ -73,6 +76,16 @@ const form = reactive({
 // see useBandwidthReference. Watched with the form below, since they are part of the stored type.
 /** Warns before the run that the sweep will start higher than asked. See stimulusFloor.ts. */
 const floorNotice = computed(() => stimulusFloorNotice(form.chirpStartHz, props.minStimulusFrequencyHz))
+
+/** Only the spans this analyzer can actually run — a span implies a sample rate. See supportedSpans.ts. */
+const availableSpans = computed(() => supportedSpans(RESPONSE_SPANS_HZ, props.sampleRatesHz))
+
+// A span the analyzer cannot run must not be left sitting in the form: the server refuses that run,
+// and a panel holding a value it will be refused for is a worse way to find out.
+watch(availableSpans, (spans) => {
+  const fallback = spanFallback(form.frequencySpanHz, spans)
+  if (fallback !== null) form.frequencySpanHz = fallback
+})
 
 const { bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz } = useBandwidthReference()
 
@@ -372,7 +385,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         :disabled="running"
         class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
       >
-        <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span }}</option>
+        <option v-for="span in availableSpans" :key="span" :value="span">{{ span }}</option>
       </select>
     </label>
 

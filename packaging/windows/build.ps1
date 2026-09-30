@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds the Windows installer: frontend -> dotnet publish (win-x64) -> Inno Setup.
 
@@ -66,17 +66,21 @@ if (-not $NoPublish) {
     }
 }
 
-# --simulate smoke tests never load libusb, so a publish that lost the DLL passes them. It travels
-# inside the single-file exe (the bundle manifest names it), and QuestPDF's font archive beside it;
-# this is the check that catches either going missing before the installer ships without it.
+# --simulate smoke tests never load libusb or portaudio, so a publish that lost either DLL passes
+# them. Both travel inside the single-file exe (the bundle manifest names them), and QuestPDF's font
+# archive beside it; this is the check that catches any of them going missing before the installer
+# ships without it.
 foreach ($required in @("Qa403.App.exe", "QuestPDF.Fonts.Lato.br", "appsettings.json")) {
     if (-not (Test-Path (Join-Path $PublishDir $required))) {
         throw "Publish output is missing $required in $PublishDir"
     }
 }
 $exeBytes = [System.IO.File]::ReadAllBytes((Join-Path $PublishDir "Qa403.App.exe"))
-if (-not [System.Text.Encoding]::GetEncoding(28591).GetString($exeBytes).Contains("libusb-1.0.dll")) {
-    throw "Qa403.App.exe does not carry libusb-1.0.dll in its single-file bundle"
+$exeText = [System.Text.Encoding]::GetEncoding(28591).GetString($exeBytes)
+foreach ($native in @("libusb-1.0.dll", "portaudio.dll")) {
+    if (-not $exeText.Contains($native)) {
+        throw "Qa403.App.exe does not carry $native in its single-file bundle"
+    }
 }
 
 if (-not $Iscc) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sets up USB access for the QA403 on Linux: installs the udev rule, adds the invoking user to
-# plugdev, and ensures libusb-1.0-0 is installed via apt.
+# plugdev, and ensures libusb-1.0-0 and libportaudio2 are installed via apt.
 #
 # Usage: ./install.sh   (from the extracted release tar.gz, or ./packaging/linux/install.sh in the
 # repo; run as the normal user — it re-execs itself with sudo for the parts that need root, so your
@@ -45,16 +45,18 @@ usermod -aG plugdev "$TARGET_USER"
 # `ldconfig -p`, which on a freshly-booted VM in testing reported the library missing even though
 # it demonstrably was not (a transient ldconfig-cache read, not a real gap).
 #
+# libportaudio2 is the sound-card analyzer's backend -- on Windows that DLL is vendored, but on
+# Linux the distro's copy is the one to use (docs/qa403-app-stack-spec.md 9.4).
 # libfontconfig1 is for the PDF reports: QuestPDF's bundled native Skia links against it even
 # though the app only ever uses the font QuestPDF ships. Present on any desktop install; a minimal
 # server image may lack it, and the symptom is the report endpoint failing to load the library.
-echo "Ensuring libusb-1.0-0 and libfontconfig1 are installed..."
+echo "Ensuring libusb-1.0-0, libportaudio2 and libfontconfig1 are installed..."
 if ! command -v apt-get >/dev/null 2>&1; then
-    echo "error: apt-get not found. Install libusb-1.0-0 and libfontconfig1 (or your distro's equivalent packages) manually, then re-run this script." >&2
+    echo "error: apt-get not found. Install libusb-1.0-0, libportaudio2 and libfontconfig1 (or your distro's equivalent packages) manually, then re-run this script." >&2
     exit 1
 fi
 apt-get update
-apt-get install -y libusb-1.0-0 libfontconfig1
+apt-get install -y libusb-1.0-0 libportaudio2 libfontconfig1
 
 echo
 echo "Done. Log out and back in (or reboot) for the plugdev group change to take effect."

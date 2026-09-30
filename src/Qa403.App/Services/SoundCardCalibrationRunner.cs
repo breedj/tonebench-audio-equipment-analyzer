@@ -170,6 +170,110 @@ public sealed class SoundCardCalibrationRunner(
     }
 
     /// <summary>
+    /// Measures one input against the card's <b>own output</b>, through a loopback cable.
+    ///
+    /// <para>Once the output has been calibrated against a voltmeter, the app knows what it is
+    /// playing in volts — so a cable from that output to the input under test is a source of known
+    /// voltage, and no second signal generator is needed. ARTA asks for one because it assumes
+    /// separate equipment; a bench with a patch cable does not need it.</para>
+    ///
+    /// <para><b>It refuses while the output is uncalibrated</b>, and that is the whole safety of it:
+    /// the known voltage is derived from the output's full scale, so running this against a guessed
+    /// one would write an input calibration that looks measured and is invented. The error compounds
+    /// rather than cancelling — any error in the output figure lands directly in the input figure —
+    /// which is why the external-source step stays, and stays the more trustworthy of the two.</para>
+    /// </summary>
+    public async Task<SoundCardCalibrationResult> MeasureInputViaLoopbackAsync(
+        double dbFs, StreamChannel channel, CancellationToken ct)
+    {
+        RequireSoundCard();
+
+        if (!OutputLevelsDbFs.Contains(dbFs))
+            throw new ArgumentOutOfRangeException(nameof(dbFs), dbFs, $"Pick one of {string.Join(", ", OutputLevelsDbFs)} dB.");
+
+        SoundCardCalibration calibration = soundCard.Calibration;
+        if (!calibration.IsOutputCalibrated)
+        {
+            throw new InvalidOperationException(
+                "Calibrate the output first. This measures the input against what the card is playing, and until the output is calibrated that voltage is not known — the result would look measured and be invented.");
+        }
+
+        // What the card is about to play, in volts, from the output calibration.
+        double knownPeakV = calibration.OutputFullScaleV * Math.Pow(10.0, dbFs / 20.0);
+
+        lock (_gate)
+        {
+            _running = true;
+        }
+
+        try
+        {
+            // On the channel being measured and nowhere else: a loopback pairs one output with one
+            // input, and a tone on the other side would only reach this one as crosstalk.
+            var tone = new ChannelGeneratorConfig(
+                Enabled: true,
+                Tones: [new GeneratorTone(ToneHz, session.Capabilities.OutputRangesDbv[0] + dbFs)])
+            {
+                Kind = GeneratorKind.Tones,
+            };
+
+            GeneratorConfig generator = channel == StreamChannel.Right
+                ? new GeneratorConfig(ChannelGeneratorConfig.Off, tone)
+                : new GeneratorConfig(tone, ChannelGeneratorConfig.Off);
+
+            if (!session.Acquiring)
+                await session.StartAcquisitionAsync(new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
+
+            await session.ConfigureGeneratorAsync(generator, ct);
+
+            double measuredDbFs = await ReadPeakDbFsAsync(channel, ct);
+            await SilenceAsync(ct);
+
+            if (measuredDbFs > ClippingGuardDb)
+            {
+                throw new InvalidOperationException(
+                    $"That input is at {measuredDbFs:0.0} dBFS, which is clipping. Pick a quieter output level and measure again.");
+            }
+
+            if (measuredDbFs < SilenceGuardDbFs)
+            {
+                throw new InvalidOperationException(
+                    $"The {channel} input read {measuredDbFs:0.0} dBFS while the card was playing — that is silence. Check the loopback cable runs from the output channel to the input channel being calibrated.");
+            }
+
+            double fullScaleMv = SoundCardCalibration.InputFullScaleFromMeasurement(knownPeakV, measuredDbFs) * 1000.0;
+
+            SoundCardConfig updated = channel == StreamChannel.Right
+                ? soundCard.Config with { InputFullScalePeakMvRight = fullScaleMv, CalibratedUtc = DateTimeOffset.UtcNow }
+                : soundCard.Config with { InputFullScalePeakMvLeft = fullScaleMv, CalibratedUtc = DateTimeOffset.UtcNow };
+
+            await SaveAndReopenAsync(updated, ct);
+
+            logger.LogInformation(
+                "Sound card calibration: {Channel} input full scale {Mv:0.0} mV peak, from a loopback of {Known:0.0} mV peak measured at {DbFs:0.00} dBFS",
+                channel, fullScaleMv, knownPeakV * 1000.0, measuredDbFs);
+
+            double? difference = updated.InputFullScalePeakMvLeft is { } l && updated.InputFullScalePeakMvRight is { } r
+                ? 20.0 * Math.Log10(r / l)
+                : null;
+
+            return new SoundCardCalibrationResult(
+                updated.OutputFullScalePeakMv,
+                updated.InputFullScalePeakMvLeft,
+                updated.InputFullScalePeakMvRight,
+                measuredDbFs,
+                difference,
+                difference is { } d && Math.Abs(d) > 3.0
+                    ? $"The two inputs differ by {d:0.00} dB, which is more than two channels of one card usually do — check the wiring and the channel pair."
+                    : null);
+        }
+        finally
+        {
+            await SilenceAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
     /// Measures one input against a source of known voltage. The generator is silenced first: the
     /// source is external, and anything this app is playing would be measured with it.
     /// </summary>

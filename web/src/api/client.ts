@@ -2536,6 +2536,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ value, unit, channel }),
     }),
+  /** The same step against the card's own output through a patch cable. Needs the output calibrated. */
+  measureSoundCardInputViaLoopback: (dbFs: number, channel: 'Left' | 'Right') =>
+    request<SoundCardCalibrationResult>('/soundcard/calibration/input/loopback', {
+      method: 'POST',
+      body: JSON.stringify({ dbFs, channel }),
+    }),
   cancelSoundCardCalibration: () =>
     request<SoundCardCalibrationState>('/soundcard/calibration/cancel', { method: 'POST' }),
 

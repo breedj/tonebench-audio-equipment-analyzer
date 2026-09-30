@@ -184,6 +184,23 @@ export function useSoundCard() {
     }
   }
 
+  /** The same step through a patch cable, with the known voltage coming from the output calibration. */
+  async function measureInputViaLoopback(dbFs: number, channel: 'Left' | 'Right') {
+    busy.value = true
+    try {
+      calibrationResult.value = await api.measureSoundCardInputViaLoopback(dbFs, channel)
+      error.value = calibrationResult.value.warning
+      await load(true)
+      return true
+    } catch (e) {
+      error.value = (e as Error).message
+      return false
+    } finally {
+      await syncCalibrationState()
+      busy.value = false
+    }
+  }
+
   async function measureInput(value: number, unit: VoltageEntryUnitName, channel: 'Left' | 'Right') {
     busy.value = true
     try {
@@ -219,5 +236,6 @@ export function useSoundCard() {
     syncCalibrationState,
     applyOutput,
     measureInput,
+    measureInputViaLoopback,
   }
 }

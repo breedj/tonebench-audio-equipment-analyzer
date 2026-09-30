@@ -34,6 +34,7 @@ const {
   syncCalibrationState,
   applyOutput,
   measureInput,
+  measureInputViaLoopback,
 } = useSoundCard()
 
 /** ARTA's levels, and the server's. */
@@ -49,7 +50,18 @@ const form = reactive({
 })
 
 const outputStep = reactive({ dbFs: -6, reading: 1000, unit: 'Rms' as VoltageEntryUnitName })
-const inputStep = reactive({ known: 500, unit: 'Rms' as VoltageEntryUnitName, channel: 'Left' as 'Left' | 'Right' })
+const inputStep = reactive({
+  /**
+   * Where the known voltage comes from. 'External' is ARTA's: a second signal generator. 'Loopback'
+   * uses the card's own output through a patch cable, which is only possible once the output has
+   * been calibrated — and is the easier of the two on a bench that has a cable.
+   */
+  source: 'External' as 'External' | 'Loopback',
+  known: 500,
+  unit: 'Rms' as VoltageEntryUnitName,
+  channel: 'Left' as 'Left' | 'Right',
+  dbFs: -20,
+})
 
 const saved = ref(false)
 
@@ -178,8 +190,16 @@ async function acceptOutput() {
 }
 
 async function acceptInput() {
-  await measureInput(inputStep.known, inputStep.unit, inputStep.channel)
+  if (inputStep.source === 'Loopback') await measureInputViaLoopback(inputStep.dbFs, inputStep.channel)
+  else await measureInput(inputStep.known, inputStep.unit, inputStep.channel)
 }
+
+/** The loopback source needs the output's own calibration to know what it is playing. */
+const outputCalibrated = computed(() => config.value?.outputFullScalePeakMv != null)
+
+const canMeasureInput = computed(
+  () => !busy.value && (inputStep.source === 'External' || outputCalibrated.value),
+)
 
 // The tone must never outlive the dialog: it is the generator, and the user has walked away.
 async function close() {
@@ -405,14 +425,47 @@ function mv(value: number | null | undefined) {
       <!-- 3. Input full scale ----------------------------------------------------------- -->
       <section class="flex flex-col gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
         <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Full scale input (mV)</h3>
-        <p class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200">
+        <label class="flex items-center justify-between gap-3">
+          <span class="text-neutral-600 dark:text-neutral-300">Known source</span>
+          <select
+            v-model="inputStep.source"
+            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          >
+            <option value="External">A generator of known voltage</option>
+            <option value="Loopback">This card's output, through a patch cable</option>
+          </select>
+        </label>
+
+        <p
+          v-if="inputStep.source === 'External'"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
           <strong>Feed the chosen input from a source whose voltage you know</strong>, and enter that
           voltage. Each channel is measured on its own, so run this once per side. The generator is
           silenced while it measures — anything this app played would be measured along with it.
         </p>
+        <p
+          v-else
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          <strong>Patch the output channel straight back to the input channel</strong>, then measure.
+          Once the output is calibrated the app knows what it is playing in volts, so the cable is a
+          source of known voltage and no second generator is needed. Note the two figures are linked:
+          any error in the output calibration lands directly in this one, where a separate generator
+          would be independent of it.
+        </p>
+        <p
+          v-if="inputStep.source === 'Loopback' && !outputCalibrated"
+          class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
+        >
+          Calibrate the output first — until then the app does not know what voltage it is playing,
+          and the result would look measured without being it.
+        </p>
 
         <label class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Input channel</span>
+          <span class="text-neutral-600 dark:text-neutral-300">
+            {{ inputStep.source === 'Loopback' ? 'Output/input pair' : 'Input channel' }}
+          </span>
           <select
             v-model="inputStep.channel"
             class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
@@ -422,7 +475,7 @@ function mv(value: number | null | undefined) {
           </select>
         </label>
 
-        <label class="flex items-center justify-between gap-3">
+        <label v-if="inputStep.source === 'External'" class="flex items-center justify-between gap-3">
           <span class="text-neutral-600 dark:text-neutral-300">Source voltage</span>
           <span class="flex w-96 items-center gap-2">
             <input
@@ -442,11 +495,26 @@ function mv(value: number | null | undefined) {
           </span>
         </label>
 
+        <label v-else class="flex items-center justify-between gap-3">
+          <span
+            class="text-neutral-600 dark:text-neutral-300"
+            title="Quiet enough that the input cannot clip, loud enough to sit well clear of the card's noise floor."
+          >
+            Play at
+          </span>
+          <select
+            v-model.number="inputStep.dbFs"
+            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          >
+            <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dB</option>
+          </select>
+        </label>
+
         <div class="flex items-center gap-3">
           <button
             type="button"
             class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
-            :disabled="busy"
+            :disabled="!canMeasureInput"
             @click="acceptInput"
           >
             Estimate peak input mV

@@ -119,6 +119,34 @@ public static class SoundCardEndpoints
             }
         });
 
+        // The same input step, but against the card's own output through a patch cable instead of
+        // a second signal generator. Refused while the output is uncalibrated -- the known voltage
+        // comes from the output's full scale, so without it the result would look measured and be
+        // invented.
+        calibration.MapPost("/input/loopback", async (
+            SoundCardLoopbackRequest request, SoundCardCalibrationRunner runner,
+            DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
+        {
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict(MeasurementRunGuard.Message);
+
+            if (!EnumParsing.TryParse(request.Channel, StreamChannel.Left, out StreamChannel channel, out string channelError))
+                return Results.BadRequest(channelError);
+
+            try
+            {
+                return Results.Ok(await runner.MeasureInputViaLoopbackAsync(request.DbFs, channel, ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         // Also reached from the client's own teardown, so a dialog closed mid-step never leaves a
         // tone playing.
         calibration.MapPost("/cancel", async (SoundCardCalibrationRunner runner, CancellationToken ct) =>
@@ -139,6 +167,10 @@ public sealed record SoundCardMeasurementRequest(double Value, string Unit);
 
 /// <param name="Channel">"Left" or "Right": which input the known source is on.</param>
 public sealed record SoundCardInputMeasurementRequest(double Value, string Unit, string Channel);
+
+/// <param name="DbFs">How far below full scale to play into the loopback.</param>
+/// <param name="Channel">Which output/input pair the patch cable joins.</param>
+public sealed record SoundCardLoopbackRequest(double DbFs, string Channel);
 
 /// <param name="PlayingDbFs">The level currently playing, or null when no tone is up.</param>
 public sealed record SoundCardCalibrationState(

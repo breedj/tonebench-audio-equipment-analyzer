@@ -283,6 +283,11 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             });
 
         IPortAudioStream stream = _portAudio.OpenStream(request, TransferFrames);
+        // The stream's own lifecycle, at Debug: a reopened stream and a reused one behave
+        // differently and nothing else in the log distinguishes them.
+        _logger.LogDebug(
+            "Sound card stream opened at {Rate:0} Hz, output latency {Lat:0.000} s",
+            config.SampleRateHz, stream.OutputLatencyS);
         var pumpFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // What the stream actually holds, read from it rather than chosen: with one transfer of
@@ -306,6 +311,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             }
             finally
             {
+                _logger.LogDebug("Sound card transfer loop finished at {Rate:0} Hz", config.SampleRateHz);
                 blocks.Writer.TryComplete();
                 pumpFinished.TrySetResult();
             }

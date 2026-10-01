@@ -81,6 +81,21 @@ const inputStep = reactive({
 
 const saved = ref(false)
 const controlPanelNote = ref<string | null>(null)
+
+/**
+ * Whether each calibration step's instructions are showing.
+ *
+ * <p>Folded away by default and opened by the <b>?</b> beside the step's heading. The dialog is
+ * long enough to scroll, and the two instruction panels are the longest things in it — but they
+ * are read once, when the bench is being set up for the first time, and are noise on every visit
+ * afterwards. They are the step's own instructions rather than a tooltip's worth of detail, so
+ * they stay in the dialog rather than moving to the manual; only their default changes.</p>
+ *
+ * <p>Deliberately not persisted: the state lives as long as this component, so a step opened
+ * during one visit is still open on the next, and a reload starts folded again.</p>
+ */
+const outputHelpOpen = ref(false)
+const inputHelpOpen = ref(false)
 let stopLevels: (() => void) | null = null
 
 onUnmounted(() => stopLevels?.())
@@ -487,25 +502,12 @@ function mv(value: number | null | undefined) {
           </select>
         </label>
 
-<!-- Read-only, deliberately. The rate a measurement runs at is the measurement's, and every
-             screen's rate and span dropdowns are already filtered to this list -- so a selector here
-             would be a second place to set one thing, and the one that nothing read. What the probe
-             is for is telling you what the card can do before you commit to it. -->
-        <div class="flex items-start justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Sample rates</span>
-          <span class="w-96">
-            <span class="font-mono">{{
-              rates.length > 0 ? rates.map((r) => `${r / 1000}`).join(', ') + ' kHz' : '—'
-            }}</span>
-            <span class="mt-0.5 block text-xs text-neutral-500">
-              {{
-                rates.length > 0
-                  ? 'Chosen per measurement — the screens offer only these.'
-                  : 'Pick a card to probe what it accepts.'
-              }}
-            </span>
-          </span>
-        </div>
+<!-- The probed rate list is not shown. The rate a measurement runs at is the measurement's,
+             and every screen's rate and span dropdowns are already filtered to it, so a row here
+             only told you which spans those dropdowns would be missing. The probe itself still
+             runs on every change -- it is what `rates` below, `canSave` and the "accepts none of
+             48, 96 or 192 kHz" refusal are made of -- so nothing about the checking changed, only
+             its standing readout. -->
 
         <label
           class="flex items-center justify-between gap-3"
@@ -578,8 +580,23 @@ function mv(value: number | null | undefined) {
 
       <!-- 2. Output full scale ---------------------------------------------------------- -->
       <section class="flex flex-col gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
-        <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Full scale output (mV)</h3>
-        <p class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200">
+        <div class="flex items-center gap-2">
+          <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Full scale output (mV)</h3>
+          <button
+            type="button"
+            class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            :aria-expanded="outputHelpOpen"
+            aria-label="What this step asks you to do"
+            title="What this step asks you to do."
+            @click="outputHelpOpen = !outputHelpOpen"
+          >
+            ?
+          </button>
+        </div>
+        <p
+          v-if="outputHelpOpen"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
           <strong>Put a voltmeter across the output channel.</strong> Play the tone, read the meter,
           and enter what it says. That fixes what the card's digital full scale is worth in volts.
         </p>
@@ -650,7 +667,19 @@ function mv(value: number | null | undefined) {
 
       <!-- 3. Input full scale ----------------------------------------------------------- -->
       <section class="flex flex-col gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
-        <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Full scale input (mV)</h3>
+        <div class="flex items-center gap-2">
+          <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Full scale input (mV)</h3>
+          <button
+            type="button"
+            class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            :aria-expanded="inputHelpOpen"
+            aria-label="What this step asks you to do"
+            title="What this step asks you to do."
+            @click="inputHelpOpen = !inputHelpOpen"
+          >
+            ?
+          </button>
+        </div>
         <label class="flex items-center justify-between gap-3">
           <span class="text-neutral-600 dark:text-neutral-300">Known source</span>
           <select
@@ -662,8 +691,11 @@ function mv(value: number | null | undefined) {
           </select>
         </label>
 
+        <!-- Both routes' instructions fold away together, behind the one ? on the heading: they
+             are two answers to the same question, and which one is showing is the Known source
+             dropdown's business. The red panel below is not help and is never folded. -->
         <p
-          v-if="inputStep.source === 'External'"
+          v-if="inputHelpOpen && inputStep.source === 'External'"
           class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
         >
           <strong>Feed the chosen input from a source whose voltage you know</strong>, and enter that
@@ -671,7 +703,7 @@ function mv(value: number | null | undefined) {
           silenced while it measures — anything this app played would be measured along with it.
         </p>
         <p
-          v-else
+          v-else-if="inputHelpOpen"
           class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
         >
           <strong>Patch both outputs straight back to their own inputs</strong>, then measure.

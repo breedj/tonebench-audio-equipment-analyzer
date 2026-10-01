@@ -53,9 +53,10 @@ const { showPage } = useManual()
       show them, because there is nothing to choose.
     </p>
     <p>
-      Underneath, <strong>Sample rates</strong> shows what the card can do — it is something the app
-      asks the card, not something you choose here. You pick the rate later, on the measurement
-      screen itself, and 48 kHz is fine for almost everything.
+      You do not pick a sample rate here. The app asks the card what it can do, by itself, every
+      time you change something — and then the rate dropdown on each measurement screen offers only
+      those. That is where you choose one, and 48 kHz is fine for almost everything. If the card
+      cannot manage any rate the app measures at, the dialog says so in red.
     </p>
     <p>
       There is nothing to press: the choice takes effect as you make it, and a line underneath says
@@ -76,6 +77,11 @@ const { showPage } = useManual()
 
     <h2>Step 2: teach it what a volt is — the output</h2>
     <p>You need a multimeter that can measure AC volts. Almost any will do.</p>
+    <p class="manual-callout">
+      Both of the next two steps have a <strong>?</strong> at the right of their heading in the
+      dialog. Press it and a short reminder of what to connect appears; press it again and it
+      folds away. It says the same thing as the lists below, in one sentence.
+    </p>
     <ol>
       <li>
         Connect the multimeter across the card's <strong>output</strong> — the same socket you will

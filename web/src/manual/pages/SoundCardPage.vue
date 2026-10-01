@@ -126,21 +126,23 @@ const { showPage } = useManual()
 
     <h3>Sample rates</h3>
     <p>
-      The dialog <em>reports</em> the rates the card accepts rather than asking you to pick one: it
-      probes the hardware, in the mode the app actually opens it in, for the three rates the app
-      measures at — <strong>48, 96 and 192 kHz</strong>.
+      There is nothing to set. Every time the choice of card, device or channel pair changes, the
+      app probes the hardware — in the mode it actually opens it in — for the three rates it
+      measures at, <strong>48, 96 and 192 kHz</strong>, and keeps whichever of them the card
+      accepts.
     </p>
     <p>
       <strong>The rate a measurement runs at is the measurement's own setting</strong>, on its
-      screen, exactly as it is for the QA403. What the card's list does is limit what those screens
+      screen, exactly as it is for the QA403. What the probe does is limit what those screens
       offer: a card that cannot do 192 kHz does not offer it, and the frequency-span dropdowns drop
       the spans that would need it — a 96 kHz span needs a 192 kHz rate, because the sweep is
-      analysed to Nyquist.
+      analysed to Nyquist. <strong>So the rate dropdown on a measurement screen is where you see
+      what the card accepted</strong>; the dialog has no list of its own.
     </p>
-    <p class="manual-callout">
-      This is worth checking before you calibrate rather than after. A card advertising a rate its
-      converters do not really run at is a real thing on consumer hardware, and the probe is the
-      only place the app can show you what the driver claims.
+    <p>
+      A card that accepts <em>none</em> of the three is not half-usable, so the dialog says so in
+      red and the selection cannot be applied. That is usually a mismatched input and output rather
+      than a card that genuinely cannot do any of them.
     </p>
 
     <h3>Applying the choice</h3>
@@ -207,6 +209,13 @@ const { showPage } = useManual()
       shape of a frequency response, group delay, the bandwidth corners. A consistent wrong
       full-scale constant cancels out of a ratio. What it cannot do is name a voltage — so absolute
       levels, watts, noise density, and the output-referred drive modes all need the calibration.
+    </p>
+
+    <p>
+      Each of the two steps carries a <strong>?</strong> at the right of its heading, which folds
+      out the same instructions in a sentence or two. They are folded away by default: they are
+      read once, when the bench is first set up, and the dialog is shorter without them. Everything
+      they say is below in full.
     </p>
 
     <h3>Step 1 — Full scale output</h3>

@@ -170,15 +170,23 @@ internal static class PortAudioInterop
     /// is not an ASIO device it returns <c>paInvalidDevice</c> — or <c>paHostApiNotFound</c> if the
     /// library was built without ASIO — rather than doing something surprising.</para>
     ///
-    /// <para><c>systemSpecific</c> is the owner window on Windows. <see cref="IntPtr.Zero"/> is
-    /// passed: this process has no window — the UI is a browser — so there is nothing to own it
-    /// with, and the driver puts up a top-level dialog instead. <b>That dialog is modal and runs
+    /// <para><c>systemSpecific</c> is the owner window on Windows — see
+    /// <see cref="GetDesktopWindow"/> for what is passed and why. <b>The dialog is modal and runs
     /// its own message loop on the calling thread</b>, which is why the caller refuses while a
     /// stream is running: the calling thread is the STA dispatcher, and the transfer loop lives
     /// on it.</para>
     /// </summary>
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int PaAsio_ShowControlPanel(int device, IntPtr systemSpecific);
+
+    /// <summary>
+    /// The window an ASIO driver's panel is parented to. This process has none of its own — the UI
+    /// is a browser — and a driver handed a null parent may decline to show anything, so the
+    /// desktop window is passed instead: it is always a valid top-level HWND and parenting a
+    /// dialog to it is what a process with no window of its own is expected to do.
+    /// </summary>
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetDesktopWindow();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Pa_StartStream(IntPtr stream);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Pa_StopStream(IntPtr stream);

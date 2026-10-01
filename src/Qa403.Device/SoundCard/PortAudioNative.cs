@@ -118,7 +118,8 @@ internal sealed class PortAudioNative : IPortAudio
         // driver, and it has to be raised from the apartment the driver was initialised in.
         return _dispatcher.Invoke(() =>
         {
-            int error = PortAudioInterop.PaAsio_ShowControlPanel(deviceIndex, IntPtr.Zero);
+            IntPtr owner = OperatingSystem.IsWindows() ? PortAudioInterop.GetDesktopWindow() : IntPtr.Zero;
+            int error = PortAudioInterop.PaAsio_ShowControlPanel(deviceIndex, owner);
             if (error == PaError.NoError)
                 return true;
 

@@ -51,9 +51,18 @@ public static class SoundCardEndpoints
 
             try
             {
-                return SoundCardCatalog.ShowControlPanel(request.HostApi, request.DeviceName)
-                    ? Results.Ok()
-                    : Results.Conflict("That card has no control panel of its own. Only an ASIO driver provides one.");
+                var started = System.Diagnostics.Stopwatch.StartNew();
+                if (!SoundCardCatalog.ShowControlPanel(request.HostApi, request.DeviceName))
+                    return Results.Conflict("That card has no control panel of its own. Only an ASIO driver provides one.");
+
+                // The driver reported success, which is all ASIO can tell us -- there is no way to
+                // ask whether a window actually appeared. A panel that is genuinely shown is modal
+                // and this call does not return until it is dismissed, so a return inside a second
+                // means the driver accepted the request and did nothing. Measured on a MOTU M4
+                // (2026-09-30): immediate, because that driver keeps its settings in a separate
+                // application. Reported as a flag rather than an error, because it is not one.
+                return Results.Ok(new SoundCardControlPanelResult(
+                    NothingAppeared: started.Elapsed < TimeSpan.FromSeconds(1)));
             }
             catch (SoundCardNotFoundException ex)
             {
@@ -74,7 +83,7 @@ public static class SoundCardEndpoints
                 ? runner.CurrentInputLevels()
                 : (null, null);
 
-            return Results.Ok(new SoundCardLevels(left, right, session.Acquiring));
+            return Results.Ok(new SoundCardLevels(left, right, session.Acquiring, runner.PlayingDbFs));
         });
 
         // The two calibration steps. Sequenced here rather than in the dialog so the run guard sees
@@ -214,8 +223,21 @@ public sealed record SoundCardLoopbackRequest(double DbFs);
 /// <param name="DeviceName">The device's name, as the listing gives it. Resolved afresh, because PortAudio's indices move.</param>
 public sealed record SoundCardControlPanelRequest(string HostApi, string DeviceName);
 
+/// <param name="NothingAppeared">
+/// True when the driver accepted the request and returned at once, which means no panel was shown
+/// — some ASIO drivers keep their settings in a separate application instead. A guess, and the
+/// only one available: ASIO offers no way to ask whether a window appeared.
+/// </param>
+public sealed record SoundCardControlPanelResult(bool NothingAppeared);
+
 /// <param name="Acquiring">False when nothing is streaming, so the bars read as idle rather than as silence.</param>
-public sealed record SoundCardLevels(double? LeftDbFs, double? RightDbFs, bool Acquiring);
+/// <param name="PlayingDbFs">
+/// The level of the calibration tone, or null when none is playing — carried here, on the poll the
+/// dialog is already making, so its idea of whether a tone is up cannot drift from the server's.
+/// It used to be updated only by the requests the dialog itself made, which left "Estimate peak
+/// output mV" enabled over a card that had stopped if anything silenced the tone by another path.
+/// </param>
+public sealed record SoundCardLevels(double? LeftDbFs, double? RightDbFs, bool Acquiring, double? PlayingDbFs);
 
 /// <param name="PlayingDbFs">The level currently playing, or null when no tone is up.</param>
 public sealed record SoundCardCalibrationState(

@@ -28,6 +28,15 @@ const calibrationResult = ref<SoundCardCalibrationResult | null>(null)
 const playingDbFs = ref<number | null>(null)
 const levels = ref<SoundCardLevels | null>(null)
 const busy = ref(false)
+
+/**
+ * Re-enumerating, which is its own flag rather than part of `busy`.
+ *
+ * Refresh re-reads the machine's device table and nothing else, so disabling the calibration
+ * buttons while it ran was simply wrong — and it was reported that way. The two states are
+ * genuinely independent: a listing being rebuilt says nothing about whether a tone is playing.
+ */
+const devicesLoading = ref(false)
 const error = ref<string | null>(null)
 let loadPromise: Promise<void> | null = null
 const controlPanelOpen = ref(false)
@@ -65,14 +74,14 @@ export function useSoundCard() {
 
   /** Re-reads the machine's devices. `refresh` also asks WASAPI to rescan; see the endpoint for its limits. */
   async function loadDevices(refresh = false) {
-    busy.value = true
+    devicesLoading.value = true
     try {
       inventory.value = await api.getSoundCardDevices(refresh)
       error.value = inventory.value.problem
     } catch (e) {
       error.value = (e as Error).message
     } finally {
-      busy.value = false
+      devicesLoading.value = false
     }
   }
 
@@ -236,6 +245,12 @@ export function useSoundCard() {
       if (stopped) return
       try {
         levels.value = await api.getSoundCardLevels()
+
+        // And take the tone's state from the same answer. Tracking it only through the requests
+        // this dialog makes left it stale whenever anything else silenced the tone — a failed
+        // step, a device switch, a second browser tab — and a stale "playing" keeps "Estimate
+        // peak output mV" enabled over a card that has stopped. Reported 2026-10-01.
+        playingDbFs.value = levels.value.playingDbFs
       } catch {
         levels.value = null
       }
@@ -259,19 +274,30 @@ export function useSoundCard() {
    * as an ordinary error.</p>
    */
   async function showControlPanel(hostApi: string, deviceName: string) {
-    if (controlPanelOpen.value) return
+    if (controlPanelOpen.value) return null
     controlPanelOpen.value = true
     error.value = null
     try {
-      await api.showSoundCardControlPanel(hostApi, deviceName)
+      return await api.showSoundCardControlPanel(hostApi, deviceName)
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
+      return null
     } finally {
       controlPanelOpen.value = false
     }
   }
 
   return {
+    devicesLoading,
+    /**
+     * Whether the sound card is doing something that owns the device: a step running, a tone
+     * playing, or the driver's panel up.
+     *
+     * Read by App.vue's ranging watcher, which must stand down for all three — the server refuses
+     * an input range under any of them, and the refusal would otherwise surface as an error
+     * banner. Enumerating is deliberately not in it; that touches no stream.
+     */
+    active: computed(() => busy.value || playingDbFs.value !== null || controlPanelOpen.value),
     controlPanelOpen,
     showControlPanel,
     levels,

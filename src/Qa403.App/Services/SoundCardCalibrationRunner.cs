@@ -122,8 +122,7 @@ public sealed class SoundCardCalibrationRunner(
             _savedOptions ??= pipeline.Options;
             pipeline.Options = pipeline.Options with { ProcessLeft = true, ProcessRight = true };
 
-            if (!session.Acquiring)
-                await session.StartAcquisitionAsync(new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
+            await StartAcquisitionIfNeededAsync(ct);
 
             await session.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), ct);
 
@@ -246,8 +245,7 @@ public sealed class SoundCardCalibrationRunner(
                 Kind = GeneratorKind.Tones,
             };
 
-            if (!session.Acquiring)
-                await session.StartAcquisitionAsync(new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
+            await StartAcquisitionIfNeededAsync(ct);
 
             await session.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), ct);
 
@@ -336,8 +334,7 @@ public sealed class SoundCardCalibrationRunner(
             pipeline.Options = pipeline.Options with { ProcessLeft = true, ProcessRight = true };
 
             var off = new GeneratorConfig(ChannelGeneratorConfig.Off, ChannelGeneratorConfig.Off);
-            if (!session.Acquiring)
-                await session.StartAcquisitionAsync(new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
+            await StartAcquisitionIfNeededAsync(ct);
 
             await session.ConfigureGeneratorAsync(off, ct);
 
@@ -393,6 +390,35 @@ public sealed class SoundCardCalibrationRunner(
         }
     }
 
+    /// <summary>
+    /// Whether <i>this runner</i> was what started the acquisition, and therefore what has to stop
+    /// it again.
+    ///
+    /// <para>It used to start one and leave it running, which was not merely untidy: a session
+    /// left acquiring keeps the browser's own ranging watcher live, and that watcher then posts an
+    /// input range into the next calibration step — "a measurement is running and controls the
+    /// input range", on the second press of a button that worked on the first. It also left the
+    /// card's control panel refused for the rest of the session, since that is refused while
+    /// acquiring. Reported 2026-10-01.</para>
+    /// </summary>
+    private bool _startedAcquisition;
+
+    /// <summary>
+    /// Starts an acquisition for a step that needs one, remembering that it was this runner that
+    /// did so. An acquisition that was already running belongs to the measurement screen and is
+    /// left alone, both here and in <see cref="SilenceAsync"/>.
+    /// </summary>
+    private async Task StartAcquisitionIfNeededAsync(CancellationToken ct)
+    {
+        if (session.Acquiring)
+            return;
+
+        await session.StartAcquisitionAsync(
+            new AcquisitionConfig(session.Capabilities.SampleRatesHz[0], 2), ct);
+
+        _startedAcquisition = true;
+    }
+
     /// <summary>Stops the tone and ends the run, whatever state it was in.</summary>
     public async Task SilenceAsync(CancellationToken ct)
     {
@@ -408,21 +434,37 @@ public sealed class SoundCardCalibrationRunner(
         {
             logger.LogWarning(ex, "Could not silence the sound card calibration tone.");
         }
+
+        // And stop the acquisition again if this runner is what started it -- see the remarks on
+        // _startedAcquisition. Separate from the try above because silencing and stopping fail
+        // independently, and a generator that would not switch off must not leave the stream up.
+        try
+        {
+            if (_startedAcquisition && session.Connected)
+                await session.StopAcquisitionAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not stop the acquisition the sound card calibration started.");
+        }
         finally
         {
-            // Hand the pipeline back whatever the measurement screen had. The steps turn both
-            // channels on for themselves, and leaving that behind would quietly switch the right
-            // channel on for an FFT screen the user had set to left only.
-            if (_savedOptions is { } saved)
-            {
-                pipeline.Options = saved;
-                _savedOptions = null;
-            }
+            _startedAcquisition = false;
+        }
 
-            lock (_gate)
-            {
-                _running = false;
-            }
+        // Hand the pipeline back whatever the measurement screen had. The steps turn both
+        // channels on for themselves, and leaving that behind would quietly switch the right
+        // channel on for an FFT screen the user had set to left only. Unconditional, because
+        // everything above it catches its own failures.
+        if (_savedOptions is { } saved)
+        {
+            pipeline.Options = saved;
+            _savedOptions = null;
+        }
+
+        lock (_gate)
+        {
+            _running = false;
         }
     }
 

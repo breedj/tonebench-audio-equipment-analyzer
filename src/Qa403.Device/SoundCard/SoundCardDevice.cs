@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
@@ -509,15 +509,29 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         }
     }
 
+    /// <summary>
+    /// A millidecibel, which is the tolerance a rung is matched to.
+    ///
+    /// <para>Not bit equality, which is what this was and which produced a 400 on the bench:
+    /// "the only range is 16.278229126255518 dBV, actual value was 16.278233778585854" — five
+    /// <i>micro</i>decibels apart, because the caller's ladder had been derived from a
+    /// calibration a few tenths of a millivolt different from the current one. The rungs of a
+    /// real ladder are six decibels apart and a sound card has exactly one, so nothing within a
+    /// millidecibel of a rung can be anything but that rung; a caller that is further out than
+    /// this is holding a genuinely stale ladder and should be told so.</para>
+    /// </summary>
+    private const double RangeMatchToleranceDb = 1e-3;
+
     private static void RequireSupportedRange(IReadOnlyList<double> ranges, double dbv)
     {
         foreach (double supported in ranges)
         {
-            if (Math.Abs(supported - dbv) < 1e-9)
+            if (Math.Abs(supported - dbv) < RangeMatchToleranceDb)
                 return;
         }
 
         throw new ArgumentOutOfRangeException(
-            nameof(dbv), dbv, $"This card's only range is {string.Join(", ", ranges)} dBV.");
+            nameof(dbv), dbv,
+            $"This card's only range is {string.Join(", ", ranges)} dBV. If that is not what you were offered, the card has been recalibrated since — reload the page.");
     }
 }

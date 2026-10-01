@@ -57,7 +57,10 @@ const { showPage } = useManual()
       asks the card, not something you choose here. You pick the rate later, on the measurement
       screen itself, and 48 kHz is fine for almost everything.
     </p>
-    <p>Press <strong>Use this card</strong>.</p>
+    <p>
+      There is nothing to press: the choice takes effect as you make it, and a line underneath says
+      the card is open and ready.
+    </p>
     <p class="manual-callout">
       If a <strong>Control panel</strong> button appears beside the dropdown, that opens your
       card's own driver settings — buffer size and the like. You do not need it to measure

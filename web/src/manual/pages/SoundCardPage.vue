@@ -143,6 +143,14 @@ const { showPage } = useManual()
       only place the app can show you what the driver claims.
     </p>
 
+    <h3>Applying the choice</h3>
+    <p>
+      The device controls take effect as they are changed — there is no Apply button, because every
+      one of them is a statement about which hardware is in front of you rather than something to
+      confirm. A line underneath says when the card is open and ready. Changing the card reopens the
+      device, which is why the ranges and the calibration readings refresh with it.
+    </p>
+
     <h3>Control panel</h3>
     <p>
       Beside the card dropdown, for an <strong>ASIO</strong> card only, is a

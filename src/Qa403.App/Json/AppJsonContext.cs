@@ -95,6 +95,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(Endpoints.SoundCardInputMeasurementRequest))]
 [JsonSerializable(typeof(Endpoints.SoundCardLoopbackRequest))]
 [JsonSerializable(typeof(Endpoints.SoundCardControlPanelRequest))]
+[JsonSerializable(typeof(Endpoints.SoundCardControlPanelResult))]
 // The user weighting tables: the config document (a Qa403.Data record, registered by hand like the
 // others) and the endpoints' own DTOs.
 [JsonSerializable(typeof(UserWeightingTable))]

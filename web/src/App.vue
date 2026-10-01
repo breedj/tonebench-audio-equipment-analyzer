@@ -1994,11 +1994,33 @@ let pendingRangeCount = 0
 // probe. Measured on the simulator's RIAA stage: this watcher stepped the range 30 -> 36 dBV on
 // the frequency-response probe's own meters frames, and in one run out of eight the step landed
 // on the capture the level probe was waiting for.
+// The sound card's calibration is in this list for the same reason as the rest, and it was the
+// one that proved it: its steps run with the session acquiring, so this watcher posted a range
+// into the middle of one and the second press of "Estimate peak input mV" came back as "a
+// measurement is running and controls the input range". Reported 2026-10-01.
 const runnerActive = computed(
-  () => responseRunning.value || sweepRunning.value || impedanceRunning.value || impulseRunning.value || outputImpedanceRunning.value,
+  () =>
+    responseRunning.value ||
+    sweepRunning.value ||
+    impedanceRunning.value ||
+    impulseRunning.value ||
+    outputImpedanceRunning.value ||
+    soundCard.active.value,
 )
 
 watch(meters, (m) => {
+  // A device with one input range has no range to choose, so there is nothing for this watcher to
+  // do -- and more than nothing to get wrong. A sound card's single rung is derived from its
+  // calibration in millivolts, so a ladder fetched before a recalibration differs from the
+  // device's by microdecibels, and posting it back came up as 'this card's only range is
+  // 16.278229126255518 dBV, actual value was 16.278233778585854'. Standing down outright is the
+  // honest rule, rather than relying on nearestInputRange happening to return the same bits.
+  if ((ranges.value?.inputRangesDbv.length ?? 8) <= 1) {
+    pendingRangeTarget = null
+    pendingRangeCount = 0
+    return
+  }
+
   const hardwareAutoActive = status.value?.autoRangeEnabled !== null && status.value?.autoRangeEnabled !== undefined
   // Manual is the third reason not to range, and it is the one this watcher has to obey itself:
   // on the simulator there is no hardware ranger for the server to switch off, so this loop *is*

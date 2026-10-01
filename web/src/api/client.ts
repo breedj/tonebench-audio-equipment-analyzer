@@ -214,6 +214,15 @@ export interface SoundCardOption {
   hasControlPanel: boolean
 }
 
+export interface SoundCardControlPanelResult {
+  /**
+   * True when the driver accepted the request and returned at once, meaning no window appeared —
+   * some ASIO drivers keep their settings in a separate application. A guess from the timing, and
+   * the only one available: ASIO offers no way to ask whether a window was shown.
+   */
+  nothingAppeared: boolean
+}
+
 export interface SoundCardInventory {
   /** False when PortAudio itself would not start — the dialog says so rather than showing "no cards". */
   available: boolean
@@ -258,6 +267,11 @@ export interface SoundCardLevels {
   rightDbFs: number | null
   /** False when nothing is streaming, so the bars read as idle rather than as silence. */
   acquiring: boolean
+  /**
+   * The calibration tone's level, or null when none is playing. Carried on this poll so the
+   * dialog's idea of whether a tone is up cannot drift from the server's.
+   */
+  playingDbFs: number | null
 }
 
 export interface SoundCardCalibrationState {
@@ -2572,7 +2586,7 @@ export const api = {
    * is modal and PortAudio offers no other way to show it — so the caller shows that it is open.
    */
   showSoundCardControlPanel: (hostApi: string, deviceName: string) =>
-    request<void>('/soundcard/control-panel', {
+    request<SoundCardControlPanelResult>('/soundcard/control-panel', {
       method: 'POST',
       body: JSON.stringify({ hostApi, deviceName }),
     }),

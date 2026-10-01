@@ -39,6 +39,7 @@ const {
   watchLevels,
   controlPanelOpen,
   showControlPanel,
+  devicesLoading,
 } = useSoundCard()
 
 /** ARTA's levels, and the server's. */
@@ -78,6 +79,7 @@ const inputStep = reactive({
 })
 
 const saved = ref(false)
+const controlPanelNote = ref<string | null>(null)
 let stopLevels: (() => void) | null = null
 
 onUnmounted(() => stopLevels?.())
@@ -251,7 +253,15 @@ watch(
 async function openControlPanel() {
   const input = splitKey(form.inputKey)
   if (!input.name) return
-  await showControlPanel(input.hostApi, input.name)
+  controlPanelNote.value = null
+
+  // Reported back by the server rather than guessed at here: only it can time the call, and the
+  // timing is the only evidence there is that no window appeared.
+  const result = await showControlPanel(input.hostApi, input.name)
+  if (result?.nothingAppeared) {
+    controlPanelNote.value =
+      "The driver accepted it but showed nothing, so this card keeps its settings in its own application — look for the manufacturer's control software."
+  }
 }
 
 async function reprobe() {
@@ -279,11 +289,48 @@ function toConfig(): SoundCardConfig | null {
   }
 }
 
+/**
+ * Applies the device selection as soon as it changes, rather than behind a button.
+ *
+ * <p>There is nothing to confirm here: every one of these controls is a statement about which
+ * hardware is in front of the user, and a selection not yet pressed into effect was simply a
+ * dialog disagreeing with the app about which card was selected. The write reopens the device, so
+ * it is debounced — changing card and then channel pair in quick succession is two statements
+ * about one intention, not two reopenings.</p>
+ */
+let applyHandle: ReturnType<typeof setTimeout> | null = null
+
+function applyDeviceSoon() {
+  if (!props.open) return
+  if (applyHandle) clearTimeout(applyHandle)
+  applyHandle = setTimeout(() => void applyDevice(), 250)
+}
+
 async function applyDevice() {
+  applyHandle = null
   const next = toConfig()
-  if (!next) return
+  if (!next || !canSave.value) return
+
+  // Nothing to do when it has not moved. Reopening the device is cheap but not free, and the
+  // watcher below fires for form changes that resolve to the same selection.
+  if (
+    next.inputHostApi === config.value?.inputHostApi &&
+    next.inputDeviceName === config.value?.inputDeviceName &&
+    next.outputHostApi === config.value?.outputHostApi &&
+    next.outputDeviceName === config.value?.outputDeviceName &&
+    next.inputChannelOffset === config.value?.inputChannelOffset &&
+    next.outputChannelOffset === config.value?.outputChannelOffset
+  ) {
+    return
+  }
+
   saved.value = await save(next)
 }
+
+watch(
+  () => [form.cardKey, form.inputKey, form.outputKey, form.inputChannelOffset, form.outputChannelOffset].join('|'),
+  () => applyDeviceSoon(),
+)
 
 async function toggleTone() {
   if (playingDbFs.value !== null) await stopTone()
@@ -335,12 +382,12 @@ function mv(value: number | null | undefined) {
           <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Device</h3>
           <button
             type="button"
-            class="rounded border border-neutral-300 px-2 py-0.5 text-[11px] hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700"
-            :disabled="busy"
+            class="rounded bg-sky-600 px-2 py-0.5 text-[11px] text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
+            :disabled="devicesLoading"
             title="Re-read the device list. A newly plugged ASIO interface needs the app restarted — PortAudio reads its list once at startup."
             @click="loadDevices(true)"
           >
-            Refresh
+            {{ devicesLoading ? 'Refreshing…' : 'Refresh' }}
           </button>
         </div>
 
@@ -372,7 +419,7 @@ function mv(value: number | null | undefined) {
                   ? 'The panel is open — close it to carry on here.'
                   : 'Opens the driver settings: buffer size, clock source and often the sample rate, none of which this app can set.'
               "
-              class="shrink-0 rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="shrink-0 rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400 px-2"
               @click="openControlPanel"
             >
               {{ controlPanelOpen ? 'Panel open…' : 'Control panel' }}
@@ -491,17 +538,16 @@ function mv(value: number | null | undefined) {
           {{ trustWarning }}
         </p>
 
-        <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
-            :disabled="!canSave"
-            @click="applyDevice"
-          >
-            Use this card
-          </button>
-          <span v-if="saved" class="text-emerald-700 dark:text-emerald-400">Saved.</span>
-        </div>
+        <p
+          v-if="controlPanelNote"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          {{ controlPanelNote }}
+        </p>
+
+        <p v-if="saved" class="text-[11px] text-emerald-700 dark:text-emerald-400">
+          Selected — the card is open and ready to calibrate.
+        </p>
       </section>
 
       <!-- 2. Output full scale ---------------------------------------------------------- -->
@@ -526,7 +572,11 @@ function mv(value: number | null | undefined) {
         <div class="flex items-center gap-3">
           <button
             type="button"
-            class="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700"
+            :class="
+              playingDbFs !== null
+                ? 'rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-500 disabled:opacity-50'
+                : 'rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400'
+            "
             :disabled="busy"
             @click="toggleTone"
           >
@@ -560,7 +610,7 @@ function mv(value: number | null | undefined) {
         <div class="flex items-center gap-3">
           <button
             type="button"
-            class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+            class="rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
             :disabled="busy || playingDbFs === null"
             @click="acceptOutput"
           >
@@ -663,7 +713,7 @@ function mv(value: number | null | undefined) {
         <div class="flex items-center gap-3">
           <button
             type="button"
-            class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+            class="rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
             :disabled="!canMeasureInput"
             @click="acceptInput"
           >

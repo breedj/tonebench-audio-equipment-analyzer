@@ -52,6 +52,7 @@ public sealed class SoundCardSetting
                 OutputDeviceName = c.OutputDeviceName,
                 InputChannelOffset = c.InputChannelOffset,
                 OutputChannelOffset = c.OutputChannelOffset,
+                StreamStartSettleMs = c.StreamStartSettleMs,
                 FrontEndGainLeftDb = c.FrontEndGainLeftDb,
                 FrontEndGainRightDb = c.FrontEndGainRightDb,
                 GainDisplayUnit = c.GainDisplayUnit,

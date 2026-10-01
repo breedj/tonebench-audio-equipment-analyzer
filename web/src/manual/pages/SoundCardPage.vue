@@ -172,19 +172,28 @@ const { showPage } = useManual()
       manufacturer's own control application.
     </p>
 
-    <h3>Settle time</h3>
+    <h3>Settle after opening</h3>
     <p>
-      Converters take a moment to settle when a stream opens, and other analyzer software offers a
-      dedicated "AD/DA transient time" for it. There is no separate setting here because
-      <strong>Configuration ▸ Acquisition ▸ Capture delay</strong> already covers it, and covers
-      more: those frames are discarded when acquisition starts — which is also what a rate change
-      is, since it opens a new stream — <em>and</em> after every generator change, which no
-      dedicated startup setting reaches.
+      A card <strong>re-clocks its hardware</strong> when a stream asks for a rate it is not already
+      running at — which is why anything else playing through the same card goes silent at that
+      moment — and it is unsettled for a short while afterwards. <strong>Settle after opening</strong>
+      is how long the app throws away before it analyses anything, and it is paid only when a stream
+      is genuinely opened. Changing the sample rate opens one; an ordinary RUN reuses the stream it
+      already has and costs nothing.
     </p>
     <p>
-      It <strong>defaults to 0</strong>, so on a sound card it is worth setting. 300 ms is what the
-      bench notes here use; it has to cover the DUT's own settling as well as the converters', and
-      on a valve amplifier the DUT is much the larger of the two.
+      The default is <strong>3 seconds</strong>, measured rather than guessed. On a MOTU M4 the
+      transient ran for about 1.5 s whatever the rate — which was 5 records at 48 kHz and 23 at
+      192 kHz, hence a setting in milliseconds rather than in records — and three seconds covers it
+      with margin at every rate. Lower it if your card settles faster; raise it if the first trace
+      after a rate change still looks wrong.
+    </p>
+    <p class="manual-callout">
+      This is <strong>not</strong> the same thing as <strong>Capture delay</strong>, and neither
+      replaces the other. Settle after opening is the <em>card's</em> clock coming good, and applies
+      only on an open. Capture delay is the <em>DUT's</em> settling after a level or frequency step,
+      and applies after every generator change — on a valve amplifier that is much the larger of the
+      two. An earlier version of this page claimed Capture delay covered both; it does not.
     </p>
 
     <h2 id="calibration">Calibrating the card</h2>

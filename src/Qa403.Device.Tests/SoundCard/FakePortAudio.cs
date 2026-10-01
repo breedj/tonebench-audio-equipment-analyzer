@@ -55,10 +55,31 @@ internal sealed class FakePortAudio : IPortAudio
 
     public int OpenedFramesPerBuffer { get; private set; }
 
+    /// <summary>How many streams have been opened, warm-ups included.</summary>
+    public int OpenCount { get; private set; }
+
+    /// <summary>
+    /// A stream for a <i>warm-up</i> open, which the device makes and throws away whenever the
+    /// sample rate has changed since the last one (see <c>SoundCardDevice.ReclockIfNeeded</c>).
+    ///
+    /// <para>Kept separate from <see cref="NextStream"/> so a test arming the stream it means to
+    /// inspect still gets that stream, and so a warm-up's own start/stop/dispose do not land in the
+    /// calls a test asserts on.</para>
+    /// </summary>
+    public FakePortAudioStream? WarmUpStream { get; private set; }
+
     public IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer)
     {
         OpenedWith = request;
         OpenedFramesPerBuffer = framesPerBuffer;
+
+        // The first open of a rate is the device's throwaway; the next one is the stream that runs.
+        if (OpenCount++ == 0 && WarmUpStream is null)
+        {
+            WarmUpStream = new FakePortAudioStream { SampleRateHz = request.SampleRateHz };
+            return WarmUpStream;
+        }
+
         NextStream.SampleRateHz = request.SampleRateHz;
         return NextStream;
     }

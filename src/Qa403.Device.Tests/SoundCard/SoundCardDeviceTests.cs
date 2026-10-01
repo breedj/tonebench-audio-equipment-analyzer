@@ -15,7 +15,8 @@ public class SoundCardDeviceTests
         int inputOffset = 0,
         int outputOffset = 0,
         int inputChannels = 2,
-        int outputChannels = 2)
+        int outputChannels = 2,
+        double settleMs = 2000.0)
     {
         var pa = new FakePortAudio();
         var api = pa.AddHostApi("ASIO", SoundCardHostApiKind.Asio);
@@ -29,6 +30,7 @@ public class SoundCardDeviceTests
             OutputDeviceName = "Test Card",
             InputChannelOffset = inputOffset,
             OutputChannelOffset = outputOffset,
+            StreamStartSettleMs = settleMs,
         };
 
         var device = new SoundCardDevice(
@@ -218,6 +220,48 @@ public class SoundCardDeviceTests
     /// invalidates a noise measurement. It is the number a user checks to decide whether to believe
     /// the screen, so a startup wait reported as one is worse than no number at all.</para>
     /// </summary>
+    /// <summary>
+    /// The settle is a <b>time</b>, converted per rate — the lesson the dropped-chunk count and the
+    /// QA403's queue depth both taught. The transient it covers lasted a consistent ~1.5 s on a
+    /// MOTU M4 whatever the rate, which was 5 records at 48 kHz and 23 at 192 kHz.
+    /// </summary>
+    [Theory]
+    [InlineData(48_000.0, 2000.0, 96_000)]
+    [InlineData(96_000.0, 2000.0, 192_000)]
+    [InlineData(192_000.0, 2000.0, 384_000)]
+    [InlineData(48_000.0, 0.0, 0)]
+    public async Task StreamStartSettleFrames_IsTheConfiguredTimeAtThatRate(
+        double sampleRateHz, double settleMs, int expectedFrames)
+    {
+        var (device, _) = Build(settleMs: settleMs);
+        await device.ConnectAsync(CancellationToken.None);
+
+        Assert.Equal(expectedFrames, device.StreamStartSettleFrames(sampleRateHz));
+    }
+
+    /// <summary>
+    /// The throwaway open that re-clocks the card.
+    ///
+    /// <para>An ASIO driver re-clocks the hardware for a rate it is not already running at, and the
+    /// MOTU M4's does not have the new one ready by the time the first stream starts: the reads come
+    /// back partially filled and the unfilled part reaches the analyzer as audio. Opening once and
+    /// discarding it is what makes the open that matters find the card already there.</para>
+    /// </summary>
+    [Fact]
+    public async Task AStreamAtANewRate_IsOpenedOnceAndThrownAwayFirst()
+    {
+        var (device, pa) = Build();
+        await device.ConnectAsync(CancellationToken.None);
+
+        await TakeAsync(device, count: 1);
+
+        Assert.Equal(2, pa.OpenCount);
+        Assert.NotNull(pa.WarmUpStream);
+        Assert.True(pa.WarmUpStream!.Started, "the throwaway stream was never started, so the driver was never asked to run at the new rate");
+        Assert.True(pa.WarmUpStream.Stopped);
+        Assert.True(pa.WarmUpStream.Disposed, "the throwaway stream was left open");
+    }
+
     [Fact]
     public async Task StreamAsync_WaitingForTheFirstBuffer_IsNotCountedAsADroppedChunk()
     {

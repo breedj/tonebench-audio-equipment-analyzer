@@ -1283,7 +1283,7 @@ public sealed class DeviceSessionService(
 
         bool anyChannelEnabled = config.Left.Enabled || config.Right.Enabled;
         if (anyChannelEnabled && streamConfigHint is { } hint)
-            await EnsureStreamRunningAsync(hint, ct);
+            _ = await EnsureStreamRunningAsync(hint, ct);
         else if (!anyChannelEnabled)
             await StopStreamIfRunningAsync();
     }
@@ -1330,12 +1330,22 @@ public sealed class DeviceSessionService(
         if (_isAcquiring)
             await StopAcquisitionCoreAsync();
 
-        // Reuses an already-running generator-only stream if its config matches, otherwise restarts it
-        // at this config — either way, by the time this returns the stream is up before spectrumPipeline
-        // starts consuming it.
-        await EnsureStreamRunningAsync(config, ct);
+        // Reuses an already-running generator-only stream if its config matches, otherwise opens one
+        // at this config. It does not wait for the open — see its remarks — which is why everything
+        // below books discards against frames that have yet to arrive rather than against the clock.
+        bool streamOpened = await EnsureStreamRunningAsync(config, ct);
         spectrumPipeline.Start(config.SampleRateHz, config.ChannelCount);
         _isAcquiring = true;
+
+        // The device's own settling, where it has any -- only on a real open, because a reused
+        // stream has nothing to settle, and zero for everything but a sound card. Booked at the
+        // very end of this method rather than here: every Flush below *overwrites* the pending
+        // discard rather than extending it (SampleRingBuffer.Reset, and the keepPendingDiscard
+        // parameter that exists for exactly this), so a settle booked first is silently replaced
+        // by the generator re-snap's own much shorter one. That is not hypothetical -- it is what
+        // this looked like when it was written that way, with the first record still reading
+        // THD 27-94 %.
+        int streamSettleFrames = streamOpened ? _device.StreamStartSettleFrames(config.SampleRateHz) : 0;
 
         // The FFT screen's Run: the generator was configured while nothing was acquiring, so
         // ConfigureGeneratorCoreAsync had no window to flush and the settle time has been applied
@@ -1345,7 +1355,9 @@ public sealed class DeviceSessionService(
         // wire, and Start() already emptied the window.
         if (_generatorConfig.Left.Enabled || _generatorConfig.Right.Enabled)
         {
-            int settleFrames = CaptureDelayFrames;
+            // Whichever is longer: both are a discard from this same instant, so taking the sum
+            // would charge the DUT's settling on top of the card's when they overlap entirely.
+            int settleFrames = Math.Max(CaptureDelayFrames, streamSettleFrames);
             if (settleFrames > 0)
                 spectrumPipeline.Flush(settleFrames);
             LastAppliedCaptureDelayMs = captureDelay.Ms;
@@ -1355,15 +1367,33 @@ public sealed class DeviceSessionService(
         // generator or its tones silently drift off-bin at the new rate.
         if (config.SampleRateHz != previousSampleRateHz)
             await ReapplyGeneratorCoreAsync(ct);
+
+        // And the device's own settling last, so nothing above can overwrite it. The max rather
+        // than the sum: these are all discards from this one instant, not a queue of them.
+        if (streamSettleFrames > 0)
+            spectrumPipeline.Flush(Math.Max(streamSettleFrames, StimulusLatencyFrames + CaptureDelayFrames));
     }
 
     /// <summary>Starts (or restarts, if already running at a different config) the underlying device stream.</summary>
-    private async Task EnsureStreamRunningAsync(AcquisitionConfig config, CancellationToken ct)
+    /// <summary>
+    /// Brings up a stream for this config, and reports whether it actually <b>opened</b> one —
+    /// false when a running stream already matched and was reused.
+    ///
+    /// <para>The caller needs that distinction: a device's stream-start settle applies only to a
+    /// real open. It is also exactly why STOP then RUN at the same rate is instant and clean while
+    /// a rate change is neither.</para>
+    ///
+    /// <para>Note the stream is <i>started</i>, not yet open, when this returns: the pump is handed
+    /// to the thread pool below and the device opens on that thread. Nothing here waits for it,
+    /// which is safe because every flush books its discard against frames that have yet to arrive.
+    /// </para>
+    /// </summary>
+    private async Task<bool> EnsureStreamRunningAsync(AcquisitionConfig config, CancellationToken ct)
     {
         lock (_streamLock)
         {
             if (_streamTask is { IsCompleted: false } && _streamConfig is { } current && current.Equals(config))
-                return;
+                return false;
         }
 
         await StopStreamIfRunningAsync();
@@ -1381,6 +1411,8 @@ public sealed class DeviceSessionService(
             _streamConfig = config;
             _streamTask = Task.Run(() => PumpAsync(config, pumpCt), CancellationToken.None);
         }
+
+        return true;
     }
 
     /// <summary>

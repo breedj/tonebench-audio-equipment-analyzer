@@ -78,6 +78,13 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
     private volatile bool _connected;
     private volatile int _stimulusLatencyFrames;
+    /// <inheritdoc />
+    public int StreamStartSettleFrames(double sampleRateHz) =>
+        (int)Math.Round(Math.Max(0.0, _settings.StreamStartSettleMs) / 1000.0 * sampleRateHz);
+
+    /// <summary>The rate the last stream was opened at, so a reopen at the same rate costs nothing. 0 until one has been.</summary>
+    private double _lastOpenedSampleRateHz;
+
     private long _droppedRxChunks;
     private long _droppedBlocks;
     private volatile bool _stopRequested;
@@ -281,6 +288,8 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 Interlocked.Increment(ref _droppedBlocks);
                 dropped.Dispose();
             });
+
+        ReclockIfNeeded(request, config.SampleRateHz);
 
         IPortAudioStream stream = _portAudio.OpenStream(request, TransferFrames);
         // The stream's own lifecycle, at Debug: a reopened stream and a reused one behave
@@ -566,6 +575,60 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// this is holding a genuinely stale ladder and should be told so.</para>
     /// </summary>
     private const double RangeMatchToleranceDb = 1e-3;
+
+    /// <summary>
+    /// Opens the stream once and throws it away before opening the one that will be used, whenever
+    /// the sample rate has changed since the last open.
+    ///
+    /// <para><b>This is a workaround for the driver, and it is doing real work.</b> An ASIO driver
+    /// re-clocks the hardware when a stream asks for a rate it is not already running at, and the
+    /// MOTU M4's does not have the new rate ready by the time that first stream starts: the reads
+    /// come back <i>partially filled</i>, and the unfilled part is handed to the analyzer as audio.
+    /// Measured 2026-10-01 from the diagnostic recorder's held-constant detector, 96 → 48 kHz while
+    /// running: <b>64 frozen runs of exactly 512 frames, 50.0 % of a 65536-point record</b> — every
+    /// 1024-frame read half real and half repeated. The analyzer measured a 1 kHz tone chopped to a
+    /// 50 % duty cycle: THD 2.32 %, SNR 7.6 dB, and a "fundamental" of 952.9 Hz against the 999.76 Hz
+    /// actually playing. At 96 kHz the same fault was ~3.3 % of the record and still ruinous.</para>
+    ///
+    /// <para>It persisted for the life of the stream and cleared only on a stop/start — because a
+    /// stop/start at the same rate <i>reuses</i> the stream rather than reopening it, which is what
+    /// made it read as "the first run after a rate change always fails". The first open is what
+    /// re-clocks the card; the second finds it already there.</para>
+    ///
+    /// <para>Only when the rate has actually changed, so an ordinary RUN pays nothing. Any failure
+    /// is swallowed: this is a warm-up, and the open that matters is the next one, which reports
+    /// its own errors.</para>
+    /// </summary>
+    private void ReclockIfNeeded(SoundCardStreamRequest request, double sampleRateHz)
+    {
+        if (_lastOpenedSampleRateHz == sampleRateHz)
+            return;
+
+        try
+        {
+            using (IPortAudioStream warmUp = _portAudio.OpenStream(request, TransferFrames))
+            {
+                // Started, not merely opened: opening negotiates the rate, starting is what makes
+                // the driver actually run at it, and it is the running that has to settle.
+                warmUp.Start();
+                Thread.Sleep(ReclockSettle);
+                warmUp.Stop();
+            }
+
+            _logger.LogDebug(
+                "Sound card re-clocked to {Rate:0} Hz with a throwaway stream before opening the real one.",
+                sampleRateHz);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "The sound card's re-clocking open failed; opening the real stream anyway.");
+        }
+
+        _lastOpenedSampleRateHz = sampleRateHz;
+    }
+
+    /// <summary>How long the throwaway stream is left running for the driver to settle on the new rate.</summary>
+    private static readonly TimeSpan ReclockSettle = TimeSpan.FromMilliseconds(300);
 
     private static void RequireSupportedRange(IReadOnlyList<double> ranges, double dbv)
     {

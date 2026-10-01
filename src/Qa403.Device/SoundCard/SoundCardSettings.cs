@@ -1,6 +1,25 @@
 ﻿namespace Qa403.Device.SoundCard;
 
 /// <summary>
+/// How long a sound card is given to settle after a stream is opened.
+/// </summary>
+public static class SoundCardStreamSettle
+{
+    /// <summary>
+    /// 2 s, measured rather than guessed. On a MOTU M4 over ASIO (2026-10-01), every stream opened
+    /// at a new rate showed the same transient: the first records read THD 45–90 % with a spurious
+    /// ~7577 Hz component, then dropped to under 0.1 % and settled at 0.0004 %. The <i>time</i> was
+    /// consistent where the record count was not — 0.75 s at 48 kHz, 1.24 s at 96 kHz and 1.51 s at
+    /// 192 kHz, i.e. 5 records at one rate and 23 at another — which is why this is expressed in
+    /// milliseconds and converted per rate, the same lesson as the QA403's queue depth.
+    /// </summary>
+    public const double DefaultMs = 3000.0;
+
+    /// <summary>Past this it is a typo rather than a card: ten seconds of discard is longer than most measurements.</summary>
+    public const double MaxMs = 10_000.0;
+}
+
+/// <summary>
 /// Which card the analyzer is, and how it is wired. The calibration that turns its samples into
 /// volts is <see cref="SoundCardCalibration"/>, kept beside this rather than inside it because the
 /// two are written by different things — this by the device picker, that by the two calibration
@@ -36,6 +55,12 @@ public sealed record SoundCardSettings
 
     /// <summary>Index of the first of the two output channels. See <see cref="InputChannelOffset"/>.</summary>
     public int OutputChannelOffset { get; init; }
+
+    /// <summary>
+    /// How long to throw away after a stream is opened, in milliseconds, before anything is
+    /// analysed. See <c>SoundCardDevice.StreamStartSettleFrames</c> for what it is covering.
+    /// </summary>
+    public double StreamStartSettleMs { get; init; } = SoundCardStreamSettle.DefaultMs;
 
     /// <summary>
     /// The front-end gain in front of the left input, in dB — a 10:1 divider is −20. Stored here so

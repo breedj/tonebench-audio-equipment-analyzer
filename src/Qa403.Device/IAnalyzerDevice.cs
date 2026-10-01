@@ -168,6 +168,23 @@ public interface IAnalyzerDevice
     /// </summary>
     int StimulusLatencyFrames(double sampleRateHz);
 
+    /// <summary>
+    /// How many frames to throw away after a stream has been <b>opened</b>, before anything is
+    /// analysed — the device's own settling, as distinct from the DUT's (the capture delay) and
+    /// from audio already committed to the DAC (<see cref="StimulusLatencyFrames"/>).
+    ///
+    /// <para><b>Zero by default, and that is right for everything with a fixed clock.</b> A QA403
+    /// is running at its rate the moment the interface is claimed. A sound card is not: an ASIO
+    /// driver re-clocks the hardware for a rate it is not already running at, and it is audibly
+    /// unsettled afterwards — a card shared with Windows playback takes that playback down with it.
+    /// Measured on a MOTU M4 (2026-10-01), the first records after an open read THD 45–90 % before
+    /// settling at 0.0004 %.</para>
+    ///
+    /// <para>Only on an <i>open</i>: a start that reuses a running stream has nothing to settle, and
+    /// paying this on every RUN would be two seconds of nothing for no reason.</para>
+    /// </summary>
+    int StreamStartSettleFrames(double sampleRateHz) => 0;
+
     /// <summary><paramref name="dbv"/> must be one of <see cref="DeviceCapabilities.InputRangesDbv"/>.</summary>
     Task SetInputRangeAsync(double dbv, CancellationToken ct);
 

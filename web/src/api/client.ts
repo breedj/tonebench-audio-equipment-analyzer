@@ -249,6 +249,12 @@ export interface SoundCardConfig {
   outputDeviceName: string
   inputChannelOffset: number
   outputChannelOffset: number
+  /**
+   * How long to throw away after a stream is opened, before anything is analysed — the card's own
+   * settling, not the DUT's (that is Capture delay). Only ever paid on a real open, which in
+   * practice means a sample-rate change.
+   */
+  streamStartSettleMs: number
   /** Null until that step has run: an uncalibrated card reports dBFS and says so. */
   outputFullScalePeakMv: number | null
   inputFullScalePeakMvLeft: number | null

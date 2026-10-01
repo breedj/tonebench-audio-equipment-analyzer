@@ -68,6 +68,12 @@ const { showPage } = useManual()
       a separate program instead, and then the button does nothing.
     </p>
 
+    <p class="manual-callout">
+      One other thing in that dialog: <strong>Settle after opening</strong>. A card takes a moment to
+      change speed, so the app waits that long before believing anything it hears. You only pay it
+      when you change the sample rate. Three seconds suits most cards and you can leave it alone.
+    </p>
+
     <h2>Step 2: teach it what a volt is — the output</h2>
     <p>You need a multimeter that can measure AC volts. Almost any will do.</p>
     <ol>

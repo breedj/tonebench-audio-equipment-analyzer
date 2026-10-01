@@ -266,6 +266,7 @@ public sealed record SoundCardConfig(
     string OutputDeviceName = "",
     int InputChannelOffset = 0,
     int OutputChannelOffset = 0,
+    double StreamStartSettleMs = 3000.0,
     double? OutputFullScalePeakMv = null,
     double? InputFullScalePeakMvLeft = null,
     double? InputFullScalePeakMvRight = null,
@@ -293,6 +294,7 @@ public sealed record SoundCardConfig(
     public bool IsValid =>
         InputChannelOffset >= 0 && InputChannelOffset <= 64
         && OutputChannelOffset >= 0 && OutputChannelOffset <= 64
+        && double.IsFinite(StreamStartSettleMs) && StreamStartSettleMs >= 0.0 && StreamStartSettleMs <= 10_000.0
         && double.IsFinite(FrontEndGainLeftDb) && Math.Abs(FrontEndGainLeftDb) <= MaxAbsGainDb
         && double.IsFinite(FrontEndGainRightDb) && Math.Abs(FrontEndGainRightDb) <= MaxAbsGainDb
         && double.IsFinite(MinStimulusFrequencyHz) && MinStimulusFrequencyHz >= 0.0 && MinStimulusFrequencyHz <= 1_000.0

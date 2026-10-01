@@ -53,6 +53,7 @@ const form = reactive({
   inputChannelOffset: 0,
   outputChannelOffset: 0,
   minStimulusFrequencyHz: 20,
+  streamStartSettleMs: 3000,
 })
 
 const outputStep = reactive({ dbFs: -6, reading: 1000, unit: 'Rms' as VoltageEntryUnitName })
@@ -233,6 +234,7 @@ watch(
       form.inputChannelOffset = config.value.inputChannelOffset
       form.outputChannelOffset = config.value.outputChannelOffset
       form.minStimulusFrequencyHz = config.value.minStimulusFrequencyHz
+      form.streamStartSettleMs = config.value.streamStartSettleMs
     }
     await reprobe()
   },
@@ -286,6 +288,7 @@ function toConfig(): SoundCardConfig | null {
     inputChannelOffset: form.inputChannelOffset,
     outputChannelOffset: form.outputChannelOffset,
     minStimulusFrequencyHz: form.minStimulusFrequencyHz,
+    streamStartSettleMs: form.streamStartSettleMs,
   }
 }
 
@@ -312,23 +315,28 @@ async function applyDevice() {
   if (!next || !canSave.value) return
 
   // Nothing to do when it has not moved. Reopening the device is cheap but not free, and the
-  // watcher below fires for form changes that resolve to the same selection.
-  if (
-    next.inputHostApi === config.value?.inputHostApi &&
-    next.inputDeviceName === config.value?.inputDeviceName &&
-    next.outputHostApi === config.value?.outputHostApi &&
-    next.outputDeviceName === config.value?.outputDeviceName &&
-    next.inputChannelOffset === config.value?.inputChannelOffset &&
-    next.outputChannelOffset === config.value?.outputChannelOffset
-  ) {
-    return
-  }
+  // watcher below fires for form changes that resolve to the same config.
+  //
+  // The *whole* config, not just the device fields: compared on those alone, a change to one of
+  // the numeric settings below them was silently never saved, because the device had not moved.
+  // That is what removing the old "Use this card" button exposed -- the button used to save
+  // everything, so nothing else had to.
+  if (JSON.stringify(next) === JSON.stringify(config.value)) return
 
   saved.value = await save(next)
 }
 
 watch(
-  () => [form.cardKey, form.inputKey, form.outputKey, form.inputChannelOffset, form.outputChannelOffset].join('|'),
+  () =>
+    [
+      form.cardKey,
+      form.inputKey,
+      form.outputKey,
+      form.inputChannelOffset,
+      form.outputChannelOffset,
+      form.minStimulusFrequencyHz,
+      form.streamStartSettleMs,
+    ].join('|'),
   () => applyDeviceSoon(),
 )
 
@@ -514,6 +522,24 @@ function mv(value: number | null | undefined) {
               class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
             <span class="text-neutral-500">Hz</span>
+          </span>
+        </label>
+
+        <label
+          class="flex items-center justify-between gap-3"
+          title="A card re-clocks its hardware when a stream asks for a rate it is not already running at, and it is unsettled for a moment afterwards. This is thrown away before anything is measured. Only paid when a stream is actually opened — changing the sample rate — never on an ordinary RUN."
+        >
+          <span class="text-neutral-600 dark:text-neutral-300">Settle after opening</span>
+          <span class="flex w-96 items-center gap-2">
+            <input
+              v-model.number="form.streamStartSettleMs"
+              type="number"
+              min="0"
+              max="10000"
+              step="100"
+              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            />
+            <span class="text-neutral-500">ms</span>
           </span>
         </label>
 

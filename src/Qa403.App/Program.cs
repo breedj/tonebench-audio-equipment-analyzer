@@ -239,6 +239,14 @@ try
         externalGainSetting.LeftDb = externalGain.LeftDb;
         externalGainSetting.RightDb = externalGain.RightDb;
 
+        // And the unit it is read in, which the setting does not carry because nothing downstream of
+        // the pipeline's door sees it -- only the status bar does. Handing the session the whole
+        // document also seeds its shared-bench copy outright rather than leaving it to the lazy
+        // capture in ApplyEffectiveExternalGain, which exists only because this runs after the
+        // container has built the service.
+        app.Services.GetRequiredService<DeviceSessionService>()
+            .SetSharedExternalGain(externalGain.LeftDb, externalGain.RightDb, externalGain.Unit);
+
         // The sound card's settings and calibration. Loaded here because AnalyzerDeviceFactory
         // reads them to build a device, which happens the moment anything resolves the session --
         // and because a card that has been calibrated must not come up claiming dBFS.

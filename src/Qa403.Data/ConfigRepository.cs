@@ -210,16 +210,46 @@ public sealed record CaptureDelayConfig(double CaptureDelayMs = 0.0)
 /// nothing in the path. Bounded at ±<see cref="MaxAbsDb"/>: a 60 dB divider brings +92 dBV down
 /// to the analyzer's ceiling, and anything past that is a typo.
 /// </summary>
-public sealed record ExternalGainConfig(double LeftDb = 0.0, double RightDb = 0.0)
+/// <param name="Unit">
+/// How the two figures are <i>read</i> -- "Db", or "Times" for a plain ratio, a 10:1 divider being
+/// 0.1 rather than −20. A display preference and nothing else: the stored value is dB either way,
+/// which is what <c>params_json</c> records and what the pipeline divides by, so a project measured
+/// through a divider reads the same whichever way the bench happened to spell it.
+///
+/// <para>Stored <b>per bench</b>, beside the gain it describes, rather than as one app-wide
+/// preference -- the sound card has carried its own <c>GainDisplayUnit</c> since it was written, and
+/// a second, global unit would be a third thing to keep in step with the two gains. A document
+/// written before this field existed has none, and the record's default makes that "Db".</para>
+///
+/// <para>A string rather than an enum for the reason <see cref="AnalyzerKindConfig.Kind"/> gives:
+/// the number behind an enum member is an implementation detail a reordering would silently change
+/// the meaning of.</para>
+/// </param>
+// The literal "Db" rather than DefaultUnit below: a record's primary-constructor default cannot
+// name a const declared in its own body. The two are pinned together by ExternalGainConfigTests.
+public sealed record ExternalGainConfig(double LeftDb = 0.0, double RightDb = 0.0, string Unit = "Db")
 {
     public const double MaxAbsDb = 60.0;
+
+    /// <summary>Read as dB — what a document written before the unit existed means.</summary>
+    public const string DefaultUnit = "Db";
+
+    /// <summary>Read as a plain ratio.</summary>
+    public const string TimesUnit = "Times";
 
     public static ExternalGainConfig Default { get; } = new();
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsValid =>
         double.IsFinite(LeftDb) && Math.Abs(LeftDb) <= MaxAbsDb
-        && double.IsFinite(RightDb) && Math.Abs(RightDb) <= MaxAbsDb;
+        && double.IsFinite(RightDb) && Math.Abs(RightDb) <= MaxAbsDb
+        && IsKnownUnit(Unit);
+
+    /// <summary>True for a unit this app knows how to display.</summary>
+    public static bool IsKnownUnit(string? unit) => unit is DefaultUnit or TimesUnit;
+
+    /// <summary>The given unit if it is one we know, else dB — for reading a hand-edited document.</summary>
+    public static string NormaliseUnit(string? unit) => IsKnownUnit(unit) ? unit! : DefaultUnit;
 }
 
 /// <summary>

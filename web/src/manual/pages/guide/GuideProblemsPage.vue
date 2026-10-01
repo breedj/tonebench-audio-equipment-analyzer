@@ -144,8 +144,10 @@ const { showPage } = useManual()
           <td>Everything is exactly 20 dB (or 10×) out</td>
           <td>
             A divider in the cable that the app has not been told about, or an
-            <strong>External gain</strong> still set in Configuration from a previous session. Those two
-            cancel each other, and one without the other is exactly this symptom.
+            <strong>Ext. gain</strong> still declared on the status bar from a previous session.
+            Those two cancel each other, and one without the other is exactly this symptom. The
+            badge is amber whenever a gain is declared, so a glance at the bottom right says which
+            of the two it is.
           </td>
         </tr>
         <tr>

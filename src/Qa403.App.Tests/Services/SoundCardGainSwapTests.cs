@@ -26,7 +26,7 @@ public class SoundCardGainSwapTests
     }
 
     private static (DeviceSessionService Session, ExternalGainSetting Gain, SoundCardSetting Card) Build(
-        DeviceKind initialKind, double cardLeftDb, double cardRightDb)
+        DeviceKind initialKind, double cardLeftDb, double cardRightDb, string cardUnit = ExternalGainConfig.DefaultUnit)
     {
         var card = new SoundCardSetting
         {
@@ -38,6 +38,7 @@ public class SoundCardGainSwapTests
                 OutputDeviceName = "Card",
                 FrontEndGainLeftDb = cardLeftDb,
                 FrontEndGainRightDb = cardRightDb,
+                GainDisplayUnit = cardUnit,
             },
         };
 
@@ -165,5 +166,57 @@ public class SoundCardGainSwapTests
 
         // Nothing measured yet, so it says so rather than claiming volts.
         Assert.False(session.GetStatus().SoundCardCalibrated);
+    }
+
+    /// <summary>
+    /// The unit is stored beside the gain it describes, so it has to swap with it. A unit left
+    /// behind on a switch is worse than a wrong gain, because it is not wrong by a visible amount:
+    /// a card's ×0.1 read against the QA403's bench prints "0.1" where the stored figure is
+    /// −20 dB, which is a plausible-looking small gain rather than an obvious fault.
+    /// </summary>
+    [Fact]
+    public async Task SwitchingAnalyzers_SwapsTheUnitWithTheGain()
+    {
+        var (session, _, _) = Build(
+            DeviceKind.Hardware, cardLeftDb: -20.0, cardRightDb: -20.0, cardUnit: ExternalGainConfig.TimesUnit);
+
+        session.SetSharedExternalGain(-10.0, -10.0, ExternalGainConfig.DefaultUnit);
+        Assert.Equal(ExternalGainConfig.DefaultUnit, session.ExternalGainUnit);
+        Assert.Equal(ExternalGainConfig.DefaultUnit, session.GetStatus().ExternalGainUnit);
+
+        await session.SwitchDeviceAsync(DeviceKind.SoundCard, CancellationToken.None);
+        Assert.Equal(ExternalGainConfig.TimesUnit, session.ExternalGainUnit);
+        Assert.Equal(ExternalGainConfig.TimesUnit, session.GetStatus().ExternalGainUnit);
+
+        await session.SwitchDeviceAsync(DeviceKind.Hardware, CancellationToken.None);
+        Assert.Equal(ExternalGainConfig.DefaultUnit, session.ExternalGainUnit);
+    }
+
+    /// <summary>
+    /// And it is never null, on either branch of <c>GetStatus</c> — the disconnected one is the
+    /// easy one to forget, and the client reads the field without a fallback.
+    /// </summary>
+    [Fact]
+    public void TheUnit_IsReportedEvenBeforeAnythingIsConnected()
+    {
+        var (session, _, _) = Build(DeviceKind.Hardware, cardLeftDb: 0.0, cardRightDb: 0.0);
+
+        Assert.False(session.GetStatus().Connected);
+        Assert.Equal(ExternalGainConfig.DefaultUnit, session.GetStatus().ExternalGainUnit);
+    }
+
+    /// <summary>
+    /// A hand-edited document naming a unit this app does not know must not reach the status bar,
+    /// where it would select neither dropdown option.
+    /// </summary>
+    [Fact]
+    public async Task AnUnknownUnitOnTheCard_ReadsAsDb()
+    {
+        var (session, _, _) = Build(
+            DeviceKind.SoundCard, cardLeftDb: 0.0, cardRightDb: 0.0, cardUnit: "ratio");
+
+        await session.ConnectAsync(CancellationToken.None);
+
+        Assert.Equal(ExternalGainConfig.DefaultUnit, session.ExternalGainUnit);
     }
 }

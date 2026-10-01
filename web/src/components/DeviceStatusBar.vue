@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DeviceKindName, DeviceRanges, DeviceStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
-import { fromDisplay, toDisplay, type GainUnit } from '../soundcard/gainUnits'
+import { formatGain, type GainUnit } from '../soundcard/gainUnits'
+import ExternalGainPopover from './ExternalGainPopover.vue'
 
 // Real instruments first, the synthetic one last: the two entries above it are things on the
 // bench, and the simulator is the odd one out rather than the middle of a scale.
@@ -201,7 +202,7 @@ const emit = defineEmits<{
   setRangingMode: [mode: RangingModeName]
   setInputRange: [dbv: number]
   openSoundCard: []
-  setSoundCardGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
+  setExternalGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
   setOutputRange: [dbv: number]
   connect: []
 }>()
@@ -345,11 +346,6 @@ function onSimulatedDutChange(e: Event) {
   emit('setSimulatedProfile', { dut: (e.target as HTMLSelectElement).value as SimulatedDutModel })
 }
 
-/** Signed, so a divider reads "−20" and an amplifier "+20" at a glance. */
-function formatGain(db: number): string {
-  return `${db > 0 ? '+' : ''}${db.toFixed(db % 1 === 0 ? 0 : 1)}`
-}
-
 /**
  * The analyzer's own sensors, formatted the way the front panel's own software shows them. Absent
  * on the simulator and until the first reading lands, and the whole group is hidden in that case
@@ -383,13 +379,53 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
  */
 const isSoundCard = computed(() => props.status?.deviceKind === 'SoundCard')
 
-/** dB or a plain ratio. The stored value is always dB — see soundcard/gainUnits. */
-const gainUnit = computed<GainUnit>(() => (props.status?.soundCardGainUnit === 'Times' ? 'Times' : 'Db'))
+/**
+ * dB or a plain ratio, for whichever bench is live. The stored value is always dB — see
+ * soundcard/gainUnits.
+ */
+const gainUnit = computed<GainUnit>(() => (props.status?.externalGainUnit === 'Times' ? 'Times' : 'Db'))
 
-const gainLeft = computed(() => toDisplay(props.status?.externalGainLeftDb ?? 0, gainUnit.value))
-const gainRight = computed(() => toDisplay(props.status?.externalGainRightDb ?? 0, gainUnit.value))
+const gainLeftDb = computed(() => props.status?.externalGainLeftDb ?? 0)
+const gainRightDb = computed(() => props.status?.externalGainRightDb ?? 0)
 
-const gainStep = computed(() => (gainUnit.value === 'Times' ? 0.01 : 0.1))
+/**
+ * Whether anything is in front of either input. The badge is shown either way — a gain of 0 is a
+ * statement worth having on screen, and it is where the control is — but it is only *amber* when
+ * there is a correction being applied. Grey means "nothing declared, every level is as measured".
+ */
+const gainDeclared = computed(() => gainLeftDb.value !== 0 || gainRightDb.value !== 0)
+
+/** Which document the popover writes to, named so a bench can tell where its figure went. */
+const gainBenchLabel = computed(() =>
+  isSoundCard.value ? 'the sound card' : props.status?.deviceKind === 'Simulated' ? 'the QA403 bench' : 'the QA403',
+)
+
+const gainOpen = ref(false)
+
+/**
+ * The badge, the pencil and the panel together — what counts as "inside" for the press below.
+ *
+ * <p>All three share one element deliberately. Were the guard the panel alone, a press on the badge
+ * would be outside it: this handler would close the panel, and the button's own click would then
+ * toggle it straight back open, so the badge would appear not to close it at all. Covering the
+ * triggers too is what makes that press the plain toggle it looks like.</p>
+ */
+const gainAnchor = ref<HTMLElement | null>(null)
+
+/**
+ * Closes the panel on a press anywhere outside it — the same `pointerdown`-on-document idiom the
+ * project menu uses, rather than a click, so the panel is gone before whatever was pressed acts on
+ * it. It stays registered for the component's life instead of being added and removed with the
+ * panel: the handler's first line is a no-op while closed, which is cheaper than a watcher and has
+ * no window in which an open panel is missing its listener.
+ */
+function onDocumentPointerDown(event: PointerEvent) {
+  if (!gainOpen.value) return
+  if (!gainAnchor.value?.contains(event.target as Node)) gainOpen.value = false
+}
+
+onMounted(() => document.addEventListener('pointerdown', onDocumentPointerDown))
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPointerDown))
 
 const soundCardTitle = computed(() => {
   const s = props.status
@@ -400,22 +436,8 @@ const soundCardTitle = computed(() => {
     : `${s.soundCardInputDevice} — not calibrated, so levels are dBFS rather than volts. Ratios (THD, IMD, response shape) are exact either way.`
 })
 
-function emitGain(which: 'left' | 'right', event: Event) {
-  const raw = Number((event.target as HTMLInputElement).value)
-  const db = fromDisplay(raw, gainUnit.value)
-  emit('setSoundCardGain', {
-    leftDb: which === 'left' ? db : (props.status?.externalGainLeftDb ?? 0),
-    rightDb: which === 'right' ? db : (props.status?.externalGainRightDb ?? 0),
-    unit: gainUnit.value,
-  })
-}
-
-function onGainUnitChange(event: Event) {
-  emit('setSoundCardGain', {
-    leftDb: props.status?.externalGainLeftDb ?? 0,
-    rightDb: props.status?.externalGainRightDb ?? 0,
-    unit: (event.target as HTMLSelectElement).value as GainUnit,
-  })
+function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
+  emit('setExternalGain', gain)
 }
 </script>
 
@@ -649,19 +671,70 @@ function onGainUnitChange(event: Event) {
 
     <div class="ml-auto flex items-center gap-4">
       <!--
-        Only while something is in the path: a divider in front of an input corrects every level on
-        screen, and a bench that has forgotten it is on reads a DUT 20 dB louder than it is.
+        Always on the bar, on every analyzer, because it is now the only place the external gain can
+        be read or set -- the Configuration dialog's copy is gone, and with it the field that wrote
+        a value the sound card's bench never applied.
+
+        Amber only while something is declared: a divider in front of an input corrects every level
+        on screen, and a bench that has forgotten it is on reads a DUT 20 dB louder than it is. Grey
+        at 0 says the opposite just as usefully -- nothing in the path, every level as measured --
+        and keeps the control where the eye already learned to find it.
+
+        The badge is itself the button, with the pencil beside it saying so: the number is the thing
+        you want to change, and making it inert while a 16 px icon beside it is not reads as a bug.
       -->
-      <span
-        v-if="status && (status.externalGainLeftDb !== 0 || status.externalGainRightDb !== 0)"
-        class="flex items-center gap-2 text-amber-700 dark:text-amber-400"
-        title="External gain in front of the inputs (Configuration ▸ Acquisition): every level shown is the DUT's output, with this undone."
-      >
-        Ext. gain
-        <span class="rounded border border-amber-300 px-2 py-0.5 font-mono dark:border-amber-700">
-          L {{ formatGain(status.externalGainLeftDb) }} · R {{ formatGain(status.externalGainRightDb) }} dB
-        </span>
-      </span>
+      <div v-if="status" ref="gainAnchor" class="relative flex items-center gap-1.5">
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          :class="gainDeclared ? 'text-amber-700 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-400'"
+          :aria-expanded="gainOpen"
+          :title="
+            gainDeclared
+              ? 'External gain in front of the inputs: every level shown is the DUT’s output, with this undone. Click to change.'
+              : 'Nothing declared in front of the inputs, so every level shown is as measured. Click to declare a divider or a front-end.'
+          "
+          @click="gainOpen = !gainOpen"
+        >
+          Ext. gain
+          <span
+            class="rounded border px-2 py-0.5 font-mono"
+            :class="gainDeclared ? 'border-amber-300 dark:border-amber-700' : 'border-neutral-300 dark:border-neutral-700'"
+          >
+            L {{ formatGain(gainLeftDb, gainUnit) }} · R {{ formatGain(gainRightDb, gainUnit) }}
+          </span>
+        </button>
+        <button
+          type="button"
+          class="flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          :aria-expanded="gainOpen"
+          aria-label="Edit external gain"
+          title="Edit the external gain."
+          @click="gainOpen = !gainOpen"
+        >
+          <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M11.5 2.5a1.6 1.6 0 0 1 2.3 2.3L5.6 13 2.5 13.5l.5-3.1z" />
+          </svg>
+        </button>
+
+        <!--
+          Anchored above the badge rather than centred on the screen: it edits the thing it is
+          pointing at, and a modal for two numbers would dim the very readings the gain changes.
+          bottom-full puts it clear of the bar; right-0 keeps it inside the window, since the badge
+          sits at the right-hand end of a bar that reaches the edge.
+        -->
+        <div v-if="gainOpen" class="absolute bottom-full right-0 z-30 mb-2">
+          <ExternalGainPopover
+            :left-db="gainLeftDb"
+            :right-db="gainRightDb"
+            :unit="gainUnit"
+            :bench-label="gainBenchLabel"
+            :disabled="rangesLocked"
+            @apply="applyGain"
+            @close="gainOpen = false"
+          />
+        </div>
+      </div>
       <!--
         Auto is the default and is what every measurement needs: the input range tracks the signal
         (the device's own hardware ranger, or App.vue's live peak monitor where there is none — see
@@ -730,55 +803,6 @@ function onGainUnitChange(event: Event) {
           {{ status?.outputRangeDbv ?? '--' }} dBV
         </span>
         <span v-if="status?.outputRangeClipping" class="text-xs font-medium">clipping</span>
-      </span>
-      <!--
-        A sound card has no attenuator on either side: one fixed full scale, which the calibration
-        measured. So the two range dropdowns above have nothing to offer, and what does vary on that
-        bench takes their place — the analog front-end in front of each input.
-
-        The value stored is always dB, which is what every measurement's parameters record and what
-        the pipeline divides by; the × unit exists because that is how a divider reads on a bench
-        (a 10:1 divider is 0.1, not −20). The conversion is in soundcard/gainUnits.ts rather than
-        here, because nothing in a .vue is testable under the node environment vitest runs in.
-      -->
-      <span
-        v-if="isSoundCard"
-        class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"
-        title="The gain of whatever sits between the DUT and each input — a 10:1 divider is −20 dB, or ×0.1. Every level shown is the DUT's, with this undone. Remembered separately from the QA403's."
-      >
-        Gain
-        <label class="flex items-center gap-1">
-          <span class="text-[11px] uppercase tracking-wide">L</span>
-          <input
-            type="number"
-            class="w-20 rounded border border-neutral-300 px-1 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
-            :value="gainLeft"
-            :step="gainStep"
-            :disabled="rangesLocked"
-            @change="emitGain('left', $event)"
-          />
-        </label>
-        <label class="flex items-center gap-1">
-          <span class="text-[11px] uppercase tracking-wide">R</span>
-          <input
-            type="number"
-            class="w-20 rounded border border-neutral-300 px-1 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
-            :value="gainRight"
-            :step="gainStep"
-            :disabled="rangesLocked"
-            @change="emitGain('right', $event)"
-          />
-        </label>
-        <select
-          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
-          :value="gainUnit"
-          :disabled="rangesLocked"
-          title="How the two boxes are read. The stored value is dB either way."
-          @change="onGainUnitChange"
-        >
-          <option value="Db">dB</option>
-          <option value="Times">×</option>
-        </select>
       </span>
     </div>
 

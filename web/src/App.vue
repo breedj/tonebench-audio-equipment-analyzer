@@ -274,7 +274,7 @@ const { load: loadCaptureDelay } = useCaptureDelay()
 void loadCaptureDelay()
 // Loaded for the simulator's ranging watcher below, which must hand the range ladder the
 // analyzer's peak, not the DUT-referred one the meters frame carries.
-const { load: loadExternalGain, gainDb: externalGainDb } = useExternalGain()
+const { load: loadExternalGain, gainDb: externalGainDb, set: setSharedExternalGain } = useExternalGain()
 void loadExternalGain()
 
 // Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the Metrics button
@@ -1738,10 +1738,24 @@ function closeSoundCardDialog() {
   void refreshRanges()
 }
 
-/** The status bar's Gain boxes, which stand in for the two attenuators a sound card does not have. */
-function setSoundCardGain(gain: { leftDb: number; rightDb: number; unit: 'Db' | 'Times' }) {
+/**
+ * The status bar's Ext. gain popover, for every analyzer.
+ *
+ * <p><b>This is the routing, and it is the whole reason the dialog does not own it.</b> Each bench
+ * stores its own front-end gain -- the sound card in its configuration document, the QA403 and the
+ * simulator in `acquisition.externalGain` -- and `DeviceSessionService` applies whichever analyzer
+ * is live. Writing to the wrong one is not an error: it stores the number, returns 200, and applies
+ * nothing, which is exactly what the Configuration dialog's field used to do while the sound card
+ * was selected. Sending both edits through one handler that keys on the live kind is what makes
+ * that unrepresentable.</p>
+ */
+function setExternalGain(gain: { leftDb: number; rightDb: number; unit: 'Db' | 'Times' }) {
   return withErrorReporting(async () => {
-    await soundCard.setFrontEndGain(gain.leftDb, gain.rightDb, gain.unit)
+    if (status.value?.deviceKind === 'SoundCard')
+      await soundCard.setFrontEndGain(gain.leftDb, gain.rightDb, gain.unit)
+    else
+      await setSharedExternalGain({ leftDb: gain.leftDb, rightDb: gain.rightDb, unit: gain.unit })
+
     status.value = await api.getDevice()
   })
 }
@@ -4646,7 +4660,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       @set-ranging-mode="setRangingMode"
       @set-input-range="setInputRangeManually"
       @open-sound-card="soundCardDialogOpen = true"
-      @set-sound-card-gain="setSoundCardGain"
+      @set-external-gain="setExternalGain"
       @set-output-range="setOutputRangeManually"
       @connect="connectDevice"
     />

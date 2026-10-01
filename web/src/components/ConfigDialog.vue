@@ -9,7 +9,6 @@ import { useDateTimeFormat } from '../composables/useDateTimeFormat'
 import { useDiagnosticLogging } from '../composables/useDiagnosticLogging'
 import { useDevice } from '../composables/useDevice'
 import { commitNumber } from '../config/numberField'
-import { useExternalGain } from '../composables/useExternalGain'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useStartupConfig } from '../composables/useStartupConfig'
@@ -23,7 +22,6 @@ const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
 const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
-const { leftDb: externalGainLeftDb, rightDb: externalGainRightDb, set: setExternalGain } = useExternalGain()
 const { config, apply: applyConfig } = useSpectrumConfig()
 const { status: deviceStatus } = useDevice()
 const { updateCheckEnabled } = useUpdateCheck()
@@ -89,20 +87,18 @@ async function applyAutoRangeStepDownDelay() {
  * merely when the stored value changes: Vue's prop patching carries an explicit
  * <c>next !== prev || key === "value"</c>, so an unchanged <c>value</c> prop is still written back
  * to the element. This dialog re-renders about once a second, because it reads the polled device
- * status — so typing "-3" into External gain put it back to 0 before it could be committed, and
- * emptying a field made a 0 appear under the cursor. Reported 2026-09-30.</p>
+ * status — so typing "-3" into a field put it back to 0 before it could be committed, and emptying
+ * one made a 0 appear under the cursor. Reported 2026-09-30. (It was External gain this was found
+ * on; that setting now lives on the status bar, and its popover carries the same drafts for the
+ * same reason.)</p>
  *
  * <p>With <c>v-model</c> on a draft the element's value <i>is</i> the bound value, so the patch is
  * a no-op and the text survives. The drafts are strings rather than numbers so a field can be
  * genuinely empty while it is being retyped, which <c>v-model.number</c> cannot express.</p>
  */
 const captureDelayDraft = ref('')
-const externalGainLeftDraft = ref('')
-const externalGainRightDraft = ref('')
 
 watch(captureDelayMs, (ms) => (captureDelayDraft.value = String(ms)), { immediate: true })
-watch(externalGainLeftDb, (db) => (externalGainLeftDraft.value = String(db)), { immediate: true })
-watch(externalGainRightDb, (db) => (externalGainRightDraft.value = String(db)), { immediate: true })
 
 // On change rather than on every keystroke: each write is a round trip that lands in the
 // configuration database, and a half-typed "3" applied to the next sweep point is not a setting.
@@ -115,23 +111,6 @@ async function onCaptureDelayChange() {
   captureDelayDraft.value = String(captureDelayMs.value)
 }
 
-// Same on-change discipline as the capture delay: each write lands in the configuration database
-// and a half-typed "-2" applied to every level on screen is not a setting either.
-async function onExternalGainChange(channel: 'left' | 'right') {
-  const bounds = { min: -60, max: 60, fallback: 0 }
-  const db = commitNumber(
-    channel === 'left' ? externalGainLeftDraft.value : externalGainRightDraft.value,
-    bounds,
-  )
-
-  await setExternalGain({
-    leftDb: channel === 'left' ? db : externalGainLeftDb.value,
-    rightDb: channel === 'right' ? db : externalGainRightDb.value,
-  })
-
-  externalGainLeftDraft.value = String(externalGainLeftDb.value)
-  externalGainRightDraft.value = String(externalGainRightDb.value)
-}
 
 // The dropdown's rows carry a live example of "now" in each format, taken once per open: the
 // pattern alone ("DD-MM-YYYY") reads as a puzzle, the date itself does not.
@@ -339,39 +318,6 @@ async function clearStoredCalibration() {
               class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
           </label>
-
-          <div
-            class="flex flex-col gap-1"
-            title="The gain of whatever sits between the DUT and this input, in dB: −20 for a 10:1 divider, needed to measure a DUT above the analyzer's +32 dBV ceiling. Every level the app reports — the spectrum, the metrics, every sweep point, every output-referred level target — is then the DUT's output rather than what reached the analyzer. Input ranging still follows what the analyzer actually sees. 0 for nothing in the path."
-          >
-            <span>External gain (dB)</span>
-            <div class="flex items-center gap-3">
-              <label class="flex items-center gap-1.5">
-                Left
-                <input
-                  type="number"
-                  min="-60"
-                  max="60"
-                  step="1"
-                  v-model="externalGainLeftDraft"
-                  @change="onExternalGainChange('left')"
-                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-                />
-              </label>
-              <label class="flex items-center gap-1.5">
-                Right
-                <input
-                  type="number"
-                  min="-60"
-                  max="60"
-                  step="1"
-                  v-model="externalGainRightDraft"
-                  @change="onExternalGainChange('right')"
-                  class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-                />
-              </label>
-            </div>
-          </div>
 
           <label
             v-if="deviceStatus?.autoRangeStepDownDelayMs != null"

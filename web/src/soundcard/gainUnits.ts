@@ -42,12 +42,18 @@ export function displayPrecision(unit: GainUnit): number {
   return unit === 'Times' ? 4 : 2
 }
 
-/** The chip on the bar, e.g. `−20.0 dB` or `×0.1`. */
+/**
+ * The chip on the bar, e.g. `−20 dB` or `×0.1`.
+ *
+ * Signed, so a divider and an amplifier are told apart at a glance — but **zero carries no sign**.
+ * `+0 dB` reads as a quantity someone chose, where the badge is grey at 0 precisely to say the
+ * opposite: nothing is declared and every level is as measured.
+ */
 export function formatGain(db: number, unit: GainUnit): string {
   const shown = toDisplay(db, unit)
   return unit === 'Times'
     ? `×${trim(shown, displayPrecision(unit))}`
-    : `${shown >= 0 ? '+' : ''}${trim(shown, displayPrecision(unit))} dB`
+    : `${shown > 0 ? '+' : ''}${trim(shown, displayPrecision(unit))} dB`
 }
 
 function clamp(db: number): number {

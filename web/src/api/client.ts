@@ -86,7 +86,8 @@ export interface DeviceStatus {
   /**
    * The gain of whatever sits between the DUT and the left input, in dB (a 10:1 divider is −20),
    * undone on every sample so every level the app reports is the DUT's. 0 with nothing in the
-   * path. Configuration ▸ Acquisition ▸ External gain.
+   * path. The *effective* one: each bench stores its own, and this is whichever analyzer is live.
+   * Edited from the status bar's Ext. gain badge.
    */
   externalGainLeftDb: number
   /** The same for the right input. */
@@ -110,8 +111,12 @@ export interface DeviceStatus {
    * voltage, and the bar says so.
    */
   soundCardCalibrated: boolean | null
-  /** Whether the bar shows the two front-end gains in dB or as a ratio. Display only. */
-  soundCardGainUnit: string | null
+  /**
+   * Whether the bar reads the two external gains in dB or as a ratio — `'Db'` or `'Times'`.
+   * Display only: the stored value is dB. The *effective* unit, like the gains themselves, since
+   * each bench stores its own. Never null.
+   */
+  externalGainUnit: string
 }
 
 /**
@@ -554,7 +559,16 @@ export interface CaptureDelayConfig {
 export interface ExternalGainConfig {
   leftDb: number
   rightDb: number
+  /**
+   * How the two figures are read: `'Db'`, or `'Times'` for a plain ratio. A display preference —
+   * the stored value is dB either way. Per bench, beside the gain it describes; the sound card
+   * keeps its own in `SoundCardConfig.gainDisplayUnit`.
+   */
+  unit: GainUnitName
 }
+
+/** Mirrors `web/src/soundcard/gainUnits.ts`'s `GainUnit`, which is where the conversion lives. */
+export type GainUnitName = 'Db' | 'Times'
 
 export interface ImpedanceStartRequest {
   method: ImpedanceMethodName

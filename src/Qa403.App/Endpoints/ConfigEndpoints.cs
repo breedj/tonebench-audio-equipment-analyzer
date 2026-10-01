@@ -243,7 +243,10 @@ public static class ConfigEndpoints
             SpectrumPipeline pipeline, CancellationToken ct) =>
         {
             if (!config.IsValid)
-                return Results.BadRequest($"An external gain must be within ±{ExternalGainConfig.MaxAbsDb:0} dB per input.");
+                return Results.BadRequest(
+                    ExternalGainConfig.IsKnownUnit(config.Unit)
+                        ? $"An external gain must be within ±{ExternalGainConfig.MaxAbsDb:0} dB per input."
+                        : $"'{config.Unit}' is not a gain unit — use '{ExternalGainConfig.DefaultUnit}' or '{ExternalGainConfig.TimesUnit}'.");
 
             await repo.SetAsync(
                 ConfigRepository.ExternalGainKey,
@@ -255,7 +258,7 @@ public static class ConfigEndpoints
             // this as the analyzer-independent value and re-applies whichever is effective, so
             // editing it while the sound card is selected does not silently swap the card's
             // divider for this one.
-            session.SetSharedExternalGain(config.LeftDb, config.RightDb);
+            session.SetSharedExternalGain(config.LeftDb, config.RightDb, config.Unit);
             pipeline.Flush(0);
 
             return Results.Ok(config);

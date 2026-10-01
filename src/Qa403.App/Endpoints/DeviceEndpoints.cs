@@ -354,10 +354,15 @@ public sealed record DeviceStatusResponse(
     /// </summary>
     bool? SoundCardCalibrated = null,
     /// <summary>
-    /// Whether the bar shows the two front-end gains in dB or as a ratio. Display only: the stored
-    /// value is dB, which is what every measurement's parameters record.
+    /// Whether the bar reads the two external gains above in dB or as a ratio — <c>"Db"</c> or
+    /// <c>"Times"</c>. Display only: the stored value is dB, which is what every measurement's
+    /// parameters record.
+    ///
+    /// <para>The <i>effective</i> unit, the way <see cref="ExternalGainLeftDb"/> is the effective
+    /// gain: it follows whichever bench is live, because each stores its own. Never null — there is
+    /// always some unit the figures are being read in.</para>
     /// </summary>
-    string? SoundCardGainUnit = null);
+    string ExternalGainUnit = "Db");
 
 /// <summary>
 /// Wire shape of <see cref="Qa403.Device.DeviceTelemetry"/>: the figures QuantAsylum's own software

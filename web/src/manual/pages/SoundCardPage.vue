@@ -34,15 +34,21 @@ const { showPage } = useManual()
       With a sound card selected the <strong>Ranging</strong>, <strong>Attenuation</strong> and
       <strong>Output range</strong> controls disappear. They have nothing to offer: a card has one
       fixed full scale on each side, where a QA403 has an eight-step input ladder and a four-step
-      output one. In their place the bar shows a <strong>Gain</strong> box per input, with a
-      <strong>dB</strong> / <strong>×</strong> unit selector.
+      output one. What remains is the <strong>Ext. gain</strong> badge, which every analyzer has —
+      see <button type="button" class="manual-link" @click="showPage('getting-started')">Getting
+      started</button> for the control itself.
     </p>
     <p>
-      That gain is what sits between the device under test and the card's input — your front-end. A
-      10:1 divider is <strong>−20 dB</strong>, or <strong>×0.1</strong>; the two units are the same
-      number said differently, and the app stores dB whichever you type. Every level on screen is
-      then the DUT's, with the divider undone. It is remembered separately from the QA403's own
-      external gain, because they are different benches: switching analyzers swaps which one applies.
+      On this bench that badge is the only thing describing the signal path, and it matters more
+      here than on a QA403: a card has no input attenuator to save a measurement, so the front-end
+      you built is the whole of your headroom. A 10:1 divider is <strong>−20 dB</strong>, or
+      <strong>×0.1</strong>.
+    </p>
+    <p class="manual-callout">
+      <strong>The card's figures are its own.</strong> They are remembered separately from the
+      QA403's, because they are different benches — your card's front-end is not in front of the
+      QA403's BNCs — and switching analyzers swaps which pair applies. The panel names the bench it
+      is writing to, so there is no doubt which one a number landed on.
     </p>
 
     <h2>Picking the card</h2>

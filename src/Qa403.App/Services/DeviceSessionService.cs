@@ -30,10 +30,11 @@ public sealed class DeviceSessionService(
 
     /// <summary>
     /// The external gain to fall back to when the analyzer is not the sound card, i.e. the one
-    /// <c>acquisition.externalGain</c> holds. Seeded from whatever the setting carries at
-    /// construction, which is what <c>Program</c> loaded from that document at startup.
+    /// <c>acquisition.externalGain</c> holds, with the unit that document reads it in. Seeded from
+    /// whatever the setting carries at construction, which is what <c>Program</c> loaded from that
+    /// document at startup.
     /// </summary>
-    private (double Left, double Right)? _sharedExternalGainDb;
+    private (double Left, double Right, string Unit)? _sharedExternalGainDb;
 
     /// <summary>
     /// The device this session is talking to. A <b>field</b> rather than a constructor parameter
@@ -62,7 +63,7 @@ public sealed class DeviceSessionService(
             // Captured lazily rather than at construction, because Program loads the external-gain
             // document into the setting after the container has built this service -- seeding it in
             // a field initializer would bank a zero and lose the QA403's divider on the way back.
-            _sharedExternalGainDb ??= (_externalGain.LeftDb, _externalGain.RightDb);
+            _sharedExternalGainDb ??= (_externalGain.LeftDb, _externalGain.RightDb, Qa403.Data.ExternalGainConfig.DefaultUnit);
 
             Qa403.Device.SoundCard.SoundCardSettings card = _soundCard.DeviceSettings;
             _externalGain.LeftDb = Clamp(card.FrontEndGainLeftDb);
@@ -85,11 +86,22 @@ public sealed class DeviceSessionService(
     /// Called by <c>PUT /api/config/external-gain</c>, whose document does not describe the sound
     /// card.
     /// </summary>
-    public void SetSharedExternalGain(double leftDb, double rightDb)
+    public void SetSharedExternalGain(double leftDb, double rightDb, string? unit = null)
     {
-        _sharedExternalGainDb = (leftDb, rightDb);
+        _sharedExternalGainDb = (leftDb, rightDb, Qa403.Data.ExternalGainConfig.NormaliseUnit(unit));
         ApplyEffectiveExternalGain();
     }
+
+    /// <summary>
+    /// How the status bar reads the effective gain — <c>"Db"</c> or <c>"Times"</c>. Follows the same
+    /// bench the two figures do, because it is stored beside them; see
+    /// <see cref="Qa403.Data.ExternalGainConfig.Unit"/> for why it is per bench rather than global.
+    /// Never null, so the client has no "which unit did it mean" case to handle.
+    /// </summary>
+    public string ExternalGainUnit =>
+        _kind == DeviceKind.SoundCard
+            ? Qa403.Data.ExternalGainConfig.NormaliseUnit(_soundCard.Config.GainDisplayUnit)
+            : _sharedExternalGainDb?.Unit ?? Qa403.Data.ExternalGainConfig.DefaultUnit;
 
     /// <summary>Re-applies the sound card's gain after its settings change, without a reconnect.</summary>
     public void RefreshSoundCardGain()
@@ -770,7 +782,8 @@ public sealed class DeviceSessionService(
                 SimulatedCrosstalkEnabled: SimulatedCrosstalkEnabled,
                 SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
                 ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb,
-                RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping);
+                RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping,
+                ExternalGainUnit: ExternalGainUnit);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
@@ -787,7 +800,7 @@ public sealed class DeviceSessionService(
             SoundCardCalibrated: _kind == DeviceKind.SoundCard
                 ? _soundCard.Calibration is { IsInputCalibrated: true, IsOutputCalibrated: true }
                 : null,
-            SoundCardGainUnit: SoundCardField(c => c.GainDisplayUnit));
+            ExternalGainUnit: ExternalGainUnit);
     }
 
     /// <summary>

@@ -50,9 +50,9 @@ const { showPage } = useManual()
       Levels are in <strong>dBV</strong> (0 dBV = 1 V rms) throughout. Watts appear wherever a load
       has been entered, computed from the measured voltage and that load — the app has no idea what
       your amplifier is really driving, so a wrong load figure makes every power reading wrong with
-      it. With an <strong>External gain</strong> set in Configuration, every level is the DUT's
-      output — what reached the analyzer through the divider, corrected by that gain — and the
-      status bar says so.
+      it. With an <strong>Ext. gain</strong> declared on the status bar, every level is the DUT's
+      output — what reached the analyzer through the divider, corrected by that gain — and that
+      badge turns amber to say so.
     </p>
 
     <h2>Running it</h2>
@@ -452,8 +452,8 @@ const { showPage } = useManual()
       non-zero even if the axis is switched back to dBV — a hidden field always means 0 dB, and
       nothing on screen is changed by a value you cannot see. Leave it at 0 for a loopback. It is
       saved with the measurement, unlike the load. Note it is not the same as the
-      <strong>External gain</strong> in Configuration ▸ Acquisition, which describes an attenuator
-      or probe <em>between</em> the DUT's output and the analyzer and corrects every measured level. A history overlay converts with its own window, so two results taken at
+      <strong>Ext. gain</strong> on the status bar, which describes an attenuator or probe
+      <em>between</em> the DUT's output and the analyzer and corrects every measured level. A history overlay converts with its own window, so two results taken at
       different FFT sizes compare correctly on the density axis. Below those: <strong>Thick lines</strong>,
       <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (on for a
       newly created measurement), the <strong>Channels</strong> row, the FFT data, Min/max,

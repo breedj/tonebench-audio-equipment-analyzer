@@ -173,6 +173,38 @@ const { showPage } = useManual()
       choose its own ranges as it goes; set Ranging back to Auto first.
     </p>
 
+    <h2 id="external-gain">External gain — what you put in front of the inputs</h2>
+    <p>
+      Beside those figures sits <strong>Ext. gain</strong>, showing a number per input. It is the
+      gain of whatever you have wired between the device under test and the analyzer: a 10:1 divider
+      is <strong>−20 dB</strong>, or <strong>×0.1</strong>. Declaring it is how a DUT above the
+      analyzer's +32 dBV input ceiling gets measured at all.
+    </p>
+    <p>
+      <strong>Grey means nothing is declared</strong> and every level is exactly as measured.
+      <strong>Amber means a correction is being applied</strong> — which is the state worth
+      noticing, because a divider the bench has forgotten about reads a DUT 20 dB louder than it is.
+      Click the badge, or the pencil beside it, and a small panel opens above the bar with a box per
+      input and a <strong>dB</strong> / <strong>×</strong> selector. The unit is only how the figures
+      are <em>read</em>; what is stored and recorded with every measurement is dB either way.
+    </p>
+    <p>
+      Every sample is divided by it as it arrives, so every level the app reports — the spectrum,
+      the metrics, every sweep point, and every output-referred target such as "0 dBV out" — is the
+      DUT's output rather than what reached the analyzer. Input ranging is the one thing that still
+      follows what the analyzer actually sees, so a divider-fed input is not parked on a range 20 dB
+      too wide. It is per input because a bench fixture rarely puts the divider on both: an
+      impedance or frequency-response measurement that references the right channel has the DUT on
+      one side only.
+    </p>
+    <p class="manual-callout">
+      <strong>It belongs to the analyzer, not to the app.</strong> Your sound card's front-end is
+      not in front of the QA403's BNCs, so each keeps its own figures and switching analyzers swaps
+      them — the panel names which bench it is writing to. This is also why the control is on the
+      bar rather than in Configuration: it is a statement about what is wired up in front of you,
+      and it has to be visible while you measure rather than filed away in a dialog.
+    </p>
+
     <h2>Where to go next</h2>
     <ul>
       <li>

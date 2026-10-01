@@ -58,6 +58,8 @@ describe('gainUnits', () => {
   // 0.1 must not read as 0.1000 just because a ratio needs four decimals at the small end.
   it('formatGain_DropsTrailingZeros', () => {
     expect(formatGain(0, 'Times')).toBe('×1')
-    expect(formatGain(0, 'Db')).toBe('+0 dB')
+    // Zero carries no sign: the badge is grey at 0 to say nothing is declared, and "+0" reads as
+    // a figure that was chosen.
+    expect(formatGain(0, 'Db')).toBe('0 dB')
   })
 })

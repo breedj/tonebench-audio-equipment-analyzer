@@ -17,6 +17,28 @@ public class ScopeChannelAlignmentTests
     private const double ToneFreqHz = 1000.0;
 
     /// <summary>
+    /// The hub's own default is 8 frames per client, and this configuration broadcasts *exactly* 8 per
+    /// tick -- NoiseFigures, Spectrum, Meters, Scope, per channel, measured -- so the default leaves this
+    /// reader one single tick of slack against a <c>DropOldest</c> bounded queue that reports nothing
+    /// when it evicts. One tick period of scheduling delay (25 ms at
+    /// TargetFrameRateHz 40) is then enough for the next tick's burst of 8 to evict the previous tick's,
+    /// and because the writer emits 8 at once while this loop consumes one at a time, the eviction
+    /// boundary lands *inside* a tick: one channel's scope frame goes and the other's survives, which
+    /// arrives here as "seq N had no right frame" and reads exactly like the capture skew this file
+    /// exists to catch. Measured with the reader deliberately parked 30 ms every 5th frame: at capacity
+    /// 8, 69 of 104 frames arrived and 11 of 13 seqs lost the right channel's scope frame; at this
+    /// capacity, with the identical stall, all 100 arrived and every group was intact.
+    ///
+    /// <para>12 groups is ~14 ticks, so the whole capture is ~112 frames -- this holds all of it nine
+    /// times over, i.e. ~128 ticks of reader slack. The hub's lossiness is a production property, for a
+    /// browser that cannot keep up, and it has its own test
+    /// (<c>SpectrumBroadcastHubTests.Broadcast_never_blocks_on_a_stalled_reader_…</c>); it is not what
+    /// this file measures, and giving this reader room removes a confound rather than hiding one. The
+    /// guards at the end of <see cref="CaptureScopeGroupsAsync"/> are what keep that honest.</para>
+    /// </summary>
+    private const int HubCapacity = 1024;
+
+    /// <summary>
     /// <see cref="SimulatedDevice"/> computes every channel of a frame from one <c>t</c>, and shares
     /// its hum/noise across channels, so an identical generator config on L and R produces sample-
     /// identical audio on both. Any difference between the two broadcast scope arrays is therefore
@@ -79,13 +101,31 @@ public class ScopeChannelAlignmentTests
     private static async Task<List<KeyValuePair<uint, Dictionary<StreamChannel, float[]>>>> CaptureScopeGroupsAsync(int groupCount)
     {
         var device = new SimulatedDevice(randomSeed: 1);
+
+        // Pinned, not inherited from the defaults: these are the *only* parts of the simulator that
+        // treat the two channels differently -- the DUT runs on one channel alone (which is what makes
+        // the impulse response's L/R reference work), the output stage on channel 0, and crosstalk mixes
+        // one into the other. Each is off by default today, so the equality assertion below rested on
+        // those defaults rather than on anything it states. If one of them ever changed, this test would
+        // fail on *that* assertion, deterministically, with a message that reads exactly like the capture
+        // skew it exists to catch. Saying so here means a changed default breaks the simulator's own
+        // tests instead. ScopeResidualTests pins its profile for the same kind of reason.
+        device.SignalProfile = device.SignalProfile with
+        {
+            Dut = SimulatedDutModel.StraightWire,
+            OutputStage = SimulatedOutputStageModel.None,
+            Load = SimulatedLoad.Open,
+            CrosstalkEnabled = false,
+        };
+
         await device.ConnectAsync(CancellationToken.None);
 
         // The same tone on both channels -- ChannelGeneratorConfig per channel, identical contents.
         var tone = new ChannelGeneratorConfig(true, [new GeneratorTone(ToneFreqHz, 0.0)]);
         await device.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), CancellationToken.None);
 
-        var hub = new SpectrumBroadcastHub();
+        // Explicit, and not the default 8 -- see HubCapacity.
+        var hub = new SpectrumBroadcastHub(capacityPerClient: HubCapacity);
         var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
         {
             // ProcessRight is off by default (left-only, matching the generator default), and this
@@ -116,6 +156,11 @@ public class ScopeChannelAlignmentTests
         {
             var open = new Dictionary<uint, Dictionary<StreamChannel, float[]>>();
             var closed = new List<KeyValuePair<uint, Dictionary<StreamChannel, float[]>>>();
+            // Which channels produced *any* frame under each seq, scope or not. ProcessChannel's
+            // flush-generation check sits ahead of every one of its broadcasts, so a channel either
+            // sends its whole set for a tick or sends nothing at all -- which makes "witnessed but no
+            // scope frame" proof that the scope frame was evicted in transport rather than never sent.
+            var witnessed = new Dictionary<uint, HashSet<StreamChannel>>();
             uint highestSeq = 0;
 
             using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -123,7 +168,16 @@ public class ScopeChannelAlignmentTests
             {
                 byte[] frame = await reader.ReadAsync(readCts.Token);
                 var header = StreamFrame.DecodeHeader(frame);
-                if (header.MsgType != StreamMsgType.Scope)
+
+                if (!witnessed.TryGetValue(header.Seq, out var channelsSeen))
+                    witnessed[header.Seq] = channelsSeen = [];
+                channelsSeen.Add(header.Channel);
+
+                // Raw frames only. A residual rides on this same MsgType and differs from the raw frame
+                // only by its flag (see ScopeResidualTests, which keys on it), so without this an
+                // enabled ScopeResidual would overwrite the raw frame under the same channel key and the
+                // equality loop would be comparing residuals. The option is off here; the filter says so.
+                if (header.MsgType != StreamMsgType.Scope || header.Flags.HasFlag(StreamFlags.ScopeResidual))
                     continue;
 
                 if (!open.TryGetValue(header.Seq, out var byChannel))
@@ -142,6 +196,7 @@ public class ScopeChannelAlignmentTests
                 }
             }
 
+            AssertNothingWasLostInTransport(closed, witnessed);
             return closed;
         }
         finally
@@ -150,6 +205,54 @@ public class ScopeChannelAlignmentTests
             try { await drainTask; } catch (OperationCanceledException) { }
             await device.StopAsync();
             await pipeline.StopAsync();
+        }
+    }
+
+    /// <summary>
+    /// Fails if the hub evicted anything, so that the assertions above can keep meaning what they say.
+    /// Both checks exist because both loss shapes were measured against a capacity-8 queue with this
+    /// reader parked 30 ms every 5th frame, and because both arrive at the assertions disguised as the
+    /// capture skew this file is about -- a missing channel, or a divergence that cannot be explained.
+    ///
+    /// <para>Whole ticks: <c>ProcessTick</c> allocates one seq per tick that has any pending channel,
+    /// every tick here has both (the two ring buffers are appended under one lock, with one discard, so
+    /// their IsFull, SamplesWritten and hop clocks are identical, and the only Flush is the one inside
+    /// Start, before the worker exists), the scope broadcast is unconditional, and a subscriber's channel
+    /// is FIFO -- so a seq that produced nothing at all is a tick that never reached this reader.
+    /// Measured: 1,2,4,5,… with seq 3 gone. Eviction is the likely cause and the only one worth a hint,
+    /// but not the only one: <c>ProcessTick</c>'s per-channel loop has no <c>catch</c>, so a throw inside
+    /// the first channel's analysis also ends a tick silently -- into a <c>NullLogger</c> here. Hence the
+    /// message names both rather than asserting the one.</para>
+    ///
+    /// <para>Half ticks: a channel that contributed some other frame type under a seq but no scope frame
+    /// had its scope frame evicted, because that broadcast is unconditional and sits past the only early
+    /// return in <c>ProcessChannel</c>. Measured: 11 of 13 seqs holding <c>R:[NoiseFigures]</c> and
+    /// nothing more. Note this is the discriminator the test needs and the pipeline cannot trip: a
+    /// channel genuinely skipped for a tick leaves *no* frame under that seq, and then the
+    /// ContainsKey assertions above are the right ones to fail.</para>
+    /// </summary>
+    private static void AssertNothingWasLostInTransport(
+        List<KeyValuePair<uint, Dictionary<StreamChannel, float[]>>> closed,
+        Dictionary<uint, HashSet<StreamChannel>> witnessed)
+    {
+        for (int i = 1; i < closed.Count; i++)
+        {
+            uint previous = closed[i - 1].Key, current = closed[i].Key;
+            Assert.True(current == previous + 1,
+                $"seq {previous} -> {current}: the ticks in between produced no frame at all here, so "
+                    + "nothing can be concluded about channel alignment. Either the hub evicted them "
+                    + "whole (raise HubCapacity) or a channel's analysis threw and ProcessTick swallowed "
+                    + "it -- which this NullLogger discards.");
+        }
+
+        foreach (var (seq, byChannel) in closed)
+        {
+            foreach (var channel in witnessed[seq])
+            {
+                Assert.True(byChannel.ContainsKey(channel),
+                    $"seq {seq}: the {channel} channel's other frames arrived but its scope frame did not, "
+                        + "so it was evicted between the hub and this reader rather than never sent. Raise HubCapacity.");
+            }
         }
     }
 }

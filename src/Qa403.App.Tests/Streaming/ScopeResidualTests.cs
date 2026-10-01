@@ -17,6 +17,18 @@ public class ScopeResidualTests
     private const double SampleRateHz = 48000;
     private const double ToneFreqHz = 1000.0;
 
+    /// <summary>
+    /// With the residual on, a tick broadcasts five frames per channel -- NoiseFigures, Spectrum,
+    /// Meters, Scope, Scope+Residual -- so two channels is **ten frames into the hub's default queue of
+    /// eight**, and this reader only ever kept up because it usually drains one tick inside the next
+    /// tick's period. It does not have to: the queue is <c>DropOldest</c> and says nothing when it
+    /// evicts, and a lost residual frame arrives here as "seq N: no residual right frame", i.e. as the
+    /// pipeline having failed to send one. See <c>ScopeChannelAlignmentTests.HubCapacity</c>, where the
+    /// same arithmetic on four frames per channel was measured losing 35 of 104 frames under a
+    /// deliberately parked reader.
+    /// </summary>
+    private const int HubCapacity = 1024;
+
     [Fact]
     public async Task TheResidual_IsTheHarmonicStack_WithTheFundamentalGone()
     {
@@ -162,7 +174,8 @@ public class ScopeResidualTests
         var tone = new ChannelGeneratorConfig(true, [new GeneratorTone(ToneFreqHz, 0.0)]);
         await device.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), CancellationToken.None);
 
-        var hub = new SpectrumBroadcastHub();
+        // Explicit, and not the default 8 -- see HubCapacity.
+        var hub = new SpectrumBroadcastHub(capacityPerClient: HubCapacity);
         var pipeline = new SpectrumPipeline(hub, NullLogger<SpectrumPipeline>.Instance)
         {
             Options = new SpectrumPipelineOptions

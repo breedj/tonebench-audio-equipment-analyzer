@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.Device.SoundCard;
 
 namespace Qa403.Device.Tests.SoundCard;
@@ -202,6 +202,58 @@ public class SoundCardDeviceTests
         Assert.True(blocks[1].Discontinuity, "the block after the overflow did not say the stream broke");
         Assert.False(blocks[2].Discontinuity);
         Assert.True(device.DroppedRxChunks >= 1);
+    }
+
+    /// <summary>
+    /// <b>Waiting for the stream to start is not a dropped chunk.</b>
+    ///
+    /// <para>An ASIO stream takes a few hundred milliseconds to deliver its first buffer and every
+    /// read until then returns <c>paTimedOut</c>. Counting those as drops put a standing figure in
+    /// the status bar on every run — measured on a MOTU M4: 3 at 96 kHz, 7 at 192 kHz, every one of
+    /// them before block 0, and none afterwards. It scaled with the sample rate only because the
+    /// stream's own read timeout is shorter there, so more waits fit into the same delay, which is
+    /// what made it look like a rate-dependent streaming fault.</para>
+    ///
+    /// <para>It matters because of what the counter means: a hole in the sample stream, which
+    /// invalidates a noise measurement. It is the number a user checks to decide whether to believe
+    /// the screen, so a startup wait reported as one is worse than no number at all.</para>
+    /// </summary>
+    [Fact]
+    public async Task StreamAsync_WaitingForTheFirstBuffer_IsNotCountedAsADroppedChunk()
+    {
+        var (device, pa) = Build();
+
+        // The first three reads time out, as a real ASIO stream's do while the driver spins up.
+        pa.NextStream.TimeOutOnRead.Add(0);
+        pa.NextStream.TimeOutOnRead.Add(1);
+        pa.NextStream.TimeOutOnRead.Add(2);
+        await device.ConnectAsync(CancellationToken.None);
+
+        var blocks = await TakeAsync(device, count: 2);
+
+        Assert.Equal(0, device.DroppedRxChunks);
+        Assert.Equal(0, device.DroppedBlocks);
+
+        // And the first block is not flagged either: there is no continuity to have broken, and a
+        // flagged first block makes the pipeline throw away the record it was about to fill.
+        Assert.False(blocks[0].Discontinuity, "the first block claimed the stream had broken before it began");
+    }
+
+    /// <summary>
+    /// A timeout <i>after</i> the stream is running is a different thing and still counts: the
+    /// driver fell behind while audio was flowing, so the window really does span a gap.
+    /// </summary>
+    [Fact]
+    public async Task StreamAsync_OnATimeoutOnceRunning_CountsItAndFlagsTheNextBlock()
+    {
+        var (device, pa) = Build();
+        pa.NextStream.TimeOutOnRead.Add(1);
+        await device.ConnectAsync(CancellationToken.None);
+
+        var blocks = await TakeAsync(device, count: 2);
+
+        Assert.True(device.DroppedRxChunks >= 1, "a timeout mid-stream was not counted");
+        Assert.True(blocks[1].Discontinuity, "the block after the gap did not say the stream broke");
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-using Qa403.Device.SoundCard;
+﻿using Qa403.Device.SoundCard;
 
 namespace Qa403.Device.Tests.SoundCard;
 
@@ -76,10 +76,23 @@ internal sealed class FakePortAudioStream : IPortAudioStream
     /// <summary>Whether a read takes as long as the audio it returns, as a real card's does.</summary>
     public bool PaceReads { get; set; } = true;
 
+    /// <summary>
+    /// Reads that throw <c>paTimedOut</c> instead of returning data, by read index. A real ASIO
+    /// stream does this for the first few hundred milliseconds, before the driver delivers its
+    /// first buffer.
+    /// </summary>
+    public HashSet<int> TimeOutOnRead { get; } = [];
+
     public bool Read(float[] buffer, int frames)
     {
         if (PaceReads)
             Thread.Sleep(TimeSpan.FromSeconds(frames / Math.Max(1.0, SampleRateHz)));
+
+        if (TimeOutOnRead.Contains(ReadCount))
+        {
+            ReadCount++;
+            throw new PortAudioException("timed out", PaError.TimedOut);
+        }
 
         int index = ReadCount++;
         int channels = buffer.Length / Math.Max(1, frames);

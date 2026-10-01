@@ -36,6 +36,26 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     private const int TransferFrames = 1024;
 
     /// <summary>
+    /// How much audio PortAudio is asked to buffer each way, <b>in seconds</b>.
+    ///
+    /// <para>A time and not a frame count, for the reason the QA403's <c>TargetInFlightSeconds</c>
+    /// is one: a buffer fixed in frames holds half as long at twice the rate. Inheriting the
+    /// device's own <c>defaultLowInputLatency</c> — which an ASIO driver reports as its buffer
+    /// size, a frame count — did exactly that, and it was measurable. Starting a stream on a
+    /// MOTU M4 and leaving it running, the dropped-chunk count settled at <b>0 at 48 kHz, 3 at
+    /// 96 kHz and 7 at 192 kHz</b> and then never moved again: a fixed ~35 ms of audio accumulating
+    /// while the stream starts, against a ring that was 2.73 s at 48 kHz and a quarter of that at
+    /// 192 kHz. Reported as "a lot of dropped when using the soundcard, especially after I change
+    /// the sample rate" — a rate change opens a new stream, so it brings a fresh batch.</para>
+    ///
+    /// <para>It is the <i>output</i> side of this that <see cref="StimulusLatencyFrames"/> reads,
+    /// so raising it lengthens the discard after every stimulus change by the same amount. That is
+    /// the correct trade and not a cost worth minimising: a discard is exact, and a hole in the
+    /// stream is not.</para>
+    /// </summary>
+    private const double TargetBufferedSeconds = 0.128;
+
+    /// <summary>
     /// How much audio is kept queued ahead of the DAC, as a time budget rather than a transfer
     /// count, for the reason <c>Qa40xUsbDevice.QueueDepthFor</c> gives: a fixed count shrinks the
     /// buffered time as the rate rises, which is exactly how DAC dropouts came to be "worse at
@@ -376,6 +396,25 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     // them means the card has actually stopped.
                     if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
                         throw;
+
+                    // **A timeout before the first block has arrived is not a drop**, and counting
+                    // it as one was reported as "a lot of dropped when using the soundcard,
+                    // especially after I change the sample rate". An ASIO stream takes a few
+                    // hundred milliseconds to deliver its first buffer, and every read until then
+                    // times out: measured on a MOTU M4, 3 timeouts at 96 kHz and 7 at 192 kHz, all
+                    // before block 0, with not a single one afterwards. The count scaled with the
+                    // sample rate only because the stream's own read timeout is shorter there --
+                    // ~90 ms against ~47 ms -- so more of them fit into the same wait.
+                    //
+                    // Nothing was lost: there were no samples yet to lose. DroppedRxChunks means a
+                    // *hole* in the stream, which per its own rule invalidates a noise measurement,
+                    // so reporting a startup wait as one is worse than useless -- it is the number
+                    // a user checks to decide whether to believe the screen.
+                    if (sequence == 0)
+                    {
+                        _logger.LogDebug("Waiting for the sound card's first buffer.");
+                        continue;
+                    }
 
                     Interlocked.Increment(ref _droppedRxChunks);
                     discontinuity = true;

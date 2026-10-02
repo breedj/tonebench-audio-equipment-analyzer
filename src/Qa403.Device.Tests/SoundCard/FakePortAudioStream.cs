@@ -83,8 +83,19 @@ internal sealed class FakePortAudioStream : IPortAudioStream
     /// </summary>
     public HashSet<int> TimeOutOnRead { get; } = [];
 
+    /// <summary>
+    /// Writes made before the first read — i.e. the priming, exactly. Observed here rather than
+    /// inferred from <see cref="WriteCount"/> afterwards, which races: the consumer is handed a
+    /// block before the pump makes that iteration's write, so counting afterwards gives one more or
+    /// one fewer depending on scheduling.
+    /// </summary>
+    public int WritesBeforeFirstRead { get; private set; } = -1;
+
     public bool Read(float[] buffer, int frames)
     {
+        if (WritesBeforeFirstRead < 0)
+            WritesBeforeFirstRead = WriteCount;
+
         if (PaceReads)
             Thread.Sleep(TimeSpan.FromSeconds(frames / Math.Max(1.0, SampleRateHz)));
 

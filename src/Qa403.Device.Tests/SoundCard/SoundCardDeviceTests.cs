@@ -207,6 +207,78 @@ public class SoundCardDeviceTests
     }
 
     /// <summary>
+    /// <b>An output underflow is the DAC's own gap, and it was invisible.</b>
+    ///
+    /// <para><c>Pa_WriteStream</c> returns <c>paOutputUnderflowed</c> when the callback found the
+    /// ring empty and played silence — a hole in the stimulus, and therefore a splice in what comes
+    /// back through the DUT. The pump discarded that bool: not counted, not flagged, not logged.
+    /// Measured on a MOTU M4 at 192 kHz, it is half of what a glitch actually looks like — an input
+    /// overflow and an output underflow logged 0.2 ms apart, both directions of one stalled pump —
+    /// so a device reporting only the overflow told half the story.</para>
+    /// </summary>
+    [Fact]
+    public async Task StreamAsync_OnAnOutputUnderflow_FlagsTheNextBlock()
+    {
+        var (device, pa) = Build();
+        await device.ConnectAsync(CancellationToken.None);
+
+        // Every write from the first loop iteration on, so this cannot depend on how many the
+        // priming made -- an underflow anywhere after the priming must reach the next block.
+        for (int i = 1; i <= 12; i++)
+            pa.NextStream.UnderflowOnWrite.Add(i);
+
+        var blocks = await TakeAsync(device, count: 3);
+
+        Assert.False(blocks[0].Discontinuity);
+        Assert.True(blocks[1].Discontinuity, "the block after the DAC ran dry did not say the stream broke");
+    }
+
+    /// <summary>
+    /// <b>The DAC's margin against a stall is the priming, and one transfer was not a margin.</b>
+    ///
+    /// <para>5.3 ms at 192 kHz — less than a scheduler quantum — against a ring PortAudio had
+    /// sized at 31 ms, so any stall at all emptied it. The single transfer was believed to be
+    /// forced by the lockstep loop, from a measurement where priming 64 ms killed the stream with
+    /// "Wait timed out"; that failed because 64 ms does not fit in a 31 ms ring, not because
+    /// lockstep allows only one. What it allows is whatever the ring holds with room for the next
+    /// write, which is what <c>OutputRingFraction</c> expresses.</para>
+    ///
+    /// <para>Asserted as properties, not against a constant: what matters is that the margin is a
+    /// <b>time</b> that does not shrink as the rate rises — the same lesson as the QA403's queue
+    /// depth — and that the ring keeps room for the next write. The three rings are the MOTU M4's
+    /// own, measured 2026-10-02. One transfer gave 21.3 / 10.7 / 5.3 ms at 48 / 96 / 192 kHz, which
+    /// is exactly why the glitch was worst at the top rate.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(0.069, 48_000.0)]
+    [InlineData(0.036, 96_000.0)]
+    [InlineData(0.031, 192_000.0)]
+    public async Task StreamAsync_PrimesTheOutputWithATimeBudget_LeavingTheRingRoomForTheNextWrite(
+        double outputLatencyS, double sampleRateHz)
+    {
+        var (device, pa) = Build();
+        FakePortAudioStream stream = pa.NextStream;
+        stream.OutputLatencyS = outputLatencyS;
+        stream.SampleRateHz = sampleRateHz;
+        await device.ConnectAsync(CancellationToken.None);
+
+        await TakeAsync(device, count: 1, sampleRateHz: sampleRateHz);
+
+        int ringFrames = (int)(outputLatencyS * sampleRateHz);
+        int primed = stream.WritesBeforeFirstRead;
+        double primedMs = primed * TransferFrames * 1000.0 / sampleRateHz;
+
+        Assert.True(primed >= 1, "nothing was written before the first read, so the DAC started dry");
+        Assert.True(
+            primedMs >= 15.0,
+            $"the output was primed with {primed} transfer(s) = {primedMs:0.0} ms of a {ringFrames}-frame ring — "
+                + "less than the stalls this pump is known to take");
+        Assert.True(
+            (primed + 1) * TransferFrames <= ringFrames,
+            $"priming {primed} transfers leaves no room in a {ringFrames}-frame ring for the next write, which is what times out");
+    }
+
+    /// <summary>
     /// <b>Waiting for the stream to start is not a dropped chunk.</b>
     ///
     /// <para>An ASIO stream takes a few hundred milliseconds to deliver its first buffer and every
@@ -461,12 +533,12 @@ public class SoundCardDeviceTests
 
     /// <summary>Reads the first <paramref name="count"/> blocks and then leaves, which also exercises the teardown.</summary>
     private static async Task<List<(float[] Samples, long Sequence, int Channels, bool Discontinuity)>> TakeAsync(
-        SoundCardDevice device, int count)
+        SoundCardDevice device, int count, double sampleRateHz = 48_000.0)
     {
         var taken = new List<(float[], long, int, bool)>();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        await foreach (PcmBlock block in device.StreamAsync(new AcquisitionConfig(48_000.0, 2), cts.Token))
+        await foreach (PcmBlock block in device.StreamAsync(new AcquisitionConfig(sampleRateHz, 2), cts.Token))
         {
             using (block)
                 taken.Add(([.. block.Samples], block.SequenceNumber, block.ChannelCount, block.StartsAfterDiscontinuity));

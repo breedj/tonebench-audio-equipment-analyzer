@@ -42,6 +42,18 @@ internal sealed class StaDispatcher : IDisposable
             // Not a background thread: it owns the native library and any open stream, and a
             // process exiting out from under an open ASIO stream is how a driver is left claimed.
             IsBackground = false,
+
+            // **This thread is the sound card's transfer pump**, and it was left at the pool's own
+            // priority while the QA403's pump and block assembler were both raised above it — the
+            // rule that "a saturated pool must not preempt transfer refill" was written for the
+            // USB device and never applied here. It is the whole of the loop, too: PortAudio's
+            // blocking duplex stream is read and written from it in lockstep, so descheduling it
+            // fails *both* directions at once. Measured on a MOTU M4 at 192 kHz, 131072-point FFT
+            // with x8 averaging and nothing else running, the pump was parked long enough to fill
+            // the 43 ms input ring and empty the output one twice in 75 seconds — the input
+            // overflow and the output underflow logged 0.2 and 0.7 ms apart, which is the
+            // signature of a stalled pump rather than of a driver or a clock.
+            Priority = ThreadPriority.AboveNormal,
         };
 
         if (OperatingSystem.IsWindows())

@@ -1462,10 +1462,27 @@ public sealed class DeviceSessionService(
                         // noise-floor jump attributable, and the pump thread is the wrong place to
                         // do file I/O. Repeated lines roughly a second apart mean the ranger is
                         // hunting at a threshold rather than tracking a real level change.
-                        logger.LogInformation(
-                            "Input range stepped to {RangeDbv} dBV by autoranging — flushing the "
-                                + "analysis window, since the step discarded the RX transfers in flight",
-                            _device.InputRangeDbv);
+                        //
+                        // **The flag says the stream broke, not why**, and only an autoranging
+                        // device may be told it was the ranger. A sound card has one fixed gain and
+                        // no ranger at all (HasInputAutoRanging false, SetInputRangeAsync only
+                        // validates), so on that device this line named the single cause it could
+                        // not be -- and a bench session spent on "why is it autoranging" before the
+                        // real cause, a glitching ASIO duplex stream, was even looked at.
+                        // SoundCardDevice.Pump names the actual cause on its own line.
+                        if (_device.HasInputAutoRanging)
+                        {
+                            logger.LogInformation(
+                                "Input range stepped to {RangeDbv} dBV by autoranging — flushing the "
+                                    + "analysis window, since the step discarded the RX transfers in flight",
+                                _device.InputRangeDbv);
+                        }
+                        else
+                        {
+                            logger.LogInformation(
+                                "Discontinuity reported on the sample stream — flushing the analysis window, "
+                                    + "since the record spanning it would read as a smeared tone on a lifted floor");
+                        }
 
                         spectrumPipeline.FlushAfterRangeStep();
                     }

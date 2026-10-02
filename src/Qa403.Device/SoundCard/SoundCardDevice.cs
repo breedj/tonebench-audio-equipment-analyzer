@@ -67,6 +67,14 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// </summary>
     private const double TargetInFlightSeconds = 0.064;
 
+    /// <summary>
+    /// How much of PortAudio's output ring the priming may occupy. The rest is the room the next
+    /// blocking <c>Pa_WriteStream</c> needs: fill the ring and the write waits for the DAC to free
+    /// a transfer's worth, which on a stream that is already late is how a hiccup becomes the
+    /// "Wait timed out" that kills it.
+    /// </summary>
+    private const double OutputRingFraction = 0.6;
+
     private readonly IPortAudio _portAudio;
     private readonly ILogger<SoundCardDevice> _logger;
     private readonly Lock _stateGate = new();
@@ -294,9 +302,15 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         IPortAudioStream stream = _portAudio.OpenStream(request, TransferFrames);
         // The stream's own lifecycle, at Debug: a reopened stream and a reused one behave
         // differently and nothing else in the log distinguishes them.
-        _logger.LogDebug(
-            "Sound card stream opened at {Rate:0} Hz, output latency {Lat:0.000} s",
-            config.SampleRateHz, stream.OutputLatencyS);
+        // Information, not Debug: these two figures are the size of PortAudio's own ring buffers,
+        // which is what decides how much jitter the lockstep read/write loop can absorb before it
+        // glitches. A glitch report that does not say what the margin was cannot be acted on.
+        _logger.LogInformation(
+            "Sound card stream opened at {Rate:0} Hz, input latency {In:0.000} s ({InFrames:0} frames), output latency {Out:0.000} s ({OutFrames:0} frames), transfer {Transfer} frames",
+            config.SampleRateHz,
+            stream.InputLatencyS, stream.InputLatencyS * config.SampleRateHz,
+            stream.OutputLatencyS, stream.OutputLatencyS * config.SampleRateHz,
+            TransferFrames);
         var pumpFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // What the stream actually holds, read from it rather than chosen: with one transfer of
@@ -375,23 +389,76 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         long sequence = 0;
         bool discontinuity = false;
 
+        // Diagnosis of a glitch, and the only thing that can tell its four causes apart. The pump
+        // sets one flag -- PcmBlock.StartsAfterDiscontinuity -- and DeviceSessionService logs that
+        // flag with the QA403's wording ("input range stepped by autoranging"), which on a card
+        // with no ranger at all names the one cause it cannot be. Read timeout, input overflow,
+        // output underflow and write timeout are four different faults with four different fixes,
+        // so each is counted and the first few of each are named.
+        var sinceLast = Stopwatch.StartNew();
+        int readTimeouts = 0, inputOverflows = 0, outputUnderflows = 0, writeTimeouts = 0;
+
+        void Glitch(string cause, int count)
+        {
+            // Every one for the first handful, then only at Debug: a card glitching steadily must
+            // not turn the log into the glitch's own biggest cost.
+            double ms = sinceLast.Elapsed.TotalMilliseconds;
+            sinceLast.Restart();
+            if (count <= GlitchesLoggedPerCause)
+            {
+                _logger.LogInformation(
+                    "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous glitch ({Count} so far this acquisition)",
+                    cause, sequence, ms, count);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous ({Count})",
+                    cause, sequence, ms, count);
+            }
+        }
+
         try
         {
             stream.Start();
 
-            // Exactly one transfer of priming, so the DAC has something before the first read
-            // returns -- and no more than one.
+            // Priming: as much audio ahead of the DAC as the ring PortAudio actually allocated will
+            // hold, in whole transfers.
             //
             // A duplex blocking stream has to be read and written in lockstep: both directions are
             // serviced by one callback, so writing several transfers ahead without reading backs the
             // input up until the callback stalls and the write times out. Measured on a MOTU M4 over
             // ASIO, priming a 64 ms queue killed the stream about a second in with
-            // "Wait timed out" from Pa_WriteStream. The queue depth this device reports is
-            // PortAudio's own output latency instead -- what it actually holds, rather than what we
-            // would like it to.
-            Synthesize(outBuffer, frames, waveform, frameIndex);
-            frameIndex += frames;
-            stream.Write(outBuffer, frames);
+            // "Wait timed out" from Pa_WriteStream -- **because 64 ms does not fit**: the ring is
+            // sized from the device's own defaultLowOutputLatency, and on that card at 192 kHz it is
+            // 5943 frames, i.e. 31 ms. A blocking write waits for room that only frees at the DAC's
+            // own rate, so asking for twice the ring waits for ever. That measurement was read as
+            // "lockstep allows only one transfer", and it does not: it allows anything the ring
+            // holds with a transfer's room to spare.
+            //
+            // One transfer was 5.3 ms at 192 kHz -- less than a scheduler quantum, against a ring
+            // that could hold six times it -- so any stall at all emptied the DAC. Bounded by
+            // OutputRingFraction so the next Write never blocks on a full ring, and by the queue
+            // this device would choose for itself; see the glitch measurements in StaDispatcher.
+            int ringFrames = (int)(stream.OutputLatencyS * config.SampleRateHz);
+            double primeSeconds = Math.Min(
+                TargetInFlightSeconds, ringFrames * OutputRingFraction / config.SampleRateHz);
+            int primeTransfers = Math.Max(1, (int)(primeSeconds * config.SampleRateHz / frames));
+
+            // Information, like the stream-opened line and for the same reason: this is the margin
+            // the DAC has against a stall, and a glitch report that does not state it cannot be
+            // acted on. Once per acquisition, so it costs nothing.
+            _logger.LogInformation(
+                "Priming the sound card's output with {Transfers} transfers ({Frames} frames, {Ms:0.0} ms) of a {RingFrames}-frame ring",
+                primeTransfers, primeTransfers * frames,
+                primeTransfers * frames * 1000.0 / config.SampleRateHz, ringFrames);
+
+            for (int i = 0; i < primeTransfers; i++)
+            {
+                Synthesize(outBuffer, frames, waveform, frameIndex);
+                frameIndex += frames;
+                stream.Write(outBuffer, frames);
+            }
 
             int consecutiveTimeouts = 0;
 
@@ -432,6 +499,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     }
 
                     Interlocked.Increment(ref _droppedRxChunks);
+                    Glitch("read timed out", ++readTimeouts);
                     discontinuity = true;
                     continue;
                 }
@@ -442,6 +510,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     // a skipped display frame. The next block must say so, or a record spanning the
                     // splice reads as a tone smeared into a skirt with the whole floor lifted.
                     Interlocked.Increment(ref _droppedRxChunks);
+                    Glitch("input overflowed", ++inputOverflows);
                     discontinuity = true;
                 }
 
@@ -469,7 +538,15 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
                 try
                 {
-                    stream.Write(outBuffer, frames);
+                    // The bool was discarded here, and it is the DAC's own gap: paOutputUnderflowed
+                    // says the callback found the ring empty and played silence. That is an audible
+                    // hole in the stimulus and a splice in what comes back, and it was invisible --
+                    // not counted, not flagged, not logged.
+                    if (stream.Write(outBuffer, frames))
+                    {
+                        Glitch("output underflowed", ++outputUnderflows);
+                        discontinuity = true;
+                    }
                 }
                 catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
                 {
@@ -479,6 +556,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
                         throw;
 
+                    Glitch("write timed out", ++writeTimeouts);
                     discontinuity = true;
                 }
             }
@@ -488,8 +566,19 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             stream.Stop();
             ArrayPool<float>.Shared.Return(inBuffer);
             ArrayPool<float>.Shared.Return(outBuffer);
+
+            if (readTimeouts + inputOverflows + outputUnderflows + writeTimeouts > 0)
+            {
+                _logger.LogInformation(
+                    "Sound card stream summary over {Blocks} blocks at {Rate:0} Hz: {ReadTimeouts} read timeouts, "
+                        + "{InputOverflows} input overflows, {OutputUnderflows} output underflows, {WriteTimeouts} write timeouts",
+                    sequence, config.SampleRateHz, readTimeouts, inputOverflows, outputUnderflows, writeTimeouts);
+            }
         }
     }
+
+    /// <summary>How many of each glitch cause are logged at Information before the rest drop to Debug.</summary>
+    private const int GlitchesLoggedPerCause = 10;
 
     /// <summary>
     /// Fills one transfer from <see cref="Qa40xGeneratorWaveform"/> — reused rather than

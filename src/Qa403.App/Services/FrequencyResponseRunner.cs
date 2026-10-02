@@ -878,7 +878,7 @@ public sealed class FrequencyResponseRunner(
 
     private async Task WaitForCaptureAsync(FrequencyResponseRequest request, int fftSize, CancellationToken ct)
     {
-        var timeout = ResponseCaptureSupport.CaptureTimeout(request.SampleRateHz, fftSize, session.CaptureDelayMs);
+        var timeout = ResponseCaptureSupport.CaptureTimeout(request.SampleRateHz, fftSize, session.CaptureDelayMs, session.StreamSettleMs);
         long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
 
         while (!pipeline.SingleShotComplete)

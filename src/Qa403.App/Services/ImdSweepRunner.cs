@@ -398,7 +398,7 @@ public sealed class ImdSweepRunner(
         await session.ConfigureGeneratorAsync(generator, ct);
         await SweepCaptureSupport.WaitForSingleShotAsync(
             pipeline,
-            SweepCaptureSupport.CaptureTimeout(request.FftSize, request.SampleRateHz, request.AverageCount, AverageHopFraction, session.CaptureDelayMs),
+            SweepCaptureSupport.CaptureTimeout(request.FftSize, request.SampleRateHz, request.AverageCount, AverageHopFraction, session.CaptureDelayMs, session.StreamSettleMs),
             ct);
         return pipeline.LatestSnapshots();
     }

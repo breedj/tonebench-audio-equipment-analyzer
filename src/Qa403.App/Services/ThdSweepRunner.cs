@@ -878,7 +878,7 @@ public sealed class ThdSweepRunner(
 
     /// <summary>How long one point may take — see <see cref="SweepCaptureSupport.CaptureTimeout"/>; the settle time is the session's.</summary>
     private TimeSpan CaptureTimeout(ThdSweepRequest request, int fftSize) =>
-        SweepCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, AverageHopFraction, session.CaptureDelayMs);
+        SweepCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, AverageHopFraction, session.CaptureDelayMs, session.StreamSettleMs);
 
     /// <summary>
     /// The FFT size the noise floor is captured at — the largest the sweep's sample rate allows, in

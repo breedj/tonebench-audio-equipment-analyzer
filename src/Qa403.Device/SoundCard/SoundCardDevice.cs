@@ -297,7 +297,25 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 dropped.Dispose();
             });
 
-        ReclockIfNeeded(request, config.SampleRateHz);
+        bool reclocked = ReclockIfNeeded(request, config.SampleRateHz);
+
+        // **The re-clock settle is discarded here, inside the device, and nowhere else.**
+        // It used to be a Flush booked by DeviceSessionService.StartAcquisitionCoreAsync, which
+        // could not hold: every later Flush *overwrites* the pending discard rather than extending
+        // it, so the first tone a runner configured replaced the 3 s settle with the 300 ms capture
+        // delay and the transient landed in the measurement. Measured on a MOTU M4 in loopback,
+        // entering each run from a different sample rate, 100 % reproducible: a THD-vs-frequency
+        // point 1 of THD 4.3 % / SNR 20 dB against 0.0006 % / 85 dB from point 2 on; a THD-vs-
+        // amplitude point 1 of THD+N 1.93 % / SNR 34 dB against 72.7 dB; and a frequency-response
+        // trace spread over **91 dB with coherence 0.17**, against 0.51 dB and 1.0000 on the very
+        // next identical run — the chirp averages the bad record in, so the whole curve goes, not
+        // one point. Frames the device never hands out cannot be un-discarded by anything
+        // downstream, which is the whole reason it lives here.
+        //
+        // Only after a re-clock. A same-rate reopen has nothing to settle — measured, and it is
+        // also why STOP then RUN at one rate was always clean — so an unconditional settle would
+        // charge every run three seconds for nothing.
+        int settleFrames = reclocked ? StreamStartSettleFrames(config.SampleRateHz) : 0;
 
         IPortAudioStream stream = _portAudio.OpenStream(request, TransferFrames);
         // The stream's own lifecycle, at Debug: a reopened stream and a reused one behave
@@ -324,7 +342,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         {
             try
             {
-                Pump(stream, blocks.Writer, config, ct);
+                Pump(stream, blocks.Writer, config, settleFrames, ct);
             }
             catch (Exception ex)
             {
@@ -377,7 +395,8 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// duplex stream.</para>
     /// </summary>
     private void Pump(
-        IPortAudioStream stream, ChannelWriter<PcmBlock> writer, AcquisitionConfig config, CancellationToken ct)
+        IPortAudioStream stream, ChannelWriter<PcmBlock> writer, AcquisitionConfig config,
+        int settleFrames, CancellationToken ct)
     {
         int frames = TransferFrames;
         var waveform = new Qa40xGeneratorWaveform(new Random(), config.SampleRateHz);
@@ -388,6 +407,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         long frameIndex = 0;
         long sequence = 0;
         bool discontinuity = false;
+        int settleRemaining = settleFrames;
 
         // Diagnosis of a glitch, and the only thing that can tell its four causes apart. The pump
         // sets one flag -- PcmBlock.StartsAfterDiscontinuity -- and DeviceSessionService logs that
@@ -445,20 +465,65 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 TargetInFlightSeconds, ringFrames * OutputRingFraction / config.SampleRateHz);
             int primeTransfers = Math.Max(1, (int)(primeSeconds * config.SampleRateHz / frames));
 
-            // Information, like the stream-opened line and for the same reason: this is the margin
-            // the DAC has against a stall, and a glitch report that does not state it cannot be
-            // acted on. Once per acquisition, so it costs nothing.
-            _logger.LogInformation(
-                "Priming the sound card's output with {Transfers} transfers ({Frames} frames, {Ms:0.0} ms) of a {RingFrames}-frame ring",
-                primeTransfers, primeTransfers * frames,
-                primeTransfers * frames * 1000.0 / config.SampleRateHz, ringFrames);
+            // **A priming write may time out, and that must not be fatal.** This call was the one
+            // write in the pump with no timeout handling, which was survivable only while it was
+            // made once; asking for three turned a latent fault into a reproducible one. Right
+            // after `ReclockIfNeeded` has opened and closed a throwaway stream, the driver is not
+            // yet consuming, so `Pa_WriteStream` blocks on a ring that nothing is draining and
+            // comes back `paTimedOut` — measured twice on a MOTU M4 on a 48 → 96 and a 96 → 192 kHz
+            // change, ~230 ms after the priming began, and the escaping exception took the whole
+            // device with it: "The sound card's transfer loop stopped", then DeviceLost, then every
+            // later measurement silently running against a session with no device. Nothing else in
+            // the log said the stream never opened.
+            //
+            // **Only one transfer fits before the first read, and the rest go in after it.**
+            // Measured with a stopwatch around each write, across a 48 → 96 and a 96 → 192 kHz
+            // change: write 0 returns in 0.0–0.8 ms, write 1 then blocks for the stream's whole
+            // write timeout (95.5 ms at 96 kHz, 49.7 at 192) and is refused — there is no room
+            // because nothing is draining the ring yet. After one read has returned, which is proof
+            // the driver is running, the remaining writes return in **0.0 ms**. So the priming is
+            // split in two, and a refusal before the first read must not be taken as final: taking
+            // it as final leaves every stream that follows a rate change on the 5.3 ms margin this
+            // whole change exists to end, which is exactly what an adaptive sweep arranges for
+            // itself at every resolution step.
+            int primed = 0;
+            bool primingFinished = false;
 
-            for (int i = 0; i < primeTransfers; i++)
+            // Writes until the queue is as deep as asked for, or until the ring refuses more.
+            // Called twice: once before the first read, and once after it — see below.
+            void Prime(bool running)
             {
-                Synthesize(outBuffer, frames, waveform, frameIndex);
-                frameIndex += frames;
-                stream.Write(outBuffer, frames);
+                while (!primingFinished && primed < primeTransfers)
+                {
+                    Synthesize(outBuffer, frames, waveform, frameIndex);
+                    frameIndex += frames;
+
+                    try
+                    {
+                        stream.Write(outBuffer, frames);
+                    }
+                    catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
+                    {
+                        // A refusal *before* the first read says only that the driver is not
+                        // consuming yet -- there is no room because nothing has drained -- so the
+                        // top-up after the first read gets its turn. A refusal once the stream is
+                        // demonstrably running is the ring genuinely full, and that is the end of it.
+                        primingFinished = running;
+                        return;
+                    }
+
+                    primed++;
+                }
+
+                primingFinished = true;
             }
+
+            Prime(running: false);
+
+            // How deep the queue ended up, after the top-up below has had its turn. Logged once,
+            // reporting what went in rather than what was asked for, so it can never overstate the
+            // margin the stream actually has -- and it is the margin a glitch report has to quote.
+            bool marginReported = false;
 
             int consecutiveTimeouts = 0;
 
@@ -512,6 +577,67 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     Interlocked.Increment(ref _droppedRxChunks);
                     Glitch("input overflowed", ++inputOverflows);
                     discontinuity = true;
+                }
+
+                // **The top-up, and it is where the priming usually happens after a rate change.**
+                // A read that returned is proof the driver is running and draining the output ring;
+                // before that it may be doing neither, which is why the priming ahead of the first
+                // read can be refused outright. Measured on a MOTU M4 immediately after
+                // ReclockIfNeeded: 1 of 2 transfers accepted at 96 kHz and 1 of 3 at 192 kHz, i.e.
+                // exactly the 5.3 ms margin the glitch fix exists to end, reappearing on every
+                // stream that follows a rate change -- which an adaptive sweep makes on its own.
+                // Writing the shortfall here costs one iteration and nothing afterwards: Prime()
+                // stops for good at the first refusal, so a ring that is simply full is asked once.
+                if (!primingFinished)
+                    Prime(running: true);
+
+                if (!marginReported)
+                {
+                    marginReported = true;
+                    _logger.LogInformation(
+                        "Primed the sound card's output with {Transfers} transfers ({Frames} frames, {Ms:0.0} ms) of a {RingFrames}-frame ring",
+                        primed, primed * frames,
+                        primed * frames * 1000.0 / config.SampleRateHz, ringFrames);
+                }
+
+                // **The re-clock settle: these frames are thrown away here and never handed out.**
+                // The driver is still bringing the hardware to the new rate, and what it returns
+                // meanwhile is partly repeated and partly silence -- the analyzer reads it as a
+                // chopped tone, which is where THD 4.3 % and a coherence of 0.17 came from. Still
+                // read, so the stream stays paced by the device clock; still written to, so the
+                // stimulus is playing throughout and the DUT settles on it rather than on the
+                // first measured record; counted against *frames*, not the clock, so it is exact.
+                //
+                // Not a dropped chunk and not a glitch: nothing was lost, because nothing here was
+                // ever going to be measured -- the same judgement as the startup read timeouts
+                // above, and for the same reason, since DroppedRxChunks is the number a user
+                // checks to decide whether to believe the screen.
+                if (settleRemaining > 0)
+                {
+                    settleRemaining -= frames;
+                    discontinuity = true;
+
+                    Synthesize(outBuffer, frames, waveform, frameIndex);
+                    frameIndex += frames;
+
+                    try
+                    {
+                        stream.Write(outBuffer, frames);
+                    }
+                    catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
+                    {
+                        if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
+                            throw;
+                    }
+
+                    if (settleRemaining <= 0)
+                    {
+                        _logger.LogInformation(
+                            "Discarded {Ms:0} ms of the sound card's re-clock settle at {Rate:0} Hz; measuring from here",
+                            settleFrames * 1000.0 / config.SampleRateHz, config.SampleRateHz);
+                    }
+
+                    continue;
                 }
 
                 float[] blockBuffer = ArrayPool<float>.Shared.Rent(frames * 2);
@@ -688,10 +814,10 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// is swallowed: this is a warm-up, and the open that matters is the next one, which reports
     /// its own errors.</para>
     /// </summary>
-    private void ReclockIfNeeded(SoundCardStreamRequest request, double sampleRateHz)
+    private bool ReclockIfNeeded(SoundCardStreamRequest request, double sampleRateHz)
     {
         if (_lastOpenedSampleRateHz == sampleRateHz)
-            return;
+            return false;
 
         try
         {
@@ -714,6 +840,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         }
 
         _lastOpenedSampleRateHz = sampleRateHz;
+        return true;
     }
 
     /// <summary>How long the throwaway stream is left running for the driver to settle on the new rate.</summary>

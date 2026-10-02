@@ -1,4 +1,4 @@
-using Qa403.App.Streaming;
+﻿using Qa403.App.Streaming;
 using Qa403.Device;
 using Qa403.Dsp;
 
@@ -235,8 +235,14 @@ internal static class SteppedCaptureSupport
     /// discarded in-flight audio), plus the averages, times three for slack. Generous on purpose —
     /// this exists to notice a wedged device, not to police timing.
     /// </summary>
-    public static TimeSpan CaptureTimeout(int fftSize, double sampleRateHz, int averageCount, double settleSeconds) =>
-        TimeSpan.FromSeconds((PointSeconds(fftSize, sampleRateHz, averageCount, settleSeconds) * 3.0) + 2.0);
+        /// <param name="streamSettleMs">
+    /// Samples the device will withhold at the start of this acquisition while its hardware
+    /// settles (DeviceSessionService.StreamSettleMs). Added to the budget rather than ignored:
+    /// those frames are genuinely not coming, and at 8192 points with one average the budget is
+    /// 3.3 s against a 3 s settle, so leaving it out turns a settling card into a TimeoutException.
+    /// </param>
+    public static TimeSpan CaptureTimeout(int fftSize, double sampleRateHz, int averageCount, double settleSeconds, double streamSettleMs = 0.0) =>
+        TimeSpan.FromSeconds((PointSeconds(fftSize, sampleRateHz, averageCount, settleSeconds) * 3.0) + 2.0 + (streamSettleMs / 1000.0));
 
     /// <summary>
     /// How long one point is expected to take: the in-flight audio the flush discards, the throwaway

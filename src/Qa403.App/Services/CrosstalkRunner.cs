@@ -461,7 +461,7 @@ public sealed class CrosstalkRunner(
     }
 
     private TimeSpan CaptureTimeout(CrosstalkRequest request, int fftSize) =>
-        SteppedCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0);
+        SteppedCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0, session.StreamSettleMs);
 
     private double EstimateSeconds(CrosstalkRequest request, SteppedStepPlan[] steps) =>
         steps.Sum(s => SteppedCaptureSupport.PointSeconds(s.FftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0));

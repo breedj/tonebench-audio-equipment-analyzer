@@ -592,7 +592,7 @@ public sealed class SteppedResponseRunner(
 
     /// <summary>How long one point may take — see <see cref="SteppedCaptureSupport.CaptureTimeout"/>.</summary>
     private TimeSpan CaptureTimeout(SteppedResponseRequest request, int fftSize) =>
-        SteppedCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0);
+        SteppedCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0, session.StreamSettleMs);
 
     /// <summary>
     /// What the whole run should take, for the UI's estimate. The level probe is not counted: it is

@@ -16,7 +16,11 @@ public class SoundCardDeviceTests
         int outputOffset = 0,
         int inputChannels = 2,
         int outputChannels = 2,
-        double settleMs = 2000.0)
+        // Zero by default. The settle is frames the device withholds, so a non-zero default
+        // silently shifts every read index and flags the first measured block -- which is what
+        // it did to four tests the moment the discard moved into the device. A test that cares
+        // about the settle asks for one.
+        double settleMs = 0.0)
     {
         var pa = new FakePortAudio();
         var api = pa.AddHostApi("ASIO", SoundCardHostApiKind.Asio);
@@ -450,6 +454,58 @@ public class SoundCardDeviceTests
         Assert.NotEmpty(written);
         Assert.Contains(written, buffer => buffer.Any(v => Math.Abs(v) > 1e-6));
         Assert.All(written, buffer => Assert.All(buffer, v => Assert.InRange(v, -1.0f, 1.0f)));
+    }
+
+    /// <summary>
+    /// <b>The re-clock settle is frames the device never hands out, and only after a re-clock.</b>
+    ///
+    /// <para>It used to be a Flush booked by the session, which the first tone a runner configured
+    /// then overwrote with the much shorter capture delay — so the card's transient landed in the
+    /// measurement. Measured on a MOTU M4 entering each run from a different sample rate, 100 %
+    /// reproducible: THD 4.3 % on a sweep's first point against 0.0006 % on its second, and a
+    /// frequency-response trace spread over 91 dB with coherence 0.17 against 0.51 dB and 1.0000
+    /// on the next identical run. Frames that are never handed out cannot be un-discarded.</para>
+    ///
+    /// <para>The second case is the one that keeps it affordable: a stream reopened at the rate it
+    /// was already running at has nothing to settle, so it must pay nothing.</para>
+    /// </summary>
+    [Fact]
+    public async Task StreamAsync_AfterAReClock_WithholdsTheSettleAndThenMeasures()
+    {
+        var (device, pa) = Build(settleMs: 100.0);
+        await device.ConnectAsync(CancellationToken.None);
+
+        // 100 ms at 48 kHz is 4800 frames, i.e. the first 4 transfers of 1024 and part of a fifth.
+        int expected = (int)Math.Ceiling(4800.0 / TransferFrames);
+
+        var blocks = await TakeAsync(device, count: 2);
+
+        Assert.True(
+            pa.NextStream.ReadCount >= expected + 2,
+            $"only {pa.NextStream.ReadCount} reads were made, so the settle was not read through");
+        Assert.True(blocks[0].Discontinuity, "the first measured block did not say the stream had broken");
+        Assert.Equal(0, blocks[0].Sequence);
+
+        // Withheld, not counted: nothing was lost, so the number the user checks must stay clean.
+        Assert.Equal(0, device.DroppedRxChunks);
+    }
+
+    [Fact]
+    public async Task StreamAsync_ReopenedAtTheSameRate_WithholdsNothing()
+    {
+        var (device, pa) = Build(settleMs: 100.0);
+        await device.ConnectAsync(CancellationToken.None);
+
+        await TakeAsync(device, count: 1);              // the first open re-clocks
+        int afterFirst = pa.NextStream.ReadCount;
+
+        await TakeAsync(device, count: 1);              // the second is the same rate
+        // The delta, because the fake counts reads across both streams.
+        int second = pa.NextStream.ReadCount - afterFirst;
+        Assert.True(
+            second <= 3,
+            $"a same-rate reopen withheld {second} reads' worth; it has nothing to settle");
+        Assert.True(afterFirst >= 5, "the first open should have settled");
     }
 
     /// <summary>

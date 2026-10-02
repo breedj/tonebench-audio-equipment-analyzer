@@ -1350,15 +1350,19 @@ public sealed class DeviceSessionService(
         spectrumPipeline.Start(config.SampleRateHz, config.ChannelCount);
         _isAcquiring = true;
 
-        // The device's own settling, where it has any -- only on a real open, because a reused
-        // stream has nothing to settle, and zero for everything but a sound card. Booked at the
-        // very end of this method rather than here: every Flush below *overwrites* the pending
-        // discard rather than extending it (SampleRingBuffer.Reset, and the keepPendingDiscard
-        // parameter that exists for exactly this), so a settle booked first is silently replaced
-        // by the generator re-snap's own much shorter one. That is not hypothetical -- it is what
-        // this looked like when it was written that way, with the first record still reading
-        // THD 27-94 %.
-        int streamSettleFrames = streamOpened ? _device.StreamStartSettleFrames(config.SampleRateHz) : 0;
+        // **The device's own stream-start settling is not booked here any more, and must not be.**
+        // It was, as a Flush at the end of this method, "so nothing above can overwrite it" -- and
+        // nothing in this method did. What overwrote it was the *runner*, one level up: the first
+        // tone it configures calls ConfigureGeneratorCoreAsync, whose own Flush replaces the
+        // pending discard rather than extending it, so a 3 s settle became the 300 ms capture
+        // delay and the card's re-clock transient landed in the measurement. Measured on a MOTU M4
+        // in loopback, 100 % reproducible, and worst where it is least visible: a frequency-
+        // response trace spread over 91 dB with coherence 0.17, against 0.51 dB and 1.0000 on the
+        // next identical run.
+        //
+        // A discard that any later flush can shorten cannot express "these frames are unusable",
+        // so the settle now lives in the device, which simply does not hand those frames out --
+        // see SoundCardDevice.Pump. Booking it here as well would discard it twice.
 
         // The FFT screen's Run: the generator was configured while nothing was acquiring, so
         // ConfigureGeneratorCoreAsync had no window to flush and the settle time has been applied
@@ -1368,11 +1372,8 @@ public sealed class DeviceSessionService(
         // wire, and Start() already emptied the window.
         if (_generatorConfig.Left.Enabled || _generatorConfig.Right.Enabled)
         {
-            // Whichever is longer: both are a discard from this same instant, so taking the sum
-            // would charge the DUT's settling on top of the card's when they overlap entirely.
-            int settleFrames = Math.Max(CaptureDelayFrames, streamSettleFrames);
-            if (settleFrames > 0)
-                spectrumPipeline.Flush(settleFrames);
+            if (CaptureDelayFrames > 0)
+                spectrumPipeline.Flush(CaptureDelayFrames);
             LastAppliedCaptureDelayMs = captureDelay.Ms;
         }
 
@@ -1381,11 +1382,27 @@ public sealed class DeviceSessionService(
         if (config.SampleRateHz != previousSampleRateHz)
             await ReapplyGeneratorCoreAsync(ct);
 
-        // And the device's own settling last, so nothing above can overwrite it. The max rather
-        // than the sum: these are all discards from this one instant, not a queue of them.
-        if (streamSettleFrames > 0)
-            spectrumPipeline.Flush(Math.Max(streamSettleFrames, StimulusLatencyFrames + CaptureDelayFrames));
+        // The device's settle is frames it will not deliver, so a runner waiting for its first
+        // record has to be told to wait that much longer -- otherwise a short-record, few-average
+        // sweep declares the card wedged. Reported in milliseconds, like CaptureDelayMs, and for
+        // the same reason.
+        StreamSettleMs = streamOpened
+            ? _device.StreamStartSettleFrames(config.SampleRateHz) * 1000.0 / config.SampleRateHz
+            : 0.0;
     }
+
+    /// <summary>
+    /// How long the device will withhold samples at the start of this acquisition while its
+    /// hardware settles — <see cref="IAnalyzerDevice.StreamStartSettleFrames"/> as a time. Zero for
+    /// everything but a sound card that has just been re-clocked.
+    ///
+    /// <para>Every runner's per-capture timeout carries this the way it carries
+    /// <see cref="CaptureDelayMs"/>: the frames are genuinely not coming, so a budget that does not
+    /// allow for them reads a settling card as a stopped one. At 8192 points and one average the
+    /// budget is 3.3 s and the settle is 3 s, so this is not a margin — it is the difference
+    /// between a measurement and a TimeoutException.</para>
+    /// </summary>
+    public double StreamSettleMs { get; private set; }
 
     /// <summary>Starts (or restarts, if already running at a different config) the underlying device stream.</summary>
     /// <summary>

@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Qa403.App.Json;
 using Qa403.App.Services;
+using Qa403.App.Streaming;
 using Qa403.Data;
 using Qa403.Device;
 using Qa403.Device.Hardware;
@@ -16,8 +17,21 @@ public static class DeviceEndpoints
 
         // Async because this poll is also the app's disconnect detector while nothing is streaming
         // — see DeviceSessionService.GetStatusAsync.
-        group.MapGet("", async (DeviceSessionService session, DatabaseHealth health, CancellationToken ct) =>
-            Results.Ok((await session.GetStatusAsync(ct)) with { DatabaseProblem = health.Problem }));
+        //
+        // The hub's drop counts are stamped on here, like DatabaseProblem and for the same reason:
+        // the session owns the device, not the WebSocket fan-out, and this poll is the one place
+        // the status bar already reads every second.
+        group.MapGet("", async (
+            DeviceSessionService session, DatabaseHealth health, SpectrumBroadcastHub hub, CancellationToken ct) =>
+        {
+            var (droppedMax, droppedTotal) = hub.DroppedFrames();
+            return Results.Ok((await session.GetStatusAsync(ct)) with
+            {
+                DatabaseProblem = health.Problem,
+                DroppedStreamFramesMax = droppedMax,
+                DroppedStreamFramesTotal = droppedTotal,
+            });
+        });
 
         // Retry hook for a device that wasn't attached when the app started — a missing QA403 no
         // longer aborts startup (see DeviceLifecycleHostedService), so this is how the session gets
@@ -302,6 +316,19 @@ public sealed record DeviceStatusResponse(
     /// knows nothing about storage.
     /// </summary>
     string? DatabaseProblem = null,
+    /// <summary>
+    /// Stream frames the worst-off connected client has had evicted from its WebSocket queue since
+    /// this acquisition started, and the sum over every connected client — see
+    /// <see cref="Streaming.SpectrumBroadcastHub.DroppedFrames"/>. Unlike the two counters above
+    /// this is not a hole in the <i>sample</i> stream: the measurement is sound and the stored
+    /// result is unaffected, but one tick's frames are a set the client pairs by seq, so a non-zero
+    /// value means what is drawn may be torn — the oscilloscope's "no fundamental to remove"
+    /// flicker, with no other way to tell it apart from a server-side cause. Set by the endpoint,
+    /// not by the session, which knows nothing about the hub.
+    /// </summary>
+    long DroppedStreamFramesMax = 0,
+    /// <summary>The sum of the same counter over every connected client. Both, because one stalled browser tab says nothing about the others.</summary>
+    long DroppedStreamFramesTotal = 0,
     /// <summary>Whether the simulator couples its channels (<see cref="Qa403.Device.Simulation.SimulatedCrosstalk"/>), or null when the device isn't the simulator.</summary>
     bool? SimulatedCrosstalkEnabled = null,
     /// <summary>The simulated amplifier's output stage (<see cref="Qa403.Device.Simulation.SimulatedOutputStageModel"/> name), or null when the device isn't the simulator.</summary>

@@ -667,6 +667,27 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       >
         {{ status.droppedBlocks }} blocks dropped
       </span>
+
+      <!--
+        The transport's own drops, and the one of the three that does NOT mean the measurement is
+        wrong: the samples all arrived and anything saved from this run is sound. What is lost is a
+        frame of one tick's *set*, which this client pairs by seq — so a torn tick reads as the
+        oscilloscope's "no fundamental to remove" flicker, or a chart a tick behind the meters.
+        Amber rather than red for exactly that reason, and worded as "display" so the distinction is
+        on the badge rather than only in the tooltip. The max is shown because one wedged tab says
+        nothing about the others; the total comes along once they differ.
+      -->
+      <span
+        v-if="status.droppedStreamFramesMax > 0"
+        class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+        title="Stream frames dropped on the way to the browser because a client fell behind. The measurement itself is unaffected — the samples all arrived — but a tick that loses one of its frames can draw torn, which is what the oscilloscope's flicker looks like."
+      >
+        {{ status.droppedStreamFramesMax }} display
+        <template v-if="status.droppedStreamFramesTotal > status.droppedStreamFramesMax">
+          / {{ status.droppedStreamFramesTotal }} total
+        </template>
+        dropped
+      </span>
     </div>
 
     <div class="ml-auto flex items-center gap-4">

@@ -143,6 +143,12 @@ public sealed class SpectrumPipeline(
         _seq = 0;
         EnsureRingBuffers(_options.FftSize);
 
+        // Per acquisition, like the device's own two drop counters and for the same reason: the
+        // number is only ever asked whether the measurement on screen can be trusted, which a
+        // running total cannot answer. Every runner starts its own acquisition, so each measurement
+        // gets a clean count for free.
+        hub.ResetDroppedFrames();
+
         logger.LogInformation(
             "Spectrum pipeline starting at {SampleRateHz:0} Hz, {ChannelCount} ch, {FftSize} points "
                 + "({BinHz:0.###} Hz/bin, {RecordMs:0.#} ms record), {Window} window, {Averaging} x{AverageCount} "
@@ -1226,6 +1232,15 @@ public sealed class SpectrumPipeline(
     /// not pair with a raw frame and a raw frame with no residual, which is the "flickering, and it
     /// says no fundamental to remove" report of 2026-09-28. At this cap one fit is ~32 ms, and the
     /// cap only binds below about 47 Hz at 192 kHz, where it still buys 3.4 periods at 20 Hz.
+    /// <para><b>That was one cause of those symptoms and not the only one</b> — this comment claimed
+    /// the report outright until 2026-10-02, when the second was measured. The transport splits a
+    /// tick the same way: <see cref="SpectrumBroadcastHub"/> evicted a client's oldest queued frame
+    /// silently, and with the residual on there are 12 frames per tick against what was then a
+    /// capacity of 8, so under ordinary CPU contention a real browser client lost ~3 % of them —
+    /// every loss a group this client cannot pair. Nothing distinguished the two, which is why both
+    /// were fixed blind. The hub counts its evictions now and
+    /// <see cref="Endpoints.DeviceStatusResponse.DroppedStreamFramesMax"/> carries the count to the
+    /// status bar, so the next report of this says which half it is.</para>
     /// <para>Bounding is not a compromise against the whole-record fit, it is better at the tail:
     /// on the dirty record above, the whole-record fit read <b>+0.44 to +0.75 dB</b> over the
     /// harmonic stack it should have left behind, because it averages a wandering LF component over

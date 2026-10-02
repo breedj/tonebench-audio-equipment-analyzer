@@ -78,6 +78,16 @@ export interface DeviceStatus {
   droppedRxChunks: number
   droppedBlocks: number
   /**
+   * Stream frames the worst-off connected client has had evicted from its WebSocket queue since
+   * this acquisition started. Not a hole in the sample stream like the two counters above — the
+   * measurement and anything saved from it are sound — but one tick's frames are a set this client
+   * pairs by seq, so non-zero means what is drawn may be torn: the oscilloscope's "no fundamental
+   * to remove" flicker, which has no other tell that distinguishes it from a server-side cause.
+   */
+  droppedStreamFramesMax: number
+  /** The same summed over every connected client; both, because one stalled tab says nothing about the others. */
+  droppedStreamFramesTotal: number
+  /**
    * What the startup integrity check found wrong with a database file, or null when both files are
    * sound. Shown in the status bar from the first poll, so a damaged file is announced rather than
    * discovered as a 500 on one history entry days later.

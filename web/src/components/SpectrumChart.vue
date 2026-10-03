@@ -561,7 +561,6 @@ function formatDbTick(v: number | null): string | null {
 function buildOptions(
   width: number,
   height: number,
-  nyquistHz: number,
   overlays: OverlayEntry[],
   theme: Theme,
   interactive: boolean,
@@ -613,7 +612,19 @@ function buildOptions(
       // always returned the fixed default (tried first) fed the zoomed request straight back into
       // range() and got the full range back, silently overriding every zoom the instant it was
       // set — the same bug as before, just moved one level down.
-      x: { time: false, distr: 3, log: 10, auto: false, range: (_u, dataMin, dataMax) => [dataMin ?? 10, dataMax ?? nyquistHz] },
+      //
+      // **The null branch is the panel's From/To, not the full span, and that is the whole of what
+      // the Frequency range dropdowns do at construction.** It is the only moment the window is
+      // decided: this callback runs with nulls exactly once, on the empty construction above, and
+      // after that auto:false means setData only ever feeds the scale's own current min/max back
+      // through here. The watcher on [xFrom, xTo] below is a *change* handler, so a window chosen
+      // while no plot existed -- which is the ordinary case, since the plot is first built by the
+      // frame RUN produces -- never reached uPlot at all. Seeded at 10..Nyquist the chart then
+      // reported that as its viewport, the server spent its column budget on the full span, and
+      // the data span fed straight back in: self-consistent, and 10 Hz to 96 kHz whatever the
+      // panel said. Reported as "when FFT starts the frequency axis does not look at the set
+      // Frequency range -- it resets to about 90 kHz when Run is pressed".
+      x: { time: false, distr: 3, log: 10, auto: false, range: (_u, dataMin, dataMax) => [dataMin ?? xFrom.value, dataMax ?? xTo.value] },
       // Initial range only — the dBV range fields in the display-options column (ChartDisplayPanel)
       // adjust it live afterward via the watcher below, without rebuilding the plot.
       y: { range: [yBottom.value, yTop.value] },
@@ -731,6 +742,10 @@ function styleKey(): string {
   return `${thickLines.value}|${showDataPoints.value}|${spectrumUnit.value}`
 }
 
+// nyquistHz is a rebuild *key*, not something buildOptions reads any more — the x window comes
+// from the panel now, and nothing else in the options depends on the analysed span. It is kept
+// because a sample-rate change is still a change of what the plot is drawing, and the rebuild is
+// rare, cheap and round-trips the current window through savedScale.
 function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   const el = containerRef.value
   if (!el) return
@@ -750,7 +765,7 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   // needs the assertion.
   const dataSlots = 5 + overlays.length * 2
   const emptyData = Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData
-  plot = new uPlot(buildOptions(width, chartHeight.value, nyquistHz, overlays, currentTheme(), true), emptyData, el)
+  plot = new uPlot(buildOptions(width, chartHeight.value, overlays, currentTheme(), true), emptyData, el)
 
   // uPlot's own double-click handler calls autoScaleX(), which fits the axis to the *data* extent.
   // While a zoomed frame is on screen that extent is the zoom window, so its reset would be a
@@ -1062,10 +1077,10 @@ function update() {
 /**
  * The chart as a PNG of exactly the requested size, drawn with the light theme whatever the screen's
  * — the same arrangement as FrequencyResponseChart.exportPng, which explains it. This chart's own
- * ordering is kept: empty construction, then setData. On screen the x axis is then the data's span,
- * which the server already cut to the panel's window; a headless render of a stored result has the
- * whole stored span as data, so the panel's From/To is applied explicitly — the same setScale the
- * dropdowns make.
+ * ordering is kept: empty construction, then setData — which seeds x from the panel's From/To, see
+ * the scale's own comment. The explicit setScale below is still needed even so: with captureZoom it
+ * is the live plot's window rather than the panel's, and a headless render of a stored result holds
+ * the whole stored span rather than the server-cut live one.
  */
 async function exportPng({ width, height, captureZoom = false, primaryLabel }: ChartExportOptions): Promise<Blob> {
   const frame = computeFrame()
@@ -1088,7 +1103,7 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
   try {
     const dataSlots = 5 + props.overlays.length * 2
     const emptyData = Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData
-    u = new uPlot(buildOptions(width, plotHeight, frame.fullHiFreqHz, props.overlays, exportGridTheme(THEME.light), false), emptyData, host)
+    u = new uPlot(buildOptions(width, plotHeight, props.overlays, exportGridTheme(THEME.light), false), emptyData, host)
     u.setData(frame.data)
     u.setScale('x', xWindow)
     await nextPaint()

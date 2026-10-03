@@ -224,45 +224,10 @@ try
         await new MigrationRunner(MigrationRunner.ConfigResourcePrefix)
             .RunAsync(configConnection, CancellationToken.None);
 
-        // The capture delay is read on every stimulus change, under the session lock, so it is
-        // loaded into memory once here rather than fetched from the database each time -- see
-        // CaptureDelaySetting. The endpoint keeps the two in step from then on.
-        app.Services.GetRequiredService<CaptureDelaySetting>().Ms =
-            (await ConfigEndpoints.ReadCaptureDelayAsync(
-                scope.ServiceProvider.GetRequiredService<ConfigRepository>(),
-                CancellationToken.None)).CaptureDelayMs;
-
-        // The external input gain, for the same reason: the pipeline reads it per block.
-        var externalGain = await ConfigEndpoints.ReadExternalGainAsync(
-            scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
-        var externalGainSetting = app.Services.GetRequiredService<ExternalGainSetting>();
-        externalGainSetting.LeftDb = externalGain.LeftDb;
-        externalGainSetting.RightDb = externalGain.RightDb;
-
-        // And the unit it is read in, which the setting does not carry because nothing downstream of
-        // the pipeline's door sees it -- only the status bar does. Handing the session the whole
-        // document also seeds its shared-bench copy outright rather than leaving it to the lazy
-        // capture in ApplyEffectiveExternalGain, which exists only because this runs after the
-        // container has built the service.
-        app.Services.GetRequiredService<DeviceSessionService>()
-            .SetSharedExternalGain(externalGain.LeftDb, externalGain.RightDb, externalGain.Unit);
-
-        // The sound card's settings and calibration. Loaded here because AnalyzerDeviceFactory
-        // reads them to build a device, which happens the moment anything resolves the session --
-        // and because a card that has been calibrated must not come up claiming dBFS.
-        app.Services.GetRequiredService<SoundCardSetting>().Config =
-            await ConfigEndpoints.ReadSoundCardAsync(
-                scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
-
-        // Which analyzer to come up on. Must be read before anything resolves the session, since
-        // that is what builds the first device; --simulate overrides it at the registration above.
-        app.Services.GetRequiredService<AnalyzerKindSetting>().Kind =
-            await ConfigEndpoints.ReadAnalyzerKindAsync(
-                scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
-
-        // The user weighting tables, for the same reason: the pipeline reads them on its worker
-        // thread. A damaged document leaves its slot empty and is logged.
-        await scope.ServiceProvider.GetRequiredService<UserWeightingService>().LoadAllAsync(CancellationToken.None);
+        // Every in-memory setting, in the one order that works -- see StartupSettingsLoader, which
+        // owns that order precisely because it is invisible: the first device is built the moment
+        // anything resolves the session, from settings that have to be loaded before it.
+        await StartupSettingsLoader.LoadAsync(scope.ServiceProvider, CancellationToken.None);
 
         // Detailed logging, if it was left on: the reproduction a tester is asked for usually
         // involves a restart, and a switch that reset on every start would miss it.

@@ -51,7 +51,10 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// <para>It is the <i>output</i> side of this that <see cref="StimulusLatencyFrames"/> reads,
     /// so raising it lengthens the discard after every stimulus change by the same amount. That is
     /// the correct trade and not a cost worth minimising: a discard is exact, and a hole in the
-    /// stream is not.</para>
+    /// stream is not. Measured, so the trade is a number rather than an assertion: a 73-point
+    /// THD-vs-frequency sweep at 192 kHz went from 273.8 s to 281 s, <b>+2.6 %</b>, with every
+    /// point still on its own grid frequency and the loopback still reading 0.005 % THD and 76 dB
+    /// SNR — i.e. the longer discard is spent waiting, not on stale audio.</para>
     /// </summary>
     private const double TargetBufferedSeconds = 0.128;
 
@@ -74,6 +77,24 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// "Wait timed out" that kills it.
     /// </summary>
     private const double OutputRingFraction = 0.6;
+
+    /// <summary>
+    /// How many whole transfers of stimulus to hold ahead of the DAC, given the ring PortAudio
+    /// actually allocated. One place, because two things need the same answer and must not drift:
+    /// the pump, which does the priming, and <see cref="StimulusLatencyFrames"/>, which has to say
+    /// how much committed audio a stimulus change must outrun. They disagreed — the pump primed
+    /// this, while the latency reported the ring's whole <i>capacity</i>, which is the figure that
+    /// method's own remarks say it is not. Harmless while the two were close; a 4x discard on
+    /// every tone of every sweep once the ring is asked for in time, and 2.7 s a tone on WASAPI
+    /// exclusive, which reports 131072 frames whatever is asked of it.
+    /// </summary>
+    private static int PrimeTransfersFor(double outputLatencyS, double sampleRateHz)
+    {
+        int ringFrames = (int)(outputLatencyS * sampleRateHz);
+        double primeSeconds = Math.Min(
+            TargetInFlightSeconds, ringFrames * OutputRingFraction / sampleRateHz);
+        return Math.Max(1, (int)(primeSeconds * sampleRateHz / TransferFrames));
+    }
 
     private readonly IPortAudio _portAudio;
     private readonly ILogger<SoundCardDevice> _logger;
@@ -280,7 +301,15 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
         var request = new SoundCardStreamRequest(
             input.Index, InputChannelCount, output.Index, OutputChannelCount,
-            config.SampleRateHz, Exclusive: true);
+            config.SampleRateHz, Exclusive: true)
+        {
+            // **The rings are asked for in time, and this field is what makes TargetBufferedSeconds
+            // real rather than documentation.** Left null, PortAudio sizes both from the driver's
+            // own defaultLow*Latency, which an ASIO driver reports as a frame count: on a MOTU M4
+            // that is 43 ms in and 30 ms out at 192 kHz, and half of each at 384. See the glitch
+            // measurements on TargetBufferedSeconds for why a frame count is the wrong unit here.
+            SuggestedLatencyS = TargetBufferedSeconds,
+        };
 
         // Drop-oldest, so a slow consumer never stalls acquisition -- the same contract the QA403's
         // block channel has, and the reason DroppedBlocks exists to report it.
@@ -331,10 +360,11 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             TransferFrames);
         var pumpFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // What the stream actually holds, read from it rather than chosen: with one transfer of
-        // priming the committed audio is PortAudio's own output latency plus the transfer in hand.
+        // What the stream actually holds: the queue the pump is about to prime, plus the transfer
+        // it will have in hand on top of it. Not PortAudio's reported latency — that is the ring's
+        // capacity, and the pump deliberately fills only OutputRingFraction of it.
         _stimulusLatencyFrames =
-            (int)Math.Ceiling(stream.OutputLatencyS * config.SampleRateHz) + TransferFrames;
+            (PrimeTransfersFor(stream.OutputLatencyS, config.SampleRateHz) + 1) * TransferFrames;
 
         // The loop runs on the dispatcher's own thread -- the apartment ASIO needs, and a dedicated
         // thread rather than the pool, which is what the DAC-gap rule asks for.
@@ -418,6 +448,56 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         var sinceLast = Stopwatch.StartNew();
         int readTimeouts = 0, inputOverflows = 0, outputUnderflows = 0, writeTimeouts = 0;
 
+        // **Attribution, and the reason it is here rather than inferred afterwards.** Every one of
+        // the four causes above is the *symptom* of the same thing — this thread was not running
+        // when the hardware needed it — and a log that says only which ring emptied cannot say
+        // whether to raise a priority, enlarge a buffer or stop allocating. So each iteration
+        // records how long it ran, read return to read return (nominally one transfer: 5.3 ms at
+        // 192 kHz), and how much of that the runtime spent with every managed thread suspended. The same question
+        // TransferPumpDiagnostics answers for the QA403, and the same two answers: a stall with GC
+        // flat in it is scheduling, which priority and buffering address; a stall that *is* the GC
+        // pause is not something thread priority can help with at all, because a blocking
+        // collection suspends an AboveNormal thread exactly as readily as any other.
+        var loopWatch = Stopwatch.StartNew();
+        var lastGcPause = GC.GetTotalPauseDuration();
+        double loopMs = 0.0;
+        double loopGcMs = 0.0;
+
+        // The worst of those, kept whether or not anything glitched — which is the point. A run
+        // with no glitch in it says only that no margin was *exceeded*; this says how much of it
+        // was used, so "the fix works" can be a measurement rather than an absence. It is the
+        // sound-card counterpart of the QA403's `TX summary` slack floor, and unlike that one it
+        // is a true worst case rather than a drifting metric: both ends come from one Stopwatch.
+        double worstLoopMs = 0.0;
+        double worstLoopGcMs = 0.0;
+        long worstLoopBlock = 0;
+
+        // Out here rather than beside the priming loop, because the margin line in the finally
+        // has to report what actually went in -- including when the stream died before it was
+        // full, which is exactly the run whose margin someone will want to read.
+        int primed = 0;
+
+        void NoteIteration()
+        {
+            loopMs = loopWatch.Elapsed.TotalMilliseconds;
+            loopWatch.Restart();
+
+            var pause = GC.GetTotalPauseDuration();
+            loopGcMs = (pause - lastGcPause).TotalMilliseconds;
+            lastGcPause = pause;
+
+            // Skipped while sequence is 0: the first iterations are the stream spinning up, where
+            // a read waits hundreds of milliseconds for the driver's first buffer and would stand
+            // as the worst case for ever. Nothing was at risk then -- there is no audio to lose
+            // before the first block, which is the same judgement the startup read timeouts get.
+            if (sequence > 0 && loopMs > worstLoopMs)
+            {
+                worstLoopMs = loopMs;
+                worstLoopGcMs = loopGcMs;
+                worstLoopBlock = sequence;
+            }
+        }
+
         void Glitch(string cause, int count)
         {
             // Every one for the first handful, then only at Debug: a card glitching steadily must
@@ -427,14 +507,16 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             if (count <= GlitchesLoggedPerCause)
             {
                 _logger.LogInformation(
-                    "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous glitch ({Count} so far this acquisition)",
-                    cause, sequence, ms, count);
+                    "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous glitch ({Count} so far this acquisition); "
+                        + "this iteration took {LoopMs:0.0} ms of which {GcMs:0.0} ms was GC",
+                    cause, sequence, ms, count, loopMs, loopGcMs);
             }
             else
             {
                 _logger.LogDebug(
-                    "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous ({Count})",
-                    cause, sequence, ms, count);
+                    "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous ({Count}); "
+                        + "iteration {LoopMs:0.0} ms, GC {GcMs:0.0} ms",
+                    cause, sequence, ms, count, loopMs, loopGcMs);
             }
         }
 
@@ -461,9 +543,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             // OutputRingFraction so the next Write never blocks on a full ring, and by the queue
             // this device would choose for itself; see the glitch measurements in StaDispatcher.
             int ringFrames = (int)(stream.OutputLatencyS * config.SampleRateHz);
-            double primeSeconds = Math.Min(
-                TargetInFlightSeconds, ringFrames * OutputRingFraction / config.SampleRateHz);
-            int primeTransfers = Math.Max(1, (int)(primeSeconds * config.SampleRateHz / frames));
+            int primeTransfers = PrimeTransfersFor(stream.OutputLatencyS, config.SampleRateHz);
 
             // **A priming write may time out, and that must not be fatal.** This call was the one
             // write in the pump with no timeout handling, which was survivable only while it was
@@ -486,7 +566,6 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             // it as final leaves every stream that follows a rate change on the 5.3 ms margin this
             // whole change exists to end, which is exactly what an adaptive sweep arranges for
             // itself at every resolution step.
-            int primed = 0;
             bool primingFinished = false;
 
             // Writes until the queue is as deep as asked for, or until the ring refuses more.
@@ -533,10 +612,17 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 try
                 {
                     overflowed = stream.Read(inBuffer, frames);
+                    // Measured here, as the read returns, and not at the top of the loop: that is
+                    // the far end of the window a stall lives in. Both glitches this has to
+                    // explain are then describing the same window -- an input overflow is noticed
+                    // by the read that has just returned late, and an output underflow by the
+                    // write a few hundred microseconds after it.
+                    NoteIteration();
                     consecutiveTimeouts = 0;
                 }
                 catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
                 {
+                    NoteIteration();
                     // The device is still there and the next transfer usually succeeds. Tearing the
                     // session down over one would be worse than the hiccup -- the same judgement the
                     // QA403's liveness ping makes about a timeout or a short read. Only a run of
@@ -692,6 +778,17 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             stream.Stop();
             ArrayPool<float>.Shared.Return(inBuffer);
             ArrayPool<float>.Shared.Return(outBuffer);
+
+            // Logged whether or not anything went wrong, because the worst iteration is the
+            // number that says how close the stream came -- and a clean run that came within a
+            // millisecond of the margin is a report worth having before the next one does not.
+            _logger.LogInformation(
+                "Sound card stream margin over {Blocks} blocks at {Rate:0} Hz: worst iteration {WorstMs:0.0} ms "
+                    + "(GC {WorstGcMs:0.0} ms) at block {WorstBlock}, against {PrimeMs:0.0} ms primed ahead of the DAC "
+                    + "and {InputMs:0.0} ms of input ring",
+                sequence, config.SampleRateHz, worstLoopMs, worstLoopGcMs, worstLoopBlock,
+                primed * frames * 1000.0 / config.SampleRateHz,
+                stream.InputLatencyS * 1000.0);
 
             if (readTimeouts + inputOverflows + outputUnderflows + writeTimeouts > 0)
             {

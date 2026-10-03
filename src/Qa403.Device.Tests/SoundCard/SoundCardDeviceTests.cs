@@ -588,6 +588,84 @@ public class SoundCardDeviceTests
     }
 
     /// <summary>Reads the first <paramref name="count"/> blocks and then leaves, which also exercises the teardown.</summary>
+    /// <summary>
+    /// <b>The rings are asked for as a time, and that is the whole of the stall fix.</b>
+    ///
+    /// <para>Left to itself PortAudio sizes both from the driver's own <c>defaultLow*Latency</c>,
+    /// which an ASIO driver reports as a frame count: on a MOTU M4 at 192 kHz that was 43 ms of
+    /// input ring and 30 ms of output, of which the pump could prime 16 ms. A scheduling stall
+    /// longer than 16 ms therefore emptied the DAC and one longer than 43 ms also lost input —
+    /// measured in the wild, one dropped chunk per ~24 sweeps on an idle machine and several per
+    /// ten minutes on a busy one, each wrecking one sweep point. Asking for the time instead gave
+    /// 171 ms in and 180 ms out at every rate, and a 64 ms prime.</para>
+    ///
+    /// <para>Asserted as a property rather than against a figure: what must hold is that the same
+    /// number of <i>seconds</i> is requested whatever the rate, since a request that scaled with
+    /// the rate would be the frame count this replaced.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(48_000.0)]
+    [InlineData(192_000.0)]
+    public async Task StreamAsync_AsksForTheRingsAsATimeBudget_NotTheDriversOwnFrameCount(double sampleRateHz)
+    {
+        var (device, pa) = Build();
+        await device.ConnectAsync(CancellationToken.None);
+
+        await TakeAsync(device, count: 1, sampleRateHz: sampleRateHz);
+
+        double? requested = pa.OpenedWith?.SuggestedLatencyS;
+        Assert.NotNull(requested);
+        Assert.True(
+            requested >= 0.1,
+            $"only {requested * 1000:0} ms of ring was asked for, which is inside the stalls this pump is known to take");
+
+        // The same seconds at four times the rate — a frame count would be a quarter of the time.
+        Assert.Equal(0.128, requested!.Value, 6);
+    }
+
+    /// <summary>
+    /// <b><c>StimulusLatencyFrames</c> is the queue primed ahead of the DAC, not the ring's
+    /// capacity</b> — which is what its own remarks always said and what the code did not do.
+    ///
+    /// <para>It reported <c>OutputLatencyS</c>, and the two were close enough to pass unnoticed
+    /// while the ring was the driver's 30 ms and the prime 16. Once the ring is asked for as a
+    /// time they are 180 ms against 64, so every stimulus change on every point of every sweep
+    /// would discard nearly three times what it has to; on WASAPI exclusive, which reports 131072
+    /// frames whatever is asked of it, it would be 2.7 s a tone.</para>
+    ///
+    /// <para>Over-discarding is only slow, never wrong, which is exactly why nothing else would
+    /// have caught it.</para>
+    /// </summary>
+    [Fact]
+    public async Task StimulusLatencyFrames_IsTheQueuePrimedAheadOfTheDac_NotTheRingsCapacity()
+    {
+        const double sampleRateHz = 192_000.0;
+        var (device, pa) = Build();
+        FakePortAudioStream stream = pa.NextStream;
+        // A ring far larger than the queue the device chooses to hold in it — the shape the time
+        // budget produces, and the shape WASAPI exclusive produces to an absurd degree.
+        stream.OutputLatencyS = 0.180;
+        stream.SampleRateHz = sampleRateHz;
+        await device.ConnectAsync(CancellationToken.None);
+
+        int reported = 0;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await foreach (PcmBlock block in device.StreamAsync(new AcquisitionConfig(sampleRateHz, 2), cts.Token))
+        {
+            block.Dispose();
+            reported = device.StimulusLatencyFrames(sampleRateHz);
+            break;
+        }
+
+        int primed = stream.WritesBeforeFirstRead;
+        int ringFrames = (int)(stream.OutputLatencyS * sampleRateHz);
+
+        Assert.Equal((primed + 1) * TransferFrames, reported);
+        Assert.True(
+            reported < ringFrames / 2,
+            $"{reported} frames reported against a {ringFrames}-frame ring — that is the capacity, not the queue");
+    }
+
     private static async Task<List<(float[] Samples, long Sequence, int Channels, bool Discontinuity)>> TakeAsync(
         SoundCardDevice device, int count, double sampleRateHz = 48_000.0)
     {

@@ -1849,6 +1849,44 @@ export interface DiagnosticLoggingStatus {
   logsDirectory: string
 }
 
+/**
+ * Configuration ▸ Diagnostics ▸ Record every acquisition: `StreamRecorder.Describe()`. The switch
+ * and the cap are the setting; everything below `recording` is what the recorder is doing now and
+ * what the last recording came to, which the panel has no other way of knowing.
+ */
+export interface StreamRecordingStatus {
+  enabled: boolean
+  maxFileMegabytes: number
+  directory: string
+  keptRecordings: number
+  recording: boolean
+  currentName: string | null
+  lastName: string | null
+  lastSeconds: number
+  lastInputFrames: number
+  lastStimulusFrames: number
+  lastBytes: number
+  lastReachedCap: boolean
+  droppedBuffers: number
+}
+
+/**
+ * Configuration ▸ Diagnostics ▸ Capture suspect records: `DiagnosticsEndpoints.DiagnosticsStatus`.
+ * Deliberately *not* persisted server-side — arming resets when the app restarts, because this
+ * writes a CSV row per analysed record and a WAV per trigger, and a switch left on for a week is a
+ * folder nobody asked for.
+ */
+export interface DiagnosticsStatus {
+  enabled: boolean
+  logMetrics: boolean
+  captureRawOnTrigger: boolean
+  triggerThresholdDb: number
+  directory: string
+  recordsObserved: number
+  capturesWritten: number
+  queueDrops: number
+}
+
 /** Configuration ▸ General ▸ Date and time format: an id from `dateTime.ts`; the server keeps the string. */
 export interface DateTimeFormatConfig {
   format: string
@@ -2710,6 +2748,24 @@ export const api = {
 
   /** Opens the log folder in the system file manager, on the machine the server runs on. */
   openLogFolder: () => request<void>('/config/diagnostic-logging/open-folder', { method: 'POST' }),
+
+  getStreamRecording: () => request<StreamRecordingStatus>('/config/stream-recording'),
+
+  setStreamRecording: (enabled: boolean, maxFileMegabytes: number) =>
+    request<StreamRecordingStatus>('/config/stream-recording', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled, maxFileMegabytes }),
+    }),
+
+  openRecordingsFolder: () => request<void>('/config/stream-recording/open-folder', { method: 'POST' }),
+
+  openDiagnosticsFolder: () => request<void>('/config/diagnostics/open-folder', { method: 'POST' }),
+
+  getDiagnostics: () => request<DiagnosticsStatus>('/diagnostics'),
+
+  /** Every field optional: an omitted one leaves that setting alone, so arming is `{ enabled: true }`. */
+  setDiagnostics: (config: Partial<Pick<DiagnosticsStatus, 'enabled' | 'logMetrics' | 'captureRawOnTrigger' | 'triggerThresholdDb'>>) =>
+    request<DiagnosticsStatus>('/diagnostics', { method: 'POST', body: JSON.stringify(config) }),
 
   getDateTimeFormatConfig: () => request<DateTimeFormatConfig>('/config/date-time-format'),
 

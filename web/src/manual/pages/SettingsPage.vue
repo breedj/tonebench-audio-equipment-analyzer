@@ -97,20 +97,74 @@
             <em>result</em> is always a separate, deliberate step.
           </td>
         </tr>
+      </tbody>
+    </table>
+
+    <h2>Diagnostics</h2>
+    <p>
+      The last tab of the Configuration dialog, and what to reach for when something looks wrong.
+      All three write into folders under the app's own data directory
+      (<code>%LOCALAPPDATA%\Qa403</code> on Windows, <code>~/.local/share/Qa403</code> on Linux),
+      and each has a button that opens its folder in the file manager — so "send me the files"
+      needs no path typed.
+    </p>
+    <table>
+      <thead>
         <tr>
-          <td>Detailed logging (for reporting a problem)</td>
+          <th>Setting</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Detailed logging</td>
           <td>
-            The app always keeps a log, one file per day, in the folder shown under the checkbox
-            (<strong>Open log folder</strong> opens it in the file manager). Ticked, that log also
-            records every request the app handles with its outcome and timing, and the device
-            layer's own debug lines — the record needed to work out what went wrong from the file
-            alone. Switch it on before reproducing a problem, reproduce it, then send in the day's
-            file; the setting survives a restart, so it can stay on across one. Off is the
-            default, and the ordinary log is written either way.
+            The app always keeps a log, one file per day, in the folder shown under the checkbox.
+            Ticked, that log also records every request the app handles with its outcome and timing,
+            and the device layer's own debug lines — the record needed to work out what went wrong
+            from the file alone. <strong>It is ticked by default</strong>, because the faults worth
+            reporting here are intermittent: a dropped USB chunk or a stalled transfer pump is
+            noticed <em>after</em> the run that showed it, and an ordinary log cannot answer for one
+            that has already happened. Untick it on a bench that would rather not have a line per
+            request; the setting survives a restart either way. When you report a problem, send the
+            day's file from this folder.
+          </td>
+        </tr>
+        <tr>
+          <td>Record every acquisition to WAV</td>
+          <td>
+            Writes each acquisition — one Run, or one whole sweep — as two 32-bit float WAV files in
+            volts, plus a small JSON file naming the analyzer, the settings and everything that
+            happened during the run. The <code>-in</code> file is what the analyzer digitized; the
+            <code>-out</code> file is the stimulus the generator was asked to play. Unticked by
+            default, because at 192 kHz stereo each direction grows 1.5 MB per second: each file
+            stops at the cap beside the checkbox (256 MB, about 2.8 minutes, and the log says when a
+            file was cut short) and only the newest ten recordings are kept. Float and unnormalised,
+            so an audio editor's own amplitude readout is directly comparable to this app's dBV.
+          </td>
+        </tr>
+        <tr>
+          <td>Capture suspect records</td>
+          <td>
+            Logs one row per analysed record to a CSV, and saves the <em>samples</em> of any record
+            whose noise floor jumps clear of its own recent baseline (6 dB by default, beside the
+            checkbox) or that contains a held-constant span — a gap in the generator output.
+            It is the waveform that tells a splice, a single bad sample and a genuinely noisy DUT
+            apart; in a spectrum all three look the same. Unticked, and unlike the other two it
+            resets when the app restarts, since it writes a row for every record analysed.
           </td>
         </tr>
       </tbody>
     </table>
+    <p>
+      One thing the recording cannot show, and it is worth knowing before reading one: the
+      <code>-out</code> file holds what the generator was <em>asked</em> to play, which is always
+      continuous. A gap in what the DAC actually played — a USB transfer that arrived late — is
+      absent from that file by construction. It shows up in the log instead, as a
+      <code>DAC starvation</code> line and in the transfer summary at the end of each stream, and
+      on the way back in as a held-constant span that <strong>Capture suspect records</strong>
+      catches.
+    </p>
 
     <h2>Status bar</h2>
     <p>Along the bottom of the window, left to right.</p>

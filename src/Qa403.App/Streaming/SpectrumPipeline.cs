@@ -391,6 +391,23 @@ public sealed class SpectrumPipeline(
         {
             cts.Dispose();
         }
+
+        // The transport's own drop counter, which until now reached the status bar and nothing else
+        // -- so a log file sent in could not say that a tick had been torn apart on the way to the
+        // browser. That is the other half of the oscilloscope's "flickering, and it says no
+        // fundamental to remove": one tick's frames are a set the client pairs by seq, and an
+        // eviction loses a member of that set while the measurement itself stays sound. Max and
+        // total, because one wedged tab says nothing about the others, and at the end of the
+        // acquisition the numbers describe, since they are reset by Start.
+        var (droppedMax, droppedTotal) = hub.DroppedFrames();
+        if (droppedTotal > 0)
+        {
+            logger.LogWarning(
+                "Display frames evicted this acquisition: {Max} from the worst client, {Total} over all clients. "
+                    + "The measurement is unaffected -- this is the WebSocket queue, not the sample stream -- but a "
+                    + "torn tick can leave the oscilloscope or a metrics table showing a neighbouring tick's data",
+                droppedMax, droppedTotal);
+        }
     }
 
     /// <summary>

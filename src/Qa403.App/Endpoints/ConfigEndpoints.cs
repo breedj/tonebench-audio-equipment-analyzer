@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using Qa403.App.Diagnostics;
+using System.Diagnostics;
 using System.Text.Json;
 using Qa403.App.Json;
 using Qa403.App.Services;
@@ -43,6 +44,76 @@ public static class ConfigEndpoints
             return CaptureDelayConfig.Default;
         }
     }
+
+    /// <summary>
+    /// Opens a folder in the system file manager, so "send me the log" or "clear out the recordings"
+    /// needs no path typed. The same shell launch <c>Program.LaunchBrowser</c> uses, pointed at a
+    /// directory, and the directory is created first -- a folder nothing has written to yet is the
+    /// commonest case for the recordings.
+    ///
+    /// <para>A failure is a 500 carrying its own message; the path is on screen beside the button
+    /// either way, which is the fallback.</para>
+    /// </summary>
+    private static IResult OpenInFileManager(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{directory}\"") { UseShellExecute = true });
+            else if (OperatingSystem.IsLinux())
+                Process.Start("xdg-open", directory);
+            else if (OperatingSystem.IsMacOS())
+                Process.Start("open", directory);
+            else
+                return Results.Problem("No file manager known for this platform.");
+
+            return Results.NoContent();
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem($"Could not open {directory}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The stored stream-recording switch and cap, or the default -- the same contract as the
+    /// capture delay, including falling back rather than failing on a document this build cannot
+    /// read. An out-of-range cap is clamped rather than rejected: a document written by hand is not
+    /// a reason to refuse to start.
+    /// </summary>
+    public static async Task<StreamRecordingConfig> ReadStreamRecordingAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? stored = await repo.GetAsync(ConfigRepository.StreamRecordingKey, ct);
+        if (string.IsNullOrWhiteSpace(stored))
+            return StreamRecordingConfig.Default;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.StreamRecordingConfig);
+            return config is null
+                ? StreamRecordingConfig.Default
+                : config with { MaxFileMegabytes = ClampRecordingCap(config.MaxFileMegabytes) };
+        }
+        catch (JsonException)
+        {
+            return StreamRecordingConfig.Default;
+        }
+    }
+
+    /// <summary>
+    /// The cap's bounds. The floor is a file worth having at all (16 MB is ~10 s of 192 kHz stereo
+    /// float32); the ceiling is what ten recordings of it come to on a disk -- 4 GB each, which is
+    /// also where RIFF's own 32-bit size field runs out.
+    /// </summary>
+    public const int MinRecordingCapMegabytes = 16;
+
+    /// <summary>See <see cref="MinRecordingCapMegabytes"/>.</summary>
+    public const int MaxRecordingCapMegabytes = 4096;
+
+    private static int ClampRecordingCap(int megabytes) =>
+        Math.Clamp(megabytes, MinRecordingCapMegabytes, MaxRecordingCapMegabytes);
 
     /// <summary>The stored external input gain, or the default -- the same contract as the capture delay.</summary>
     /// <summary>
@@ -434,27 +505,55 @@ public static class ConfigEndpoints
         // Opens the log folder in the system file manager, so "send me the log file" needs no path
         // typed. The same shell launch LaunchBrowser uses, pointed at a directory; a failure is a
         // 500 with its message, and the path is still on screen beside the button.
-        group.MapPost("/diagnostic-logging/open-folder", () =>
+        group.MapPost("/diagnostic-logging/open-folder", () => OpenInFileManager(Qa403AppData.LogsDirectory));
+
+        // The stream recorder: one switch and one cap, applied live and persisted. The GET answers
+        // with the recorder's own state as well as the setting -- what it is doing now, and what the
+        // last recording came to -- because the panel's only other way of knowing is the log.
+        group.MapGet("/stream-recording", (StreamRecorder recorder) => Results.Ok(recorder.Describe()));
+
+        group.MapPut("/stream-recording", async (
+            StreamRecordingConfig config, StreamRecorder recorder, ConfigRepository repo,
+            ILoggerFactory loggers, CancellationToken ct) =>
         {
-            var directory = Qa403AppData.LogsDirectory;
-            Directory.CreateDirectory(directory);
-            try
+            if (config.MaxFileMegabytes != ClampRecordingCap(config.MaxFileMegabytes))
             {
-                if (OperatingSystem.IsWindows())
-                    Process.Start(new ProcessStartInfo("explorer.exe", $"\"{directory}\"") { UseShellExecute = true });
-                else if (OperatingSystem.IsLinux())
-                    Process.Start("xdg-open", directory);
-                else if (OperatingSystem.IsMacOS())
-                    Process.Start("open", directory);
-                else
-                    return Results.Problem("No file manager known for this platform.");
-                return Results.NoContent();
+                return Results.BadRequest(
+                    $"The per-file cap must be between {MinRecordingCapMegabytes} and {MaxRecordingCapMegabytes} MB.");
             }
-            catch (Exception ex)
+
+            await repo.SetAsync(
+                ConfigRepository.StreamRecordingKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.StreamRecordingConfig),
+                ct);
+
+            bool wasEnabled = recorder.Enabled;
+            recorder.Enabled = config.Enabled;
+            recorder.MaxFileMegabytes = config.MaxFileMegabytes;
+
+            // Logged, and at Information: a recording that was armed explains both the files in that
+            // folder and any extra I/O a later report blames on the app. Disarming mid-acquisition
+            // leaves the open recording to finish -- the tap and the file belong to the run that
+            // started them, and truncating one on a setting change would produce a file whose end
+            // means nothing.
+            if (config.Enabled != wasEnabled)
             {
-                return Results.Problem($"Could not open {directory}: {ex.Message}");
+                loggers.CreateLogger("Qa403.App.Diagnostics").LogInformation(
+                    "Stream recording {State} (cap {CapMb} MB per file, keeping {Kept} recordings in {Directory})",
+                    config.Enabled ? "armed" : "disarmed", config.MaxFileMegabytes,
+                    StreamRecorder.KeptRecordings, recorder.Directory);
             }
+
+            return Results.Ok(recorder.Describe());
         });
+
+        // The recordings and the single-record captures share a folder button each, for the reason
+        // the log folder has one: a path on screen is not the same as a folder a user can get to.
+        group.MapPost("/stream-recording/open-folder", (StreamRecorder recorder) =>
+            OpenInFileManager(recorder.Directory));
+
+        group.MapPost("/diagnostics/open-folder", () =>
+            OpenInFileManager(Qa403AppData.DiagnosticsDirectory));
 
         // How dates are written on screenshots and reports. Client-owned vocabulary, like the report
         // settings: the server keeps an id and the client decides what it means.

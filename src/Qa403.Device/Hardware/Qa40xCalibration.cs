@@ -112,6 +112,21 @@ internal sealed class Qa40xCalibration
         return (int)Math.Clamp(raw, int.MinValue, int.MaxValue);
     }
 
+    /// <summary>
+    /// Raw DAC counts back to volts -- the exact inverse of <see cref="VoltsToRaw"/>, so a recording
+    /// of the stimulus reads in volts at the output terminals rather than in counts.
+    ///
+    /// <para>It exists for the stream recorder (<see cref="IStimulusTap"/>) and is worth the two
+    /// lines rather than recording the volts that went *in*: the clamp above is the DAC clipping, so
+    /// a generator asked for more than its output range can produce looks identical to one that was
+    /// not until the counts are turned back round. Nothing measures with this.</para>
+    /// </summary>
+    public double DacRawToVolts(int raw, double outputRangeDbv, int channel)
+    {
+        double calLinear = GetDacLinear(outputRangeDbv, channel);
+        return raw / (double)int.MaxValue * PeakVolts(outputRangeDbv) / calLinear;
+    }
+
     private static double PeakVolts(double dbv) => Math.Sqrt(2.0) * Math.Pow(10.0, dbv / 20.0);
 
     private double ReadLinear(IReadOnlyDictionary<double, int> offsets, double rangeDbv, int channel)

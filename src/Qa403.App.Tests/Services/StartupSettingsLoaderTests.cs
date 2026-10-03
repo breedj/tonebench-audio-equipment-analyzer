@@ -88,6 +88,11 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         services.AddSingleton<UserWeightingSetting>();
         services.AddSingleton<UserWeightingService>();
         services.AddSingleton<DiagnosticRecorder>();
+
+        // The loader reads the stream recorder's setting into it, before the session resolves --
+        // pointed at this test's own folder, since the real one is the developer's data folder.
+        services.AddSingleton(sp => new StreamRecorder(
+            NullLogger<StreamRecorder>.Instance, Path.Combine(_dir, "recordings")));
         services.AddSingleton<SpectrumBroadcastHub>();
         services.AddSingleton<SpectrumPipeline>();
 

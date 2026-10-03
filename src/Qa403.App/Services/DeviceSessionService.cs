@@ -17,7 +17,7 @@ namespace Qa403.App.Services;
 public sealed class DeviceSessionService(
     AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
     ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
-    SoundCardSetting? soundCard = null)
+    SoundCardSetting? soundCard = null, StreamRecorder? streamRecorder = null)
     : IDisposable, IMeasurementRun
 {
     private readonly ExternalGainSetting _externalGain = externalGain ?? new ExternalGainSetting();
@@ -125,6 +125,15 @@ public sealed class DeviceSessionService(
         IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
         ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null)
         : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger, externalGain)
+    {
+    }
+
+    /// <summary>The pinned-device overload with a stream recorder, for the tests that record one.</summary>
+    public DeviceSessionService(
+        IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
+        ILogger<DeviceSessionService> logger, StreamRecorder streamRecorder)
+        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger,
+            streamRecorder: streamRecorder)
     {
     }
 
@@ -335,6 +344,53 @@ public sealed class DeviceSessionService(
         Generator: _generatorConfig,
         DroppedRxChunks: _device.DroppedRxChunks,
         DroppedBlocks: _device.DroppedBlocks);
+
+    /// <summary>
+    /// Arms the device's stimulus tap and opens a recording for the acquisition that is starting, or
+    /// does nothing at all when the recorder is disarmed.
+    ///
+    /// <para>The tap is attached here rather than when the device is built, and detached when the
+    /// recording ends, because a non-null tap is what makes the transfer loop copy every chunk it
+    /// builds: a recorder left attached would pay that cost on every run for a diagnostic that is
+    /// normally off. The order matters — tap first, then <c>Begin</c>, then the stream — so that a
+    /// generator-only stream already running starts being recorded at once rather than from the
+    /// first chunk after the file was opened.</para>
+    /// </summary>
+    private void BeginStreamRecording(AcquisitionConfig config)
+    {
+        if (streamRecorder is not { Enabled: true })
+            return;
+
+        _device.StimulusTap = streamRecorder;
+        streamRecorder.Begin(new StreamRecordingContext(
+            SampleRateHz: config.SampleRateHz,
+            InputChannelCount: config.ChannelCount,
+            Analyzer: _info?.ProductName ?? "(not connected)",
+            SerialNumber: _info?.SerialNumber,
+            FirmwareVersion: _info?.FirmwareVersion,
+            DeviceKind: _kind.ToString(),
+            InputRangeDbv: _device.InputRangeDbv,
+            OutputRangeDbv: _outputRangeDbv,
+            ExternalGainLeftDb: ExternalGainLeftDb,
+            ExternalGainRightDb: ExternalGainRightDb,
+            CaptureDelayMs: captureDelay.Ms,
+            GeneratorLeft: DiagnosticRecorder.Describe(_generatorConfig.Left),
+            GeneratorRight: DiagnosticRecorder.Describe(_generatorConfig.Right)));
+    }
+
+    /// <summary>
+    /// Closes the recording, waits for its files to be complete, and detaches the tap. Awaited
+    /// rather than fired off: the log line naming the file is what a user is asked to send, and it
+    /// has to be in the file before the next acquisition's line.
+    /// </summary>
+    private async Task EndStreamRecordingAsync()
+    {
+        if (streamRecorder is null)
+            return;
+
+        await streamRecorder.EndAsync().ConfigureAwait(false);
+        _device.StimulusTap = null;
+    }
 
     /// <summary>The effective (already bin-snapped, if snapping is on) generator config — what the device is actually playing.</summary>
     public GeneratorConfig EffectiveGeneratorConfig => _generatorConfig;
@@ -1291,6 +1347,13 @@ public sealed class DeviceSessionService(
             // settle time, for the DUT's own response to the step. See SpectrumPipeline.Flush and
             // CaptureDelayFrames.
             FlushAfterStimulusChange();
+
+            // A recording's two files cannot say *why* the stimulus changed in the middle of them,
+            // and a sweep changes it per point -- so the sidecar carries the configuration each
+            // time, which is what makes a stale-stimulus bug visible as a disagreement between the
+            // event and the samples after it.
+            streamRecorder?.Note(
+                $"stimulus now L: {DiagnosticRecorder.Describe(config.Left)}, R: {DiagnosticRecorder.Describe(config.Right)}");
             return;
         }
 
@@ -1346,6 +1409,9 @@ public sealed class DeviceSessionService(
         // Reuses an already-running generator-only stream if its config matches, otherwise opens one
         // at this config. It does not wait for the open — see its remarks — which is why everything
         // below books discards against frames that have yet to arrive rather than against the clock.
+        // Before the stream is brought up, so nothing it plays is missed -- see BeginStreamRecording.
+        BeginStreamRecording(config);
+
         bool streamOpened = await EnsureStreamRunningAsync(config, ct);
         spectrumPipeline.Start(config.SampleRateHz, config.ChannelCount);
         _isAcquiring = true;
@@ -1504,6 +1570,10 @@ public sealed class DeviceSessionService(
                         spectrumPipeline.FlushAfterRangeStep();
                     }
 
+                    // Before the enqueue, which takes ownership and disposes the block: the
+                    // recorder copies what it needs and keeps nothing.
+                    streamRecorder?.WriteInput(block);
+
                     spectrumPipeline.Enqueue(block); // takes ownership — disposes the block itself
                 }
                 else
@@ -1565,6 +1635,7 @@ public sealed class DeviceSessionService(
 
         _isAcquiring = false;
         await spectrumPipeline.StopAsync();
+        await EndStreamRecordingAsync();
 
         // The generator may still need the stream even though acquisition is done with it.
         bool generatorActive = _generatorConfig.Left.Enabled || _generatorConfig.Right.Enabled;
@@ -1597,6 +1668,11 @@ public sealed class DeviceSessionService(
         _isAcquiring = false;
         await spectrumPipeline.StopAsync();
         logger.LogInformation("QA403 teardown: spectrum pipeline stopped");
+
+        // Before the stream comes down, so the file is closed and its header patched while the
+        // writer still has time -- a recording abandoned by the shutdown watchdog is a file whose
+        // length nothing ever wrote.
+        await EndStreamRecordingAsync();
 
         await StopStreamIfRunningAsync();
         logger.LogInformation("QA403 teardown: device stream stopped and pump joined");

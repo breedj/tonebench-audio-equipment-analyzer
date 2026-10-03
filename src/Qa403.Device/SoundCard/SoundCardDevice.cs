@@ -118,6 +118,12 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     private long _droppedBlocks;
     private volatile bool _stopRequested;
 
+    /// <summary>
+    /// Where each output block is copied while the stream recorder is armed, or null. Volatile and
+    /// read per block, so arming takes effect on a running stream -- see <see cref="IStimulusTap"/>.
+    /// </summary>
+    private volatile IStimulusTap? _stimulusTap;
+
     public SoundCardDevice(
         SoundCardSettings settings,
         SoundCardCalibration calibration,
@@ -144,6 +150,13 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// <inheritdoc />
     /// <remarks>One fixed range, so there is nothing to step and no runner should try.</remarks>
     public bool HasInputAutoRanging => false;
+
+    /// <inheritdoc />
+    public IStimulusTap? StimulusTap
+    {
+        get => _stimulusTap;
+        set => _stimulusTap = value;
+    }
 
     /// <inheritdoc />
     /// <remarks>Declared per card, because a front-end changes where the corner is.</remarks>
@@ -574,7 +587,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             {
                 while (!primingFinished && primed < primeTransfers)
                 {
-                    Synthesize(outBuffer, frames, waveform, frameIndex);
+                    Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
                     frameIndex += frames;
 
                     try
@@ -703,7 +716,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     settleRemaining -= frames;
                     discontinuity = true;
 
-                    Synthesize(outBuffer, frames, waveform, frameIndex);
+                    Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
                     frameIndex += frames;
 
                     try
@@ -745,7 +758,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     Interlocked.Increment(ref _droppedBlocks);
                 }
 
-                Synthesize(outBuffer, frames, waveform, frameIndex);
+                Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
                 frameIndex += frames;
 
                 try
@@ -813,7 +826,8 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// every seam. The config is read once per transfer, as the simulator reads its profile once
     /// per block and for the same reason. No L/R swap — that is a QA403 DAC quirk.</para>
     /// </summary>
-    private void Synthesize(float[] buffer, int frames, Qa40xGeneratorWaveform waveform, long frameIndex)
+    private void Synthesize(
+        float[] buffer, int frames, Qa40xGeneratorWaveform waveform, long frameIndex, double sampleRateHz)
     {
         GeneratorConfig generator;
         lock (_stateGate)
@@ -823,12 +837,32 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
         Array.Clear(buffer, 0, frames * OutputChannelCount);
 
+        // Null unless the stream recorder is armed. Rented per block for the reason the QA403's
+        // pump rents per chunk: this is a diagnostic that is normally off, and it must not cost a
+        // live buffer for the life of every stream.
+        var tap = _stimulusTap;
+        float[]? tapVolts = tap is null ? null : ArrayPool<float>.Shared.Rent(frames * 2);
+
         for (int f = 0; f < frames; f++)
         {
             long index = frameIndex + f;
             int dst = (f * OutputChannelCount) + _settings.OutputChannelOffset;
             buffer[dst] = _calibration.VoltsToSample(waveform.ComputeSample(generator.Left, index, 0));
             buffer[dst + 1] = _calibration.VoltsToSample(waveform.ComputeSample(generator.Right, index, 1));
+
+            if (tapVolts is null)
+                continue;
+
+            // From the samples, not from the volts, so the clamp in VoltsToSample -- the card's own
+            // clipping -- is in the recording. OutputFullScaleV is its exact inverse.
+            tapVolts[f * 2] = (float)(buffer[dst] * _calibration.OutputFullScaleV);
+            tapVolts[(f * 2) + 1] = (float)(buffer[dst + 1] * _calibration.OutputFullScaleV);
+        }
+
+        if (tap is not null && tapVolts is not null)
+        {
+            tap.WriteStimulus(tapVolts.AsSpan(0, frames * 2), channelCount: 2, sampleRateHz, frameIndex);
+            ArrayPool<float>.Shared.Return(tapVolts);
         }
     }
 

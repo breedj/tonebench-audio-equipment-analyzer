@@ -30,6 +30,56 @@ public class ConfigDatabaseTests
     }
 
     /// <summary>
+    /// Migration 003: an install that had turned detailed logging off comes up on the new default
+    /// (on) once, by having the stored row deleted. Pinned because it is the one place this app
+    /// resets a setting the user chose, and because a default alone would have reached only fresh
+    /// installs -- which is every tester and nobody already at a bench.
+    ///
+    /// <para>A row written <i>after</i> the migration survives, which is what keeps turning it back
+    /// off meaningful: migrations run once per database.</para>
+    /// </summary>
+    [Fact]
+    public async Task Migration003_ClearsAStoredDetailedLoggingChoice_Once()
+    {
+        string path = TestDb.CreateTempPath();
+        var factory = new ConfigConnectionFactory(new Qa403ConfigDatabaseOptions { Path = path });
+
+        // An install as it stood before this build: the table exists and the user had turned the
+        // switch off. Migration 001 only is applied by hand here, since running them all is the
+        // thing under test.
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+        {
+            await using var create = connection.CreateCommand();
+            create.CommandText =
+                "CREATE TABLE app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_utc TEXT NOT NULL);"
+                    + "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_utc TEXT NOT NULL);"
+                    + "INSERT INTO schema_version (version, name, applied_utc) "
+                    + "VALUES (1, '001_app_setting.sql', '2026-01-01T00:00:00Z');"
+                    + "INSERT INTO app_setting (key, value, updated_utc) "
+                    + "VALUES ('logging.diagnostic', '{\"Enabled\":false}', '2026-01-01T00:00:00Z'),"
+                    + "       ('acquisition.captureDelay', '{\"CaptureDelayMs\":300}', '2026-01-01T00:00:00Z');";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, CancellationToken.None);
+
+        var repo = new ConfigRepository(factory);
+
+        // Gone, so the new default applies; and nothing else was touched.
+        Assert.Null(await repo.GetAsync(ConfigRepository.DiagnosticLoggingKey, CancellationToken.None));
+        Assert.NotNull(await repo.GetAsync(ConfigRepository.CaptureDelayKey, CancellationToken.None));
+
+        // Turning it off again sticks: the migration has already run for this database.
+        await repo.SetAsync(
+            ConfigRepository.DiagnosticLoggingKey, "{\"Enabled\":false}", CancellationToken.None);
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, CancellationToken.None);
+
+        Assert.NotNull(await repo.GetAsync(ConfigRepository.DiagnosticLoggingKey, CancellationToken.None));
+    }
+
+    /// <summary>
     /// The load-bearing property: configuration written here leaves no trace in the measurement
     /// database. If <c>app_setting</c> ever appeared over there, a copied measurement file would
     /// carry this machine's calibration with it.
@@ -114,7 +164,10 @@ public class ConfigDatabaseTests
             while (await reader.ReadAsync())
                 rows.Add((reader.GetInt64(0), reader.GetString(1)));
 
-            Assert.Equal([(1L, "001_app_setting.sql"), (2L, "002_impulse_reference.sql")], rows);
+            Assert.Equal(
+                [(1L, "001_app_setting.sql"), (2L, "002_impulse_reference.sql"),
+                 (3L, "003_detailed_logging_default.sql")],
+                rows);
         }
         finally
         {

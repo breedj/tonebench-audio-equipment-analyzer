@@ -38,6 +38,13 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     // on the caller's, hence volatile.
     private volatile int _activeBlockFrameCount = AcquisitionConfig.DefaultBlockFrameCount;
     private volatile bool _stopRequested;
+
+    /// <summary>
+    /// Where the generator's own output is copied while the stream recorder is armed, or null.
+    /// Implemented here and not only on hardware because this is the device the recording itself is
+    /// developed and tested against -- see <see cref="IStimulusTap"/>.
+    /// </summary>
+    private volatile IStimulusTap? _stimulusTap;
     private bool _connected;
 
     public SimulatedDevice(int? randomSeed = null) =>
@@ -109,6 +116,13 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     /// range, and they keep the interface's <c>true</c> default.
     /// </summary>
     public bool HasInputAutoRanging => false;
+
+    /// <inheritdoc />
+    public IStimulusTap? StimulusTap
+    {
+        get => _stimulusTap;
+        set => _stimulusTap = value;
+    }
 
     /// <summary>
     /// The simulator has no autoranging, so this stays false however it is set — the UI reads it to
@@ -244,6 +258,14 @@ public sealed class SimulatedDevice : IAnalyzerDevice
             int sampleCount = config.BlockFrameCount * config.ChannelCount;
             float[] buffer = ArrayPool<float>.Shared.Rent(sampleCount);
 
+            // Null unless the stream recorder is armed. Always two channels, whatever the stream's
+            // channel count: a recording's second channel is the generator's right output, which
+            // exists on a mono acquisition too.
+            var tap = _stimulusTap;
+            float[]? tapVolts = tap is null ? null : ArrayPool<float>.Shared.Rent(config.BlockFrameCount * 2);
+            if (tapVolts is not null)
+                Array.Clear(tapVolts, 0, config.BlockFrameCount * 2);
+
             Span<double> generatedByChannel = stackalloc double[Math.Max(2, config.ChannelCount)];
 
             for (int frame = 0; frame < config.BlockFrameCount; frame++)
@@ -269,6 +291,12 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                     // those too — a DUT's own noise floor is not band-limited by its own response.
                     double generated = SignalSynthesizer.HardClip(
                         synthesizer.ComputeChannelSample(profile, absoluteFrame, ch), outputClipPeakV);
+
+                    // The stimulus is what left the DAC: after the output clip (so a level above the
+                    // output range is recorded truncated, as hardware records it) and before the DUT,
+                    // the output stage and the crosstalk, none of which are the generator's.
+                    if (tapVolts is not null && ch < 2)
+                        tapVolts[(frame * 2) + ch] = (float)generated;
 
                     // One channel only — left for a DUT, right for an impedance fixture, the way a
                     // bench is wired for each (see SimulatedDutModelExtensions.MeasuredChannel).
@@ -303,6 +331,13 @@ public sealed class SimulatedDevice : IAnalyzerDevice
                     double sample = SignalSynthesizer.SoftClip(generated + sharedAdditive, inputClipPeakV);
                     buffer[(frame * config.ChannelCount) + ch] = (float)sample;
                 }
+            }
+
+            if (tap is not null && tapVolts is not null)
+            {
+                tap.WriteStimulus(
+                    tapVolts.AsSpan(0, config.BlockFrameCount * 2), channelCount: 2, config.SampleRateHz, frameIndex);
+                ArrayPool<float>.Shared.Return(tapVolts);
             }
 
             frameIndex += config.BlockFrameCount;

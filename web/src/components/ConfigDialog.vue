@@ -7,6 +7,7 @@ import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
 import { useDiagnosticLogging } from '../composables/useDiagnosticLogging'
+import { useDiagnostics } from '../composables/useDiagnostics'
 import { useDevice } from '../composables/useDevice'
 import { commitNumber } from '../config/numberField'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
@@ -40,16 +41,50 @@ const {
   openLogFolder,
 } = useDiagnosticLogging()
 void loadDiagnosticLogging()
+const {
+  recording: streamRecording,
+  capture: recordCapture,
+  error: diagnosticsError,
+  load: loadDiagnostics,
+  refresh: refreshDiagnostics,
+  setRecording: setStreamRecording,
+  setCapture: setRecordCapture,
+  openRecordingsFolder,
+  openDiagnosticsFolder,
+} = useDiagnostics()
+void loadDiagnostics()
 const { fixture, hasCalibration, error: fixtureError, load: loadFixture, save: saveFixture, clear: clearFixture } =
   useImpedanceFixture()
+
+// Staged like the auto-range delay below, applied on change: typing a cap one digit at a time would
+// otherwise send a PUT per keystroke, and 2 MB is a value the server rejects.
+const recordingCapMb = reactive({ value: 256 })
+
+watch(
+  streamRecording,
+  (status) => {
+    if (status) recordingCapMb.value = status.maxFileMegabytes
+  },
+  { immediate: true },
+)
+
+/** One line about the last recording, which is what says whether it is worth sending. */
+const lastRecordingSummary = computed(() => {
+  const status = streamRecording.value
+  if (!status?.lastName) return null
+
+  const megabytes = status.lastBytes / 1024 / 1024
+  const capped = status.lastReachedCap ? ', stopped at the cap' : ''
+  return `${status.lastName}: ${status.lastSeconds.toFixed(1)} s, ${megabytes.toFixed(1)} MB${capped}`
+})
 
 /**
  * Which tab is showing. Grouped by what a setting is *about* rather than by where it is stored —
  * the auto-ranging delay lives on the device and the capture delay in the configuration database,
  * but both are things you reach for while setting up an acquisition.
  */
-type ConfigTab = 'General' | 'Acquisition' | 'Measurement' | 'Impedance'
-const TABS: ConfigTab[] = ['General', 'Acquisition', 'Measurement', 'Impedance']
+type ConfigTab = 'General' | 'Acquisition' | 'Measurement' | 'Impedance' | 'Diagnostics'
+const TABS: ConfigTab[] = ['General', 'Acquisition', 'Measurement', 'Impedance', 'Diagnostics']
 const activeTab = ref<ConfigTab>('General')
 
 // Fetched when the dialog opens rather than on mount: it is a round trip for something most
@@ -57,7 +92,11 @@ const activeTab = ref<ConfigTab>('General')
 watch(
   () => props.open,
   (open) => {
-    if (open) void loadFixture(true)
+    if (!open) return
+    void loadFixture(true)
+    // The record counters and the last recording move while the dialog is shut, and a stale
+    // "0 records observed" reads as a diagnostic that is not working.
+    void refreshDiagnostics()
   },
   { immediate: true },
 )
@@ -273,33 +312,6 @@ async function clearStoredCalibration() {
             Autosave measurement settings
           </label>
 
-          <!-- The switch to ask a tester for. The folder line and the button are the other half
-               of that request: a log file is only sendable by someone who can find it. -->
-          <div
-            class="flex flex-col gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800"
-            title="Writes a detailed record to the log file — every request the app handles, with its outcome and timing, plus the device layer's own debug lines. Switch it on before reproducing a problem, then send the day's file from the folder below. Off, the app still keeps its ordinary log."
-          >
-            <label class="flex items-center gap-2">
-              <input
-                type="checkbox"
-                :checked="diagnosticLoggingEnabled"
-                @change="setDiagnosticLogging(($event.target as HTMLInputElement).checked)"
-              />
-              Detailed logging (for reporting a problem)
-            </label>
-            <div class="flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-              <span class="min-w-0 break-all font-mono" :title="logsDirectory ?? ''">{{ logsDirectory ?? '…' }}</span>
-              <button
-                type="button"
-                class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-                title="Opens the log folder in the file manager. The current file is named after today's date."
-                @click="openLogFolder"
-              >
-                Open log folder
-              </button>
-            </div>
-            <p v-if="diagnosticLoggingError" class="text-xs text-red-600 dark:text-red-400">{{ diagnosticLoggingError }}</p>
-          </div>
         </template>
 
         <template v-else-if="activeTab === 'Acquisition'">
@@ -360,6 +372,148 @@ async function clearStoredCalibration() {
               />
             </span>
           </label>
+        </template>
+
+        <template v-else-if="activeTab === 'Diagnostics'">
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">
+            What the app records about its own behaviour, for a problem report. The log is always
+            written; the two switches below it write much more and are off until asked for.
+          </p>
+
+          <!-- The switch to ask a tester for. The folder line and the button are the other half
+               of that request: a log file is only sendable by someone who can find it. -->
+          <div
+            class="flex flex-col gap-1.5"
+            title="Adds to the log file every request the app handles, with its outcome and timing, plus the device layer's own debug lines. On by default, because the faults worth reporting here are intermittent — the first anyone hears of one is after the run that showed it. Off, the app still keeps its ordinary log."
+          >
+            <label class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                :checked="diagnosticLoggingEnabled"
+                @change="setDiagnosticLogging(($event.target as HTMLInputElement).checked)"
+              />
+              Detailed logging
+            </label>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+              <span class="min-w-0 break-all font-mono" :title="logsDirectory ?? ''">{{ logsDirectory ?? '…' }}</span>
+              <button
+                type="button"
+                class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                title="Opens the log folder in the file manager. The current file is named after today's date."
+                @click="openLogFolder"
+              >
+                Open log folder
+              </button>
+            </div>
+            <p v-if="diagnosticLoggingError" class="text-xs text-red-600 dark:text-red-400">{{ diagnosticLoggingError }}</p>
+          </div>
+
+          <div class="flex flex-col gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+            <label
+              class="flex items-center gap-2"
+              title="Writes every acquisition to disk as two WAV files: what the analyzer digitized, and the stimulus the generator played. One pair per Run or per sweep. Both are 32-bit float in volts, so any audio editor shows the same levels the app does."
+            >
+              <input
+                type="checkbox"
+                :checked="streamRecording?.enabled ?? false"
+                @change="setStreamRecording(($event.target as HTMLInputElement).checked)"
+              />
+              Record every acquisition to WAV
+            </label>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400">
+              1.5 MB per second per direction at 192 kHz, so each file stops at the cap and only the
+              newest {{ streamRecording?.keptRecordings ?? 10 }} recordings are kept. The output file
+              shows what the generator was asked to play; it cannot show a gap in what the DAC
+              managed to play, which the log's transfer summary reports instead.
+            </p>
+            <label
+              class="flex items-center gap-2 text-xs"
+              title="Recording stops when either file reaches this size; the measurement itself carries on, and the log says the file was cut short. 256 MB is about 2.8 minutes at 192 kHz stereo."
+            >
+              <span class="text-neutral-500 dark:text-neutral-400">Stop each file at</span>
+              <input
+                type="number"
+                min="16"
+                max="4096"
+                step="16"
+                v-model.number="recordingCapMb.value"
+                class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+                @change="setStreamRecording(streamRecording?.enabled ?? false, recordingCapMb.value)"
+              />
+              <span class="text-neutral-500 dark:text-neutral-400">MB</span>
+            </label>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+              <span class="min-w-0 break-all font-mono" :title="streamRecording?.directory ?? ''">
+                {{ streamRecording?.directory ?? '…' }}
+              </span>
+              <button
+                type="button"
+                class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                title="Opens the recordings folder in the file manager."
+                @click="openRecordingsFolder"
+              >
+                Open recordings folder
+              </button>
+            </div>
+            <p v-if="streamRecording?.recording" class="text-xs text-amber-600 dark:text-amber-400">
+              Recording now: {{ streamRecording.currentName }}
+            </p>
+            <p v-else-if="lastRecordingSummary" class="text-xs text-neutral-500 dark:text-neutral-400">
+              Last recording — {{ lastRecordingSummary }}
+            </p>
+            <p v-if="(streamRecording?.droppedBuffers ?? 0) > 0" class="text-xs text-amber-600 dark:text-amber-400">
+              {{ streamRecording?.droppedBuffers }} buffers dropped while writing, so a file has a
+              splice in it. The measurements are unaffected — this is the recorder falling behind the
+              disk, not the sample stream.
+            </p>
+          </div>
+
+          <div class="flex flex-col gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+            <label
+              class="flex items-center gap-2"
+              title="Logs one row per analysed record, and saves the samples of any record whose noise floor jumps clear of its own recent baseline or that contains a held-constant span — the waveform of a glitch, which the spectrum cannot distinguish from a noisy DUT. Resets when the app restarts."
+            >
+              <input
+                type="checkbox"
+                :checked="recordCapture?.enabled ?? false"
+                @change="setRecordCapture({ enabled: ($event.target as HTMLInputElement).checked })"
+              />
+              Capture suspect records (until the app restarts)
+            </label>
+            <label
+              class="flex items-center gap-2 text-xs"
+              title="How far above its own recent baseline a record's noise floor must jump to be captured. 6 dB is well clear of the couple of dB a healthy floor breathes by."
+            >
+              <span class="text-neutral-500 dark:text-neutral-400">Capture when the floor jumps</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                :value="recordCapture?.triggerThresholdDb ?? 6"
+                class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+                @change="setRecordCapture({ triggerThresholdDb: Number(($event.target as HTMLInputElement).value) })"
+              />
+              <span class="text-neutral-500 dark:text-neutral-400">dB</span>
+            </label>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+              <span class="min-w-0 break-all font-mono" :title="recordCapture?.directory ?? ''">
+                {{ recordCapture?.directory ?? '…' }}
+              </span>
+              <button
+                type="button"
+                class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                title="Opens the diagnostics folder in the file manager."
+                @click="openDiagnosticsFolder"
+              >
+                Open diagnostics folder
+              </button>
+            </div>
+            <p v-if="recordCapture" class="text-xs text-neutral-500 dark:text-neutral-400">
+              {{ recordCapture.recordsObserved }} records observed, {{ recordCapture.capturesWritten }} captured.
+            </p>
+          </div>
+
+          <p v-if="diagnosticsError" class="text-xs text-red-600 dark:text-red-400">{{ diagnosticsError }}</p>
         </template>
 
         <template v-else-if="activeTab === 'Impedance'">

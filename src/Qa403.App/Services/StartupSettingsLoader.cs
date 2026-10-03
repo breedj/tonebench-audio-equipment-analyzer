@@ -1,3 +1,4 @@
+using Qa403.App.Diagnostics;
 using Qa403.App.Endpoints;
 using Qa403.Data;
 
@@ -64,6 +65,14 @@ public static class StartupSettingsLoader
         // Which analyzer to come up on. --simulate overrides it, at the factory's registration.
         services.GetRequiredService<AnalyzerKindSetting>().Kind =
             await ConfigEndpoints.ReadAnalyzerKindAsync(config, ct);
+
+        // The stream recorder's switch and cap. Before the session resolves, because the session
+        // takes the recorder as a dependency and arms the device's tap from it -- a setting read
+        // afterwards would leave the first acquisition of the session unrecorded.
+        var streamRecording = await ConfigEndpoints.ReadStreamRecordingAsync(config, ct);
+        var recorder = services.GetRequiredService<StreamRecorder>();
+        recorder.Enabled = streamRecording.Enabled;
+        recorder.MaxFileMegabytes = streamRecording.MaxFileMegabytes;
 
         // The user weighting tables, for the same reason the capture delay is here: the pipeline
         // reads them on its worker thread. A damaged document leaves its slot empty and is logged.

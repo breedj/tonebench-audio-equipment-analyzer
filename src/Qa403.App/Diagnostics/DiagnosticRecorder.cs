@@ -333,7 +333,13 @@ public sealed class DiagnosticRecorder
             ? string.Empty
             : value.ToString("0.####", CultureInfo.InvariantCulture);
 
-    private static string Describe(ChannelGeneratorConfig? channel)
+    /// <summary>
+    /// One generator channel as a line of text -- "tones 1000Hz@-20dBV", "chirp 2..96000Hz@-18dBV",
+    /// "off". Public because <see cref="StreamRecorder"/>'s sidecar and the session's recording
+    /// events quote a stimulus the same way this type's own sidecar does, and two formatters would
+    /// drift apart the first time a generator kind was added.
+    /// </summary>
+    public static string Describe(ChannelGeneratorConfig? channel)
     {
         if (channel is null || !channel.Enabled || channel.Kind == GeneratorKind.Off)
             return "off";

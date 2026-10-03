@@ -185,6 +185,24 @@ public interface IAnalyzerDevice
     /// </summary>
     int StreamStartSettleFrames(double sampleRateHz) => 0;
 
+    /// <summary>
+    /// Where this device copies the samples it hands its DAC, or null -- the default -- for no
+    /// copying at all. Set by the session while the stream recorder is armed, cleared when it is
+    /// not; see <see cref="IStimulusTap"/> for what the recording can and cannot answer, and for why
+    /// an implementation may do nothing but copy the span.
+    ///
+    /// <para>A default member with an inert setter, the way <see cref="Telemetry"/> is a default
+    /// getter: a device that synthesizes nothing (and every test double that wraps one) needs no
+    /// edit, and a device that does implements the property for real. Assigning to one that has not
+    /// is silently a no-op, which is the correct behaviour for a diagnostic -- a recording of a
+    /// device that cannot be recorded is an empty output file, not a failed acquisition.</para>
+    /// </summary>
+    IStimulusTap? StimulusTap
+    {
+        get => null;
+        set { }
+    }
+
     /// <summary><paramref name="dbv"/> must be one of <see cref="DeviceCapabilities.InputRangesDbv"/>.</summary>
     Task SetInputRangeAsync(double dbv, CancellationToken ct);
 

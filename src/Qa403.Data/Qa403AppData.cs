@@ -25,4 +25,11 @@ public static class Qa403AppData
     public static string LogsDirectory => Path.Combine(RootDirectory, "logs");
 
     public static string DiagnosticsDirectory => Path.Combine(RootDirectory, "diagnostics");
+
+    /// <summary>
+    /// Where the stream recorder's WAV pairs go. Separate from <see cref="DiagnosticsDirectory"/>
+    /// because these are the one thing here measured in hundreds of megabytes: a user asked to
+    /// clear them out, or to send one, should be looking at a folder that holds nothing else.
+    /// </summary>
+    public static string RecordingsDirectory => Path.Combine(RootDirectory, "recordings");
 }

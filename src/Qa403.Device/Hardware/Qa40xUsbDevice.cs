@@ -119,6 +119,14 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     private volatile BlockAssembler? _activeAssembler;
 
     /// <summary>Drops from an ended stream, kept until the next one starts and zeroes them. Live drops come off <see cref="_activePump"/> — see <see cref="DroppedRxChunks"/>.</summary>
+    /// <summary>
+    /// Where the TX chunks are copied while the stream recorder is armed, or null. Volatile because
+    /// the pump reads it on its own thread while a request thread arms it, and read once per chunk
+    /// rather than latched at stream start: arming has to take effect on a running stream, the same
+    /// reasoning as <see cref="AutoRangeEnabled"/>'s Func.
+    /// </summary>
+    private volatile IStimulusTap? _stimulusTap;
+
     private long _droppedRxChunks;
 
     /// <summary>Block drops from an ended stream, kept until the next one starts and zeroes them. Live drops come off <see cref="_activeAssembler"/> — see <see cref="DroppedBlocks"/>.</summary>
@@ -215,6 +223,13 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
     /// <inheritdoc />
     public double InputRangeDbv => Volatile.Read(ref _inputRangeDbv);
+
+    /// <inheritdoc />
+    public IStimulusTap? StimulusTap
+    {
+        get => _stimulusTap;
+        set => _stimulusTap = value;
+    }
 
     /// <inheritdoc />
     public long DroppedRxChunks => Interlocked.Read(ref _droppedRxChunks) + (_activePump?.DroppedChunks ?? 0);
@@ -487,7 +502,10 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             Volatile.Read(ref _inputRangeDbv), () => AutoRangeEnabled, config.SampleRateHz, () => _stopRequested,
             // Keep the device's own view of the input range in step with what autoranging actually
             // programmed, so a later SetInputRangeAsync/status read isn't working from a stale value.
-            stepped => Volatile.Write(ref _inputRangeDbv, stepped));
+            stepped => Volatile.Write(ref _inputRangeDbv, stepped),
+            // A Func for the same reason the autorange flag is one: the recorder is armed and
+            // disarmed while a stream is up, and a latched null would record nothing all run.
+            () => _stimulusTap);
 
         // Calibration and block assembly run on their own thread, not on thread-pool continuations —
         // see BlockAssembler. Measured on real hardware before this existed: a 100 s sweep dropped 75
@@ -1188,7 +1206,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         Qa40xTransport transport, Qa40xCalibration calibration, Qa40xAutoRanger autoRanger,
         ILogger logger, Func<GeneratorConfig> getGeneratorConfig, double initialOutputRangeDbv,
         double initialInputRangeDbv, Func<bool> isAutoRangeEnabled, double sampleRateHz, Func<bool> isStopRequested,
-        Action<double> onInputRangeStepped)
+        Action<double> onInputRangeStepped, Func<IStimulusTap?> getStimulusTap)
     {
         private readonly Queue<(Task<int> Task, byte[] Buffer)> _pendingReads = new();
         private readonly Queue<(Task<int> Task, byte[] Buffer)> _pendingWrites = new();
@@ -1677,6 +1695,13 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             double outputRangeDbv = Volatile.Read(ref _outputRangeDbv);
             var waveform = _waveform;
 
+            // Null unless the stream recorder is armed, in which case this chunk is also copied out
+            // in volts -- see IStimulusTap for what that recording is and is not evidence of. Rented
+            // per chunk rather than held as a field: the pump is the only caller, but a field would
+            // keep 4 KB alive for the life of every stream for a diagnostic that is normally off.
+            var tap = getStimulusTap();
+            float[]? tapVolts = tap is null ? null : ArrayPool<float>.Shared.Rent(TransferChunkFrames * 2);
+
             for (int frame = 0; frame < TransferChunkFrames; frame++)
             {
                 long frameIndex = startFrameIndex + frame;
@@ -1691,6 +1716,23 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 int byteOffset = frame * BytesPerFrame;
                 BinaryPrimitives.WriteInt32LittleEndian(chunk.AsSpan(byteOffset), slot0Raw);
                 BinaryPrimitives.WriteInt32LittleEndian(chunk.AsSpan(byteOffset + 4), slot1Raw);
+
+                if (tapVolts is null)
+                    continue;
+
+                // Taken from the *counts*, not from the volts above, so the recording shows the
+                // DAC's clipping (VoltsToRaw clamps) rather than the level that was asked for; and
+                // written in logical order, left first, undoing the wire's L/R swap -- a recording
+                // whose channels are crossed is worse than none.
+                tapVolts[frame * 2] = (float)calibration.DacRawToVolts(slot1Raw, outputRangeDbv, channel: 1);
+                tapVolts[(frame * 2) + 1] = (float)calibration.DacRawToVolts(slot0Raw, outputRangeDbv, channel: 0);
+            }
+
+            if (tap is not null && tapVolts is not null)
+            {
+                tap.WriteStimulus(
+                    tapVolts.AsSpan(0, TransferChunkFrames * 2), channelCount: 2, sampleRateHz, startFrameIndex);
+                ArrayPool<float>.Shared.Return(tapVolts);
             }
         }
     }

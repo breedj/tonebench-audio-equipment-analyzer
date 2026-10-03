@@ -1,3 +1,4 @@
+using Qa403.App.Diagnostics;
 using Qa403.Device.Hardware;
 
 namespace Qa403.App.Services;
@@ -23,7 +24,11 @@ namespace Qa403.App.Services;
 /// </summary>
 public sealed class DeviceLifecycleHostedService(
     DeviceSessionService session,
-    ILogger<DeviceLifecycleHostedService> logger) : IHostedService
+    ILogger<DeviceLifecycleHostedService> logger,
+    // Optional for the same reason the session's own recorder parameter is: the container always
+    // supplies it, and the tests that construct this by hand are about startup surviving a missing
+    // device, not about diagnostics.
+    StreamRecorder? streamRecorder = null) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -51,5 +56,19 @@ public sealed class DeviceLifecycleHostedService(
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => session.ShutdownAsync();
+    /// <summary>
+    /// Session teardown, then the recorder's writer. In that order: the session's shutdown is what
+    /// closes an open recording and patches its WAV headers, and stopping the writer first would
+    /// leave it with nobody to write that close.
+    ///
+    /// <para>Bounded, as everything in this shutdown is (see <c>Program</c>'s nested budget): the
+    /// recorder's queue holds at most a few megabytes of already-copied samples, and the close is
+    /// two four-byte writes.</para>
+    /// </summary>
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await session.ShutdownAsync();
+        if (streamRecorder is not null)
+            await streamRecorder.StopAsync();
+    }
 }

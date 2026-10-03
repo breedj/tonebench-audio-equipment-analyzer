@@ -109,14 +109,35 @@ public sealed record AutosaveConfig(bool Enabled = true)
 
 /// <summary>
 /// Whether the log file carries the detailed record a fault report needs: every API request with
-/// its status and timing, and the Debug-level lines the ordinary Information floor drops. Off by
-/// default -- the ordinary log is what the app writes for itself; this is what a tester is asked
-/// to switch on (Configuration ▸ General ▸ Detailed logging) before reproducing a problem and
-/// sending the file in. Persisted, so it survives the restart the reproduction usually involves.
+/// its status and timing, and the Debug-level lines the ordinary Information floor drops.
+///
+/// <para><b>On by default</b> (since 2026-10-03), which is a deliberate reversal. The setting was
+/// written for a tester who is <i>told</i> to switch it on before reproducing a problem -- and that
+/// only works for a fault anyone knew to expect. The faults this app actually has are intermittent
+/// (a dropped RX chunk, a stalled pump, a GC pause), so the first report of one arrives after the
+/// run that showed it, and a log written at the Information floor cannot answer for it. Paying for
+/// the detail always is cheaper than asking a user to reproduce something that happens once an hour.
+/// Still a switch rather than a constant, and still persisted, so a bench that would rather not
+/// write a request line per call can turn it off and have that survive a restart.</para>
 /// </summary>
-public sealed record DiagnosticLoggingConfig(bool Enabled = false)
+public sealed record DiagnosticLoggingConfig(bool Enabled = true)
 {
     public static DiagnosticLoggingConfig Default { get; } = new();
+}
+
+/// <summary>
+/// Whether every acquisition is recorded to disk as a pair of WAV files -- the input stream as the
+/// analyzer digitized it and the stimulus as the DAC was told to play it -- and how large one of
+/// those files may get before recording stops.
+///
+/// <para><b>Off by default, and that is about size rather than cost.</b> 192 kHz stereo float32 is
+/// 1.5 MB/s per direction, so a continuous run left unattended would fill a disk; the recorder keeps
+/// the ten newest recordings and stops each file at the cap. See <c>StreamRecorder</c> for what the
+/// two files can and cannot be evidence of.</para>
+/// </summary>
+public sealed record StreamRecordingConfig(bool Enabled = false, int MaxFileMegabytes = 256)
+{
+    public static StreamRecordingConfig Default { get; } = new();
 }
 
 /// <summary>
@@ -436,6 +457,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The detailed-logging switch's key. One document, see <see cref="DiagnosticLoggingConfig"/>.</summary>
     public const string DiagnosticLoggingKey = "logging.diagnostic";
+
+    /// <summary>The stream recorder's key. One document, see <see cref="StreamRecordingConfig"/>.</summary>
+    public const string StreamRecordingKey = "diagnostics.streamRecording";
 
     /// <summary>The date/time format's key. One document, see <see cref="DateTimeFormatConfig"/>.</summary>
     public const string DateTimeFormatKey = "ui.dateTimeFormat";

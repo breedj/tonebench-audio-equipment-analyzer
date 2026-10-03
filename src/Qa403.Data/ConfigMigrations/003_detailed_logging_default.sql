@@ -1,0 +1,14 @@
+-- Detailed logging became the default on 2026-10-03 (see DiagnosticLoggingConfig), and a default
+-- only reaches an install that has never written the document. This deletes the stored one, once,
+-- so an existing bench comes up on the new default like a fresh one does.
+--
+-- Why a migration rather than only a changed default: the switch was written to be turned *on*
+-- before reproducing a known fault, so a bench that tried it and turned it back off has
+-- {"Enabled":false} on disk -- and that is exactly the bench where the next intermittent fault will
+-- be reported from a log that cannot answer for it. Nothing is lost that cannot be set again in one
+-- click, and the row is a diagnostic preference rather than anything describing the hardware or a
+-- measurement; this app does not reset a user's settings anywhere else, and should not start.
+--
+-- Idempotent by being a migration: it runs once per database, and a user who turns detailed logging
+-- off afterwards writes the row again and keeps it.
+DELETE FROM app_setting WHERE key = 'logging.diagnostic';

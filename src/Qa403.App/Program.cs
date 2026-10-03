@@ -134,6 +134,9 @@ try
 
     builder.Services.AddSingleton(new DiagnosticLoggingSetting(logLevelSwitch));
     builder.Services.AddSingleton<DiagnosticRecorder>();
+    // A factory rather than AddSingleton<StreamRecorder>(): its second constructor parameter is a
+    // directory with a default, which is a test seam rather than something to ask the container for.
+    builder.Services.AddSingleton(sp => new StreamRecorder(sp.GetRequiredService<ILogger<StreamRecorder>>()));
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<CaptureDelaySetting>();
@@ -229,16 +232,22 @@ try
         // anything resolves the session, from settings that have to be loaded before it.
         await StartupSettingsLoader.LoadAsync(scope.ServiceProvider, CancellationToken.None);
 
-        // Detailed logging, if it was left on: the reproduction a tester is asked for usually
-        // involves a restart, and a switch that reset on every start would miss it.
+        // Detailed logging, as it was left: the reproduction a tester is asked for usually involves
+        // a restart, and a switch that reset on every start would miss it. On by default now (see
+        // DiagnosticLoggingConfig) -- applied both ways rather than only when on, since the stored
+        // document is the only thing that can say "this bench turned it off".
         var diagnosticLogging = await ReadDiagnosticLoggingAsync(
             scope.ServiceProvider.GetRequiredService<ConfigRepository>(), CancellationToken.None);
-        if (diagnosticLogging.Enabled)
-        {
-            app.Services.GetRequiredService<DiagnosticLoggingSetting>().Enabled = true;
-            Log.Information("Detailed logging is on (app {Version}, {Os}, .NET {Runtime})",
-                UpdateCheckService.CurrentVersion, Environment.OSVersion, Environment.Version);
-        }
+        app.Services.GetRequiredService<DiagnosticLoggingSetting>().Enabled = diagnosticLogging.Enabled;
+
+        // Unconditional, and the first thing in every log file: a file sent in by a user has no
+        // other way of saying which build, OS or runtime wrote it, and every answer below it is
+        // worthless without that. Cheap enough to pay for on a start that never reports a fault.
+        Log.Information(
+            "QA403 Audio Analyzer {Version} starting: {Os}, .NET {Runtime}, {Cores} cores, "
+                + "detailed logging {DetailedLogging}",
+            UpdateCheckService.CurrentVersion, Environment.OSVersion, Environment.Version,
+            Environment.ProcessorCount, diagnosticLogging.Enabled ? "on" : "off");
     }
 
     // One line per API request with its status and timing -- but only while detailed logging is

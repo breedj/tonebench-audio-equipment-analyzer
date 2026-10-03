@@ -1919,6 +1919,8 @@ export interface MeasurementTypeAppliedResponse {
   chartShowPeakHold?: boolean | null
   /** Whether the live spectrum line itself is drawn — see ChartDisplayPanel.vue's "FFT data" checkbox. Null means drawn. */
   chartShowFftTrace?: boolean | null
+  /** Whether the harmonic markers are drawn over the spectrum — see ChartDisplayPanel.vue's "Harmonic markers" checkbox. Null means drawn. */
+  chartShowHarmonicMarkers?: boolean | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */
@@ -1972,6 +1974,8 @@ export interface StagedMeasurementConfig {
   chartShowPeakHold?: boolean | null
   /** Whether the live spectrum line itself is drawn — see ChartDisplayPanel.vue's "FFT data" checkbox. Null means drawn. */
   chartShowFftTrace?: boolean | null
+  /** Whether the harmonic markers are drawn over the spectrum — see ChartDisplayPanel.vue's "Harmonic markers" checkbox. Null means drawn. */
+  chartShowHarmonicMarkers?: boolean | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */

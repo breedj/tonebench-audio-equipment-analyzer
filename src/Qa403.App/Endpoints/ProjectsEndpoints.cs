@@ -196,7 +196,9 @@ public sealed record StagedMeasurementConfig(
     /// <summary>The unit the generator panel's level boxes are typed in -- see <see cref="Qa403.Data.FftSpectrumParameters.GeneratorLevelUnit"/>. The tones themselves are always dBV.</summary>
     string? GeneratorLevelUnit = null,
     /// <summary>Whether the spectrum chart draws the live trace itself -- see <see cref="Qa403.Data.FftSpectrumParameters.ChartShowFftTrace"/>.</summary>
-    bool? ChartShowFftTrace = null);
+    bool? ChartShowFftTrace = null,
+    /// <summary>Whether the spectrum chart draws the harmonic markers -- see <see cref="Qa403.Data.FftSpectrumParameters.ChartShowHarmonicMarkers"/>.</summary>
+    bool? ChartShowHarmonicMarkers = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -249,4 +251,6 @@ public sealed record MeasurementTypeAppliedResponse(
     /// <summary>The unit the generator panel's level boxes are typed in — see <see cref="Qa403.Data.FftSpectrumParameters.GeneratorLevelUnit"/>.</summary>
     string? GeneratorLevelUnit = null,
     /// <summary>Whether the spectrum chart draws the live trace itself — see <see cref="Qa403.Data.FftSpectrumParameters.ChartShowFftTrace"/>.</summary>
-    bool? ChartShowFftTrace = null);
+    bool? ChartShowFftTrace = null,
+    /// <summary>Whether the spectrum chart draws the harmonic markers — see <see cref="Qa403.Data.FftSpectrumParameters.ChartShowHarmonicMarkers"/>.</summary>
+    bool? ChartShowHarmonicMarkers = null);

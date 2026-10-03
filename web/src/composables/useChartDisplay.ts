@@ -57,6 +57,12 @@ const dutGainDb = ref(0)
 // level (see SpectrumChart's weightingCurvePlugin). Off by default: it is a teaching aid, and a
 // second line on a busy chart otherwise.
 const showWeightingCurve = ref(false)
+// The vertical lines at H2, H3 ... on the spectrum, each labelled with its dBc. On by default --
+// they are how a harmonic is found by eye -- but at the low end of a log axis the first few orders
+// land within a handful of pixels of one another, and over a dense trace the lines hide more than
+// they point at. The harmonics *table* is the separate `showHarmonics` flag above and reads the
+// same numbers either way.
+const showHarmonicMarkers = ref(true)
 
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
 // stored params — loading is the opposite of an unsaved edit. Same pattern as
@@ -72,6 +78,7 @@ watch([
   yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold, showFftTrace,
   autofitOnDone,
   showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
+  showHarmonicMarkers,
 ], () => {
   if (!restoring) useProjects().markDirty()
 })
@@ -139,6 +146,7 @@ export interface StoredSpectrumDisplay {
   chartUnit?: string | null
   dutGainDb?: number | null
   chartShowWeightingCurve?: boolean | null
+  chartShowHarmonicMarkers?: boolean | null
 }
 
 /**
@@ -164,6 +172,8 @@ export interface SpectrumDisplaySource {
   spectrumUnit: Ref<SpectrumUnit>
   dutGainDb: Ref<number>
   showWeightingCurve: Ref<boolean>
+  /** Whether the harmonic markers are drawn over the spectrum -- the harmonics table is separate. */
+  showHarmonicMarkers: Ref<boolean>
   activeXRange: Ref<{ min: number; max: number } | null>
   resetPeakHoldTrigger: Ref<number>
   autofitYTrigger: Ref<number>
@@ -209,6 +219,7 @@ export function createSpectrumDisplaySource(
     // Never for a stored result: the curve is fetched for the *live* weighting, which need not be
     // the one the result was captured under.
     showWeightingCurve: ref(false),
+    showHarmonicMarkers: ref(loaded?.chartShowHarmonicMarkers ?? true),
     activeXRange: ref(null),
     resetPeakHoldTrigger: ref(0),
     autofitYTrigger: ref(0),
@@ -261,6 +272,7 @@ export function useChartDisplay() {
     spectrumUnit.value = parseSpectrumUnit(loaded?.chartUnit)
     dutGainDb.value = loaded?.dutGainDb ?? 0
     showWeightingCurve.value = loaded?.chartShowWeightingCurve ?? false
+    showHarmonicMarkers.value = loaded?.chartShowHarmonicMarkers ?? true
     void nextTick(() => {
       restoring = false
     })
@@ -298,6 +310,7 @@ export function useChartDisplay() {
     spectrumUnit,
     dutGainDb,
     showWeightingCurve,
+    showHarmonicMarkers,
     activeXRange,
     resetPeakHoldTrigger,
     autofitYTrigger,

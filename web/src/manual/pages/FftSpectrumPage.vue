@@ -355,6 +355,15 @@ const { showPage } = useManual()
       it again, and ticking FFT data back on brings the band back with it.
     </p>
     <p>
+      <strong>Harmonic markers</strong> are the vertical lines at the fundamental and each harmonic,
+      labelled with that order's level in dBc. Unticking it leaves the trace clean: at the low end of
+      a log axis the first few orders land within a handful of pixels of one another, and over a
+      dense trace or a two-channel capture the lines can hide more than they point at. The
+      <strong>Harmonics</strong> panel under the chart reads the same figures either way, and so does
+      a report. It does not affect the gap markers a multitone stimulus draws, which belong to the
+      multitone table rather than to any one fundamental.
+    </p>
+    <p>
       With a weighting selected the trace itself is weighted — the A curve's roll-off below 1 kHz is
       visible on a flat noise floor — and an amber <strong>A-weighted</strong> (or
       <strong>ITU-R 468</strong>, <strong>User 1 (name)</strong> …) tag sits beside the chart's title
@@ -400,7 +409,12 @@ const { showPage } = useManual()
     <h3>Harmonics, Intermodulation and Other peaks</h3>
     <p>
       <strong>Harmonics</strong> lists the fundamental and each harmonic with its frequency, level
-      in dBV and level relative to the fundamental in dBc.
+      in dBV and level relative to the fundamental in dBc. How each of those levels is arrived at —
+      the peak search, the skirt sum, the noise-floor subtraction — and how they are combined into
+      the THD tiles is set out under
+      <button type="button" class="manual-link" @click="showPage('thd-vs-frequency')">
+        THD vs frequency
+      </button>.
       <strong>Intermodulation</strong> appears next to it while two sine tones are staged: both
       tones, then every counted product (labelled IM2, IM3 … with its combination, e.g. f2 − 2·f1)
       with frequency, level and dBc against the method's reference, and underneath the IMD total,
@@ -457,7 +471,7 @@ const { showPage } = useManual()
       different FFT sizes compare correctly on the density axis. Below those: <strong>Thick lines</strong>,
       <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (on for a
       newly created measurement), the <strong>Channels</strong> row, the FFT data, Min/max,
-      Peak-hold and Weighting curve toggles, and finally four checkboxes that show or hide the
+      Peak-hold, Harmonic markers and Weighting curve toggles, and finally four checkboxes that show or hide the
       Waterfall, Oscilloscope, Harmonics and Other peaks panels — so a measurement that only needs
       the spectrum does not have to scroll past the rest. A new measurement starts with the
       Oscilloscope and Harmonics shown and the Waterfall and Other peaks hidden; tick them on where

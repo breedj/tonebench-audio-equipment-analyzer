@@ -25,6 +25,7 @@ const {
   spectrumUnit,
   dutGainDb,
   showWeightingCurve,
+  showHarmonicMarkers,
   requestAutofitY,
   requestAutofitX,
   requestResetPeakHold,
@@ -220,6 +221,13 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
         >
           Reset peak-hold
         </button>
+        <label
+          class="flex items-center gap-1.5"
+          title="The vertical lines at H2, H3 … over the spectrum, each labelled with its level in dBc. The harmonics table below the chart reads the same figures either way."
+        >
+          <input v-model="showHarmonicMarkers" type="checkbox" />
+          Harmonic markers
+        </label>
         <label
           class="flex items-center gap-1.5"
           title="Draws the weighting in effect as a dashed amber curve — shape only, hung 20 dB below the top of the level range. Nothing is drawn while the weighting is None."

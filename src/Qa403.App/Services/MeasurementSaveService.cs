@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -1560,7 +1560,8 @@ public sealed class MeasurementSaveService(
             parameters.ChartShowWeightingCurve,
             parameters.ScopeResidual,
             parameters.GeneratorLevelUnit,
-            parameters.ChartShowFftTrace);
+            parameters.ChartShowFftTrace,
+            parameters.ChartShowHarmonicMarkers);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -1623,6 +1624,7 @@ public sealed class MeasurementSaveService(
             ChartUnit = staged?.ChartUnit,
             ChartShowWeightingCurve = staged?.ChartShowWeightingCurve,
             ChartShowFftTrace = staged?.ChartShowFftTrace,
+            ChartShowHarmonicMarkers = staged?.ChartShowHarmonicMarkers,
             GeneratorLevelUnit = staged?.GeneratorLevelUnit,
             // Live pipeline state, like the IMD spec: the oscilloscope's Residual checkbox pushes
             // it through spectrum-config the moment it is toggled.

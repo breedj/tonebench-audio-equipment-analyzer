@@ -184,6 +184,7 @@ const {
   spectrumUnit: chartSpectrumUnit,
   dutGainDb: chartDutGainDb,
   showWeightingCurve: chartShowWeightingCurve,
+  showHarmonicMarkers: chartShowHarmonicMarkers,
   applyLoaded: applyLoadedChartDisplay,
   requestAutofitY: requestChartAutofitY,
   requestAutofitX: requestChartAutofitX,
@@ -2480,6 +2481,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowMinMax: chartShowMinMax.value,
     chartShowPeakHold: chartShowPeakHold.value,
     chartShowFftTrace: chartShowFftTrace.value,
+    chartShowHarmonicMarkers: chartShowHarmonicMarkers.value,
     chartAutofitOnDone: chartAutofitOnDone.value,
     chartShowWaterfall: chartShowWaterfall.value,
     chartShowOscilloscope: chartShowOscilloscope.value,
@@ -4400,7 +4402,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               <template #default>
                 <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   <span>{{ sweepProgressLabel || 'Idle' }}</span>
-                  <span v-if="sweepGeneratorAmpDbv">· gen {{ sweepGeneratorAmpDbv.toFixed(2) }} dBV</span>
+                  <!-- `v-if` on the value itself hid the readout at exactly 0.00 dBV, which is a level
+                       anyone sweeps at; and the IMD runner has no level of its own (its x axis IS the
+                       level), so without the kind test this showed the THD runner's leftover figure. -->
+                  <span v-if="!isImdSweep && (sweepRunning || sweepPoints.length) && Number.isFinite(sweepGeneratorAmpDbv)">
+                    · gen {{ sweepGeneratorAmpDbv.toFixed(2) }} dBV
+                  </span>
                   <span v-if="sweepPoints.length">· {{ sweepPoints.length }} readings</span>
                 </div>
                 <p v-if="sweepError" class="text-xs text-red-600 dark:text-red-400">{{ sweepError }}</p>

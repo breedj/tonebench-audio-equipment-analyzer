@@ -1,4 +1,4 @@
-﻿using Qa403.Device;
+using Qa403.Device;
 using Qa403.Dsp;
 
 namespace Qa403.Data;
@@ -138,7 +138,15 @@ public sealed record FftSpectrumParameters(
     /// before this existed has to mean. The min/max band and the peak-hold trace have their own
     /// flags and are unaffected: leaving those two legible on their own is the point of it.
     /// </summary>
-    bool? ChartShowFftTrace = null);
+    bool? ChartShowFftTrace = null,
+    /// <summary>
+    /// Whether the spectrum chart draws the harmonic markers -- the vertical lines at H2, H3 ... with
+    /// each one's dBc beside it. Display only, like the toggles above. Null means drawn, which is what
+    /// a row saved before this existed has to mean. The harmonics *table* is a separate flag
+    /// (<see cref="ChartShowHarmonics"/>): the markers are what crowd a chart whose harmonics sit a
+    /// few pixels apart at the low end, and the table reads the same numbers without them.
+    /// </summary>
+    bool? ChartShowHarmonicMarkers = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for

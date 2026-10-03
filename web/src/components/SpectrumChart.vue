@@ -91,6 +91,7 @@ const {
   spectrumUnit,
   dutGainDb,
   showWeightingCurve,
+  showHarmonicMarkers,
   activeXRange,
   resetPeakHoldTrigger,
   autofitYTrigger,
@@ -462,6 +463,9 @@ function harmonicMarkersPlugin(theme: Theme, interactive: boolean): uPlot.Plugin
       return
     }
     if (stimulusKind.value !== 'Tones') return
+    // The display panel's "Harmonic markers". Only the harmonic lines: a comb's gap markers above
+    // are the multitone table's own reading, not harmonics of anything, and have no checkbox.
+    if (!showHarmonicMarkers.value) return
     const ch0 = props.meters[0]
     if (!ch0 || ch0.harmonics.length === 0) return
 
@@ -1124,6 +1128,9 @@ watch(showMinMax, update)
 watch(showPeakHold, update)
 watch(showFftTrace, update)
 watch(showWeightingCurve, () => plot?.redraw())
+// A draw-hook-only flag, like the weighting curve's: nothing about the data or the scales changes,
+// so a redraw is the whole update.
+watch(showHarmonicMarkers, () => plot?.redraw())
 watch(yTop, () => plot?.redraw())
 watch(thickLines, update)
 watch(showDataPoints, update)

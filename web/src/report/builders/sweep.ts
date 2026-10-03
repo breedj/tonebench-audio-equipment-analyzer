@@ -235,8 +235,8 @@ function summaryRows(points: ThdSweepPoint[], method: SweepReportData['method'],
   if (!summary) return rows
   const total = sweepTraceLabel('thd', method, family)
   rows.push(
-    { label: `Worst ${total}`, value: `${formatDistortion(summary.worst.percent, unit)} at ${formatSweepX(summary.worst.x, xAxis)}` },
-    { label: `Best ${total}`, value: `${formatDistortion(summary.best.percent, unit)} at ${formatSweepX(summary.best.x, xAxis)}` },
+    { label: `Worst ${total}`, value: `${formatDistortion(summary.worst.percent, unit, summary.worst.gainDb)} at ${formatSweepX(summary.worst.x, xAxis)}` },
+    { label: `Best ${total}`, value: `${formatDistortion(summary.best.percent, unit, summary.best.gainDb)} at ${formatSweepX(summary.best.x, xAxis)}` },
   )
   return rows
 }

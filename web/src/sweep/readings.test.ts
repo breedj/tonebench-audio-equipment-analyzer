@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { ThdSweepPoint } from '../api/client'
-import { formatDistortion, formatMagnitude, formatPower, sweepMetricColumns, sweepMetricRow, sweepSummary } from './readings'
+import {
+  formatDistortion,
+  formatGenerator,
+  formatMagnitude,
+  formatPower,
+  sweepMetricColumns,
+  sweepMetricRow,
+  sweepSummary,
+} from './readings'
 
 function point(overrides: Partial<ThdSweepPoint> = {}): ThdSweepPoint {
   return {
@@ -27,19 +35,31 @@ function point(overrides: Partial<ThdSweepPoint> = {}): ThdSweepPoint {
 
 describe('formatDistortion', () => {
   it('writes percent with as many decimals as the figure needs, and never a gap for zero', () => {
-    expect(formatDistortion(1.5, 'percent')).toBe('1.50%')
-    expect(formatDistortion(0.4, 'percent')).toBe('0.40%')
-    expect(formatDistortion(0.0123, 'percent')).toBe('0.012%')
-    expect(formatDistortion(0.00025, 'percent')).toBe('0.00025%')
-    expect(formatDistortion(0.0000001, 'percent')).toBe('0.000000%')
-    expect(formatDistortion(0, 'percent')).toBe('0%')
-    expect(formatDistortion(Number.NaN, 'percent')).toBe('—')
+    expect(formatDistortion(1.5, 'percent', 20)).toBe('1.50%')
+    expect(formatDistortion(0.4, 'percent', 20)).toBe('0.40%')
+    expect(formatDistortion(0.0123, 'percent', 20)).toBe('0.012%')
+    expect(formatDistortion(0.00025, 'percent', 20)).toBe('0.00025%')
+    expect(formatDistortion(0.0000001, 'percent', 20)).toBe('0.000000%')
+    expect(formatDistortion(0, 'percent', 20)).toBe('0%')
+    expect(formatDistortion(Number.NaN, 'percent', 20)).toBe('—')
   })
 
-  it('writes dB through the same conversion the chart plots with', () => {
-    expect(formatDistortion(1, 'db')).toBe('-40.00 dB')
-    expect(formatDistortion(0.1, 'db')).toBe('-60.00 dB')
-    expect(formatDistortion(Number.NaN, 'db')).toBe('—')
+  it('leaves the percent form alone whatever the gain is', () => {
+    expect(formatDistortion(0.4, 'percent', 0)).toBe('0.40%')
+    expect(formatDistortion(0.4, 'percent', 26)).toBe('0.40%')
+    expect(formatDistortion(0.4, 'percent', Number.NaN)).toBe('0.40%')
+  })
+
+  it('writes dB gain-compensated, through the same conversion the chart plots with', () => {
+    expect(formatDistortion(1, 'db', 0)).toBe('-40.00 dB')
+    expect(formatDistortion(0.1, 'db', 0)).toBe('-60.00 dB')
+    expect(formatDistortion(1, 'db', 14.53)).toBe('-25.47 dB')
+    expect(formatDistortion(0.1, 'db', -6)).toBe('-66.00 dB')
+    expect(formatDistortion(Number.NaN, 'db', 0)).toBe('—')
+  })
+
+  it('writes a dash in dB for a point with no gain, rather than an uncompensated figure', () => {
+    expect(formatDistortion(0.1, 'db', Number.NaN)).toBe('—')
   })
 })
 
@@ -54,26 +74,45 @@ describe('formatMagnitude and formatPower', () => {
   })
 })
 
+describe('formatGenerator', () => {
+  it('writes the level the point was played at in volts and in dBV', () => {
+    expect(formatGenerator(-20)).toBe('100 mV (-20.00 dBV)')
+    expect(formatGenerator(0)).toBe('1 V (0.00 dBV)')
+    expect(formatGenerator(Number.NaN)).toBe('—')
+  })
+})
+
 describe('sweepMetricColumns and sweepMetricRow', () => {
-  it('lay out the same ten columns for a conventional THD sweep against frequency', () => {
+  it('lay out the same eleven columns for a conventional THD sweep against frequency', () => {
     expect(sweepMetricColumns('Conventional', 'thd', 'frequency')).toEqual([
-      'Frequency', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
+      'Frequency', 'Generator', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
     ])
     expect(sweepMetricRow(point(), 'Conventional', 'frequency', 'percent', 8)).toEqual([
-      '1.00 kHz', '0.40%', '-0.30 dB', '0.30%', '0.10%', '0.020%', '0.0010%', '0.0050%', '1.25 mW (8 Ω)', '0.0010%',
+      '1.00 kHz', '100 mV (-20.00 dBV)', '0.40%', '-0.30 dB', '0.30%', '0.10%', '0.020%', '0.0010%', '0.0050%',
+      '1.25 mW (8 Ω)', '0.0010%',
     ])
   })
 
   it('rename the total and the orders for a normalized run and for the IMD family', () => {
-    expect(sweepMetricColumns('FrequencyNormalized', 'thd', 'frequency').slice(1, 8)).toEqual([
+    expect(sweepMetricColumns('FrequencyNormalized', 'thd', 'frequency').slice(2, 9)).toEqual([
       'nTHD', 'Magnitude', 'nD2', 'nD3', 'nD4', 'nD5', 'nD6+',
     ])
     expect(sweepMetricColumns('Conventional', 'imd', 'outputVolt')).toEqual([
-      'Output voltage', 'IMD', 'Magnitude', 'IM2', 'IM3', 'IM4', 'IM5', 'IM6+', 'Power', 'Noise floor',
+      'Output voltage', 'Generator', 'IMD', 'Magnitude', 'IM2', 'IM3', 'IM4', 'IM5', 'IM6+', 'Power', 'Noise floor',
     ])
     // A normalized run reads its normalized figures, gaps where it has none.
-    expect(sweepMetricRow(point(), 'FrequencyNormalized', 'frequency', 'percent', 8).slice(1, 8)).toEqual([
+    expect(sweepMetricRow(point(), 'FrequencyNormalized', 'frequency', 'percent', 8).slice(2, 9)).toEqual([
       '0.52%', '-0.30 dB', '0.50%', '0.12%', '—', '—', '—',
+    ])
+  })
+
+  // The table sits under the chart and is read against it, so every distortion cell carries the
+  // same gain term the trace does — here the fixture's -0.3 dB, on THD, every order and the noise
+  // floor, with Magnitude (already a gain) untouched.
+  it('write the dB cells gain-compensated, like the traces above them', () => {
+    expect(sweepMetricRow(point(), 'Conventional', 'frequency', 'db', 8).slice(2)).toEqual([
+      '-48.26 dB', '-0.30 dB', '-50.76 dB', '-60.30 dB', '-74.28 dB', '-100.30 dB', '-86.32 dB',
+      '1.25 mW (8 Ω)', '-100.30 dB',
     ])
   })
 
@@ -82,6 +121,15 @@ describe('sweepMetricColumns and sweepMetricRow', () => {
     expect(sweepMetricRow(p, 'Conventional', 'outputVolt', 'db', 8)[0]).toBe('1 V')
     expect(sweepMetricRow(p, 'Conventional', 'inputVolt', 'db', 8)[0]).toBe('100 mV')
     expect(sweepMetricRow(p, 'Conventional', 'outputWatt', 'db', 8)[0]).toBe('125 mW')
+  })
+
+  // An inputVolt sweep's x axis already IS the generator level, so a Generator column there would
+  // restate the first one; every other axis leaves the level unstated without it.
+  it('omit the generator column only on the input-voltage axis', () => {
+    expect(sweepMetricColumns('Conventional', 'thd', 'inputVolt')).not.toContain('Generator')
+    expect(sweepMetricColumns('Conventional', 'thd', 'outputWatt')).toContain('Generator')
+    const row = sweepMetricRow(point(), 'Conventional', 'inputVolt', 'percent', 8)
+    expect(row).toHaveLength(sweepMetricColumns('Conventional', 'thd', 'inputVolt').length)
   })
 })
 
@@ -95,8 +143,8 @@ describe('sweepSummary', () => {
     ]
     expect(sweepSummary(points, 'Conventional', 'frequency')).toEqual({
       points: 4,
-      worst: { x: 10000, percent: 0.9 },
-      best: { x: 1000, percent: 0.05 },
+      worst: { x: 10000, percent: 0.9, gainDb: -0.3 },
+      best: { x: 1000, percent: 0.05, gainDb: -0.3 },
     })
   })
 
@@ -104,8 +152,8 @@ describe('sweepSummary', () => {
     const points = [point({ freqHz: 100, normalizedThdPercent: 0.7 }), point({ freqHz: 200, normalizedThdPercent: null })]
     expect(sweepSummary(points, 'FrequencyNormalized', 'frequency')).toEqual({
       points: 2,
-      worst: { x: 100, percent: 0.7 },
-      best: { x: 100, percent: 0.7 },
+      worst: { x: 100, percent: 0.7, gainDb: -0.3 },
+      best: { x: 100, percent: 0.7, gainDb: -0.3 },
     })
   })
 

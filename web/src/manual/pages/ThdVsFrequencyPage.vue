@@ -185,6 +185,15 @@ const { showPage } = useManual()
       run, one row per channel, columns aligned across every block so a live sweep and a stored one
       can be read against each other.
     </p>
+    <p>
+      <strong>Generator</strong> is the level the point was actually played at, in volts and in dBV.
+      Under <strong>Generator voltage</strong> level mode that is simply the Level field; under the
+      two output-referred modes the analyzer solved for it from the 1 kHz probe, and this column and
+      the <code>gen</code> figure on the status line above the chart are the only places it is
+      stated. It is on every point, so a stored result read back months later still says how hard the
+      DUT was driven. The column is omitted on the amplitude screen's <strong>Input voltage</strong>
+      axis, where the sweep axis already is the generator level.
+    </p>
 
     <h3>The point previews</h3>
     <p>
@@ -218,8 +227,19 @@ const { showPage } = useManual()
         <tr>
           <td>Units</td>
           <td>
-            <strong>%</strong> or <strong>dB</strong>. The same measurements either way — percent on
-            a log axis spanning several decades, or the equivalent dB below the fundamental.
+            <strong>%</strong> or <strong>dB</strong>, and the two answer different questions.
+            Percent is the distortion as a fraction of the DUT's <em>output</em>, on a log axis
+            spanning several decades. dB is linear and <em>gain-compensated</em>: each figure is
+            converted to dB below the fundamental and then the DUT's gain at that point is added
+            back, so every trace — including Magnitude — is referred to one volt of generator
+            drive. A harmonic at −51.08 dBV under a fundamental of +9 dBV, from a DUT with 14.53 dB
+            of gain there, is 60.08 dB down and is drawn at <strong>−45.55 dB</strong>, which is
+            that same harmonic read against the −5.53 dBV going in. The axis is labelled
+            <strong>dB V/V</strong> for that reason, and it is what makes the traces readable
+            against each other: the harmonics of a flat DUT sit a fixed distance under its
+            Magnitude curve, and a bump in the response lifts the whole family together instead of
+            dividing itself out. ARTA's distortion-vs-frequency plot and the previous QA40x
+            application both do this; their percent plots, like this one, do not.
           </td>
         </tr>
         <tr>

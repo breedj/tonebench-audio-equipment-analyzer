@@ -183,6 +183,14 @@ const { showPage } = useManual()
       Note which way round they run: a distortion figure of −100 dB is <em>better</em> than one of
       −60 dB. More minus is better for distortion and noise; more plus is bigger for levels.
     </p>
+    <p>
+      One place the two do not line up exactly: on the distortion sweep charts, switching the units
+      to dB also adds the amplifier's gain, so that every line on that chart — distortion and the
+      amplifier's own response together — is measured against the volt going <em>in</em> rather
+      than the volt coming out. With an amplifier of 20 dB gain, the 0.1 % in the table above is
+      drawn at −40 dB there rather than −60. The percent view never does this, so if you want the
+      table's numbers, read that one.
+    </p>
 
     <h2>And watts</h2>
     <p>

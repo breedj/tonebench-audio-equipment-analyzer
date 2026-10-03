@@ -9,6 +9,7 @@ import {
   mergePreviewSeries,
   nearestSweepPoint,
   percentToDb,
+  sweepDistortionDb,
   sweepTraceLabel,
 } from './points'
 
@@ -85,6 +86,39 @@ describe('percentToDb', () => {
 
   it('stays finite at zero rather than returning -Infinity', () => {
     expect(Number.isFinite(percentToDb(0))).toBe(true)
+  })
+})
+
+describe('sweepDistortionDb', () => {
+  // The bench reading this was written from: a fundamental at +9 dBV with H2 at -51.08 dBV, out of
+  // a DUT whose gain there is 14.53 dB. The harmonic is 60.08 dB under the fundamental, and the dB
+  // view puts it at -45.55 — which is the same harmonic read against the -5.53 dBV the generator
+  // was actually putting in. That identity is the whole point of the compensation.
+  it('refers a harmonic to the generator rather than to the DUT output', () => {
+    const h2Dbc = -51.08 - 9
+    const gainDb = 14.53
+    expect(sweepDistortionDb(100 * Math.pow(10, h2Dbc / 20), gainDb)).toBeCloseTo(-45.55, 6)
+    expect(sweepDistortionDb(100 * Math.pow(10, h2Dbc / 20), gainDb)).toBeCloseTo(-51.08 - (9 - gainDb), 6)
+  })
+
+  it('is plain dBc through a unity-gain DUT', () => {
+    expect(sweepDistortionDb(1, 0)).toBeCloseTo(-40, 9)
+    expect(sweepDistortionDb(0.1, 0)).toBeCloseTo(-60, 9)
+  })
+
+  it('moves every figure by the same gain, whatever its size', () => {
+    for (const percent of [100, 1, 0.1, 0.001]) {
+      expect(sweepDistortionDb(percent, 20) - percentToDb(percent)).toBeCloseTo(20, 9)
+      expect(sweepDistortionDb(percent, -6) - percentToDb(percent)).toBeCloseTo(-6, 9)
+    }
+  })
+
+  // A sweep stored before gain_db was written reads NaN there (useMeasurements.toSweepPoints), and
+  // its Magn trace is already absent. A gap says so; silently plotting the uncompensated dBc would
+  // put that trace a whole DUT gain away from every other run on the chart.
+  it('is NaN where the point carries no gain', () => {
+    expect(sweepDistortionDb(0.1, Number.NaN)).toBeNaN()
+    expect(sweepDistortionDb(0.1, Number.POSITIVE_INFINITY)).toBeNaN()
   })
 })
 

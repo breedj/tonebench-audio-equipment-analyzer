@@ -16,7 +16,7 @@ import ToolbarIcon from './ToolbarIcon.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
-import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
+import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
 import { sweepMetricColumns, sweepMetricRow } from '../sweep/readings'
 import {
   decadeOrFallbackSplits,
@@ -51,10 +51,13 @@ import { exportGridStroke, exportGridTheme } from '../charts/palette'
  * property of the measurement, not a grid mismatch, and the shared-x union already built for
  * overlays is what absorbs it.
  *
- * The y axis has two modes. Percent is logarithmic (distr: 3): distortion spans four or five
- * decades across a sweep and a linear axis renders all of it as a flat line on zero. dB is the same
- * data as dBc (20·log10(pct/100)) on a linear axis, which is the same shape — the toggle is about
- * which numbers people want to read off, matching the previous app's two graph types.
+ * The y axis has two modes, and they are not two views of one number. Percent is logarithmic
+ * (distr: 3) and is the distortion as a fraction of the DUT's own output: it spans four or five
+ * decades across a sweep, and a linear axis renders all of it as a flat line on zero. dB is linear
+ * and gain-compensated — the ratio in dBc plus the point's gain, i.e. referred to the generator
+ * rather than to the DUT (see sweepDistortionDb, and toY, which is the only place it is applied).
+ * That matches ARTA's `dB V/V` plot and the previous app's two graph types, whose percent plot is
+ * likewise uncompensated.
  */
 
 const props = defineProps<{
@@ -369,7 +372,8 @@ function valueOf(point: ThdSweepPoint, key: TraceKey, method: ThdMethodName): nu
  * than 0: on the log percent axis 0 has no position at all, and on the dB axis it would plunge the
  * whole scale to the -infinity floor and flatten every real trace against the top.
  */
-function toY(value: number, key: TraceKey): number | null {
+function toY(point: ThdSweepPoint, key: TraceKey, method: ThdMethodName): number | null {
+  const value = valueOf(point, key, method)
   if (!Number.isFinite(value)) return null
 
   // Magnitude is a gain in dB and goes straight onto the axis -- it is legitimately negative or
@@ -377,7 +381,14 @@ function toY(value: number, key: TraceKey): number | null {
   if (key === 'magnitude') return value
 
   if (value <= 0) return null
-  return props.unit === 'db' ? percentToDb(value) : value
+  if (props.unit !== 'db') return value
+
+  // The dB axis is gain-compensated: see sweepDistortionDb, which is where that is decided and
+  // why. It takes the point rather than the bare figure for exactly this -- the gain is the
+  // point's own. A point with no stored gain comes back NaN, i.e. a gap, like any other figure
+  // this run does not have.
+  const db = sweepDistortionDb(value, point.gainDb)
+  return Number.isFinite(db) ? db : null
 }
 
 /** The y window in axis units, always [bottom, top]. */
@@ -417,7 +428,7 @@ const outOfRange = computed(() => {
       const x = xOf(p)
       if (!(x > 0) || x < props.xFrom || x > props.xTo) continue
       for (const trace of traces) {
-        const y = toY(valueOf(p, trace.key, method), trace.key)
+        const y = toY(p, trace.key, method)
         if (y == null) continue
         if (y > yMax) above = true
         if (y < yMin) below = true
@@ -516,9 +527,9 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
         auto: false,
         range: (_u, min, max) => [min ?? props.xFrom, max ?? props.xTo],
       },
-      // Percent is log (distr 3) across up to seven decades; dB is the same numbers on a linear
-      // axis, so the bounds go through percentToDb and swap ends -- a smaller percentage is a more
-      // negative dB, but it is still the bottom of the window.
+      // Percent is log (distr 3) across up to seven decades; dB is linear and carries its own
+      // window (see the yTopDb/yBottomDb props), so there is no conversion between the two here --
+      // only a choice of which pair yRange() hands back.
       y:
         props.unit === 'db'
           ? { auto: false, range: (_u, min, max) => [min ?? yRange()[0], max ?? yRange()[1]] }
@@ -540,7 +551,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
       {
         scale: 'y',
         size: 62,
-        ...exportAxisLabel(interactive, props.unit === 'percent' ? 'Distortion (%)' : 'Distortion (dB)'),
+        ...exportAxisLabel(interactive, props.unit === 'percent' ? 'Distortion (%)' : 'Distortion (dB V/V)'),
         ...(decadeGridY
           ? {
               splits: (u, axisIdx, scaleMin, scaleMax) =>
@@ -946,7 +957,7 @@ function pushSeriesData(data: (number | null)[][], xs: number[], sweepPoints: Th
     }
 
     for (const trace of activeTraces.value) {
-      const anchorValues = anchorPoints.map((p) => toY(valueOf(p, trace.key, method), trace.key))
+      const anchorValues = anchorPoints.map((p) => toY(p, trace.key, method))
       data.push(interpolateOnGrid(xs, anchorIdx, anchorValues, logY))
       // Markers belong at the measured frequencies only, and only where there is a value to mark.
       measuredIdxBySeries.push(anchorIdx.filter((_, k) => anchorValues[k] != null))

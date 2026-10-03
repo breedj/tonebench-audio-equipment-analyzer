@@ -173,18 +173,26 @@ describe('sweepMeasurementSections', () => {
       'Worst THD': '0.90% at 10.0 kHz',
       'Best THD': '0.050% at 1.00 kHz',
     })
-    expect(sections[1].headers).toEqual(['Frequency', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor'])
+    expect(sections[1].headers).toEqual([
+      'Frequency', 'Generator', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
+    ])
     expect(sections[1].cells!.map((c) => c[0])).toEqual(['100 Hz', '1.00 kHz', '10.0 kHz'])
-    expect(sections[1].cells![1]).toEqual(['1.00 kHz', '0.050%', '-0.30 dB', '0.30%', '0.10%', '0.020%', '0.0010%', '0.0050%', '1.25 mW (8 Ω)', '0.0010%'])
+    expect(sections[1].cells![1]).toEqual([
+      '1.00 kHz', '100 mV (-20.00 dBV)', '0.050%', '-0.30 dB', '0.30%', '0.10%', '0.020%', '0.0010%', '0.0050%',
+      '1.25 mW (8 Ω)', '0.0010%',
+    ])
     expect(rowsToObject(sections[2].rows!).Points).toBe('1')
   })
 
   it('writes the figures in dB when the display says so, and names the IMD family', () => {
     const imd: SweepReportData = { ...data, family: 'imd', display: { ...defaultSweepDisplay(), unit: 'db' } }
     const sections = sweepMeasurementSections(imd, IMD_VS_AMPLITUDE_KIND, 8)
-    expect(rowsToObject(sections[0].rows!)['Worst IMD']).toBe('-40.92 dB at 100 mV')
+    // -40.92 dBc plus that point's own -0.3 dB of gain: the dB figures on paper are compensated
+    // the way the chart's dB axis is, so the summary cannot disagree with the trace it summarises.
+    expect(rowsToObject(sections[0].rows!)['Worst IMD']).toBe('-41.22 dB at 100 mV')
     expect(sections[1].headers![0]).toBe('Output voltage')
-    expect(sections[1].headers![1]).toBe('IMD')
+    expect(sections[1].headers![1]).toBe('Generator')
+    expect(sections[1].headers![2]).toBe('IMD')
   })
 
   it('says so when nothing was measured', () => {
@@ -227,6 +235,8 @@ describe('sweepSections', () => {
 
   it('reads the Power column against the load the run recorded, not the screen', () => {
     const sections = sweepSections({ ...subject, paramsJson: amplitudeParams, kind: THD_VS_AMPLITUDE_KIND }, ['measurements'])
-    expect(sections[1].cells![0][8]).toBe('1.25 mW (4 Ω)')
+    // By header rather than a fixed index: the column list is the one in sweepMetricColumns, and a
+    // column added to it ahead of Power would otherwise fail this for no reason.
+    expect(sections[1].cells![0][sections[1].headers!.indexOf('Power')]).toBe('1.25 mW (4 Ω)')
   })
 })

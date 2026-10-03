@@ -235,9 +235,43 @@ export function formatDuration(seconds: number): string {
   return rest === 0 ? `${minutes} m` : `${minutes} m ${rest} s`
 }
 
-/** dBc from a percentage of the fundamental — the chart's %/dB toggle. */
+/** dBc from a percentage of the fundamental — the ratio alone, before the dB view's gain term. */
 export function percentToDb(percent: number): number {
   return 20 * Math.log10(Math.max(percent, Number.EPSILON) / 100)
+}
+
+/**
+ * A distortion or noise percentage as the **dB** view plots it: the ratio in dBc *plus the point's
+ * own gain*, which is the one place that compensation is decided for the chart, the Autofit extent
+ * and the metrics table alike.
+ *
+ * The percent view answers "how much of the DUT's output is distortion"; the dB view answers "how
+ * big is the distortion against the volt that was put in", which is what ARTA's `dB V/V` axis shows
+ * and what the previous app plots (frmThdFrequency.cs PlotMagnitude — its percent plot is
+ * uncompensated in exactly the same way). The identity is worth keeping in mind, because it is why
+ * the term is the gain and not something else:
+ *
+ *     harmonic_dBV − fundamental_dBV + gain_dB  ≡  harmonic_dBV − generator_dBV
+ *
+ * since `gainDb` is `fundamentalDbv − generatorDbv` (ThdSweepRunner). So every trace on the dB axis
+ * — THD, D2..D6+, Noise and Magnitude itself — is referred to one volt of generator drive, which is
+ * what makes them readable against each other: a flat DUT's harmonics sit a fixed distance under
+ * its Magn curve, and a bump in the response moves the whole family together instead of silently
+ * dividing itself out of the distortion traces.
+ *
+ * **The same gain, at the swept point, for every trace and both THD methods.** A frequency-
+ * normalized run already divides each harmonic by the fundamental measured at *that harmonic's*
+ * frequency; adding that harmonic's gain back as well would cancel the normalization exactly
+ * (`harmonic_dBV − generator_dBV` either way) and make nTHD plot identically to THD, which is the
+ * one thing the method exists not to do. The point's own gain is also what the reference adds — its
+ * left-channel D2 line reaches for `step.Right.Gain_dB`, which is a slip, not a convention.
+ *
+ * NaN when the point carries no gain (a sweep stored before `gain_db` was written), so the trace
+ * draws a gap rather than a figure that quietly means something else. Its Magn trace is already
+ * absent for the same reason.
+ */
+export function sweepDistortionDb(percent: number, gainDb: number): number {
+  return Number.isFinite(gainDb) ? percentToDb(percent) + gainDb : Number.NaN
 }
 
 /**

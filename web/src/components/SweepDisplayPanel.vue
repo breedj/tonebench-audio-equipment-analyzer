@@ -21,7 +21,7 @@ import { computed, watch } from 'vue'
 import { useImdSweep } from '../composables/useImdSweep'
 import { useSweep } from '../composables/useSweep'
 import { useMeasurements } from '../composables/useMeasurements'
-import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
+import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
 import { AMPLITUDE_X_AXES, sweepXLabel, sweepXUnit, sweepXValue, type SweepXAxis } from '../sweep/xAxis'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -229,7 +229,11 @@ function computeDistortionExtent(): { min: number; max: number } | null {
         // toY) and would drag the dB axis to -Infinity, so it is excluded from either extent — the
         // same gap-not-plunge rule the chart itself draws with.
         if (key !== 'magnitude' && !(raw > 0)) continue
-        const v = unit.value === 'db' && key !== 'magnitude' ? percentToDb(raw) : raw
+        // Gain-compensated on the dB axis, exactly as the chart draws it (sweepDistortionDb) —
+        // Autofit has to fit what is on screen, and the compensation moves a trace by the DUT's
+        // whole gain. A point with no stored gain yields NaN and is skipped, the chart's gap.
+        const v = unit.value === 'db' && key !== 'magnitude' ? sweepDistortionDb(raw, p.gainDb) : raw
+        if (!Number.isFinite(v)) continue
         if (v > max) max = v
         if (v < min) min = v
       }

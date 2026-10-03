@@ -1,6 +1,6 @@
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
-import { percentToDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from './points'
-import { formatSweepX, sweepXLabel, sweepXValue, type SweepXAxis } from './xAxis'
+import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from './points'
+import { dbvToVolt, formatSweepX, sweepXLabel, sweepXValue, type SweepXAxis } from './xAxis'
 
 /**
  * The sweep chart's metrics table as pure functions: the columns, one row per point, and the
@@ -13,15 +13,20 @@ import { formatSweepX, sweepXLabel, sweepXValue, type SweepXAxis } from './xAxis
 export type SweepUnit = 'percent' | 'db'
 
 /**
- * A distortion/noise percentage as the metrics pane's active unit wants it — the same
- * percentToDb conversion the chart itself plots with, so a row's numbers always match wherever
- * the corresponding trace actually sits on screen. Unlike the chart's toY (which returns null for
- * a non-positive value to draw a gap), this reports a real reading: a point whose figure is 0 is
+ * A distortion/noise percentage as the metrics pane's active unit wants it — through the same
+ * sweepDistortionDb the chart plots with, `gainDb` and all, so a row's number is the number the
+ * corresponding trace actually sits at on screen. Pass the point's own `gainDb`; it is required
+ * rather than defaulted, because a silently-omitted gain is a row that reads 20-odd dB away from
+ * the trace it describes with nothing to say so. Unlike the chart's toY (which returns null for a
+ * non-positive value to draw a gap), this reports a real reading: a point whose figure is 0 is
  * "0%", not a hole in the table.
  */
-export function formatDistortion(percent: number, unit: SweepUnit): string {
+export function formatDistortion(percent: number, unit: SweepUnit, gainDb: number): string {
   if (!Number.isFinite(percent)) return '—'
-  if (unit === 'db') return `${percentToDb(percent).toFixed(2)} dB`
+  if (unit === 'db') {
+    const db = sweepDistortionDb(percent, gainDb)
+    return Number.isFinite(db) ? `${db.toFixed(2)} dB` : '—'
+  }
   if (!(percent > 0)) return '0%'
   const decimals = percent >= 1 ? 2 : Math.min(6, Math.max(0, Math.ceil(-Math.log10(percent)) + 1))
   return `${percent.toFixed(decimals)}%`
@@ -30,6 +35,28 @@ export function formatDistortion(percent: number, unit: SweepUnit): string {
 /** Magnitude is a gain in dB on both unit modes — the chart's TRACES say why it has no percent form. */
 export function formatMagnitude(gainDb: number): string {
   return Number.isFinite(gainDb) ? `${gainDb.toFixed(2)} dB` : '—'
+}
+
+/**
+ * `100 mV (-20.00 dBV)` — the level the generator actually played this point at.
+ *
+ * Both forms, because neither alone answers the question: the Level field may have been typed in
+ * either unit, and under an output-referred Level mode it was typed in neither — the runner solved
+ * for this figure and nothing else on the chart states it. Volts first, since that is the quantity
+ * a DUT's input is specified in; the dBV in brackets is what every other level readout in the app
+ * is written in.
+ */
+export function formatGenerator(generatorDbv: number): string {
+  if (!Number.isFinite(generatorDbv)) return '—'
+  return `${formatSweepX(dbvToVolt(generatorDbv), 'inputVolt')} (${generatorDbv.toFixed(2)} dBV)`
+}
+
+/**
+ * Whether the metrics table carries a Generator column at all. Omitted on an `inputVolt` sweep,
+ * whose x axis already *is* the generator level — the column would restate the first one.
+ */
+export function showsGeneratorColumn(xAxis: SweepXAxis): boolean {
+  return xAxis !== 'inputVolt'
 }
 
 /** "1 mW (8 Ω)" — the load a sweep's Power figure was computed against, named beside it so the number cannot be read against another. */
@@ -51,23 +78,29 @@ export function formatPower(watt: number, loadOhms: number): string {
  */
 export function sweepMetricColumns(method: ThdMethodName, family: SweepTraceFamily, xAxis: SweepXAxis): string[] {
   const t = (key: SweepTraceKey) => sweepTraceLabel(key, method, family)
-  return [sweepXLabel(xAxis), t('thd'), 'Magnitude', t('d2'), t('d3'), t('d4'), t('d5'), t('d6plus'), 'Power', 'Noise floor']
+  return [
+    sweepXLabel(xAxis),
+    ...(showsGeneratorColumn(xAxis) ? ['Generator'] : []),
+    t('thd'), 'Magnitude', t('d2'), t('d3'), t('d4'), t('d5'), t('d6plus'), 'Power', 'Noise floor',
+  ]
 }
 
 /** One point's row of values for the metrics table, in sweepMetricColumns order, under its run's method. */
 export function sweepMetricRow(point: ThdSweepPoint, method: ThdMethodName, xAxis: SweepXAxis, unit: SweepUnit, loadOhms: number): string[] {
   const v = (key: SweepTraceKey) => sweepTraceValue(point, key, method)
+  const d = (key: SweepTraceKey) => formatDistortion(v(key), unit, point.gainDb)
   return [
     formatSweepX(sweepXValue(point, xAxis), xAxis),
-    formatDistortion(v('thd'), unit),
+    ...(showsGeneratorColumn(xAxis) ? [formatGenerator(point.generatorDbv)] : []),
+    d('thd'),
     formatMagnitude(point.gainDb),
-    formatDistortion(v('d2'), unit),
-    formatDistortion(v('d3'), unit),
-    formatDistortion(v('d4'), unit),
-    formatDistortion(v('d5'), unit),
-    formatDistortion(v('d6plus'), unit),
+    d('d2'),
+    d('d3'),
+    d('d4'),
+    d('d5'),
+    d('d6plus'),
     formatPower(point.powerWatt, loadOhms),
-    formatDistortion(v('noise'), unit),
+    d('noise'),
   ]
 }
 
@@ -75,8 +108,9 @@ export function sweepMetricRow(point: ThdSweepPoint, method: ThdMethodName, xAxi
 export interface SweepSummary {
   /** Points on the channel, whatever their figures. */
   points: number
-  worst: { x: number; percent: number }
-  best: { x: number; percent: number }
+  /** `gainDb` rides along because the dB form of a figure is that point's own (see formatDistortion). */
+  worst: { x: number; percent: number; gainDb: number }
+  best: { x: number; percent: number; gainDb: number }
 }
 
 /**
@@ -87,14 +121,17 @@ export interface SweepSummary {
  * what the sweep measured.
  */
 export function sweepSummary(points: readonly ThdSweepPoint[], method: ThdMethodName, xAxis: SweepXAxis): SweepSummary | null {
-  let worst: { x: number; percent: number } | null = null
-  let best: { x: number; percent: number } | null = null
+  let worst: { x: number; percent: number; gainDb: number } | null = null
+  let best: { x: number; percent: number; gainDb: number } | null = null
   for (const point of points) {
     const percent = sweepTraceValue(point, 'thd', method)
     if (!Number.isFinite(percent)) continue
+    // Worst and best are decided on the percentage — the distortion ratio — under either unit.
+    // The dB form is a presentation of that same point, so it carries the point's gain with it
+    // rather than being ranked after the compensation, which would rank the DUT's response too.
     const x = sweepXValue(point, xAxis)
-    if (!worst || percent > worst.percent) worst = { x, percent }
-    if (!best || percent < best.percent) best = { x, percent }
+    if (!worst || percent > worst.percent) worst = { x, percent, gainDb: point.gainDb }
+    if (!best || percent < best.percent) best = { x, percent, gainDb: point.gainDb }
   }
   return worst && best ? { points: points.length, worst, best } : null
 }

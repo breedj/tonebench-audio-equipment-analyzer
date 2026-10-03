@@ -105,12 +105,18 @@ function showsLine(index: number, after: boolean): boolean {
   return dropIndex(dragFromIndex.value, index, after) !== dragFromIndex.value
 }
 
+// The ✕ deletes the measurement *and* every result ever saved under it, and the server never
+// refuses — there is no 409 for "it still has saved results", which an earlier comment here claimed
+// and which cost a project file's "Amp 1 kHz at 1 W" and its five results on 2026-10-02. So the
+// question is asked first, by deleteMeasurementType itself (ConfirmDialog, mounted in App.vue): a
+// confirmation inside the composable is one no caller can skip, and the sidebar row is far too
+// narrow for the click-twice Confirm/Cancel pair MeasurementHistoryPanel uses for a single result.
 async function onDelete(id: number) {
   if (currentProjectId.value === null) return
   try {
     await deleteMeasurementType(id, currentProjectId.value)
   } catch {
-    // Surfaced via the error ref below (e.g. 409 when the type still has saved results).
+    // Surfaced via the error ref below. A declined confirmation is not an error — it resolves false.
   }
 }
 </script>

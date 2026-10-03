@@ -163,6 +163,24 @@ public sealed class ProjectRepository(SqliteConnectionFactory connectionFactory)
     }
 
     /// <summary>
+    /// How many results are stored under the type -- what the sidebar's delete confirmation names,
+    /// since that is the part of what a delete destroys that the row itself does not show.
+    ///
+    /// <para>Counted here rather than carried on <see cref="ListTypesAsync"/>: that list is reloaded
+    /// when a <em>type</em> is created, saved, deleted or reordered and never when a <em>result</em>
+    /// is saved, so a count riding on it would read 0 for a measurement whose five results were
+    /// stored since the project was opened -- stale in exactly the direction that makes the
+    /// confirmation reassuring and wrong. And a count over the existing results listing would be
+    /// capped by its own page size (take defaults to 100), which under-reports the same way.</para>
+    /// </summary>
+    public async Task<int> CountTypeResultsAsync(long id, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM measurement_result WHERE measurement_type_id = @id;", new { id });
+    }
+
+    /// <summary>
     /// Deletes the type together with all of its results and their captures/spectra/metrics, in one
     /// transaction -- same cascade MeasurementRepository.DeleteResultAsync does for a single result,
     /// just scoped to every result under this type instead of one.

@@ -91,8 +91,26 @@ public static class ProjectsEndpoints
             return updated ? Results.Ok() : Results.NotFound();
         });
 
+        // How many results the delete below would take with the type. Its own endpoint rather than a
+        // column on the type listing, and read fresh at the moment the question is asked — see
+        // ProjectRepository.CountTypeResultsAsync for why a count carried on that list is stale in
+        // the one direction that matters.
+        typeGroup.MapGet("/{id:long}/result-count", async (long id, ProjectRepository repo, CancellationToken ct) =>
+        {
+            // A type that is already gone has no results to lose, so this is a 404 rather than a 0:
+            // the caller is about to tell the user what a delete destroys, and "nothing" and "no
+            // such measurement" are not the same answer.
+            if (await repo.GetTypeAsync(id, ct) is null)
+                return Results.NotFound();
+
+            return Results.Ok(new MeasurementTypeResultCountResponse(await repo.CountTypeResultsAsync(id, ct)));
+        });
+
         // Deletes the type's own results (and their captures/spectra/metrics) along with it — see
-        // ProjectRepository.DeleteTypeAsync — rather than rejecting while any exist.
+        // ProjectRepository.DeleteTypeAsync — rather than rejecting while any exist. There is
+        // deliberately no 409 for "still has results": the sidebar asks first (useProjects.
+        // deleteMeasurementType, over the count above), which is where that refusal would otherwise
+        // have to live.
         typeGroup.MapDelete("/{id:long}", async (long id, ProjectRepository repo, CancellationToken ct) =>
         {
             bool deleted = await repo.DeleteTypeAsync(id, ct);
@@ -148,6 +166,9 @@ public static class ProjectsEndpoints
 }
 
 public sealed record IdResponse(long Id);
+
+/// <summary>How many results are stored under a measurement type — see the result-count endpoint.</summary>
+public sealed record MeasurementTypeResultCountResponse(int Count);
 
 public sealed record ProjectResponse(long Id, string Name, string? Notes, DateTimeOffset CreatedUtc);
 

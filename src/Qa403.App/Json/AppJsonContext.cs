@@ -53,6 +53,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(MeasurementTypeResponse))]
 [JsonSerializable(typeof(IEnumerable<MeasurementTypeResponse>))]
 [JsonSerializable(typeof(MeasurementTypeAppliedResponse))]
+[JsonSerializable(typeof(MeasurementTypeResultCountResponse))]
 [JsonSerializable(typeof(UpdateCheckResult))]
 [JsonSerializable(typeof(ThdSweepStartRequest))]
 [JsonSerializable(typeof(ThdSweepStarted))]

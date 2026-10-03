@@ -1888,6 +1888,11 @@ export interface MeasurementType {
   createdUtc: string
 }
 
+/** Mirrors Qa403.App.Endpoints.MeasurementTypeResultCountResponse. */
+export interface MeasurementTypeResultCount {
+  count: number
+}
+
 /** What a measurement type's stored generator/acquisition config actually is — same shape as DeviceStatus's generatorLeft/Right, so the UI's existing form-sync logic works from either source. */
 export interface MeasurementTypeAppliedResponse {
   generatorLeft: GeneratorChannelState
@@ -2715,6 +2720,16 @@ export const api = {
   updateMeasurementType: (id: number, req: SaveMeasurementTypeRequest) =>
     request<void>(`/measurement-types/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
 
+  /**
+   * How many results `deleteMeasurementType` would destroy along with the type — what its
+   * confirmation quotes. Read here rather than off `listMeasurementTypes`, whose rows are only
+   * reloaded when a *type* changes and so would still say 0 for a measurement run and saved since
+   * the project was opened; and not counted from `listMeasurements`, which pages at 100.
+   */
+  countMeasurementTypeResults: (id: number) =>
+    request<MeasurementTypeResultCount>(`/measurement-types/${id}/result-count`),
+
+  /** Takes every result stored under the type with it, irreversibly — ask first; see useProjects.deleteMeasurementType. */
   deleteMeasurementType: (id: number) => request<void>(`/measurement-types/${id}`, { method: 'DELETE' }),
 
   /**

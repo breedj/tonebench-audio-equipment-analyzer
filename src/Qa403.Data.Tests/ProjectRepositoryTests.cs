@@ -218,4 +218,90 @@ public class ProjectRepositoryTests
             TestDb.Cleanup(path);
         }
     }
+    /// <summary>
+    /// The number the sidebar's delete confirmation quotes. Scoped to the one type, because the
+    /// whole point of the figure is to say what <em>this</em> delete destroys, and counted past the
+    /// 100-row page size of the results listing, which is the other way it could have been read.
+    /// </summary>
+    [Fact]
+    public async Task CountTypeResults_CountsOnlyItsOwnResults_AndIsNotCappedByAPageSize()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            var repo = new ProjectRepository(factory);
+            long projectId = await repo.CreateProjectAsync("GM70", null, CancellationToken.None);
+            long amp = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Amp 1 kHz at 1 W", null, "{}", CancellationToken.None);
+            long other = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Loopback", null, "{}", CancellationToken.None);
+            long empty = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Never run", null, "{}", CancellationToken.None);
+
+            await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            {
+                await InsertResultsAsync(connection, amp, 105);
+                await InsertResultsAsync(connection, other, 3);
+            }
+
+            Assert.Equal(105, await repo.CountTypeResultsAsync(amp, CancellationToken.None));
+            Assert.Equal(3, await repo.CountTypeResultsAsync(other, CancellationToken.None));
+            Assert.Equal(0, await repo.CountTypeResultsAsync(empty, CancellationToken.None));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The count is what the confirmation promises and the delete is what keeps it, so they are
+    /// pinned to each other here: whatever the count said is gone afterwards, and nothing else is.
+    /// </summary>
+    [Fact]
+    public async Task DeleteType_RemovesExactlyTheResultsTheCountNamed()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            var repo = new ProjectRepository(factory);
+            long projectId = await repo.CreateProjectAsync("GM70", null, CancellationToken.None);
+            long amp = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Amp 1 kHz at 1 W", null, "{}", CancellationToken.None);
+            long other = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Loopback", null, "{}", CancellationToken.None);
+
+            await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            {
+                await InsertResultsAsync(connection, amp, 5);
+                await InsertResultsAsync(connection, other, 2);
+            }
+
+            int counted = await repo.CountTypeResultsAsync(amp, CancellationToken.None);
+            Assert.Equal(5, counted);
+
+            Assert.True(await repo.DeleteTypeAsync(amp, CancellationToken.None));
+
+            await using (var connection = await factory.OpenAsync(CancellationToken.None))
+                Assert.Equal(2, await TestDb.ScalarAsync(connection, "SELECT COUNT(*) FROM measurement_result;"));
+
+            Assert.Equal(2, await repo.CountTypeResultsAsync(other, CancellationToken.None));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    private static async Task InsertResultsAsync(SqliteConnection connection, long typeId, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO measurement_result (measurement_type_id, name, notes, ts, params_json, is_simulated)
+                VALUES ($typeId, $name, NULL, '2026-10-02T12:00:00.000Z', '{}', 1);
+                """;
+            command.Parameters.AddWithValue("$typeId", typeId);
+            command.Parameters.AddWithValue("$name", $"run {i}");
+            await command.ExecuteNonQueryAsync();
+        }
+    }
 }

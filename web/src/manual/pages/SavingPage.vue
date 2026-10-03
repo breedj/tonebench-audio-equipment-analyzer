@@ -56,8 +56,9 @@ const { showPage } = useManual()
     <p>
       The sidebar lists the measurements in the current project.
       <strong>+ New measurement</strong> picks a type and names it; the ✕ that appears on hover
-      deletes one. A red dot means unsaved settings changes — on the measurement's own name in the
-      toolbar, and beside it in the sidebar.
+      deletes one. That ✕ takes every result ever saved under the measurement with it and cannot be
+      undone, so it asks first, naming how many stored results would go. A red dot means unsaved
+      settings changes — on the measurement's own name in the toolbar, and beside it in the sidebar.
     </p>
     <p>
       <strong>Save</strong> writes the current settings into the selected measurement.

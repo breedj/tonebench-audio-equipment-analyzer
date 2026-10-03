@@ -8,6 +8,7 @@ import {
   type StagedMeasurementConfig,
 } from '../api/client'
 import { stopRun } from '../deviceControl'
+import { deleteTypeConfirmation } from '../measurements/deleteTypePrompt'
 import { useConfirm } from './useConfirm'
 
 // Module-level, not inside the composable function, so every caller (the menu, the sidebar, the
@@ -256,7 +257,28 @@ export function useProjects() {
     }
   }
 
-  async function deleteMeasurementType(id: number, projectId: number) {
+  /**
+   * Deletes a measurement type and every result stored under it, after asking. Resolves false when
+   * the question was declined (nothing was touched) and true once the delete has landed; a failed
+   * delete still throws, with the message on `error`.
+   *
+   * <p>The confirmation lives here rather than in the sidebar so that no caller can delete a
+   * measurement without it, and the result count it quotes is read fresh for the question — see
+   * api.countMeasurementTypeResults for why it cannot come off `types`. A count that cannot be read
+   * does not block the question: the delete would fail for the same reason anyway, and the dialog
+   * says the number is unknown rather than implying there is nothing to lose.</p>
+   */
+  async function deleteMeasurementType(id: number, projectId: number): Promise<boolean> {
+    const name = types.value.find((t) => t.id === id)?.name ?? 'this measurement'
+    let resultCount: number | null = null
+    try {
+      resultCount = (await api.countMeasurementTypeResults(id)).count
+    } catch {
+      // Left null, which the dialog words as "how many could not be read".
+    }
+
+    if (!(await useConfirm().confirm(deleteTypeConfirmation(name, resultCount)))) return false
+
     try {
       await api.deleteMeasurementType(id)
       if (currentTypeId.value === id) {
@@ -267,6 +289,7 @@ export function useProjects() {
       markClean(id)
       await loadTypes(projectId)
       error.value = null
+      return true
     } catch (e) {
       error.value = (e as Error).message
       throw e

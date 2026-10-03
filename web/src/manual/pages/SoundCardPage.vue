@@ -54,9 +54,25 @@ const { showPage } = useManual()
     <h2>Picking the card</h2>
     <p>
       The <strong>Sound card</strong> dropdown comes first, and it lists <em>cards</em> rather than
-      devices: one entry per physical interface per <em>host API</em> — the driver family the card is
-      reached through. The order is deliberate: the ones that reach the hardware come first, the ones
-      that resample last.
+      devices: one entry per physical interface, under the best <em>host API</em> — the driver family
+      the card is reached through — that can drive it. The order is deliberate: the ones that reach
+      the hardware come first, the ones that resample last.
+    </p>
+    <p>
+      Only the host APIs a measurement can be believed through are offered, and each card appears
+      <em>once</em>: an interface with an ASIO driver is listed as ASIO rather than four times over.
+      On a typical machine that is the difference between four entries and thirty — the same card
+      reached through MME, DirectSound, WASAPI and WDM-KS is four list entries for one piece of
+      hardware, and three of them are worse than the fourth.
+    </p>
+    <p>
+      <strong>Advanced</strong>, beside <strong>Refresh</strong>, shows the unfiltered list: every
+      host API, one entry per interface within each, with the count it adds in brackets. It is there
+      for the case the table below describes — a card with no ASIO driver whose WASAPI exclusive mode
+      is refused, which leaves WDM-KS as its only honest path. Turning it off again moves the
+      selection back onto the same hardware under the better host API rather than clearing it. A card
+      already saved under a hidden host API keeps working and opens the dialog with Advanced already
+      on, so it never appears to have vanished.
     </p>
     <p>
       Choosing a card is what fills the <strong>Input</strong> and <strong>Output</strong> lists, and
@@ -65,6 +81,186 @@ const { showPage } = useManual()
       only one device on a side, as an ASIO card does, that list is not shown at all: there is
       nothing to choose.
     </p>
+    <h3>What a host API actually is</h3>
+    <p>
+      They are not five different ways of reaching a card — they are five depths into the same one.
+      Everything below ends at the same WDM driver; what differs is how much of Windows sits in
+      between.
+    </p>
+
+    <figure class="manual-figure">
+      <svg
+        viewBox="0 0 540 215"
+        role="img"
+        aria-label="Five horizontal lanes, one per host API, from the app on the left to the card on the right. MME and DirectSound pass through a shim, the endpoint, the mixer, kernel streaming and the driver. WASAPI shared skips the shim. WASAPI exclusive also skips the mixer. WDM-KS enters at kernel streaming. ASIO goes straight to the vendor driver."
+      >
+        <!-- column captions -->
+        <text x="140" y="20" text-anchor="middle" class="muted">shim</text>
+        <text x="205" y="20" text-anchor="middle" class="muted">endpoint</text>
+        <text x="300" y="20" text-anchor="middle" class="muted">mixer + APOs</text>
+        <text x="390" y="20" text-anchor="middle" class="muted">KS</text>
+        <text x="460" y="20" text-anchor="middle" class="muted">driver</text>
+        <text x="510" y="20" text-anchor="middle" class="muted">card</text>
+
+        <!-- MME / DirectSound: everything -->
+        <text x="108" y="50" text-anchor="end">MME / DirectSound</text>
+        <line x1="112" y1="46" x2="117" y2="46" />
+        <rect x="117" y="37" width="46" height="18" />
+        <line x1="163" y1="46" x2="177" y2="46" />
+        <rect x="177" y="37" width="56" height="18" />
+        <line x1="233" y1="46" x2="254" y2="46" />
+        <rect x="254" y="37" width="92" height="18" />
+        <line x1="346" y1="46" x2="373" y2="46" />
+        <rect x="373" y="37" width="34" height="18" />
+        <line x1="407" y1="46" x2="435" y2="46" />
+        <rect x="435" y="37" width="50" height="18" />
+        <line x1="485" y1="46" x2="510" y2="46" />
+        <circle cx="510" cy="46" r="3.5" class="node" />
+
+        <!-- WASAPI shared: no shim -->
+        <text x="108" y="82" text-anchor="end">WASAPI shared</text>
+        <line x1="112" y1="78" x2="177" y2="78" />
+        <rect x="177" y="69" width="56" height="18" />
+        <line x1="233" y1="78" x2="254" y2="78" />
+        <rect x="254" y="69" width="92" height="18" />
+        <line x1="346" y1="78" x2="373" y2="78" />
+        <rect x="373" y="69" width="34" height="18" />
+        <line x1="407" y1="78" x2="435" y2="78" />
+        <rect x="435" y="69" width="50" height="18" />
+        <line x1="485" y1="78" x2="510" y2="78" />
+        <circle cx="510" cy="78" r="3.5" class="node" />
+
+        <!-- WASAPI exclusive: the mixer is bypassed -->
+        <text x="108" y="114" text-anchor="end">WASAPI exclusive</text>
+        <line x1="112" y1="110" x2="177" y2="110" />
+        <rect x="177" y="101" width="56" height="18" />
+        <line x1="233" y1="110" x2="373" y2="110" />
+        <rect x="373" y="101" width="34" height="18" />
+        <line x1="407" y1="110" x2="435" y2="110" />
+        <rect x="435" y="101" width="50" height="18" />
+        <line x1="485" y1="110" x2="510" y2="110" />
+        <circle cx="510" cy="110" r="3.5" class="node" />
+
+        <!-- WDM-KS: straight into the filter graph -->
+        <text x="108" y="146" text-anchor="end">WDM-KS</text>
+        <line x1="112" y1="142" x2="373" y2="142" />
+        <rect x="373" y="133" width="34" height="18" />
+        <line x1="407" y1="142" x2="435" y2="142" />
+        <rect x="435" y="133" width="50" height="18" />
+        <line x1="485" y1="142" x2="510" y2="142" />
+        <circle cx="510" cy="142" r="3.5" class="node" />
+
+        <!-- ASIO: the vendor's own driver, nothing of the Windows stack -->
+        <text x="108" y="178" text-anchor="end">ASIO</text>
+        <line x1="112" y1="174" x2="435" y2="174" />
+        <rect x="435" y="165" width="50" height="18" />
+        <line x1="485" y1="174" x2="510" y2="174" />
+        <circle cx="510" cy="174" r="3.5" class="node" />
+
+        <text x="112" y="205" class="muted">A box is a stage the audio passes through; a bare line is one it skips.</text>
+      </svg>
+      <figcaption>
+        The same hardware, five depths in. ASIO's driver is the manufacturer's own rather than the
+        WDM one the other four share, which is why it is the only lane that leaves the Windows audio
+        stack entirely.
+      </figcaption>
+    </figure>
+
+    <p>
+      That picture is the whole argument. Every stage in it either resamples, applies gain, or adds
+      something that is not your DUT — so the fewer boxes a lane passes through, the less of Windows
+      is in the measurement.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Host API</th>
+          <th>Resamples?</th>
+          <th>Bit-exact</th>
+          <th>Latency</th>
+          <th>Duplex</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>MME</strong></td>
+          <td>yes, always</td>
+          <td>no</td>
+          <td>50–200 ms</td>
+          <td>two independent streams</td>
+        </tr>
+        <tr>
+          <td><strong>DirectSound</strong></td>
+          <td>yes, always</td>
+          <td>no</td>
+          <td>20–60 ms</td>
+          <td>two independent streams</td>
+        </tr>
+        <tr>
+          <td><strong>WASAPI shared</strong></td>
+          <td>yes, to the mixer's rate</td>
+          <td>no</td>
+          <td>10–30 ms</td>
+          <td>two independent streams</td>
+        </tr>
+        <tr>
+          <td><strong>WASAPI exclusive</strong></td>
+          <td>no</td>
+          <td>yes</td>
+          <td>3–10 ms</td>
+          <td>two endpoints, one card's clock</td>
+        </tr>
+        <tr>
+          <td><strong>WDM-KS</strong></td>
+          <td>no</td>
+          <td>yes</td>
+          <td>1–5 ms</td>
+          <td>two KS filters, often refused</td>
+        </tr>
+        <tr>
+          <td><strong>ASIO</strong></td>
+          <td>no</td>
+          <td>yes</td>
+          <td>1–3 ms</td>
+          <td><strong>one device, one clock</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>What decides it</h3>
+    <p>Four things, in the order they hurt:</p>
+    <ol>
+      <li>
+        <strong>Hidden resampling.</strong> The disqualifier. The three lanes that pass through the
+        mixer accept <em>any</em> rate because they resample to whatever the converter is really
+        running at — so the rate you think you measured at is not the rate the ADC clocked at, your
+        frequency axis is wrong by an unknown ratio, and the resampler's own filter sits in the
+        response you are trying to measure. The tell is that these never refuse a rate; a bit-exact
+        path refuses the ones the hardware cannot do.
+      </li>
+      <li>
+        <strong>Things in the path that are not your DUT.</strong> The shared mixer applies the
+        volume slider, and <em>Enhancements</em>, <em>Loudness Equalization</em> and vendor EQ are
+        inserted alongside it. A mixer left at 0.8 gain reads as 1.9 dB of DUT loss.
+      </li>
+      <li>
+        <strong>One clock for capture and playback.</strong> See
+        <a href="#duplex">why that matters</a> — this is what ASIO alone guarantees.
+      </li>
+      <li>
+        <strong>Latency.</strong> Matters least here. Records are seconds long, so a 60 ms buffer
+        costs nothing; it is on the list only because high latency usually travels with a mixed path.
+      </li>
+    </ol>
+
+    <p class="manual-callout">
+      <strong>ASIO4ALL is not ASIO.</strong> It is a wrapper presenting an ASIO interface over
+      WDM-KS, so you get the API's shape without the vendor's clocking — the bottom lane's label on
+      the second-from-bottom lane's path. If a card offers only ASIO4ALL, treat it as WDM-KS.
+    </p>
+
+    <h3>Which to pick</h3>
     <table>
       <thead>
         <tr>
@@ -83,25 +279,32 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td><strong>WDM-KS</strong></td>
+          <td><strong>WASAPI</strong></td>
           <td>
-            Kernel streaming: unmixed and honest, but it does not always allow a duplex stream, and
-            its device names carry no interface name at all, so the app cannot tell which input
-            belongs with which output.
+            Yes, for a card with no ASIO driver — and always in exclusive mode, which the app always
+            requests. In shared mode Windows pins the card to the mixer's rate and resamples silently
+            — measured on one interface, shared mode offered only 48 kHz while exclusive gave 44.1,
+            48, 96 and 192 kHz. Needs <em>Allow applications to take exclusive control</em> left
+            ticked in Windows' own sound settings for that device.
           </td>
         </tr>
         <tr>
-          <td><strong>WASAPI</strong></td>
+          <td><strong>WDM-KS</strong></td>
           <td>
-            Only in exclusive mode, which the app always requests. In shared mode Windows pins the
-            card to the mixer's rate and resamples silently — measured on one interface, shared mode
-            offered only 48 kHz while exclusive gave 44.1, 48, 96 and 192 kHz.
+            Hidden unless <strong>Advanced</strong> is ticked. Kernel streaming is unmixed and
+            honest, and the lowest-latency of the Windows stack — but it does not always allow a
+            duplex stream, and its device names carry no interface name at all
+            (<code>In 1-2 (In 1-2)</code>), so the app cannot tell which input belongs with which
+            output. That is the one guarantee <a href="#duplex">picking the card first</a> exists to
+            make, and latency buys nothing on records seconds long, so WASAPI exclusive is preferred
+            wherever it works. Reach for this when it does not.
           </td>
         </tr>
         <tr>
           <td><strong>DirectSound</strong>, <strong>MME</strong></td>
           <td>
-            No. Both accept any rate by resampling in software, so the rate they report is not the
+            No — hidden unless <strong>Advanced</strong> is ticked. Both accept any rate by
+            resampling in software, so the rate they report is not the
             rate the converter ran at. The dialog warns if you pick one.
           </td>
         </tr>

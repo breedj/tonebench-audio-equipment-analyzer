@@ -122,13 +122,14 @@ public static class SoundCardCatalog
             int inputChannels = inputChannelOffset + 2;
             int outputChannels = outputChannelOffset + 2;
 
-            if (input.MaxInputChannels < inputChannels || output.MaxOutputChannels < outputChannels)
+            if (SoundCardEnumerator.ChannelPairProblem(
+                    input, inputChannelOffset, output, outputChannelOffset) is { } channelProblem)
             {
                 return new SoundCardProbe(
                     [], SoundCardEnumerator.Pairing(input, output).ToString(),
                     SoundCardEnumerator.Trust(input.HostApiKind).ToString(),
                     SoundCardEnumerator.Trust(output.HostApiKind).ToString(),
-                    "That channel pair is past what the card has.");
+                    channelProblem);
             }
 
             var rates = enumerator.SupportedRatesHz(

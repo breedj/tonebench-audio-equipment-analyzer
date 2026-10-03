@@ -235,4 +235,66 @@ public class SoundCardEnumeratorTests
             SoundCardEnumerator.PreferenceOf(SoundCardHostApiKind.WdmKs)
             < SoundCardEnumerator.PreferenceOf(SoundCardHostApiKind.Wasapi));
     }
+
+    // ---- the channel pair ----------------------------------------------------------------------
+
+    private static SoundCardDeviceDescriptor Input(string name, int channels) => Device(name, inputs: channels);
+
+    private static SoundCardDeviceDescriptor Output(string name, int channels) => Device(name, inputs: 0, outputs: channels);
+
+    [Theory]
+    [InlineData(0, "1/2")]
+    [InlineData(2, "3/4")]
+    [InlineData(6, "7/8")]
+    public void PairLabel_IsHowTheDialogWritesIt(int offset, string expected) =>
+        Assert.Equal(expected, SoundCardEnumerator.PairLabel(offset));
+
+    [Fact]
+    public void APairTheDevicesHave_IsNoProblem()
+    {
+        Assert.Null(SoundCardEnumerator.ChannelPairProblem(
+            Input("MOTU M Series", 8), 2, Output("MOTU M Series", 4), 2));
+    }
+
+    /// <summary>
+    /// The message has to name the pair, the count it needs and the count the device has. The one
+    /// it replaced -- "That channel pair is past what the card has." -- named none of the three,
+    /// and the control that would answer it is usually not on screen: the dialog shows a
+    /// channel-pair dropdown only where there is more than one pair to choose, so a two-channel
+    /// card displays this beside nothing that mentions channels.
+    /// </summary>
+    [Fact]
+    public void AnInputPairPastTheDevice_NamesThePairAndBothCounts()
+    {
+        string? problem = SoundCardEnumerator.ChannelPairProblem(
+            Input("Microphone (Realtek(R) Audio)", 2), 2, Output("Speakers", 2), 0);
+
+        Assert.Equal(
+            "Channels 3/4 need 4 input channels and 'Microphone (Realtek(R) Audio)' has 2.",
+            problem);
+    }
+
+    [Fact]
+    public void AnOutputPairPastTheDevice_SaysOutput()
+    {
+        string? problem = SoundCardEnumerator.ChannelPairProblem(
+            Input("In", 8), 0, Output("Speakers", 2), 4);
+
+        Assert.Equal("Channels 5/6 need 6 output channels and 'Speakers' has 2.", problem);
+    }
+
+    /// <summary>
+    /// Both sides at once, rather than whichever was tested first: a pair is chosen per direction,
+    /// and fixing the input only to be told about the output is two trips through one dead end.
+    /// </summary>
+    [Fact]
+    public void WhenBothSidesAreShort_BothAreNamed()
+    {
+        string? problem = SoundCardEnumerator.ChannelPairProblem(
+            Input("In", 2), 2, Output("Out", 2), 2);
+
+        Assert.Equal(
+            "Channels 3/4 need 4 input channels and 'In' has 2, and channels 3/4 need 4 output channels and 'Out' has 2.",
+            problem);
+    }
 }

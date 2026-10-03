@@ -103,6 +103,46 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
             string.Equals(d.HostApiName, hostApiName, StringComparison.OrdinalIgnoreCase)
             && string.Equals(d.Name, deviceName, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>How a channel pair is written in the UI: an offset of 2 is "3/4".</summary>
+    public static string PairLabel(int channelOffset) => $"{channelOffset + 1}/{channelOffset + 2}";
+
+    /// <summary>
+    /// Why a channel pair cannot be used on these two devices, or null when it can.
+    ///
+    /// <para>It names the pair, the count it needs and the count the device has, because the
+    /// control that would fix it is usually <b>not on screen</b>: the dialog shows a channel-pair
+    /// dropdown only where there is more than one pair to choose, so a stale offset carried onto a
+    /// two-channel card produces an error about channels beside no channel control at all. The
+    /// message it replaced — "That channel pair is past what the card has." — named neither the
+    /// pair nor either count, and read as the card being at fault.</para>
+    ///
+    /// <para>Both sides are reported when both are short, rather than the first one found: a pair
+    /// is chosen per direction, and fixing the input only to be told about the output is two trips
+    /// through the same dead end.</para>
+    /// </summary>
+    public static string? ChannelPairProblem(
+        SoundCardDeviceDescriptor input, int inputChannelOffset,
+        SoundCardDeviceDescriptor output, int outputChannelOffset)
+    {
+        string? inputProblem = input.MaxInputChannels < inputChannelOffset + 2
+            ? $"channels {PairLabel(inputChannelOffset)} need {inputChannelOffset + 2} input channels and '{input.Name}' has {input.MaxInputChannels}"
+            : null;
+
+        string? outputProblem = output.MaxOutputChannels < outputChannelOffset + 2
+            ? $"channels {PairLabel(outputChannelOffset)} need {outputChannelOffset + 2} output channels and '{output.Name}' has {output.MaxOutputChannels}"
+            : null;
+
+        return (inputProblem, outputProblem) switch
+        {
+            (null, null) => null,
+            (not null, null) => Capitalise($"{inputProblem}."),
+            (null, not null) => Capitalise($"{outputProblem}."),
+            _ => Capitalise($"{inputProblem}, and {outputProblem}."),
+        };
+    }
+
+    private static string Capitalise(string text) => char.ToUpperInvariant(text[0]) + text[1..];
+
     /// <summary>Whether the two devices look like one physical interface. Advisory — see <see cref="SoundCardPairing.Unknown"/>.</summary>
     public static SoundCardPairing Pairing(SoundCardDeviceDescriptor input, SoundCardDeviceDescriptor output)
     {

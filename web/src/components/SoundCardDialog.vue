@@ -2,6 +2,15 @@
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import type { SoundCardConfig, VoltageEntryUnitName } from '../api/client'
 import { useSoundCard } from '../composables/useSoundCard'
+import { useManual } from '../manual/useManual'
+import {
+  buildCards,
+  clampChannelOffset,
+  keyOf,
+  reselectCardKey,
+  savedCardNeedsAdvanced,
+  splitKey,
+} from '../soundcard/cardList'
 import Modal from './Modal.vue'
 
 /**
@@ -41,6 +50,8 @@ const {
   showControlPanel,
   devicesLoading,
 } = useSoundCard()
+
+const { openManual } = useManual()
 
 /** ARTA's levels, and the server's. */
 const OUTPUT_LEVELS = [-3, -6, -9, -12, -20]
@@ -110,11 +121,6 @@ function barLabel(dbFs: number | null | undefined) {
   return dbFs == null || !Number.isFinite(dbFs) ? '—' : `${dbFs.toFixed(1)} dBFS`
 }
 
-/** Host API and name together: the same device name exists under several host APIs, and they are different devices. */
-function keyOf(hostApi: string, name: string) {
-  return `${hostApi}\u0000${name}`
-}
-
 /** The card a saved device belongs to, found in the listing rather than re-derived here. */
 function cardKeyFor(hostApi: string, deviceName: string) {
   const match = [...(inventory.value?.inputs ?? []), ...(inventory.value?.outputs ?? [])].find(
@@ -123,10 +129,16 @@ function cardKeyFor(hostApi: string, deviceName: string) {
   return match ? keyOf(match.hostApi, match.interfaceName) : ''
 }
 
-function splitKey(key: string) {
-  const [hostApi = '', name = ''] = key.split('\u0000')
-  return { hostApi, name }
-}
+/**
+ * TEMPORARY — shows the full card list this picker offered before 2026-10-02: every host API, one
+ * entry per (API, interface), 35 entries on this bench for four pieces of hardware. It exists only
+ * so the filtered list can be checked against real cards, and comes out once that is done, along
+ * with <c>buildCards</c>' own <c>advanced</c> parameter.
+ *
+ * <p>Not persisted, and off on every open, because the filtered list is the one meant to be used —
+ * except where the saved card is only reachable in the full one (see the open watcher).</p>
+ */
+const advanced = ref(false)
 
 /**
  * The cards the machine has, each a host API and an interface within it.
@@ -135,36 +147,18 @@ function splitKey(key: string) {
  * hardware — and therefore one clock. Two cards run on two, and the drift between them is not
  * reported as a fault but as DUT response.
  */
-const cards = computed(() => {
-  const seen = new Map<
-    string,
-    { key: string; hostApi: string; interfaceName: string; trust: string; duplex: boolean; preference: number; hasControlPanel: boolean }
-  >()
+const cards = computed(() =>
+  buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], advanced.value),
+)
 
-  for (const o of [...(inventory.value?.inputs ?? []), ...(inventory.value?.outputs ?? [])]) {
-    const key = keyOf(o.hostApi, o.interfaceName)
-    const existing = seen.get(key)
-    if (existing) {
-      existing.duplex ||= o.isFullDuplex
-      existing.hasControlPanel ||= o.hasControlPanel
-      continue
-    }
-
-    seen.set(key, {
-      key,
-      hostApi: o.hostApi,
-      interfaceName: o.interfaceName,
-      trust: o.trust,
-      duplex: o.isFullDuplex,
-      preference: o.preference,
-      hasControlPanel: o.hasControlPanel,
-    })
-  }
-
-  return [...seen.values()].sort(
-    (a, b) => a.preference - b.preference || a.interfaceName.localeCompare(b.interfaceName),
-  )
-})
+/** How many entries Advanced would add, so the checkbox can say what it is for. */
+const hiddenCardCount = computed(() =>
+  Math.max(
+    0,
+    buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], true).length -
+      buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], false).length,
+  ),
+)
 
 const selectedCard = computed(() => cards.value.find((c) => c.key === form.cardKey) ?? null)
 
@@ -243,6 +237,15 @@ watch(
     stopLevels?.()
     stopLevels = watchLevels()
     if (config.value) {
+      // A card saved under a host API the default list hides still resolves on the server — the
+      // config stores names, not indices — but it would be missing from its own dropdown, which
+      // reads as the card having vanished. Show the full list for that case instead.
+      advanced.value = savedCardNeedsAdvanced(
+        inventory.value?.inputs ?? [],
+        inventory.value?.outputs ?? [],
+        config.value.inputHostApi,
+        config.value.inputDeviceName,
+      )
       form.cardKey = cardKeyFor(config.value.inputHostApi, config.value.inputDeviceName)
       form.inputKey = keyOf(config.value.inputHostApi, config.value.inputDeviceName)
       form.outputKey = keyOf(config.value.outputHostApi, config.value.outputDeviceName)
@@ -254,6 +257,36 @@ watch(
     await reprobe()
   },
   { immediate: true },
+)
+
+// Toggling the list must not leave the selection pointing outside it: both device lists filter on
+// the card key, so a card that is no longer offered survives as a blank Input and a blank Output.
+watch(
+  () => advanced.value,
+  () => {
+    form.cardKey = reselectCardKey(
+      form.cardKey,
+      inventory.value?.inputs ?? [],
+      inventory.value?.outputs ?? [],
+      advanced.value,
+    )
+  },
+)
+
+// A channel pair belongs to the device it was chosen on. Carried onto one with fewer channels it
+// asks for channels that do not exist, and because the pair dropdowns are rendered only where there
+// is more than one pair to pick, a two-channel card then shows an error about channels with no
+// channel control on screen to answer it -- see clampChannelOffset. Clamped on the device rather
+// than on the card, since a card's devices need not all have the same width.
+watch(
+  () => [form.inputKey, form.outputKey].join('|'),
+  () => {
+    form.inputChannelOffset = clampChannelOffset(
+      form.inputChannelOffset, selectedInput.value?.maxInputChannels ?? 0)
+    form.outputChannelOffset = clampChannelOffset(
+      form.outputChannelOffset, selectedOutput.value?.maxOutputChannels ?? 0)
+  },
+  { flush: 'sync' },
 )
 
 // Re-probed on every change of either side or either offset, because the answer depends on all four
@@ -403,15 +436,28 @@ function mv(value: number | null | undefined) {
       <section class="flex flex-col gap-2">
         <div class="flex items-center justify-between">
           <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Device</h3>
-          <button
-            type="button"
-            class="rounded bg-sky-600 px-2 py-0.5 text-[11px] text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
-            :disabled="devicesLoading"
-            title="Re-read the device list. A newly plugged ASIO interface needs the app restarted — PortAudio reads its list once at startup."
-            @click="loadDevices(true)"
-          >
-            {{ devicesLoading ? 'Refreshing…' : 'Refresh' }}
-          </button>
+          <span class="flex items-center gap-3">
+            <!-- TEMPORARY, removed once the filtered list has been checked against real cards. -->
+            <label
+              class="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300"
+              :title="
+                `Shows every host API PortAudio enumerates, one entry per interface within each — ${hiddenCardCount} more than the list above. ` +
+                'Normally hidden: DirectSound and MME resample in software, so the rate they report is not the rate the converter ran at, and WDM-KS device names carry no interface name, so an input and an output cannot be shown to be the same card.'
+              "
+            >
+              <input v-model="advanced" type="checkbox" class="h-3.5 w-3.5" />
+              Advanced<template v-if="hiddenCardCount > 0"> (+{{ hiddenCardCount }})</template>
+            </label>
+            <button
+              type="button"
+              class="rounded bg-sky-600 px-2 py-0.5 text-[11px] text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
+              :disabled="devicesLoading"
+              title="Re-read the device list. A newly plugged ASIO interface needs the app restarted — PortAudio reads its list once at startup."
+              @click="loadDevices(true)"
+            >
+              {{ devicesLoading ? 'Refreshing…' : 'Refresh' }}
+            </button>
+          </span>
         </div>
 
         <!-- The card first, the channels second. Picking the interface is what guarantees both
@@ -855,7 +901,24 @@ function mv(value: number | null | undefined) {
 
       <p v-if="error" class="text-red-600 dark:text-red-400">{{ error }}</p>
 
-      <div class="flex justify-end">
+      <div class="flex items-center justify-end gap-2">
+        <!-- The manual rather than more prose in here: this dialog is already the longest in the
+             app, and the host API table and the two calibration procedures are reference material
+             that is read once. Its own <dialog> opens into the top layer, so it lands over this one
+             and leaves the settings behind it untouched — which is the point, since most of what
+             the page explains is what to pick here. -->
+        <button
+          type="button"
+          class="mr-auto flex items-center gap-1.5 rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          title="Using a sound card: host APIs, both calibration steps, and what the figures mean."
+          @click="openManual('sound-card')"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+          </svg>
+          Manual
+        </button>
         <button
           type="button"
           class="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-100 dark:border-neutral-700"

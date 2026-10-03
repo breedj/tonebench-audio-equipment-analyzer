@@ -49,6 +49,172 @@ const { showPage } = useManual()
       waveform behind any single point can be inspected afterwards without re-running the sweep.
     </p>
 
+    <h2>How the figures are calculated</h2>
+    <p>
+      The same arithmetic produces the THD tiles on the
+      <button type="button" class="manual-link" @click="showPage('fft-spectrum')">FFT analysis</button>
+      screen and every point of the
+      <button type="button" class="manual-link" @click="showPage('thd-vs-amplitude')">amplitude sweep</button>;
+      only the axis differs.
+    </p>
+
+    <h3>Measuring one tone</h3>
+    <p>
+      Each point is one averaged record, Hann-windowed. The analyzer locates the fundamental as the
+      largest bin above the <strong>Fundamental min search</strong> frequency — 200 Hz on the FFT
+      screen, so mains hum is never mistaken for the tone, which a sweep lowers to half its own
+      start frequency, or a run from 20 Hz would fail to find its own tone for the whole bottom
+      decade — then looks for each harmonic at an integer multiple of that bin. The fundamental and
+      every harmonic are measured by exactly the same three steps:
+    </p>
+    <ol>
+      <li>locate the peak within <strong>±2 bins</strong> of the expected bin, since clock drift moves a tone by a bin or two;</li>
+      <li>sum the power spectral density over <strong>±3 bins</strong> around it — the tone's skirt;</li>
+      <li>subtract the local noise floor from that sum.</li>
+    </ol>
+    <p>
+      Four details there decide whether the number means anything, and none of them is arbitrary.
+    </p>
+    <ul>
+      <li>
+        The skirt is summed in the <strong>power (PSD) domain</strong>, not the amplitude domain. A
+        coherent tone under a Hann window spreads real energy into its neighbouring bins, and only
+        the PSD sum — which is the <em>S2</em> normalisation, the Parseval-safe one — adds that back
+        to the true amplitude. An amplitude-domain (<em>S1</em>) sum double-counts the spread and
+        reads high.
+      </li>
+      <li>
+        The floor subtracted is the <strong>median</strong> of 24 bins either side of the tone,
+        skipping a 4-bin guard band so the window's own mainlobe and the tone's phase-noise skirt
+        are not counted as noise. Median rather than mean, so an adjacent spur or the next harmonic
+        cannot inflate it — then scaled by <strong>1 ÷ ln 2</strong>, because PSD noise bins are
+        exponentially distributed, for which median = ln 2 × mean, and it is the mean that has to
+        come off a sum of bins. Omitting that scaling under-subtracts by 1.6 dB on every harmonic.
+        Omitting the subtraction entirely is far worse: ±3 bins across eight harmonics integrates 56
+        bins of noise floor, and on the bench a signal with no harmonic content at all reported
+        THD −106 dB.
+      </li>
+      <li>
+        The located peak is only believed over the expected bin if it stands <strong>6 dB</strong>
+        above that floor. Taking the largest of five bins of pure noise is a biased estimator — for
+        exponentially distributed noise power the maximum of five bins averages 2.28× the mean, i.e.
+        +3.6 dB of selection bias — so unchecked peak-picking invents a harmonic wherever there is
+        none.
+      </li>
+      <li>
+        A harmonic whose power comes out at zero or below after the subtraction is reported at
+        <strong>a tenth of the floor amplitude</strong>, 20 dB under it. Something finite is needed
+        for dBV and dBc to stay renderable, and a tenth contributes 1 % of a single noise bin's
+        power to the THD sum — nothing — while putting the reading unmistakably in “below the floor”
+        territory.
+      </li>
+    </ul>
+    <p>
+      How many harmonics are counted is the <strong>Harmonic count</strong> in the FFT screen's
+      analysis settings, twelve by default. A sweep counts them up to <strong>Nyquist</strong>
+      rather than to the 20 kHz measurement band the FFT screen uses: bounded at 20 kHz, every
+      harmonic of a point above about 7 kHz would be out of band and THD would read 0 across the
+      whole top of the sweep.
+    </p>
+
+    <h3>From harmonics to THD</h3>
+    <p>
+      Every figure on the chart is a voltage ratio against the fundamental of the same capture,
+      where <em>V1</em> is the fundamental and <em>Vn</em> the <em>n</em>th harmonic:
+    </p>
+    <table>
+      <tbody>
+        <tr>
+          <td>THD</td>
+          <td><code>√(V2² + V3² + … + VN²) ÷ V1</code> — every counted harmonic, power-summed.</td>
+        </tr>
+        <tr>
+          <td>D2 … D5</td>
+          <td><code>Vn ÷ V1</code> — one harmonic each, so they can be read individually.</td>
+        </tr>
+        <tr>
+          <td>D6+</td>
+          <td>
+            <code>√(V6² + V7² + …) ÷ V1</code> — everything from the sixth up, rolled into one trace
+            so the chart does not carry eleven near-identical lines down in the grass.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Power-summed rather than “the largest of them”, because that is what makes the buckets add
+      back up to the total: <code>THD² = D2² + D3² + D4² + D5² + D6+²</code>.
+    </p>
+
+    <h3>Percent and dB</h3>
+    <p>
+      <strong>Percent</strong> is that ratio × 100 — the distortion as a fraction of what the DUT
+      put out. <strong>dB</strong> is the same ratio in decibels, <code>20·log₁₀(ratio)</code>, i.e.
+      <code>20·log₁₀(percent ÷ 100)</code>, <em>plus the DUT's gain at that point</em> — see
+      <strong>Units</strong> under Display panel below for why the gain is added and what it makes
+      the axis mean. The ratio alone runs:
+    </p>
+    <table>
+      <tbody>
+        <tr><td>1 %</td><td>−40 dB</td></tr>
+        <tr><td>0.1 %</td><td>−60 dB</td></tr>
+        <tr><td>0.01 %</td><td>−80 dB</td></tr>
+        <tr><td>0.001 %</td><td>−100 dB</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Through an amplifier with 26 dB of gain those same four readings are drawn at −14, −34, −54
+      and −74 dB. So a figure read off the dB axis is converted back with
+      <code>percent = 100 × 10^((dB − Magnitude) ÷ 20)</code>, Magnitude being that point's own
+      value on the Magn trace.
+    </p>
+
+    <h3>Frequency-normalized</h3>
+    <p>
+      Under <strong>Frequency normalized</strong> each harmonic is divided by the fundamental the
+      same sweep measured <em>at that harmonic's own frequency</em> instead of at the stimulus
+      frequency:
+    </p>
+    <p><code>nTHD(f) = √( Σ A<sub>n</sub>(f)² ÷ A₁(n·f)² )</code></p>
+    <p>
+      so the DUT's linear response — a roll-off, a resonance, a reflection — drops out and what is
+      left is the nonlinearity. A conventional THD divides everything by A₁(f), which on a device
+      with a 6 dB/octave slope reads the second harmonic 6 dB wrong and the third 9.5 dB wrong for
+      reasons that have nothing to do with distortion. The reference is read off the sweep's own
+      fundamental trace, interpolated linearly in dB over log frequency — the straight line a
+      first-order roll-off draws on a Bode plot, so a 6 dB/octave slope reads exactly right between
+      grid points and a resonance is at worst cut across by a chord. That is why the sweep carries
+      on past the frequency you asked for, to five times it or 98 % of Nyquist, whichever comes
+      first: without those extra points the top of the band has nothing to divide by. An order whose
+      <em>n</em>·<em>f</em> still falls outside the measured span is left out of the sum and drawn as
+      a gap rather than guessed at, and the total is withheld entirely when even the second harmonic
+      has no reference — a “THD” made of whichever harmonics happened to be available is not a
+      figure. Both sets are stored, so a normalized run can still be read conventionally.
+    </p>
+
+    <h3>The noise floor trace</h3>
+    <p>
+      With <strong>Measure noise floor first</strong> ticked, one capture is taken with the
+      generator off before the sweep begins, and the trace is the <em>mean per-bin amplitude</em>
+      across the measurement band, expressed as a percentage of each point's own fundamental. It is
+      a per-bin figure, which is why that capture always uses the largest FFT the sweep's sample
+      rate allows whatever size the points themselves use: a per-bin level falls as the bin narrows,
+      so under adaptive resolution a floor taken at each point's own size would climb 16.8 dB from
+      20 Hz to 20 kHz in 3.4 dB steps with the real noise perfectly constant — and on a DUT whose
+      distortion sits near the residual, that false slope crosses the distortion traces part-way up
+      the sweep.
+    </p>
+
+    <h3>Also measured, not plotted</h3>
+    <p>
+      Every point additionally stores <strong>THD+N</strong> — everything in the measurement band
+      except the fundamental's notch, over V1, where the notch is half an octave either side
+      (0.71·f to 1.41·f, always clear of the second harmonic at every FFT size) — and
+      <strong>SNR</strong>, the same integral with each harmonic's own ±3 bins taken out as well, so
+      distortion is not counted as noise. Neither is drawn on this chart or written to the CSV; they
+      are in the stored result.
+    </p>
+
     <h2>Running it</h2>
     <p>
       <strong>RUN SWEEP</strong> walks the points once and stops on its own.

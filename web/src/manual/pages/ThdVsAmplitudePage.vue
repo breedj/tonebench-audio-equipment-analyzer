@@ -32,7 +32,11 @@ const { showPage } = useManual()
       and its harmonics — the same per-point data as the frequency sweep: THD, D2 through D5, D6+,
       the fundamental level, and optionally the generator-off residual. The x axis is the level
       rather than the frequency, and can be read as the DUT's output voltage, its output power, or
-      the voltage that went in.
+      the voltage that went in. How a tone's amplitude is measured, how the harmonics become THD,
+      D2–D5 and D6+, and what the percent and dB axes each mean are set out under
+      <button type="button" class="manual-link" @click="showPage('thd-vs-frequency')">
+        THD vs frequency
+      </button>; all of it applies here unchanged.
     </p>
     <p>
       The knee is the point of the whole plot. Below it, THD is usually flat or falling; at it, the

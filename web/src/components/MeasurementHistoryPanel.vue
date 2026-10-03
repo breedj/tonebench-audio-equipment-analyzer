@@ -113,28 +113,32 @@ async function onConfirmDelete(item: MeasurementSummary) {
             </td>
             <td class="py-1 text-right">
               <div class="flex justify-end gap-1.5 text-xs whitespace-nowrap">
-                <button
-                  type="button"
-                  class="rounded border px-2 py-1 btn-action"
-                  @click="onEdit(item)"
-                >
-                  Edit
-                </button>
-                <a
-                  :href="api.measurementCsvExportUrl(item.resultId)"
-                  download
-                  class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
-                >
-                  CSV
-                </a>
-                <button
-                  type="button"
-                  class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
-                  title="A PDF report of this stored result."
-                  @click="emit('report', item.resultId)"
-                >
-                  Report
-                </button>
+                <!-- Hidden while this row is awaiting a delete confirmation, so Confirm/Cancel
+                     are the only things clickable on it. -->
+                <template v-if="pendingDeleteId !== item.resultId">
+                  <button
+                    type="button"
+                    class="rounded border px-2 py-1 btn-action"
+                    @click="onEdit(item)"
+                  >
+                    Edit
+                  </button>
+                  <a
+                    :href="api.measurementCsvExportUrl(item.resultId)"
+                    download
+                    class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                  >
+                    CSV
+                  </a>
+                  <button
+                    type="button"
+                    class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                    title="A PDF report of this stored result."
+                    @click="emit('report', item.resultId)"
+                  >
+                    Report
+                  </button>
+                </template>
                 <template v-if="pendingDeleteId === item.resultId">
                   <button
                     type="button"

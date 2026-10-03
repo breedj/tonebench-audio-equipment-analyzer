@@ -436,7 +436,7 @@ async function clearStoredCalibration() {
 
               <button
                 type="button"
-                class="w-fit rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                class="w-fit rounded bg-neutral-900 px-2 py-1 text-xs text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
                 title="Removes the stored standards and unlocks the reference resistor. Measurements using their own calibration are unaffected."
                 @click="clearStoredCalibration"
               >

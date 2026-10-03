@@ -1297,11 +1297,17 @@ export interface FrequencyResponseStatus {
 /** What an impulse-response run divides the captured response by. Mirrors `ImpulseReferenceMode`. */
 export type ImpulseReferenceModeName = 'None' | 'RightChannel' | 'StoredLoopback'
 
-/** Gate windows the impulse-response panel offers. Rectangular is a real choice: a bare cut isolates a reflection exactly. */
+/**
+ * Gate windows the impulse-response panel offers. Rectangular is a real choice: a bare cut
+ * isolates a reflection exactly. The rest are a ladder of taper, listed in that order — must stay
+ * in step with `ImpulseResponseRequest.SupportedGateWindows`, which validates the choice.
+ */
 export const IMPULSE_GATE_WINDOWS: { value: WindowType; label: string }[] = [
   { value: 'Rectangular', label: 'Rectangular (bare cut)' },
   { value: 'Hann', label: 'Hann' },
   { value: 'BlackmanHarris', label: 'Blackman-Harris' },
+  { value: 'Kaiser5', label: 'Kaiser 5' },
+  { value: 'Kaiser7', label: 'Kaiser 7' },
 ]
 
 export const IMPULSE_REFERENCE_MODES: { value: ImpulseReferenceModeName; label: string }[] = [
@@ -1657,7 +1663,18 @@ export interface AcquisitionStartRequest {
   singleShot?: boolean
 }
 
-export type WindowType = 'Rectangular' | 'Hann' | 'Hamming' | 'BlackmanHarris' | 'FlatTop'
+/**
+ * Mirrors `Qa403.Dsp.WindowType`. The Kaiser numbers are ARTA's alpha, i.e. beta = pi*alpha —
+ * see the convention note on `Window` server-side before adding or renaming one.
+ */
+export type WindowType =
+  | 'Rectangular'
+  | 'Hann'
+  | 'Hamming'
+  | 'BlackmanHarris'
+  | 'FlatTop'
+  | 'Kaiser5'
+  | 'Kaiser7'
 export type AveragingMode = 'Off' | 'Linear' | 'Exponential'
 
 // Mirrors Qa403.App.Streaming.SpectrumPipelineOptions. Server serializes/accepts WindowType and

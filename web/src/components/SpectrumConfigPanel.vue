@@ -25,6 +25,11 @@ const WINDOWS: { value: WindowType; label: string }[] = [
   { value: 'Hann', label: 'Hann' },
   { value: 'Hamming', label: 'Hamming' },
   { value: 'BlackmanHarris', label: 'Blackman-Harris' },
+  // Kaiser alpha=5 and alpha=7 (beta = pi*alpha, ARTA's naming): 2.28 and 2.68 bins of ENBW at
+  // -120 and -171 dB of sidelobe suppression, i.e. the two rungs between Blackman-Harris and
+  // Flat Top. Listed in ENBW order with the rest of the tail.
+  { value: 'Kaiser5', label: 'Kaiser 5' },
+  { value: 'Kaiser7', label: 'Kaiser 7' },
   { value: 'FlatTop', label: 'Flat Top' },
 ]
 

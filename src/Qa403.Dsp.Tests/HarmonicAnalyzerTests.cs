@@ -21,11 +21,27 @@ public class HarmonicAnalyzerTests
         return (spectrum, w.Sums);
     }
 
+    /// <summary>
+    /// The bound is per window because <see cref="HarmonicAnalyzer.DefaultSkirtHalfWidthBins"/> is
+    /// a fixed +/-3 bins while a window's mainlobe is not, so each row below is really a statement
+    /// about how much of a coherent tone that window leaves outside the skirt the analyzer sums.
+    /// Rectangular and Hann put every last bit of it within +/-1 bin and recover the amplitude to
+    /// numerical precision; the rest do not, and the figures are the measured shortfall rather
+    /// than round numbers picked to make the test pass.
+    /// </summary>
     [Theory]
-    [InlineData(WindowType.Rectangular)]
-    [InlineData(WindowType.Hann)]
-    [InlineData(WindowType.FlatTop)]
-    public void Analyze_FundamentalOnly_ReportsExactAmplitudeAndZeroDbc(WindowType windowType)
+    [InlineData(WindowType.Rectangular, 1e-6)]
+    [InlineData(WindowType.Hann, 1e-6)]
+    // 5-term cosine sum: offsets +/-4 fall outside the skirt. ~1.4e-5 Vrms short.
+    [InlineData(WindowType.FlatTop, 1e-4)]
+    // Kaiser is not a cosine sum, so its mainlobe decays onto every bin rather than stopping at a
+    // term count: ~5.1 bins wide at alpha=5 and ~7.1 at alpha=7. Even so the energy past +/-3 bins
+    // is 8e-6 and 4e-4 of the total -- 3.0e-6 and 1.5e-4 Vrms, i.e. Kaiser7 costs about ten times
+    // what FlatTop does and is still under 0.002 dB. That is the number to check if a Kaiser THD
+    // reading is ever suspected of reading low.
+    [InlineData(WindowType.Kaiser5, 1e-5)]
+    [InlineData(WindowType.Kaiser7, 2e-4)]
+    public void Analyze_FundamentalOnly_ReportsExactAmplitudeAndZeroDbc(WindowType windowType, double maxAbsErrorVrms)
     {
         var (spectrum, sums) = ForwardWindowed(windowType, (1.0, FundamentalBin));
         var psdBuffer = new double[spectrum.Length];
@@ -38,13 +54,8 @@ public class HarmonicAnalyzerTests
         Assert.Equal(1, harmonics[0].Order);
         Assert.Equal(FundamentalBin, harmonics[0].Bin);
 
-        // FlatTop's 5-term mainlobe spreads a coherent tone's energy wider than the default
-        // +/-3 bin skirt captures (Rectangular/Hann's energy is fully within +/-1 bin, so they
-        // recover the exact amplitude to numerical precision) — a few 1e-4 Vrms of truncated
-        // tail is expected there, not a bug.
-        double tolerance = windowType == WindowType.FlatTop ? 1e-4 : 1e-6;
         Assert.True(
-            Math.Abs(1.0 / Math.Sqrt(2.0) - harmonics[0].AmplitudeVrms) < tolerance,
+            Math.Abs(1.0 / Math.Sqrt(2.0) - harmonics[0].AmplitudeVrms) < maxAbsErrorVrms,
             $"{windowType}: expected ~{1.0 / Math.Sqrt(2.0):F6} Vrms, got {harmonics[0].AmplitudeVrms:F6}");
         Assert.Equal(0.0, harmonics[0].Dbc, 9);
     }

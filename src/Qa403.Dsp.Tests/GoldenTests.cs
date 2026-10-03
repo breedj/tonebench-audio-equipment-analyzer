@@ -21,6 +21,8 @@ public class GoldenTests
         WindowType.Hamming,
         WindowType.BlackmanHarris,
         WindowType.FlatTop,
+        WindowType.Kaiser5,
+        WindowType.Kaiser7,
     ];
 
     private static readonly IFftBackend[] AllBackends = [new FftSharpBackend(), new MathNetBackend()];

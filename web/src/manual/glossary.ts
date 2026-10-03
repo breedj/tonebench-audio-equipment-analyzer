@@ -635,9 +635,9 @@ export const GLOSSARY: GlossaryEntry[] = [
   },
   {
     term: 'Window',
-    aliases: ['taper', 'Hamming', 'Blackman-Harris', 'Rectangular'],
+    aliases: ['taper', 'Hamming', 'Blackman-Harris', 'Rectangular', 'Kaiser', 'Kaiser 5', 'Kaiser 7'],
     definition:
-      'A taper applied to a record before the FFT, so that its two ends meet and a tone does not smear across the whole spectrum. Every window trades the width of a tone’s main lobe against how quickly its skirts fall away; rectangular means no taper at all, which is exactly right when the record already holds a whole number of cycles — as a periodic chirp does — and wrong otherwise.',
+      'A taper applied to a record before the FFT, so that its two ends meet and a tone does not smear across the whole spectrum. Every window trades the width of a tone’s main lobe against how quickly its skirts fall away; rectangular means no taper at all, which is exactly right when the record already holds a whole number of cycles — as a periodic chirp does — and wrong otherwise. The Kaiser windows are named by their α (β = πα), so Kaiser 5 and Kaiser 7 push the skirts to −120 and −171 dB at 2.28 and 2.68 bins of noise bandwidth — two rungs beyond Blackman-Harris.',
     see: ['fft-spectrum'],
   },
   {

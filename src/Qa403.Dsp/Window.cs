@@ -10,6 +10,23 @@ namespace Qa403.Dsp;
 /// Coefficient arrays are cached per (type, length): building a window and summing it is
 /// the only allocation, and every later call for the same (type, length) is a dictionary
 /// lookup — no allocation on the hot path.
+///
+/// <para><b>The Kaiser windows are parameterised the way ARTA names them: the number is α, and
+/// β = πα.</b> So <see cref="WindowType.Kaiser5"/> is β = 5π ≈ 15.708 and
+/// <see cref="WindowType.Kaiser7"/> is β = 7π ≈ 21.991 — Harris's 1978 convention, not the bare β
+/// that numpy, scipy and MATLAB take. The distinction is not cosmetic: read as β, "Kaiser 5" would
+/// have a 1.359-bin ENBW and −37 dB sidelobes — *narrower* in the skirts than Hann, and the
+/// opposite of the low-leakage window the name is asked for. The πα reading gives 2.283 bins at
+/// −120 dB and 2.685 at −171 dB, which is what ARTA recommends these two for ("for measuring
+/// harmonic and intermodulation distortions use the Kaiser5 … to get 24-bit resolution use
+/// Kaiser7").</para>
+///
+/// <para>Which reading is right is settled by ARTA's own Table 2.2: its Kaiser7 ENBW of 2.6849
+/// bins is what β = 7π produces, to four decimals. Its Kaiser5 entry of 2.2183 matches nothing —
+/// β = 5π gives 2.2830, and 2.2183 would need α = 4.708 — so that one is an error in their table,
+/// not evidence of a second convention. Pinned by
+/// <c>WindowTests.Kaiser_HasTheEnbwOfTheAlphaTimesPiConvention</c>, which exists so that a later
+/// "fix" to the bare-β reading fails loudly instead of quietly changing every stored ENBW.</para>
 /// </summary>
 public static class Window
 {
@@ -78,6 +95,14 @@ public static class Window
                 FillCosineSum(w, 0.21557895, 0.41663158, 0.277263158, 0.083578947, 0.006947368);
                 break;
 
+            case WindowType.Kaiser5:
+                FillKaiser(w, alpha: 5.0);
+                break;
+
+            case WindowType.Kaiser7:
+                FillKaiser(w, alpha: 7.0);
+                break;
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(type));
         }
@@ -91,6 +116,68 @@ public static class Window
         }
 
         return new WindowCoefficients(type, w, new WindowSums(s1, s2, length));
+    }
+
+    /// <summary>
+    /// Kaiser-Bessel, periodic like every other window here: the shape argument runs
+    /// <c>2n/N − 1</c> over n = 0..N−1, not the symmetric <c>2n/(N−1) − 1</c> ARTA's Table 2.1
+    /// writes. The two agree to about one part in N, but the DFT-even form is the convention the
+    /// golden tests pin, so it is the one used.
+    ///
+    /// <para>Only half the array is evaluated: the argument enters as its square, so
+    /// <c>w[N−n] == w[n]</c> for every n ≥ 1 and the window is its own mirror about N/2. Worth
+    /// doing here where it is not for the cosine sums, because <see cref="BesselI0"/> is a
+    /// ~60-term series per sample rather than a handful of cosines, and the build happens on the
+    /// pipeline worker inside a tick, the first time a record length is seen. Measured in Release
+    /// at 1,048,576 points: 71 ms for Kaiser7 and 62 ms for Kaiser5 against 22 ms for
+    /// Blackman-Harris — once per (type, length), and against a record that is 5.5 s long.</para>
+    /// </summary>
+    private static void FillKaiser(double[] w, double alpha)
+    {
+        int n = w.Length;
+        double beta = Math.PI * alpha;
+        double normalisation = BesselI0(beta);
+
+        for (int i = 0; i <= n / 2; i++)
+        {
+            double r = (2.0 * i / n) - 1.0;
+            // Clamped: r is exactly ±1 at the ends in exact arithmetic, and a rounding overshoot
+            // would hand Math.Sqrt a negative and produce NaN coefficients.
+            double shape = Math.Sqrt(Math.Max(0.0, 1.0 - (r * r)));
+            double value = BesselI0(beta * shape) / normalisation;
+
+            w[i] = value;
+            if (i > 0)
+                w[n - i] = value;
+        }
+    }
+
+    /// <summary>
+    /// Modified Bessel function of the first kind, order 0, by its own power series
+    /// <c>Σ ((x/2)^k / k!)²</c> — each term is the previous one times <c>(x/2)² / k²</c>, so it
+    /// costs one multiply and one divide and converges to machine precision in about sixty terms
+    /// at the largest argument used here (β = 7π).
+    ///
+    /// <para>Written out rather than taken from MathNet.Numerics' <c>SpecialFunctions</c>:
+    /// nothing outside <c>Qa403.Dsp/Fft</c> may name that package (see CLAUDE.md), and the usual
+    /// Abramowitz &amp; Stegun 9.8.2 polynomial is only good to ~2e-7 relative, which is coarse
+    /// against a window whose whole point is a −170 dB sidelobe floor.</para>
+    /// </summary>
+    private static double BesselI0(double x)
+    {
+        double halfSquared = x * x / 4.0;
+        double term = 1.0;
+        double sum = 1.0;
+
+        for (int k = 1; k < 256; k++)
+        {
+            term *= halfSquared / ((double)k * k);
+            sum += term;
+            if (term < sum * 1e-17)
+                break;
+        }
+
+        return sum;
     }
 
     private static void FillCosineSum(double[] w, params double[] coefficients)

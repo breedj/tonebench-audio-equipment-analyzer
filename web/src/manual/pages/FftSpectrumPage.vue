@@ -211,11 +211,13 @@ const { showPage } = useManual()
           <td>Window</td>
           <td>
             How each record is tapered before transforming. <strong>Hann</strong> is the sensible
-            default. <strong>Blackman-Harris</strong> trades resolution for far lower skirts, useful
-            when a small harmonic sits close to a large fundamental.
-            <strong>Flat Top</strong> gives the most accurate amplitude for a tone that is not on an
-            exact bin. <strong>Rectangular</strong> is only correct when the tone is exactly
-            coherent — which is what Snap to bin arranges.
+            default. <strong>Blackman-Harris</strong>, <strong>Kaiser 5</strong> and
+            <strong>Kaiser 7</strong> are three rungs of the same trade — each one widens the
+            mainlobe a little further to push the skirts a long way down, which is what you want
+            when a small harmonic sits close to a large fundamental. <strong>Flat Top</strong>
+            gives the most accurate amplitude for a tone that is not on an exact bin.
+            <strong>Rectangular</strong> is only correct when the tone is exactly coherent — which
+            is what Snap to bin arranges.
           </td>
         </tr>
         <tr>
@@ -236,6 +238,75 @@ const { showPage } = useManual()
         </tr>
       </tbody>
     </table>
+
+    <p>
+      The windows in order of that trade. <em>Noise bandwidth</em> is how many bins wide a single
+      bin really is, so it is both the resolution cost and the factor a noise reading is divided
+      by; <em>skirt suppression</em> is how far the highest sidelobe sits below the tone. The
+      Kaiser numbers are the <em>α</em> of the classic Kaiser–Bessel family (β = πα), the same
+      naming ARTA uses — not the bare β that scipy and MATLAB take, which would mean something
+      much weaker.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Window</th>
+          <th>Noise bandwidth</th>
+          <th>Skirt suppression</th>
+          <th>Use it for</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Rectangular</td>
+          <td>1.00 bins</td>
+          <td>13 dB</td>
+          <td>A record that already holds whole cycles — a snapped tone, a periodic chirp.</td>
+        </tr>
+        <tr>
+          <td>Hamming</td>
+          <td>1.36 bins</td>
+          <td>43 dB</td>
+          <td>Resolving two tones close together, when nothing far below them matters.</td>
+        </tr>
+        <tr>
+          <td>Hann</td>
+          <td>1.50 bins</td>
+          <td>32 dB</td>
+          <td>The default, and the right answer for noise.</td>
+        </tr>
+        <tr>
+          <td>Blackman-Harris</td>
+          <td>2.00 bins</td>
+          <td>92 dB</td>
+          <td>A harmonic close to a large fundamental.</td>
+        </tr>
+        <tr>
+          <td>Kaiser 5</td>
+          <td>2.28 bins</td>
+          <td>120 dB</td>
+          <td>Distortion measurement where the skirts of the fundamental would otherwise sit above the harmonics.</td>
+        </tr>
+        <tr>
+          <td>Kaiser 7</td>
+          <td>2.68 bins</td>
+          <td>171 dB</td>
+          <td>The same, down to the floor of a 24-bit converter. Nothing here resolves better than this, and nothing needs to.</td>
+        </tr>
+        <tr>
+          <td>Flat Top</td>
+          <td>3.77 bins</td>
+          <td>93 dB</td>
+          <td>Reading a tone's amplitude when it is not on an exact bin — calibration, not distortion.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      One caveat on the two Kaisers: a harmonic's amplitude is summed over a fixed ±3 bins, and a
+      Kaiser's main lobe is wider than that (about ±5 bins at α = 5 and ±7 at α = 7). The energy
+      left outside is small — 0.00004 dB and 0.002 dB — so it does not change a reading, but it is
+      the reason to reach for Kaiser 7 for <em>separation</em> rather than for absolute level.
+    </p>
 
     <h2>Bandwidth &amp; weighting panel</h2>
     <p>

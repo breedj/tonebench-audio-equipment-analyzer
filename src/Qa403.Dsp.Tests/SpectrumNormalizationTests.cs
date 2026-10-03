@@ -27,6 +27,8 @@ public class SpectrumNormalizationTests
     [InlineData(WindowType.Hamming)]
     [InlineData(WindowType.BlackmanHarris)]
     [InlineData(WindowType.FlatTop)]
+    [InlineData(WindowType.Kaiser5)]
+    [InlineData(WindowType.Kaiser7)]
     public void AmplitudeSpectrum_CoherentTone_PeakBinReadsExactVoltPeak(WindowType windowType)
     {
         var w = Window.Get(windowType, FftSize);

@@ -126,9 +126,16 @@ public sealed record ImpulseResponseRequest(
     /// a bare cut is what isolates a reflection exactly, and it is a legitimate choice rather than a
     /// degenerate one. Flat-top is not — it is a window for reading amplitudes off a spectrum, and
     /// it has no meaning as a gate.
+    ///
+    /// <para>The two Kaisers are here for the opposite reason to the rectangular one: a gate's
+    /// taper sets how much of a late reflection leaks back into the gated response, and α = 5 and
+    /// α = 7 are two more rungs of that ladder past Blackman-Harris (−94, −120 and −171 dB of
+    /// sidelobe suppression) at the usual cost in mainlobe width. Nothing about
+    /// <see cref="ImpulseWindow.WindowIr"/> is specific to a cosine sum — it cuts half of whatever
+    /// cached coefficient array <see cref="Window.Get"/> returns — so they work here unchanged.</para>
     /// </summary>
     public static readonly WindowType[] SupportedGateWindows =
-        [WindowType.Rectangular, WindowType.Hann, WindowType.BlackmanHarris];
+        [WindowType.Rectangular, WindowType.Hann, WindowType.BlackmanHarris, WindowType.Kaiser5, WindowType.Kaiser7];
 
     /// <summary>
     /// The acquisition half, as the frequency-response measurement would express it. The one place

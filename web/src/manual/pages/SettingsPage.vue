@@ -142,7 +142,7 @@
     <p>
       The last tab of the Configuration dialog, and what to reach for when something looks wrong.
       All three write into folders under the app's own data directory
-      (<code>%LOCALAPPDATA%\Qa403</code> on Windows, <code>~/.local/share/Qa403</code> on Linux),
+      (<code>%LOCALAPPDATA%\Tonebench</code> on Windows, <code>~/.local/share/Tonebench</code> on Linux),
       and each has a button that opens its folder in the file manager — so "send me the files"
       needs no path typed.
     </p>
@@ -424,7 +424,7 @@
             stays until the file is repaired (for a project, until it is closed). Close it, keep a copy
             of the file before anything else, then rebuild it: every readable row can be copied into a
             fresh database, and only the damaged rows are lost. The configuration database is
-            <code>qa403-config.db</code> under <code>%LOCALAPPDATA%\Qa403</code>.
+            <code>tonebench-config.db</code> under <code>%LOCALAPPDATA%\Tonebench</code>.
           </td>
         </tr>
         <tr>

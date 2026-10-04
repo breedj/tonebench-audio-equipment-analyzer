@@ -40,12 +40,12 @@ describe('useProjectSession', () => {
       return current
     })
     const recent = vi.spyOn(api, 'listRecentProjects').mockResolvedValue([
-      { path: 'C:\\P\\amp.qa403', name: amp.name, lastOpenedUtc: '2026-09-19T10:00:00Z', exists: true },
+      { path: 'C:\\P\\amp.tbench', name: amp.name, lastOpenedUtc: '2026-09-19T10:00:00Z', exists: true },
     ])
 
-    expect(await useProjectSession().open('C:\\P\\amp.qa403')).toBe(true)
+    expect(await useProjectSession().open('C:\\P\\amp.tbench')).toBe(true)
 
-    expect(open).toHaveBeenCalledWith('C:\\P\\amp.qa403')
+    expect(open).toHaveBeenCalledWith('C:\\P\\amp.tbench')
     expect(useProjects().currentProject.value).toEqual(amp)
     expect(useProjects().currentProjectId.value).toBe(1)
     expect(recent).toHaveBeenCalled()
@@ -56,12 +56,12 @@ describe('useProjectSession', () => {
       current = session(amp, path)
       return current
     })
-    await useProjectSession().open('C:\\P\\amp.qa403')
+    await useProjectSession().open('C:\\P\\amp.tbench')
     expect(api.stopAcquisition).not.toHaveBeenCalled()
   })
 
   it('close: stops the run, closes, and leaves nothing open', async () => {
-    current = session(amp, 'C:\\P\\amp.qa403')
+    current = session(amp, 'C:\\P\\amp.tbench')
     await useProjects().refreshSession()
     const close = vi.spyOn(api, 'closeProject').mockImplementation(async () => {
       current = session(null, null)
@@ -75,7 +75,7 @@ describe('useProjectSession', () => {
   })
 
   it('close: a dirty measurement asks first, and Cancel aborts without touching the server', async () => {
-    current = session(amp, 'C:\\P\\amp.qa403')
+    current = session(amp, 'C:\\P\\amp.tbench')
     vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([
       { id: 7, projectId: 1, kind: 'FftSpectrum', name: 'noise', notes: null, paramsJson: '{}', sortOrder: 0, createdUtc: '' },
     ])
@@ -97,7 +97,7 @@ describe('useProjectSession', () => {
   })
 
   it('delete: confirms with the path, then deletes that path', async () => {
-    current = session(amp, 'C:\\P\\amp.qa403')
+    current = session(amp, 'C:\\P\\amp.tbench')
     await useProjects().refreshSession()
     const del = vi.spyOn(api, 'deleteProject').mockImplementation(async () => {
       current = session(null, null)
@@ -107,16 +107,16 @@ describe('useProjectSession', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(useConfirm().state.value?.danger).toBe(true)
-    expect(useConfirm().state.value?.message).toContain('C:\\P\\amp.qa403')
+    expect(useConfirm().state.value?.message).toContain('C:\\P\\amp.tbench')
     useConfirm().answer(true)
 
     expect(await pending).toBe(true)
-    expect(del).toHaveBeenCalledWith('C:\\P\\amp.qa403')
+    expect(del).toHaveBeenCalledWith('C:\\P\\amp.tbench')
     expect(useProjects().currentProject.value).toBeNull()
   })
 
   it('save as: saves dirty types first, then switches to the copy', async () => {
-    current = session(amp, 'C:\\P\\amp.qa403')
+    current = session(amp, 'C:\\P\\amp.tbench')
     await useProjects().refreshSession()
     const order: string[] = []
     const saveAs = vi.spyOn(api, 'saveProjectAs').mockImplementation(async (req) => {
@@ -126,7 +126,7 @@ describe('useProjectSession', () => {
     })
 
     const done = await useProjectSession().saveAs(
-      { name: 'copy', notes: null, path: 'C:\\P\\copy.qa403', includeResults: true },
+      { name: 'copy', notes: null, path: 'C:\\P\\copy.tbench', includeResults: true },
       async () => {
         order.push('saveDirty')
       },
@@ -134,12 +134,12 @@ describe('useProjectSession', () => {
 
     expect(done).toBe(true)
     expect(order).toEqual(['saveDirty', 'saveAs'])
-    expect(saveAs).toHaveBeenCalledWith({ name: 'copy', notes: null, path: 'C:\\P\\copy.qa403', includeResults: true })
+    expect(saveAs).toHaveBeenCalledWith({ name: 'copy', notes: null, path: 'C:\\P\\copy.tbench', includeResults: true })
     expect(useProjects().currentProject.value?.name).toBe('copy')
   })
 
   it('properties: updates the name in place without reloading the types', async () => {
-    current = session(amp, 'C:\\P\\amp.qa403')
+    current = session(amp, 'C:\\P\\amp.tbench')
     await useProjects().refreshSession()
     const listTypes = vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([])
     vi.spyOn(api, 'updateProjectProperties').mockImplementation(async (req) => {

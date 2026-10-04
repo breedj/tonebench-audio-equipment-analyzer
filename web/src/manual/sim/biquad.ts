@@ -1,4 +1,4 @@
-// A port of the simulator's own `Biquad` (src/Qa403.Device/Simulation/SimulatedDut.cs) — the same
+// A port of the simulator's own `Biquad` (src/Tonebench.Device/Simulation/SimulatedDut.cs) — the same
 // Audio-EQ-Cookbook designs, the same bilinear `fromAnalog`, the same direct-form II transposed
 // recursion — so the manual's "expected result" charts are drawn from the transfer function that
 // actually produces the simulated samples rather than from a sketch of it.

@@ -15,7 +15,7 @@ const visible = computed(() => updateAvailable.value && latestVersion.value !== 
     class="flex items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100"
   >
     <span>
-      QA403 Audio Analyzer {{ latestVersion }} is available.
+      Tonebench - Audio Equipment Analyzer {{ latestVersion }} is available.
       <a v-if="latestUrl" :href="latestUrl" target="_blank" rel="noopener" class="underline hover:no-underline">
         View release
       </a>

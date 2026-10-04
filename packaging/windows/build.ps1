@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     The one script both a developer and .github/workflows/release.yml use, so the publish command
-    and the ISCC invocation exist in exactly one place. Output: dist\qa403-audio-analyzer-<version>-win-x64-setup.exe.
+    and the ISCC invocation exist in exactly one place. Output: dist\tonebench-<version>-win-x64-setup.exe.
 
     -Version       Defaults to <Version> in Directory.Build.props (read through MSBuild, so it stays
                    single-sourced). The workflow passes the git tag without its "v".
@@ -30,12 +30,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$project = Join-Path $root "src\Qa403.App\Qa403.App.csproj"
+$project = Join-Path $root "src\Tonebench.App\Tonebench.App.csproj"
 if (-not $PublishDir) { $PublishDir = Join-Path $root "publish\win-x64" }
 # Absolute, because Inno Setup resolves a relative Source: against the .iss file's own folder.
 $PublishDir = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $PublishDir))
 $distDir = Join-Path $root "dist"
-$script = Join-Path $PSScriptRoot "qa403.iss"
+$script = Join-Path $PSScriptRoot "tonebench.iss"
 
 function Invoke-Step([string]$What, [scriptblock]$Command) {
     Write-Host ""
@@ -60,7 +60,7 @@ if (-not $NoPublish) {
     }
 
     # The same one-liner as release.yml and README.md; the single-file/trimmed/self-contained shape
-    # is in Qa403.App.csproj under the publish condition.
+    # is in Tonebench.App.csproj under the publish condition.
     Invoke-Step "dotnet publish (win-x64)" {
         dotnet publish $project -c $Configuration -r win-x64 -p:Version=$Version -o $PublishDir --nologo
     }
@@ -70,16 +70,16 @@ if (-not $NoPublish) {
 # them. Both travel inside the single-file exe (the bundle manifest names them), and QuestPDF's font
 # archive beside it; this is the check that catches any of them going missing before the installer
 # ships without it.
-foreach ($required in @("Qa403.App.exe", "QuestPDF.Fonts.Lato.br", "appsettings.json")) {
+foreach ($required in @("Tonebench.App.exe", "QuestPDF.Fonts.Lato.br", "appsettings.json")) {
     if (-not (Test-Path (Join-Path $PublishDir $required))) {
         throw "Publish output is missing $required in $PublishDir"
     }
 }
-$exeBytes = [System.IO.File]::ReadAllBytes((Join-Path $PublishDir "Qa403.App.exe"))
+$exeBytes = [System.IO.File]::ReadAllBytes((Join-Path $PublishDir "Tonebench.App.exe"))
 $exeText = [System.Text.Encoding]::GetEncoding(28591).GetString($exeBytes)
 foreach ($native in @("libusb-1.0.dll", "portaudio.dll")) {
     if (-not $exeText.Contains($native)) {
-        throw "Qa403.App.exe does not carry $native in its single-file bundle"
+        throw "Tonebench.App.exe does not carry $native in its single-file bundle"
     }
 }
 
@@ -95,7 +95,7 @@ Invoke-Step "Inno Setup" {
     & $Iscc "/DAppVersion=$Version" "/DPublishDir=$PublishDir" "/DOutputDir=$distDir" $script
 }
 
-$setup = Join-Path $distDir "qa403-audio-analyzer-$Version-win-x64-setup.exe"
+$setup = Join-Path $distDir "tonebench-$Version-win-x64-setup.exe"
 if (-not (Test-Path $setup)) { throw "Inno Setup reported success but $setup does not exist" }
 Write-Host ""
 Write-Host "Installer: $setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)" -ForegroundColor Green

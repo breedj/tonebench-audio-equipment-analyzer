@@ -1,5 +1,5 @@
-// Binary WebSocket wire format, docs/qa403-app-stack-spec.md §4.2. Must stay in sync with
-// Qa403.App/Streaming/StreamFrame.cs by hand — no codegen. All fields little-endian.
+// Binary WebSocket wire format, docs/tonebench-stack-spec.md §4.2. Must stay in sync with
+// Tonebench.App/Streaming/StreamFrame.cs by hand — no codegen. All fields little-endian.
 //
 // offset  type      field
 // 0       u8        msgType     1=spectrum 2=scope 3=meters
@@ -89,7 +89,7 @@ export const STREAM_FLAG_LOG_SPACED = 1 << 1
 export const STREAM_FLAG_ZOOMED = 1 << 2
 /**
  * Meters-frame-only: this channel's single-shot capture (see the "Single" button and
- * Qa403.App.Streaming.SpectrumPipelineOptions.SingleShot) just completed on this tick, and the
+ * Tonebench.App.Streaming.SpectrumPipelineOptions.SingleShot) just completed on this tick, and the
  * pipeline has stopped sending further frames for it until the next Run or Single. This is the
  * signal a client waiting on a single shot polls for — see decodeMetersFrame's `held`.
  */
@@ -651,7 +651,7 @@ export function decodeImdSweepPointFrame(buffer: ArrayBuffer): ImdSweepPointFram
 }
 
 /**
- * Mirrors Qa403.App.Services.ThdSweepPhase. Ordinals, because the phase rides in the sweep
+ * Mirrors Tonebench.App.Services.ThdSweepPhase. Ordinals, because the phase rides in the sweep
  * progress frame's `seq` field — it is an enumeration, not a set of independent flag bits.
  */
 export const SweepPhase = {
@@ -846,7 +846,7 @@ export function decodeSweepProgressFrame(buffer: ArrayBuffer): SweepProgressFram
 }
 
 /**
- * Mirrors Qa403.App.Services.FrequencyResponseTraceKind. These are the header's channel byte, so a
+ * Mirrors Tonebench.App.Services.FrequencyResponseTraceKind. These are the header's channel byte, so a
  * client must not read that byte as a StreamChannel on these frames — Gain is 2, which is not a
  * channel at all.
  */
@@ -861,7 +861,7 @@ export const ResponseTraceKind = {
 } as const
 export type ResponseTraceKind = (typeof ResponseTraceKind)[keyof typeof ResponseTraceKind]
 
-/** Mirrors Qa403.App.Services.FrequencyResponsePhase. Ordinals, for the same reason as SweepPhase. */
+/** Mirrors Tonebench.App.Services.FrequencyResponsePhase. Ordinals, for the same reason as SweepPhase. */
 export const ResponsePhase = {
   Idle: 0,
   DeterminingLevel: 1,
@@ -883,7 +883,7 @@ export const ResponsePhase = {
 export type ResponsePhase = (typeof ResponsePhase)[keyof typeof ResponsePhase]
 
 /**
- * Mirrors Qa403.App.Services.ImpedanceTraceKind. These are the header's channel byte on an
+ * Mirrors Tonebench.App.Services.ImpedanceTraceKind. These are the header's channel byte on an
  * Impedance frame, so a client must not read that byte as a StreamChannel there.
  */
 export const ImpedanceTraceKind = {

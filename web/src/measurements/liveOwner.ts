@@ -44,7 +44,7 @@ export type LiveStore =
 
 /**
  * Who a store's contents belong to: the project and the measurement type together, never the type id
- * alone. Type ids are per project (`AUTOINCREMENT` inside one `.qa403` file), so the first
+ * alone. Type ids are per project (`AUTOINCREMENT` inside one `.tbench` file), so the first
  * measurement of every project is id 1 — and an owner recorded as "1" would make the previous
  * project's spectrum look like the new project's own, which is the one case this whole module exists
  * to stop.

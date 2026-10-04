@@ -38,7 +38,7 @@ describe('initialForm', () => {
 
 describe('locationFor', () => {
   it('follows the name until the user edits the location', () => {
-    expect(locationFor('new', 'GM70: amp', 'C:\\P', '\\', false)).toBe('C:\\P\\GM70 amp.qa403')
+    expect(locationFor('new', 'GM70: amp', 'C:\\P', '\\', false)).toBe('C:\\P\\GM70 amp.tbench')
     expect(locationFor('new', '', 'C:\\P', '\\', false)).toBe('')
     expect(locationFor('new', 'GM70', 'C:\\P', '\\', true)).toBeNull()
   })
@@ -49,13 +49,13 @@ describe('locationFor', () => {
 })
 
 describe('validateForm', () => {
-  const ok = { name: 'x', notes: '', location: 'C:\\P\\x.qa403', includeResults: true }
+  const ok = { name: 'x', notes: '', location: 'C:\\P\\x.tbench', includeResults: true }
 
   it('needs a name, and an absolute location outside Properties', () => {
     expect(validateForm('new', ok)).toBeNull()
     expect(validateForm('new', { ...ok, name: '  ' })).toMatch(/name/)
     expect(validateForm('new', { ...ok, location: '' })).toMatch(/where/)
-    expect(validateForm('new', { ...ok, location: 'x.qa403' })).toMatch(/absolute/)
+    expect(validateForm('new', { ...ok, location: 'x.tbench' })).toMatch(/absolute/)
     expect(validateForm('saveAs', { ...ok, location: '/home/j/x' })).toBeNull()
     expect(validateForm('properties', { ...ok, location: '' })).toBeNull()
   })
@@ -64,7 +64,7 @@ describe('validateForm', () => {
 describe('submittedForm', () => {
   it('trims and appends the extension', () => {
     expect(submittedForm({ name: ' a ', notes: ' d ', location: ' C:\\P\\a ', includeResults: false }))
-      .toEqual({ name: 'a', notes: 'd', location: 'C:\\P\\a.qa403', includeResults: false })
+      .toEqual({ name: 'a', notes: 'd', location: 'C:\\P\\a.tbench', includeResults: false })
     expect(submittedForm({ name: 'a', notes: '', location: '', includeResults: true }).location).toBe('')
   })
 })

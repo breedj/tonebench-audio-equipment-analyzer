@@ -12,7 +12,7 @@ import { api, type ImpedanceFixtureConfig } from '../api/client'
  * <p>Server-side rather than `localStorage`, unlike theme or capture delay. This is measurement data
  * of a few kilobytes describing physical hardware; it has to read the same in every tab, survive a
  * browser cache clear, and live on the machine the QA403 is plugged into. It is kept in its own
- * database file — see the server's `Qa403ConfigDatabaseOptions` for why it must not sit in the
+ * database file — see the server's `TonebenchConfigDatabaseOptions` for why it must not sit in the
  * measurement history.</p>
  */
 const fixture = ref<ImpedanceFixtureConfig | null>(null)

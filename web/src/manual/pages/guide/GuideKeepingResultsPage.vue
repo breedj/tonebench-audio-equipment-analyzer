@@ -24,7 +24,7 @@ const { showPage } = useManual()
         <tr>
           <td>Project</td>
           <td>
-            One file on your disk, ending in <code>.qa403</code>. Everything about one amplifier, or one
+            One file on your disk, ending in <code>.tbench</code>. Everything about one amplifier, or one
             investigation.
           </td>
           <td>A notebook</td>

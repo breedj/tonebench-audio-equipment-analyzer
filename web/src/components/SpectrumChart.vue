@@ -662,7 +662,7 @@ function buildOptions(
 }
 
 // The wire payload interleaves (freqHz,min,max) per column. The uPlot series is the max — it never
-// misses a harmonic spike the way a mean would (see docs/qa403-app-stack-spec.md §3.1) — and it is
+// misses a harmonic spike the way a mean would (see docs/tonebench-stack-spec.md §3.1) — and it is
 // what the legend and cursor readout report. The min is drawn by minMaxBandPlugin above rather than
 // as a second series, which keeps one legend row per channel and the cursor on the trace people
 // actually read values off.

@@ -1,4 +1,5 @@
 import { computed, ref, watch } from 'vue'
+import { readStoredPreference, writeStoredPreference } from '../browserStorage'
 
 // Module-level singleton (same pattern as useChartDisplay.ts/useSpectrumConfig.ts) — the
 // Configuration dialog's selector and every component that reads colors off the current theme
@@ -7,10 +8,10 @@ import { computed, ref, watch } from 'vue'
 
 export type ThemeMode = 'Auto' | 'Light' | 'Dark'
 
-const STORAGE_KEY = 'qa403.themeMode'
+const STORAGE_KEY = 'tonebench.themeMode'
 
 function loadInitial(): ThemeMode {
-  const stored = localStorage.getItem(STORAGE_KEY)
+  const stored = readStoredPreference(STORAGE_KEY)
   return stored === 'Light' || stored === 'Dark' || stored === 'Auto' ? stored : 'Auto'
 }
 
@@ -36,7 +37,7 @@ watch(
 )
 
 watch(themeMode, (mode) => {
-  localStorage.setItem(STORAGE_KEY, mode)
+  writeStoredPreference(STORAGE_KEY, mode)
 })
 
 export function useAppTheme() {

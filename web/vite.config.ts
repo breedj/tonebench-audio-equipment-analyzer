@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(rootDir, '../src/Qa403.App/wwwroot'),
+    outDir: path.resolve(rootDir, '../src/Tonebench.App/wwwroot'),
     emptyOutDir: true,
     // Vite's 500 kB default warns about bytes crossing the internet on a cold cache. This bundle
     // never does: Kestrel serves it from wwwroot on 127.0.0.1, so the browser reads it off local

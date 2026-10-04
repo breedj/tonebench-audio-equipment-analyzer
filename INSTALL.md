@@ -1,17 +1,17 @@
-# Installing QA403 Audio Analyzer
+# Installing Tonebench - Audio Equipment Analyzer
 
 This guide is for people who want to *use* the analyzer. Building it from source is described in
 [README.md](README.md).
 
-Every release on the [releases page](https://github.com/breedj/qa40x-audio-analyzer-cp/releases)
+Every release on the [releases page](https://github.com/breedj/tonebench-audio-equipment-analyzer/releases)
 comes with four downloads:
 
 | File | For |
 |---|---|
-| `qa403-audio-analyzer-<version>-win-x64-setup.exe` | Windows 10/11, 64-bit — the installer (recommended) |
-| `qa403-audio-analyzer-<version>-win-x64.zip` | Windows — portable, no installer |
-| `qa403-audio-analyzer_<version>_amd64.deb` | Debian, Ubuntu, Linux Mint and other apt-based distributions |
-| `qa403-audio-analyzer-<version>-linux-x64.tar.gz` | Any other 64-bit Linux |
+| `tonebench-<version>-win-x64-setup.exe` | Windows 10/11, 64-bit — the installer (recommended) |
+| `tonebench-<version>-win-x64.zip` | Windows — portable, no installer |
+| `tonebench_<version>_amd64.deb` | Debian, Ubuntu, Linux Mint and other apt-based distributions |
+| `tonebench-<version>-linux-x64.tar.gz` | Any other 64-bit Linux |
 
 Nothing else is needed: the .NET runtime is built into the program. The analyzer runs as a small
 local web server and opens its screen in your normal browser (Chrome, Edge or Firefox — any
@@ -23,11 +23,11 @@ current one).
 
 ### Install
 
-1. Download `qa403-audio-analyzer-<version>-win-x64-setup.exe` and run it.
+1. Download `tonebench-<version>-win-x64-setup.exe` and run it.
 2. Windows SmartScreen will say **"Windows protected your PC"**, because the program is not signed
    with a paid certificate. Click **More info**, then **Run anyway**.
 3. Click through the wizard. It installs for your user account only (into
-   `%LOCALAPPDATA%\Programs\QA403 Audio Analyzer`), so **no administrator password** is asked and
+   `%LOCALAPPDATA%\Programs\Tonebench - Audio Equipment Analyzer`), so **no administrator password** is asked and
    nothing changes for other users of the PC. A desktop icon is optional.
 
 No USB driver needs to be installed. Plug the QA403 into a USB port and Windows binds it on its
@@ -35,13 +35,13 @@ own; the front-panel LED does not need to be any particular colour.
 
 ### Start and stop
 
-Start **QA403 Audio Analyzer** from the Start Menu. A black console window opens — that is the
+Start **Tonebench - Audio Equipment Analyzer** from the Start Menu. A black console window opens — that is the
 program — and a moment later your browser opens on `http://127.0.0.1:8399` with the analyzer.
 
 - **To quit, close the console window** (or press Ctrl+C in it). The program then shuts the QA403
   down cleanly and saves its data; wait for the window to disappear before unplugging the device.
   Closing only the browser tab leaves the analyzer running — just open the address again.
-- **QA403 Audio Analyzer (simulator)** in the Start Menu runs without any hardware, against a
+- **Tonebench - Audio Equipment Analyzer (simulator)** in the Start Menu runs without any hardware, against a
   simulated device and several simulated amplifiers and loudspeakers. Use it to explore the
   measurements before connecting anything.
 
@@ -50,8 +50,8 @@ program again and read what the window says.
 
 ### Portable use (zip)
 
-Unzip `qa403-audio-analyzer-<version>-win-x64.zip` anywhere — a USB stick works — and run
-`Qa403.App.exe`. Everything works the same; you just get no Start Menu entry and no uninstaller.
+Unzip `tonebench-<version>-win-x64.zip` anywhere — a USB stick works — and run
+`Tonebench.App.exe`. Everything works the same; you just get no Start Menu entry and no uninstaller.
 The program never writes into its own folder, so it can sit on read-only media.
 
 ### Upgrade
@@ -59,9 +59,12 @@ The program never writes into its own folder, so it can sit on read-only media.
 Run the new installer. If the analyzer is running, the installer tells you so and can close it for
 you; it shuts down cleanly before the files are replaced. Your projects and settings are untouched.
 
+Coming from *QA403 Audio Analyzer* (0.2.0 or earlier) is a rename rather than an upgrade — see
+[Upgrading from QA403 Audio Analyzer](#upgrading-from-qa403-audio-analyzer).
+
 ### Uninstall
 
-*Settings › Apps › Installed apps › QA403 Audio Analyzer › Uninstall*, or the **Uninstall** entry
+*Settings › Apps › Installed apps › Tonebench - Audio Equipment Analyzer › Uninstall*, or the **Uninstall** entry
 in the Start Menu group. Your projects, settings and logs are deliberately left in place (see
 [Where your data is](#where-your-data-is)); delete those folders yourself if you want them gone.
 
@@ -72,14 +75,14 @@ in the Start Menu group. Your projects, settings and logs are deliberately left 
 ### Debian, Ubuntu, Mint (.deb)
 
 ```bash
-sudo apt install ./qa403-audio-analyzer_<version>_amd64.deb
+sudo apt install ./tonebench_<version>_amd64.deb
 sudo usermod -aG plugdev $USER
 ```
 
 Then **log out and log back in** (or reboot) — the group change only applies to new logins. The
 package installs:
 
-- the program, started as `qa403-audio-analyzer` or from your applications menu (category
+- the program, started as `tonebench` or from your applications menu (category
   *Audio/Video*),
 - the udev rule that lets members of the `plugdev` group open the QA403 (without it only root can),
 - its two library dependencies, `libusb-1.0-0` and `libfontconfig1`.
@@ -88,17 +91,17 @@ Adding *you* to `plugdev` is the one step a package cannot do, hence the second 
 
 The analyzer runs in a terminal window and opens your browser on `http://127.0.0.1:8399`. **To
 quit, close the terminal window or press Ctrl+C** in it; the QA403 is shut down cleanly first. The
-menu entry has a right-click action *QA403 Audio Analyzer (simulator)* for running without hardware
-(`qa403-audio-analyzer --simulate` from a shell).
+menu entry has a right-click action *Tonebench - Audio Equipment Analyzer (simulator)* for running without hardware
+(`tonebench --simulate` from a shell).
 
 Upgrade by installing the newer .deb the same way. Remove with
-`sudo apt remove qa403-audio-analyzer`; your projects and settings are left in place.
+`sudo apt remove tonebench`; your projects and settings are left in place.
 
 ### Other distributions (tar.gz)
 
 ```bash
-tar -xzf qa403-audio-analyzer-<version>-linux-x64.tar.gz
-cd qa403-audio-analyzer-linux-x64
+tar -xzf tonebench-<version>-linux-x64.tar.gz
+cd tonebench-linux-x64
 ./install.sh
 ```
 
@@ -117,8 +120,33 @@ sudo udevadm trigger
 sudo usermod -aG plugdev $USER      # then log out and back in
 ```
 
-Start the analyzer with `./Qa403.App` from the unpacked folder (`./Qa403.App --simulate` for the
+Start the analyzer with `./Tonebench.App` from the unpacked folder (`./Tonebench.App --simulate` for the
 simulator). You can move the folder anywhere; the program never writes into it.
+
+---
+
+## Upgrading from QA403 Audio Analyzer
+
+The app was called *QA403 Audio Analyzer* up to and including version 0.2.0. Three things are worth
+knowing on the first run of a later version.
+
+**Uninstall the old version first.** The installer treats Tonebench as a separate program, so
+running it over a QA403 Audio Analyzer install leaves both listed in *Installed apps*. Uninstalling
+the old one removes nothing of yours: projects, settings and logs are never touched by an uninstall.
+On Debian-based Linux, `sudo apt remove qa403-audio-analyzer` does the same.
+
+**Your settings and calibrations come across by themselves.** On first start, Tonebench copies the
+configuration database out of the old data folder — `%LOCALAPPDATA%\Qa403` on Windows,
+`~/.local/share/Qa403` on Linux — into its own. That file holds your settings, your recent-projects
+list and, the part that cannot be recreated, your loopback and impedance-fixture calibrations. It is
+a copy: the old folder is left exactly as it was, so nothing is lost if you want to go back. The
+startup console says so when it happens. The old logs, diagnostic captures and any WAV recordings
+stay behind — delete that folder when you are satisfied, or keep it as a backup.
+
+**Your existing projects open unchanged.** Project files used to end in `.qa403` and new ones now end
+in `.tbench`. Both are listed by *Project › Open* and both open normally — a project file is
+recognised by what is inside it, not by its name. A `.qa403` file keeps its own name when you save
+it; use *Save As* if you would rather have the new extension.
 
 ---
 
@@ -126,9 +154,9 @@ simulator). You can move the folder anywhere; the program never writes into it.
 
 | | Windows | Linux |
 |---|---|---|
-| Your projects (`.qa403` files) | `Documents\QA403 Projects` | `~/QA403 Projects` |
-| Settings and calibrations | `%LOCALAPPDATA%\Qa403\qa403-config.db` | `~/.local/share/Qa403/qa403-config.db` |
-| Logs (last 14 days) | `%LOCALAPPDATA%\Qa403\logs` | `~/.local/share/Qa403/logs` |
+| Your projects (`.tbench` files) | `Documents\Tonebench Projects` | `~/Tonebench Projects` |
+| Settings and calibrations | `%LOCALAPPDATA%\Tonebench\tonebench-config.db` | `~/.local/share/Tonebench/tonebench-config.db` |
+| Logs (last 14 days) | `%LOCALAPPDATA%\Tonebench\logs` | `~/.local/share/Tonebench/logs` |
 
 Projects can be saved anywhere you like from the *Project* menu; the folder above is only the
 default. Settings include the impedance-fixture and loopback calibrations, which describe *your*
@@ -162,7 +190,7 @@ window shows the address it is actually using.
 
 **Something else.**
 The console window shows what the program is doing; the same text is in the log folder above.
-Please attach the day's log file when you [open an issue](https://github.com/breedj/qa40x-audio-analyzer-cp/issues).
+Please attach the day's log file when you [open an issue](https://github.com/breedj/tonebench-audio-equipment-analyzer/issues).
 
 ---
 

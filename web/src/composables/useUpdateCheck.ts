@@ -1,31 +1,32 @@
 import { ref, watch } from 'vue'
 import { api } from '../api/client'
+import { readStoredPreference, writeStoredPreference } from '../browserStorage'
 
 // Module-level singleton (same pattern as useCaptureDelay.ts/useAppTheme.ts) — App.vue's banner
 // and ConfigDialog's opt-out checkbox must agree on one value. A pure client preference (whether
 // to phone GitHub at all), so it lives in localStorage rather than any server-side setting —
-// docs/qa403-app-stack-spec.md §8 calls for this to be opt-out for air-gapped lab machines.
+// docs/tonebench-stack-spec.md §8 calls for this to be opt-out for air-gapped lab machines.
 
-const ENABLED_KEY = 'qa403.updateCheckEnabled'
-const DISMISSED_KEY = 'qa403.updateDismissedVersion'
+const ENABLED_KEY = 'tonebench.updateCheckEnabled'
+const DISMISSED_KEY = 'tonebench.updateDismissedVersion'
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 function loadEnabled(): boolean {
-  return localStorage.getItem(ENABLED_KEY) !== 'false'
+  return readStoredPreference(ENABLED_KEY) !== 'false'
 }
 
 const updateCheckEnabled = ref<boolean>(loadEnabled())
-const dismissedVersion = ref<string | null>(localStorage.getItem(DISMISSED_KEY))
+const dismissedVersion = ref<string | null>(readStoredPreference(DISMISSED_KEY))
 const latestVersion = ref<string | null>(null)
 const latestUrl = ref<string | null>(null)
 const updateAvailable = ref(false)
 
 watch(updateCheckEnabled, (enabled) => {
-  localStorage.setItem(ENABLED_KEY, String(enabled))
+  writeStoredPreference(ENABLED_KEY, String(enabled))
 })
 
 watch(dismissedVersion, (version) => {
-  if (version) localStorage.setItem(DISMISSED_KEY, version)
+  if (version) writeStoredPreference(DISMISSED_KEY, version)
 })
 
 let pollHandle: ReturnType<typeof setInterval> | undefined

@@ -1,5 +1,5 @@
 /**
- * The sweep's frequency grid, mirroring Qa403.Dsp/SweepPoints.cs.
+ * The sweep's frequency grid, mirroring Tonebench.Dsp/SweepPoints.cs.
  *
  * Duplicated rather than fetched because the config panel has to answer "how many points is that,
  * and how long will it take?" while the user is still typing — before anything has been sent to the
@@ -71,7 +71,7 @@ export function estimatePointCount(
 }
 
 /**
- * Mirrors Qa403.Dsp.SweepResolution — see there for why bin index and cycle count are the same
+ * Mirrors Tonebench.Dsp.SweepResolution — see there for why bin index and cycle count are the same
  * number, and why that means one constant sizes the FFT. Duplicated for the same reason the
  * frequency grid is: the panel has to answer "how long will this take?" while the user is still
  * typing, before anything has reached the server.

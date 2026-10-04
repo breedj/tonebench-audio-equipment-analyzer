@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
-import Qa403Logo from './Qa403Logo.vue'
+import TonebenchLogo from './TonebenchLogo.vue'
 import { api } from '../api/client'
 import { LIBRARY_GROUPS } from '../about/libraries'
 import { splitVersion, type AppVersion } from '../about/version'
@@ -22,7 +22,7 @@ const view = ref<'about' | 'libraries'>('about')
 const version = ref<AppVersion | null>(null)
 const versionFailed = ref(false)
 
-const REPOSITORY_URL = 'https://github.com/breedj/qa40x-audio-analyzer-cp'
+const REPOSITORY_URL = 'https://github.com/breedj/tonebench-audio-equipment-analyzer'
 
 watch(
   () => props.open,
@@ -48,18 +48,18 @@ watch(
   <Modal :open="props.open" :title="view === 'about' ? 'About' : 'Open-source libraries'" wide @close="emit('close')">
     <template v-if="view === 'about'">
       <div class="flex items-center gap-4">
-        <Qa403Logo :size="76" class="shrink-0" />
+        <TonebenchLogo :size="76" class="shrink-0" />
         <div class="min-w-0">
-          <div class="text-2xl leading-none font-bold tracking-tight">QA403</div>
+          <div class="text-2xl leading-none font-bold tracking-tight">Tonebench</div>
           <div class="mt-1.5 text-[11px] font-semibold tracking-[0.2em] text-neutral-500 uppercase dark:text-neutral-400">
-            Audio Analyzer
+            Audio Equipment Analyzer
           </div>
         </div>
       </div>
 
       <p class="mt-4 text-sm text-neutral-600 dark:text-neutral-300">
-        A cross-platform analyzer application for the QuantAsylum QA403, with its own USB transport,
-        its own DSP and a local measurement database.
+        A cross-platform analyzer application for the QuantAsylum QA403 and for sound cards, with its
+        own USB transport, its own DSP and a local measurement database.
       </p>
 
       <dl class="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 border-t border-neutral-200 pt-4 text-sm dark:border-neutral-800">
@@ -88,7 +88,7 @@ watch(
             rel="noopener"
             class="font-medium text-blue-700 underline underline-offset-2 hover:no-underline dark:text-blue-300"
           >
-            breedj/qa40x-audio-analyzer-cp
+            breedj/tonebench-audio-equipment-analyzer
           </a>
         </dd>
       </dl>

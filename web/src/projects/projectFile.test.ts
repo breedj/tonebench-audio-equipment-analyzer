@@ -24,7 +24,14 @@ describe('sanitizeFileName', () => {
 
 describe('ensureExtension', () => {
   it('appends once, ignoring case', () => {
-    expect(ensureExtension('amp')).toBe('amp.qa403')
+    expect(ensureExtension('amp')).toBe('amp.tbench')
+    expect(ensureExtension('amp.tbench')).toBe('amp.tbench')
+    expect(ensureExtension('amp.TBench')).toBe('amp.TBench')
+  })
+
+  // A project written before the rename keeps its own extension, or saving amp.qa403 would write
+  // amp.qa403.tbench and leave the original beside it. Mirrors ProjectPaths.EnsureExtension.
+  it('leaves the legacy extension alone', () => {
     expect(ensureExtension('amp.qa403')).toBe('amp.qa403')
     expect(ensureExtension('amp.QA403')).toBe('amp.QA403')
   })
@@ -32,27 +39,27 @@ describe('ensureExtension', () => {
 
 describe('joinPath', () => {
   it('uses the given separator and never doubles it', () => {
-    expect(joinPath('C:\\Users\\j\\Documents', 'a.qa403', '\\')).toBe('C:\\Users\\j\\Documents\\a.qa403')
-    expect(joinPath('C:\\', 'a.qa403', '\\')).toBe('C:\\a.qa403')
-    expect(joinPath('/home/j', 'a.qa403', '/')).toBe('/home/j/a.qa403')
-    expect(joinPath('/', 'a.qa403', '/')).toBe('/a.qa403')
-    expect(joinPath('', 'a.qa403', '/')).toBe('a.qa403')
+    expect(joinPath('C:\\Users\\j\\Documents', 'a.tbench', '\\')).toBe('C:\\Users\\j\\Documents\\a.tbench')
+    expect(joinPath('C:\\', 'a.tbench', '\\')).toBe('C:\\a.tbench')
+    expect(joinPath('/home/j', 'a.tbench', '/')).toBe('/home/j/a.tbench')
+    expect(joinPath('/', 'a.tbench', '/')).toBe('/a.tbench')
+    expect(joinPath('', 'a.tbench', '/')).toBe('a.tbench')
   })
 })
 
 describe('fileNameOf / parentPath', () => {
   it('split on either separator', () => {
-    expect(fileNameOf('C:\\bench\\amp.qa403')).toBe('amp.qa403')
-    expect(fileNameOf('/home/j/amp.qa403')).toBe('amp.qa403')
-    expect(fileNameOf('amp.qa403')).toBe('amp.qa403')
-    expect(parentPath('C:\\bench\\amp.qa403')).toBe('C:\\bench')
-    expect(parentPath('/home/j/amp.qa403')).toBe('/home/j')
-    expect(parentPath('amp.qa403')).toBe('')
+    expect(fileNameOf('C:\\bench\\amp.tbench')).toBe('amp.tbench')
+    expect(fileNameOf('/home/j/amp.tbench')).toBe('amp.tbench')
+    expect(fileNameOf('amp.tbench')).toBe('amp.tbench')
+    expect(parentPath('C:\\bench\\amp.tbench')).toBe('C:\\bench')
+    expect(parentPath('/home/j/amp.tbench')).toBe('/home/j')
+    expect(parentPath('amp.tbench')).toBe('')
   })
 
   it('keeps a root as a root', () => {
-    expect(parentPath('C:\\amp.qa403')).toBe('C:\\')
-    expect(parentPath('/amp.qa403')).toBe('/')
+    expect(parentPath('C:\\amp.tbench')).toBe('C:\\')
+    expect(parentPath('/amp.tbench')).toBe('/')
   })
 })
 
@@ -64,16 +71,16 @@ describe('isRooted', () => {
     expect(isRooted('/home')).toBe(true)
     expect(isRooted('~')).toBe(true)
     expect(isRooted('~/x')).toBe(true)
-    expect(isRooted('x.qa403')).toBe(false)
-    expect(isRooted('sub\\x.qa403')).toBe(false)
+    expect(isRooted('x.tbench')).toBe(false)
+    expect(isRooted('sub\\x.tbench')).toBe(false)
     expect(isRooted('C:x')).toBe(false)
   })
 })
 
 describe('suggestLocation', () => {
   it('sanitizes the name and adds the extension under the folder', () => {
-    expect(suggestLocation('GM70: amp', 'C:\\Users\\j\\Documents\\QA403 Projects', '\\'))
-      .toBe('C:\\Users\\j\\Documents\\QA403 Projects\\GM70 amp.qa403')
-    expect(suggestLocation('', '/home/j/QA403 Projects', '/')).toBe('/home/j/QA403 Projects/Project.qa403')
+    expect(suggestLocation('GM70: amp', 'C:\\Users\\j\\Documents\\Tonebench Projects', '\\'))
+      .toBe('C:\\Users\\j\\Documents\\Tonebench Projects\\GM70 amp.tbench')
+    expect(suggestLocation('', '/home/j/Tonebench Projects', '/')).toBe('/home/j/Tonebench Projects/Project.tbench')
   })
 })

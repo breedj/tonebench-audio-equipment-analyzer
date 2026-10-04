@@ -5,8 +5,18 @@
  * the server are the same machine today, but nothing in the API requires that.
  */
 
-/** One project per file — mirrors ProjectPaths.Extension on the server. */
-export const PROJECT_EXTENSION = '.qa403'
+/** One project per file — mirrors ProjectPaths.Extension on the server. What new files are written with. */
+export const PROJECT_EXTENSION = '.tbench'
+
+/** What project files were called while the app was named after the QA403 — ProjectPaths.LegacyExtension. */
+export const LEGACY_PROJECT_EXTENSION = '.qa403'
+
+/**
+ * Listed by the open dialog and left alone by {@link ensureExtension} — ProjectPaths.OpenableExtensions.
+ * Opening does not consult it: the server validates a project file by its contents, so this only
+ * decides what the dialog shows and what Save As declines to rename.
+ */
+export const OPENABLE_PROJECT_EXTENSIONS = [PROJECT_EXTENSION, LEGACY_PROJECT_EXTENSION]
 
 /**
  * A project name as a file name, valid on every platform at once — the same rule as
@@ -34,7 +44,9 @@ export function sanitizeFileName(name: string): string {
 }
 
 export function ensureExtension(path: string): string {
-  return path.toLowerCase().endsWith(PROJECT_EXTENSION) ? path : path + PROJECT_EXTENSION
+  const lower = path.toLowerCase()
+  // The legacy extension counts, or saving an existing amp.qa403 writes amp.qa403.tbench.
+  return OPENABLE_PROJECT_EXTENSIONS.some((e) => lower.endsWith(e)) ? path : path + PROJECT_EXTENSION
 }
 
 /** `folder` + `name` with exactly one separator between them, whatever the folder ends in. */

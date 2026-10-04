@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Tonebench - Audio Equipment Analyzer
+Comment=Audio equipment analyzer for the QuantAsylum QA403 and USB sound cards
+Exec=tonebench
+Icon=tonebench
+# In a terminal on purpose: the console is the log, and its close button (or Ctrl+C) is how the app
+# is shut down — there is no quit control in the browser UI. Closing the terminal sends SIGHUP,
+# which the app handles as a graceful shutdown (Program.cs, RegisterConsoleCloseShutdown).
+Terminal=true
+Categories=AudioVideo;Audio;Science;Electronics;
+Keywords=QA403;QuantAsylum;soundcard;audio;analyzer;THD;spectrum;
+Actions=Simulate;
+
+[Desktop Action Simulate]
+Name=Tonebench - Audio Equipment Analyzer (simulator)
+Exec=tonebench --simulate

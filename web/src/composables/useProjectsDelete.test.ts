@@ -33,7 +33,7 @@ describe('useProjects: deleting a measurement type', () => {
     vi.restoreAllMocks()
     stored = [type(11, 'Amp 1 kHz at 1 W'), type(12, 'Loopback')]
     vi.spyOn(api, 'getProjectSession').mockResolvedValue({
-      open: true, path: 'C:\\P\\amp.qa403', project: amp,
+      open: true, path: 'C:\\P\\amp.tbench', project: amp,
     } satisfies ProjectSession)
     vi.spyOn(api, 'listMeasurementTypes').mockImplementation(async () => stored.map((t) => ({ ...t })))
     vi.spyOn(api, 'listRecentProjects').mockResolvedValue([])

@@ -1,0 +1,101 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tonebench.Device\Tonebench.Device.csproj" />
+    <ProjectReference Include="..\Tonebench.Dsp\Tonebench.Dsp.csproj" />
+    <ProjectReference Include="..\Tonebench.Data\Tonebench.Data.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <Product>Tonebench - Audio Equipment Analyzer</Product>
+    <Authors>Joost Breed</Authors>
+    <ApplicationIcon>..\..\packaging\windows\tonebench.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- The release publish shape (docs/tonebench-stack-spec.md §2.4), kept here so the workflow, the
+       two packaging scripts and the README all run the same one-liner instead of each carrying a copy
+       of these flags:
+           dotnet publish src/Tonebench.App/Tonebench.App.csproj -c Release -r <rid> -o <dir> [-p:Version=X]
+       Applied only when `dotnet publish` runs with a RID (_IsPublishing is the global property the
+       SDK sets for publish and keys PublishRelease on; it is underscore-prefixed, so if a future SDK
+       drops it, replace the condition with an explicit -p:ReleasePublish=true that the callers pass).
+       A plain build/run/test never sees trimming or single-file. What the publish folder holds
+       afterwards (measured, not assumed — packaging/windows/build.ps1 checks it): the exe, which has
+       absorbed libusb-1.0.dll (the bundler classifies by file type, so a native .dll reaches the bundle
+       under IncludeNativeLibrariesForSelfExtract even as a None item, and is self-extracted at startup),
+       QuestPDF.Fonts.Lato.br loose beside it (QuestPDF's default font archive, copied by its own
+       .targets and NOT bundled, since only .dll/.so/.dylib content is), appsettings*.json, the
+       static-web-assets manifest and a loose wwwroot copy that the embedded one makes redundant. -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true' And '$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DebugType>none</DebugType>
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot\**" Condition="Exists('wwwroot')" />
+  </ItemGroup>
+
+  <!-- LibUsbDotNet 3.x wraps native libusb-1.0, which the NuGet package does not bundle
+       (docs/tonebench-stack-spec.md §2.1/§9.4). Vendored at code/native/win-x64. Linux relies on
+       the distro's libusb-1.0-0 package instead (packaging/linux/install.sh installs it if
+       missing) — see docs/tonebench-stack-spec.md §9.4's bundle-vs-depend tradeoff.
+       Keyed on RuntimeIdentifier so a win-x64 publish copies the DLL regardless of which OS the
+       publish runs on (e.g. a CI runner) — but ALSO on the RID being empty, which is what a plain
+       `dotnet build`/`dotnet run` (i.e. run.bat, every dev run) has. Testing the RID alone left the
+       DLL out of bin\Debug entirely, so the app started, failed to load libusb, and ran device-less
+       on a machine with a QA403 plugged in. The $(OS) half keeps a RID-less build on Linux from
+       copying a Windows DLL into its output. -->
+  <!-- PortAudio backs the sound-card analyzer (Tonebench.Device/SoundCard). Vendored for the same
+       reason as libusb and copied on the same condition — but note upstream ships source only, so
+       unlike libusb this binary is one we build. packaging/native/portaudio.md has the recipe; the
+       short version is VS's own CMake + Ninja, PA_DLL_LINK_WITH_STATIC_RUNTIME left ON (its
+       default) so the DLL needs no VC++ redistributable, and ASIO off until someone accepts
+       Steinberg's SDK licence and rebuilds. Which host APIs the DLL carries is invisible to this
+       codebase: the list comes from Pa_GetHostApiCount at runtime, so an ASIO-enabled rebuild
+       dropped in here needs no code change. Linux uses the distro's libportaudio2, the same
+       bundle-vs-depend tradeoff as libusb (docs/tonebench-stack-spec.md §9.4). -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And '$(OS)' == 'Windows_NT')">
+    <None Include="..\..\native\win-x64\libusb-1.0.dll" Link="libusb-1.0.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\native\win-x64\portaudio.dll" Link="portaudio.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Trimming (dotnet publish -p:PublishTrimmed=true) can't see Dapper's reflection-based POCO
+       mapping in Tonebench.Data (ProjectRepository/MeasurementRepository), so that assembly is rooted
+       to keep its full metadata rather than risk silently-null-mapped columns. -->
+  <!-- QuestPDF is rooted as insurance: under TrimMode=partial only assemblies that opt in are
+       trimmed, but a PDF that comes out blank on a published build is the kind of failure only the
+       release smoke test would see. -->
+  <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
+    <TrimmerRootAssembly Include="Tonebench.Data" />
+    <TrimmerRootAssembly Include="QuestPDF" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.10" />
+    <!-- PDF reports (Endpoints/ReportsEndpoints.cs, Reports/ReportPdfRenderer.cs). Ships its own
+         native Skia per RID, carried by IncludeNativeLibrariesForSelfExtract in the release publish;
+         on Linux that library links against libfontconfig1 (packaging/linux/install.sh). -->
+    <PackageReference Include="QuestPDF" Version="2026.9.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <!-- The chirp measurements' shared pure helpers (ResponseCaptureSupport) are internal; the level
+       probe's correction step is pinned by ProbeCorrectionTests. Same arrangement as Tonebench.Data. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tonebench.App.Tests" />
+  </ItemGroup>
+
+</Project>

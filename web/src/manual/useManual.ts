@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { manualPageById, manualPageForKind, type ManualEdition } from './pages'
+import { readStoredPreference, writeStoredPreference } from '../browserStorage'
 
 // Module-level singleton, same pattern as useChartDisplay.ts/useAppTheme.ts: the header's manual
 // button and every measurement screen's own help button drive one dialog, so opening from either
@@ -13,17 +14,17 @@ const pageId = ref<string | null>(null)
 // this only really decides what the *index* shows — which is why it is remembered: a reader who has
 // switched to the simple guide should not be handed the full manual's contents next time. Stored
 // per browser like the theme, since it is a reading preference and nothing else depends on it.
-const EDITION_STORAGE_KEY = 'qa403.manual.edition'
+const EDITION_STORAGE_KEY = 'tonebench.manual.edition'
 
 function storedEdition(): ManualEdition {
-  return localStorage.getItem(EDITION_STORAGE_KEY) === 'guide' ? 'guide' : 'reference'
+  return readStoredPreference(EDITION_STORAGE_KEY) === 'guide' ? 'guide' : 'reference'
 }
 
 const edition = ref<ManualEdition>(storedEdition())
 
 function setEdition(next: ManualEdition) {
   edition.value = next
-  localStorage.setItem(EDITION_STORAGE_KEY, next)
+  writeStoredPreference(EDITION_STORAGE_KEY, next)
 }
 
 export function useManual() {

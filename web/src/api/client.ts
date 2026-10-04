@@ -1,5 +1,5 @@
-// Hand-written client for the endpoints in docs/qa403-app-stack-spec.md §4.1.
-// Wire shapes must stay in sync with Qa403.App/Endpoints/*.cs by hand — no codegen.
+// Hand-written client for the endpoints in docs/tonebench-stack-spec.md §4.1.
+// Wire shapes must stay in sync with Tonebench.App/Endpoints/*.cs by hand — no codegen.
 
 export interface DeviceStatus {
   connected: boolean
@@ -185,7 +185,7 @@ export type DeviceKindName = 'Hardware' | 'Simulated' | 'SoundCard'
 
 /**
  * Who picks the input and output attenuators. One mode for both: they are the two ends of the same
- * analog path, and the reasons to pin either are the same reason. Mirrors Qa403.App's RangingMode.
+ * analog path, and the reasons to pin either are the same reason. Mirrors Tonebench.App's RangingMode.
  */
 export type RangingModeName = 'Auto' | 'Manual'
 
@@ -256,7 +256,7 @@ export interface SoundCardProbe {
   problem: string | null
 }
 
-/** Mirrors Qa403.Data.SoundCardConfig. */
+/** Mirrors Tonebench.Data.SoundCardConfig. */
 export interface SoundCardConfig {
   inputHostApi: string
   inputDeviceName: string
@@ -313,16 +313,16 @@ export interface SoundCardCalibrationResult {
   warning: string | null
 }
 
-/** Mirrors Qa403.Device.Simulation.SimulatedOutputStageModel. */
+/** Mirrors Tonebench.Device.Simulation.SimulatedOutputStageModel. */
 export type SimulatedOutputStageModel = 'None' | 'SolidState' | 'TubeAmp'
 
-/** Mirrors Qa403.Device.Simulation.SimulatedLoad. */
+/** Mirrors Tonebench.Device.Simulation.SimulatedLoad. */
 export type SimulatedLoad = 'Open' | 'EightOhms' | 'FourOhms'
 
-/** Mirrors Qa403.Device.GeneratorKind — exactly one stimulus is active per channel. */
+/** Mirrors Tonebench.Device.GeneratorKind — exactly one stimulus is active per channel. */
 export type GeneratorKind = 'Off' | 'Tones' | 'Multitone' | 'WhiteNoise' | 'EchoChirp'
 
-/** Mirrors Qa403.Device.SmoothingOctaves. Stored and round-tripped only; the FR measurement that consumes it is a later phase. */
+/** Mirrors Tonebench.Device.SmoothingOctaves. Stored and round-tripped only; the FR measurement that consumes it is a later phase. */
 export type SmoothingOctaves =
   | 'None'
   | 'OneOver96'
@@ -366,20 +366,20 @@ export interface GeneratorChannelState {
 // Frequency response (chirp)
 // ---------------------------------------------------------------------------
 
-/** Mirrors Qa403.App.Services.FrequencyResponseTraceKind. */
+/** Mirrors Tonebench.App.Services.FrequencyResponseTraceKind. */
 export type ResponseTraceKindName = 'Left' | 'Right' | 'Gain' | 'CrosstalkLeftToRight' | 'CrosstalkRightToLeft'
 
 /** Which amplifier channel is the crosstalk aggressor; 'Both' runs the two directions back to back. */
 export type CrosstalkDirection = 'LeftToRight' | 'RightToLeft' | 'Both'
 
 /**
- * Mirrors Qa403.App.Services.ResponsePhaseKind — what phase a run measured, and so what the UI may
+ * Mirrors Tonebench.App.Services.ResponsePhaseKind — what phase a run measured, and so what the UI may
  * draw and what it should call it. There is only one phase quantity in these measurements,
  * `arg(L/R)`; what changes is whether it exists and what it means.
  */
 export type ResponsePhaseKindName = 'None' | 'PerTrace' | 'DutResponse' | 'ChannelDifference'
 
-/** Mirrors Qa403.App.Services.FrequencyResponsePhase. */
+/** Mirrors Tonebench.App.Services.FrequencyResponsePhase. */
 export type ResponsePhaseName =
   | 'Idle'
   | 'DeterminingLevel'
@@ -423,26 +423,26 @@ export const RESPONSE_SMOOTHING: { denominator: number; label: string }[] = [
 // Impedance
 // ---------------------------------------------------------------------------------------------
 
-/** Mirrors Qa403.App.Services.ImpedanceMethod. Only ReferenceResistor is implemented. */
+/** Mirrors Tonebench.App.Services.ImpedanceMethod. Only ReferenceResistor is implemented. */
 export type ImpedanceMethodName = 'ReferenceResistor' | 'TwoLoad'
 
-/** Mirrors Qa403.App.Services.ImpedanceStimulus. */
+/** Mirrors Tonebench.App.Services.ImpedanceStimulus. */
 export type ImpedanceStimulusName = 'Chirp' | 'SteppedSine' | 'PinkNoise'
 
-/** Mirrors Qa403.App.Services.ImpedanceCableMode. */
+/** Mirrors Tonebench.App.Services.ImpedanceCableMode. */
 export type ImpedanceCableModeName = 'None' | 'Measured' | 'Fixed'
 
-/** Mirrors Qa403.App.Services.ImpedanceCalTarget. */
+/** Mirrors Tonebench.App.Services.ImpedanceCalTarget. */
 export type ImpedanceCalTargetName = 'None' | 'Open' | 'Short'
 
-/** Mirrors Qa403.App.Services.ImpedanceTraceKind. */
+/** Mirrors Tonebench.App.Services.ImpedanceTraceKind. */
 export type ImpedanceTraceKindName = 'Impedance' | 'OpenCal' | 'ShortCal'
 
 /**
  * One stored fixture calibration standard: the measured channel ratio, decimated to a few hundred
  * log-spaced points so it fits in a measurement type's params_json.
  *
- * Mirrors Qa403.Dsp.ImpedanceCalibration. The browser is the only place these live — the server
+ * Mirrors Tonebench.Dsp.ImpedanceCalibration. The browser is the only place these live — the server
  * keeps none of its own, so they travel back with every start request.
  */
 export interface ImpedanceCalibrationJson {
@@ -1038,7 +1038,7 @@ export interface OutputImpedanceStarted {
   estimatedSeconds: number
 }
 
-/** Mirrors Qa403.App.Services.OutputImpedanceStatus. Every reading is null until measured — never NaN. */
+/** Mirrors Tonebench.App.Services.OutputImpedanceStatus. Every reading is null until measured — never NaN. */
 export interface OutputImpedanceStatus {
   running: boolean
   phase: ResponsePhaseName
@@ -1670,7 +1670,7 @@ export interface AcquisitionStartRequest {
 }
 
 /**
- * Mirrors `Qa403.Dsp.WindowType`. The Kaiser numbers are ARTA's alpha, i.e. beta = pi*alpha —
+ * Mirrors `Tonebench.Dsp.WindowType`. The Kaiser numbers are ARTA's alpha, i.e. beta = pi*alpha —
  * see the convention note on `Window` server-side before adding or renaming one.
  */
 export type WindowType =
@@ -1683,7 +1683,7 @@ export type WindowType =
   | 'Kaiser7'
 export type AveragingMode = 'Off' | 'Linear' | 'Exponential'
 
-// Mirrors Qa403.App.Streaming.SpectrumPipelineOptions. Server serializes/accepts WindowType and
+// Mirrors Tonebench.App.Streaming.SpectrumPipelineOptions. Server serializes/accepts WindowType and
 // AveragingMode as strings (JsonStringEnumConverter, configured in Program.cs) — same
 // representation in both directions, no int<->name mapping needed here.
 export interface SpectrumConfig {
@@ -1752,7 +1752,7 @@ export interface WeightingCurveResponse {
   gainDb: number[]
 }
 
-/** Mirrors Qa403.App.Streaming.IntermodulationSpec. */
+/** Mirrors Tonebench.App.Streaming.IntermodulationSpec. */
 export interface IntermodulationSpec {
   toneLowHz: number
   toneHighHz: number
@@ -1792,8 +1792,8 @@ export interface SpectrumConfigRequest {
   scopeResidual?: boolean
 }
 
-// Projects / measurement-types / measurements — mirrors Qa403.App/Endpoints/ProjectsEndpoints.cs,
-// ProjectSessionEndpoints.cs and MeasurementsEndpoints.cs. A project is one `.qa403` file holding
+// Projects / measurement-types / measurements — mirrors Tonebench.App/Endpoints/ProjectsEndpoints.cs,
+// ProjectSessionEndpoints.cs and MeasurementsEndpoints.cs. A project is one `.tbench` file holding
 // several configured measurement-types; saving a measurement snapshots the type's parameters as-run.
 
 export interface Project {
@@ -1814,7 +1814,7 @@ export interface ProjectSession {
 export interface CreateProjectRequest {
   name: string
   notes: string | null
-  /** Absolute; `.qa403` is appended when missing. */
+  /** Absolute; `.tbench` is appended when missing. */
   path: string
 }
 
@@ -1958,7 +1958,7 @@ export interface MeasurementType {
   createdUtc: string
 }
 
-/** Mirrors Qa403.App.Endpoints.MeasurementTypeResultCountResponse. */
+/** Mirrors Tonebench.App.Endpoints.MeasurementTypeResultCountResponse. */
 export interface MeasurementTypeResultCount {
   count: number
 }
@@ -2164,7 +2164,7 @@ export interface UpdateMeasurementRequest {
 }
 
 /**
- * Mirrors Qa403.App.Endpoints.AppIdentity — what a second instance of the app reads off port 8399
+ * Mirrors Tonebench.App.Endpoints.AppIdentity — what a second instance of the app reads off port 8399
  * to decide whether the listener there is us. `version` is this build's informational version, read
  * from the assembly, so it is available with no network and whatever the update check is set to.
  */
@@ -2174,7 +2174,7 @@ export interface AppIdentity {
   version: string
 }
 
-/** Mirrors Qa403.App.Services.UpdateCheckResult. latestVersion/latestUrl are null when the check failed or found nothing newer. */
+/** Mirrors Tonebench.App.Services.UpdateCheckResult. latestVersion/latestUrl are null when the check failed or found nothing newer. */
 export interface UpdateStatus {
   currentVersion: string
   latestVersion: string | null
@@ -2247,21 +2247,21 @@ export function measurementsQuery(filter: MeasurementFilter = {}): string {
 // THD vs frequency sweep
 // ---------------------------------------------------------------------------
 
-/** Mirrors Qa403.App.Services.ThdSweepLevelMode. */
+/** Mirrors Tonebench.App.Services.ThdSweepLevelMode. */
 export type SweepLevelMode = 'GeneratorVoltage' | 'OutputVoltage' | 'OutputPower'
 
-/** Mirrors Qa403.App.Services.ThdSweepLevelUnit. 'Watt' is only valid with the OutputPower mode. */
+/** Mirrors Tonebench.App.Services.ThdSweepLevelUnit. 'Watt' is only valid with the OutputPower mode. */
 export type SweepLevelUnit = 'Dbv' | 'Volt' | 'MilliVolt' | 'Watt'
 
 /**
- * Mirrors Qa403.App.Services.ThdMethod: what each harmonic is divided by. Conventional is the
+ * Mirrors Tonebench.App.Services.ThdMethod: what each harmonic is divided by. Conventional is the
  * fundamental at the stimulus frequency; FrequencyNormalized is the fundamental the same sweep
  * measured at the harmonic's own frequency n·f, which removes the DUT's frequency response from
  * the reading. Frequency axis only.
  */
 export type ThdMethodName = 'Conventional' | 'FrequencyNormalized'
 
-/** Mirrors Qa403.App.Services.ThdSweepPhase. */
+/** Mirrors Tonebench.App.Services.ThdSweepPhase. */
 export type SweepPhaseName =
   | 'Idle'
   | 'DeterminingLevel'
@@ -2301,7 +2301,7 @@ export interface ThdSweepStartRequest {
 }
 
 /**
- * Mirrors Qa403.Data.ThdVsFrequencyParameters — what a ThdVsFrequency measurement type stores in
+ * Mirrors Tonebench.Data.ThdVsFrequencyParameters — what a ThdVsFrequency measurement type stores in
  * `params_json`, and what a saved sweep result records as its as-run settings. Identical to
  * ThdSweepStartRequest plus `generatorAmpDbv`, but deliberately its own type: the request is what
  * the client asks for, this is what was configured or actually run.
@@ -2341,7 +2341,7 @@ export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
 }
 
 /**
- * Mirrors Qa403.App.Endpoints.ThdAmplitudeSweepStartRequest. Much smaller than its frequency
+ * Mirrors Tonebench.App.Endpoints.ThdAmplitudeSweepStartRequest. Much smaller than its frequency
  * counterpart because most of that request has no meaning on this axis: the level *is* the swept
  * variable, so there is no level mode, no adaptive resolution and no noise-floor pass, and the
  * window / FFT size / sample rate are fixed server-side.
@@ -2365,7 +2365,7 @@ export interface ThdAmplitudeSweepStartRequest {
 }
 
 /**
- * Mirrors Qa403.Data.ThdVsAmplitudeParameters — what a ThdVsAmplitude measurement type stores in
+ * Mirrors Tonebench.Data.ThdVsAmplitudeParameters — what a ThdVsAmplitude measurement type stores in
  * `params_json`. Its own type rather than an extension of the request for the same reason the
  * frequency sweep's is: the request is what the client asks for, this is what was configured, and
  * this one also carries the chart's display state.
@@ -2425,7 +2425,7 @@ export interface ThdSweepStarted {
   amplitudesVolt: number[]
 }
 
-/** One decimated (x, min, max) trace — mirrors the streaming protocol's SweepPreviewSeries and Qa403.Data.StoredPreviewSeries. */
+/** One decimated (x, min, max) trace — mirrors the streaming protocol's SweepPreviewSeries and Tonebench.Data.StoredPreviewSeries. */
 export interface SweepPreviewSeries {
   /** Frequency (Hz) for an FFT preview, elapsed time (s) for a scope preview. */
   x: number[]
@@ -2468,7 +2468,7 @@ export interface ThdSweepPoint {
   normalizedD6PlusPercent: number | null
 }
 
-// The IMD-vs-amplitude sweep — mirrors Qa403.App/Endpoints/ImdSweepEndpoints.cs and
+// The IMD-vs-amplitude sweep — mirrors Tonebench.App/Endpoints/ImdSweepEndpoints.cs and
 // Services/ImdSweepModels.cs. Levels are sine-equivalent volts: the single sine whose peak equals
 // the two-tone pair's peak (see imd/presets.ts).
 
@@ -2498,7 +2498,7 @@ export interface ImdSweepStarted {
   levelsVolt: number[]
 }
 
-/** Mirrors Qa403.App.Services.ImdSweepPoint. */
+/** Mirrors Tonebench.App.Services.ImdSweepPoint. */
 export interface ImdSweepPoint {
   channel: number
   generatorSineEquivalentDbv: number
@@ -2531,7 +2531,7 @@ export interface ImdSweepStatus {
 }
 
 /**
- * Mirrors Qa403.Data.ImdVsAmplitudeParameters. The chart display fields reuse the THD amplitude
+ * Mirrors Tonebench.Data.ImdVsAmplitudeParameters. The chart display fields reuse the THD amplitude
  * sweep's names (chartShowThd is the IMD total, chartShowD2..D5 the IM2..IM5 orders, chartShowD6Plus
  * IM6+), so sweep/display.ts reads both records alike.
  */
@@ -2602,7 +2602,7 @@ export interface ThdSweepStatus {
   currentFreqHz: number
   /** The generator amplitude actually used — solved by probing for the output-referred modes, or the level of the point being measured on the amplitude axis. */
   generatorAmpDbv: number
-  /** Which quantity the running sweep steps. Mirrors Qa403.App.Services.SweepAxis. */
+  /** Which quantity the running sweep steps. Mirrors Tonebench.App.Services.SweepAxis. */
   axis: 'Frequency' | 'Amplitude'
   /** The generator amplitude of the point being measured, in volts. Only moves on the amplitude axis. */
   currentAmplitudeVolt: number
@@ -2802,7 +2802,7 @@ export const api = {
 
   /**
    * One directory of the server's file system, for the in-app file dialog. No path lists the
-   * default projects folder; `ext` filters the files shown (the server's default is `.qa403`).
+   * default projects folder; `ext` filters the files shown (the server's default is `.tbench`).
    */
   browseFiles: (path: string | null, ext?: string) => {
     const params = new URLSearchParams()
@@ -2971,7 +2971,7 @@ export const api = {
   saveImpedance: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/impedance/save', { method: 'POST', body: JSON.stringify(req) }),
 
-  // Output impedance / damping factor — mirrors Qa403.App/Endpoints/OutputImpedanceEndpoints.cs.
+  // Output impedance / damping factor — mirrors Tonebench.App/Endpoints/OutputImpedanceEndpoints.cs.
   startOutputImpedance: (req: OutputImpedanceStartRequest) =>
     request<OutputImpedanceStarted>('/output-impedance/start', { method: 'POST', body: JSON.stringify(req) }),
 

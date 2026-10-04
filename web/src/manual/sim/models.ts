@@ -1,5 +1,5 @@
 // The simulator's DUT models, coefficient for coefficient as `SimulatedDut.For` builds them
-// (src/Qa403.Device/Simulation/SimulatedDut.cs). Edit the two together: a model changed on one side
+// (src/Tonebench.Device/Simulation/SimulatedDut.cs). Edit the two together: a model changed on one side
 // and not the other leaves the manual drawing a response the simulator no longer produces, and
 // nothing but biquad.test.ts — which pins a handful of measured figures — would notice.
 //

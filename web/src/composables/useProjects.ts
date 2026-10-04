@@ -15,7 +15,7 @@ import { useConfirm } from './useConfirm'
 // save dialog's pickers, the history filter) shares one state instead of drifting out of sync
 // with independent copies — same shape as useSpectrumConfig.ts's singleton refs.
 //
-// The open project is the server's: one `.qa403` file at a time, opened and switched through
+// The open project is the server's: one `.tbench` file at a time, opened and switched through
 // useProjectSession, and read back here with `refreshSession` (GET /api/project). Null means the
 // welcome screen. There is no client-side list of projects any more — the recent files list is
 // useRecentProjects, and it is a list of files, not of rows.

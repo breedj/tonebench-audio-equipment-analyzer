@@ -1,12 +1,12 @@
 # Rebuilding `native/win-x64/portaudio.dll`
 
-PortAudio backs the sound-card analyzer (`src/Qa403.Device/SoundCard`). Unlike libusb, **upstream
+PortAudio backs the sound-card analyzer (`src/Tonebench.Device/SoundCard`). Unlike libusb, **upstream
 ships source only** — there is no official Windows binary — so the vendored DLL is one we build,
 **with ASIO, and with one local patch**. This file is the recipe, so the binary in the tree is
 reproducible rather than folklore.
 
 Linux does not use this: the .deb depends on the distro's `libportaudio2`, the same bundle-vs-depend
-tradeoff as libusb (`docs/qa403-app-stack-spec.md` §9.4). ALSA and JACK do real full-duplex, so
+tradeoff as libusb (`docs/tonebench-stack-spec.md` §9.4). ALSA and JACK do real full-duplex, so
 none of the Windows difficulties below apply there.
 
 ## What is in the vendored DLL
@@ -129,10 +129,10 @@ regardless of apartment.
 
 ## Where this is wired in
 
-- `src/Qa403.App/Qa403.App.csproj` copies it next to `libusb-1.0.dll`, on the same RID condition,
+- `src/Tonebench.App/Tonebench.App.csproj` copies it next to `libusb-1.0.dll`, on the same RID condition,
   and `IncludeNativeLibrariesForSelfExtract` absorbs it into the single-file publish.
-- `src/Qa403.Device.Tests/Qa403.Device.Tests.csproj` copies it for the hardware tests.
+- `src/Tonebench.Device.Tests/Tonebench.Device.Tests.csproj` copies it for the hardware tests.
 - `packaging/windows/build.ps1` greps the published exe for `portaudio.dll` and fails the build if
   it is missing — the `--simulate` smoke test never loads it, so nothing else would catch it.
-- `packaging/windows/qa403.iss` needs **no** entry: a native `.dll` ends up inside the exe.
+- `packaging/windows/tonebench.iss` needs **no** entry: a native `.dll` ends up inside the exe.
 - `packaging/linux/deb/control` and `packaging/linux/install.sh` name `libportaudio2` instead.

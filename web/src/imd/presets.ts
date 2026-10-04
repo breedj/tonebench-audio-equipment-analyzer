@@ -1,7 +1,7 @@
 import type { GeneratorKind, GeneratorTone, ImdMethodName, IntermodulationConfigRequest } from '../api/client'
 
 /**
- * The standard two-tone IMD tests. Mirrors Qa403.Dsp.IntermodulationPresets — the ids are the C#
+ * The standard two-tone IMD tests. Mirrors Tonebench.Dsp.IntermodulationPresets — the ids are the C#
  * enum names because they travel in a measurement type's params_json — and presets.test.ts pins
  * the numbers to the tutorial's. `ratio` is amplitude (low:high), so 4 means the LF tone is
  * 12.04 dB above the HF one.
@@ -37,7 +37,7 @@ export function imdPreset(id: ImdPresetId): ImdPreset {
  * Splits a sine-equivalent level into the two tone levels: the pair's peak equals the peak of a
  * sine at `sineEquivalentDbv`, with V1 = ratio · V2. 4:1 → −1.94 / −13.98 dB, 1:1 → −6.02 dB each.
  * This is the tutorial's convention — every IMD test is set up so the two-tone peak equals the
- * rated-power sine's peak — and Qa403.Dsp.IntermodulationPresets.ToneLevelsDbv is the same formula.
+ * rated-power sine's peak — and Tonebench.Dsp.IntermodulationPresets.ToneLevelsDbv is the same formula.
  */
 export function toneLevelsDbv(sineEquivalentDbv: number, ratio: number): { lowDbv: number; highDbv: number } {
   const lowShare = ratio / (ratio + 1)

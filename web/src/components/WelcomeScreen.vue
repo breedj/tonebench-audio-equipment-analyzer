@@ -37,7 +37,7 @@ onMounted(async () => {
 <template>
   <div class="flex flex-1 items-start justify-center overflow-y-auto p-8">
     <div class="w-full max-w-2xl">
-      <h1 class="text-2xl font-semibold">QA403 audio analyzer</h1>
+      <h1 class="text-2xl font-semibold">Tonebench</h1>
       <p v-if="version" class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Version {{ version }}</p>
 
       <div class="mt-6 flex flex-wrap gap-2">
@@ -85,7 +85,7 @@ onMounted(async () => {
       <h2 class="mt-8 text-sm font-semibold text-neutral-600 dark:text-neutral-300">Recent projects</h2>
       <p v-if="recentError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ recentError }}</p>
       <p v-else-if="recent.length === 0" class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
-        Nothing yet. Create a project, or open a <span class="font-mono">.qa403</span> file.
+        Nothing yet. Create a project, or open a <span class="font-mono">.tbench</span> file.
       </p>
       <ul v-else class="mt-2 divide-y divide-neutral-200 rounded border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
         <li v-for="entry in recent" :key="entry.path" class="flex items-center gap-3 px-3 py-2">

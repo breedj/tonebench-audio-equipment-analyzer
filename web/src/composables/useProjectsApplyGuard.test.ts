@@ -14,7 +14,7 @@ const amp: Project = { id: 1, name: 'GM70 amp', notes: null, createdUtc: '2026-0
 describe('useProjects: a type whose settings failed to load', () => {
   beforeEach(async () => {
     vi.restoreAllMocks()
-    vi.spyOn(api, 'getProjectSession').mockResolvedValue({ open: true, path: 'C:\\P\\amp.qa403', project: amp } satisfies ProjectSession)
+    vi.spyOn(api, 'getProjectSession').mockResolvedValue({ open: true, path: 'C:\\P\\amp.tbench', project: amp } satisfies ProjectSession)
     vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([
       { id: 7, projectId: 1, kind: 'FftSpectrum', name: 'broken', notes: null, paramsJson: '{}', sortOrder: 0, createdUtc: '' },
       { id: 8, projectId: 1, kind: 'FftSpectrum', name: 'fine', notes: null, paramsJson: '{}', sortOrder: 1, createdUtc: '' },

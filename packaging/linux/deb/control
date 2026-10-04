@@ -1,14 +1,15 @@
-Package: qa403-audio-analyzer
+Package: tonebench
 Version: @VERSION@
 Section: electronics
 Priority: optional
 Architecture: amd64
 Depends: libc6 (>= 2.34), libgcc-s1, libstdc++6, zlib1g, libusb-1.0-0, libportaudio2, libfontconfig1, libssl3 | libssl1.1
 Maintainer: Joost Breed <joost.breed.quicknet@gmail.com>
-Homepage: https://github.com/breedj/qa40x-audio-analyzer-cp
-Description: Audio analyzer for the QuantAsylum QA403
- Drives a QuantAsylum QA403 over USB with its own DSP, live plotting in the
- browser and a local measurement database. Self-contained .NET build: no
- runtime to install. After installing, add yourself to the plugdev group
- (sudo usermod -aG plugdev $USER) and log in again to open the device as a
- non-root user; the udev rule this package installs grants that group access.
+Homepage: https://github.com/breedj/tonebench-audio-equipment-analyzer
+Description: Audio equipment analyzer for the QuantAsylum QA403 and sound cards
+ Drives a QuantAsylum QA403 over USB, or any sound card through PortAudio, with
+ its own DSP, live plotting in the browser and a local measurement database.
+ Self-contained .NET build: no runtime to install. After installing, add
+ yourself to the plugdev group (sudo usermod -aG plugdev $USER) and log in
+ again to open the device as a non-root user; the udev rule this package
+ installs grants that group access.

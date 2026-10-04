@@ -20,7 +20,7 @@ describe('useProjects: the Notes box across a save', () => {
     stored = [
       { id: 11, projectId: 1, kind: 'FftSpectrum', name: 'Loopback', notes: null, paramsJson: '{}', sortOrder: 0, createdUtc: '' },
     ]
-    vi.spyOn(api, 'getProjectSession').mockResolvedValue({ open: true, path: 'C:\\P\\amp.qa403', project: amp } satisfies ProjectSession)
+    vi.spyOn(api, 'getProjectSession').mockResolvedValue({ open: true, path: 'C:\\P\\amp.tbench', project: amp } satisfies ProjectSession)
     vi.spyOn(api, 'listMeasurementTypes').mockImplementation(async () => stored.map((t) => ({ ...t })))
     vi.spyOn(api, 'listRecentProjects').mockResolvedValue([])
     vi.spyOn(api, 'cancelRuns').mockResolvedValue(undefined as never)

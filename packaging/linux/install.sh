@@ -46,7 +46,7 @@ usermod -aG plugdev "$TARGET_USER"
 # it demonstrably was not (a transient ldconfig-cache read, not a real gap).
 #
 # libportaudio2 is the sound-card analyzer's backend -- on Windows that DLL is vendored, but on
-# Linux the distro's copy is the one to use (docs/qa403-app-stack-spec.md 9.4).
+# Linux the distro's copy is the one to use (docs/tonebench-stack-spec.md 9.4).
 # libfontconfig1 is for the PDF reports: QuestPDF's bundled native Skia links against it even
 # though the app only ever uses the font QuestPDF ships. Present on any desktop install; a minimal
 # server image may lack it, and the symptom is the report endpoint failing to load the library.

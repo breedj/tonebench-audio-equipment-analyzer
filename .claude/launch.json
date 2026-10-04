@@ -4,7 +4,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "src\\Qa403.App\\Qa403.App.csproj", "--", "--no-browser", "--simulate"],
+      "runtimeArgs": ["run", "--project", "src\\Tonebench.App\\Tonebench.App.csproj", "--", "--no-browser", "--simulate"],
       "port": 8399
     },
     {

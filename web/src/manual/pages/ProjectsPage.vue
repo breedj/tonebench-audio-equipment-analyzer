@@ -11,7 +11,7 @@ const { showPage } = useManual()
     <p>
       A project is a file. Everything you do for one amplifier, one loudspeaker, one investigation —
       the measurements you set up, the results you keep, the notes you write — lives in a single
-      <code>.qa403</code> file that you name and place yourself, the way a document does. Copy it,
+      <code>.tbench</code> file that you name and place yourself, the way a document does. Copy it,
       back it up, move it to another machine, keep it next to the schematic: the file is the project.
     </p>
     <p>
@@ -54,16 +54,16 @@ const { showPage } = useManual()
         <strong>New…</strong> asks for a <strong>Name</strong>, an optional
         <strong>Description</strong> and a <strong>File location</strong>. The location follows the
         name — the app's projects folder plus the name as a file name — until you edit it or pick one
-        with <strong>Browse…</strong>. The projects folder is <code>Documents\QA403 Projects</code>
-        on Windows and <code>~/QA403 Projects</code> on Linux, created the first time a project is
-        saved into it. <code>.qa403</code> is added when you leave it off. A name that is already
+        with <strong>Browse…</strong>. The projects folder is <code>Documents\Tonebench Projects</code>
+        on Windows and <code>~/Tonebench Projects</code> on Linux, created the first time a project is
+        saved into it. <code>.tbench</code> is added when you leave it off. A name that is already
         taken in that folder is refused rather than overwritten.
       </li>
       <li>
         <strong>Open…</strong> opens the file dialog on the projects folder. The buttons along the top
         jump to Documents, your home folder and each drive; the ↑ goes up one folder; the path box
         takes a typed or pasted path — <kbd>Enter</kbd> lists a folder, or opens a file. Only
-        <code>.qa403</code> files are listed. Double-click a file, or select it and press
+        <code>.tbench</code> files are listed. Double-click a file, or select it and press
         <strong>Open</strong>.
       </li>
       <li>
@@ -110,15 +110,23 @@ const { showPage } = useManual()
       A file made by <strong>New…</strong> or <strong>Save As…</strong>, on any machine. A file
       written by an older version of the app is brought up to date when it is opened, which means
       opening is a write: a read-only file, or one on a read-only medium, fails with a message saying
-      so. A file that is not a QA403 database is refused without being touched.
+      so. A file that is not one of this app's databases is refused without being touched.
+    </p>
+    <p>
+      Project files written before the app was renamed end in <code>.qa403</code> rather than
+      <code>.tbench</code>. Both are listed by the Open dialog and both open normally: a project file
+      is recognised by what is inside it, not by what it is called. Saving keeps a file's own
+      extension, so an existing <code>.qa403</code> project stays where and what it is; use
+      <strong>Save As…</strong> if you would rather have the new one.
     </p>
     <p>
       Before projects were one file each, every project lived together in one database,
       <code>qa403.db</code> under <code>%LOCALAPPDATA%\Qa403</code> (<code>~/.local/share/Qa403</code>
-      on Linux). That file is left where it is. When it holds a single project it opens like any
-      other — type its path into the Open dialog's path box, since the list shows only
-      <code>.qa403</code> files — and from then on it is simply a project file with an old name. When
-      it holds several, it is refused with a message naming them, because a project file holds one.
+      on Linux — the folder the app used under its old name). That file is left where it is. When it
+      holds a single project it opens like any other — type its path into the Open dialog's path box,
+      since the list shows project files rather than databases — and from then on it is simply a
+      project file with an old name. When it holds several, it is refused with a message naming them,
+      because a project file holds one.
     </p>
 
     <h2>Where to keep the files</h2>

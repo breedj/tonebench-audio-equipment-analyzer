@@ -1,0 +1,40 @@
+namespace Tonebench.Data;
+
+/// <summary>
+/// Where <c>tonebench-config.db</c> lives — the application's own configuration, kept in a
+/// <b>separate file</b> from the measurement history, which is one <c>.tbench</c> project file per
+/// project (see <see cref="CurrentProjectFile"/>).
+///
+/// <para><b>Why a second database rather than more tables in the first one.</b> The two hold
+/// different kinds of thing and want different lifetimes. Measurement history is portable: it is
+/// what you copy to another machine, hand to someone else, or restore from a backup. Configuration
+/// is <i>machine-specific</i> — and in this app that is not a matter of taste, because the impedance
+/// fixture calibration stored here describes one particular QA403's inter-channel gain and phase
+/// mismatch and one particular set of test leads. Carried along inside a copied measurement
+/// database it would not merely be stale, it would be actively wrong: every impedance reading on the
+/// other machine would be silently corrected by the wrong numbers, with nothing on screen to say
+/// so.</para>
+///
+/// <para>Separating them makes that impossible by construction. It also means a corrupt or deleted
+/// configuration costs you preferences rather than years of measurements, and that a project file
+/// restored from backup does not quietly revert the calibration. The loopback calibrations of the
+/// impulse response live here for the same reason (config migration 002), as do the recent-projects
+/// list, the last opened project and the startup preference — all about this machine.</para>
+///
+/// <para>Under <see cref="TonebenchAppData.RootDirectory"/> (LocalApplicationData,
+/// <c>~/.local/share/Tonebench</c> on Linux) rather than next to the binary, because a rebuild must not
+/// silently destroy it; override with the <c>Config:Path</c> configuration key.</para>
+/// </summary>
+public sealed record TonebenchConfigDatabaseOptions
+{
+    public required string Path { get; init; }
+
+    public static TonebenchConfigDatabaseOptions Default
+    {
+        get
+        {
+            Directory.CreateDirectory(TonebenchAppData.RootDirectory);
+            return new TonebenchConfigDatabaseOptions { Path = TonebenchAppData.ConfigDatabasePath };
+        }
+    }
+}

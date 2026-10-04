@@ -2,12 +2,25 @@
 import { computed, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { api, type FileBrowseResponse } from '../api/client'
-import { ensureExtension, fileNameOf, isRooted, joinPath, parentPath, PROJECT_EXTENSION } from '../projects/projectFile'
+import {
+  ensureExtension,
+  fileNameOf,
+  isRooted,
+  joinPath,
+  OPENABLE_PROJECT_EXTENSIONS,
+  parentPath,
+  PROJECT_EXTENSION,
+} from '../projects/projectFile'
 
 // The in-app file dialog. The app is a server driving the system browser, so a web page cannot
 // open the operating system's file dialog on the server's behalf; this lists the server's file
 // system one directory at a time (GET /api/files/browse) and looks the same on Windows and Linux.
-// Two modes: `open` picks an existing .qa403 file, `save` picks a folder and a file name.
+// Two modes: `open` picks an existing project file, `save` picks a folder and a file name.
+//
+// A project file has two extensions it may carry — the current .tbench and the .qa403 of the
+// builds named after the QA403 — so `extension` (one, with its dot) is what save mode *writes*,
+// while `listedExtensions` is what either mode *accepts*. Passing the single one as the browse
+// filter would list a folder of pre-rename projects as empty.
 
 const props = defineProps<{
   open: boolean
@@ -33,6 +46,14 @@ const selectedFile = ref<string | null>(null)
 
 const title = computed(() => props.title ?? (props.mode === 'open' ? 'Open project' : 'Save project file'))
 const extension = computed(() => props.extension ?? PROJECT_EXTENSION)
+/** Explicit prop: that one alone. Otherwise every extension a project file may carry. */
+const listedExtensions = computed(() =>
+  props.extension ? [props.extension] : OPENABLE_PROJECT_EXTENSIONS,
+)
+const endsWithListed = (path: string) => {
+  const lower = path.toLowerCase()
+  return listedExtensions.value.some((e) => lower.endsWith(e))
+}
 const separator = computed(() => listing.value?.separator ?? '/')
 
 const resultPath = computed<string | null>(() => {
@@ -46,7 +67,7 @@ async function browse(path: string | null) {
   loading.value = true
   error.value = null
   try {
-    listing.value = await api.browseFiles(path, extension.value)
+    listing.value = await api.browseFiles(path, props.extension)
     pathInput.value = listing.value.path
     selectedFile.value = null
   } catch (e) {
@@ -62,7 +83,7 @@ watch(
     if (!open) return
     const start = props.startPath ?? null
     // A full file path starts in its folder, with its name in the box; anything else is a folder.
-    const looksLikeFile = start !== null && start.toLowerCase().endsWith(extension.value)
+    const looksLikeFile = start !== null && endsWithListed(start)
     fileName.value = looksLikeFile ? fileNameOf(start) : (props.suggestedName ?? '')
     void browse(looksLikeFile ? parentPath(start) : start)
   },
@@ -77,8 +98,8 @@ function onPathEnter() {
   }
   // A file: select it outright in open mode, or take its name and folder in save mode. `.db` too,
   // so a database from before projects were one file each can be opened by typing its path — the
-  // list shows only .qa403, and such a file opens fine when it holds a single project.
-  if (typed.toLowerCase().endsWith(extension.value) || (extension.value === PROJECT_EXTENSION && typed.toLowerCase().endsWith('.db'))) {
+  // list shows only project files, and such a database opens fine when it holds a single project.
+  if (endsWithListed(typed) || (extension.value === PROJECT_EXTENSION && typed.toLowerCase().endsWith('.db'))) {
     if (props.mode === 'open') {
       emit('select', typed)
       return

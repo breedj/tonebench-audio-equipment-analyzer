@@ -1,14 +1,14 @@
-# qa40x-audio-analyzer-cp
-Cross platform audio analyzer for qa40x devices
+# tonebench-audio-equipment-analyzer
+Cross platform audio analyzer for qa40x devices with sound card support.
 Developed with the help of Claude.ai
 
 ## Running
 
-`dotnet run --project src/Qa403.App` talks to a real QA403 by default. Pass `--simulate` to use a
+`dotnet run --project src/Tonebench.App` talks to a real QA403 by default. Pass `--simulate` to use a
 synthetic device instead — no hardware required, useful for UI work or trying the app out:
 
 ```bash
-dotnet run --project src/Qa403.App -- --simulate
+dotnet run --project src/Tonebench.App -- --simulate
 ```
 
 `--no-browser` skips the automatic browser launch. `--project <path>` opens that project file at
@@ -16,12 +16,11 @@ startup, ahead of the "Show welcome page on startup" preference.
 
 ## Projects
 
-A project is one SQLite file with the `.qa403` extension, created and opened from the Project menu
-(or the welcome screen) and placed wherever you like — `Documents\QA403 Projects` (`~/QA403 Projects`
+A project is one SQLite file with the `.tbench` extension, created and opened from the Project menu
+(or the welcome screen) and placed wherever you like — `Documents\Tonebench Projects` (`~/Tonebench Projects`
 on Linux) by default. The app's own configuration, including the impedance fixture and loopback
-calibrations and the recent-projects list, lives separately in `%LOCALAPPDATA%\Qa403\qa403-config.db`
-(`~/.local/share/Qa403/` on Linux). The `qa403.db` that earlier versions kept in that folder is left
-untouched; when it holds a single project it can be opened by typing its path in the Open dialog.
+calibrations and the recent-projects list, lives separately in `%LOCALAPPDATA%\Tonebench\tonebench-config.db`
+(`~/.local/share/Tonebench/` on Linux).
 
 ## Installing
 
@@ -29,10 +28,10 @@ The user-facing guide is [INSTALL.md](INSTALL.md); the short version follows.
 
 ## Installing on Windows
 
-Download `qa403-audio-analyzer-<version>-win-x64-setup.exe` from the
-[releases page](https://github.com/breedj/qa40x-audio-analyzer-cp/releases) and run it. It installs
-per user (into `%LOCALAPPDATA%\Programs\QA403 Audio Analyzer`, no administrator prompt) and adds
-**QA403 Audio Analyzer** and **QA403 Audio Analyzer (simulator)** to the Start Menu. The binaries are
+Download `tonebench-<version>-win-x64-setup.exe` from the
+[releases page](https://github.com/breedj/tonebench-audio-equipment-analyzer/releases) and run it. It installs
+per user (into `%LOCALAPPDATA%\Programs\Tonebench - Audio Equipment Analyzer`, no administrator prompt) and adds
+**Tonebench - Audio Equipment Analyzer** and **Tonebench - Audio Equipment Analyzer (simulator)** to the Start Menu. The binaries are
 not code-signed, so SmartScreen shows "Windows protected your PC" the first time — click *More info*,
 then *Run anyway*.
 
@@ -42,20 +41,20 @@ installed: the QA403 binds to WinUSB on its own. Uninstall from *Settings > Apps
 entry); your projects, configuration and logs are left in place.
 
 The zip beside the installer holds the same files for a portable install — unzip anywhere and run
-`Qa403.App.exe`.
+`Tonebench.App.exe`.
 
 ## Installing on Linux
 
 ### Debian / Ubuntu (.deb)
 
 ```bash
-sudo apt install ./qa403-audio-analyzer_<version>_amd64.deb
+sudo apt install ./tonebench_<version>_amd64.deb
 sudo usermod -aG plugdev $USER   # log out and back in (or reboot) for the group change to take effect
 ```
 
 The package brings the udev rule that lets the `plugdev` group open the QA403, its two library
 dependencies (`libusb-1.0-0`, `libfontconfig1`) and an applications-menu entry; adding *yourself* to
-`plugdev` is the one step a package cannot do. Start it from the menu or with `qa403-audio-analyzer`
+`plugdev` is the one step a package cannot do. Start it from the menu or with `tonebench`
 (`--simulate` for the synthetic device). It runs in a terminal on purpose: the terminal is the log,
 and closing it (or Ctrl+C) is how you quit — the app catches that and shuts the device down cleanly.
 
@@ -65,8 +64,8 @@ The QA403 is a driverless USB device; by default only root can open it. Unpack t
 the setup script once, as your normal user:
 
 ```bash
-tar -xzf qa403-audio-analyzer-<version>-linux-x64.tar.gz
-cd qa403-audio-analyzer-linux-x64
+tar -xzf tonebench-<version>-linux-x64.tar.gz
+cd tonebench-linux-x64
 ./install.sh
 ```
 
@@ -83,35 +82,35 @@ sudo usermod -aG plugdev $USER   # log out/in (or reboot) for the group change t
 sudo apt-get install -y libusb-1.0-0 libfontconfig1   # or your distribution's equivalents
 ```
 
-Without this, the app will fail to open the device with a permissions error. Then run `./Qa403.App`.
+Without this, the app will fail to open the device with a permissions error. Then run `./Tonebench.App`.
 
 ## Where your data lives
 
 | | Windows | Linux |
 |---|---|---|
-| Projects (`.qa403` files) | `Documents\QA403 Projects` | `~/QA403 Projects` |
-| Configuration (`qa403-config.db`) | `%LOCALAPPDATA%\Qa403` | `~/.local/share/Qa403` |
-| Logs (`qa403-<date>.log`, 14 days kept) | `%LOCALAPPDATA%\Qa403\logs` | `~/.local/share/Qa403/logs` |
-| Diagnostic captures | `%LOCALAPPDATA%\Qa403\diagnostics` | `~/.local/share/Qa403/diagnostics` |
+| Projects (`.tbench` files) | `Documents\Tonebench Projects` | `~/Tonebench Projects` |
+| Configuration (`tonebench-config.db`) | `%LOCALAPPDATA%\Tonebench` | `~/.local/share/Tonebench` |
+| Logs (`tonebench-<date>.log`, 14 days kept) | `%LOCALAPPDATA%\Tonebench\logs` | `~/.local/share/Tonebench/logs` |
+| Diagnostic captures | `%LOCALAPPDATA%\Tonebench\diagnostics` | `~/.local/share/Tonebench/diagnostics` |
 
 Nothing is ever written next to the executable, which is what makes an upgrade a plain file
 replacement and an uninstall safe. The startup console prints these paths. (The single-file
-executable unpacks its native libraries to `%TEMP%\.net\Qa403.App` / `~/.net/Qa403.App` on first
+executable unpacks its native libraries to `%TEMP%\.net\Tonebench.App` / `~/.net/Tonebench.App` on first
 run; that cache is harmless and can be deleted.)
 
 ## Building a release
 
 Releases are self-contained, trimmed, single-file publishes — no .NET runtime install required on
-the target machine. The publish flags live in `Qa403.App.csproj` under a condition that only
+the target machine. The publish flags live in `Tonebench.App.csproj` under a condition that only
 `dotnet publish` with a runtime identifier triggers, so the whole command is:
 
 ```bash
 cd web && npm ci && npm run build && cd ..
-dotnet publish src/Qa403.App/Qa403.App.csproj -c Release -r win-x64 -o publish/win-x64
-dotnet publish src/Qa403.App/Qa403.App.csproj -c Release -r linux-x64 -o publish/linux-x64
+dotnet publish src/Tonebench.App/Tonebench.App.csproj -c Release -r win-x64 -o publish/win-x64
+dotnet publish src/Tonebench.App/Tonebench.App.csproj -c Release -r linux-x64 -o publish/linux-x64
 ```
 
-The publish folder holds `Qa403.App[.exe]` (with `libusb-1.0.dll` inside the bundle on Windows),
+The publish folder holds `Tonebench.App[.exe]` (with `libusb-1.0.dll` inside the bundle on Windows),
 `QuestPDF.Fonts.Lato.br` (QuestPDF's default font, which the bundler does not absorb) and
 `appsettings.json`; the loose `wwwroot` copy is redundant with the embedded one. `TrimMode=partial`
 (not `full`) because ASP.NET Core's own trimming support is itself partial; `full` is unsupported for
@@ -125,13 +124,13 @@ powershell -File packaging/windows/build.ps1     # Windows: Inno Setup 6 install
 ```
 
 Both take `-Version`/`--version` (default: `<Version>` in `Directory.Build.props`) and
-`-SkipFrontend`/`--skip-frontend`. The installer script is `packaging/windows/qa403.iss`; the
+`-SkipFrontend`/`--skip-frontend`. The installer script is `packaging/windows/tonebench.iss`; the
 package layout, `Depends` and maintainer scripts are under `packaging/linux/deb/`. The app icon is
-`packaging/icons/qa403.svg`; `npm run icons` in `web/` regenerates the `.ico`, the `.png` and the
+`packaging/icons/tonebench.svg`; `npm run icons` in `web/` regenerates the `.ico`, the `.png` and the
 favicon from it.
 
 Trimming removes System.Text.Json's reflection-based fallback entirely, which breaks every JSON
-request/response unless it has source-generated metadata — see `Qa403.App/Json/AppJsonContext.cs`.
+request/response unless it has source-generated metadata — see `Tonebench.App/Json/AppJsonContext.cs`.
 Adding a new request/response DTO to any endpoint means adding it (or confirming it's reachable
 from an existing root type's property graph) to that context, or the trimmed build will 500 on
 that route with `JsonTypeInfo metadata for type '...' was not provided`. This is caught by actually

@@ -87,7 +87,7 @@ export function validateForm(mode: ProjectDialogMode, form: ProjectForm): string
   return null
 }
 
-/** The form as the server wants it: trimmed, `.qa403` appended, empty description as null. */
+/** The form as the server wants it: trimmed, `.tbench` appended, empty description as null. */
 export function submittedForm(form: ProjectForm): ProjectForm {
   const notes = form.notes.trim()
   return {

@@ -18,9 +18,9 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      # Only Qa403.Device.Tests/Hardware/Qa40xUsbDeviceHardwareTests.cs carries this trait — every
+      # Only Tonebench.Device.Tests/Hardware/Qa40xUsbDeviceHardwareTests.cs carries this trait — every
       # other test in the solution runs here, matching CLAUDE.md's documented pre-commit command.
-      - run: dotnet test Qa403.sln --filter "Category!=Hardware" --configuration Release
+      - run: dotnet test Tonebench.sln --filter "Category!=Hardware" --configuration Release
 
   build:
     needs: test
@@ -59,31 +59,31 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/v}"
           else
-            version="$(dotnet msbuild src/Qa403.App/Qa403.App.csproj -getProperty:Version -nologo | tr -d '[:space:]')"
+            version="$(dotnet msbuild src/Tonebench.App/Tonebench.App.csproj -getProperty:Version -nologo | tr -d '[:space:]')"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version $version"
 
-      # The single-file/trimmed/self-contained shape lives in Qa403.App.csproj under its publish
+      # The single-file/trimmed/self-contained shape lives in Tonebench.App.csproj under its publish
       # condition, so this is the same one-liner packaging/windows/build.ps1, packaging/linux/build.sh
       # and README.md use.
       - name: Publish
         shell: bash
         run: |
-          dotnet publish src/Qa403.App/Qa403.App.csproj -c Release -r ${{ matrix.rid }} \
+          dotnet publish src/Tonebench.App/Tonebench.App.csproj -c Release -r ${{ matrix.rid }} \
             -p:Version=${{ steps.version.outputs.version }} -o publish/${{ matrix.rid }}
 
       # Verifies the trimmed self-contained binary actually runs, not just that it built — trimming
       # is the likeliest way to silently break Dapper's reflection-based mapping (see
-      # Qa403.App.csproj's TrimmerRootAssembly note). The PDF render is the second thing only a
+      # Tonebench.App.csproj's TrimmerRootAssembly note). The PDF render is the second thing only a
       # published binary can prove: QuestPDF's native Skia library has to be found after the
       # single-file self-extract, and on Linux it has to link against the runner's libfontconfig.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         working-directory: publish/${{ matrix.rid }}
         run: |
-          chmod +x Qa403.App
-          ./Qa403.App --simulate --no-browser &
+          chmod +x Tonebench.App
+          ./Tonebench.App --simulate --no-browser &
           PID=$!
           for i in $(seq 1 20); do
             if curl -fs http://127.0.0.1:8399/api/update-check >/dev/null 2>&1; then
@@ -110,7 +110,7 @@ jobs:
         working-directory: publish/${{ matrix.rid }}
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath .\Qa403.App.exe -ArgumentList "--simulate --no-browser" -PassThru
+          $proc = Start-Process -FilePath .\Tonebench.App.exe -ArgumentList "--simulate --no-browser" -PassThru
           $ok = $false
           for ($i = 0; $i -lt 20; $i++) {
             try {
@@ -154,8 +154,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ../../dist | Out-Null
-          Compress-Archive -Path Qa403.App.exe, QuestPDF.Fonts.Lato.br, appsettings.json `
-            -DestinationPath ../../dist/qa403-audio-analyzer-${{ steps.version.outputs.version }}-win-x64.zip -Force
+          Compress-Archive -Path Tonebench.App.exe, QuestPDF.Fonts.Lato.br, appsettings.json `
+            -DestinationPath ../../dist/tonebench-${{ steps.version.outputs.version }}-win-x64.zip -Force
 
       - name: Build installer
         if: runner.os == 'Windows'
@@ -174,11 +174,11 @@ jobs:
           $setup = Get-Item dist/*-win-x64-setup.exe
           $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/NORESTART" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "Installer exited with $($p.ExitCode)"; exit 1 }
-          $app = "$env:LOCALAPPDATA\Programs\QA403 Audio Analyzer"
-          foreach ($f in "Qa403.App.exe", "QuestPDF.Fonts.Lato.br", "appsettings.json", "unins000.exe") {
+          $app = "$env:LOCALAPPDATA\Programs\Tonebench"
+          foreach ($f in "Tonebench.App.exe", "QuestPDF.Fonts.Lato.br", "appsettings.json", "unins000.exe") {
             if (-not (Test-Path "$app\$f")) { Write-Error "Installed layout is missing $f"; exit 1 }
           }
-          $proc = Start-Process -FilePath "$app\Qa403.App.exe" -ArgumentList "--simulate --no-browser" -WorkingDirectory $app -PassThru
+          $proc = Start-Process -FilePath "$app\Tonebench.App.exe" -ArgumentList "--simulate --no-browser" -WorkingDirectory $app -PassThru
           $ok = $false
           for ($i = 0; $i -lt 20; $i++) {
             try {
@@ -189,15 +189,15 @@ jobs:
           }
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           if (-not $ok) { Write-Error "Installed app did not respond within 20s"; exit 1 }
-          if (-not (Get-ChildItem "$env:LOCALAPPDATA\Qa403\logs\qa403-*.log" -ErrorAction SilentlyContinue)) {
-            Write-Error "No log file under %LOCALAPPDATA%\Qa403\logs"; exit 1
+          if (-not (Get-ChildItem "$env:LOCALAPPDATA\Tonebench\logs\tonebench-*.log" -ErrorAction SilentlyContinue)) {
+            Write-Error "No log file under %LOCALAPPDATA%\Tonebench\logs"; exit 1
           }
           if (Test-Path "$app\logs") { Write-Error "The installed app wrote a logs folder beside the exe"; exit 1 }
           $u = Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
           if ($u.ExitCode -ne 0) { Write-Error "Uninstaller exited with $($u.ExitCode)"; exit 1 }
           Start-Sleep -Seconds 2
           if (Test-Path $app) { Write-Error "Uninstall left $app behind"; exit 1 }
-          if (-not (Test-Path "$env:LOCALAPPDATA\Qa403")) { Write-Error "Uninstall removed the user's data folder"; exit 1 }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Tonebench")) { Write-Error "Uninstall removed the user's data folder"; exit 1 }
           Write-Host "Installed, ran, uninstalled; user data kept."
 
       # ---- Linux: .deb + tar.gz ----------------------------------------------------------------
@@ -208,7 +208,7 @@ jobs:
           ./packaging/linux/build.sh --no-publish --publish-dir publish/${{ matrix.rid }} \
             --version ${{ steps.version.outputs.version }}
           # Depends in packaging/linux/deb/control is hand-maintained; this is the cross-check.
-          ldd publish/${{ matrix.rid }}/Qa403.App || true
+          ldd publish/${{ matrix.rid }}/Tonebench.App || true
           if command -v lintian >/dev/null 2>&1; then lintian dist/*.deb || true; fi
 
       # apt (with the ./ prefix) resolves Depends and runs postinst, which a bare dpkg -i would not.
@@ -217,11 +217,11 @@ jobs:
       - name: Smoke test installed layout (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y ./dist/qa403-audio-analyzer_*_amd64.deb
+          sudo apt-get install -y ./dist/tonebench_*_amd64.deb
           test -f /usr/lib/udev/rules.d/99-qa403.rules
-          test -f /usr/share/applications/qa403-audio-analyzer.desktop
-          test -L /usr/bin/qa403-audio-analyzer
-          qa403-audio-analyzer --simulate --no-browser &
+          test -f /usr/share/applications/tonebench.desktop
+          test -L /usr/bin/tonebench
+          tonebench --simulate --no-browser &
           PID=$!
           ok=0
           for i in $(seq 1 20); do
@@ -233,12 +233,12 @@ jobs:
           kill -TERM $PID || true
           wait $PID || true
           [ "$ok" = 1 ] || { echo "Installed app did not respond within 20s" >&2; exit 1; }
-          ls "$HOME/.local/share/Qa403/logs"/qa403-*.log
-          grep -q "Host stopped cleanly" "$HOME/.local/share/Qa403/logs"/qa403-*.log
-          sudo apt-get remove -y qa403-audio-analyzer
+          ls "$HOME/.local/share/Tonebench/logs"/tonebench-*.log
+          grep -q "Host stopped cleanly" "$HOME/.local/share/Tonebench/logs"/tonebench-*.log
+          sudo apt-get remove -y tonebench
           test ! -e /usr/lib/udev/rules.d/99-qa403.rules
-          test ! -e /usr/lib/qa403-audio-analyzer
-          test -d "$HOME/.local/share/Qa403"
+          test ! -e /usr/lib/tonebench
+          test -d "$HOME/.local/share/Tonebench"
           echo "Installed, ran, shut down cleanly on SIGTERM, removed; user data kept."
 
       # Tags only, and briefly: the `release` job downloads these minutes later and publishes them
@@ -251,7 +251,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: qa403-audio-analyzer-${{ matrix.rid }}
+          name: tonebench-${{ matrix.rid }}
           retention-days: 7
           path: |
             dist/*.zip
@@ -276,9 +276,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" \
-            artifacts/qa403-audio-analyzer-win-x64/*-setup.exe \
-            artifacts/qa403-audio-analyzer-win-x64/*.zip \
-            artifacts/qa403-audio-analyzer-linux-x64/*.deb \
-            artifacts/qa403-audio-analyzer-linux-x64/*.tar.gz \
+            artifacts/tonebench-win-x64/*-setup.exe \
+            artifacts/tonebench-win-x64/*.zip \
+            artifacts/tonebench-linux-x64/*.deb \
+            artifacts/tonebench-linux-x64/*.tar.gz \
             --title "${{ github.ref_name }}" \
             --generate-notes

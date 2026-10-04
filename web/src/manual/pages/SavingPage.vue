@@ -23,7 +23,7 @@ const { showPage } = useManual()
       <tbody>
         <tr>
           <td>Project</td>
-          <td>A <code>.qa403</code> file holding a list of measurements and their results.</td>
+          <td>A <code>.tbench</code> file holding a list of measurements and their results.</td>
           <td>Project ▸ Save, Save As…</td>
         </tr>
         <tr>

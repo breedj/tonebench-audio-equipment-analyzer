@@ -305,7 +305,7 @@ node_modules/
 
 # Visual Studio 6 workspace and project file (working project files containing files to include in project)
 # NOTE: *.dsp removed — with core.ignorecase=true (default on Windows) it matched the
-# src/Qa403.Dsp/ directory itself and silently swallowed the entire project from git status.
+# src/Tonebench.Dsp/ directory itself and silently swallowed the entire project from git status.
 *.dsw
 
 # Visual Studio 6 technical files
@@ -426,7 +426,7 @@ test-results/
 # Mac bundle stuff
 *.dmg
 # NOTE: *.app removed — same core.ignorecase issue as *.dsp above: it matched the
-# src/Qa403.App/ directory and silently swallowed the whole host project from git status.
+# src/Tonebench.App/ directory and silently swallowed the whole host project from git status.
 # This project doesn't produce a macOS .app bundle anyway.
 
 # content below from: https://github.com/github/gitignore/blob/main/Global/macOS.gitignore

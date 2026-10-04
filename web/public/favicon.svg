@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- QA403 Audio Analyzer app icon: the harmonic comb — a fundamental with its peak marker and
+  <!-- Tonebench - Audio Equipment Analyzer app icon: the harmonic comb — a fundamental with its peak marker and
        five harmonics falling into the noise floor — on a dark tile. Chosen from five proposals on
        2026-09-30; it is the one that still reads at 16 px, which is the only size the taskbar and
        the favicon ever get.
 
-       Source of packaging/windows/qa403.ico, packaging/linux/qa403-audio-analyzer.png and
+       Source of packaging/windows/tonebench.ico, packaging/linux/tonebench.png and
        web/public/favicon.svg; regenerate all three with `npm run icons` in web/.
 
        TWO THINGS HERE ARE LOAD-BEARING.
 
-       (1) The tile is not decoration. `web/src/components/Qa403Logo.vue` draws the same comb as a
+       (1) The tile is not decoration. `web/src/components/TonebenchLogo.vue` draws the same comb as a
        bare glyph whose structure is `currentColor`, which is right inside the app where there is a
        theme to follow; an icon has no theme and no known background, and `currentColor` rasterises
        to black. So the shipped icon carries its own ground and its own literal colours — the
@@ -19,7 +19,7 @@
        (2) The comb geometry below is the glyph's own coordinates, placed by one transform rather
        than re-drawn at tile scale. The glyph's real bounds are x 18..238 and y 18.5..207 (strokes
        and round caps included, not just the nominal rects), fitted to x 36..220 and centred
-       vertically: scale 184/220 = 0.8364, hence the translate. Qa403Logo.vue applies the same
+       vertically: scale 184/220 = 0.8364, hence the translate. TonebenchLogo.vue applies the same
        transform for its own tile variant, so the two cannot drift apart — edit the numbers in
        both, or in neither. -->
   <defs>

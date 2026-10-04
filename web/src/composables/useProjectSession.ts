@@ -5,7 +5,7 @@ import { useConfirm } from './useConfirm'
 import { useProjects } from './useProjects'
 import { useRecentProjects } from './useRecentProjects'
 
-const APP_TITLE = 'QA403 audio analyzer'
+const APP_TITLE = 'Tonebench'
 
 /**
  * The Project menu's verbs. Each one asks about unsaved changes where those would be lost, stops

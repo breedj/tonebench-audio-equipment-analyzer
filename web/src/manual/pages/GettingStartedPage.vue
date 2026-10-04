@@ -34,7 +34,7 @@ const { showPage } = useManual()
     <h2>Projects and measurements</h2>
     <p>
       Work is organised two levels deep. A <strong>project</strong> is a body of work — one
-      amplifier, one investigation — and it is one <code>.qa403</code> file on disk. Inside it live
+      amplifier, one investigation — and it is one <code>.tbench</code> file on disk. Inside it live
       <strong>measurements</strong>: named,
       configured instruments, listed in the sidebar on the left. A measurement is not a
       reading — it is a saved <em>setup</em>, such as "1 kHz THD at 1 W" or "response into 8 Ω",

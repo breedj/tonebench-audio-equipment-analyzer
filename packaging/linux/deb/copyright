@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: qa403-audio-analyzer
-Source: https://github.com/breedj/qa40x-audio-analyzer-cp
+Upstream-Name: tonebench
+Source: https://github.com/breedj/tonebench-audio-equipment-analyzer
 
 Files: *
 Copyright: Joost Breed

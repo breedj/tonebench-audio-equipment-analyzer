@@ -57,7 +57,7 @@ import ConfigDialog from './components/ConfigDialog.vue'
 import SoundCardDialog from './components/SoundCardDialog.vue'
 import { useSoundCard } from './composables/useSoundCard'
 import AboutDialog from './components/AboutDialog.vue'
-import Qa403Logo from './components/Qa403Logo.vue'
+import TonebenchLogo from './components/TonebenchLogo.vue'
 import ManualDialog from './manual/ManualDialog.vue'
 import { useManual } from './manual/useManual'
 import UpdateBanner from './components/UpdateBanner.vue'
@@ -3161,8 +3161,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
            `aria-hidden` because the name is right beside it: it overrides the component's own
            role/aria-label, which exist for the about dialog, where the mark is on its own. -->
       <div class="flex items-center gap-2">
-        <Qa403Logo :size="20" variant="glyph" class="shrink-0" aria-hidden="true" />
-        <span class="text-sm font-semibold">QA403 audio analyzer</span>
+        <TonebenchLogo :size="20" variant="glyph" class="shrink-0" aria-hidden="true" />
+        <span class="text-sm font-semibold">Tonebench</span>
       </div>
       <ProjectMenu
         :project-name="currentProject?.name ?? null"

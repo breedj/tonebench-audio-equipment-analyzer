@@ -1,5 +1,5 @@
 // The four classic low-pass alignments the simulator offers as DUTs, prototype for prototype as
-// `FilterPrototype` (src/Qa403.Device/Simulation/FilterPrototypes.cs) holds them: fifth order,
+// `FilterPrototype` (src/Tonebench.Device/Simulation/FilterPrototypes.cs) holds them: fifth order,
 // normalised to a corner of 1 rad/s, computed with scipy.signal (butter, cheby1 rp=1,
 // bessel norm='mag', ellip rp=1 rs=60; analog=True, output='zpk'). Edit the two tables together —
 // the C# is the one that produces the samples, this one is what the manual draws.

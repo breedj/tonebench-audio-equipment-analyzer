@@ -18,7 +18,7 @@ import {
 
 // One dialog for Project ▸ New…, Save As… and Properties…: name, description, and — except for
 // Properties — where the file goes. What differs per mode lives in projectDialogModel.ts so it can
-// be tested. The location follows the name (default folder + sanitized name + .qa403) until the
+// be tested. The location follows the name (default folder + sanitized name + .tbench) until the
 // user edits it or picks one with Browse…, which opens the in-app file dialog in save mode.
 
 const props = defineProps<{ open: boolean; mode: ProjectDialogMode; current: Project | null }>()
@@ -115,7 +115,7 @@ function onConfirm() {
             type="text"
             spellcheck="false"
             class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 font-mono text-xs dark:border-neutral-700"
-            title="Where the .qa403 file is written. Follows the name until you change it."
+            title="Where the .tbench file is written. Follows the name until you change it."
             @input="onLocationInput"
             @keyup.enter="onConfirm"
           />

@@ -172,7 +172,7 @@ function onCancel(e: Event) {
           <!-- The index page. The sidebar carries the same links, but it is hidden on a narrow
                window and it has no room for the one-line summaries. -->
           <template v-if="page === null">
-            <h1>QA403 audio analyzer — {{ editionInfo.title.toLowerCase() }}</h1>
+            <h1>Tonebench — {{ editionInfo.title.toLowerCase() }}</h1>
             <p>{{ editionInfo.blurb }}</p>
             <p v-if="edition === 'reference'">
               One chapter per measurement, plus the parts every measurement shares. Each measurement

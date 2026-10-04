@@ -2,7 +2,7 @@ import type { WeightingSpec, WeightingStandardName } from './streaming/protocol'
 
 /**
  * The noise weighting as the Bandwidth & weighting panel, the metric tiles and the chart's annunciator name
- * it. Pure so it can be tested; the server owns the curves themselves (Qa403.Dsp.Weighting).
+ * it. Pure so it can be tested; the server owns the curves themselves (Tonebench.Dsp.Weighting).
  */
 
 export const NO_WEIGHTING: WeightingSpec = { standard: 'None', user1: false, user2: false }

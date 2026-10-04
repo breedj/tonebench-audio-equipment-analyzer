@@ -61,10 +61,14 @@
        reason as libusb and copied on the same condition — but note upstream ships source only, so
        unlike libusb this binary is one we build. packaging/native/portaudio.md has the recipe; the
        short version is VS's own CMake + Ninja, PA_DLL_LINK_WITH_STATIC_RUNTIME left ON (its
-       default) so the DLL needs no VC++ redistributable, and ASIO off until someone accepts
-       Steinberg's SDK licence and rebuilds. Which host APIs the DLL carries is invisible to this
-       codebase: the list comes from Pa_GetHostApiCount at runtime, so an ASIO-enabled rebuild
-       dropped in here needs no code change. Linux uses the distro's libportaudio2, the same
+       default) so the DLL needs no VC++ redistributable, and **ASIO on** — against ASIO SDK 2.3.4,
+       plus the local apply-asio-guard.py patch, since a faulting third-party ASIO driver otherwise
+       takes the process down inside Pa_Initialize. ASIO is not a nicety: measured on a MOTU M4,
+       not one of 57 non-ASIO devices carries both directions, so it is the only host API this app
+       can measure through. What that means for a *user* is that the card's own ASIO driver is the
+       one prerequisite the installer cannot supply — see INSTALL.md. Which host APIs the DLL
+       carries is invisible to this codebase: the list comes from Pa_GetHostApiCount at runtime, so
+       a rebuild needs no code change. Linux uses the distro's libportaudio2, the same
        bundle-vs-depend tradeoff as libusb (docs/tonebench-stack-spec.md §9.4). -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And '$(OS)' == 'Windows_NT')">
     <None Include="..\..\native\win-x64\libusb-1.0.dll" Link="libusb-1.0.dll" CopyToOutputDirectory="PreserveNewest" />

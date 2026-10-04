@@ -13,9 +13,18 @@ comes with four downloads:
 | `tonebench_<version>_amd64.deb` | Debian, Ubuntu, Linux Mint and other apt-based distributions |
 | `tonebench-<version>-linux-x64.tar.gz` | Any other 64-bit Linux |
 
-Nothing else is needed: the .NET runtime is built into the program. The analyzer runs as a small
-local web server and opens its screen in your normal browser (Chrome, Edge or Firefox — any
+Nothing else is needed to run it: the .NET runtime is built into the program, no USB driver is
+needed for the QA403, and no Visual C++ redistributable is needed either. The analyzer runs as a
+small local web server and opens its screen in your normal browser (Chrome, Edge or Firefox — any
 current one).
+
+There is **one** prerequisite the installer cannot supply, and only if you want to measure through
+a **sound card** rather than a QA403: that card's own **ASIO driver**. Windows' other audio paths
+present a card as a separate input device and a separate output device, and a measurement needs
+both at once on one clock — so a card with no ASIO driver does not appear in the sound-card picker's
+list, however well it works for playback. Interfaces sold for recording (MOTU, Focusrite, RME,
+Behringer…) ship one; a laptop's built-in audio generally does not, and the generic
+[ASIO4ALL](https://asio4all.org) is the usual stand-in there. A QA403 needs none of this.
 
 ---
 
@@ -184,6 +193,13 @@ for a command it never gets; a power cycle clears that.
 **The browser opens on a different port than 8399.**
 Something else was using 8399, and the analyzer picked the next free one (up to 8409). The console
 window shows the address it is actually using.
+
+**My sound card is not in the sound-card list.**
+It has no ASIO driver, or the driver was installed after the analyzer was started. Install the
+manufacturer's ASIO driver (or ASIO4ALL for a card without one) and **restart the analyzer** — a
+newly registered ASIO driver is only picked up on a start, which is true of every ASIO host. The
+log line beginning `Audio devices enumerated by` lists the host APIs the analyzer found, which
+tells you whether ASIO was there at all.
 
 **PDF reports fail on Linux.**
 `libfontconfig1` is missing; the .deb and `install.sh` install it, a manual setup may not have.

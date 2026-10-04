@@ -91,6 +91,12 @@ internal sealed class FakePortAudioStream : IPortAudioStream
     /// </summary>
     public int WritesBeforeFirstRead { get; private set; } = -1;
 
+    /// <summary>
+    /// Extra time a given read blocks for, on top of its own pacing — a driver that delivered a
+    /// transfer late, which is the one fault the loop's segment split exists to attribute.
+    /// </summary>
+    public Dictionary<int, TimeSpan> DelayOnRead { get; } = [];
+
     public bool Read(float[] buffer, int frames)
     {
         if (WritesBeforeFirstRead < 0)
@@ -98,6 +104,9 @@ internal sealed class FakePortAudioStream : IPortAudioStream
 
         if (PaceReads)
             Thread.Sleep(TimeSpan.FromSeconds(frames / Math.Max(1.0, SampleRateHz)));
+
+        if (DelayOnRead.TryGetValue(ReadCount, out TimeSpan extra))
+            Thread.Sleep(extra);
 
         if (TimeOutOnRead.Contains(ReadCount))
         {
@@ -127,6 +136,30 @@ internal sealed class FakePortAudioStream : IPortAudioStream
         }
 
         return UnderflowOnWrite.Contains(index);
+    }
+
+    /// <summary>
+    /// What the two ring queries answer. A real driver reports frames; <c>-1</c> is a host API that
+    /// will not say, and the default here, because the pump reads these only to put them in a log
+    /// line and no test of the loop should depend on them.
+    /// </summary>
+    public long AvailableToRead { get; set; } = -1;
+
+    /// <inheritdoc cref="AvailableToRead"/>
+    public long AvailableToWrite { get; set; } = -1;
+
+    public int AvailableQueryCount { get; private set; }
+
+    public long FramesAvailableToRead()
+    {
+        AvailableQueryCount++;
+        return AvailableToRead;
+    }
+
+    public long FramesAvailableToWrite()
+    {
+        AvailableQueryCount++;
+        return AvailableToWrite;
     }
 
     public void Dispose()

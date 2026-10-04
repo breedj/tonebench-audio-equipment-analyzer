@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
+﻿using System.Globalization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Qa403.Device.SoundCard;
 
 namespace Qa403.Device.Tests.SoundCard;
@@ -20,7 +22,8 @@ public class SoundCardDeviceTests
         // silently shifts every read index and flags the first measured block -- which is what
         // it did to four tests the moment the discard moved into the device. A test that cares
         // about the settle asks for one.
-        double settleMs = 0.0)
+        double settleMs = 0.0,
+        ILogger<SoundCardDevice>? logger = null)
     {
         var pa = new FakePortAudio();
         var api = pa.AddHostApi("ASIO", SoundCardHostApiKind.Asio);
@@ -40,7 +43,7 @@ public class SoundCardDeviceTests
         var device = new SoundCardDevice(
             settings,
             calibration ?? SoundCardCalibration.Uncalibrated,
-            NullLogger<SoundCardDevice>.Instance,
+            logger ?? NullLogger<SoundCardDevice>.Instance,
             pa);
 
         return (device, pa);
@@ -235,6 +238,86 @@ public class SoundCardDeviceTests
 
         Assert.False(blocks[0].Discontinuity);
         Assert.True(blocks[1].Discontinuity, "the block after the DAC ran dry did not say the stream broke");
+    }
+
+    /// <summary>
+    /// <b>A glitch line has to say which of the loop's three segments held the time.</b>
+    ///
+    /// <para>It used to report one figure — the whole iteration, read return to read return — plus
+    /// the GC share, and that left three faults with three different fixes looking identical: the
+    /// driver not delivering, our own per-block work, and backpressure on the output ring. Measured
+    /// over 50 loaded sweeps on 2026-10-04, the single dropped chunk came from a 256.1 ms iteration
+    /// with 0.4 ms of GC in it, so "not a collection" was all the log could say about it.</para>
+    /// </summary>
+    [Fact]
+    public async Task StreamAsync_AGlitchLine_SaysWhichSegmentOfTheLoopHeldTheTime()
+    {
+        var log = new RecordingLogger<SoundCardDevice>();
+        var (device, pa) = Build(logger: log);
+        await device.ConnectAsync(CancellationToken.None);
+
+        for (int i = 1; i <= 12; i++)
+            pa.NextStream.UnderflowOnWrite.Add(i);
+
+        await TakeAsync(device, count: 3);
+
+        string glitch = log.Single("output underflowed");
+        Assert.Contains("read wait", glitch);
+        Assert.Contains("our work", glitch);
+        Assert.Contains("write wait", glitch);
+        Assert.Contains("was GC", glitch);
+    }
+
+    /// <summary>
+    /// <b>And the stall has to land on the segment that actually held it.</b>
+    ///
+    /// <para>A read delivered late is the case the 2026-10-04 stall looks most like, and the one
+    /// thing a single iteration figure cannot distinguish from our own work running long. The
+    /// margin line carries the same split as a glitch line, because a clean run's worst iteration is
+    /// the number that says how close the stream came — and the frame counts beside it are what
+    /// separate "the data had been waiting for us" from "the driver had only just produced it",
+    /// which thread CPU time cannot: a thread blocked in the driver's read and a thread that was
+    /// never scheduled both burn none.</para>
+    /// </summary>
+    [Fact]
+    public async Task StreamAsync_AStallWaitingForTheDriver_IsReportedAsReadWaitWithWhatTheRingsHeld()
+    {
+        var log = new RecordingLogger<SoundCardDevice>();
+        var (device, pa) = Build(logger: log);
+        await device.ConnectAsync(CancellationToken.None);
+
+        // Far longer than the 21.3 ms transfer this fake paces itself by, so the window is late by
+        // any threshold and the reading is taken.
+        pa.NextStream.DelayOnRead[3] = TimeSpan.FromMilliseconds(120);
+        pa.NextStream.AvailableToRead = 12288;
+        pa.NextStream.AvailableToWrite = 30208;
+
+        await TakeAsync(device, count: 5);
+
+        string margin = log.Single("stream margin");
+        Assert.Contains("12288 frames were waiting to be read", margin);
+        Assert.Contains("30208 frames of the output ring were free", margin);
+
+        // The stall was inside the read, so the split must blame the read and not our own work --
+        // which is the whole of what this line is for.
+        double readWaitMs = Segment(margin, "read wait ");
+        double workMs = Segment(margin, "our work ");
+        Assert.True(readWaitMs > 60.0, margin);
+        Assert.True(workMs < 60.0, margin);
+    }
+
+    /// <summary>Reads one "name NN.N" figure out of a log line, so the assertions above are about the numbers and not about the wording.</summary>
+    private static double Segment(string line, string name)
+    {
+        int at = line.IndexOf(name, StringComparison.Ordinal);
+        Assert.True(at >= 0, $"\"{name}\" is missing from: {line}");
+
+        int start = at + name.Length;
+        int end = start;
+        while (end < line.Length && (char.IsDigit(line[end]) || line[end] == '.'))
+            end++;
+
+        return double.Parse(line[start..end], CultureInfo.InvariantCulture);
     }
 
     /// <summary>

@@ -205,6 +205,20 @@ internal static class PortAudioInterop
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int Pa_WriteStream(IntPtr stream, [In] float[] buffer, CULong frames);
 
+    /// <summary>
+    /// Frames already buffered on each side of a blocking stream. Both return a <c>signed long</c>
+    /// that is a frame count when positive and a <c>PaError</c> when negative, which is why they are
+    /// <see cref="CLong"/> rather than <see cref="CULong"/>.
+    ///
+    /// <para>Read only when a transfer loop iteration has already run late — see
+    /// <see cref="SoundCardLoopTiming"/>, which is the one caller.</para>
+    /// </summary>
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern CLong Pa_GetStreamReadAvailable(IntPtr stream);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern CLong Pa_GetStreamWriteAvailable(IntPtr stream);
+
     internal static string ReadUtf8(IntPtr p) => p == IntPtr.Zero ? string.Empty : (Marshal.PtrToStringUTF8(p) ?? string.Empty);
 
     internal static string ErrorText(int code) => ReadUtf8(Pa_GetErrorText(code));

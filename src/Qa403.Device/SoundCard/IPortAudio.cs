@@ -130,4 +130,19 @@ internal interface IPortAudioStream : IDisposable
 
     /// <summary>Plays interleaved frames. True when the driver reported an output underflow — the DAC ran dry.</summary>
     bool Write(float[] buffer, int frames);
+
+    /// <summary>
+    /// Frames the driver already has waiting for the next <see cref="Read"/>, and free space in the
+    /// output ring — <c>-1</c> for either when the driver will not say.
+    ///
+    /// <para>Diagnostics only, and read only after an iteration has already run late: several
+    /// transfers waiting on a late read means the data had been sitting there and the host was late,
+    /// where nothing behind it means the driver had only just produced it. The two cases look
+    /// identical in every other number this loop keeps, including thread CPU time, because a thread
+    /// blocked inside the driver's read and a thread that was never scheduled both burn none.</para>
+    /// </summary>
+    long FramesAvailableToRead();
+
+    /// <inheritdoc cref="FramesAvailableToRead"/>
+    long FramesAvailableToWrite();
 }

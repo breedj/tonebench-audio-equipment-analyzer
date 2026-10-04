@@ -466,49 +466,33 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         // when the hardware needed it — and a log that says only which ring emptied cannot say
         // whether to raise a priority, enlarge a buffer or stop allocating. So each iteration
         // records how long it ran, read return to read return (nominally one transfer: 5.3 ms at
-        // 192 kHz), and how much of that the runtime spent with every managed thread suspended. The same question
-        // TransferPumpDiagnostics answers for the QA403, and the same two answers: a stall with GC
-        // flat in it is scheduling, which priority and buffering address; a stall that *is* the GC
-        // pause is not something thread priority can help with at all, because a blocking
-        // collection suspends an AboveNormal thread exactly as readily as any other.
-        var loopWatch = Stopwatch.StartNew();
-        var lastGcPause = GC.GetTotalPauseDuration();
-        double loopMs = 0.0;
-        double loopGcMs = 0.0;
-
-        // The worst of those, kept whether or not anything glitched — which is the point. A run
-        // with no glitch in it says only that no margin was *exceeded*; this says how much of it
-        // was used, so "the fix works" can be a measurement rather than an absence. It is the
-        // sound-card counterpart of the QA403's `TX summary` slack floor, and unlike that one it
-        // is a true worst case rather than a drifting metric: both ends come from one Stopwatch.
-        double worstLoopMs = 0.0;
-        double worstLoopGcMs = 0.0;
-        long worstLoopBlock = 0;
+        // 192 kHz), how much of that the runtime spent with every managed thread suspended, and
+        // which of the loop's three segments held it. The same question TransferPumpDiagnostics
+        // answers for the QA403, and the same two answers to begin with: a stall with GC flat in it
+        // is scheduling, which priority and buffering address; a stall that *is* the GC pause is not
+        // something thread priority can help with at all, because a blocking collection suspends an
+        // AboveNormal thread exactly as readily as any other. The segment split is what the second
+        // of those needed next — see SoundCardLoopTiming, which also says why the frame counts are
+        // the discriminator and thread CPU time is not.
+        var timing = new SoundCardLoopTiming(frames * 1000.0 / config.SampleRateHz);
 
         // Out here rather than beside the priming loop, because the margin line in the finally
         // has to report what actually went in -- including when the stream died before it was
         // full, which is exactly the run whose margin someone will want to read.
         int primed = 0;
 
+        // Skipped while sequence is 0: the first iterations are the stream spinning up, where a
+        // read waits hundreds of milliseconds for the driver's first buffer and would stand as the
+        // worst case for ever. Nothing was at risk then -- there is no audio to lose before the
+        // first block, which is the same judgement the startup read timeouts get.
         void NoteIteration()
         {
-            loopMs = loopWatch.Elapsed.TotalMilliseconds;
-            loopWatch.Restart();
+            if (!timing.ReadReturned(sequence) || sequence == 0)
+                return;
 
-            var pause = GC.GetTotalPauseDuration();
-            loopGcMs = (pause - lastGcPause).TotalMilliseconds;
-            lastGcPause = pause;
-
-            // Skipped while sequence is 0: the first iterations are the stream spinning up, where
-            // a read waits hundreds of milliseconds for the driver's first buffer and would stand
-            // as the worst case for ever. Nothing was at risk then -- there is no audio to lose
-            // before the first block, which is the same judgement the startup read timeouts get.
-            if (sequence > 0 && loopMs > worstLoopMs)
-            {
-                worstLoopMs = loopMs;
-                worstLoopGcMs = loopGcMs;
-                worstLoopBlock = sequence;
-            }
+            // Only for a window that already ran long: two native calls, on the thread that has to
+            // get back to the next transfer, are affordable once in a while and not every 5.3 ms.
+            timing.NoteQueue(stream.FramesAvailableToRead(), stream.FramesAvailableToWrite());
         }
 
         void Glitch(string cause, int count)
@@ -517,19 +501,30 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             // not turn the log into the glitch's own biggest cost.
             double ms = sinceLast.Elapsed.TotalMilliseconds;
             sinceLast.Restart();
+
+            // The window that has just closed, for both glitches of one stall: an input overflow is
+            // noticed by the read that returned late, an output underflow by the write a few hundred
+            // microseconds after it, and quoting the same window is what lets the two lines be read
+            // together. The segments tile it, so whichever of the three carries the time is the one
+            // to chase -- and the queue reading, when there is one, says whether the data had been
+            // waiting for us or had only just been produced.
+            SoundCardLoopWindow w = timing.Last;
             if (count <= GlitchesLoggedPerCause)
             {
                 _logger.LogInformation(
                     "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous glitch ({Count} so far this acquisition); "
-                        + "this iteration took {LoopMs:0.0} ms of which {GcMs:0.0} ms was GC",
-                    cause, sequence, ms, count, loopMs, loopGcMs);
+                        + "this iteration took {LoopMs:0.0} ms — read wait {ReadWaitMs:0.0}, our work {WorkMs:0.0}, write wait {WriteWaitMs:0.0}, "
+                        + "of which {GcMs:0.0} ms was GC{Queued}",
+                    cause, sequence, ms, count,
+                    w.TotalMs, w.ReadWaitMs, w.WorkMs, w.WriteWaitMs, w.GcMs, w.DescribeQueue());
             }
             else
             {
                 _logger.LogDebug(
                     "Sound card stream glitch: {Cause} at block {Sequence}, {Ms:0.0} ms since the previous ({Count}); "
-                        + "iteration {LoopMs:0.0} ms, GC {GcMs:0.0} ms",
-                    cause, sequence, ms, count, loopMs, loopGcMs);
+                        + "iteration {LoopMs:0.0} ms (read wait {ReadWaitMs:0.0}, work {WorkMs:0.0}, write wait {WriteWaitMs:0.0}), GC {GcMs:0.0} ms",
+                    cause, sequence, ms, count,
+                    w.TotalMs, w.ReadWaitMs, w.WorkMs, w.WriteWaitMs, w.GcMs);
             }
         }
 
@@ -719,6 +714,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
                     frameIndex += frames;
 
+                    timing.WorkDone();
                     try
                     {
                         stream.Write(outBuffer, frames);
@@ -727,6 +723,10 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     {
                         if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
                             throw;
+                    }
+                    finally
+                    {
+                        timing.WriteDone();
                     }
 
                     if (settleRemaining <= 0)
@@ -761,6 +761,11 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
                 frameIndex += frames;
 
+                // Everything from the read returning to here is "our work": the calibration loop,
+                // the block hand-off and the synthesis -- and the glitch logging above, which is
+                // deliberately inside it, since a log sink that blocks is exactly the kind of thing
+                // this split exists to catch.
+                timing.WorkDone();
                 try
                 {
                     // The bool was discarded here, and it is the DAC's own gap: paOutputUnderflowed
@@ -784,6 +789,12 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     Glitch("write timed out", ++writeTimeouts);
                     discontinuity = true;
                 }
+                finally
+                {
+                    // In a finally, or a timed-out write's own duration folds into the next read
+                    // wait and blames the driver for time this loop spent waiting on the ring.
+                    timing.WriteDone();
+                }
             }
         }
         finally
@@ -795,13 +806,17 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             // Logged whether or not anything went wrong, because the worst iteration is the
             // number that says how close the stream came -- and a clean run that came within a
             // millisecond of the margin is a report worth having before the next one does not.
+            SoundCardLoopWindow worst = timing.Worst;
             _logger.LogInformation(
                 "Sound card stream margin over {Blocks} blocks at {Rate:0} Hz: worst iteration {WorstMs:0.0} ms "
-                    + "(GC {WorstGcMs:0.0} ms) at block {WorstBlock}, against {PrimeMs:0.0} ms primed ahead of the DAC "
-                    + "and {InputMs:0.0} ms of input ring",
-                sequence, config.SampleRateHz, worstLoopMs, worstLoopGcMs, worstLoopBlock,
+                    + "— read wait {ReadWaitMs:0.0}, our work {WorkMs:0.0}, write wait {WriteWaitMs:0.0}, of which "
+                    + "{WorstGcMs:0.0} ms was GC — at block {WorstBlock}, against {PrimeMs:0.0} ms primed ahead of the DAC "
+                    + "and {InputMs:0.0} ms of input ring{Queued}",
+                sequence, config.SampleRateHz,
+                worst.TotalMs, worst.ReadWaitMs, worst.WorkMs, worst.WriteWaitMs, worst.GcMs, worst.Block,
                 primed * frames * 1000.0 / config.SampleRateHz,
-                stream.InputLatencyS * 1000.0);
+                stream.InputLatencyS * 1000.0,
+                worst.DescribeQueue());
 
             if (readTimeouts + inputOverflows + outputUnderflows + writeTimeouts > 0)
             {

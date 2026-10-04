@@ -342,6 +342,20 @@ internal sealed class PortAudioNative : IPortAudio
             return false;
         });
 
+        // A negative return is a PaError rather than a count, and a diagnostic may not throw on a
+        // host API that declines to answer: both come back as -1, which the log prints as unknown.
+        public long FramesAvailableToRead() => dispatcher.Invoke(() =>
+        {
+            long frames = (long)PortAudioInterop.Pa_GetStreamReadAvailable(_handle).Value;
+            return frames < 0 ? -1 : frames;
+        });
+
+        public long FramesAvailableToWrite() => dispatcher.Invoke(() =>
+        {
+            long frames = (long)PortAudioInterop.Pa_GetStreamWriteAvailable(_handle).Value;
+            return frames < 0 ? -1 : frames;
+        });
+
         public void Dispose() => dispatcher.Invoke(() =>
         {
             if (_handle == IntPtr.Zero)

@@ -64,7 +64,10 @@ const form = reactive({
   inputChannelOffset: 0,
   outputChannelOffset: 0,
   minStimulusFrequencyHz: 20,
-  streamStartSettleMs: 3000,
+  // SoundCardStreamSettle.DefaultMs. Only ever seen before a card has been saved, since loading
+  // overwrites the whole form -- but it has to agree with the server's default or the first save
+  // of a fresh card writes a figure the server did not choose.
+  streamStartSettleMs: 2000,
 })
 
 const outputStep = reactive({ dbFs: -6, reading: 1000, unit: 'Rms' as VoltageEntryUnitName })

@@ -222,6 +222,7 @@ const GUIDE_PAGES: ManualPageEntry[] = [
     title: 'When something looks wrong',
     summary: 'The dozen things that go wrong most often, what each looks like on screen, and what to do.',
     group: 'Afterwards',
+    counterpart: 'reporting-issues',
     component: manualPage(() => import('./pages/guide/GuideProblemsPage.vue')),
   },
 ]
@@ -580,6 +581,13 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     summary: 'Global settings, attenuation, and what the warnings mean.',
     group: 'Reference',
     component: manualPage(() => import('./pages/SettingsPage.vue')),
+  },
+  {
+    id: 'reporting-issues',
+    title: 'Reporting an issue',
+    summary: 'The bug button: what it asks, what goes into the zip, and why it is worth pressing while the fault is still on screen.',
+    group: 'Reference',
+    component: manualPage(() => import('./pages/ReportingIssuesPage.vue')),
   },
   {
     id: 'glossary',

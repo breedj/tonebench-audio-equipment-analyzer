@@ -240,6 +240,34 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             _calibration.InputRangeDbv,
             _calibration.IsInputCalibrated && _calibration.IsOutputCalibrated ? string.Empty : " (UNCALIBRATED — levels are dBFS)");
 
+        // **Every figure that turns this card's samples into volts, in one line, on its own.**
+        // The line above says which card and whether it is calibrated; it cannot be read backwards
+        // into a level. These three full-scale figures and the two front-end gains are the whole
+        // of the volts conversion, so a reported level that is wrong by 20 dB, or by the
+        // 0.05 dB the two channels differ by, is answered here and nowhere else — the alternative
+        // is asking the user to screenshot a dialog. The channel offsets are here because a
+        // calibration measured on inputs 3/4 and applied to 1/2 reads as a wrong card, and the
+        // settle because it is the one setting that decides whether the first record of a run is
+        // the card's transient (see SoundCardStreamSettle).
+        _logger.LogInformation(
+            "Sound card calibration: output full scale {OutMv} mV peak ({OutDbv} dBV), input full scale "
+                + "{InLeftMv} / {InRightMv} mV peak (L/R, {ChannelDiff} dB apart), front-end gain "
+                + "{GainLeft:0.##} / {GainRight:0.##} dB, input channels {InOffset}+{InOffset2}, output channels "
+                + "{OutOffset}+{OutOffset2}, settle {SettleMs:0} ms, stimulus floor {MinHz:0.##} Hz",
+            Mv(_calibration.OutputFullScalePeakV), Dbv(_calibration.OutputFullScalePeakV),
+            Mv(_calibration.InputFullScalePeakVLeft), Mv(_calibration.InputFullScalePeakVRight),
+            _calibration.InputChannelDifferenceDb is { } diff ? diff.ToString("0.000") : "n/a",
+            _settings.FrontEndGainLeftDb, _settings.FrontEndGainRightDb,
+            _settings.InputChannelOffset + 1, _settings.InputChannelOffset + 2,
+            _settings.OutputChannelOffset + 1, _settings.OutputChannelOffset + 2,
+            _settings.StreamStartSettleMs, _settings.MinStimulusFrequencyHz);
+
+        // Null is "that step has never been run", which is not 0 mV and not a number at all --
+        // printing it as 0 would read as a measured figure of zero. See SoundCardConfig's remarks.
+        static string Mv(double? peakV) => peakV is { } v ? (v * 1000.0).ToString("0.0") : "not measured";
+        static string Dbv(double? peakV) =>
+            peakV is > 0.0 ? SoundCardCalibration.PeakVoltsToDbv(peakV.Value).ToString("0.00") : "n/a";
+
         string label = pairing == SoundCardPairing.FullDuplexDevice
             ? input.Name
             : $"{input.Name} + {output.Name}";

@@ -12,8 +12,15 @@ public static class SoundCardStreamSettle
     /// consistent where the record count was not — 0.75 s at 48 kHz, 1.24 s at 96 kHz and 1.51 s at
     /// 192 kHz, i.e. 5 records at one rate and 23 at another — which is why this is expressed in
     /// milliseconds and converted per rate, the same lesson as the QA403's queue depth.
+    ///
+    /// <para>It shipped as 3000 while this remark said 2 s, and the 2 s is the figure the
+    /// measurements support: the worst transient seen was 1.51 s, so 2000 covers it with a third
+    /// again on top. The extra second was not free — it is spent on the first stream of every
+    /// reopen, which is what <see cref="SoundCardConfig"/>'s calibration steps do between presses
+    /// — and <c>ConfigMigrations/004</c> carries an existing bench over, but only from exactly
+    /// 3000, so a figure anyone typed is left alone.</para>
     /// </summary>
-    public const double DefaultMs = 3000.0;
+    public const double DefaultMs = 2000.0;
 
     /// <summary>Past this it is a typo rather than a card: ten seconds of discard is longer than most measurements.</summary>
     public const double MaxMs = 10_000.0;

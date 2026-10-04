@@ -22,8 +22,38 @@ public static class SoundCardEndpoints
         // -- crashes the process once ASIO is in the build. WASAPI's own rescan is used where it
         // exists; a newly plugged ASIO interface needs the app restarted, which is what every other
         // ASIO host asks for too.
-        group.MapGet("/devices", (bool? refresh) =>
-            Results.Ok(SoundCardCatalog.Enumerate(refresh ?? false)));
+        group.MapGet("/devices", (bool? refresh, ILoggerFactory loggers) =>
+        {
+            SoundCardInventory catalog = SoundCardCatalog.Enumerate(refresh ?? false);
+
+            // **Which host APIs this build of PortAudio actually carries, logged once per
+            // enumeration.** It belongs in the log and it cannot go in the startup line: the
+            // answer requires Pa_Initialize, which calls ASIOInit on every registered driver and
+            // is exactly the call one faulting third-party driver used to take the process down
+            // with (see packaging/native/portaudio.md). A QA403 bench must not pay that on every
+            // start -- but a sound-card bench has already paid it by the time this GET runs.
+            //
+            // Worth having because "ASIO is not in the list" and "your card has no ASIO driver"
+            // look identical from a screenshot, and only the first is ours. The count beside each
+            // name says which of them found anything.
+            loggers.CreateLogger("Tonebench.SoundCard").LogInformation(
+                "Audio devices enumerated by {Version}: available {Available}, host APIs {HostApis}, "
+                    + "{Inputs} input(s), {Outputs} output(s), {FullDuplex} full duplex{Problem}",
+                catalog.Version is { Length: > 0 } v ? v : "PortAudio",
+                catalog.Available,
+                string.Join(
+                    ", ",
+                    catalog.Inputs.Concat(catalog.Outputs)
+                        .GroupBy(o => o.HostApi)
+                        .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(g => $"{g.Key} ({g.Count()})")),
+                catalog.Inputs.Count,
+                catalog.Outputs.Count,
+                catalog.Inputs.Count(o => o.IsFullDuplex),
+                catalog.Problem is { Length: > 0 } p ? $" — {p}" : string.Empty);
+
+            return Results.Ok(catalog);
+        });
 
         // Whether a particular pairing works, and at which rates. Separate from the listing because
         // it has to be re-asked whenever either side or either channel offset changes, and because

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -152,6 +152,9 @@ try
     builder.Services.AddSingleton<AnalyzerKindSetting>();
     builder.Services.AddSingleton<SoundCardCalibrationRunner>();
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SoundCardCalibrationRunner>());
+    // Report an issue. A singleton like every other service here, although it holds no state: it
+    // asks nine of them for theirs, which is the whole job.
+    builder.Services.AddSingleton<IssueReportService>();
     builder.Services.AddSingleton<UserWeightingSetting>();
     builder.Services.AddSingleton<UserWeightingService>();
     builder.Services.AddSingleton<DeviceSessionService>();
@@ -250,21 +253,37 @@ try
         // Unconditional, and the first thing in every log file: a file sent in by a user has no
         // other way of saying which build, OS or runtime wrote it, and every answer below it is
         // worthless without that. Cheap enough to pay for on a start that never reports a fault.
+        //
+        // OSDescription rather than OSVersion alone -- the version number alone cannot tell
+        // Windows 11 from Windows 10 (both are 10.0.x) nor name a Linux distribution at all, and
+        // this app ships on both. The memory figure is the GC's view of what it may use, which on
+        // Windows is the physical RAM and under a container is the container's limit: the question
+        // it answers is whether a 1M-point FFT and a 256 MB WAV had room, and the limit is the
+        // number that decides that rather than the hardware's.
+        var memory = GC.GetGCMemoryInfo();
         Log.Information(
-            "Tonebench - Audio Equipment Analyzer {Version} starting: {Os}, .NET {Runtime}, {Cores} cores, "
-                + "detailed logging {DetailedLogging}",
-            UpdateCheckService.CurrentVersion, Environment.OSVersion, Environment.Version,
-            Environment.ProcessorCount, diagnosticLogging.Enabled ? "on" : "off");
+            "Tonebench - Audio Equipment Analyzer {Version} starting: {Os} ({OsVersion}), {Arch}, "
+                + ".NET {Runtime}, {Cores} cores, {MemoryGb:0.0} GB available to the runtime, "
+                + "server GC {ServerGc}, detailed logging {DetailedLogging}",
+            UpdateCheckService.CurrentVersion,
+            System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            Environment.OSVersion.Version,
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            Environment.Version,
+            Environment.ProcessorCount,
+            memory.TotalAvailableMemoryBytes / (1024.0 * 1024.0 * 1024.0),
+            System.Runtime.GCSettings.IsServerGC ? "on" : "off",
+            diagnosticLogging.Enabled ? "on" : "off");
     }
 
     // One line per API request with its status and timing -- but only while detailed logging is
-    // on, and never for the status poll that lands every second while the app is idle: at one line
-    // a second the file would be that poll and nothing else.
+    // on, and never for a *polled* GET that succeeded: at several lines a second the file would be
+    // the poll and nothing else, which is the one thing a log sent in by a tester cannot afford.
     app.UseSerilogRequestLogging(options =>
     {
         var setting = app.Services.GetRequiredService<DiagnosticLoggingSetting>();
         options.GetLevel = (httpContext, _, exception) =>
-            httpContext.Request.Path == "/api/device" && httpContext.Request.Method == "GET" && exception is null && httpContext.Response.StatusCode < 400
+            IsSuccessfulPoll(httpContext, exception)
                 ? LogEventLevel.Verbose
                 : setting.RequestLogLevel(httpContext.Response.StatusCode, exception);
     });
@@ -305,6 +324,7 @@ try
     app.MapMeasurementsEndpoints();
     app.MapReportsEndpoints();
     app.MapUpdateCheckEndpoints();
+    app.MapIssueReportEndpoints();
 
     app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = wwwroot, OnPrepareResponse = CacheHeaders });
 
@@ -453,6 +473,29 @@ static void StartShutdownWatchdog(IHostApplicationLifetime lifetime)
 
         watchdog.Start();
     });
+}
+
+/// <summary>
+/// The GETs a screen polls on a timer, which the request log drops to Verbose while they succeed.
+///
+/// <para>Two of them, and the second was found by reading a log file rather than by reasoning:
+/// 1949 of the 2182 lines in one day's log — <b>89 %</b> — were
+/// <c>GET /api/soundcard/levels</c>, the sound-card dialog's level bars at 120 ms. That is a log
+/// in which nothing else can be found, and it is the log a tester is asked to send. The status
+/// poll (<c>GET /api/device</c>, once a second) was already excluded for the same reason; the
+/// difference is only that nobody had the dialog open for four minutes until now.</para>
+///
+/// <para>Only a <i>successful</i> GET. A poll that starts failing is the most interesting thing in
+/// the file — it is how a lost device, a wedged runner or a 409 storm announces itself — so the
+/// status code and any exception are part of the test, not just the path.</para>
+/// </summary>
+static bool IsSuccessfulPoll(HttpContext httpContext, Exception? exception)
+{
+    if (exception is not null || httpContext.Response.StatusCode >= 400 || httpContext.Request.Method != "GET")
+        return false;
+
+    PathString path = httpContext.Request.Path;
+    return path == "/api/device" || path == "/api/soundcard/levels";
 }
 
 /// <summary>The stored detailed-logging switch, or off when nothing is stored or the document is unreadable.</summary>

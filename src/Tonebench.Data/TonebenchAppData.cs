@@ -42,6 +42,19 @@ public static class TonebenchAppData
     /// </summary>
     public static string RecordingsDirectory => Path.Combine(RootDirectory, "recordings");
 
+    /// <summary>
+    /// Where <c>Report an issue</c> leaves the zip it builds.
+    ///
+    /// <para>Its own folder, beside the three above rather than inside any of them, because a
+    /// report is a <i>copy</i> of what they hold: a zip written into <see cref="LogsDirectory"/>
+    /// would be caught by the log retention, and one written into
+    /// <see cref="RecordingsDirectory"/> by the recorder's purge of all but the newest ten sets —
+    /// in both cases deleting the thing the user was about to send. It is also the one folder here
+    /// whose contents are meant to leave the machine, which is a good enough reason on its own for
+    /// it to be the only thing in it.</para>
+    /// </summary>
+    public static string IssueReportsDirectory => Path.Combine(RootDirectory, "issue-reports");
+
     private static string LocalAppData =>
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 

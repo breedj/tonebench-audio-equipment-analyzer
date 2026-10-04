@@ -331,7 +331,10 @@ public sealed record SoundCardConfig(
     string OutputDeviceName = "",
     int InputChannelOffset = 0,
     int OutputChannelOffset = 0,
-    double StreamStartSettleMs = 3000.0,
+    // Kept in step with SoundCardStreamSettle.DefaultMs by hand -- Tonebench.Data has no reference
+    // to Tonebench.Device, and this is the default a *stored* document gets when the field is
+    // absent, so the two must agree or a fresh install and a reopened one settle differently.
+    double StreamStartSettleMs = 2000.0,
     double? OutputFullScalePeakMv = null,
     double? InputFullScalePeakMvLeft = null,
     double? InputFullScalePeakMvRight = null,
@@ -511,4 +514,24 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
         await using var connection = await factory.OpenAsync(ct);
         await connection.ExecuteAsync("DELETE FROM app_setting WHERE key = @Key;", new { Key = key });
     }
+
+    /// <summary>
+    /// Every stored document, key and raw JSON, for the issue report.
+    ///
+    /// <para>All of them rather than the keys this build knows about: a document written by a
+    /// <i>newer</i> build, or one left behind by an older one, is exactly the kind of thing that
+    /// explains a fault and exactly the kind of thing a hand-written list of keys leaves out. The
+    /// values come back unparsed — the report writes them through as raw JSON, so it cannot fail on
+    /// a document this build could not deserialize, which is again the interesting case.</para>
+    /// </summary>
+    public async Task<IReadOnlyList<StoredSetting>> ListAllAsync(CancellationToken ct)
+    {
+        await using var connection = await factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<StoredSetting>(
+            "SELECT key AS Key, value AS Value, updated_utc AS UpdatedUtc FROM app_setting ORDER BY key;");
+        return [.. rows];
+    }
 }
+
+/// <summary>One stored configuration document, as <see cref="ConfigRepository.ListAllAsync"/> hands it out.</summary>
+public sealed record StoredSetting(string Key, string Value, string UpdatedUtc);

@@ -1,4 +1,4 @@
-using Tonebench.App.Diagnostics;
+﻿using Tonebench.App.Diagnostics;
 using System.Diagnostics;
 using System.Text.Json;
 using Tonebench.App.Json;
@@ -77,7 +77,12 @@ public static class ConfigEndpoints
     /// <para>A failure is a 500 carrying its own message; the path is on screen beside the button
     /// either way, which is the fallback.</para>
     /// </summary>
-    private static IResult OpenInFileManager(string directory)
+    /// <summary>
+    /// Raises the platform's file manager on a folder. Internal rather than private since the issue
+    /// report offers the same thing for its own folder -- and a second copy of the three-platform
+    /// branch would be a second place for a platform to be missed.
+    /// </summary>
+    internal static IResult OpenInFileManager(string directory)
     {
         Directory.CreateDirectory(directory);
         try

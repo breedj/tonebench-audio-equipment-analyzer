@@ -20,7 +20,8 @@ public class SoundCardCalibrationRunnerTests
         public override IAnalyzerDevice Create(DeviceKind kind) => new SimulatedDevice();
     }
 
-    private static (SoundCardCalibrationRunner Runner, SoundCardSetting Card, DeviceSessionService Session) Build(
+    private static (SoundCardCalibrationRunner Runner, SoundCardSetting Card, DeviceSessionService Session,
+        SpectrumPipeline Pipeline) Build(
         DeviceKind kind = DeviceKind.SoundCard, double? outputFullScaleMv = null)
     {
         var card = new SoundCardSetting
@@ -47,7 +48,7 @@ public class SoundCardCalibrationRunnerTests
         var runner = new SoundCardCalibrationRunner(
             session, pipeline, card, null!, NullLogger<SoundCardCalibrationRunner>.Instance);
 
-        return (runner, card, session);
+        return (runner, card, session, pipeline);
     }
 
     /// <summary>
@@ -57,7 +58,7 @@ public class SoundCardCalibrationRunnerTests
     [Fact]
     public async Task Loopback_WhileTheOutputIsUncalibrated_IsRefused()
     {
-        var (runner, _, session) = Build(outputFullScaleMv: null);
+        var (runner, _, session, pipeline) = Build(outputFullScaleMv: null);
         await session.ConnectAsync(CancellationToken.None);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -69,7 +70,7 @@ public class SoundCardCalibrationRunnerTests
     [Fact]
     public async Task Loopback_AtALevelTheDialogDoesNotOffer_IsRefused()
     {
-        var (runner, _, session) = Build(outputFullScaleMv: 2000.0);
+        var (runner, _, session, pipeline) = Build(outputFullScaleMv: 2000.0);
         await session.ConnectAsync(CancellationToken.None);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
@@ -79,7 +80,7 @@ public class SoundCardCalibrationRunnerTests
     [Fact]
     public async Task EveryStep_OnAnAnalyzerThatIsNotASoundCard_IsRefused()
     {
-        var (runner, _, session) = Build(DeviceKind.Simulated, outputFullScaleMv: 2000.0);
+        var (runner, _, session, pipeline) = Build(DeviceKind.Simulated, outputFullScaleMv: 2000.0);
         await session.ConnectAsync(CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
@@ -93,7 +94,7 @@ public class SoundCardCalibrationRunnerTests
     [Fact]
     public async Task ApplyingAnOutputReading_BeforeAToneIsPlaying_IsRefused()
     {
-        var (runner, _, session) = Build();
+        var (runner, _, session, pipeline) = Build();
         await session.ConnectAsync(CancellationToken.None);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -105,10 +106,77 @@ public class SoundCardCalibrationRunnerTests
     [Fact]
     public void Nothing_IsRunningBeforeAStepStarts()
     {
-        var (runner, _, _) = Build();
+        var (runner, _, _, _) = Build();
 
         Assert.False(runner.Running);
         Assert.Null(runner.PlayingDbFs);
+    }
+
+    /// <summary>
+    /// A step analyses at its <i>own</i> record length, and hands the screen's back afterwards.
+    ///
+    /// <para>This is what made the input step fail intermittently: these steps read one peak, and
+    /// how long that takes is one record — so inheriting the measurement screen's FFT size made a
+    /// calibration's latency a property of a setting on an unrelated screen. The pipeline's own
+    /// default is 65536 points, 1.37 s at 48 kHz, and a bench left at 131072 pays 2.73 s, against a
+    /// budget that then had to cover a 3 s re-clock settle as well. See
+    /// <c>SoundCardCalibrationRunner.CalibrationFftSize</c> and <c>ReadBudget</c>.</para>
+    ///
+    /// <para>Both halves matter: a step that pinned the size and did not put it back would leave an
+    /// FFT screen measuring at 16384 points with its own dropdown saying something else.</para>
+    /// </summary>
+    [Fact]
+    public async Task AStep_AnalysesAtItsOwnRecordLength_AndHandsTheScreensBack()
+    {
+        var (runner, _, session, pipeline) = Build();
+        await session.ConnectAsync(CancellationToken.None);
+
+        pipeline.Options = pipeline.Options with { FftSize = 131072, ProcessRight = false };
+
+        await runner.StartOutputToneAsync(-6.0, CancellationToken.None);
+        Assert.Equal(SoundCardCalibrationRunner.CalibrationFftSize, pipeline.Options.FftSize);
+
+        // Both channels, so the dialog's two level bars both move -- the pipeline's default is
+        // left only, which is the FFT screen's.
+        Assert.True(pipeline.Options.ProcessRight);
+
+        await runner.CancelAsync();
+
+        Assert.Equal(131072, pipeline.Options.FftSize);
+        Assert.False(pipeline.Options.ProcessRight);
+    }
+
+    /// <summary>
+    /// The external-source step tidies up after a step that <b>threw</b>, which it did not.
+    ///
+    /// <para>It had no teardown at all — no options restore, no <c>SilenceAsync</c> — so a step
+    /// refused for a clipped or a silent source left the screen's <c>ProcessRight</c> switched on,
+    /// left this runner's FFT size in place of the screen's, and left the acquisition it started
+    /// running. The last is the one that bites: a session left acquiring keeps the browser's own
+    /// ranging watcher live, which then posts an input range into the next step — and refuses the
+    /// card's control panel for the rest of the session. The loopback step always had this; this
+    /// one is now the same shape.</para>
+    ///
+    /// <para>Driven through the failure path on purpose: with the generator silenced (which this
+    /// step does, since the source is external) the simulator presents its own noise floor, which
+    /// is below the silence guard, so the step refuses — exactly the case that leaked.</para>
+    /// </summary>
+    [Fact]
+    public async Task TheExternalSourceStep_ThatIsRefused_StillPutsEverythingBack()
+    {
+        var (runner, _, session, pipeline) = Build(outputFullScaleMv: 2000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        pipeline.Options = pipeline.Options with { FftSize = 32768, ProcessRight = false };
+        SpectrumPipelineOptions before = pipeline.Options;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runner.MeasureInputAsync(1000.0, VoltageEntryUnit.Rms, StreamChannel.Left, CancellationToken.None));
+
+        Assert.Equal(before.FftSize, pipeline.Options.FftSize);
+        Assert.Equal(before.ProcessRight, pipeline.Options.ProcessRight);
+        Assert.False(session.Acquiring);
+        Assert.False(runner.Running);
     }
 
     /// <summary>

@@ -1718,6 +1718,10 @@ export interface SpectrumConfig {
 export type ImdMethodName = 'Smpte' | 'Ccif'
 
 import type { WeightingSpec, WeightingStandardName } from '../streaming/protocol'
+// The listing's shape belongs with the dialog's own arithmetic, which is where it is read -- see
+// issueReport.ts. Re-exported here so a caller needs one import for the request and the response.
+import type { IssueReportContents } from '../issueReport'
+export type { IssueReportContents }
 export type { WeightingSpec, WeightingStandardName }
 
 /**
@@ -3103,4 +3107,42 @@ export const api = {
   // before it ever fills that field in, which would leave the about dialog blank on exactly the
   // machines least able to look the version up elsewhere. This one touches no network.
   getAppInfo: () => request<AppIdentity>('/app'),
+
+  /** What is on this machine for a report to carry, so the dialog can say so before it builds one. */
+  getIssueReportContents: () => request<IssueReportContents>('/issue-report'),
+
+  /**
+   * Builds the zip. It is written to a folder on the machine rather than returned as a body — with
+   * the recordings box ticked it is hundreds of megabytes, which is not a thing to pull through a
+   * Blob, and a file in a known folder is still there tomorrow when the user gets round to
+   * attaching it. The result says where, and `issueReportDownloadUrl` turns that into a link.
+   */
+  buildIssueReport: (request_: IssueReportRequest) =>
+    request<IssueReportResult>('/issue-report', { method: 'POST', body: JSON.stringify(request_) }),
+
+  openIssueReportFolder: () => request<void>('/issue-report/open-folder', { method: 'POST' }),
+}
+
+export interface IssueReportRequest {
+  answers: { id: string; question: string; answer: string }[]
+  screenshotPngBase64?: string | null
+  logDays: number
+  includeDiagnostics: boolean
+  includeRecordings: boolean
+  includeSettings: boolean
+  /** Everything the browser knows and the server cannot — see IssueReportService's `client` block. */
+  clientStateJson?: string | null
+}
+
+export interface IssueReportResult {
+  fileName: string
+  path: string
+  bytes: number
+  included: string[]
+  warnings: string[]
+}
+
+/** The download link for a finished report. A plain href, so the browser's own download handles it. */
+export function issueReportDownloadUrl(fileName: string): string {
+  return `/api/issue-report/download?name=${encodeURIComponent(fileName)}`
 }

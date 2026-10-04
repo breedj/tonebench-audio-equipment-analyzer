@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Tonebench.App.Diagnostics;
 using Tonebench.App.Endpoints;
 using Tonebench.App.Services;
@@ -56,6 +56,12 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(MeasurementTypeAppliedResponse))]
 [JsonSerializable(typeof(MeasurementTypeResultCountResponse))]
 [JsonSerializable(typeof(UpdateCheckResult))]
+
+// Report an issue. The report's own JSON is written with Utf8JsonWriter rather than serialized --
+// see IssueReportService.BuildJson -- so only the request and the two responses are here.
+[JsonSerializable(typeof(IssueReportRequest))]
+[JsonSerializable(typeof(IssueReportContents))]
+[JsonSerializable(typeof(IssueReportResult))]
 [JsonSerializable(typeof(ThdSweepStartRequest))]
 [JsonSerializable(typeof(ThdSweepStarted))]
 [JsonSerializable(typeof(ThdSweepStatus))]

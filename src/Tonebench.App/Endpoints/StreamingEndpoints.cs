@@ -22,6 +22,21 @@ public static class StreamingEndpoints
             using var socket = await context.WebSockets.AcceptWebSocketAsync();
             var (id, reader) = hub.Subscribe();
 
+            // Which browser is on the other end, once per client. It belongs in the log for the
+            // same reason the OS line does: the client is half of this app, several of its faults
+            // have been rendering ones (a ResizeObserver that never fires, a canvas that comes out
+            // transparent), and a log sent in otherwise cannot say whether it was Chrome, Edge or
+            // Firefox. This is also the one place that counts *clients* -- two tabs attached is a
+            // real diagnosis here (it halves each one's frames and was a whole bench session once),
+            // and the subscriber id is what shows it.
+            logger.LogInformation(
+                "Stream client {Id} connected from {Remote}: {UserAgent}",
+                // ToString() because Serilog quotes a Guid and renders a string bare, and this line
+                // is prose rather than structured output.
+                id.ToString(),
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                context.Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? ua : "no user agent");
+
             // ApplicationStopping as well as RequestAborted. A WebSocket is a request that never
             // completes on its own, and Kestrel drains in-flight requests before it will stop — so
             // without this token the shutdown sat here for the entire ShutdownTimeout with a browser

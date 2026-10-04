@@ -100,6 +100,7 @@ import ReportDialog from './components/ReportDialog.vue'
 import ProjectReportDialog from './components/ProjectReportDialog.vue'
 import ToolbarIcon from './components/ToolbarIcon.vue'
 import ScreenshotDialog from './components/ScreenshotDialog.vue'
+import IssueReportDialog from './components/IssueReportDialog.vue'
 import { DEFAULT_RESPONSE_DISPLAY, responseDisplayFromParams, responsePhaseKindFromParams, type ResponseDisplay } from './response/display'
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
@@ -367,6 +368,7 @@ const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
 const soundCardDialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
+const issueReportDialogOpen = ref(false)
 // The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
 // because the header's button and the per-measurement help button have to drive one dialog.
 const { openManual, openManualForKind } = useManual()
@@ -2204,6 +2206,84 @@ async function screenshotChart(settings: ScreenshotSettings) {
 }
 
 /**
+ * The chart on screen as a PNG for an issue report, or null when this screen has no chart or has
+ * nothing drawn on it yet.
+ *
+ * <p>A fixed 1200 x 800 in the light palette, with the zoom captured — the Screenshot dialog's size
+ * and ratio questions are for a document, and a report wants a picture that is legible rather than
+ * one anybody chose a size for. No frame, no title, no black and white: the report's own
+ * <code>report.md</code> says what measurement it was.</p>
+ *
+ * <p>Base64 rather than a Blob because it rides inside the JSON request, and <code>FileReader</code>
+ * is what turns one into the other without a loop over a megabyte of bytes.</p>
+ */
+async function issueReportScreenshot(): Promise<string | null> {
+  const chart = chartOnScreen()
+  if (!chart || !screenshotAvailable.value) return null
+
+  try {
+    const png = await chart.exportPng({ width: 1200, height: 800, captureZoom: true })
+    return await blobToBase64(png)
+  } catch {
+    // A chart that will not export is a smaller problem than the one being reported.
+    return null
+  }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read the chart image.'))
+    reader.onload = () => {
+      // readAsDataURL gives "data:image/png;base64,AAAA" and the server wants the payload alone.
+      const text = String(reader.result)
+      const comma = text.indexOf(',')
+      resolve(comma >= 0 ? text.slice(comma + 1) : text)
+    }
+    reader.readAsDataURL(blob)
+  })
+}
+
+/**
+ * Everything the browser knows that the server cannot, for the report's <code>client</code> block.
+ *
+ * <p>Three kinds of thing, and each has cost a diagnosis. <b>Which browser and how big its
+ * window</b>: several faults here have been rendering ones (a ResizeObserver that never fires in a
+ * hidden pane, a chart that kept a 432 px canvas inside a 661 px column), and a report otherwise
+ * cannot say whether it was Chrome, Edge or Firefox. <b>Which measurement was on screen</b>, by kind
+ * as well as name, because a screenshot of a Bode plot does not say which of three projections drew
+ * it. And <b>the staged settings</b>, which are the client's own until a run starts — the server's
+ * status reports what is playing, never what is typed into the panels, so a fault in a run that was
+ * never started leaves no trace anywhere else.</p>
+ */
+function issueReportClientState(): unknown {
+  return {
+    userAgent: navigator.userAgent,
+    language: navigator.language,
+    window: { width: window.innerWidth, height: window.innerHeight, pixelRatio: window.devicePixelRatio },
+    theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+    project: currentProject.value?.name ?? null,
+    measurement: currentType.value
+      ? { id: currentType.value.id, name: currentType.value.name, kind: currentType.value.kind }
+      : null,
+    view: {
+      responseProjection: isFrequencyResponse.value ? activeResponseProjection.value : null,
+      impulseView: isImpulseResponse.value ? impulseView.value : null,
+      impedanceView: isImpedance.value ? impedanceView.value : null,
+    },
+    stagedStimulus: stimulusSummary(stimulusKind.value, stimulusTones, stimulusMultitone),
+    runnersActive: {
+      response: responseRunning.value,
+      sweep: sweepRunning.value,
+      impedance: impedanceRunning.value,
+      impulse: impulseRunning.value,
+      outputImpedance: outputImpedanceRunning.value,
+    },
+    lastError: error.value ?? null,
+  }
+}
+
+/**
  * What is on screen as a report subject, or null when there is no measurement open. Assembled from
  * the live refs: the curves, the display panel's state, and the type's *current* settings — which
  * may be edited since the run, so the chapter labels them as configured rather than as run. A stored
@@ -3197,6 +3277,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
           <path d="M12 16v-4M12 8h.01" stroke-linecap="round" />
+        </svg>
+      </button>
+      <!-- Report an issue: six questions and a zip holding the answers, the chart on screen, the
+           log and every calibration of this bench. Here rather than inside Configuration, and
+           beside About for the same reason it is — it is reached when something is wrong, which is
+           not a moment to go looking through settings pages. -->
+      <button
+        type="button"
+        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        aria-label="Report an issue"
+        title="Report an issue — builds one zip to send, holding your description, this screen, the log and your settings"
+        @click="issueReportDialogOpen = true"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <!-- A bug: body, head, six legs and two antennae. The one icon nobody mistakes for -->
+          <!-- something else, which matters for a button pressed when something has gone wrong. -->
+          <path d="M8 2l1.5 1.5M16 2l-1.5 1.5" />
+          <path d="M9 7.5A3 3 0 0 1 15 7.5" />
+          <rect x="7" y="8" width="10" height="12" rx="5" />
+          <path d="M7 11H3M7 14H2M7 17H3M17 11h4M17 14h5M17 17h4" />
         </svg>
       </button>
       <button
@@ -4722,6 +4822,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       @close="projectReportOpen = false"
     />
     <ConfigDialog :open="configDialogOpen" @close="closeConfigDialog" />
+    <!-- `screenshot` and `clientState` are callbacks rather than props: nothing is rendered or
+         serialized until the dialog actually asks, so the button costs nothing until it is pressed.
+         The PNG is the Screenshot button's own export at a fixed size -- a report wants a picture
+         that is legible rather than one the user has chosen a size for. -->
+    <IssueReportDialog
+      :open="issueReportDialogOpen"
+      :screenshot="issueReportScreenshot"
+      :client-state="issueReportClientState"
+      @close="issueReportDialogOpen = false"
+    />
     <SoundCardDialog :open="soundCardDialogOpen" @close="closeSoundCardDialog" />
     <AboutDialog :open="aboutDialogOpen" @close="aboutDialogOpen = false" />
     <ManualDialog />

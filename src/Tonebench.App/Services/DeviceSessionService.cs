@@ -1509,6 +1509,78 @@ public sealed class DeviceSessionService(
         StreamSettleMs = streamOpened
             ? _device.StreamStartSettleFrames(config.SampleRateHz) * 1000.0 / config.SampleRateHz
             : 0.0;
+
+        // **What this acquisition is actually measuring with, in one line.** SpectrumPipeline.Start
+        // already logs the analysis side (record length, window, averaging, weighting) and every
+        // sweep runner logs its own request -- but nothing logged the *stimulus* or the two
+        // attenuators, and those are the settings most of this app's faults turn out to be about: a
+        // range boundary that moved the noise floor, a generator at a level nobody meant, an
+        // external gain left on from a fixture that is no longer wired up. The live FFT screen has
+        // no runner to log for it, so a fault reported from that screen had no record of its
+        // settings at all.
+        //
+        // Here rather than in ConfigureGeneratorCoreAsync, although that is the one place every
+        // stimulus change passes through: a sweep passes through it once per point, which would be
+        // hundreds of lines a run. An acquisition start is once per RUN, and by this point the
+        // stimulus is already in _generatorConfig -- the FFT screen configures the generator before
+        // acquiring, which is the same ordering the capture-delay flush above relies on.
+        logger.LogInformation(
+            "Acquisition starting at {SampleRateHz:0} Hz, {Channels} ch: stimulus L {Left}, R {Right}; "
+                + "input range {InputDbv:0.#} dBV ({Ranging}), output range {OutputDbv:0.#} dBV, "
+                + "external gain {GainLeft:0.##}/{GainRight:0.##} dB, capture delay {CaptureDelayMs:0} ms, "
+                + "stream settle {SettleMs:0} ms",
+            config.SampleRateHz, config.ChannelCount,
+            DescribeStimulus(_generatorConfig.Left), DescribeStimulus(_generatorConfig.Right),
+            InputRangeDbv,
+            _device.HasInputAutoRanging ? (AutoRangeEnabled == true ? "auto" : "manual") : "fixed",
+            OutputRangeDbv,
+            _externalGain.LeftDb, _externalGain.RightDb,
+            captureDelay.Ms, StreamSettleMs);
+    }
+
+    /// <summary>
+    /// One channel's stimulus as a line of text, for the acquisition-start log.
+    ///
+    /// <para>Every kind names the figures that would make a measurement wrong if they were not what
+    /// the user believed, and nothing else: a tone's frequency and level, a comb's density and
+    /// total, a sweep's span and period. The tone list is capped because a multitone comb can be
+    /// sixty tones and the useful part of it is the first few plus the count — the comb's own
+    /// parameters above it say the rest.</para>
+    /// </summary>
+    private static string DescribeStimulus(ChannelGeneratorConfig channel)
+    {
+        if (!channel.Enabled || channel.Kind == GeneratorKind.Off)
+            return "off";
+
+        switch (channel.Kind)
+        {
+            case GeneratorKind.Multitone when channel.Multitone is { } comb:
+                return $"multitone {comb.TonesPerOctave}/octave at {comb.TotalRmsDbv:0.##} dBV total, "
+                    + $"rolloff {comb.RolloffDbPerOctave:0.##} dB/octave ({channel.Tones.Count} tones)";
+
+            case GeneratorKind.WhiteNoise when channel.Noise is { } noise:
+                return $"white noise at {noise.LevelDbv:0.##} dBV rms";
+
+            case GeneratorKind.PinkNoise when channel.Noise is { } noise:
+                return $"pink noise at {noise.LevelDbv:0.##} dBV rms";
+
+            case GeneratorKind.EchoChirp when channel.Chirp is { } chirp:
+                return $"chirp {chirp.StartFrequencyHz:0.##}-{chirp.EndFrequencyHz:0.##} Hz at "
+                    + $"{chirp.AmplitudeDbv:0.##} dBV, period {chirp.RepeatFrames} frames, smoothing {chirp.Smoothing}";
+
+            default:
+                if (channel.Tones.Count == 0)
+                    return $"{channel.Kind} with no tones";
+
+                const int named = 4;
+                string tones = string.Join(
+                    " + ",
+                    channel.Tones.Take(named).Select(t => $"{t.FrequencyHz:0.####} Hz at {t.AmplitudeDbv:0.##} dBV"));
+
+                return channel.Tones.Count > named
+                    ? $"{tones} (+{channel.Tones.Count - named} more)"
+                    : tones;
+        }
     }
 
     /// <summary>

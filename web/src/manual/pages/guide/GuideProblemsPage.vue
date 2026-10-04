@@ -259,18 +259,28 @@ const { showPage } = useManual()
 
     <h2>If you need to report it</h2>
     <p>
-      Send the log file. The app keeps one per day and records the details as it goes, so the run
-      that went wrong is already in there — you do not have to switch anything on first and
-      reproduce it. Configuration ▸ Diagnostics has an <strong>Open log folder</strong> button;
-      send today's file from there. (The <strong>Detailed logging</strong> tick box above it is what
-      makes the log that detailed. Leave it on.)
+      <strong>Press the bug button at the top right, while the problem is still on screen.</strong>
+      It asks you six questions — what happened, what you expected, what you were doing — and then
+      writes a single <code>.zip</code> holding your answers, a picture of the chart, the log file
+      and every setting and calibration of your bench. Send that one file. There is nothing to
+      collect by hand and nothing to switch on first, and it is worth pressing <em>before</em> you
+      stop the measurement: half of what it collects is what the analyzer is doing at that moment,
+      and that is gone as soon as you press STOP.
     </p>
     <p>
       If the problem is one that has to be seen to be believed — a trace that jumps, a tone that is
-      not the one you asked for — tick <strong>Record every acquisition to WAV</strong> in the same
-      place, run the measurement again, and send the newest pair of files from
-      <strong>Open recordings folder</strong> as well. They are the samples the analyzer actually
-      measured and the stimulus it actually played. Untick it afterwards: they are large.
+      not the one you asked for — tick <strong>Record every acquisition to WAV</strong> in
+      Configuration ▸ Diagnostics, run the measurement again, and tick
+      <strong>Recorded audio</strong> in the report as well. Those files are the samples the analyzer
+      actually measured and the stimulus it actually played. Untick the recording afterwards: they
+      are large.
+    </p>
+    <p>
+      The log on its own is still useful if that is all you want to send: the app keeps one per day
+      and records the details as it goes, so the run that went wrong is already in there.
+      Configuration ▸ Diagnostics has an <strong>Open log folder</strong> button. (The
+      <strong>Detailed logging</strong> tick box above it is what makes the log that detailed. Leave
+      it on.)
     </p>
     <p>
       And when a measurement has you stuck, it is often quicker to reproduce it against the

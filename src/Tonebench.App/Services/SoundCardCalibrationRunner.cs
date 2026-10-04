@@ -52,6 +52,19 @@ public sealed class SoundCardCalibrationRunner(
     /// <summary>Below this, nothing is plugged in — calibrating against the card's own noise floor is worse than not calibrating.</summary>
     public const double SilenceGuardDbFs = -60.0;
 
+    /// <summary>
+    /// The record length every step analyses at, instead of inheriting the measurement screen's.
+    ///
+    /// <para>These steps read one number — the loudest sample a 400 Hz tone produced — and a record
+    /// is the unit of latency in getting it: the step cannot answer until a whole one has been
+    /// filled and analysed. Inheriting the screen's size made that latency a property of a setting
+    /// on an unrelated screen, which is how the input step came to fail intermittently:
+    /// <see cref="SpectrumPipelineOptions"/>'s default alone is 65536 points, 1.37 s at 48 kHz, and
+    /// a bench left at 131072 pays 2.73 s. 16384 is 341 ms at 48 kHz and 85 ms at 192 kHz, which is
+    /// as much resolution as a peak reading has any use for.</para>
+    /// </summary>
+    public const int CalibrationFftSize = 16384;
+
     private readonly Lock _gate = new();
     private bool _running;
 
@@ -120,7 +133,12 @@ public sealed class SoundCardCalibrationRunner(
             // ProcessRight is off by default -- the FFT screen's own left-only default, which the
             // pipeline keeps -- so without this the right bar never moves.
             _savedOptions ??= pipeline.Options;
-            pipeline.Options = pipeline.Options with { ProcessLeft = true, ProcessRight = true };
+            pipeline.Options = pipeline.Options with
+            {
+                ProcessLeft = true,
+                ProcessRight = true,
+                FftSize = CalibrationFftSize,
+            };
 
             await StartAcquisitionIfNeededAsync(ct);
 
@@ -236,7 +254,12 @@ public sealed class SoundCardCalibrationRunner(
             // own left-only default, which the pipeline keeps -- so inheriting it meant the right
             // input was never analysed at all and the step came back "no reading to calibrate
             // against". Every runner sets its own options for this reason; this one has to as well.
-            pipeline.Options = savedOptions with { ProcessLeft = true, ProcessRight = true };
+            pipeline.Options = savedOptions with
+            {
+                ProcessLeft = true,
+                ProcessRight = true,
+                FftSize = CalibrationFftSize,
+            };
 
             var tone = new ChannelGeneratorConfig(
                 Enabled: true,
@@ -249,8 +272,11 @@ public sealed class SoundCardCalibrationRunner(
 
             await session.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), ct);
 
-            double leftDbFs = await ReadPeakDbFsAsync(StreamChannel.Left, LoopbackAdvice, ct);
-            double rightDbFs = await ReadPeakDbFsAsync(StreamChannel.Right, LoopbackAdvice, ct);
+            // One budget for both channels, taken after the stream is up so it carries that
+            // stream's settle -- see ReadBudget.
+            TimeSpan budget = ReadBudget();
+            double leftDbFs = await ReadPeakDbFsAsync(StreamChannel.Left, LoopbackAdvice, budget, ct);
+            double rightDbFs = await ReadPeakDbFsAsync(StreamChannel.Right, LoopbackAdvice, budget, ct);
             await SilenceAsync(ct);
 
             RequireUsableLevel(leftDbFs, StreamChannel.Left);
@@ -327,18 +353,25 @@ public sealed class SoundCardCalibrationRunner(
             _running = true;
         }
 
+        SpectrumPipelineOptions savedOptions = pipeline.Options;
+
         try
         {
             // Both channels analysed, for the same reason as the loopback step above: ProcessRight
             // is off by default, so the right input would never be analysed.
-            pipeline.Options = pipeline.Options with { ProcessLeft = true, ProcessRight = true };
+            pipeline.Options = savedOptions with
+            {
+                ProcessLeft = true,
+                ProcessRight = true,
+                FftSize = CalibrationFftSize,
+            };
 
             var off = new GeneratorConfig(ChannelGeneratorConfig.Off, ChannelGeneratorConfig.Off);
             await StartAcquisitionIfNeededAsync(ct);
 
             await session.ConfigureGeneratorAsync(off, ct);
 
-            double measuredDbFs = await ReadPeakDbFsAsync(channel, ExternalSourceAdvice, ct);
+            double measuredDbFs = await ReadPeakDbFsAsync(channel, ExternalSourceAdvice, ReadBudget(), ct);
 
             if (measuredDbFs > ClippingGuardDb)
             {
@@ -383,10 +416,14 @@ public sealed class SoundCardCalibrationRunner(
         }
         finally
         {
-            lock (_gate)
-            {
-                _running = false;
-            }
+            // The loopback step's teardown, which this one did not have: it restored nothing and
+            // called nothing, so a step that threw (a clipped source, a silent one) left the
+            // screen's ProcessRight switched on, left this runner's FFT size in place of the
+            // screen's, and -- the one that bites -- left the acquisition it started running, which
+            // is what keeps the browser's ranging watcher live and refuses the card's own control
+            // panel. SilenceAsync is the single place that undoes all of it.
+            pipeline.Options = savedOptions;
+            await SilenceAsync(CancellationToken.None);
         }
     }
 
@@ -535,10 +572,45 @@ public sealed class SoundCardCalibrationRunner(
     private const string LoopbackAdvice =
         "Nothing is arriving on the {0} input. Both inputs are measured together, so both need a patch cable from their own output — check the cable on the {0} channel, then try again.";
 
-    private async Task<double> ReadPeakDbFsAsync(StreamChannel channel, string advice, CancellationToken ct)
+    /// <summary>
+    /// How long a step waits for its first analysed record — derived from what the stream will
+    /// actually cost, never a fixed figure.
+    ///
+    /// <para><b>This is the rule every runner already follows</b> (see
+    /// <see cref="DeviceSessionService.StreamSettleMs"/>): a sound card withholds frames while it
+    /// re-clocks, those frames are genuinely not coming, and a budget that does not allow for them
+    /// reads a settling card as a silent input. This runner alone had a hard-coded 5 s, and that is
+    /// the whole of the "Nothing is arriving on the left input" fault reported 2026-10-04 —
+    /// <i>on the second press</i>, which is the tell. Every step ends in
+    /// <see cref="SaveAndReopenAsync"/>, a reopen builds a new device, and a new device's
+    /// <c>_lastOpenedSampleRateHz</c> is 0 — so the next stream re-clocks and withholds the settle,
+    /// where the press before it may not have. Arithmetic on the old budget, at the defaults of the
+    /// day: 300 ms throwaway re-clock + 3000 ms withheld + one 65536-point record at 48 kHz
+    /// (1365 ms) = 4.7 s against a 5 s deadline, i.e. 0.3 s of slack decided by scheduling. At
+    /// 131072 points it could not pass at all. Both terms are now in the budget and the record is
+    /// this runner's own short one (<see cref="CalibrationFftSize"/>), so the slack is seconds
+    /// rather than milliseconds.</para>
+    ///
+    /// <para>Taken after the stream is up, so <c>StreamSettleMs</c> is that stream's rather than the
+    /// previous one's, and the capture delay is in it because every step configures a generator and
+    /// therefore books one.</para>
+    /// </summary>
+    private TimeSpan ReadBudget()
+    {
+        double sampleRateHz = session.StreamConfig?.SampleRateHz ?? session.Capabilities.SampleRatesHz[0];
+        double recordMs = pipeline.Options.FftSize / sampleRateHz * 1000.0;
+
+        // Two records, not one: the flush the generator booked is consumed before the window
+        // starts filling, so the first analysis lands up to two records after the configure.
+        return TimeSpan.FromMilliseconds(
+            session.StreamSettleMs + session.CaptureDelayMs + (recordMs * 2.0) + 2000.0);
+    }
+
+    private async Task<double> ReadPeakDbFsAsync(
+        StreamChannel channel, string advice, TimeSpan budget, CancellationToken ct)
     {
         double best = double.NegativeInfinity;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        DateTime deadline = DateTime.UtcNow + budget;
         int seen = 0;
 
         while (DateTime.UtcNow < deadline && seen < 8)
@@ -555,7 +627,14 @@ public sealed class SoundCardCalibrationRunner(
             }
         }
 
-        if (double.IsNegativeInfinity(best))
+        // "Nothing arrived" and "what arrived was digital silence" are different faults and the
+        // guard used to answer both with the first message. A record that was analysed and read
+        // -inf dBFS is a connected input with no signal on it, which is what the silence guard's
+        // own wording describes ("read -0.0 dBFS while the card was playing -- that is silence"),
+        // so that case is returned and left to RequireUsableLevel. Only a step that saw no record
+        // at all in the whole budget says nothing is arriving -- and after this change that means
+        // the pipeline really did not produce one, rather than that it was still settling.
+        if (seen == 0)
             throw new InvalidOperationException(string.Format(advice, channel.ToString().ToLowerInvariant()));
 
         return best;

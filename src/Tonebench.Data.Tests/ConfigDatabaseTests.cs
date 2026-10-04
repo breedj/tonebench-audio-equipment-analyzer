@@ -80,6 +80,63 @@ public class ConfigDatabaseTests
     }
 
     /// <summary>
+    /// Migration 004: the settle carried forward from 3000 ms to 2000, and <b>only</b> from exactly
+    /// 3000. The row cannot be deleted the way 003's is — it also holds the card's identity and the
+    /// three full-scale figures the calibration measured — so this pins both halves: the one field
+    /// moves, everything beside it in the same document survives, and a bench that chose its own
+    /// figure is left alone.
+    /// </summary>
+    [Theory]
+    [InlineData(3000, 2000.0)]
+    [InlineData(5000, 5000.0)]
+    [InlineData(0, 0.0)]
+    public async Task Migration004_CarriesTheSoundCardSettleForward_OnlyFromTheOldDefault(
+        int storedMs, double expectedMs)
+    {
+        string path = TestDb.CreateTempPath();
+        var factory = new ConfigConnectionFactory(new TonebenchConfigDatabaseOptions { Path = path });
+
+        string stored =
+            $"{{\"inputHostApi\":\"ASIO\",\"inputDeviceName\":\"MOTU M Series\",\"outputHostApi\":\"ASIO\","
+                + $"\"outputDeviceName\":\"MOTU M Series\",\"inputChannelOffset\":2,\"outputChannelOffset\":2,"
+                + $"\"streamStartSettleMs\":{storedMs},\"outputFullScalePeakMv\":3370.552932940348,"
+                + $"\"inputFullScalePeakMvLeft\":9437.70457685045,\"inputFullScalePeakMvRight\":9432.590945255923,"
+                + $"\"frontEndGainLeftDb\":-20}}";
+
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+        {
+            await using var create = connection.CreateCommand();
+            create.CommandText =
+                "CREATE TABLE app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_utc TEXT NOT NULL);"
+                    + "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_utc TEXT NOT NULL);"
+                    + "INSERT INTO schema_version (version, name, applied_utc) "
+                    + "VALUES (1, '001_app_setting.sql', '2026-01-01T00:00:00Z');"
+                    + "INSERT INTO app_setting (key, value, updated_utc) VALUES ('soundcard.settings', $v, '2026-01-01T00:00:00Z');";
+            create.Parameters.AddWithValue("$v", stored);
+            await create.ExecuteNonQueryAsync();
+        }
+
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, CancellationToken.None);
+
+        string? after = await new ConfigRepository(factory).GetAsync("soundcard.settings", CancellationToken.None);
+        Assert.NotNull(after);
+
+        SoundCardConfig? config = System.Text.Json.JsonSerializer.Deserialize<SoundCardConfig>(
+            after, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.NotNull(config);
+        Assert.Equal(expectedMs, config.StreamStartSettleMs);
+
+        // The calibration, which is the whole reason this is a json_set and not a DELETE.
+        Assert.Equal("MOTU M Series", config.InputDeviceName);
+        Assert.Equal(2, config.InputChannelOffset);
+        Assert.Equal(3370.552932940348, config.OutputFullScalePeakMv);
+        Assert.Equal(9437.70457685045, config.InputFullScalePeakMvLeft);
+        Assert.Equal(9432.590945255923, config.InputFullScalePeakMvRight);
+        Assert.Equal(-20.0, config.FrontEndGainLeftDb);
+    }
+
+    /// <summary>
     /// The load-bearing property: configuration written here leaves no trace in the measurement
     /// database. If <c>app_setting</c> ever appeared over there, a copied measurement file would
     /// carry this machine's calibration with it.
@@ -166,7 +223,7 @@ public class ConfigDatabaseTests
 
             Assert.Equal(
                 [(1L, "001_app_setting.sql"), (2L, "002_impulse_reference.sql"),
-                 (3L, "003_detailed_logging_default.sql")],
+                 (3L, "003_detailed_logging_default.sql"), (4L, "004_soundcard_settle_default.sql")],
                 rows);
         }
         finally

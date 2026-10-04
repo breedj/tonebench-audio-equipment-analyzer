@@ -1,4 +1,4 @@
-# tonebench-audio-equipment-analyzer
+# Tonebench - Audio Equipment Analyzer
 Cross platform audio analyzer for qa40x devices with sound card support.
 Developed with the help of Claude.ai
 

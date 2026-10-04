@@ -101,6 +101,7 @@ import ProjectReportDialog from './components/ProjectReportDialog.vue'
 import ToolbarIcon from './components/ToolbarIcon.vue'
 import ScreenshotDialog from './components/ScreenshotDialog.vue'
 import IssueReportDialog from './components/IssueReportDialog.vue'
+import SplashScreen from './components/SplashScreen.vue'
 import { DEFAULT_RESPONSE_DISPLAY, responseDisplayFromParams, responsePhaseKindFromParams, type ResponseDisplay } from './response/display'
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
@@ -369,6 +370,10 @@ const configDialogOpen = ref(false)
 const soundCardDialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
 const issueReportDialogOpen = ref(false)
+// The splash screen, up from the first frame and gone four seconds later (SplashScreen.vue). An
+// overlay rather than a gate: everything below mounts, opens the last project and connects the
+// analyzer behind it, so the four seconds cover that work instead of being spent before it starts.
+const splashShowing = ref(true)
 // The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
 // because the header's button and the per-measurement help button have to drive one dialog.
 const { openManual, openManualForKind } = useManual()
@@ -3227,6 +3232,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
 <template>
   <div class="flex h-screen flex-col bg-[var(--surface-ground)] text-neutral-900 dark:text-neutral-100">
+    <!-- First in the tree and `fixed`, so it is painted over everything without taking part in the
+         layout underneath -- see SplashScreen.vue. It unmounts itself through @done once its own
+         fade has finished, rather than on the hold's timer, or it would disappear instead of
+         fading. -->
+    <SplashScreen v-if="splashShowing" @done="splashShowing = false" />
+
     <UpdateBanner />
     <header class="flex items-center gap-3 border-b border-neutral-200 bg-[var(--surface-panel)] px-4 py-2 dark:border-neutral-800">
       <!-- The mark and the name are one unit, so they sit in their own flex box: the header's own

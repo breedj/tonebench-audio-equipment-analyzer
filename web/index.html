@@ -5,6 +5,43 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tonebench - Audio Equipment Analyzer</title>
+
+    <!--
+      THE GROUND, BEFORE THE BUNDLE. style.css defines --surface-ground and useAppTheme puts the
+      `dark` class on <html>, but both arrive with the JavaScript bundle — so until it has parsed,
+      the page is the browser's own white. On a dark bench that is a white flash on every reload,
+      and it is what the splash screen would otherwise open with, which defeats the one thing a
+      splash is for.
+
+      The two colours are --surface-ground's, duplicated here because nothing can be imported
+      before the bundle exists; they must stay in step with style.css, the same arrangement
+      DecaySurfaceChart's own copy of the plot well has. The script is the standard no-flash trick:
+      read the stored preference, fall back to the OS, set the class. It writes nothing -- the
+      `qa403.` lookup here is a read of a key browserStorage.ts migrates properly a moment later,
+      and doing it twice would be the only way for the two to disagree.
+    -->
+    <style>
+      html {
+        background: #f5f5f4;
+      }
+      html.dark {
+        background: #121417;
+      }
+    </style>
+    <script>
+      ;(function () {
+        try {
+          var mode = localStorage.getItem('tonebench.themeMode') || localStorage.getItem('qa403.themeMode')
+          var dark =
+            mode === 'Dark' ||
+            ((mode === 'Auto' || mode === null) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {
+          // Storage that cannot be read holds no preference, which is what a fresh install looks
+          // like: the light ground above stands, and useAppTheme corrects it either way.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

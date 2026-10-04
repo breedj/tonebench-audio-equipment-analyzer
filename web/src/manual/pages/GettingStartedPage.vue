@@ -15,6 +15,14 @@ const { showPage } = useManual()
       this machine.
     </p>
 
+    <p>
+      Opening it shows the name, the version and the build for four seconds while the rest of the
+      application starts behind it. Click anywhere on it, or press any key, to go straight through —
+      it is a greeting rather than a wait, and the project and the analyzer are being opened the
+      whole time it is up. The same figures are in <strong>About</strong> afterwards, which is where
+      to read the build number when filing an issue.
+    </p>
+
     <h2>The device</h2>
     <p>
       The status bar along the bottom is the whole device story. A green dot and the product name

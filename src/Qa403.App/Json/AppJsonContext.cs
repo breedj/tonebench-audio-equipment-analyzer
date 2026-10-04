@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 using Qa403.App.Diagnostics;
 using Qa403.App.Endpoints;
 using Qa403.App.Services;
@@ -105,6 +105,7 @@ namespace Qa403.App.Json;
 [JsonSerializable(typeof(ImportWeightingRequest))]
 [JsonSerializable(typeof(StartupConfig))]
 [JsonSerializable(typeof(AutosaveConfig))]
+[JsonSerializable(typeof(Experimental384kConfig))]
 [JsonSerializable(typeof(DiagnosticLoggingConfig))]
 [JsonSerializable(typeof(StreamRecordingConfig))]
 [JsonSerializable(typeof(StreamRecordingStatus))]

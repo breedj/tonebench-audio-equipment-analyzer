@@ -906,11 +906,15 @@ const outOfRange = computed(() => {
 
 /** The Frequency range "Autofit" target's upper edge — a fixed step above the current sample
  * rate's Nyquist frequency, not a true data-driven autofit (unlike the dBV range button): 48 kHz
- * -> 25 kHz, 96 kHz -> 50 kHz, 192 kHz -> 100 kHz, and reasonable buckets for anything else. */
+ * -> 25 kHz, 96 kHz -> 50 kHz, 192 kHz -> 100 kHz, 384 kHz -> 200 kHz, and reasonable buckets for
+ * anything else. The 384 kHz arm is not optional decoration: without it Autofit at that rate shows
+ * 0-100 kHz of a 0-192 kHz band, which on screen is indistinguishable from the sample rate not
+ * having applied at all. */
 function autofitFreqToFor(sampleRateHz: number): number {
   if (sampleRateHz <= 48000) return 25000
   if (sampleRateHz <= 96000) return 50000
-  return 100000
+  if (sampleRateHz <= 192000) return 100000
+  return 200000
 }
 
 watch(autofitYTrigger, () => {

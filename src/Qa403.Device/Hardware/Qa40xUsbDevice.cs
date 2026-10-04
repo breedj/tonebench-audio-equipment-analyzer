@@ -69,8 +69,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     ///
     /// <para>128 ms covers the worst stall seen with margin. It is above PyQa40x's ~107 ms, which is
     /// the highest of the references, so it is no longer bracketed by them — but the references do
-    /// not do per-chunk work on the consumer side and this app does. <see cref="MaxQueueDepth"/> is
-    /// 48, which is exactly 128 ms at 192 kHz, so this is also the most the clamp allows there.
+    /// not do per-chunk work on the consumer side and this app does.
     /// The cost is latency, not throughput: <c>StimulusLatencyFrames</c> doubles, and every
     /// stimulus-driven flush already derives its discard from <see cref="QueueDepthFor"/>, so that
     /// follows automatically.</para>
@@ -78,13 +77,40 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     private const double TargetInFlightSeconds = 0.128;
 
     private const int MinQueueDepth = 4;
-    private const int MaxQueueDepth = 48;
+
+    /// <summary>
+    /// Ceiling on <see cref="QueueDepthFor"/>, and a constant that must be re-derived whenever the
+    /// top supported sample rate changes — which is the whole reason it is documented rather than
+    /// just written down.
+    ///
+    /// <para>96 is exactly <see cref="TargetInFlightSeconds"/> at <b>384 kHz</b>, so the clamp no
+    /// longer binds at any rate this device offers and that constant alone sets the buffered time.
+    /// It was 48, i.e. 128 ms at 192 kHz, which was the top rate when it was chosen. Enabling
+    /// 384 kHz exposed what that costs: <c>QueueDepthFor(384000)</c> wants 96 transfers, the clamp
+    /// allowed 48, and the result was a silent halving to <b>64 ms</b> — below four of the five pump
+    /// stalls ever measured here (46.5, 81.0, 92.7, 94.4, 125.3 ms), at exactly the rate with the
+    /// least margin to begin with. <c>StimulusLatencyFrames</c> derives from the same clamped value,
+    /// so every stimulus-driven flush would have under-discarded by 24 576 frames too.</para>
+    ///
+    /// <para>The remaining job of the clamp is only to stop a pathological rate asking for thousands
+    /// of simultaneously submitted transfers. Note what 96 means in flight: 96 × 4096 bytes per
+    /// direction, ~393 kB, twice what this app has ever had outstanding. A libusb objection to that
+    /// would surface as a short transfer or a failed submit, both of which the pump already counts
+    /// (<see cref="TransferPumpDiagnostics"/>'s <c>ShortWrites</c>/<c>ShortReads</c>).</para>
+    /// </summary>
+    private const int MaxQueueDepth = 96;
 
     /// <summary>
     /// Chunks buffered between the transfer pump and the calibrating consumer. Generous on purpose —
     /// at 192 kHz this is ~680 ms of headroom, so a consumer stalled behind one slow 64K-point FFT
     /// tick still never pushes back on the pump. Overflow drops oldest rather than blocking, because
     /// blocking the pump is precisely the DAC underrun this design exists to prevent.
+    ///
+    /// <para>A count, so like every other count here it is a shrinking amount of time as the rate
+    /// rises: the same 256 chunks are ~341 ms at 384 kHz. Left as a count deliberately — whether it
+    /// needs raising is a question for <see cref="DroppedRxChunks"/> on a real run, not for
+    /// arithmetic, and pre-emptively doubling a buffer costs memory on every rate to fix a drop
+    /// nobody has observed.</para>
     /// </summary>
     private const int RxChannelCapacity = 256;
 
@@ -152,7 +178,30 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
     public event EventHandler? DeviceLost;
 
-    public DeviceCapabilities Capabilities => DeviceCapabilities.Qa403;
+    /// <summary>
+    /// Whether to report 384 kHz as a supported capture rate — Configuration's experimental
+    /// checkbox, read through <c>Experimental384kSetting</c>.
+    ///
+    /// <para>A <see cref="Func{T}"/> and not a captured <see cref="bool"/>, for the same reason
+    /// <see cref="StreamAsync"/> passes <c>() => AutoRangeEnabled</c> to the pump rather than its
+    /// value: the device is constructed by <c>AnalyzerDeviceFactory</c> at the moment
+    /// <c>DeviceSessionService</c> is first resolved, which can be before the configuration document
+    /// has been read. A value latched then would be the default for the life of the session — the
+    /// exact trap that cost the analyzer-kind preference (see <c>StartupSettingsLoader</c>). Read
+    /// live, the answer is always current and the startup ordering cannot bite.</para>
+    /// </summary>
+    public Func<bool>? Allow384kHz { get; init; }
+
+    /// <inheritdoc />
+    public DeviceCapabilities Capabilities =>
+        Allow384kHz?.Invoke() == true ? DeviceCapabilities.Qa403Experimental : DeviceCapabilities.Qa403;
+
+    /// <summary>
+    /// 192 kHz. The QA403's DAC does not work at 384 kHz — see
+    /// <see cref="DeviceCapabilities.Qa403Experimental"/>, where the measurements and the protection-relay
+    /// incident are recorded.
+    /// </summary>
+    public double MaxGeneratorSampleRateHz => 192_000.0;
 
     /// <inheritdoc/>
     public DeviceTelemetry? Telemetry => _telemetry;

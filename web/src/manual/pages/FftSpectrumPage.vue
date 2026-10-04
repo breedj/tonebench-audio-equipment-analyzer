@@ -91,6 +91,12 @@ const { showPage } = useManual()
       other screen's power figures. The DUT's own gain is not set here — it lives under the
       <strong>Units</strong> dropdown in the display panel, described under Level range below.
     </p>
+    <p>
+      At a sample rate this analyzer can capture at but not play — 384 kHz on a QA403, if you have
+      enabled it in Configuration ▸ Acquisition — the whole panel steps aside and says so. Nothing is
+      lost: the stimulus you had set up is still there and comes back the moment you choose a lower
+      rate, and both outputs stay silent meanwhile, which is what that rate is for.
+    </p>
     <table>
       <thead>
         <tr>
@@ -195,7 +201,9 @@ const { showPage } = useManual()
             Sets the top of the analysed band to half of it — 48 kHz reaches 24 kHz, 192 kHz reaches
             96 kHz. Take the higher rates when you need to see high-order harmonics of a high
             fundamental; take a lower one when you do not, since the record covers more time for the
-            same number of points.
+            same number of points. The experimental 384 kHz appears here only once it is enabled in
+            Configuration ▸ Acquisition, and it is capture-only: picking it takes the Generator panel
+            out of service for as long as it is selected.
           </td>
         </tr>
         <tr>
@@ -524,7 +532,9 @@ const { showPage } = useManual()
       <strong>Level range</strong> and <strong>Frequency range</strong> set the spectrum's window.
       One <strong>Autofit</strong>, under the level range, fits both: the frequency axis to 10 Hz and
       just past Nyquist for the current sample rate, and the level axis to the highest and lowest
-      point plotted with 10 dB of headroom. <strong>Units</strong> picks what the level axis reads:
+      point plotted with 10 dB of headroom. The frequency <strong>To</strong> list ends at 100 kHz,
+      which covers a 192 kHz capture whole; enabling the experimental 384 kHz rate adds a 200 kHz
+      entry to it, so the wider band can be chosen by hand and not only reached with Autofit. <strong>Units</strong> picks what the level axis reads:
       <strong>dBV</strong> per bin; <strong>dBV/√Hz</strong>, a noise density, which is the bin's
       power spread over the window's equivalent noise bandwidth (dBV − 10·log₁₀ ENBW, about
       −6.4 dB for Hann at 65536 points and 192 kHz) so a noise floor sits at the same height

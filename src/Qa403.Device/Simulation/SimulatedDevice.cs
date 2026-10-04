@@ -50,7 +50,25 @@ public sealed class SimulatedDevice : IAnalyzerDevice
     public SimulatedDevice(int? randomSeed = null) =>
         _random = randomSeed is { } seed ? new Random(seed) : new Random();
 
-    public DeviceCapabilities Capabilities => DeviceCapabilities.Qa403;
+    /// <summary>
+    /// Mirrors <c>Qa40xUsbDevice.Allow384kHz</c>, so Configuration's experimental checkbox, the
+    /// sample-rate dropdown it feeds and the generator refusal below can all be exercised under
+    /// <c>--simulate</c> with no QA403 attached — the "Testing without hardware" rule. A
+    /// <see cref="Func{T}"/> for the same startup-ordering reason the hardware device uses one.
+    /// </summary>
+    public Func<bool>? Allow384kHz { get; init; }
+
+    public DeviceCapabilities Capabilities =>
+        Allow384kHz?.Invoke() == true ? DeviceCapabilities.Qa403Experimental : DeviceCapabilities.Qa403;
+
+    /// <summary>
+    /// 192 kHz, copying the hardware's limit although nothing here would actually misbehave above
+    /// it. The simulator exists to stand in for the QA403, and a simulator that happily generates at
+    /// 384 kHz would make the one screen this setting affects behave differently on the two devices —
+    /// which is precisely the difference a user would then meet for the first time on real hardware,
+    /// where the consequence is the output protection relay cycling.
+    /// </summary>
+    public double MaxGeneratorSampleRateHz => 192_000.0;
 
     /// <summary>Never raised: the simulator has no physical device to lose.</summary>
     public event EventHandler? DeviceLost { add { } remove { } }

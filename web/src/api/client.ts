@@ -1615,6 +1615,12 @@ export interface DeviceRanges {
   maxChannelCount: number
   /** The lowest frequency this analyzer can excite, in Hz; 0 on one with no floor. See stimulusFloor.ts. */
   minStimulusFrequencyHz: number
+  /**
+   * The highest sample rate this analyzer can *play* a stimulus at, in Hz, or null on one with no
+   * ceiling (a sound card's generator works wherever it captures). 192 kHz on a QA403, where
+   * 384 kHz is an input-only rate. See generatorRateCeiling.ts.
+   */
+  maxGeneratorSampleRateHz: number | null
 }
 
 export interface GeneratorTone {
@@ -1835,6 +1841,15 @@ export interface StartupConfig {
 }
 
 /** Configuration ▸ General ▸ Autosave: whether a measurement's settings are saved the moment they change. */
+/**
+ * Configuration ▸ Acquisition ▸ "Allow 384 kHz sample rate (experimental)". Adds 384 kHz to the
+ * analyzer's reported capture rates, which is all the FFT screen's dropdown needs. Input-only: the
+ * server refuses a voiced generator at that rate, because the QA403's DAC produces garbage there.
+ */
+export interface Experimental384kConfig {
+  enabled: boolean
+}
+
 export interface AutosaveConfig {
   enabled: boolean
 }
@@ -2740,6 +2755,14 @@ export const api = {
 
   setAutosaveConfig: (config: AutosaveConfig) =>
     request<AutosaveConfig>('/config/autosave', { method: 'PUT', body: JSON.stringify(config) }),
+
+  getExperimental384k: () => request<Experimental384kConfig>('/config/experimental-384k'),
+
+  setExperimental384k: (config: Experimental384kConfig) =>
+    request<Experimental384kConfig>('/config/experimental-384k', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
 
   getDiagnosticLogging: () => request<DiagnosticLoggingStatus>('/config/diagnostic-logging'),
 

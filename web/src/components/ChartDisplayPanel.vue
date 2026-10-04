@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useChartDisplay } from '../composables/useChartDisplay'
+import { useExperimental384k } from '../composables/useExperimental384k'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { SPECTRUM_UNIT_OPTIONS } from '../spectrumUnits'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -44,6 +45,24 @@ watch(processRight, (enabled) => { visibleR.value = enabled }, { immediate: true
 const FREQ_FROM_PRESETS = [5, 10, 20, 50, 100, 200, 500]
 const FREQ_TO_PRESETS = [1000, 2000, 5000, 10000, 20000, 100000]
 
+/**
+ * Nyquist's own bucket for the experimental 384 kHz rate (the top of Autofit's ladder — see
+ * autofitFreqToFor in SpectrumChart.vue), offered only while that rate is: the list otherwise ends
+ * at 100 kHz, which is the whole of a 192 kHz capture and all any other rate can show.
+ *
+ * It has to be a *preset* rather than something Autofit leaves behind. withCurrentValue below folds
+ * whatever is selected into the list, so pressing Autofit at 384 kHz did put 200000 in the dropdown
+ * — and picking any other entry dropped it again, with no way back to the band short of another
+ * Autofit. Keyed on the setting and not on the staged sample rate, so the entry does not appear and
+ * vanish as the rate is changed; a window wider than Nyquist just shows empty spectrum above it,
+ * which 100 kHz already does at 48 and 96 kHz.
+ */
+const EXPERIMENTAL_384K_FREQ_TO_HZ = 200000
+const { experimental384kEnabled, load: loadExperimental384k } = useExperimental384k()
+// Idempotent (the composable keeps one in-flight promise). ConfigDialog is the only other caller
+// and it is mounted on demand, so this screen cannot rely on its having run.
+void loadExperimental384k()
+
 // Dropdowns, like Stimulus — but Autofit can land on a value outside the preset list (e.g. 25000,
 // from the sample-rate-derived target), so the current value is folded into its own list rather
 // than dropped, the same way a value loaded from a saved measurement wouldn't be silently lost.
@@ -51,7 +70,12 @@ function withCurrentValue(presets: number[], current: number): number[] {
   return presets.includes(current) ? presets : [...presets, current].sort((a, b) => a - b)
 }
 const fromOptions = computed(() => withCurrentValue(FREQ_FROM_PRESETS, xFrom.value))
-const toOptions = computed(() => withCurrentValue(FREQ_TO_PRESETS, xTo.value))
+const toOptions = computed(() =>
+  withCurrentValue(
+    experimental384kEnabled.value ? [...FREQ_TO_PRESETS, EXPERIMENTAL_384K_FREQ_TO_HZ] : FREQ_TO_PRESETS,
+    xTo.value,
+  ),
+)
 
 // A unit switch moves every level on the chart by the same constant (about -6 dB for a 4 Hz ENBW,
 // -20 dB more for a DUT of 20 dB gain), so the window that fitted the old unit is wrong for the

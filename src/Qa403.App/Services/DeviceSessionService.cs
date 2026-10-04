@@ -1,4 +1,4 @@
-﻿using Qa403.App.Endpoints;
+using Qa403.App.Endpoints;
 using Qa403.App.Diagnostics;
 using Qa403.App.Streaming;
 using Qa403.Device;
@@ -551,6 +551,22 @@ public sealed class DeviceSessionService(
     public double MinStimulusFrequencyHz => _device.MinStimulusFrequencyHz;
 
     /// <summary>
+    /// The highest sample rate the analyzer in use can <i>play</i> a stimulus at, in Hz, or null on
+    /// one with no ceiling. The FFT screen's Generator panel reads it to stand down at a
+    /// capture-only rate, so <see cref="RequireGeneratorRateSupported"/>'s refusal is what catches a
+    /// mistake rather than what tells the user about a known limitation.
+    ///
+    /// <para><b>Null, never <see cref="double.PositiveInfinity"/>,</b> because this crosses the
+    /// wire: <c>System.Text.Json</c> will not write a non-finite double and finds that out part way
+    /// through serializing, which truncates the whole response — the same trap
+    /// <c>ImpedanceStatusJsonTests</c> exists for. The default
+    /// <see cref="IAnalyzerDevice.MaxGeneratorSampleRateHz"/> <i>is</i> infinity, so every analyzer
+    /// but the QA403 and the simulator would hit it.</para>
+    /// </summary>
+    public double? MaxGeneratorSampleRateHz =>
+        double.IsFinite(_device.MaxGeneratorSampleRateHz) ? _device.MaxGeneratorSampleRateHz : null;
+
+    /// <summary>
     /// Refuses a rate the analyzer in use does not have, here rather than at the device.
     ///
     /// <para>This is the one place every measurement passes through, which is why the check lives
@@ -575,6 +591,39 @@ public sealed class DeviceSessionService(
 
         throw new InvalidOperationException(
             $"This analyzer cannot run at {sampleRateHz / 1000.0:0.###} kHz. It supports {string.Join(", ", supported.Select(r => $"{r / 1000.0:0.###} kHz"))} — pick a frequency span that asks for one of those.");
+    }
+
+    /// <summary>
+    /// Refuses a <i>voiced</i> generator above <see cref="IAnalyzerDevice.MaxGeneratorSampleRateHz"/>.
+    /// Silence is always allowed, because Stop and every measurement switch disable both channels
+    /// unconditionally and that must never fail — the same reasoning as the <c>_info is null</c>
+    /// branch in <see cref="ConfigureGeneratorCoreAsync"/>.
+    ///
+    /// <para>This sits in <see cref="ConfigureGeneratorCoreAsync"/> for the reason the capture delay
+    /// does: it is the one place every stimulus change passes through, so the live FFT screen and
+    /// every point of every sweep are covered by one check rather than each screen remembering.</para>
+    ///
+    /// <para>It throws rather than clamping the rate or silently dropping the tones.
+    /// <see cref="InvalidOperationException"/> is what <c>AcquisitionEndpoints</c> already maps to a
+    /// 409 carrying the message, so the user is told; quietly playing a different stimulus than the
+    /// one asked for, or quietly capturing with no stimulus at all, would both be reported as a
+    /// successful measurement of something nobody requested.</para>
+    /// </summary>
+    private void RequireGeneratorRateSupported(GeneratorConfig config, double sampleRateHz)
+    {
+        if (!config.Left.Enabled && !config.Right.Enabled)
+            return;
+
+        double maxHz = _device.MaxGeneratorSampleRateHz;
+        if (sampleRateHz <= maxHz + 1e-6)
+            return;
+
+        throw new InvalidOperationException(
+            $"This analyzer's generator cannot be used at {sampleRateHz / 1000.0:0.###} kHz — it is an input-only "
+                + $"rate. The generator works up to {maxHz / 1000.0:0.###} kHz. Measured on a QA403 at 384 kHz, the "
+                + "output is about 12 dB low with roughly 44 % distortion and enough near-DC content to cycle the "
+                + "device's own output protection relay, which a software stop does not clear. Turn the generator "
+                + "off to capture at this rate, or drop to a lower rate to use it.");
     }
 
     /// <summary>
@@ -1292,6 +1341,11 @@ public sealed class DeviceSessionService(
     private async Task ConfigureGeneratorCoreAsync(GeneratorConfig config, CancellationToken ct, AcquisitionConfig? streamConfigHint = null)
     {
         _lastSampleRateHz = streamConfigHint?.SampleRateHz ?? _streamConfig?.SampleRateHz ?? _lastSampleRateHz;
+
+        // Before anything is cached or snapped: a rate whose DAC does not work must refuse the
+        // stimulus rather than play a mangled one. See RequireGeneratorRateSupported.
+        RequireGeneratorRateSupported(config, _lastSampleRateHz);
+
         _requestedGeneratorConfig = config;
 
         if (config.Left.Enabled || config.Right.Enabled)

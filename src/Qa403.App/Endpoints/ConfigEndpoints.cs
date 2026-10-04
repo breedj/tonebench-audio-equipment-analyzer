@@ -1,4 +1,4 @@
-﻿using Qa403.App.Diagnostics;
+using Qa403.App.Diagnostics;
 using System.Diagnostics;
 using System.Text.Json;
 using Qa403.App.Json;
@@ -42,6 +42,29 @@ public static class ConfigEndpoints
         catch (JsonException)
         {
             return CaptureDelayConfig.Default;
+        }
+    }
+
+    /// <summary>
+    /// The stored experimental 384 kHz opt-in, defaulting to off for an absent or unreadable
+    /// document — the same contract as the capture delay. Shared with
+    /// <see cref="StartupSettingsLoader"/>, which loads it into <see cref="Experimental384kSetting"/>.
+    /// </summary>
+    public static async Task<Experimental384kConfig> ReadExperimental384kAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? stored = await repo.GetAsync(ConfigRepository.Experimental384kKey, ct);
+        if (string.IsNullOrWhiteSpace(stored))
+            return Experimental384kConfig.Default;
+
+        try
+        {
+            return JsonSerializer.Deserialize(stored, AppJsonContext.Default.Experimental384kConfig)
+                   ?? Experimental384kConfig.Default;
+        }
+        catch (JsonException)
+        {
+            return Experimental384kConfig.Default;
         }
     }
 
@@ -296,6 +319,28 @@ public static class ConfigEndpoints
                 JsonSerializer.Serialize(config, AppJsonContext.Default.CaptureDelayConfig),
                 ct);
             setting.Ms = config.CaptureDelayMs;
+
+            return Results.Ok(config);
+        });
+
+        // The experimental 384 kHz opt-in. No validation branch — a bool is always valid — and,
+        // unlike /soundcard two blocks down, *no device reconnect*: the device reads this through a
+        // Func (Qa40xUsbDevice.Allow384kHz), so the new rate list is reported by the already-open
+        // device on the very next status poll. Rebuilding the device here would drop the USB
+        // connection to change a number the open one is perfectly able to report.
+        group.MapGet("/experimental-384k", async (
+            ConfigRepository repo, CancellationToken ct) =>
+            Results.Ok(await ReadExperimental384kAsync(repo, ct)));
+
+        group.MapPut("/experimental-384k", async (
+            Experimental384kConfig config, ConfigRepository repo, Experimental384kSetting setting,
+            CancellationToken ct) =>
+        {
+            await repo.SetAsync(
+                ConfigRepository.Experimental384kKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.Experimental384kConfig),
+                ct);
+            setting.Enabled = config.Enabled;
 
             return Results.Ok(config);
         });

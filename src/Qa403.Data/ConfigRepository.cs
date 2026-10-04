@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using Qa403.Dsp;
 
 namespace Qa403.Data;
@@ -105,6 +105,20 @@ public sealed record StartupConfig(bool ShowWelcomeOnStartup = true)
 public sealed record AutosaveConfig(bool Enabled = true)
 {
     public static AutosaveConfig Default { get; } = new();
+}
+
+/// <summary>
+/// Configuration ▸ Acquisition ▸ "Allow 384 kHz sample rate (experimental)": whether the QA403
+/// reports 384 kHz as a capture rate — see <c>DeviceCapabilities.Qa403Experimental</c>, which
+/// records what was measured there and why the generator is refused at that rate.
+///
+/// <para>Off by default, and that is the whole point of it being a setting: 384 kHz is undocumented
+/// by QuantAsylum, buys no measurable bandwidth over 192 kHz on the hardware tested, and is
+/// input-only. Nobody should meet it without having asked for it.</para>
+/// </summary>
+public sealed record Experimental384kConfig(bool Enabled = false)
+{
+    public static Experimental384kConfig Default { get; } = new();
 }
 
 /// <summary>
@@ -425,6 +439,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The capture delay's key. One document, see <see cref="CaptureDelayConfig"/>.</summary>
     public const string CaptureDelayKey = "acquisition.captureDelay";
+
+    /// <summary>The experimental 384 kHz opt-in. One document, see <see cref="Experimental384kConfig"/>.</summary>
+    public const string Experimental384kKey = "acquisition.experimental384k";
 
     /// <summary>The external input gain's key. One document, see <see cref="ExternalGainConfig"/>.</summary>
     public const string ExternalGainKey = "acquisition.externalGain";

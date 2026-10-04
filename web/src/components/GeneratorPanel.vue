@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef, watch } from 'vue'
-import type { DeviceStatus, GeneratorChannelRequest } from '../api/client'
+import type { DeviceRanges, DeviceStatus, GeneratorChannelRequest } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useStagedSampleRate } from '../composables/useStagedSampleRate'
+import { generatorRateCeilingNotice } from '../generatorRateCeiling'
 import GeneratorChannelPanel from './GeneratorChannelPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
+
+const props = defineProps<{
+  ranges: DeviceRanges | null
+}>()
 
 // Shared with both channels' Metrics panels — one amplifier load, edited here instead of twice.
 const { loadOhms } = useLoadOhms()
@@ -18,6 +24,26 @@ const { loadedParams } = useProjects()
 const emit = defineEmits<{ change: [] }>()
 
 const channelPanel = useTemplateRef<InstanceType<typeof GeneratorChannelPanel>>('channelPanel')
+
+// The rate the FFT settings panel beside this one currently has staged -- not what the device is
+// streaming at (see useStagedSampleRate.ts).
+const { stagedSampleRateHz } = useStagedSampleRate()
+
+/**
+ * Non-null when the FFT screen is staged at a rate this analyzer captures at but cannot play --
+ * 384 kHz on a QA403, where the DAC emits garbage with enough near-DC content to cycle the device's
+ * own output protection relay (see generatorRateCeiling.ts). The panel's whole body is replaced by
+ * it: a stimulus composed here could not be played, and the server refuses a voiced generator at
+ * that rate with a 409 on Run rather than clamping it.
+ *
+ * The staged form is left *intact* behind the notice rather than cleared -- dropping back to
+ * 192 kHz restores the tone, the level and the channel checkboxes exactly as they were, so a rate
+ * tried out of curiosity does not cost the user their stimulus.
+ */
+const rateCeilingNotice = computed(() =>
+  generatorRateCeilingNotice(stagedSampleRateHz.value, props.ranges?.maxGeneratorSampleRateHz),
+)
+const generatorUsable = computed(() => rateCeilingNotice.value === null)
 
 // Left and right play the same stimulus — only whether each channel is on is separate. Staged
 // from whichever measurement is currently selected, same as the shared stimulus form below;
@@ -58,9 +84,16 @@ watch(
 function buildRequest(): { left: GeneratorChannelRequest; right: GeneratorChannelRequest; snapToBin: boolean } | null {
   const shared = channelPanel.value?.currentConfig()
   if (!shared) return null
+  // Both channels are forced silent at a capture-only rate, here rather than by clearing the
+  // checkboxes: this is the one seam every generator write passes through (Run, a live edit, and
+  // the measurement-type save all call it), so no path can reach the device with a voiced channel
+  // the analyzer would be damaged playing. GeneratorChannelPanel stays mounted behind the notice
+  // for exactly this reason -- unmounted, `shared` would be null, this would return null, and
+  // App.vue would skip the generator call altogether rather than sending the silence.
+  const voiced = generatorUsable.value
   return {
-    left: { ...shared, enabled: leftEnabled.value },
-    right: { ...shared, enabled: rightEnabled.value },
+    left: { ...shared, enabled: voiced && leftEnabled.value },
+    right: { ...shared, enabled: voiced && rightEnabled.value },
     snapToBin: snapToBin.value,
   }
 }
@@ -80,56 +113,69 @@ defineExpose({ buildRequest, resyncTones })
 
 <template>
   <CollapsibleSection title="Generator" padding="p-4">
-    <fieldset class="mb-3 flex items-center gap-4 text-sm" title="Which channel(s) play this stimulus once Run is pressed — the ADC always samples both.">
-      <legend class="sr-only">Enabled channels</legend>
-      <label class="flex items-center gap-1.5">
-        <input type="checkbox" v-model="leftEnabled" @change="emit('change')" />
-        Left
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input type="checkbox" v-model="rightEnabled" @change="emit('change')" />
-        Right
-      </label>
-    </fieldset>
+    <!-- A rate this analyzer cannot play takes the panel out of service: the title and its collapse
+         control stay (so the rail's shape does not change under the user), and everything that would
+         compose a stimulus is replaced by the reason. `v-show` and not `v-if` -- see buildRequest:
+         the channel panel has to stay mounted to report the staged config it silences. -->
+    <p
+      v-if="rateCeilingNotice"
+      class="text-sm text-amber-700 dark:text-amber-400"
+    >
+      {{ rateCeilingNotice }}
+    </p>
 
-    <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-      <label class="flex items-center gap-1.5" title="Amplifier load, used for both channels' power figures.">
-        Load
-        <input
-          type="number"
-          min="0.1"
-          step="0.1"
-          v-model.number="loadOhms"
-          class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700"
-        />
-        Ω
-      </label>
-    </div>
+    <div v-show="generatorUsable" class="contents">
+      <fieldset class="mb-3 flex items-center gap-4 text-sm" title="Which channel(s) play this stimulus once Run is pressed — the ADC always samples both.">
+        <legend class="sr-only">Enabled channels</legend>
+        <label class="flex items-center gap-1.5">
+          <input type="checkbox" v-model="leftEnabled" @change="emit('change')" />
+          Left
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input type="checkbox" v-model="rightEnabled" @change="emit('change')" />
+          Right
+        </label>
+      </fieldset>
 
-    <GeneratorChannelPanel
-      ref="channelPanel"
-      :load-state="loadedParams?.generatorLeft"
-      @change="emit('change')"
-    />
+      <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <label class="flex items-center gap-1.5" title="Amplifier load, used for both channels' power figures.">
+          Load
+          <input
+            type="number"
+            min="0.1"
+            step="0.1"
+            v-model.number="loadOhms"
+            class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700"
+          />
+          Ω
+        </label>
+      </div>
 
-    <div class="mt-4 flex items-center gap-4">
-      <!--
-        A tone that doesn't land exactly on an FFT bin leaks across its neighbours whatever window is
-        used. Snapping moves it to the nearest coherent bin — which depends on the FFT size, so the
-        effective frequency changes when the analyzer is reconfigured. The frequency field above
-        always shows what was typed; the label beneath it shows what's really playing once Run
-        confirms it.
-      -->
-      <label
-        class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
-        :class="{ 'opacity-40': !canSnapToBin }"
-        :title="canSnapToBin
-          ? 'Snap tone frequencies to the nearest coherent FFT bin, so a tone lands on exactly one bin with no leakage.'
-          : 'Only applies to sine tones and the multitone comb — noise and the chirp have no frequency to snap.'"
-      >
-        <input v-model="snapToBin" type="checkbox" :disabled="!canSnapToBin" @change="emit('change')" />
-        Snap to bin
-      </label>
+      <GeneratorChannelPanel
+        ref="channelPanel"
+        :load-state="loadedParams?.generatorLeft"
+        @change="emit('change')"
+      />
+
+      <div class="mt-4 flex items-center gap-4">
+        <!--
+          A tone that doesn't land exactly on an FFT bin leaks across its neighbours whatever window is
+          used. Snapping moves it to the nearest coherent bin — which depends on the FFT size, so the
+          effective frequency changes when the analyzer is reconfigured. The frequency field above
+          always shows what was typed; the label beneath it shows what's really playing once Run
+          confirms it.
+        -->
+        <label
+          class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
+          :class="{ 'opacity-40': !canSnapToBin }"
+          :title="canSnapToBin
+            ? 'Snap tone frequencies to the nearest coherent FFT bin, so a tone lands on exactly one bin with no leakage.'
+            : 'Only applies to sine tones and the multitone comb — noise and the chirp have no frequency to snap.'"
+        >
+          <input v-model="snapToBin" type="checkbox" :disabled="!canSnapToBin" @change="emit('change')" />
+          Snap to bin
+        </label>
+      </div>
     </div>
   </CollapsibleSection>
 </template>

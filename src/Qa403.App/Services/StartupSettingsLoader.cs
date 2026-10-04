@@ -66,6 +66,15 @@ public static class StartupSettingsLoader
         services.GetRequiredService<AnalyzerKindSetting>().Kind =
             await ConfigEndpoints.ReadAnalyzerKindAsync(config, ct);
 
+        // The experimental 384 kHz opt-in. The device reads this through a Func rather than
+        // capturing it (Qa40xUsbDevice.Allow384kHz), so unlike the two settings above it would in
+        // fact survive being loaded after the first device was built. It is loaded here anyway: the
+        // rule about this method is an order, not a case-by-case judgement, and a later change that
+        // turned that Func into a captured bool would otherwise re-arm the trap silently -- which is
+        // exactly how the analyzer-kind preference came to be written correctly and read too late.
+        services.GetRequiredService<Experimental384kSetting>().Enabled =
+            (await ConfigEndpoints.ReadExperimental384kAsync(config, ct)).Enabled;
+
         // The stream recorder's switch and cap. Before the session resolves, because the session
         // takes the recorder as a dependency and arms the device's tap from it -- a setting read
         // afterwards would leave the first acquisition of the session unrecorded.

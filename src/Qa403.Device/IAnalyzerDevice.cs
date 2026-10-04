@@ -1,4 +1,4 @@
-﻿namespace Qa403.Device;
+namespace Qa403.Device;
 
 /// <summary>
 /// Abstraction over a QA403-class audio analyzer: connect, configure input/output ranges and
@@ -184,6 +184,25 @@ public interface IAnalyzerDevice
     /// paying this on every RUN would be two seconds of nothing for no reason.</para>
     /// </summary>
     int StreamStartSettleFrames(double sampleRateHz) => 0;
+
+    /// <summary>
+    /// The highest sample rate at which this analyzer's <i>generator</i> may be driven, when that is
+    /// lower than the highest rate it can <i>capture</i> at. <see cref="double.PositiveInfinity"/>
+    /// means no such limit, which is true of every implementation but the QA403.
+    ///
+    /// <para>A default member, like <see cref="Telemetry"/> and
+    /// <see cref="StreamStartSettleFrames"/>, so that only the one implementation with the
+    /// limitation has to mention it and the test doubles need no edit.</para>
+    ///
+    /// <para><b>Why this exists.</b> The QA403 captures correctly at 384 kHz and emits garbage from
+    /// its DAC there — see <see cref="DeviceCapabilities.Qa403Experimental"/> for the measurements.
+    /// That garbage carries enough near-DC content to cycle the device's own output protection relay,
+    /// and a <c>StreamingStop</c> did not clear it, so the limit is a hardware-protection rule rather
+    /// than a measurement-quality one. A caller must refuse to configure a live generator above this
+    /// rate; it is deliberately not silently clamped, because quietly playing a different stimulus
+    /// than the one asked for is its own class of wrong answer.</para>
+    /// </summary>
+    double MaxGeneratorSampleRateHz => double.PositiveInfinity;
 
     /// <summary>
     /// Where this device copies the samples it hands its DAC, or null -- the default -- for no

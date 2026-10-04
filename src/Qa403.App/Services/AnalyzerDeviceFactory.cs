@@ -1,4 +1,4 @@
-﻿using Qa403.Device;
+using Qa403.Device;
 using Qa403.Device.Hardware;
 using Qa403.Device.Simulation;
 using Qa403.Device.SoundCard;
@@ -48,11 +48,17 @@ public class AnalyzerDeviceFactory
     private readonly ILoggerFactory _loggerFactory;
     private readonly IAnalyzerDevice? _pinned;
     private readonly SoundCardSetting _soundCard;
+    private readonly Experimental384kSetting _experimental384k;
 
-    public AnalyzerDeviceFactory(ILoggerFactory loggerFactory, DeviceKind initialKind, SoundCardSetting? soundCard = null)
+    public AnalyzerDeviceFactory(
+        ILoggerFactory loggerFactory,
+        DeviceKind initialKind,
+        SoundCardSetting? soundCard = null,
+        Experimental384kSetting? experimental384k = null)
     {
         _loggerFactory = loggerFactory;
         _soundCard = soundCard ?? new SoundCardSetting();
+        _experimental384k = experimental384k ?? new Experimental384kSetting();
         InitialKind = initialKind;
     }
 
@@ -60,6 +66,7 @@ public class AnalyzerDeviceFactory
     {
         _loggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
         _soundCard = new SoundCardSetting();
+        _experimental384k = new Experimental384kSetting();
         _pinned = pinned;
 
         // A three-way test, not "simulator or else": a pinned sound card reported itself as
@@ -102,7 +109,14 @@ public class AnalyzerDeviceFactory
                 _soundCard.Calibration,
                 _loggerFactory.CreateLogger<SoundCardDevice>()),
 
-            _ => new Qa40xUsbDevice(_loggerFactory.CreateLogger<Qa40xUsbDevice>()),
+            // Allow384kHz is a Func, so unlike the sound card's settings it is NOT captured here:
+            // the checkbox takes effect on this already-built device, and a device built before the
+            // configuration document was read still reports the right rates. See
+            // Qa40xUsbDevice.Allow384kHz.
+            _ => new Qa40xUsbDevice(_loggerFactory.CreateLogger<Qa40xUsbDevice>())
+            {
+                Allow384kHz = () => _experimental384k.Enabled,
+            },
         };
 
     /// <summary>
@@ -116,9 +130,9 @@ public class AnalyzerDeviceFactory
     /// defaults keep all three on — a large number of tests are written against that bench, and a
     /// device built directly still gets it.
     /// </summary>
-    private static SimulatedDevice CreateSimulator()
+    private SimulatedDevice CreateSimulator()
     {
-        var device = new SimulatedDevice();
+        var device = new SimulatedDevice { Allow384kHz = () => _experimental384k.Enabled };
         device.SignalProfile = device.SignalProfile with
         {
             NoiseEnabled = false,

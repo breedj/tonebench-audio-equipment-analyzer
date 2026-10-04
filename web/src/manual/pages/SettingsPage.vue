@@ -39,6 +39,44 @@
           </td>
         </tr>
         <tr>
+          <td>Allow 384 kHz sample rate (experimental)</td>
+          <td>
+            Adds <strong>384 kHz</strong> to the FFT screen's <strong>Sample rate</strong> list, and
+            with it a 200 kHz entry in that screen's frequency <strong>To</strong> list, since the
+            spectrum now reaches 192 kHz. Off by default.
+            <strong>What it is for:</strong> capturing a signal something <em>else</em> is driving —
+            an ultrasonic source, a switching supply's residue, a transmitter, anything whose content
+            runs past the 96 kHz a 192 kHz capture can show. Everything the FFT screen measures from
+            an input works normally at it: the spectrum, the waterfall, the noise figures, the
+            harmonics table.
+            <strong>What it is not for:</strong> anything that needs this analyzer's own generator.
+            <strong>The generator cannot be used at 384 kHz</strong>, so there is no loopback, no THD
+            of your own tone, and no sweep — the sweep screens never offer the rate in the first
+            place. Select it on the FFT screen and the Generator panel steps aside and says so,
+            keeping whatever you had set up: both outputs stay silent until you choose a lower rate,
+            when the stimulus comes back exactly as it was. Drive the DUT from an external generator
+            and measure its output here.
+            <strong>Why the generator is refused</strong> — measured on a QA403 here rather than
+            assumed, since QuantAsylum does not document this rate at all. The ADC really does run at
+            it: frames arrive at 382.7 kHz against the 384 kHz asked for, the input stage's own
+            1–20 kHz noise reads within 0.05 dB of its 192 kHz figure, and two minutes of capture
+            drops nothing — these are samples from that converter running faster, not padded or
+            repeated. The DAC does not. A −6 dBV tone comes back at −18.7 dBV with about 44 %
+            distortion, against −6.6 dBV and 0.0005 % at 192 kHz over the same cable, and the near-DC
+            rubbish in it cycles the analyzer's own output protection relay — which a software stop
+            does not clear; the device needs a power cycle. That is why playing a tone here is
+            refused outright rather than allowed with a warning.
+            <strong>It also buys no bandwidth.</strong> The analog filters do not move with the rate —
+            the loopback was already about 32 dB down at 120 kHz and 51 dB at 180 kHz — so 192 kHz
+            reaches everything 384 kHz does. (That figure is the generator and the input in series
+            through the broken generator, so the input path's own limit above 96 kHz is not something
+            this bench could settle; it needs an external signal source.) So this rate is worth having
+            for what it lets you <em>look</em> at, not for extra reach on an ordinary measurement.
+            A measurement saved at 384 kHz cannot be re-run with this unticked — it is refused, with a
+            message saying so, rather than quietly measured at another rate.
+          </td>
+        </tr>
+        <tr>
           <td>Metrics bandwidth (Hz)</td>
           <td>
             The band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated

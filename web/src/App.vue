@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
 import { api, ApiError, type ResponsePhaseKindName, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
@@ -1736,6 +1736,18 @@ function setDeviceKind(kind: import('./api/client').DeviceKindName) {
  */
 function closeSoundCardDialog() {
   soundCardDialogOpen.value = false
+  void refreshRanges()
+}
+
+/**
+ * And so does closing Configuration, for the same reason: the experimental 384 kHz checkbox moves
+ * the analyzer's reported sample-rate list, which `ranges` is otherwise only fetched at mount — so
+ * without this the box appears to do nothing until the page is reloaded. The device itself needs no
+ * reconnect; it reads the setting through a Func, so the open connection already reports the new
+ * list (see Qa40xUsbDevice.Allow384kHz).
+ */
+function closeConfigDialog() {
+  configDialogOpen.value = false
   void refreshRanges()
 }
 
@@ -4526,7 +4538,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 </button>
               </div>
 
-              <GeneratorPanel ref="generatorPanel" @change="applyGeneratorLive" />
+              <GeneratorPanel ref="generatorPanel" :ranges="ranges" @change="applyGeneratorLive" />
               <SpectrumConfigPanel
                 ref="spectrumConfigPanel"
                 :ranges="ranges"
@@ -4709,7 +4721,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       :live-subject="reportLiveSubject"
       @close="projectReportOpen = false"
     />
-    <ConfigDialog :open="configDialogOpen" @close="configDialogOpen = false" />
+    <ConfigDialog :open="configDialogOpen" @close="closeConfigDialog" />
     <SoundCardDialog :open="soundCardDialogOpen" @close="closeSoundCardDialog" />
     <AboutDialog :open="aboutDialogOpen" @close="aboutDialogOpen = false" />
     <ManualDialog />

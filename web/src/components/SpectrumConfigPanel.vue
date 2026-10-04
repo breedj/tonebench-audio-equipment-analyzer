@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { AveragingMode, DeviceRanges, WindowType } from '../api/client'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useProjects } from '../composables/useProjects'
+import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const props = defineProps<{
@@ -52,7 +53,11 @@ const form = reactive({
 // Sample rate — formerly Acquisition's own field — is staged from the measurement type's params
 // (loadedParams), not the server-side spectrum config those other fields above use; it only takes
 // effect on Run (or immediately, if something's already live — see onSampleRateChange).
-const sampleRateHz = ref(192000)
+//
+// Held in a module singleton rather than a local ref so GeneratorPanel can watch it: a rate this
+// analyzer captures at but cannot play (384 kHz on a QA403) takes that panel out of service — see
+// useStagedSampleRate.ts and generatorRateCeiling.ts.
+const { stagedSampleRateHz: sampleRateHz } = useStagedSampleRate()
 watch(
   loadedParams,
   (params) => {

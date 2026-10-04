@@ -60,7 +60,7 @@ public static class DeviceEndpoints
             var caps = session.Capabilities;
             return Results.Ok(new DeviceRangesResponse(
                 caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount,
-                session.MinStimulusFrequencyHz));
+                session.MinStimulusFrequencyHz, session.MaxGeneratorSampleRateHz));
         });
 
         group.MapPost("/input-range", async (
@@ -434,7 +434,14 @@ public sealed record DeviceRangesResponse(
     /// The lowest frequency this analyzer can excite, in Hz; 0 on one with no floor. The chirp
     /// panels warn against it before a run, so the raising is not a surprise afterwards.
     /// </summary>
-    double MinStimulusFrequencyHz = 0.0);
+    double MinStimulusFrequencyHz = 0.0,
+    /// <summary>
+    /// The highest sample rate this analyzer can play a stimulus at, in Hz, or <b>null</b> on one
+    /// with no ceiling — never infinity, which would truncate this response (see
+    /// <see cref="Qa403.App.Services.DeviceSessionService.MaxGeneratorSampleRateHz"/>). The FFT
+    /// screen's Generator panel stands itself down above it; see <c>generatorRateCeiling.ts</c>.
+    /// </summary>
+    double? MaxGeneratorSampleRateHz = null);
 
 public sealed record InputRangeRequest(double Dbv);
 

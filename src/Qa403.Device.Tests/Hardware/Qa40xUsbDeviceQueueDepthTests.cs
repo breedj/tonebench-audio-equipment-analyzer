@@ -17,6 +17,9 @@ public class Qa40xUsbDeviceQueueDepthTests
     /// <summary>512 frames per transfer — <c>Qa40xUsbDevice.TransferChunkFrames</c>.</summary>
     private const int TransferChunkFrames = 512;
 
+    /// <summary>The buffered time the design asks for — <c>Qa40xUsbDevice.TargetInFlightSeconds</c>.</summary>
+    private const double TargetInFlightSeconds = 0.128;
+
     [Theory]
     [InlineData(48_000)]
     [InlineData(96_000)]
@@ -32,6 +35,37 @@ public class Qa40xUsbDeviceQueueDepthTests
             bufferedSeconds >= 0.040,
             $"{sampleRateHz} Hz: depth {depth} buffers only {bufferedSeconds * 1000:F1} ms — too little slack "
                 + "to absorb a GC pause or a slow spectrum tick before the DAC runs dry.");
+    }
+
+    /// <summary>
+    /// The assertion the test above should have been all along. It parameterised 384 kHz but asked
+    /// only for 40 ms, which the clamped depth of 48 satisfied at 64 ms — so it <b>passed against the
+    /// bug</b> for as long as <c>MaxQueueDepth</c> was 48: the clamp had been derived from 192 kHz
+    /// being the top rate, and at 384 kHz it silently halved <c>TargetInFlightSeconds</c>, below four
+    /// of the five pump stalls ever measured on this app.
+    ///
+    /// <para>"A time budget, not a transfer count" is only meaningful if the budget is the <i>same</i>
+    /// budget at every rate, so this pins the actual number rather than a floor. 1 ms of tolerance is
+    /// the rounding <c>QueueDepthFor</c>'s <c>Math.Ceiling</c> can introduce — one transfer is 10.7 ms
+    /// at 48 kHz, so a genuinely wrong depth can never hide inside it.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(48_000)]
+    [InlineData(96_000)]
+    [InlineData(192_000)]
+    [InlineData(384_000)]
+    public void QueueDepthFor_BuffersTheSameTimeAtEverySupportedSampleRate(double sampleRateHz)
+    {
+        int depth = Qa40xUsbDevice.QueueDepthFor(sampleRateHz);
+
+        double bufferedSeconds = depth * TransferChunkFrames / sampleRateHz;
+
+        Assert.True(
+            Math.Abs(bufferedSeconds - TargetInFlightSeconds) < 0.001,
+            $"{sampleRateHz / 1000.0:0.###} kHz: depth {depth} buffers {bufferedSeconds * 1000:F1} ms, not the "
+                + $"{TargetInFlightSeconds * 1000:F0} ms every rate is supposed to get. If this is short at the top "
+                + "rate, MaxQueueDepth is clamping — it has to be re-derived whenever a faster rate is added, which "
+                + "is exactly what adding 384 kHz exposed.");
     }
 
     [Fact]
@@ -56,7 +90,7 @@ public class Qa40xUsbDeviceQueueDepthTests
     {
         // Clamped at both ends so a pathological rate can't ask for a 1-deep pipeline (instant
         // underrun) or thousands of simultaneously submitted transfers.
-        Assert.InRange(Qa40xUsbDevice.QueueDepthFor(1_000), 4, 48);
-        Assert.InRange(Qa40xUsbDevice.QueueDepthFor(10_000_000), 4, 48);
+        Assert.InRange(Qa40xUsbDevice.QueueDepthFor(1_000), 4, 96);
+        Assert.InRange(Qa40xUsbDevice.QueueDepthFor(10_000_000), 4, 96);
     }
 }

@@ -10,6 +10,7 @@ namespace Qa403.Device.Tests.Hardware;
 /// code/CLAUDE.md for how to run this suite explicitly.
 /// </summary>
 [Trait("Category", "Hardware")]
+[Collection(nameof(Qa403HardwareCollection))]
 public class Qa40xUsbDeviceHardwareTests
 {
     /// <summary>Fixed generator level for the loopback test: comfortably inside the fixed 8 dBV output range used below, and measurable at every input range from 0 to 42 dBV.</summary>

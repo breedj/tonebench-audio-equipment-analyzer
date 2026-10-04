@@ -82,6 +82,7 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         services.AddSingleton<ConfigRepository>();
 
         services.AddSingleton<CaptureDelaySetting>();
+        services.AddSingleton<Experimental384kSetting>();
         services.AddSingleton<ExternalGainSetting>();
         services.AddSingleton<SoundCardSetting>();
         services.AddSingleton<AnalyzerKindSetting>();
@@ -185,11 +186,17 @@ public sealed class StartupSettingsLoaderTests : IDisposable
             System.Text.Json.JsonSerializer.Serialize(
                 new ExternalGainConfig(-20.0, -10.0), AppJsonContext.Default.ExternalGainConfig),
             CancellationToken.None);
+        await config.SetAsync(
+            ConfigRepository.Experimental384kKey,
+            System.Text.Json.JsonSerializer.Serialize(
+                new Experimental384kConfig(true), AppJsonContext.Default.Experimental384kConfig),
+            CancellationToken.None);
 
         await StartupSettingsLoader.LoadAsync(provider, CancellationToken.None);
 
         Assert.Equal(250.0, provider.GetRequiredService<CaptureDelaySetting>().Ms);
         Assert.Equal(-20.0, provider.GetRequiredService<ExternalGainSetting>().LeftDb);
         Assert.Equal(-10.0, provider.GetRequiredService<ExternalGainSetting>().RightDb);
+        Assert.True(provider.GetRequiredService<Experimental384kSetting>().Enabled);
     }
 }

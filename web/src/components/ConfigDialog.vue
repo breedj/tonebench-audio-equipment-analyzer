@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
 import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
+import { useExperimental384k } from '../composables/useExperimental384k'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
 import { useDiagnosticLogging } from '../composables/useDiagnosticLogging'
 import { useDiagnostics } from '../composables/useDiagnostics'
@@ -23,6 +24,12 @@ const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
 const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
+const {
+  experimental384kEnabled,
+  load: loadExperimental384k,
+  setExperimental384kEnabled,
+} = useExperimental384k()
+void loadExperimental384k()
 const { config, apply: applyConfig } = useSpectrumConfig()
 const { status: deviceStatus } = useDevice()
 const { updateCheckEnabled } = useUpdateCheck()
@@ -329,6 +336,24 @@ async function clearStoredCalibration() {
               @change="onCaptureDelayChange"
               class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             />
+          </label>
+
+          <label
+            class="flex items-start gap-2"
+            title="Offers 384 kHz in the FFT screen's Sample rate list. QuantAsylum does not document this rate, and measured on a QA403 it is input-only: the ADC really does run at 384 kHz, but the generator does not work there — the output comes back about 12 dB low with roughly 44 % distortion, and its near-DC content cycles the analyzer's own output protection relay. The app therefore refuses to play a tone at this rate. It also buys no bandwidth: the analog path was already about 32 dB down at 120 kHz, so 192 kHz reaches everything this does. Useful only for capturing a signal some other source is driving."
+          >
+            <input
+              type="checkbox"
+              class="mt-0.5"
+              :checked="experimental384kEnabled"
+              @change="setExperimental384kEnabled(($event.target as HTMLInputElement).checked)"
+            />
+            <span>
+              Allow 384 kHz sample rate (experimental)
+              <span class="block text-xs text-neutral-500">
+                Capture only — the generator is refused above 192 kHz.
+              </span>
+            </span>
           </label>
 
           <label

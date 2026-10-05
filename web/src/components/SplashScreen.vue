@@ -104,10 +104,7 @@ onBeforeUnmount(() => {
       <dt class="text-right text-neutral-500 dark:text-neutral-400">Author</dt>
       <dd class="text-left font-medium">Joost Breed</dd>
     </dl>
-
-    <p class="max-w-md text-xs text-neutral-500 dark:text-neutral-400">
-      QA403 and QA40x are products of QuantAsylum. This application is an independent one and is
-      neither produced nor endorsed by them.
-    </p>
+    <!-- The QuantAsylum attribution lives in the About dialog only. It belongs somewhere permanent
+         and readable, not on a screen that shows for a moment at startup. -->
   </div>
 </template>

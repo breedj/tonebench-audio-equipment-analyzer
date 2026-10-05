@@ -8,6 +8,8 @@ import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { MAX_SCOPE_PERIODS, useScopeDisplay } from '../composables/useScopeDisplay'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { exportGridTheme } from '../charts/palette'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import {
   CHART_EXPORT_HEADER_PX,
   composeChartPng,
@@ -58,7 +60,12 @@ function currentTheme() {
   return darkQuery.matches ? THEME.dark : THEME.light
 }
 
+const rootRef = ref<HTMLElement | null>(null)
 const containerRef = ref<HTMLDivElement>()
+// Fitted only when expanded -- see charts/useResultChartHeight.ts's pageHeightPx. Under the
+// spectrum chart this keeps the height it has always had, since the two share the view; expanded,
+// the root is pinned over the viewport and the plot takes the window.
+const chartHeight = useResultChartHeight(rootRef, containerRef, { pageHeightPx: CHART_HEIGHT })
 // How many whole periods the last draw actually managed — findTriggerWindow steps the request
 // down when the 2048-sample frame can't hold it, and silently showing 2 when the field says 20
 // reads as the field being broken. Null while untriggered (no tone to count periods of).
@@ -115,7 +122,7 @@ function ensurePlot() {
 
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
-  plot = new uPlot(buildOptions(width, CHART_HEIGHT, currentTheme(), true), [[], [], []], el)
+  plot = new uPlot(buildOptions(width, chartHeight.value, currentTheme(), true), [[], [], []], el)
   plotIsDark = darkQuery.matches
   plotIsResidual = residualMode.value
 }
@@ -382,8 +389,9 @@ function handleResize() {
   if (!plot || !containerRef.value) return
   // Zero while the panel is hidden (App.vue's v-show) -- see WaterfallChart's handleResize.
   const width = containerRef.value.getBoundingClientRect().width
-  if (width > 0) plot.setSize({ width, height: CHART_HEIGHT })
+  if (width > 0) plot.setSize({ width, height: chartHeight.value })
 }
+watch(chartHeight, handleResize)
 
 function handleThemeChange() {
   if (!plot) return
@@ -412,8 +420,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <div class="flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+  <section
+    ref="rootRef"
+    class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+  >
+    <ExpandToggle class="absolute right-2 top-2" :target="rootRef" />
+    <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. The
+         row wraps, because its controls already crowd a narrow rail. -->
+    <div class="flex flex-wrap items-center gap-3 pr-9 text-xs text-neutral-500 dark:text-neutral-400">
       <span>Oscilloscope</span>
       <label class="flex items-center gap-1.5" title="How many whole periods of the generator tone to show. Stepped down automatically when the captured frame is too short to hold that many.">
         Periods

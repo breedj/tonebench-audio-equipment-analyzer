@@ -11,6 +11,8 @@ import { useAppTheme } from '../composables/useAppTheme'
 import { freqAxis } from '../freqAxis'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, exportAxisLabel, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import { exportGridTheme } from '../charts/palette'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 
 const props = defineProps<{
   spectrum: Record<number, SpectrumFrame>
@@ -121,7 +123,12 @@ const rows: WaterfallRow[] = []
 // both) doesn't append the same spectrum twice.
 let lastSeq = -1
 
+const rootRef = ref<HTMLElement | null>(null)
 const containerRef = ref<HTMLDivElement>()
+// Fitted only when expanded -- see charts/useResultChartHeight.ts's pageHeightPx. Under the
+// spectrum chart this keeps the height it has always had, since the two share the view; expanded,
+// the root is pinned over the viewport and the plot takes the window.
+const chartHeight = useResultChartHeight(rootRef, containerRef, { pageHeightPx: CHART_HEIGHT })
 const selectedChannel = ref(0)
 const autoLevels = ref(true)
 const topDb = ref(0)
@@ -337,7 +344,7 @@ function ensurePlot(span: { min: number; max: number }) {
 
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
-  plot = new uPlot(buildOptions(width, CHART_HEIGHT, span, currentTheme(), true), [[span.min, span.max], [null, null]], el)
+  plot = new uPlot(buildOptions(width, chartHeight.value, span, currentTheme(), true), [[span.min, span.max], [null, null]], el)
   plotIsDark = isDark.value
   lastYSpanS = -1
   lastXSpan = { min: span.min, max: span.max }
@@ -524,8 +531,9 @@ function handleResize() {
   // Zero while the panel is hidden (App.vue's v-show) -- a 0 px canvas is not a size to keep; the
   // observer fires again with the real width when the panel is shown.
   const width = containerRef.value.getBoundingClientRect().width
-  if (width > 0) plot.setSize({ width, height: CHART_HEIGHT })
+  if (width > 0) plot.setSize({ width, height: chartHeight.value })
 }
+watch(chartHeight, handleResize)
 
 // Axis colours are baked into the options at construction, same as the other two charts — a
 // Light/Dark/Auto change is one of the few things that legitimately needs the instance rebuilt.
@@ -550,8 +558,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-    <div class="flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+  <section
+    ref="rootRef"
+    class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+  >
+    <ExpandToggle class="absolute right-2 top-2" :target="rootRef" />
+    <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. -->
+    <div class="flex flex-wrap items-center gap-3 pr-9 text-xs text-neutral-500 dark:text-neutral-400">
       <span>Waterfall</span>
 
       <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">

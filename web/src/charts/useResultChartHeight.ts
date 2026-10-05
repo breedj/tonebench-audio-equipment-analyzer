@@ -17,6 +17,21 @@ export interface ResultChartHeightOptions {
    * many lines there are, because a wall of metrics must not shrink the chart into a strip.
    */
   aboveHeight?: (el: HTMLElement) => number
+  /**
+   * A fixed drawing height to keep **in the page**, for a chart that is not the view's main one.
+   *
+   * <p>The oscilloscope and the waterfall sit under the spectrum chart, and the two sweep previews
+   * stack in the rail: fitting any of them to the view is exactly wrong, because several of them
+   * share it. They keep the height they have always had, and this composable is used only for the
+   * other half of its job - knowing that the root has been pinned over the viewport and giving it
+   * the window. Without that an expanded preview is a 150 px plot adrift in a full-screen panel,
+   * which is how the button would look broken rather than absent.</p>
+   *
+   * <p>The furniture is still measured in the page, because the expanded branch has no way to
+   * measure it (a root at `inset: 0` is the window's height whatever it contains) and reads what
+   * the page last saw.</p>
+   */
+  pageHeightPx?: number
 }
 
 /** The whole element plus its bottom margin — what a block above the chart costs the column. */
@@ -80,7 +95,9 @@ export function useResultChartHeight(
   plot: Ref<HTMLElement | null | undefined>,
   options: ResultChartHeightOptions = {},
 ): Ref<number> {
-  const height = ref(RESULT_CHART_HEIGHT_PX)
+  // A secondary chart starts at its own height rather than the full-width fallback, so a plot
+  // built on mount is built at the size it will keep instead of being resized a frame later.
+  const height = ref(options.pageHeightPx ?? RESULT_CHART_HEIGHT_PX)
   const aboveHeight = options.aboveHeight ?? fullHeightWithMargin
   let mainObserver: ResizeObserver | null = null
   let aboveObserver: ResizeObserver | null = null
@@ -100,17 +117,27 @@ export function useResultChartHeight(
     const main = rootEl?.closest('main')
     if (!rootEl || !plotEl || !main) return
 
-    let visible: number
     if (expandedChart.value === rootEl) {
-      visible = window.innerHeight - (verticalPadding(rootEl) - rootPadding)
-    } else {
-      furniture = rootEl.getBoundingClientRect().height - plotEl.getBoundingClientRect().height
-      rootPadding = verticalPadding(rootEl)
-      visible = main.clientHeight - verticalPadding(main) - offsetAbove(main, rootEl)
-      // The offset already holds the whole of `above`; the caller decides how much of it to keep.
-      const above = options.above?.value
-      if (above) visible += fullHeightWithMargin(above) - aboveHeight(above)
+      const visible = window.innerHeight - (verticalPadding(rootEl) - rootPadding)
+      height.value = Math.max(MIN_RESULT_CHART_HEIGHT_PX, Math.round(visible - furniture))
+      return
     }
+
+    furniture = rootEl.getBoundingClientRect().height - plotEl.getBoundingClientRect().height
+    rootPadding = verticalPadding(rootEl)
+
+    // Kept, not fitted, and deliberately not clamped to MIN_RESULT_CHART_HEIGHT_PX: that floor is
+    // what stops a *result* chart squashing on a short window, and every secondary height here is
+    // below it on purpose.
+    if (options.pageHeightPx !== undefined) {
+      height.value = options.pageHeightPx
+      return
+    }
+
+    let visible = main.clientHeight - verticalPadding(main) - offsetAbove(main, rootEl)
+    // The offset already holds the whole of `above`; the caller decides how much of it to keep.
+    const above = options.above?.value
+    if (above) visible += fullHeightWithMargin(above) - aboveHeight(above)
     height.value = Math.max(MIN_RESULT_CHART_HEIGHT_PX, Math.round(visible - furniture))
   }
 

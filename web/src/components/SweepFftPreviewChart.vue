@@ -4,6 +4,8 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { ThdSweepPoint } from '../api/client'
 import { useAppTheme } from '../composables/useAppTheme'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { formatHz } from '../composables/useSweep'
 import { freqAxis } from '../freqAxis'
 import { mergePreviewSeries } from '../sweep/points'
@@ -45,8 +47,13 @@ const props = defineProps<{
 
 const { isDark } = useAppTheme()
 const { fitAllSpectra } = useSweepPreviewFit()
+const rootRef = ref<HTMLElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 const CHART_HEIGHT = 150
+// Fitted only when expanded -- see charts/useResultChartHeight.ts's pageHeightPx. In the rail this
+// keeps the height it has always had, because several of these stack there; expanded, the root is
+// pinned over the viewport and the plot takes the window.
+const chartHeight = useResultChartHeight(rootRef, containerRef, { pageHeightPx: CHART_HEIGHT })
 
 // Matches ThdSweepChart's own D2 (blue)/D5 (red) hues -- one is "left channel", the other "right
 // channel" here rather than "which harmonic", but staying inside the app's existing blue/red pair
@@ -64,7 +71,7 @@ function buildOptions(width: number): uPlot.Options {
   const fitted = fitAllSpectra.value
   return {
     width,
-    height: CHART_HEIGHT,
+    height: chartHeight.value,
     scales: {
       x: { time: false, distr: 3, log: 10 },
       // Fitted, the window is the caller's rather than this point's own -- and it is read inside
@@ -164,8 +171,9 @@ watch([isDark, fitAllSpectra], update)
 let resizeObserver: ResizeObserver | null = null
 function handleResize() {
   if (plot && containerRef.value)
-    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
+    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: chartHeight.value })
 }
+watch(chartHeight, handleResize)
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
@@ -182,8 +190,13 @@ const theme = computed(() => currentTheme())
 </script>
 
 <template>
-  <section class="flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
-    <div class="flex items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+  <section
+    ref="rootRef"
+    class="relative flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800"
+  >
+    <ExpandToggle class="absolute right-1 top-1" :target="rootRef" />
+    <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. -->
+    <div class="flex items-center justify-between gap-2 pr-9 text-xs text-neutral-500 dark:text-neutral-400">
       <!-- min-w-0 so the label is what gives way when an overlay's name is long: a flex item will
            not shrink below its content without it, and the button and the per-channel readout were
            pushed off the panel's edge instead. -->

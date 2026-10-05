@@ -4,6 +4,8 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { ThdSweepPoint } from '../api/client'
 import { useAppTheme } from '../composables/useAppTheme'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import ExpandToggle from './ExpandToggle.vue'
 import { formatHz } from '../composables/useSweep'
 import { mergePreviewSeries } from '../sweep/points'
 import {
@@ -37,8 +39,13 @@ const props = defineProps<{
 
 const { isDark } = useAppTheme()
 const { fitAllScopes } = useSweepPreviewFit()
+const rootRef = ref<HTMLElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 const CHART_HEIGHT = 150
+// Fitted only when expanded -- see charts/useResultChartHeight.ts's pageHeightPx. In the rail this
+// keeps the height it has always had, because several of these stack there; expanded, the root is
+// pinned over the viewport and the plot takes the window.
+const chartHeight = useResultChartHeight(rootRef, containerRef, { pageHeightPx: CHART_HEIGHT })
 
 const THEME = {
   dark: { axis: '#a3a3a3', grid: '#404040', left: '#60a5fa', right: '#f87171' },
@@ -53,7 +60,7 @@ function buildOptions(width: number): uPlot.Options {
   const fitted = fitAllScopes.value
   return {
     width,
-    height: CHART_HEIGHT,
+    height: chartHeight.value,
     scales: {
       x: { time: false },
       // Read inside the callback rather than baked into the options, so a window that grows as the
@@ -166,8 +173,9 @@ watch([isDark, fitAllScopes], update)
 let resizeObserver: ResizeObserver | null = null
 function handleResize() {
   if (plot && containerRef.value)
-    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: CHART_HEIGHT })
+    plot.setSize({ width: containerRef.value.getBoundingClientRect().width, height: chartHeight.value })
 }
+watch(chartHeight, handleResize)
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
@@ -194,8 +202,13 @@ const rightSpan = computed(() => spanMs(props.pointRight))
 </script>
 
 <template>
-  <section class="flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
-    <div class="flex items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+  <section
+    ref="rootRef"
+    class="relative flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800"
+  >
+    <ExpandToggle class="absolute right-1 top-1" :target="rootRef" />
+    <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. -->
+    <div class="flex items-center justify-between gap-2 pr-9 text-xs text-neutral-500 dark:text-neutral-400">
       <!-- min-w-0 so the label is what gives way when an overlay's name is long -- see the
            spectrum preview's own header. -->
       <span class="flex min-w-0 items-center gap-2">

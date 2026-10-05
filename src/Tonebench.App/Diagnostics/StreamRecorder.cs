@@ -76,7 +76,7 @@ public sealed record StreamRecordingStatus(
 /// <para><b>Off by default, capped, and purged.</b> 192 kHz stereo float32 is 1.5 MB/s <i>per
 /// direction</i>, so an unattended continuous run would fill a disk overnight. Recording stops at
 /// <see cref="MaxFileMegabytes"/> and says so in the log and the sidecar; the acquisition itself is
-/// untouched. At the start of each recording all but the newest <see cref="KeptRecordings"/> − 1
+/// untouched. After each recording all but the newest <see cref="KeptRecordings"/>
 /// file sets are deleted, so the folder holds ten at most.</para>
 ///
 /// <para><b>Cost, and why it is safe on the threads that call it.</b> Every producer does one copy
@@ -98,11 +98,35 @@ public sealed class StreamRecorder : IStimulusTap
     public const int DefaultMaxFileMegabytes = 256;
 
     /// <summary>
-    /// Buffers in flight. ~0.7 s of QA403 TX chunks (512 frames each, 375/s at 192 kHz) and far more
-    /// of input blocks, against a writer doing sequential appends at 3 MB/s — comfortable enough that
-    /// a drop means the disk stalled, not that the queue was tight.
+    /// How long the queue can absorb a writer that has stopped draining. The queue exists for
+    /// stalls — a disk hiccup, a thread-pool pause — not for a throughput shortfall, which no depth
+    /// would survive; the measured stalls here were under a second, so this is roughly double the
+    /// worst one seen.
     /// </summary>
-    private const int QueueCapacity = 512;
+    private const double QueueSeconds = 1.5;
+
+    /// <summary>
+    /// Buffers in flight, and it is <b>a time budget rather than a buffer count</b> — the same
+    /// lesson as <c>Qa40xUsbDevice.QueueDepthFor</c> and the sound card's output priming. A fixed
+    /// count buys half as much time whenever the sample rate doubles, which is exactly when the
+    /// writer has twice as much to do: at 512 buffers this held 1.2 s at 192 kHz and 0.6 s at
+    /// 384 kHz, so enabling 384 kHz silently halved the margin.
+    ///
+    /// <para>Sized against the worst case the app can produce: the top sample rate, with the
+    /// smallest buffers either side — QA403 TX chunks of 512 frames (750/s at 384 kHz) plus input
+    /// blocks of <c>AcquisitionConfig.DefaultBlockFrameCount</c> (94/s), i.e. 844 buffers a second.
+    /// Full, that is a few tens of megabytes of pooled arrays and it is the price of not losing the
+    /// file the user is trying to send in.</para>
+    /// </summary>
+    private const int QueueCapacity =
+        (int)(QueueSeconds * ((MaxSupportedSampleRateHz / Qa40xStimulusChunkFrames)
+            + (MaxSupportedSampleRateHz / AcquisitionConfig.DefaultBlockFrameCount)));
+
+    /// <summary>The experimental 384 kHz rate — the fastest anything here can arrive at.</summary>
+    private const double MaxSupportedSampleRateHz = 384_000.0;
+
+    /// <summary>The QA403's TX chunk, which is the smallest buffer the recorder is ever handed.</summary>
+    private const double Qa40xStimulusChunkFrames = 512.0;
 
     /// <summary>Events kept in the sidecar. Past this the run is logging its own hunting, and the file is the log's job.</summary>
     private const int MaxEvents = 2000;
@@ -150,17 +174,20 @@ public sealed class StreamRecorder : IStimulusTap
         _queue = Channel.CreateBounded<IRecorderCommand>(
             new BoundedChannelOptions(QueueCapacity)
             {
-                // The *new* buffer is dropped, not the oldest: a recording's value is that it is
-                // contiguous, and keeping the newest audio by discarding the middle of the file
-                // loses the same samples while also moving everything after the hole in time.
-                FullMode = BoundedChannelFullMode.DropWrite,
+                // Wait, although nothing here ever waits for a sample buffer: the dropping is done
+                // by Enqueue instead, and that is the whole point. A DropWrite channel drops
+                // whatever is being written WITHOUT telling the writer -- TryWrite returns true and
+                // WriteAsync completes -- so there is no way to put a command on it that is
+                // guaranteed to arrive, and Begin and End are exactly that. With Wait, TryWrite
+                // returns false when the queue is full, which is the signal Enqueue needs to drop a
+                // buffer deliberately and WriteAsync genuinely waits for room.
+                //
+                // The buffer dropped is still the *new* one, as it was: a recording's value is that
+                // it is contiguous, and keeping the newest audio by discarding the middle of the
+                // file loses the same samples while also moving everything after the hole in time.
+                FullMode = BoundedChannelFullMode.Wait,
                 SingleReader = true,
                 SingleWriter = false,
-            },
-            itemDropped: dropped =>
-            {
-                dropped.Dispose();
-                Interlocked.Increment(ref _droppedBuffers);
             });
 
         _writer = Task.Run(RunWriterAsync);
@@ -179,6 +206,16 @@ public sealed class StreamRecorder : IStimulusTap
     public bool Recording => _recording;
 
     /// <summary>Buffers the writer could not keep up with, over the life of the process. Non-zero means a file has a splice in it.</summary>
+    /// <summary>
+    /// Buffers thrown away because the queue was full, <b>for the recording in progress or the one
+    /// that just finished</b> -- zeroed when a recording opens, never a running total.
+    ///
+    /// <para>The only question this number is ever asked is whether <i>this file</i> has splices in
+    /// it, and a process-lifetime total cannot answer it: it was one, and eight consecutive
+    /// recordings on 2026-10-05 therefore all reported the same 444 although only the first two had
+    /// dropped anything, which read as every file being damaged. Same rule, and the same reason, as
+    /// <c>DroppedRxChunks</c> and <c>DroppedBlocks</c> being per-acquisition.</para>
+    /// </summary>
     public long DroppedBuffers => Interlocked.Read(ref _droppedBuffers);
 
     /// <summary>The last finished recording, for the panel and the status. Published as a whole record, so a reader never sees half of one.</summary>
@@ -216,11 +253,26 @@ public sealed class StreamRecorder : IStimulusTap
         if (!Enabled || _recording)
             return;
 
-        // Set here rather than on the writer task: the producers gate on it, and the stimulus tap
-        // fires every 2.7 ms — waiting for the writer to open a file would lose the first chunks.
-        // Buffers that arrive before the Begin command is processed queue up behind it in order.
+        // Both set here rather than on the writer task: the producers gate on _recording, and the
+        // stimulus tap fires every 2.7 ms — waiting for the writer to open a file would lose the
+        // first chunks. Buffers that arrive before the Begin command is processed queue up behind it
+        // in order, and a drop among them belongs to THIS recording, which is the other half of why
+        // the counter is zeroed here: zeroed on the writer task instead, those drops would be wiped
+        // when the open finally ran, and until it ran the previous recording's total would still be
+        // what anyone reading this saw.
+        Interlocked.Exchange(ref _droppedBuffers, 0);
         _recording = true;
-        Enqueue(new BeginRecording(context, DateTimeOffset.Now));
+
+        // Not Enqueue either, for the same reason as End: a dropped Begin opens no files, so every
+        // buffer after it is written to nothing and the run reports success having recorded
+        // silence. It cannot wait -- this is the acquisition's own thread -- so a full queue means
+        // the previous recording is still draining and this one is declined, out loud.
+        if (!_queue.Writer.TryWrite(new BeginRecording(context, DateTimeOffset.Now)))
+        {
+            _recording = false;
+            _logger.LogWarning(
+                "Stream recording not started: the writer is still draining the previous recording");
+        }
     }
 
     /// <summary>
@@ -284,15 +336,28 @@ public sealed class StreamRecorder : IStimulusTap
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Not Enqueue: an End that gets dropped leaves a half-written file open for ever, and the
-        // caller waiting on it. The queue is drained continuously, so this cannot block for long.
+        // caller waiting on it. That was true, and it happened -- under DropWrite this WriteAsync
+        // silently discarded the End whenever the queue was full, which is a hung acquisition, and
+        // it hid behind a race with the writer (the test that fills the queue passed in 23 ms once
+        // and then hung for fifteen minutes). The channel waits now, so this does what it says.
         await _queue.Writer.WriteAsync(new EndRecording(done)).ConfigureAwait(false);
         await done.Task.ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The droppable path: audio and events, never a Begin or an End. A full queue throws the new
+    /// item away rather than making the producer wait — a diagnostic must never stall the
+    /// acquisition it is observing — and only audio is counted, because the count means "this file
+    /// has splices in it" and a lost event is reported separately.
+    /// </summary>
     private void Enqueue(IRecorderCommand command)
     {
-        if (!_queue.Writer.TryWrite(command))
-            command.Dispose();
+        if (_queue.Writer.TryWrite(command))
+            return;
+
+        command.Dispose();
+        if (command is SampleBuffer)
+            Interlocked.Increment(ref _droppedBuffers);
     }
 
     private async Task RunWriterAsync()
@@ -346,7 +411,6 @@ public sealed class StreamRecorder : IStimulusTap
     private async Task OpenAsync(BeginRecording begin)
     {
         System.IO.Directory.CreateDirectory(Directory);
-        Purge();
 
         _context = begin.Context;
         _startedAt = begin.StartedAt;
@@ -452,8 +516,12 @@ public sealed class StreamRecorder : IStimulusTap
                 ? $"; STOPPED at the {MaxFileMegabytes} MB cap, so the acquisition continued past the end of the file"
                 : string.Empty,
             DroppedBuffers > 0
-                ? $"; {DroppedBuffers} buffers dropped over this process's life -- a file with drops has splices in it"
+                ? $"; {DroppedBuffers} buffers dropped, so THIS file has splices in it"
                 : string.Empty);
+
+        // Last, and deliberately after the log line: the recording is complete and reported before
+        // the folder is trimmed, so a slow delete cannot delay either. See Purge.
+        Purge();
     }
 
     /// <summary>Drops both writers without patching their headers — for a failure, where the sizes are the least of it.</summary>
@@ -467,10 +535,19 @@ public sealed class StreamRecorder : IStimulusTap
     }
 
     /// <summary>
-    /// Deletes all but the newest <see cref="KeptRecordings"/> − 1 file sets, so the one about to be
-    /// written makes ten. Grouped by stem, because a set is three files and deleting a WAV while
-    /// leaving its sidecar behind would leave the folder describing recordings that are not there.
-    /// The stems are timestamps, so ordinal sort is chronological.
+    /// Deletes all but the newest <see cref="KeptRecordings"/> file sets. Grouped by stem, because a
+    /// set is three files and deleting a WAV while leaving its sidecar behind would leave the folder
+    /// describing recordings that are not there. The stems are timestamps, so ordinal sort is
+    /// chronological.
+    ///
+    /// <para><b>Run after a recording closes, never when one opens</b>, and that is not a tidiness
+    /// preference. This runs on the writer's own task, so while it is deleting, nothing is draining
+    /// the queue — and at the start of a recording the queue is filling at the full sample rate.
+    /// Deleting a backlog of multi-hundred-megabyte sets takes on the order of a second, which is
+    /// longer than the queue holds, so the first second of the new recording went in the bin: that is
+    /// what the 280 and 164 dropped buffers of 2026-10-05 were, both at the start of a run that
+    /// followed a 512 MB one, with nothing dropped for the remaining 2500 s of recording. After a
+    /// close there is no stream to fall behind, so the same work costs nothing.</para>
     /// </summary>
     private void Purge()
     {
@@ -480,7 +557,9 @@ public sealed class StreamRecorder : IStimulusTap
             .OrderBy(stem => stem, StringComparer.Ordinal)
             .ToList();
 
-        int toDelete = stems.Count - (KeptRecordings - 1);
+        // KeptRecordings, not KeptRecordings - 1: this runs after the new set is written, so the set
+        // being kept room for is already in the list.
+        int toDelete = stems.Count - KeptRecordings;
         for (int i = 0; i < toDelete; i++)
         {
             foreach (string suffix in RecordingSuffixes)

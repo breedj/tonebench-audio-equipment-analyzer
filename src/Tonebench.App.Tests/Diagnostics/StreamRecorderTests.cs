@@ -212,6 +212,58 @@ public sealed class StreamRecorderTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_dir, "stream-20261001-000100*"));
     }
 
+    /// <summary>
+    /// The drop count belongs to <i>this</i> recording, not to the process. It was a running total
+    /// once, and the sidecar copied it verbatim, so on 2026-10-05 eight consecutive recordings all
+    /// reported the same 444 although only the first two had dropped anything — six clean files that
+    /// read as damaged, and no way to tell which of the eight was which. The same rule, and the same
+    /// reason, as the device's own per-acquisition drop counters.
+    ///
+    /// <para>Forcing a real drop is the only way to test it, so the first recording is handed far
+    /// more buffers than the queue can hold, far faster than a writer doing one file write each can
+    /// drain them. The assertion that matters is the second recording's.</para>
+    ///
+    /// <para>Filling the queue is also the only thing that reaches <see cref="StreamRecorder.EndAsync"/>'s
+    /// own worst case — the End command being dropped like any other — so this doubles as the guard
+    /// on that: it hung here for fifteen minutes before the retry was added.</para>
+    /// </summary>
+    [Fact]
+    public async Task TheDropCount_BelongsToTheRecording_NotToTheProcess()
+    {
+        var recorder = Create();
+        recorder.Begin(Context());
+
+        // Several times the queue's capacity, in buffers small enough that the cost is the writer's
+        // per-buffer file write rather than the bytes.
+        for (int i = 0; i < 8000; i++)
+        {
+            using var block = Block(64, 2, 48000, (_, _) => 0.1f);
+            recorder.WriteInput(block);
+        }
+
+        // WaitAsync, not a bare await: a full queue used to swallow the End command outright, so the
+        // failure this guards against is a test run that never finishes rather than one that fails.
+        await recorder.EndAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(
+            recorder.DroppedBuffers > 0,
+            "The queue did not overflow, so this test is no longer forcing the case it exists for.");
+
+        recorder.Begin(Context());
+        Assert.Equal(0, recorder.DroppedBuffers);
+
+        using (var block = Block(256, 2, 48000, (_, _) => 0.25f))
+            recorder.WriteInput(block);
+
+        await recorder.EndAsync();
+        Assert.Equal(0, recorder.DroppedBuffers);
+
+        var finished = recorder.Last;
+        Assert.NotNull(finished);
+        using var sidecar = JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(_dir, finished.Name + "-info.json")));
+        Assert.Equal(0, sidecar.RootElement.GetProperty("droppedBuffers").GetInt64());
+    }
+
     /// <summary>Disarmed, nothing is written and nothing is copied — the folder is not even created.</summary>
     [Fact]
     public async Task Disarmed_NothingIsWrittenAtAll()

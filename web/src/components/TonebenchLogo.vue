@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-// THE APP'S MARK: a fundamental with its peak marker and five harmonics falling into the noise
-// floor — the app's signature measurement. Chosen from five proposals on 2026-09-30 because it is
-// the one that still reads at 16 px, which is the only size a taskbar or a favicon ever gets.
+// THE APP'S MARK: a fundamental with its peak marker and five falling harmonics — the app's
+// signature measurement. Chosen from five proposals on 2026-09-30 because it is the one that still
+// reads at 16 px, which is the only size a taskbar or a favicon ever gets.
+//
+// The dashed noise floor just above the baseline was removed on 2026-10-05: at 16 px a 4 px dash on
+// a 10/12 pattern is under half a pixel of coverage, so it rendered as a grey smear across the
+// harmonics rather than as a line, and at 256 px it read as a second baseline.
 //
 // One geometry, two variants, and the difference between them is not cosmetic:
 //
@@ -16,8 +20,11 @@ import { computed } from 'vue'
 //          own — a header, a heading, an empty state.
 //
 // The comb is drawn ONCE, at its own coordinates, and the tile variant places it with a single
-// transform. Its real bounds are x 18..238 and y 18.5..207 — strokes and round caps included, not
-// the nominal rects — fitted to x 36..220 and centred vertically, hence scale 184/220 = 0.8364.
+// transform. Its real bounds are x 20..236 and y 18.5..207 — strokes and round caps included, not
+// the nominal rects, so x is the baseline's and y runs from the top of the peak marker's stroke to
+// the bottom of the baseline — fitted to x 36..220 and centred vertically, hence scale
+// 184/216 = 0.8519. Both numbers moved when the noise floor went, because its round caps at
+// x 18..238 were what set the width.
 // packaging/icons/tonebench.svg carries the same numbers because sharp cannot rasterise a .vue; that
 // duplication is the one thing here that can rot, so its comment says so too. Change the geometry
 // in both files or in neither, then run `npm run icons` in web/.
@@ -28,7 +35,7 @@ const props = withDefaults(defineProps<{ size?: number; variant?: 'tile' | 'glyp
 })
 
 const tiled = computed(() => props.variant === 'tile')
-/** Baseline and noise floor. White over the tile's own dark ground; the theme's ink otherwise. */
+/** The baseline. White over the tile's own dark ground; the theme's ink otherwise. */
 const structure = computed(() => (tiled.value ? '#ffffff' : 'currentColor'))
 const bar = computed(() => (tiled.value ? '#38bdf8' : '#0ea5e9'))
 const marker = computed(() => (tiled.value ? '#4ade80' : '#22c55e'))
@@ -57,18 +64,7 @@ const gradientId = `tonebench-logo-tile-${Math.random().toString(36).slice(2, 9)
       <rect x="8" y="8" width="240" height="240" rx="52" :fill="`url(#${gradientId})`" />
     </template>
 
-    <g :transform="tiled ? 'translate(20.94 33.73) scale(0.8364)' : undefined">
-      <!-- noise floor -->
-      <path
-        d="M20 192 H236"
-        fill="none"
-        :stroke="structure"
-        stroke-width="4"
-        stroke-linecap="round"
-        stroke-dasharray="10 12"
-        opacity="0.3"
-      />
-
+    <g :transform="tiled ? 'translate(18.96 31.95) scale(0.8519)' : undefined">
       <!-- baseline -->
       <rect x="20" y="202" width="216" height="5" rx="2.5" :fill="structure" opacity="0.22" />
 

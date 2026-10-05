@@ -1,3 +1,9 @@
+<script setup lang="ts">
+import { useManual } from '../useManual'
+
+const { showPage } = useManual()
+</script>
+
 <template>
   <div>
     <h1>Configuration and status bar</h1>
@@ -66,12 +72,17 @@
             rubbish in it cycles the analyzer's own output protection relay — which a software stop
             does not clear; the device needs a power cycle. That is why playing a tone here is
             refused outright rather than allowed with a warning.
-            <strong>It also buys no bandwidth.</strong> The analog filters do not move with the rate —
-            the loopback was already about 32 dB down at 120 kHz and 51 dB at 180 kHz — so 192 kHz
-            reaches everything 384 kHz does. (That figure is the generator and the input in series
-            through the broken generator, so the input path's own limit above 96 kHz is not something
-            this bench could settle; it needs an external signal source.) So this rate is worth having
-            for what it lets you <em>look</em> at, not for extra reach on an ordinary measurement.
+            <strong>The extra reach is real.</strong> Measured with an external generator driving the
+            input, the analyzer's input path is flat to within about 1.2 dB out to 180 kHz and falls
+            through −3 dB at about 189 kHz, which is the ADC's digital brick wall just under the
+            192 kHz Nyquist of this rate — there is no analog corner in the way. A loopback says
+            otherwise (32 dB down at 120 kHz) only because a loopback includes the generator, whose
+            reconstruction filter accounts for essentially all of that. So at 384 kHz you really can
+            look at content up to about 180 kHz, which is exactly what this rate is for; see
+            <button type="button" class="manual-link" @click="showPage('analyzer-specs')">
+              The analyzer’s own figures</button>
+            for the three curves side by side. What it does <em>not</em> buy is reach on an ordinary
+            measurement, because those are driven by the generator that cannot go there.
             A measurement saved at 384 kHz cannot be re-run with this unticked — it is refused, with a
             message saying so, rather than quietly measured at another rate.
           </td>
@@ -179,6 +190,10 @@
             stops at the cap beside the checkbox (256 MB, about 2.8 minutes, and the log says when a
             file was cut short) and only the newest ten recordings are kept. Float and unnormalised,
             so an audio editor's own amplitude readout is directly comparable to this app's dBV.
+            <strong>At 384 kHz that cap is only 83 seconds</strong>, so raise it before a long
+            capture. If the JSON reports <em>dropped buffers</em>, that recording's file has a splice
+            in it — audio missing, with the two sides joined — and the figure is for that recording
+            alone; the measurement itself is unaffected, because what is recorded is a copy.
           </td>
         </tr>
         <tr>

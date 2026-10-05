@@ -569,6 +569,14 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/views/SPlaneViewPage.vue')),
   },
   {
+    id: 'analyzer-specs',
+    title: 'The analyzer’s own figures',
+    summary:
+      'What a QA403 measures like when it is measuring itself: analog bandwidth, residual distortion, noise, crosstalk and ranges — every figure measured on this bench.',
+    group: 'Reference',
+    component: manualPage(() => import('./pages/AnalyzerSpecsPage.vue')),
+  },
+  {
     id: 'saving',
     title: 'Projects, saving and history',
     summary: 'What gets stored where, overlays, CSV export, screenshots and PDF reports, deleting.',

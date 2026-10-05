@@ -15,8 +15,12 @@ namespace Tonebench.Device.Tests.Hardware;
 /// (<c>docs/protocol.md</c> §2.4, corroborated by a developer-supplied C# snippet, PyQa40x and
 /// qa40x-rs-main) and <see cref="Qa40xRegisters.SampleRateHzToRegister"/> already encodes it, but
 /// 384 kHz is absent from <see cref="DeviceCapabilities.Qa403"/> and has never been run here.
-/// These tests answer four separate questions — does the ADC clock change, is the data real, does
-/// the analog path reach past 96 kHz, and does the DAC work — and they must be read in that order.
+/// These tests answer five separate questions — does the ADC clock change, is the data real, does
+/// the <i>loopback</i> reach past 96 kHz, does the <i>input alone</i> reach past it, and does the
+/// DAC work — and they must be read in that order. The third and fourth are not the same question,
+/// which is the mistake this file made once: a loopback bounds TX and RX together and can never
+/// place a corner at either end, so A3's table was read as a verdict on the input and was not one.
+/// See <see cref="ExternalSweep_ShowsTheInputReachesAlmostToNyquist"/>.
 ///
 /// <para><b>The trap that shapes this whole file: a loopback test cannot measure the sample rate.</b>
 /// <see cref="Qa40xGeneratorWaveform"/> synthesises against the <i>requested</i> rate
@@ -29,8 +33,10 @@ namespace Tonebench.Device.Tests.Hardware;
 /// a <see cref="Stopwatch"/> is the only proof, which is what <see cref="AdcClock_At384kHz_DeliversFramesAtThatRateAgainstTheWallClock"/>
 /// does and why it runs with the generator off. The analog filters are the one part of the chain
 /// fixed in hertz and therefore <i>not</i> co-scaled, which is what makes
-/// <see cref="Loopback_At384kHz_ReportsTheAnalogBandwidth"/> both a cross-check on the clock and the
-/// measurement that says whether 384 kHz is worth having at all.</para>
+/// <see cref="Loopback_At384kHz_ReportsTheAnalogBandwidth"/> a cross-check on the clock. It is
+/// <i>not</i> the measurement that says whether 384 kHz is worth having — only an external source
+/// can say that, because a loopback carries the DAC, and on this device the DAC turned out to be the
+/// whole of the roll-off.</para>
 ///
 /// <para>Requires a real QA403 over USB with the outputs looped back to the inputs, L to L and R to
 /// R — the same bench as <see cref="Qa40xUsbDeviceHardwareTests"/>. Excluded from the default run;
@@ -300,6 +306,206 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
         var measured = HarmonicAnalyzer.MeasureTone(psd, psd.BinOfFrequency(toneHz), peakSearchSpanBins: 4);
         return 20.0 * Math.Log10(Math.Max(measured.AmplitudeVrms, double.Epsilon));
     }
+
+    // ---------------------------------------------------------------------------------------
+    // A3b — the same question asked of the input alone, which A3 cannot answer.
+    // ---------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The <b>input path's own</b> response, measured with an external generator sweeping into the
+    /// inputs and this analyzer's generator silent. <b>This is the test that overturned A3's
+    /// conclusion, and the reasoning matters more than the numbers.</b>
+    ///
+    /// <para><see cref="Loopback_At384kHz_ReportsTheAnalogBandwidth"/> reads TX <i>and</i> RX in
+    /// series, and both filters can only <i>lose</i> — so a loopback bounds the pair and leaves each
+    /// end <b>at least as flat as the figure shown</b>. It can establish an upper bound on a corner
+    /// and never the corner itself. A3's table was therefore read as "the analog filters stop near
+    /// 90 kHz, so 384 kHz buys no bandwidth", and that inference was wrong: the loss was all in the
+    /// DAC.</para>
+    ///
+    /// <para><b>Measured 2026-10-05, serial 1077527945, fw 60</b>, through three sweeps recorded by
+    /// <c>StreamRecorder</c> at 384 kHz. Relative to 1 kHz, the input alone reads <b>−0.0 dB at
+    /// 20 kHz, −0.1 at 50 k, −0.3 at 80 k, −0.4 at 90 k, −0.6 at 120 k, −0.8 at 150 k, −1.2 at 180 k
+    /// and −3.0 at ≈189 kHz</b> — against the loopback's −32.01 at 120 k and −50.81 at 180 k. The
+    /// difference, ~31 dB at 120 kHz, is the DAC's reconstruction filter. What finally stops the
+    /// input is the ADC's <i>digital</i> decimation filter at 98 % of Nyquist, which moves with the
+    /// sample rate and is not an analog corner at all.</para>
+    ///
+    /// <para><b>Two generators, not one, and that is the whole point of the measurement.</b> A sweep
+    /// reads source × input, so one generator cannot separate its own flatness from the analyzer's.
+    /// Four sweeps from two unrelated generators, at three levels spanning 10.4 dB, agreed to
+    /// <b>0.00–0.02 dB from 110 to 170 kHz</b> and on the knee at 185 and 189 kHz to 0.08 dB.
+    /// Sources do not share a roll-off by coincidence, so the roll-off is the input's; the spread of
+    /// level says it does not move with level either, which is what an input stage compressing or
+    /// slewing at the top of the band would have looked like. It also settles the clock question A1 exists for, directly: a 150 kHz tone
+    /// read back <i>as</i> 150 kHz, where a device secretly still at 192 kHz would have folded it to
+    /// 42 kHz.</para>
+    ///
+    /// <para><b>Which part of that is analog and which is digital</b> was settled by capturing the
+    /// same sweep at <b>192 kHz</b>, where 90 kHz sits at 0.94 of Nyquist instead of 0.47. Below
+    /// 90 kHz the two rates agree to <b>0.03 dB at the same absolute frequency</b>, so that gentle
+    /// droop is fixed in hertz — analog. From 91 kHz the 192 kHz capture dives alone (−0.48 dB at
+    /// 92 k, −1.41 at 94 k, −3 dB at <b>95.8 kHz = 0.998 of its own Nyquist</b>) against −0.22,
+    /// −0.24 and −0.25 for the 384 kHz capture at those same frequencies, so that cliff is the
+    /// decimation filter. The usable band is therefore <b>≈0.94 × Nyquist at either rate</b> —
+    /// 90 kHz at 192 kHz, 180 kHz at 384 kHz.</para>
+    ///
+    /// <para><b>Skipped because it needs gear, not because it is settled</b> — unlike A4, which is
+    /// skipped to avoid cycling a relay. Un-skip it with a generator sweeping L+ (shorting plug on
+    /// L−) from about 20 kHz to 190 kHz, ~1 Vrms, slowly and at constant amplitude, over the capture
+    /// window below. The assertions are the two claims that matter and are deliberately loose: a
+    /// response near 150 kHz, which no analog corner at 90 kHz could produce, and a fall by 190 kHz,
+    /// which is the brick wall. Everything finer than that is in the table it prints.</para>
+    /// </summary>
+    [Fact(Skip = "Needs an external generator sweeping into the inputs; the measured table is in this method's remarks.")]
+    public async Task ExternalSweep_ShowsTheInputReachesAlmostToNyquist()
+    {
+        const double CaptureSeconds = 40.0;
+        const double ReferenceHz = 30_000.0;
+
+        using var device = new Qa40xUsbDevice(NullLogger<Qa40xUsbDevice>.Instance);
+        await device.ConnectAsync(CancellationToken.None);
+        device.AutoRangeEnabled = false;
+        await device.SetInputRangeAsync(LoopbackInputRangeDbv, CancellationToken.None);
+
+        // Silent: the whole point is that nothing of ours is in the path. A3's own generator would
+        // sum with the external one and make the reading meaningless.
+        await device.ConfigureGeneratorAsync(
+            new GeneratorConfig(ChannelGeneratorConfig.Off, ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+
+        output.WriteLine($"Sweep an external generator into L+ now — 20 kHz to 190 kHz over {CaptureSeconds:0} s, constant amplitude.");
+        var capture = await CaptureAsync(device, ExperimentalRateHz, (int)(CaptureSeconds * ExperimentalRateHz));
+        var response = SweepResponse(capture.Left, ExperimentalRateHz);
+
+        Assert.True(
+            response.Count >= 50,
+            $"Only {response.Count} blocks held a tone. Was the generator sweeping into the left input?");
+
+        double reference = LevelNear(response, ReferenceHz)
+            ?? throw new Xunit.Sdk.XunitException($"The sweep never passed {ReferenceHz / 1000:0} kHz, so there is nothing to reference against.");
+
+        output.WriteLine($"        tone     dB re {ReferenceHz / 1000:0} kHz   (input alone, generator silent)");
+        foreach (double toneHz in new[] { 20e3, 50e3, 80e3, 90e3, 100e3, 120e3, 150e3, 170e3, 180e3, 185e3, 189e3 })
+        {
+            double? level = LevelNear(response, toneHz);
+            output.WriteLine($"{toneHz,12:0} Hz {(level is null ? "         -" : $"{level - reference,10:+0.00;-0.00}")}");
+        }
+
+        double? at150k = LevelNear(response, 150_000);
+        double? at190k = LevelNear(response, 190_000);
+        Assert.True(at150k is not null, "The sweep never reached 150 kHz, which is the frequency the claim rests on.");
+        Assert.True(at190k is not null, "The sweep never reached 190 kHz, so the brick wall was not crossed.");
+
+        Assert.True(
+            at150k - reference > -2.0,
+            $"The input reads {at150k - reference:0.00} dB at 150 kHz relative to {ReferenceHz / 1000:0} kHz. Measured 2026-10-05 at "
+                + "−0.8 dB, and the point of the figure is that it is nowhere near a corner: the loopback is 31 dB down there, "
+                + "all of it the DAC. A reading below −2 dB means either the input path really has changed or the external "
+                + "generator is not flat — check the generator against a second one before believing the analyzer has moved.");
+
+        Assert.True(
+            at190k - reference < -1.5,
+            $"The input reads {at190k - reference:0.00} dB at 190 kHz, i.e. no brick wall. Measured 2026-10-05 at −3 dB by "
+                + "189 kHz, which is the ADC's decimation filter at 98 % of Nyquist. Reading flat here means the sweep never "
+                + "actually got above 180 kHz, or something is aliasing a lower tone up into this band.");
+    }
+
+    /// <summary>
+    /// A swept tone's level against its frequency, one point per block, both read out of the signal
+    /// itself.
+    ///
+    /// <para>Two things here are what make the reading survive a hand-driven sweep. The level is the
+    /// <b>summed power of the bins around the peak</b>, not the peak bin: a sweep moves within the
+    /// block, so its energy is spread over several bins and the peak bin alone reads low by an
+    /// amount that varies with sweep rate. And the frequency is the power-weighted <b>centroid</b> of
+    /// those same bins, i.e. the mean frequency the block swept through — so nothing depends on
+    /// elapsed time, the operator's sweep rate, or its linearity, and a pause or a stumble costs
+    /// resolution rather than correctness.</para>
+    /// </summary>
+    private static List<SweepPoint> SweepResponse(float[] mono, double sampleRateHz)
+    {
+        const int Block = 16_384;      // 42.7 ms at 384 kHz: 23 Hz bins, and little smear at a hand sweep rate
+        const int HalfBandBins = 40;   // the tone plus its smear; everything outside is the floor
+
+        var window = Window.Get(WindowType.Hann, Block);
+        var windowed = new double[Block];
+        var spectrum = new Complex[(Block / 2) + 1];
+        var backend = new FftFlatBackend();
+        double binHz = sampleRateHz / Block;
+        double s1 = window.Sums.S1;
+        var points = new List<SweepPoint>();
+
+        for (int start = 0; start + Block <= mono.Length; start += Block)
+        {
+            Window.Apply(mono.AsSpan(start, Block), window, windowed);
+            backend.Forward(windowed, spectrum);
+
+            int peak = 1;
+            for (int bin = 2; bin < spectrum.Length; bin++)
+            {
+                if (spectrum[bin].Magnitude > spectrum[peak].Magnitude)
+                    peak = bin;
+            }
+
+            int lo = Math.Max(1, peak - HalfBandBins);
+            int hi = Math.Min(spectrum.Length - 1, peak + HalfBandBins);
+            double floor = MedianPowerOutside(spectrum, lo, hi);
+
+            double power = 0;
+            double weighted = 0;
+            for (int bin = lo; bin <= hi; bin++)
+            {
+                double p = Math.Max((spectrum[bin].Magnitude * spectrum[bin].Magnitude) - floor, 0);
+                power += p;
+                weighted += p * bin * binHz;
+            }
+
+            if (power <= 0)
+                continue;
+
+            double amplitude = 2.0 * Math.Sqrt(power) / s1;
+            points.Add(new SweepPoint(weighted / power, 20.0 * Math.Log10(Math.Max(amplitude / Math.Sqrt(2), double.Epsilon))));
+        }
+
+        return points;
+    }
+
+    /// <summary>
+    /// The median level of the blocks within 1.5 % of <paramref name="frequencyHz"/>, or null where
+    /// the sweep never went. A median because the stream recorder's own dropped buffers — and any
+    /// real splice — show up as isolated blocks reading 1–2 dB low, which a mean would carry into
+    /// the answer.
+    /// </summary>
+    private static double? LevelNear(List<SweepPoint> response, double frequencyHz)
+    {
+        double span = Math.Max(900, 0.015 * frequencyHz);
+        var levels = response
+            .Where(p => Math.Abs(p.FrequencyHz - frequencyHz) < span)
+            .Select(p => p.LevelDbv)
+            .OrderBy(v => v)
+            .ToArray();
+
+        return levels.Length == 0 ? null : levels[levels.Length / 2];
+    }
+
+    private static double MedianPowerOutside(Complex[] spectrum, int lo, int hi)
+    {
+        var outside = new List<double>(spectrum.Length);
+        for (int bin = 1; bin < spectrum.Length; bin++)
+        {
+            if (bin < lo || bin > hi)
+                outside.Add(spectrum[bin].Magnitude * spectrum[bin].Magnitude);
+        }
+
+        if (outside.Count == 0)
+            return 0;
+
+        outside.Sort();
+        return outside[outside.Count / 2];
+    }
+
+    private sealed record SweepPoint(double FrequencyHz, double LevelDbv);
 
     // ---------------------------------------------------------------------------------------
     // A4 — the ASIO40x FAQ's claim on trial.

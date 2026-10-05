@@ -33,7 +33,13 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $project = Join-Path $root "src\Tonebench.App\Tonebench.App.csproj"
 if (-not $PublishDir) { $PublishDir = Join-Path $root "publish\win-x64" }
 # Absolute, because Inno Setup resolves a relative Source: against the .iss file's own folder.
-$PublishDir = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $PublishDir))
+# Only a relative -PublishDir is resolved against the caller's directory: Join-Path concatenates an
+# already-rooted path onto it ("C:\code\C:\publish"), which GetFullPath rejects outright — so the
+# default, which is absolute, took the script down before it built anything.
+if (-not [System.IO.Path]::IsPathRooted($PublishDir)) {
+    $PublishDir = Join-Path (Get-Location) $PublishDir
+}
+$PublishDir = [System.IO.Path]::GetFullPath($PublishDir)
 $distDir = Join-Path $root "dist"
 $script = Join-Path $PSScriptRoot "tonebench.iss"
 

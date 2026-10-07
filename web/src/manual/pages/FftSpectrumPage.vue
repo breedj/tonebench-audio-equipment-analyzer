@@ -111,6 +111,9 @@ const { showPage } = useManual()
             <strong>Sine tones</strong> — one or more tones, each with its own frequency and level.
             <strong>Multitone</strong> — a comb of tones across 5 Hz–20 kHz.
             <strong>White noise</strong> — flat noise at a set level.
+            <strong>Square</strong> and <strong>Triangle</strong> — one hard-switched waveform at a
+            set frequency and level, for looking at edges rather than at a spectrum (see
+            <em>Square and triangle</em> below).
           </td>
         </tr>
         <tr>
@@ -163,7 +166,18 @@ const { showPage } = useManual()
             its neighbours. Leave it on for distortion work. The frequency you typed stays in the
             field; the grey figure beneath it is what is really playing, which depends on the FFT
             size. Sine tones and the multitone comb (snapped tone by tone); noise and the chirp
-            have nothing to snap.
+            have nothing to snap, and a square or triangle has its own rounding instead (below).
+          </td>
+        </tr>
+        <tr>
+          <td>Frequency, Level (rms)</td>
+          <td>
+            Square and triangle only. The level is the waveform's <em>rms</em>, like every other
+            stimulus here, so one level means three different peaks: a square's peak equals its rms,
+            a triangle's is 1.73 times it and a sine's 1.41. The grey lines beneath report what is
+            really playing — the frequency after rounding, the samples per cycle, how many harmonics
+            fit below Nyquist, the peak volts, and the levels an ideal shape's first harmonics sit
+            at, to compare the Harmonics table against.
           </td>
         </tr>
         <tr>
@@ -178,6 +192,66 @@ const { showPage } = useManual()
         </tr>
       </tbody>
     </table>
+
+    <h2>Square and triangle</h2>
+    <p>
+      These two are transient tests rather than spectral ones. A square's edge excites everything at
+      once, so overshoot, ringing, tilt and asymmetry on the oscilloscope say in one glance what a
+      frequency sweep says in a minute: a flat top with a clean corner is a wide, well damped
+      amplifier; a rounded corner is a limited high end; a few cycles of ringing on the step is a
+      resonance, and its period is where; a sagging top is a limited low end; different behaviour on
+      the rising and falling edges is an asymmetry in the output stage. A triangle has the same odd
+      harmonics falling away far faster (1/n² instead of 1/n), so it asks much less of the high end
+      and is the gentler probe when the square's own edge is what you keep measuring.
+    </p>
+    <p>
+      <strong>The frequency is rounded, on purpose.</strong> One cycle is built from a whole, even
+      number of samples, which is what keeps the waveform exactly periodic: every harmonic above
+      Nyquist then folds back onto an odd harmonic of the fundamental instead of landing at some
+      unrelated frequency, so the spectrum holds the shape's own lines and nothing else. The cost is
+      that only a sample period is available: 1 kHz is exact at every rate, but 10 kHz at 192 kHz
+      becomes 9.6 kHz (20 samples a cycle) and at 48 kHz becomes 12 kHz (4 samples). The panel says
+      what it settled on. The ceiling is a quarter of the sample rate, where a cycle is four samples
+      and a square has become a sine.
+    </p>
+    <p>
+      <strong>The harmonics are known, which is what makes the reading useful.</strong> An ideal
+      square has only odd harmonics, each 1/n of the fundamental: −9.5 dBc at H3, −14.0 at H5, −16.9
+      at H7. A triangle has 1/n²: −19.1, −28.0, −33.8. Whatever your DUT does to those levels is its
+      own high-frequency response, read straight off the harmonics table. Two caveats. The folding
+      above lifts the top of the series slightly — 0.17 dB by H7 at 20 samples a cycle, more as the
+      harmonic approaches Nyquist — so compare the lower harmonics, not the last ones. And THD+N,
+      SNR, N+D, N−D and the noise tiles read <code>n/a</code>: the stimulus <em>is</em> harmonics, so
+      an ideal square reads THD+N around 48 % and SNR around 6 dB however clean the amplifier is
+      (a little less in a narrower measurement bandwidth, which leaves the top of the series out).
+      The <strong>THD</strong> tile is a different sum again — only the harmonics the analyzer
+      tracks, a dozen by default — so it reads lower still, around 44 % on an ideal square. Compare
+      the harmonics line by line rather than reading one number.
+    </p>
+    <p>
+      <strong>What a square cannot measure here is slew rate.</strong> The stimulus edge is not a
+      step: the DAC's own reconstruction filter rolls off above about 86 kHz, so the fastest edge the
+      analyzer can produce rises in roughly 4 µs — and at 192 kHz the captured record carries one
+      sample every 5.2 µs, so the edge is about one sample wide on screen. A rise time you read off
+      it is the analyzer's, not the DUT's, unless the DUT is slower than about 1 V/µs at the
+      amplitude you are driving; the 384 kHz input rate would halve the sampling interval but the
+      generator cannot be used there at all. Any overshoot and ringing on the first cycle of the step
+      is partly the reconstruction filter's too, which is why the honest way to run this test is to
+      loop the generator straight into the <strong>right</strong> input while the DUT drives the
+      left: the right trace is then the stimulus as it really leaves the analyzer, and the difference
+      between the two traces is the amplifier.
+    </p>
+    <p>
+      For slew rate, use
+      <button type="button" class="manual-link" @click="showPage('thd-vs-frequency')">
+        THD vs frequency
+      </button>
+      instead, at the full output level you care about. Slew limiting shows up as distortion climbing
+      steeply with frequency at constant amplitude — roughly as f² once it starts — and the frequency
+      where it takes off bounds the slew rate at 2·π·f·V<sub>peak</sub>. That is the classical
+      power-bandwidth measurement, and it is a real number from this analyzer rather than a reading
+      of its own DAC.
+    </p>
 
     <h2>FFT settings panel</h2>
     <table>
@@ -403,7 +477,8 @@ const { showPage } = useManual()
     </p>
     <p>
       Those same tiles read <code>n/a</code> whenever the stimulus is more than one tone — an IMD
-      preset, any Sine tones stimulus with two or more tones, or a Multitone comb. Every one of them
+      preset, any Sine tones stimulus with two or more tones, or a Multitone comb — and for a square
+      or a triangle, whose own harmonic series fills the noise band. Every one of them
       is defined against a single fundamental: the loudest tone is treated as the signal and
       everything else in the band as noise and distortion. Play a second tone and the figure is
       still arithmetically correct and completely meaningless — SMPTE's 7 kHz tone sits 12.04 dB
@@ -502,7 +577,9 @@ const { showPage } = useManual()
       instead of showing a number.
       <strong>Other peaks</strong> lists everything that is neither — mains hum and its harmonics,
       intermodulation products, spurs — largest first, as many as you ask for. Both tables need a
-      single fundamental to refer to, so neither appears for Multitone or White noise. Other peaks
+      single fundamental to refer to, so neither appears for Multitone or White noise. A square or
+      triangle keeps them both: those shapes have one unmistakable fundamental, and the harmonics
+      table against their known series is most of what the measurement is for. Other peaks
       starts collapsed; its ▸ opens it.
     </p>
     <p>

@@ -23,6 +23,7 @@ import { useExternalGain } from './composables/useExternalGain'
 import { useAutosave } from './composables/useAutosave'
 import { determineAttenuation, nearestInputRange } from './attenuation'
 import { formatAveraging, stimulusSummary } from './metrics'
+import { isWaveKind } from './periodicWave'
 import { stopRun } from './deviceControl'
 import DeviceStatusBar from './components/DeviceStatusBar.vue'
 import MeasurementSidebar from './components/MeasurementSidebar.vue'
@@ -228,7 +229,11 @@ const {
   imd: stimulusImd,
   levelUnit: stimulusLevelUnit,
 } = useGeneratorStimulus()
-const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones')
+// Square and triangle keep them: those shapes have one unambiguous fundamental (the loudest bin by
+// a wide margin -- 0.91 dB of a square's rms is in it) and their harmonic series is the measurement.
+// The ideal levels are 1/n for a square and 1/n^2 for a triangle, so the table reads the DUT's own
+// high end directly: -9.54 dBc at H3 on a perfect square, -19.08 at H5.
+const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones' || isWaveKind(stimulusKind.value))
 
 // Whether the pipeline is measuring two-tone IMD right now — what the Intermodulation table
 // needs to tell "no frame yet" from "nothing configured".

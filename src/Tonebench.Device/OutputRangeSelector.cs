@@ -114,6 +114,15 @@ public static class OutputRangeSelector
             // A sweep is one sinusoid at a time, so its peak is just its amplitude.
             GeneratorKind.EchoChirp => channel.Chirp is { } chirp ? PeakVolts(chirp.AmplitudeDbv) : 0.0,
 
+            // Not PeakVolts: these two are the one place a level does not imply a sine's crest
+            // factor. A square's peak is its rms (3.01 dB less headroom than a sine at the same
+            // dBV) and a triangle's is sqrt(3) times it (4.77 dB more) — PeriodicWave.PeakVolts is
+            // the single definition, and using the sine conversion here would park a triangle one
+            // whole range step too low and clip every edge of it.
+            GeneratorKind.Square or GeneratorKind.Triangle => channel.Wave is { } wave
+                ? PeriodicWave.PeakVolts(channel.Kind, wave.LevelDbv)
+                : 0.0,
+
             _ => 0.0,
         };
     }

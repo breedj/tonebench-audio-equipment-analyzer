@@ -324,7 +324,7 @@ export type SimulatedOutputStageModel = 'None' | 'SolidState' | 'TubeAmp'
 export type SimulatedLoad = 'Open' | 'EightOhms' | 'FourOhms'
 
 /** Mirrors Tonebench.Device.GeneratorKind — exactly one stimulus is active per channel. */
-export type GeneratorKind = 'Off' | 'Tones' | 'Multitone' | 'WhiteNoise' | 'EchoChirp'
+export type GeneratorKind = 'Off' | 'Tones' | 'Multitone' | 'WhiteNoise' | 'EchoChirp' | 'Square' | 'Triangle'
 
 /** Mirrors Tonebench.Device.SmoothingOctaves. Stored and round-tripped only; the FR measurement that consumes it is a later phase. */
 export type SmoothingOctaves =
@@ -355,6 +355,17 @@ export interface EchoChirpSettings {
   smoothing: SmoothingOctaves
 }
 
+/**
+ * Square/triangle parameters, shared by both shapes (the kind is which) — mirrors
+ * Tonebench.Device.PeriodicWaveSettings.
+ */
+export interface PeriodicWaveSettings {
+  /** What was asked for. The frequency actually played is quantised to a whole even sample period — see periodicWave.ts. */
+  freqHz: number
+  /** The waveform's total rms, dBV. Not a peak: a square's peak equals this, a triangle's is sqrt(3) times it. */
+  levelDbv: number
+}
+
 export interface GeneratorChannelState {
   enabled: boolean
   /** The effective tone list — for kind 'Multitone' this is the derived comb, not the parameters. */
@@ -363,6 +374,7 @@ export interface GeneratorChannelState {
   multitone: MultitoneSettings
   noise: WhiteNoiseSettings
   chirp: EchoChirpSettings
+  wave: PeriodicWaveSettings
 }
 
 
@@ -1676,6 +1688,7 @@ export interface GeneratorChannelRequest {
   multitone?: Partial<MultitoneSettings>
   noise?: Partial<WhiteNoiseSettings>
   chirp?: Partial<EchoChirpSettings>
+  wave?: Partial<PeriodicWaveSettings>
 }
 
 export interface GeneratorRequest {

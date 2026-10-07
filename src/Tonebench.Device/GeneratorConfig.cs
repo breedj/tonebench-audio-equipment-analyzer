@@ -35,6 +35,22 @@ public enum GeneratorKind
 
     /// <summary>Exponential ("Farina") sine sweep, the stimulus a frequency-response measurement uses.</summary>
     EchoChirp,
+
+    /// <summary>
+    /// Hard-switched square wave at <see cref="PeriodicWaveSettings"/>'s frequency and level — a
+    /// transient test rather than a spectral one: overshoot, ringing, settling and slew behaviour
+    /// are what it shows. See <see cref="PeriodicWave"/> for why the period is quantised to a whole
+    /// even number of samples and what that costs.
+    /// </summary>
+    Square,
+
+    /// <summary>
+    /// Triangle wave from the same <see cref="PeriodicWaveSettings"/>. Odd harmonics like the
+    /// square but falling as 1/n^2 instead of 1/n, so it asks far less of a DUT's high end: the
+    /// stimulus to reach for when a square's own edge is the thing being measured rather than the
+    /// amplifier.
+    /// </summary>
+    Triangle,
 }
 
 /// <summary>
@@ -89,6 +105,35 @@ public sealed record WhiteNoiseSettings
     public double LevelDbv { get; init; } = -20.0;
 }
 
+/// <summary>
+/// Parameters for <see cref="GeneratorKind.Square"/> and <see cref="GeneratorKind.Triangle"/>.
+///
+/// <para>One record for both, for the reason <see cref="WhiteNoiseSettings"/> gives for serving two
+/// noise kinds: a frequency and a level is the whole of what either shape is configured with, and
+/// both mean the same thing by both. The shape is <see cref="ChannelGeneratorConfig.Kind"/>, so
+/// switching between them changes the waveform and neither the pitch nor the loudness.</para>
+/// </summary>
+public sealed record PeriodicWaveSettings
+{
+    /// <summary>
+    /// Requested fundamental. The frequency actually played is <see cref="PeriodicWave.EffectiveFrequencyHz"/>
+    /// — only whole even sample periods exist — and that is what device status reports back.
+    /// </summary>
+    public double FrequencyHz { get; init; } = 1000.0;
+
+    /// <summary>
+    /// Total rms of the waveform, dBV referenced to 1 Vrms, the same convention every other kind
+    /// here uses. <b>Not a peak</b>: see <see cref="PeriodicWave.PeakVolts"/> for the three
+    /// different peaks one level means, and why that is the right way round.
+    ///
+    /// <para>Quieter by default than the sine generator's -6 dBV on purpose. A square carries its
+    /// full amplitude at every instant and drives a DUT's high end as hard as the sample rate
+    /// allows, so the first thing a new user hears should not be a full-level edge into an
+    /// amplifier.</para>
+    /// </summary>
+    public double LevelDbv { get; init; } = -20.0;
+}
+
 /// <summary>Parameters for <see cref="GeneratorKind.EchoChirp"/>.</summary>
 public sealed record EchoChirpSettings
 {
@@ -137,7 +182,12 @@ public sealed record EchoChirpSettings
 /// <see cref="Tones"/> is the *effective* tone list: for <see cref="GeneratorKind.Multitone"/> it
 /// holds the comb derived from <see cref="Multitone"/>, so everything downstream that reads the
 /// generator's tones (device status, the UI's fundamental tracking) works for multitone without
-/// knowing anything about how the comb was built.
+/// knowing anything about how the comb was built. For <see cref="GeneratorKind.Square"/> and
+/// <see cref="GeneratorKind.Triangle"/> it holds the single line those shapes' fundamental produces,
+/// at its own level rather than the waveform's total (<see cref="PeriodicWave.FundamentalDbv"/>) and
+/// at the frequency the quantised period really plays — so the scope trigger, the Gen tile and the
+/// gain reading all describe the line the analyzer measures. The synthesizers ignore it for those
+/// kinds and read <see cref="Wave"/>, so there is no second copy of the stimulus to disagree with.
 /// </remarks>
 public sealed record ChannelGeneratorConfig(bool Enabled, IReadOnlyList<GeneratorTone> Tones)
 {
@@ -149,6 +199,9 @@ public sealed record ChannelGeneratorConfig(bool Enabled, IReadOnlyList<Generato
     public WhiteNoiseSettings? Noise { get; init; }
 
     public EchoChirpSettings? Chirp { get; init; }
+
+    /// <summary>Shared by <see cref="GeneratorKind.Square"/> and <see cref="GeneratorKind.Triangle"/> — see <see cref="PeriodicWaveSettings"/>.</summary>
+    public PeriodicWaveSettings? Wave { get; init; }
 
     public static ChannelGeneratorConfig Off { get; } = new(Enabled: false, Tones: []) { Kind = GeneratorKind.Off };
 }

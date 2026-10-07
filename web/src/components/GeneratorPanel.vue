@@ -170,7 +170,7 @@ defineExpose({ buildRequest, resyncTones })
           :class="{ 'opacity-40': !canSnapToBin }"
           :title="canSnapToBin
             ? 'Snap tone frequencies to the nearest coherent FFT bin, so a tone lands on exactly one bin with no leakage.'
-            : 'Only applies to sine tones and the multitone comb — noise and the chirp have no frequency to snap.'"
+            : 'Only applies to sine tones and the multitone comb. Noise and the chirp have no single frequency; a square or triangle has one, but it is quantised to a whole sample period instead (shown under the frequency box).'"
         >
           <input v-model="snapToBin" type="checkbox" :disabled="!canSnapToBin" @change="emit('change')" />
           Snap to bin

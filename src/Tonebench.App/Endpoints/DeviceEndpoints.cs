@@ -439,13 +439,21 @@ public sealed record GeneratorChannelResponse(
     GeneratorKind Kind,
     MultitoneResponse Multitone,
     WhiteNoiseResponse Noise,
-    EchoChirpResponse Chirp);
+    EchoChirpResponse Chirp,
+    PeriodicWaveResponse Wave);
 
 public sealed record MultitoneResponse(int TonesPerOctave, double TotalRmsDbv, double RolloffDbPerOctave);
 
 public sealed record WhiteNoiseResponse(double LevelDbv);
 
 public sealed record EchoChirpResponse(double AmplitudeDbv, double StartFreqHz, double EndFreqHz, SmoothingOctaves Smoothing);
+
+/// <summary>
+/// The square/triangle block. <c>FreqHz</c> is what was <i>asked</i> for; the frequency actually
+/// played is the one on the effective tone list, which is quantised to a whole even sample period
+/// (see <c>Tonebench.Device.PeriodicWave</c>) and which the panel shows beneath the typed value.
+/// </summary>
+public sealed record PeriodicWaveResponse(double FreqHz, double LevelDbv);
 
 public sealed record DeviceRangesResponse(
     IReadOnlyList<double> SampleRatesHz,

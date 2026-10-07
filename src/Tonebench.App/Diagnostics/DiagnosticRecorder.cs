@@ -357,6 +357,8 @@ public sealed class DiagnosticRecorder
             GeneratorKind.PinkNoise when channel.Noise is { } noise => $"pink noise @{Fmt(noise.LevelDbv)}dBV",
             GeneratorKind.EchoChirp when channel.Chirp is { } chirp =>
                 $"chirp {Fmt(chirp.StartFrequencyHz)}..{Fmt(chirp.EndFrequencyHz)}Hz @{Fmt(chirp.AmplitudeDbv)}dBV",
+            GeneratorKind.Square or GeneratorKind.Triangle when channel.Wave is { } wave =>
+                $"{channel.Kind.ToString().ToLowerInvariant()} {Fmt(wave.FrequencyHz)}Hz @{Fmt(wave.LevelDbv)}dBV",
             _ => channel.Kind.ToString(),
         };
     }

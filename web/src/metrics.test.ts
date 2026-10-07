@@ -301,6 +301,31 @@ describe('noiseFigureCaveat', () => {
     expect(noiseFigureCaveat({ kind: 'WhiteNoise', toneCount: 0 })).toBeNull()
     expect(noiseFigureCaveat({ kind: 'EchoChirp', toneCount: 0 })).toBeNull()
   })
+
+  // One fundamental, correctly notched -- and the rest of the waveform is its own harmonic series,
+  // so the noise band holds the stimulus rather than anything the DUT or the analyzer did. The
+  // figure quoted is what a perfect square reads on a perfect analyzer.
+  it('flags a square or a triangle, whose own harmonics fill the noise band', () => {
+    expect(noiseFigureCaveat({ kind: 'Square', toneCount: 1 })).toMatch(/square/)
+    expect(noiseFigureCaveat({ kind: 'Square', toneCount: 1 })).toMatch(/48 %/)
+    expect(noiseFigureCaveat({ kind: 'Triangle', toneCount: 1 })).toMatch(/triangle/)
+    expect(noiseFigureCaveat({ kind: 'Triangle', toneCount: 1 })).toMatch(/12 %/)
+  })
+})
+
+describe('stimulusSummary for the hard-switched shapes', () => {
+  const multitone = { tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 }
+
+  // The staged `tones` list belongs to the sine generator and is not what these kinds play, so a
+  // two-tone IMD pair left behind by a kind switch must not make the caveat blame two tones.
+  it('is one fundamental whatever the sine rows still hold', () => {
+    const stale = [
+      { freqHz: 60, ampDbv: -2 },
+      { freqHz: 7000, ampDbv: -14 },
+    ]
+    expect(stimulusSummary('Square', stale, multitone)).toEqual({ kind: 'Square', toneCount: 1 })
+    expect(stimulusSummary('Triangle', stale, multitone)).toEqual({ kind: 'Triangle', toneCount: 1 })
+  })
 })
 
 describe('stimulusSummary', () => {

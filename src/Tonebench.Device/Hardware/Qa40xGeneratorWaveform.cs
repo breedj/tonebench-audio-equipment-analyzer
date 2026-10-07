@@ -72,6 +72,14 @@ internal sealed class Qa40xGeneratorWaveform(Random random, double sampleRateHz)
             GeneratorKind.WhiteNoise => ComputeWhiteNoise(channel.Noise),
             GeneratorKind.PinkNoise => ComputePinkNoise(channel.Noise, channelIndex, frameIndex),
             GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, frameIndex),
+
+            // Shared with the simulator rather than re-derived here, unlike the chirp: the period
+            // quantisation and the per-shape peak are arithmetic a second copy could get subtly
+            // wrong, and a simulator at a different level or a different frequency than the
+            // hardware is a DUT that behaves differently under --simulate.
+            GeneratorKind.Square or GeneratorKind.Triangle =>
+                PeriodicWave.Sample(channel.Kind, channel.Wave, frameIndex, sampleRateHz),
+
             _ => 0.0,
         };
     }

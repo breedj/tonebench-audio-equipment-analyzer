@@ -60,6 +60,8 @@ public static class GeneratorEndpoints
 
         var multitone = ToMultitone(request.Multitone);
         var noise = ToNoise(request.Noise);
+        if (!TryToWave(request.Wave, kind, channelName, out var wave, out error))
+            return false;
         if (!TryToChirp(request.Chirp, out var chirp, out error))
         {
             error = $"{channelName} channel: {error}";
@@ -89,7 +91,45 @@ public static class GeneratorEndpoints
             Multitone = multitone,
             Noise = noise,
             Chirp = chirp,
+            Wave = wave,
         };
+
+        return true;
+    }
+
+    /// <summary>
+    /// The square/triangle block. Validated only for the kinds that read it — an untouched default
+    /// must never block a stimulus that never looks at it, the rule the impedance request's two
+    /// settings groups already follow.
+    ///
+    /// <para>Only the frequency is checked, and only against zero. The <i>upper</i> limit is
+    /// <c>fs/4</c> and the sample rate is not known here (this endpoint's rate is a hint that may be
+    /// absent), so a frequency above it is clamped by <see cref="PeriodicWave.PeriodFrames"/> and
+    /// reported back through the effective tone list rather than refused — which is also what
+    /// happens to one that is merely quantised, and the two are the same thing by degree.</para>
+    /// </summary>
+    private static bool TryToWave(
+        PeriodicWaveRequest? request, GeneratorKind kind, string channelName,
+        out PeriodicWaveSettings settings, out string error)
+    {
+        var defaults = new PeriodicWaveSettings();
+        settings = defaults;
+        error = "";
+
+        if (request is null)
+            return true;
+
+        settings = defaults with
+        {
+            FrequencyHz = request.FreqHz ?? defaults.FrequencyHz,
+            LevelDbv = request.LevelDbv ?? defaults.LevelDbv,
+        };
+
+        if (PeriodicWave.IsWaveKind(kind) && !(settings.FrequencyHz > 0.0))
+        {
+            error = $"{channelName} channel: {kind} FreqHz must be greater than 0 (got {settings.FrequencyHz}).";
+            return false;
+        }
 
         return true;
     }
@@ -163,6 +203,9 @@ public sealed record WhiteNoiseRequest(double? LevelDbv);
 
 public sealed record EchoChirpRequest(double? AmplitudeDbv, double? StartFreqHz, double? EndFreqHz, string? Smoothing);
 
+/// <summary>Square/triangle parameters — see <see cref="PeriodicWaveSettings"/>. <c>LevelDbv</c> is the waveform's total rms, not its peak.</summary>
+public sealed record PeriodicWaveRequest(double? FreqHz, double? LevelDbv);
+
 /// <summary>
 /// One channel's generator request. <c>Kind</c> and the per-kind blocks are optional so the
 /// original body shape (<c>{ enabled, tones }</c>) still means a plain sine tone list.
@@ -173,7 +216,8 @@ public sealed record GeneratorChannelRequest(
     string? Kind = null,
     MultitoneRequest? Multitone = null,
     WhiteNoiseRequest? Noise = null,
-    EchoChirpRequest? Chirp = null);
+    EchoChirpRequest? Chirp = null,
+    PeriodicWaveRequest? Wave = null);
 
 /// <summary>
 /// <c>SampleRateHz</c>/<c>ChannelCount</c>/<c>BlockFrameCount</c> are only a hint for starting a

@@ -2,6 +2,15 @@
 import { computed, reactive, watch } from 'vue'
 import type { GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, ImdMethodName, SmoothingOctaves } from '../api/client'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useStagedSampleRate } from '../composables/useStagedSampleRate'
+import {
+  isWaveKind,
+  waveEffectiveFreqHz,
+  waveHarmonicsBelowNyquist,
+  waveIdealHarmonicsDbc,
+  wavePeakVolts,
+  wavePeriodFrames,
+} from '../periodicWave'
 import { useMetricSelection } from '../composables/useMetricSelection'
 import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, presetTones, sineEquivalentDbv } from '../imd/presets'
 import { generatorLevelFromDbv, generatorLevelToDbv } from '../generatorLevel'
@@ -33,6 +42,8 @@ const KINDS: { value: GeneratorKind; label: string }[] = [
   { value: 'Tones', label: 'Sine tones' },
   { value: 'Multitone', label: 'Multitone' },
   { value: 'WhiteNoise', label: 'White noise' },
+  { value: 'Square', label: 'Square' },
+  { value: 'Triangle', label: 'Triangle' },
 ]
 
 const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
@@ -50,7 +61,34 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
 // it's a silent no-op for Multitone/WhiteNoise) and with GeneratorMetricsPanel.vue, which needs this
 // staged config reactively even after Stop silences DeviceStatus.generatorLeft/Right — see
 // useGeneratorStimulus.ts.
-const { kind, tones, multitone, noise, chirp, imd, levelUnit } = useGeneratorStimulus()
+const { kind, tones, multitone, noise, wave, chirp, imd, levelUnit } = useGeneratorStimulus()
+
+// The rate Run would ask for, not the one the device happens to be streaming at — the quantised
+// frequency depends on it, and the panel has to show the right answer before anything is running.
+const { stagedSampleRateHz } = useStagedSampleRate()
+
+/**
+ * What a square or triangle will really play, and what it costs: only whole even sample periods
+ * exist, so 10 kHz at 192 kHz lands on 9.6 kHz (see periodicWave.ts). Shown rather than silently
+ * applied, the same way a snapped tone's real bin frequency is shown beneath what was typed.
+ */
+const waveReading = computed(() => {
+  if (!isWaveKind(kind.value)) return null
+  const fs = stagedSampleRateHz.value
+  const periodFrames = wavePeriodFrames(wave.freqHz, fs)
+  if (periodFrames <= 0) return null
+  return {
+    effectiveFreqHz: waveEffectiveFreqHz(wave.freqHz, fs),
+    periodFrames,
+    harmonics: waveHarmonicsBelowNyquist(wave.freqHz, fs),
+    peakV: wavePeakVolts(kind.value, wave.levelDbv),
+    // Line by line rather than as one THD figure: the THD tile sums only the harmonics the analyzer
+    // tracks, so an "ideal THD" quoted here would not be the number beside it on screen -- while
+    // these are exactly the rows of the Harmonics table underneath.
+    idealHarmonics: waveIdealHarmonicsDbc(kind.value),
+    quantised: Math.abs(waveEffectiveFreqHz(wave.freqHz, fs) - wave.freqHz) > 0.0005,
+  }
+})
 const { selectedMetrics, setSelectedMetrics } = useMetricSelection()
 
 const IMD_METHODS: { value: ImdMethodName; label: string }[] = [
@@ -165,6 +203,9 @@ watch(
     actualFreqHz.fill(null, 0, actualFreqHz.length)
     Object.assign(multitone, state.multitone)
     Object.assign(noise, state.noise)
+    // A type saved before these kinds existed carries no wave block; keep the default rather than
+    // assigning undefined over a reactive object's fields.
+    if (state.wave) Object.assign(wave, state.wave)
     Object.assign(chirp, state.chirp)
   },
   { immediate: true },
@@ -211,6 +252,9 @@ function currentConfig(): Omit<GeneratorChannelRequest, 'enabled'> {
       return { ...base, multitone: { ...multitone } }
     case 'WhiteNoise':
       return { ...base, noise: { ...noise } }
+    case 'Square':
+    case 'Triangle':
+      return { ...base, wave: { ...wave } }
     case 'EchoChirp':
       return { ...base, chirp: { ...chirp } }
     default:
@@ -393,6 +437,54 @@ defineExpose({ currentConfig, syncFromStatus })
           <GeneratorLevelUnitSelect @change="emit('change')" />
         </div>
       </label>
+    </div>
+
+    <!-- Square and triangle share one form, as they share one settings block: the dropdown above is
+         the shape. The reading beneath the frequency is not decoration -- the period is quantised to
+         a whole even number of samples, so what plays is often not what was typed. -->
+    <div v-else-if="kind === 'Square' || kind === 'Triangle'" class="space-y-2 text-sm">
+      <label class="flex flex-col gap-1">
+        Frequency (Hz)
+        <input
+          type="number"
+          min="1"
+          v-model.number="wave.freqHz"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="emit('change')"
+        />
+      </label>
+      <label class="flex flex-col gap-1">
+        Level (rms)
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            :step="levelStep"
+            :value="displayLevel(wave.levelDbv)"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            @change="onLevelEdit($event, wave.levelDbv, (v) => (wave.levelDbv = v))"
+          />
+          <GeneratorLevelUnitSelect @change="emit('change')" />
+        </div>
+      </label>
+      <div v-if="waveReading" class="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p>
+          <span :class="waveReading.quantised ? 'text-amber-600 dark:text-amber-400' : ''">
+            Playing {{ waveReading.effectiveFreqHz.toFixed(3) }} Hz
+          </span>
+          ({{ waveReading.periodFrames }} frames per cycle, {{ waveReading.harmonics }} harmonics below
+          Nyquist)
+        </p>
+        <p>
+          {{ waveReading.peakV.toPrecision(4) }} V peak &middot; ideal harmonics
+          <span v-for="(h, i) in waveReading.idealHarmonics" :key="h.order">
+            <template v-if="i">, </template>H{{ h.order }} {{ h.dbc.toFixed(1) }} dBc
+          </span>
+        </p>
+      </div>
+      <p class="text-xs text-neutral-400 dark:text-neutral-600">
+        Only whole even sample periods exist, so the frequency is rounded to one. THD+N, SNR and the
+        noise tiles read the shape's own harmonics and show n/a.
+      </p>
     </div>
 
     <div v-else-if="kind === 'EchoChirp'" class="space-y-2 text-sm">

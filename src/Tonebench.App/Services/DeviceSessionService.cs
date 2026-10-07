@@ -984,6 +984,7 @@ public sealed class DeviceSessionService(
         var multitone = config.Multitone ?? new MultitoneSettings();
         var noise = config.Noise ?? new WhiteNoiseSettings();
         var chirp = config.Chirp ?? new EchoChirpSettings();
+        var wave = config.Wave ?? new PeriodicWaveSettings();
 
         return new GeneratorChannelResponse(
             config.Enabled,
@@ -991,7 +992,8 @@ public sealed class DeviceSessionService(
             config.Kind,
             new MultitoneResponse(multitone.TonesPerOctave, multitone.TotalRmsDbv, multitone.RolloffDbPerOctave),
             new WhiteNoiseResponse(noise.LevelDbv),
-            new EchoChirpResponse(chirp.AmplitudeDbv, chirp.StartFrequencyHz, chirp.EndFrequencyHz, chirp.Smoothing));
+            new EchoChirpResponse(chirp.AmplitudeDbv, chirp.StartFrequencyHz, chirp.EndFrequencyHz, chirp.Smoothing),
+            new PeriodicWaveResponse(wave.FrequencyHz, wave.LevelDbv));
     }
 
     /// <summary>
@@ -1258,6 +1260,52 @@ public sealed class DeviceSessionService(
     }
 
     /// <summary>
+    /// Fills in what a square or triangle channel really plays: its frequency quantised to a whole
+    /// even sample period, and the level of its fundamental, as a one-entry effective tone list.
+    ///
+    /// <para>Here rather than in the device for the reason the multitone comb is built in the
+    /// endpoint: this is the one place that knows the sample rate the stimulus will be played at, and
+    /// the quantisation depends on it — the same 10 kHz request is 10.105 kHz at 48 kHz and 9.6 kHz
+    /// at 192 kHz. Doing it here also means device status, the scope trigger, the Gen tile and the
+    /// gain reading all see the line the analyzer will measure without any of them knowing that a
+    /// square is not a sine.</para>
+    ///
+    /// <para>The synthesizers read <see cref="ChannelGeneratorConfig.Wave"/> and ignore the tone
+    /// list for these kinds, so this cannot become a second, disagreeing copy of the stimulus; what
+    /// it is, is a derived <i>reading</i> of it. Note it rewrites <c>Wave.FrequencyHz</c> as well, so
+    /// that the figure the device synthesizes from and the figure status reports are one number.</para>
+    /// </summary>
+    private GeneratorConfig ResolveWaves(GeneratorConfig config)
+    {
+        double sampleRateHz = _lastSampleRateHz;
+        if (sampleRateHz <= 0)
+            return config;
+
+        return config with { Left = Resolve(config.Left), Right = Resolve(config.Right) };
+
+        ChannelGeneratorConfig Resolve(ChannelGeneratorConfig channel)
+        {
+            if (!PeriodicWave.IsWaveKind(channel.Kind) || channel.Wave is not { } wave)
+                return channel;
+
+            double effectiveHz = PeriodicWave.EffectiveFrequencyHz(wave.FrequencyHz, sampleRateHz);
+            if (effectiveHz <= 0.0)
+                return channel with { Tones = [] };
+
+            // With the period, so the level reported is the line the analyzer will really read and
+            // not the textbook one -- 0.9 dB apart at the top of the band. See FundamentalDbv.
+            double fundamentalDbv = PeriodicWave.FundamentalDbv(
+                channel.Kind, wave.LevelDbv, PeriodicWave.PeriodFrames(wave.FrequencyHz, sampleRateHz));
+
+            return channel with
+            {
+                Wave = wave with { FrequencyHz = effectiveHz },
+                Tones = [new GeneratorTone(effectiveHz, fundamentalDbv)],
+            };
+        }
+    }
+
+    /// <summary>
     /// Rewrites every tone frequency to the nearest coherent bin for the current FFT size and sample
     /// rate. No-op when <see cref="GeneratorConfig.SnapToBin"/> is off. Applies to the *effective*
     /// tone list, so a multitone comb gets snapped tone by tone as well.
@@ -1276,6 +1324,14 @@ public sealed class DeviceSessionService(
 
         ChannelGeneratorConfig SnapChannel(ChannelGeneratorConfig channel)
         {
+            // Only the kinds whose tone list *is* the stimulus. Square and Triangle carry their
+            // fundamental on that list too (see ResolveWaves), and it is already the real frequency
+            // of a quantised period — moving it to the nearest coherent bin would make status report
+            // a frequency the DAC is not playing, which is the one thing the effective list exists
+            // to prevent. The other kinds have an empty list, so this is also a no-op for them.
+            if (channel.Kind is not (GeneratorKind.Tones or GeneratorKind.Multitone))
+                return channel;
+
             if (channel.Tones.Count == 0)
                 return channel;
 
@@ -1351,6 +1407,9 @@ public sealed class DeviceSessionService(
         if (config.Left.Enabled || config.Right.Enabled)
             _lastVoicedGeneratorConfig = config;
 
+        // Before SnapTones, which leaves these kinds alone precisely because this has already put
+        // the real frequency on their tone list.
+        config = ResolveWaves(config);
         config = SnapTones(config);
         SetMultitoneSpec(config);
 
@@ -1563,6 +1622,14 @@ public sealed class DeviceSessionService(
 
             case GeneratorKind.PinkNoise when channel.Noise is { } noise:
                 return $"pink noise at {noise.LevelDbv:0.##} dBV rms";
+
+            case GeneratorKind.Square or GeneratorKind.Triangle when channel.Wave is { } wave:
+                // The played frequency, not the requested one (ResolveWaves has already rewritten
+                // it), and the peak beside the level: those two differ by shape, and a log that
+                // quoted only the rms could not say what the DUT was actually driven to.
+                return $"{channel.Kind.ToString().ToLowerInvariant()} wave at {wave.FrequencyHz:0.####} Hz, "
+                    + $"{wave.LevelDbv:0.##} dBV rms "
+                    + $"({PeriodicWave.PeakVolts(channel.Kind, wave.LevelDbv):0.####} V peak)";
 
             case GeneratorKind.EchoChirp when channel.Chirp is { } chirp:
                 return $"chirp {chirp.StartFrequencyHz:0.##}-{chirp.EndFrequencyHz:0.##} Hz at "

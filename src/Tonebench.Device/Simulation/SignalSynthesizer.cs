@@ -61,6 +61,14 @@ internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
             GeneratorKind.WhiteNoise => ComputeWhiteNoise(channel.Noise),
             GeneratorKind.PinkNoise => ComputePinkNoise(channel.Noise, channelIndex, frameIndex),
             GeneratorKind.EchoChirp => ComputeEchoChirp(channel.Chirp, frameIndex),
+
+            // The same call the real TX loop makes (see Hardware.Qa40xGeneratorWaveform). Note no
+            // SimulatedSignalProfile.HarmonicDbc stack is added on top, as ComputeTones does: these
+            // shapes are harmonics, 48.3 % of them for a square, so a fake -46 dBc stack under that
+            // would be unmeasurable and only muddy the one spectrum whose lines are known exactly.
+            GeneratorKind.Square or GeneratorKind.Triangle =>
+                PeriodicWave.Sample(channel.Kind, channel.Wave, frameIndex, sampleRateHz),
+
             _ => 0.0,
         };
     }

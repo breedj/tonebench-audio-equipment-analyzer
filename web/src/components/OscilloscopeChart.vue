@@ -7,6 +7,8 @@ import type { ScopeFrame } from '../streaming/protocol'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { MAX_SCOPE_PERIODS, useScopeDisplay } from '../composables/useScopeDisplay'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useStagedSampleRate } from '../composables/useStagedSampleRate'
+import { isWaveKind, waveEffectiveFreqHz } from '../periodicWave'
 import { exportGridTheme } from '../charts/palette'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import ExpandToggle from './ExpandToggle.vue'
@@ -128,7 +130,14 @@ function ensurePlot() {
 }
 
 // The staged stimulus, for the fallback in generatorFreqHz below.
-const { kind: stagedKind, tones: stagedTones } = useGeneratorStimulus()
+const { kind: stagedKind, tones: stagedTones, wave: stagedWave } = useGeneratorStimulus()
+
+// A square or triangle's period is quantised to whole even samples, so the trigger has to use the
+// *played* frequency and not the typed one: 10 kHz asked for at 192 kHz plays at 9.6 kHz, and a
+// trigger 4 % out walks the trace sideways a little further on every frame. Re-derived here rather
+// than read from status for the reason generatorFreqHz falls back at all -- Stop silences status,
+// and a stopped SINGLE is exactly when the scope matters most.
+const { stagedSampleRateHz } = useStagedSampleRate()
 
 // The generator's own configured tone frequency — not something re-derived from the captured
 // signal (e.g. via FFT or crossing spacing), since the generator already knows it exactly and a
@@ -144,7 +153,14 @@ const { kind: stagedKind, tones: stagedTones } = useGeneratorStimulus()
 // both read the staged form for exactly this: it survives Stop.
 function generatorFreqHz(status: DeviceStatus | null): number | null {
   const gen = status?.generatorLeft ?? status?.generatorRight
-  if (gen && gen.kind === 'Tones' && gen.tones.length > 0 && gen.tones[0].freqHz > 0) return gen.tones[0].freqHz
+  // Live status first, for every kind whose effective tone list is its fundamental: that is the
+  // server's own answer, already quantised (square, triangle) or snapped (tones).
+  if (gen && (gen.kind === 'Tones' || isWaveKind(gen.kind)) && gen.tones.length > 0 && gen.tones[0].freqHz > 0)
+    return gen.tones[0].freqHz
+  if (isWaveKind(stagedKind.value)) {
+    const freqHz = waveEffectiveFreqHz(stagedWave.freqHz, stagedSampleRateHz.value)
+    return freqHz > 0 ? freqHz : null
+  }
   if (stagedKind.value !== 'Tones' || stagedTones.length === 0) return null
   return stagedTones[0].freqHz > 0 ? stagedTones[0].freqHz : null
 }

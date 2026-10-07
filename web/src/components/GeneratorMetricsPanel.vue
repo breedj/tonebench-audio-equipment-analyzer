@@ -2,16 +2,24 @@
 import { computed } from 'vue'
 import { generatorTile, GEN_METRIC_LABEL } from '../metrics'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import { useMetricSelection } from '../composables/useMetricSelection'
 
 // One box for both channels — Left and Right always play the same stimulus (see
 // GeneratorPanel.vue), so a per-channel "L: Gen"/"R: Gen" pair would just be the same values
 // twice. Reads the *staged* form (useGeneratorStimulus.ts), not DeviceStatus, so this keeps
 // showing the configured stimulus after Stop instead of blanking out with the silenced generator.
-const { kind, tones, multitone, noise } = useGeneratorStimulus()
+const { kind, tones, multitone, noise, wave } = useGeneratorStimulus()
+// The square/triangle frequency is quantised against the rate Run would ask for, so the tile needs
+// it to report what is really on the output rather than what was typed.
+const { stagedSampleRateHz } = useStagedSampleRate()
 const { selectedMetrics, removeMetric } = useMetricSelection()
 
-const tile = computed(() => (selectedMetrics.value.includes(GEN_METRIC_LABEL) ? generatorTile(kind.value, tones, multitone, noise) : null))
+const tile = computed(() =>
+  selectedMetrics.value.includes(GEN_METRIC_LABEL)
+    ? generatorTile(kind.value, tones, multitone, noise, wave, stagedSampleRateHz.value)
+    : null,
+)
 </script>
 
 <template>

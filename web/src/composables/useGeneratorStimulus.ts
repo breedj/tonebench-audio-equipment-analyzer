@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue'
-import type { GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
+import type { GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, PeriodicWaveSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
 import type { ImdPresetId } from '../imd/presets'
 import type { GeneratorLevelUnit } from '../generatorLevel'
 
@@ -13,6 +13,9 @@ const kind = ref<GeneratorKind>('Tones')
 const tones = reactive<GeneratorTone[]>([{ freqHz: 1000, ampDbv: -6 }])
 const multitone = reactive<MultitoneSettings>({ tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 })
 const noise = reactive<WhiteNoiseSettings>({ levelDbv: -20 })
+// Square and triangle share one staged block, as they share one settings record server-side: the
+// shape is `kind`, so switching between them changes neither the pitch nor the level.
+const wave = reactive<PeriodicWaveSettings>({ freqHz: 1000, levelDbv: -20 })
 const chirp = reactive<EchoChirpSettings>({
   amplitudeDbv: -20,
   startFreqHz: 20,
@@ -36,5 +39,5 @@ const imd = reactive<{ preset: ImdPresetId; method: ImdMethodName; maxOrder: num
 })
 
 export function useGeneratorStimulus() {
-  return { kind, tones, multitone, noise, chirp, imd, levelUnit }
+  return { kind, tones, multitone, noise, wave, chirp, imd, levelUnit }
 }

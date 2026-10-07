@@ -102,6 +102,36 @@ const allRootsOutOfBand = computed(() => {
   return band.value !== null && roots.length > 0 && roots.every(outsideBand)
 })
 
+/**
+ * How many of the fitted entries the sweep actually constrained, and how many are extrapolation.
+ *
+ * <p>Counted in <i>entries</i> — a conjugate pair is one — so the numbers match the rows below
+ * rather than the map's legend, which counts roots and so says 5 where this says 3.</p>
+ */
+const bandSplit = computed(() => {
+  const all = fit.value ? [...fit.value.poles, ...fit.value.zeros] : []
+  const outside = all.filter(outsideBand).length
+  return { total: all.length, outside, inside: all.length - outside }
+})
+
+/**
+ * Most of the model is extrapolation — and the lever for that is the <i>order</i>, which is the one
+ * thing the panel never said outright.
+ *
+ * <p>Reported 2026-10-06, from the first-order filter: Auto picked order 3, the table listed the
+ * right pole at 2.02 kHz and three out-of-band entries, and nothing on screen suggested order 1 —
+ * so the reasonable next move looked like the chart's "Hide out of band" checkbox, which does not
+ * touch the fit and cannot. The existing cancellation note covers the other way a fit wastes order
+ * (a pair that does nothing in band); this covers roots the band never reached.</p>
+ *
+ * <p>Not shown when every root is outside, which has its own note and is usually already at the
+ * lowest order on offer, and not shown at parity — an order-2 fit with one in-band pair and one
+ * out-of-band zero pair is an ordinary, good fit.</p>
+ */
+const mostlyExtrapolated = computed(
+  () => !allRootsOutOfBand.value && bandSplit.value.inside > 0 && bandSplit.value.outside > bandSplit.value.inside,
+)
+
 function rowsOf(list: Singularity[]) {
   return list.map((s) => ({
     freq: formatHz(s.freqHz),
@@ -231,6 +261,17 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
         Every root lies outside the measured band, so the sweep constrains no pole or zero — it says
         only that the response is featureless between its endpoints. Widen the sweep to place the
         components.
+      </p>
+
+      <p v-if="mostlyExtrapolated" class="text-[11px] text-amber-600 dark:text-amber-400">
+        Only {{ bandSplit.inside }} of the {{ bandSplit.total }} entries above
+        {{ bandSplit.inside === 1 ? 'lies' : 'lie' }} inside the measured band; the other
+        {{ bandSplit.outside }} {{ bandSplit.outside === 1 ? 'is' : 'are' }} extrapolation. Untick
+        <strong>Choose order automatically</strong> and try
+        <strong>Poles {{ bandSplit.inside }}</strong>, with <strong>Zeros 0</strong> for an all-pole
+        DUT such as a filter or an amplifier without an output transformer. Note the out-of-band
+        roots are still part of H(s) and of the fit error — a root above the band edge, especially a
+        high-Q one, can carry the whole top of the band.
       </p>
 
       <!-- Not beside the note above: a fit whose roots are all outside the band is usually already at

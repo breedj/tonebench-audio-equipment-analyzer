@@ -1,15 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import Modal from './Modal.vue'
-import { api } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
 import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
-import { useExperimental384k } from '../composables/useExperimental384k'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
 import { useDiagnosticLogging } from '../composables/useDiagnosticLogging'
 import { useDiagnostics } from '../composables/useDiagnostics'
-import { useDevice } from '../composables/useDevice'
 import { commitNumber } from '../config/numberField'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
@@ -24,14 +21,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
 const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
-const {
-  experimental384kEnabled,
-  load: loadExperimental384k,
-  setExperimental384kEnabled,
-} = useExperimental384k()
-void loadExperimental384k()
 const { config, apply: applyConfig } = useSpectrumConfig()
-const { status: deviceStatus } = useDevice()
 const { updateCheckEnabled } = useUpdateCheck()
 const { showWelcomeOnStartup, load: loadStartupConfig, setShowWelcomeOnStartup } = useStartupConfig()
 void loadStartupConfig()
@@ -86,9 +76,15 @@ const lastRecordingSummary = computed(() => {
 })
 
 /**
- * Which tab is showing. Grouped by what a setting is *about* rather than by where it is stored —
- * the auto-ranging delay lives on the device and the capture delay in the configuration database,
- * but both are things you reach for while setting up an acquisition.
+ * Which tab is showing. Grouped by what a setting is *about* rather than by where it is stored — the
+ * metrics bandwidth is live pipeline state and the capture delay a configuration document, but both
+ * are things you reach for while setting up an acquisition.
+ *
+ * Everything here is global: it applies whichever measurement is selected and whichever analyzer is
+ * attached. The two settings that are not — the experimental 384 kHz rate and the auto-ranging
+ * step-down delay — moved to the QA403's own dialog on the status bar (Qa403Dialog.vue), beside the
+ * sound card's. A field that appears only when particular hardware is plugged in does not belong in
+ * a dialog whose first line promises that nothing here depends on the device.
  */
 type ConfigTab = 'General' | 'Acquisition' | 'Measurement' | 'Impedance' | 'Diagnostics'
 const TABS: ConfigTab[] = ['General', 'Acquisition', 'Measurement', 'Impedance', 'Diagnostics']
@@ -108,38 +104,26 @@ watch(
   { immediate: true },
 )
 
-// Staged locally like the bandwidth field below, applied on change. Only meaningful on a device
-// with a hardware ranger (autoRangeStepDownDelayMs is null on the simulator, which has its own
-// client-side ranger in App.vue instead) — the field is hidden in that case.
-const autoRangeStepDownDelayMs = reactive({ value: 1000 })
-
-watch(
-  deviceStatus,
-  (s) => {
-    if (s?.autoRangeStepDownDelayMs != null) autoRangeStepDownDelayMs.value = s.autoRangeStepDownDelayMs
-  },
-  { immediate: true },
-)
-
-async function applyAutoRangeStepDownDelay() {
-  deviceStatus.value = await api.setAutoRangeStepDownDelay(autoRangeStepDownDelayMs.value)
-}
-
 /**
- * The three numeric settings are edited through their own draft strings, and that is not a style
- * choice — it is the fix for a bug that made them look broken.
+ * The capture delay is edited through its own draft string, and that is not a style choice — it is
+ * the fix for a bug that made these fields look broken.
  *
  * <p>Bound as <c>:value="theStoredRef"</c>, a field is overwritten on <b>every re-render</b>, not
  * merely when the stored value changes: Vue's prop patching carries an explicit
  * <c>next !== prev || key === "value"</c>, so an unchanged <c>value</c> prop is still written back
- * to the element. This dialog re-renders about once a second, because it reads the polled device
- * status — so typing "-3" into a field put it back to 0 before it could be committed, and emptying
- * one made a 0 appear under the cursor. Reported 2026-09-30. (It was External gain this was found
- * on; that setting now lives on the status bar, and its popover carries the same drafts for the
- * same reason.)</p>
+ * to the element. This dialog used to re-render about once a second, because it read the polled
+ * device status — so typing "-3" into a field put it back to 0 before it could be committed, and
+ * emptying one made a 0 appear under the cursor. Reported 2026-09-30. (It was External gain this was
+ * found on; that setting now lives on the status bar, and its popover carries the same drafts for
+ * the same reason.)</p>
+ *
+ * <p>The poll itself has gone — the two device settings that needed it moved to
+ * <c>Qa403Dialog.vue</c>, which stages its own field the same way — but the draft stays: any watcher
+ * or sibling write re-renders this dialog, and a field that cannot survive a re-render is a field
+ * waiting for the next one.</p>
  *
  * <p>With <c>v-model</c> on a draft the element's value <i>is</i> the bound value, so the patch is
- * a no-op and the text survives. The drafts are strings rather than numbers so a field can be
+ * a no-op and the text survives. The draft is a string rather than a number so the field can be
  * genuinely empty while it is being retyped, which <c>v-model.number</c> cannot express.</p>
  */
 const captureDelayDraft = ref('')
@@ -338,39 +322,13 @@ async function clearStoredCalibration() {
             />
           </label>
 
-          <label
-            class="flex items-start gap-2"
-            title="Offers 384 kHz in the FFT screen's Sample rate list. QuantAsylum does not document this rate, and measured on a QA403 it is input-only: the ADC really does run at 384 kHz, but the generator does not work there — the output comes back about 12 dB low with roughly 44 % distortion, and its near-DC content cycles the analyzer's own output protection relay. The app therefore refuses to play a tone at this rate. It also buys no bandwidth: the analog path was already about 32 dB down at 120 kHz, so 192 kHz reaches everything this does. Useful only for capturing a signal some other source is driving."
-          >
-            <input
-              type="checkbox"
-              class="mt-0.5"
-              :checked="experimental384kEnabled"
-              @change="setExperimental384kEnabled(($event.target as HTMLInputElement).checked)"
-            />
-            <span>
-              Allow 384 kHz sample rate (experimental)
-              <span class="block text-xs text-neutral-500">
-                Capture only — the generator is refused above 192 kHz.
-              </span>
-            </span>
-          </label>
-
-          <label
-            v-if="deviceStatus?.autoRangeStepDownDelayMs != null"
-            class="flex flex-col gap-1"
-            title="How long a peak must stay under-range before the input range steps down to a more sensitive setting. Higher values ride out amplitude-modulated signals (e.g. two close tones beating) without chasing every dip; lower values react faster to a genuinely quieter signal."
-          >
-            Auto-range step-down delay (ms)
-            <input
-              type="number"
-              min="0"
-              step="100"
-              v-model.number="autoRangeStepDownDelayMs.value"
-              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-              @change="applyAutoRangeStepDownDelay"
-            />
-          </label>
+          <!-- Said rather than left to be hunted for: both of these were on this tab until
+               2026-10-05, and someone who knew where they were will come back here first. -->
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">
+            The experimental 384 kHz sample rate and the auto-range step-down delay belong to the
+            analyzer rather than to the bench, and are now in <strong>QA403 settings</strong> — the
+            gear beside the status bar's Analyzer picker.
+          </p>
         </template>
 
         <template v-else-if="activeTab === 'Measurement'">

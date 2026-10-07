@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   axisTickHz,
   mappedRadius,
+  mappedWindow,
   plainRadius,
   referenceHz,
   sPlaneMap,
+  signedMappedRadius,
   surfaceViewport,
   toHz,
   toMapped,
+  windowHz,
   MIN_REFERENCE_HZ,
+  MIN_WINDOW_SPAN_HZ,
   type SPlaneMap,
 } from './splaneScale'
 import { rootPoints, MIN_ROOT_EXTENT_HZ, type RootPoint } from './poleZeroMap'
@@ -216,5 +220,63 @@ describe('axisTickHz', () => {
     expect(axisTickHz(log, 0)).toEqual([])
     expect(axisTickHz(log, Number.NaN)).toEqual([])
     expect(axisTickHz(log, -1)).toEqual([])
+  })
+})
+
+describe('mappedWindow', () => {
+  const linear = sPlaneMap('Linear', null)
+  const log = sPlaneMap('LogModulus', { lowHz: 10, highHz: 100000 })
+
+  it('is the identity under a linear radius, so the boxes are the coordinates', () => {
+    expect(mappedWindow(linear, { xMinHz: -5000, xMaxHz: 1000, yMinHz: -200, yMaxHz: 200 })).toEqual({
+      xMin: -5000,
+      xMax: 1000,
+      yMin: -200,
+      yMax: 200,
+    })
+  })
+
+  /**
+   * The property that makes the boxes mean what they say: a bound typed in lands exactly where a
+   * root at that frequency on the same axis lands — which is what `toMapped` does on an axis, since
+   * the warp leaves the angle alone.
+   */
+  it('warps each bound to where a root at that frequency is drawn', () => {
+    const v = mappedWindow(log, { xMinHz: -100000, xMaxHz: 100, yMinHz: -20000, yMaxHz: 20000 })
+
+    expect(v.xMin).toBeCloseTo(toMapped(log, -100000, 0).x, 12)
+    expect(v.xMax).toBeCloseTo(toMapped(log, 100, 0).x, 12)
+    expect(v.yMax).toBeCloseTo(toMapped(log, 0, 20000).y, 12)
+    expect(v.yMin).toBeCloseTo(-toMapped(log, 0, 20000).y, 12)
+  })
+
+  it('keeps the sign of a bound, so the origin stays inside a straddling window', () => {
+    expect(signedMappedRadius(log, -1000)).toBeCloseTo(-mappedRadius(log, 1000), 12)
+    expect(signedMappedRadius(log, 0)).toBe(0)
+  })
+
+  it('orders the bounds, whichever way round they were typed', () => {
+    const v = mappedWindow(linear, { xMinHz: 1000, xMaxHz: -5000, yMinHz: 200, yMaxHz: -200 })
+
+    expect(v.xMin).toBeLessThan(v.xMax)
+    expect(v.yMin).toBeLessThan(v.yMax)
+  })
+
+  /** `fitTransform` divides by the span; a window closed to nothing paints an empty chart. */
+  it('opens a degenerate axis to the minimum span rather than returning a zero-height window', () => {
+    const v = mappedWindow(linear, { xMinHz: -100, xMaxHz: -100, yMinHz: 0, yMaxHz: 0 })
+
+    expect(v.xMax - v.xMin).toBeCloseTo(MIN_WINDOW_SPAN_HZ, 12)
+    expect(v.yMax - v.yMin).toBeCloseTo(MIN_WINDOW_SPAN_HZ, 12)
+  })
+
+  it('round-trips through windowHz, which is what seeds the boxes from the fit', () => {
+    const asked = { xMinHz: -46000, xMaxHz: 120, yMinHz: -38000, yMaxHz: 38000 }
+    const back = windowHz(log, mappedWindow(log, asked))
+
+    expect(back.xMinHz).toBeCloseTo(asked.xMinHz, 6)
+    expect(back.xMaxHz).toBeCloseTo(asked.xMaxHz, 9)
+    expect(back.yMinHz).toBeCloseTo(asked.yMinHz, 6)
+    expect(back.yMaxHz).toBeCloseTo(asked.yMaxHz, 6)
   })
 })

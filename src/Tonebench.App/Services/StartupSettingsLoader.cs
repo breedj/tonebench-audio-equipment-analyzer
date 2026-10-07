@@ -75,6 +75,14 @@ public static class StartupSettingsLoader
         services.GetRequiredService<Experimental384kSetting>().Enabled =
             (await ConfigEndpoints.ReadExperimental384kAsync(config, ct)).Enabled;
 
+        // The auto-ranging step-down delay, which unlike the opt-in above genuinely has to be here:
+        // AnalyzerDeviceFactory *writes* it into each device it builds, because the ranger's field
+        // cannot be read through a Func. Loaded after that setting and before the session resolves,
+        // or the first device of the session comes up at the ranger's own 1000 ms default and the
+        // stored value only takes effect on the first analyzer switch.
+        services.GetRequiredService<AutoRangeStepDownDelaySetting>().Ms =
+            (await ConfigEndpoints.ReadAutoRangeStepDownDelayAsync(config, ct)).DelayMs;
+
         // The stream recorder's switch and cap. Before the session resolves, because the session
         // takes the recorder as a dependency and arms the device's tap from it -- a setting read
         // afterwards would leave the first acquisition of the session unrecorded.

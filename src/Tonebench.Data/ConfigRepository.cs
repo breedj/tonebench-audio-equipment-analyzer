@@ -113,12 +113,42 @@ public sealed record AutosaveConfig(bool Enabled = true)
 /// records what was measured there and why the generator is refused at that rate.
 ///
 /// <para>Off by default, and that is the whole point of it being a setting: 384 kHz is undocumented
-/// by QuantAsylum, buys no measurable bandwidth over 192 kHz on the hardware tested, and is
-/// input-only. Nobody should meet it without having asked for it.</para>
+/// by QuantAsylum and is <i>input-only</i> — the DAC emits rubbish there and cycles the analyzer's
+/// own output protection relay, so a voiced generator above 192 kHz is refused outright. (It does
+/// buy real reach on the input, to about 180 kHz, measured with an external source; an earlier note
+/// here said it bought none, which was a loopback measuring the generator's reconstruction filter.)
+/// Nobody should meet the rate without having asked for it.</para>
 /// </summary>
 public sealed record Experimental384kConfig(bool Enabled = false)
 {
     public static Experimental384kConfig Default { get; } = new();
+}
+
+/// <summary>
+/// QA403 settings ▸ "Auto-range step-down delay": how long a peak must stay under-range before the
+/// input range steps down to a more sensitive one, in milliseconds.
+///
+/// <para>A device register rather than something the app computes, so this document is only the
+/// <i>durable</i> copy of it — <c>AutoRangeStepDownDelaySetting</c> is the live one, and
+/// <c>AnalyzerDeviceFactory</c> writes it into every device it builds, which is what carries it
+/// across a restart and across an analyzer switch. It was neither until 2026-10-06: the value went
+/// straight into the ranger and went back to 1000 ms the next time the app started, which is a
+/// setting that cannot be used for anything that matters.</para>
+///
+/// <para>The default is <c>Qa40xAutoRanger.DefaultStepDownDelayMs</c>, repeated here because
+/// <c>Tonebench.Data</c> does not reference <c>Tonebench.Device</c> — the two are pinned against
+/// each other by <c>AutoRangeStepDownDelayTests</c> rather than by the compiler. The ceiling is a
+/// minute: the ranger's own hysteresis is what rides out a beating multitone, and a step-down that
+/// takes longer than most sweeps is indistinguishable from step-down turned off.</para>
+/// </summary>
+public sealed record AutoRangeStepDownDelayConfig(double DelayMs = 1000.0)
+{
+    public const double MaxDelayMs = 60_000.0;
+
+    public static AutoRangeStepDownDelayConfig Default { get; } = new();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid => double.IsFinite(DelayMs) && DelayMs >= 0.0 && DelayMs <= MaxDelayMs;
 }
 
 /// <summary>
@@ -448,6 +478,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The external input gain's key. One document, see <see cref="ExternalGainConfig"/>.</summary>
     public const string ExternalGainKey = "acquisition.externalGain";
+
+    /// <summary>The auto-ranging step-down delay's key. One document, see <see cref="AutoRangeStepDownDelayConfig"/>.</summary>
+    public const string AutoRangeStepDownDelayKey = "acquisition.autoRangeStepDownDelay";
 
     /// <summary>The sound-card analyzer's key. One document, see <see cref="SoundCardConfig"/>.</summary>
     public const string SoundCardKey = "soundcard.settings";

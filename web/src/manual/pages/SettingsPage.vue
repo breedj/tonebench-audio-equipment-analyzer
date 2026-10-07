@@ -11,7 +11,11 @@ const { showPage } = useManual()
     <h2>Configuration dialog</h2>
     <p>
       The gear button at the top right. Everything in it is global — it applies whichever
-      measurement is selected, and is not part of any measurement's saved settings.
+      measurement is selected, whichever analyzer is attached, and is not part of any measurement's
+      saved settings. The settings that belong to one <em>analyzer</em> are not here: each has its own
+      gear on the status bar, beside the Analyzer picker — <strong>QA403 settings</strong> below, and
+      <button type="button" class="manual-link" @click="showPage('sound-card')">Using a sound card</button>
+      for a card.
     </p>
     <table>
       <thead>
@@ -44,6 +48,79 @@ const { showPage } = useManual()
             saved result.
           </td>
         </tr>
+        <tr>
+          <td>Metrics bandwidth (Hz)</td>
+          <td>
+            The band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated
+            over, and what keeps DC out of that integration. This is the <strong>Custom</strong>
+            choice of the FFT screen's Bandwidth dropdown (in the Bandwidth &amp; weighting panel), whose two presets (20 Hz–20 kHz
+            and 20 Hz–80 kHz) write these same fields. 20 Hz–20 kHz gives audio-band figures;
+            widening it includes noise the ear cannot hear and makes every noise-based number look
+            worse. It is saved with the FFT measurement.
+          </td>
+        </tr>
+        <tr>
+          <td>Date and time format</td>
+          <td>
+            How a date and time are written wherever the app puts one on paper: the Screenshot
+            dialog's <strong>Add date</strong> line, and a report's <strong>Taken</strong> row and
+            <strong>Generated</strong> line. <strong>System</strong> follows this PC's region settings,
+            as the app always did; the fixed formats (ISO <code>2026-09-20 14:05</code>,
+            day-month-year, month/day/year with AM/PM, and two with the month spelt) read the same
+            wherever the document ends up, which is the point of choosing one — a report sent
+            abroad should not need its reader to guess whether 09/10 is September or October. Each
+            row of the dropdown shows the current time in that format.
+          </td>
+        </tr>
+        <tr>
+          <td>Check for updates</td>
+          <td>
+            Periodically checks for a newer release and shows a dismissible banner. It never
+            installs anything, and fails silently on a machine with no internet access.
+          </td>
+        </tr>
+        <tr>
+          <td>Show welcome page on startup</td>
+          <td>
+            Ticked, the app starts on the welcome screen with its list of recent projects. Unticked,
+            it opens the project that was open last time — if that file still exists; otherwise the
+            welcome screen. The same setting is on the welcome screen itself.
+          </td>
+        </tr>
+        <tr>
+          <td>Autosave measurement settings</td>
+          <td>
+            Ticked, every change to the selected measurement's settings — a generator level, an axis
+            range, a note — is written into it a moment after it is made, so the measurement's
+            <strong>Save</strong> button never needs pressing and switching measurements never asks
+            about unsaved changes. It is ticked by default; unticked, changes wait for Save and the red
+            dot says so. Either way <strong>Save as…</strong> still makes a copy, and saving a
+            <em>result</em> is always a separate, deliberate step.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>QA403 settings</h2>
+    <p>
+      The gear beside the status bar's <strong>Analyzer</strong> picker, in the same place the sound
+      card's settings live. Both of these were on Configuration's Acquisition tab until October 2026
+      and moved here for one reason: neither is global. The experimental rate is a statement about
+      what <em>this</em> converter does, and the step-down delay is a register in this device's own
+      ranger — on a sound-card bench there is no ranger at all, and the field used to appear and
+      disappear with the hardware inside a dialog whose first line says nothing in it depends on the
+      device. Both are stored with the bench and survive a restart; neither is part of a
+      measurement's saved settings. The simulator shows this dialog too,
+      because it mirrors the QA403's rate limits; it has no ranger, so it offers only the first.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Setting</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
         <tr>
           <td>Allow 384 kHz sample rate (experimental)</td>
           <td>
@@ -88,62 +165,17 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Metrics bandwidth (Hz)</td>
-          <td>
-            The band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated
-            over, and what keeps DC out of that integration. This is the <strong>Custom</strong>
-            choice of the FFT screen's Bandwidth dropdown (in the Bandwidth &amp; weighting panel), whose two presets (20 Hz–20 kHz
-            and 20 Hz–80 kHz) write these same fields. 20 Hz–20 kHz gives audio-band figures;
-            widening it includes noise the ear cannot hear and makes every noise-based number look
-            worse. It is saved with the FFT measurement.
-          </td>
-        </tr>
-        <tr>
-          <td>Step-down delay (ms)</td>
+          <td>Auto-range step-down delay (ms)</td>
           <td>
             How long a peak must stay under-range before the input range steps down to a more
             sensitive setting. Higher values ride out an amplitude-modulated signal — two close
             tones beating, for instance — without chasing every dip; lower values react faster to a
-            genuinely quieter signal.
-          </td>
-        </tr>
-        <tr>
-          <td>Date and time format</td>
-          <td>
-            How a date and time are written wherever the app puts one on paper: the Screenshot
-            dialog's <strong>Add date</strong> line, and a report's <strong>Taken</strong> row and
-            <strong>Generated</strong> line. <strong>System</strong> follows this PC's region settings,
-            as the app always did; the fixed formats (ISO <code>2026-09-20 14:05</code>,
-            day-month-year, month/day/year with AM/PM, and two with the month spelt) read the same
-            wherever the document ends up, which is the point of choosing one — a report sent
-            abroad should not need its reader to guess whether 09/10 is September or October. Each
-            row of the dropdown shows the current time in that format.
-          </td>
-        </tr>
-        <tr>
-          <td>Check for updates</td>
-          <td>
-            Periodically checks for a newer release and shows a dismissible banner. It never
-            installs anything, and fails silently on a machine with no internet access.
-          </td>
-        </tr>
-        <tr>
-          <td>Show welcome page on startup</td>
-          <td>
-            Ticked, the app starts on the welcome screen with its list of recent projects. Unticked,
-            it opens the project that was open last time — if that file still exists; otherwise the
-            welcome screen. The same setting is on the welcome screen itself.
-          </td>
-        </tr>
-        <tr>
-          <td>Autosave measurement settings</td>
-          <td>
-            Ticked, every change to the selected measurement's settings — a generator level, an axis
-            range, a note — is written into it a moment after it is made, so the measurement's
-            <strong>Save</strong> button never needs pressing and switching measurements never asks
-            about unsaved changes. It is ticked by default; unticked, changes wait for Save and the red
-            dot says so. Either way <strong>Save as…</strong> still makes a copy, and saving a
-            <em>result</em> is always a separate, deliberate step.
+            genuinely quieter signal. 1000 ms by default. It is written straight into the
+            analyzer's own ranger <em>and</em> stored with the bench, so it is applied again to
+            whichever analyzer opens next — on a restart or after switching analyzers. (It was not
+            stored until October 2026, and went back to 1000 ms every time the app started.) Shown
+            only while an analyzer with a ranger of its own is selected: a sound card has none, and
+            on the simulator the ranging is done by the browser.
           </td>
         </tr>
       </tbody>
@@ -288,18 +320,31 @@ const { showPage } = useManual()
               deliberately: changing the DUT while a live spectrum is running shows the difference
               immediately, which is the clearest thing the simulator can demonstrate. Changing one
               part-way through a <em>sweep</em> will quietly give you a result measured under two
-              different conditions, so don't. The three checkboxes start <strong>unchecked</strong>:
-              a straight wire then reads as a straight wire, and the noise floor
-              (−150 dBV/√Hz white plus 1/f), the mains hum (50 Hz and two harmonics) and the
-              generator's fixed harmonic stack (0.51 % THD, level-independent) are each something
-              to switch on. <strong>Harmonics</strong> is greyed out under a nonlinear amplifier
-              model, which drops the stack whatever the box says.
+              different conditions, so don't. <strong>Noise</strong> (a −150 dBV/√Hz white floor with
+              a little 1/f rise) and <strong>Harmonics</strong> (a fixed 0.51 % stack on every
+              generator tone, level-independent) start <strong>checked</strong>;
+              <strong>Hum</strong> (50 Hz and two harmonics) starts unchecked, being a fault to
+              demonstrate rather than a property of a working bench. Noise is on because a bench with
+              <em>no</em> noise is not a clean one but an impossible one: a stopband bin then comes
+              out exactly zero, with a coherence of 1.0 and a meaningless phase, and the complex-plane
+              views spend their floors cleaning up after it. <strong>Harmonics</strong> is greyed out
+              under a nonlinear amplifier model, which drops the stack whatever the box says.
             </p>
             <p>
               Selecting the QA403 with none attached is not an error: the session simply ends up
               disconnected, exactly as it does when the app starts with nothing plugged in, and
               <strong>Connect</strong> picks it up when you attach one.
             </p>
+          </td>
+        </tr>
+        <tr>
+          <td>Gear, beside Analyzer</td>
+          <td>
+            That analyzer's own settings: <strong>QA403 settings</strong> under the QA403 and the
+            simulator, and the sound card's card picker and calibration under a card. It follows the
+            analyzer that is <em>selected</em> rather than one that is connected, so a setting can be
+            made before the hardware is up — and under the QA403 one of them (the sample rate)
+            decides what the FFT screen offers in the first place.
           </td>
         </tr>
         <tr>

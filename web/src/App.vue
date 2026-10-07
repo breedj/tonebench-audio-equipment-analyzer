@@ -54,6 +54,7 @@ import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
+import Qa403Dialog from './components/Qa403Dialog.vue'
 import SoundCardDialog from './components/SoundCardDialog.vue'
 import { useSoundCard } from './composables/useSoundCard'
 import AboutDialog from './components/AboutDialog.vue'
@@ -368,6 +369,7 @@ const metricPickerOpen = ref(false)
 const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
 const soundCardDialogOpen = ref(false)
+const qa403DialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
 const issueReportDialogOpen = ref(false)
 // The splash screen, up from the first frame and gone four seconds later (SplashScreen.vue). An
@@ -995,6 +997,19 @@ const responseProjection = ref<import('./api/client').ResponseProjection>('Bode'
 // the dB map trades that away to keep 60 dB of range on screen.
 const responseNyquistRadius = ref<import('./api/client').NyquistRadiusName>('Linear')
 const responseNyquistRadiusFloorDb = ref(-40)
+// Nichols' gain axis: fitted by default, which is what every build before the control did. There is
+// no phase pair beside it on purpose -- that axis carries unwrapped degrees, so its span belongs to
+// the DUT rather than to a preference (response/projection.ts's nicholsViewport says why).
+const responseNicholsAutoGain = ref(DEFAULT_RESPONSE_DISPLAY.nicholsAutoGain)
+const responseNicholsTopDb = ref(DEFAULT_RESPONSE_DISPLAY.nicholsTopDb)
+const responseNicholsBottomDb = ref(DEFAULT_RESPONSE_DISPLAY.nicholsBottomDb)
+// The pole-zero map's window, in hertz on both axes. Fitted by default, and square while it is --
+// damping reads as an angle from the origin there.
+const responsePoleZeroAutoWindow = ref(DEFAULT_RESPONSE_DISPLAY.poleZeroAutoWindow)
+const responsePoleZeroXMinHz = ref(DEFAULT_RESPONSE_DISPLAY.poleZeroXMinHz)
+const responsePoleZeroXMaxHz = ref(DEFAULT_RESPONSE_DISPLAY.poleZeroXMaxHz)
+const responsePoleZeroYMinHz = ref(DEFAULT_RESPONSE_DISPLAY.poleZeroYMinHz)
+const responsePoleZeroYMaxHz = ref(DEFAULT_RESPONSE_DISPLAY.poleZeroYMaxHz)
 const responseInvertLoopSign = ref(false)
 const responseRestoreDelay = ref(false)
 const responseShowFittedModel = ref(DEFAULT_RESPONSE_DISPLAY.showFittedModel)
@@ -1096,6 +1111,14 @@ function currentResponseDisplay(): ResponseDisplay {
     delayBottomUs: responseDelayBottomUs.value,
     nyquistRadius: responseNyquistRadius.value,
     nyquistRadiusFloorDb: responseNyquistRadiusFloorDb.value,
+    nicholsAutoGain: responseNicholsAutoGain.value,
+    nicholsTopDb: responseNicholsTopDb.value,
+    nicholsBottomDb: responseNicholsBottomDb.value,
+    poleZeroAutoWindow: responsePoleZeroAutoWindow.value,
+    poleZeroXMinHz: responsePoleZeroXMinHz.value,
+    poleZeroXMaxHz: responsePoleZeroXMaxHz.value,
+    poleZeroYMinHz: responsePoleZeroYMinHz.value,
+    poleZeroYMaxHz: responsePoleZeroYMaxHz.value,
     invertLoopSign: responseInvertLoopSign.value,
     restoreDelay: responseRestoreDelay.value,
     showFittedModel: responseShowFittedModel.value,
@@ -1150,6 +1173,14 @@ function applyStoredResponseDisplay(paramsJson: string) {
   responseDelayBottomUs.value = display.delayBottomUs
   responseNyquistRadius.value = display.nyquistRadius
   responseNyquistRadiusFloorDb.value = display.nyquistRadiusFloorDb
+  responseNicholsAutoGain.value = display.nicholsAutoGain
+  responseNicholsTopDb.value = display.nicholsTopDb
+  responseNicholsBottomDb.value = display.nicholsBottomDb
+  responsePoleZeroAutoWindow.value = display.poleZeroAutoWindow
+  responsePoleZeroXMinHz.value = display.poleZeroXMinHz
+  responsePoleZeroXMaxHz.value = display.poleZeroXMaxHz
+  responsePoleZeroYMinHz.value = display.poleZeroYMinHz
+  responsePoleZeroYMaxHz.value = display.poleZeroYMaxHz
   responseShowFittedModel.value = display.showFittedModel
   responseHideOutOfBandRoots.value = display.hideOutOfBandRoots
   responseSurfaceScale.value = display.surfaceScale
@@ -1190,6 +1221,9 @@ watch(
     responsePhaseTopDeg, responsePhaseBottomDeg, responseAutofitOnDone,
     responseDelayView, responseDelayTopUs, responseDelayBottomUs,
     responseProjection, responseNyquistRadius, responseNyquistRadiusFloorDb,
+    responseNicholsAutoGain, responseNicholsTopDb, responseNicholsBottomDb,
+    responsePoleZeroAutoWindow, responsePoleZeroXMinHz, responsePoleZeroXMaxHz,
+    responsePoleZeroYMinHz, responsePoleZeroYMaxHz,
     responseInvertLoopSign, responseRestoreDelay,
     responseFitAutoOrder, responseFitOrder, responseFitZeroOrder,
   ],
@@ -1747,15 +1781,20 @@ function closeSoundCardDialog() {
 }
 
 /**
- * And so does closing Configuration, for the same reason: the experimental 384 kHz checkbox moves
- * the analyzer's reported sample-rate list, which `ranges` is otherwise only fetched at mount — so
- * without this the box appears to do nothing until the page is reloaded. The device itself needs no
+ * And so does closing the QA403's, for the same reason: the experimental 384 kHz checkbox moves the
+ * analyzer's reported sample-rate list, which `ranges` is otherwise only fetched at mount — so
+ * without this the box appears to do nothing until the page is reloaded. (It used to hang off
+ * Configuration, which is where that checkbox was until 2026-10-05.) The device itself needs no
  * reconnect; it reads the setting through a Func, so the open connection already reports the new
  * list (see Qa40xUsbDevice.Allow384kHz).
  */
+function closeQa403Dialog() {
+  qa403DialogOpen.value = false
+  void refreshRanges()
+}
+
 function closeConfigDialog() {
   configDialogOpen.value = false
-  void refreshRanges()
 }
 
 /**
@@ -3060,6 +3099,14 @@ function buildTypeParamsJson(): string | undefined {
       chartProjection: responseProjection.value,
       chartNyquistRadius: responseNyquistRadius.value,
       chartNyquistRadiusFloorDb: responseNyquistRadiusFloorDb.value,
+      chartNicholsAutoGain: responseNicholsAutoGain.value,
+      chartNicholsTopDb: responseNicholsTopDb.value,
+      chartNicholsBottomDb: responseNicholsBottomDb.value,
+      chartPoleZeroAutoWindow: responsePoleZeroAutoWindow.value,
+      chartPoleZeroXMinHz: responsePoleZeroXMinHz.value,
+      chartPoleZeroXMaxHz: responsePoleZeroXMaxHz.value,
+      chartPoleZeroYMinHz: responsePoleZeroYMinHz.value,
+      chartPoleZeroYMaxHz: responsePoleZeroYMaxHz.value,
       chartInvertLoopSign: responseInvertLoopSign.value,
       chartRestoreDelay: responseRestoreDelay.value,
       chartShowFittedModel: responseShowFittedModel.value,
@@ -3958,6 +4005,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :scale="responseSurfaceScale"
                   :radius-mode="responseNyquistRadius"
                   :radius-floor-db="responseNyquistRadiusFloorDb"
+                  :nichols-auto-gain="responseNicholsAutoGain"
+                  :nichols-top-db="responseNicholsTopDb"
+                  :nichols-bottom-db="responseNicholsBottomDb"
+                  :pole-zero-auto-window="responsePoleZeroAutoWindow"
+                  :pole-zero-x-min-hz="responsePoleZeroXMinHz"
+                  :pole-zero-x-max-hz="responsePoleZeroXMaxHz"
+                  :pole-zero-y-min-hz="responsePoleZeroYMinHz"
+                  :pole-zero-y-max-hz="responsePoleZeroYMaxHz"
                   :invert-sign="responseInvertLoopSign"
                   :restore-delay="responseRestoreDelay"
                   :latency-samples="responseLatencySamples"
@@ -4016,6 +4071,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:projection="responseProjection"
                   v-model:nyquist-radius="responseNyquistRadius"
                   v-model:nyquist-radius-floor-db="responseNyquistRadiusFloorDb"
+                  v-model:nichols-auto-gain="responseNicholsAutoGain"
+                  v-model:nichols-top-db="responseNicholsTopDb"
+                  v-model:nichols-bottom-db="responseNicholsBottomDb"
+                  v-model:pole-zero-auto-window="responsePoleZeroAutoWindow"
+                  v-model:pole-zero-x-min-hz="responsePoleZeroXMinHz"
+                  v-model:pole-zero-x-max-hz="responsePoleZeroXMaxHz"
+                  v-model:pole-zero-y-min-hz="responsePoleZeroYMinHz"
+                  v-model:pole-zero-y-max-hz="responsePoleZeroYMaxHz"
+                  :auto-window="responsePolarChart?.autoWindow ?? null"
                   v-model:show-fitted-model="responseShowFittedModel"
                   v-model:hide-out-of-band-roots="responseHideOutOfBandRoots"
                   v-model:surface-scale="responseSurfaceScale"
@@ -4790,6 +4854,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       @set-ranging-mode="setRangingMode"
       @set-input-range="setInputRangeManually"
       @open-sound-card="soundCardDialogOpen = true"
+      @open-qa403="qa403DialogOpen = true"
       @set-external-gain="setExternalGain"
       @set-output-range="setOutputRangeManually"
       @connect="connectDevice"
@@ -4844,6 +4909,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       @close="issueReportDialogOpen = false"
     />
     <SoundCardDialog :open="soundCardDialogOpen" @close="closeSoundCardDialog" />
+    <!-- The status's own poll feeds this rather than a second one of its own: the step-down delay is
+         read back off the device, and ConfigDialog's draft-string bug was a dialog that polled. -->
+    <Qa403Dialog :open="qa403DialogOpen" :status="status" @close="closeQa403Dialog" />
     <AboutDialog :open="aboutDialogOpen" @close="aboutDialogOpen = false" />
     <ManualDialog />
   </div>

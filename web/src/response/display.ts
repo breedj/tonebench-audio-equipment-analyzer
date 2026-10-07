@@ -46,11 +46,36 @@ export interface ResponseDisplay {
   /** The Nyquist and Nichols projections' own settings — see ResponsePolarChart. */
   nyquistRadius: NyquistRadiusName
   nyquistRadiusFloorDb: number
+  /**
+   * Nichols: whether the gain axis is fitted to the curve, and the window it uses when it is not.
+   *
+   * On by default, which is what every build before the control did — so a stored type keeps the
+   * window it appeared to have. The phase axis has no pair of its own on purpose: it carries
+   * unwrapped degrees, so its span belongs to the DUT rather than to a preference (see
+   * `nicholsViewport`), and the plotted frequency range is what narrows it.
+   */
+  nicholsAutoGain: boolean
+  nicholsTopDb: number
+  nicholsBottomDb: number
+  /**
+   * Pole-zero map: whether the window is fitted to the roots, and the window in hertz when it is
+   * not — σ/2π along x, jω/2π up y, signed. A fitted window is drawn with equal aspect so ζ reads as
+   * an angle; a hand-set one is honoured exactly instead.
+   */
+  poleZeroAutoWindow: boolean
+  poleZeroXMinHz: number
+  poleZeroXMaxHz: number
+  poleZeroYMinHz: number
+  poleZeroYMaxHz: number
   invertLoopSign: boolean
   restoreDelay: boolean
   /** Draw the Poles and zeros panel's model over the measurement on Nyquist and Nichols. */
   showFittedModel: boolean
-  /** Pole-zero map: leave the fit's extrapolated roots off the plot. */
+  /**
+   * Both s-plane views: leave the fit's extrapolated roots off the plot. A *plot* setting only —
+   * the fit, the Poles and zeros table and H(s) all keep them, because a rational fit is solved as
+   * one function and its residual is quoted against all of it.
+   */
   hideOutOfBandRoots: boolean
   /** Both s-plane views: how radius is laid out — see response/splaneScale.ts. */
   surfaceScale: SPlaneScaleName
@@ -87,10 +112,23 @@ export const DEFAULT_RESPONSE_DISPLAY: Readonly<ResponseDisplay> = Object.freeze
   delayBottomUs: -1000,
   nyquistRadius: 'Linear',
   nyquistRadiusFloorDb: -40,
+  nicholsAutoGain: true,
+  nicholsTopDb: 20,
+  nicholsBottomDb: -40,
+  poleZeroAutoWindow: true,
+  poleZeroXMinHz: -100000,
+  poleZeroXMaxHz: 100000,
+  poleZeroYMinHz: -100000,
+  poleZeroYMaxHz: 100000,
   invertLoopSign: false,
   restoreDelay: false,
   showFittedModel: true,
-  hideOutOfBandRoots: false,
+  // On since 2026-10-06, at Joost's request. The roots it hides are the ones the sweep never
+  // constrained, and on a wide span they routinely sit decades out — which, with the window fitted
+  // to the roots, squeezes every real one into the origin marker. A type saved with the box
+  // explicitly off keeps it off; one saved before the box existed picks this up, which is the
+  // behaviour a default change is supposed to have.
+  hideOutOfBandRoots: true,
   surfaceScale: 'Linear',
   surfaceMode: 'Heatmap',
   surfaceTopDb: 40,
@@ -148,6 +186,20 @@ export function responseDisplayFromParams(
   if (stored.chartNyquistRadius === 'Linear' || stored.chartNyquistRadius === 'Db') display.nyquistRadius = stored.chartNyquistRadius
   if (typeof stored.chartNyquistRadiusFloorDb === 'number' && stored.chartNyquistRadiusFloorDb < 0)
     display.nyquistRadiusFloorDb = stored.chartNyquistRadiusFloorDb
+  if (typeof stored.chartNicholsAutoGain === 'boolean') display.nicholsAutoGain = stored.chartNicholsAutoGain
+  if (typeof stored.chartNicholsTopDb === 'number' && Number.isFinite(stored.chartNicholsTopDb))
+    display.nicholsTopDb = stored.chartNicholsTopDb
+  if (typeof stored.chartNicholsBottomDb === 'number' && Number.isFinite(stored.chartNicholsBottomDb))
+    display.nicholsBottomDb = stored.chartNicholsBottomDb
+  if (typeof stored.chartPoleZeroAutoWindow === 'boolean') display.poleZeroAutoWindow = stored.chartPoleZeroAutoWindow
+  if (typeof stored.chartPoleZeroXMinHz === 'number' && Number.isFinite(stored.chartPoleZeroXMinHz))
+    display.poleZeroXMinHz = stored.chartPoleZeroXMinHz
+  if (typeof stored.chartPoleZeroXMaxHz === 'number' && Number.isFinite(stored.chartPoleZeroXMaxHz))
+    display.poleZeroXMaxHz = stored.chartPoleZeroXMaxHz
+  if (typeof stored.chartPoleZeroYMinHz === 'number' && Number.isFinite(stored.chartPoleZeroYMinHz))
+    display.poleZeroYMinHz = stored.chartPoleZeroYMinHz
+  if (typeof stored.chartPoleZeroYMaxHz === 'number' && Number.isFinite(stored.chartPoleZeroYMaxHz))
+    display.poleZeroYMaxHz = stored.chartPoleZeroYMaxHz
   if (typeof stored.chartInvertLoopSign === 'boolean') display.invertLoopSign = stored.chartInvertLoopSign
   if (typeof stored.chartRestoreDelay === 'boolean') display.restoreDelay = stored.chartRestoreDelay
   if (typeof stored.chartShowFittedModel === 'boolean') display.showFittedModel = stored.chartShowFittedModel

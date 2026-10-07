@@ -16,7 +16,7 @@ import {
  * What the simulator's status-bar knobs have to say for a given measurement to produce anything
  * worth looking at — and the line the measurement screen shows when they do not.
  *
- * The simulator has twenty-two DUT models and four toggles, and which of them matter is different
+ * The simulator has two dozen DUT models and four toggles, and which of them matter is different
  * for every measurement: an IMD sweep into the "Tube amp" model draws nothing, because that model
  * is a linear filter and only four models distort at all; an impedance run into an amplifier model
  * inverts a divider that is not there; a crosstalk sweep reads a −200 dB floor until the Crosstalk
@@ -54,6 +54,8 @@ const DUT_LABELS: Partial<Record<SimulatedDutModel, string>> = {
   Oscillating: 'Oscillating',
   PhonoRiaa: 'Phono stage (RIAA)',
   DigitalProcessor: 'DSP processor (12 ms)',
+  FirstOrderLowPass: 'First order LP (2 kHz)',
+  SecondOrderLowPass: 'Second order LP (2 kHz)',
   ButterworthLowPass: 'Butterworth LP (2 kHz)',
   ChebyshevLowPass: 'Chebyshev LP (2 kHz)',
   BesselLowPass: 'Bessel LP (2 kHz)',

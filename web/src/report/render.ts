@@ -178,6 +178,16 @@ export async function renderView(
             projection: view,
             radiusMode: display.nyquistRadius,
             radiusFloorDb: display.nyquistRadiusFloorDb,
+            // The stored axis windows, so a chapter is the chart the screen showed rather than a
+            // re-fit of it — the same reasoning as `fitOrder` below.
+            nicholsAutoGain: display.nicholsAutoGain,
+            nicholsTopDb: display.nicholsTopDb,
+            nicholsBottomDb: display.nicholsBottomDb,
+            poleZeroAutoWindow: display.poleZeroAutoWindow,
+            poleZeroXMinHz: display.poleZeroXMinHz,
+            poleZeroXMaxHz: display.poleZeroXMaxHz,
+            poleZeroYMinHz: display.poleZeroYMinHz,
+            poleZeroYMaxHz: display.poleZeroYMaxHz,
             invertSign: display.invertLoopSign,
             restoreDelay: display.restoreDelay,
             latencySamples,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import type {
   DecayPalette,
   NyquistRadiusName,
@@ -23,6 +23,7 @@ import {
   unitToUs,
   usToUnit,
 } from '../response/delayAxis'
+import { seedNicholsGain, seedPoleZeroWindow, type ResponseAutoWindow } from '../response/autoWindow'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -30,12 +31,32 @@ import CollapsibleSection from './CollapsibleSection.vue'
  * several records; a stepped sine has one deterministic capture per point and nothing to compare it
  * with, so the toggle is hidden there rather than offering a control that always reads 1.
  */
-const props = withDefaults(defineProps<{ allowCoherence?: boolean }>(), { allowCoherence: true })
+const props = withDefaults(
+  defineProps<{
+    allowCoherence?: boolean
+    /**
+     * The window the mounted complex-plane chart fitted for itself, in these boxes' own units — what
+     * seeds them when **Auto** is turned off, and what Autofit writes into them. Null when no such
+     * chart is on screen (Bode, |H(s)|) or when it has nothing to fit; the boxes then keep what they
+     * hold rather than being reset to a default that has nothing to do with the DUT.
+     */
+    autoWindow?: ResponseAutoWindow | null
+  }>(),
+  { allowCoherence: true, autoWindow: null },
+)
 
 const view = defineModel<ResponseView>('view', { required: true })
 const projection = defineModel<ResponseProjection>('projection', { required: true })
 const nyquistRadius = defineModel<NyquistRadiusName>('nyquistRadius', { required: true })
 const nyquistRadiusFloorDb = defineModel<number>('nyquistRadiusFloorDb', { required: true })
+const nicholsAutoGain = defineModel<boolean>('nicholsAutoGain', { required: true })
+const nicholsTopDb = defineModel<number>('nicholsTopDb', { required: true })
+const nicholsBottomDb = defineModel<number>('nicholsBottomDb', { required: true })
+const poleZeroAutoWindow = defineModel<boolean>('poleZeroAutoWindow', { required: true })
+const poleZeroXMinHz = defineModel<number>('poleZeroXMinHz', { required: true })
+const poleZeroXMaxHz = defineModel<number>('poleZeroXMaxHz', { required: true })
+const poleZeroYMinHz = defineModel<number>('poleZeroYMinHz', { required: true })
+const poleZeroYMaxHz = defineModel<number>('poleZeroYMaxHz', { required: true })
 const showFittedModel = defineModel<boolean>('showFittedModel', { required: true })
 const hideOutOfBandRoots = defineModel<boolean>('hideOutOfBandRoots', { required: true })
 const surfaceScale = defineModel<SPlaneScaleName>('surfaceScale', { required: true })
@@ -106,6 +127,9 @@ const PROJECTIONS: { value: ResponseProjection; label: string }[] = [
 const sPlaneShowing = computed(() => projection.value === 'PoleZero' || projection.value === 'SPlane')
 /** The surface's own controls. */
 const surfaceShowing = computed(() => projection.value === 'SPlane')
+/** The two projections with an axis window of their own. */
+const nicholsShowing = computed(() => !bodeShowing.value && projection.value === 'Nichols')
+const poleZeroShowing = computed(() => !bodeShowing.value && projection.value === 'PoleZero')
 
 const S_PLANE_SCALES: { value: SPlaneScaleName; label: string }[] = [
   { value: 'Linear', label: 'Linear' },
@@ -219,6 +243,91 @@ function onTopDbChange(event: Event) {
 
 function onBottomDbChange(event: Event) {
   yBottomDb.value = commitBoundedNumber(event, yBottomDb.value, DB_MIN, yTopDb.value - DB_MIN_SPAN)
+}
+
+/**
+ * The Nichols gain window's own limits. The minimum span is two decibels rather than the dB window's
+ * four, because reading a gain margin is exactly the case where someone wants ±3 dB about 0.
+ */
+const NICHOLS_MIN_SPAN_DB = 2
+
+function onNicholsTopChange(event: Event) {
+  nicholsTopDb.value = commitBoundedNumber(event, nicholsTopDb.value, nicholsBottomDb.value + NICHOLS_MIN_SPAN_DB, DB_MAX)
+}
+
+function onNicholsBottomChange(event: Event) {
+  nicholsBottomDb.value = commitBoundedNumber(event, nicholsBottomDb.value, DB_MIN, nicholsTopDb.value - NICHOLS_MIN_SPAN_DB)
+}
+
+/**
+ * The pole-zero window's limits, in hertz. Signed on both axes: a stable pole has a negative σ, and
+ * both halves of the jω axis are drawn. The span floor is small rather than tidy — a DUT's lowest
+ * root can sit at a fraction of a hertz, and this axis is meant to be able to go there.
+ */
+const PZ_MAX_HZ = 1e7
+const PZ_MIN_SPAN_HZ = 1e-3
+
+/**
+ * Named rather than handed the ref, because a template unwraps a ref to its *value*: passing the
+ * model in from the markup would hand this function a number and leave nothing to write back to.
+ * Each bound is clamped against its own partner, so the window can never close to nothing.
+ */
+type PoleZeroBound = 'xMin' | 'xMax' | 'yMin' | 'yMax'
+
+function onPoleZeroBoundChange(event: Event, bound: PoleZeroBound) {
+  const commit = (current: number, lo: number, hi: number) => commitBoundedNumber(event, current, lo, hi)
+  switch (bound) {
+    case 'xMin':
+      poleZeroXMinHz.value = commit(poleZeroXMinHz.value, -PZ_MAX_HZ, poleZeroXMaxHz.value - PZ_MIN_SPAN_HZ)
+      return
+    case 'xMax':
+      poleZeroXMaxHz.value = commit(poleZeroXMaxHz.value, poleZeroXMinHz.value + PZ_MIN_SPAN_HZ, PZ_MAX_HZ)
+      return
+    case 'yMin':
+      poleZeroYMinHz.value = commit(poleZeroYMinHz.value, -PZ_MAX_HZ, poleZeroYMaxHz.value - PZ_MIN_SPAN_HZ)
+      return
+    case 'yMax':
+      poleZeroYMaxHz.value = commit(poleZeroYMaxHz.value, poleZeroYMinHz.value + PZ_MIN_SPAN_HZ, PZ_MAX_HZ)
+      return
+  }
+}
+
+/**
+ * Put the chart's own fitted window into the boxes.
+ *
+ * Called when Auto is turned off — so the boxes open on the window that was on screen a moment ago
+ * rather than on a default belonging to no DUT — and by Autofit, which under these projections means
+ * exactly this. The fit comes from the chart (see response/autoWindow.ts); with nothing mounted or
+ * nothing measured there is no window to seed from, and the boxes keep what they hold.
+ */
+function seedNicholsFromFit() {
+  const fitted = props.autoWindow
+  if (fitted?.kind !== 'Nichols') return
+  const seeded = seedNicholsGain(fitted)
+  nicholsTopDb.value = seeded.topDb
+  nicholsBottomDb.value = seeded.bottomDb
+}
+
+function seedPoleZeroFromFit() {
+  const fitted = props.autoWindow
+  if (fitted?.kind !== 'PoleZero') return
+  const seeded = seedPoleZeroWindow(fitted)
+  poleZeroXMinHz.value = seeded.xMinHz
+  poleZeroXMaxHz.value = seeded.xMaxHz
+  poleZeroYMinHz.value = seeded.yMinHz
+  poleZeroYMaxHz.value = seeded.yMaxHz
+}
+
+function onNicholsAutoChange(event: Event) {
+  const auto = (event.target as HTMLInputElement).checked
+  if (!auto) seedNicholsFromFit()
+  nicholsAutoGain.value = auto
+}
+
+function onPoleZeroAutoChange(event: Event) {
+  const auto = (event.target as HTMLInputElement).checked
+  if (!auto) seedPoleZeroFromFit()
+  poleZeroAutoWindow.value = auto
 }
 
 function onTopPhaseChange(event: Event) {
@@ -406,6 +515,19 @@ function autofitX() {
  */
 function autofitAll() {
   autofitX()
+  // Under Nichols and the pole-zero map, Autofit means the chart's own fit written into the boxes —
+  // not a checkbox quietly turned back on, which would discard a window the user chose. With Auto
+  // already on there is nothing to do, since that fit is what is drawn.
+  //
+  // After a tick, because `autofitX` has just moved the plotted frequency window: the fit depends on
+  // it, and `props.autoWindow` reaches this component through the parent's render, which has not run
+  // yet. Seeding synchronously here would write the window from *before* the frequency fit.
+  if ((nicholsShowing.value && !nicholsAutoGain.value) || (poleZeroShowing.value && !poleZeroAutoWindow.value)) {
+    void nextTick(() => {
+      if (nicholsShowing.value && !nicholsAutoGain.value) seedNicholsFromFit()
+      if (poleZeroShowing.value && !poleZeroAutoWindow.value) seedPoleZeroFromFit()
+    })
+  }
   if (!bodeShowing.value) return
   autofitDb()
   if (showPhase.value && phaseAvailable.value) autofitPhase()
@@ -515,8 +637,15 @@ watch(running, (isRunning, wasRunning) => {
          window is fitted to the roots, one of them squeezes every real one into the origin. -->
     <label v-if="!bodeShowing && sPlaneShowing" class="flex items-center gap-1.5 text-xs">
       <input v-model="hideOutOfBandRoots" type="checkbox" />
-      <span title="Leaves the roots the fit placed outside the swept band off the plot, and rescales it to what is left. They are extrapolation — the sweep constrains the response between its endpoints and says nothing beyond them. The fit itself is unchanged, and the Poles and zeros panel goes on listing them, flagged.">
-        Remove out of band
+      <!-- "from the plot" is in the label and not only in the tooltip, and that is the fix for a
+           real misreading: "Remove out of band" reads as removing those roots from the *fit*, so the
+           Poles and zeros table and H(s) going on listing them looks like the checkbox failing.
+           Reported 2026-10-06. The fit cannot drop them — it is one rational function solved as a
+           whole, and its residual is quoted against all of it; the lever for "I do not want those
+           roots" is the order, which the panel now says outright when most of them are
+           extrapolation. -->
+      <span title="Leaves the roots the fit placed outside the swept band off the plot, and rescales it to what is left. They are extrapolation — the sweep constrains the response between its endpoints and says nothing beyond them. The fit itself is unchanged: the Poles and zeros panel goes on listing them, flagged, and H(s) keeps them. To get them out of the model, lower the order.">
+        Hide out of band from the plot
       </span>
     </label>
 
@@ -773,6 +902,114 @@ watch(running, (isRunning, wasRunning) => {
     </button>
   </CollapsibleSection>
 
+  <!-- Nichols' own value axis. Its *phase* axis has no section, and that is deliberate: unwrapped
+       degrees make its span a property of the DUT rather than a preference (see
+       response/projection.ts), and the frequency window below is what narrows it. -->
+  <CollapsibleSection v-if="nicholsShowing" title="Gain range (dB)" size="xs">
+    <label
+      class="flex items-center gap-1.5 text-xs"
+      title="Fits the gain axis to the curve on every pass, and always keeps 0 dB and the −180° marker in view. Untick to set the window yourself — the boxes start from the window that was on screen, so unticking changes nothing until you edit them."
+    >
+      <input type="checkbox" :checked="nicholsAutoGain" @change="onNicholsAutoChange" />
+      Auto
+    </label>
+    <template v-if="!nicholsAutoGain">
+      <label class="flex flex-col gap-1 text-xs">
+        Top
+        <input
+          :value="nicholsTopDb"
+          type="number"
+          :step="DB_STEP"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="onNicholsTopChange"
+        />
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        Bottom
+        <input
+          :value="nicholsBottomDb"
+          type="number"
+          :step="DB_STEP"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="onNicholsBottomChange"
+        />
+      </label>
+      <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
+        A window that leaves 0 dB out is drawn as asked — the gain crossover and the −180° markers
+        then sit off the plot.
+      </p>
+    </template>
+    <button
+      type="button"
+      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      title="Fits the frequency window to the measured band, and the gain window to the curve inside it."
+      @click="autofitAll"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
+  <!-- The map's own window, in hertz on both axes like the chart's labels: σ/2π across, jω/2π up. -->
+  <CollapsibleSection v-if="poleZeroShowing" title="Pole/zero range (Hz)" size="xs">
+    <label
+      class="flex items-center gap-1.5 text-xs"
+      title="Fits the window to the fitted roots, square, so damping still reads as an angle from the origin. Untick to set the four bounds yourself — the boxes start from the window that was on screen."
+    >
+      <input type="checkbox" :checked="poleZeroAutoWindow" @change="onPoleZeroAutoChange" />
+      Auto
+    </label>
+    <template v-if="!poleZeroAutoWindow">
+      <label class="flex flex-col gap-1 text-xs">
+        σ/2π from
+        <input
+          :value="poleZeroXMinHz"
+          type="number"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="onPoleZeroBoundChange($event, 'xMin')"
+        />
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        σ/2π to
+        <input
+          :value="poleZeroXMaxHz"
+          type="number"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="onPoleZeroBoundChange($event, 'xMax')"
+        />
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        jω/2π from
+        <input
+          :value="poleZeroYMinHz"
+          type="number"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="onPoleZeroBoundChange($event, 'yMin')"
+        />
+      </label>
+      <label class="flex flex-col gap-1 text-xs">
+        jω/2π to
+        <input
+          :value="poleZeroYMaxHz"
+          type="number"
+          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="onPoleZeroBoundChange($event, 'yMax')"
+        />
+      </label>
+      <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
+        A hand-set window is drawn exactly as given, so two axes of different spans tilt the angles
+        damping is read from. Keep them equal, or use Auto, when reading ζ off the picture.
+      </p>
+    </template>
+    <button
+      type="button"
+      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      title="Fits the frequency window to the measured band, and the plane's window to the fitted roots."
+      @click="autofitAll"
+    >
+      Autofit
+    </button>
+  </CollapsibleSection>
+
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
     <label class="flex flex-col gap-1 text-xs">
       From
@@ -792,8 +1029,11 @@ watch(running, (isRunning, wasRunning) => {
         <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
       </select>
     </label>
+    <!-- The chart's one Autofit lives in its first axis section; under Bode, Nichols and the
+         pole-zero map that is a section above this one, and this is where the projections with no
+         value axis of their own (Nyquist, |H(s)|) get it. -->
     <button
-      v-if="!bodeShowing"
+      v-if="!bodeShowing && !nicholsShowing && !poleZeroShowing"
       type="button"
       class="w-full rounded border px-2 py-1 text-xs btn-action"
       title="Fits the frequency window to the measured band. This projection has no other axis to fit."

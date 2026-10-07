@@ -46,6 +46,33 @@ public static class ConfigEndpoints
     }
 
     /// <summary>
+    /// The stored auto-ranging step-down delay, defaulting to the ranger's own 1000 ms for an
+    /// absent, unreadable or out-of-range document — the same contract as the capture delay.
+    /// Shared with <see cref="StartupSettingsLoader"/>, which loads it into
+    /// <see cref="AutoRangeStepDownDelaySetting"/>, and written by
+    /// <c>POST /api/device/auto-range-step-down-delay</c> rather than by a route of its own: that
+    /// endpoint already owns applying it to the live device, and two write paths for one number is
+    /// how the two copies come to disagree.
+    /// </summary>
+    public static async Task<AutoRangeStepDownDelayConfig> ReadAutoRangeStepDownDelayAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? stored = await repo.GetAsync(ConfigRepository.AutoRangeStepDownDelayKey, ct);
+        if (string.IsNullOrWhiteSpace(stored))
+            return AutoRangeStepDownDelayConfig.Default;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.AutoRangeStepDownDelayConfig);
+            return config is { IsValid: true } ? config : AutoRangeStepDownDelayConfig.Default;
+        }
+        catch (JsonException)
+        {
+            return AutoRangeStepDownDelayConfig.Default;
+        }
+    }
+
+    /// <summary>
     /// The stored experimental 384 kHz opt-in, defaulting to off for an absent or unreadable
     /// document — the same contract as the capture delay. Shared with
     /// <see cref="StartupSettingsLoader"/>, which loads it into <see cref="Experimental384kSetting"/>.

@@ -172,14 +172,121 @@ public class FilterDutTests
         }
     }
 
+    /// <summary>
+    /// The two orders that exist to be checked against, pinned to the formulas that define them:
+    /// <c>-10 log10(1 + x^2)</c> and <c>-10 log10(1 + x^4)</c>, i.e. one real pole and one
+    /// conjugate pair at Q = 1/sqrt(2).
+    ///
+    /// <para>Tighter than the five-pole alignments' own tolerance on purpose. These two are the
+    /// models a pole-zero fit is checked against, so an error here is one that would be read as a
+    /// fit's error — and both are exact in closed form at the analog-equivalent frequency, so there
+    /// is nothing to be approximate about.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(100.0)]
+    [InlineData(1_000.0)]
+    [InlineData(2_000.0)]
+    [InlineData(4_000.0)]
+    [InlineData(20_000.0)]
+    public void FirstAndSecondOrder_MatchTheirClosedForms(double freqHz)
+    {
+        double x = AnalogEquivalentHz(freqHz) / Fc;
+
+        Assert.Equal(-10.0 * Math.Log10(1.0 + (x * x)), GainDb(SimulatedDutModel.FirstOrderLowPass, freqHz), 0.001);
+        Assert.Equal(-10.0 * Math.Log10(1.0 + Math.Pow(x, 4.0)), GainDb(SimulatedDutModel.SecondOrderLowPass, freqHz), 0.001);
+    }
+
+    /// <summary>
+    /// −3.01 dB at the corner and the slope that names the order: 20 dB per decade for one pole,
+    /// 40 for two.
+    ///
+    /// <para>Measured over a decade in <i>analog</i> frequency, not in digital — which is the whole
+    /// point of <see cref="AnalogEquivalentHz"/> one level up. A decade of nominal frequency ending
+    /// near Nyquist is not a decade at all once the bilinear transform has compressed it: 8 kHz to
+    /// 80 kHz at 192 kHz reads 28.8 dB on a one-pole filter, and a tolerance loose enough to call
+    /// that 20 would hide a genuinely wrong order. The corner itself maps to itself, so that half
+    /// needs no correction.</para>
+    /// </summary>
+    [Fact]
+    public void FirstAndSecondOrder_HaveTheCornerAndTheSlopeOfTheirOrder()
+    {
+        Assert.Equal(-3.01, GainDb(SimulatedDutModel.FirstOrderLowPass, Fc), 0.01);
+        Assert.Equal(-3.01, GainDb(SimulatedDutModel.SecondOrderLowPass, Fc), 0.01);
+
+        // One decade of analog frequency, starting a hundred times the corner. Far out on purpose:
+        // the slope is asymptotic, so a decade starting at four times the corner reads 19.74 dB on a
+        // one-pole filter — correct arithmetic and the wrong thing to call "20 dB per decade". Both
+        // ends still map inside Nyquist, since the prewarped transform compresses everything above
+        // the corner towards it.
+        double low = DigitalForAnalogHz(200_000.0);
+        double high = DigitalForAnalogHz(2_000_000.0);
+
+        Assert.Equal(
+            20.0,
+            GainDb(SimulatedDutModel.FirstOrderLowPass, low) - GainDb(SimulatedDutModel.FirstOrderLowPass, high),
+            0.01);
+        Assert.Equal(
+            40.0,
+            GainDb(SimulatedDutModel.SecondOrderLowPass, low) - GainDb(SimulatedDutModel.SecondOrderLowPass, high),
+            0.01);
+    }
+
+    /// <summary>The inverse of <see cref="AnalogEquivalentHz"/>: the digital frequency that stands for an analog one.</summary>
+    private static double DigitalForAnalogHz(double analogHz, double sampleRateHz = SampleRateHz)
+    {
+        double wc = 2.0 * Math.PI * Fc;
+        double k = wc / Math.Tan(wc / (2.0 * sampleRateHz));
+        return sampleRateHz * Math.Atan(2.0 * Math.PI * analogHz / k) / Math.PI;
+    }
+
+    /// <summary>
+    /// Half the order's total phase at the corner — −45° for one pole, −90° for two — which is the
+    /// reading the manual tells a user to identify an order by, and the one a complex-plane view
+    /// has to reproduce.
+    /// </summary>
+    [Fact]
+    public void FirstAndSecondOrder_HaveHalfTheirPhaseAtTheCorner()
+    {
+        double first = SimulatedDut.For(SimulatedDutModel.FirstOrderLowPass, SampleRateHz)!.ResponseAt(Fc).Phase;
+        double second = SimulatedDut.For(SimulatedDutModel.SecondOrderLowPass, SampleRateHz)!.ResponseAt(Fc).Phase;
+
+        Assert.Equal(-45.0, first * 180.0 / Math.PI, 0.05);
+        Assert.Equal(-90.0, second * 180.0 / Math.PI, 0.05);
+    }
+
+    /// <summary>
+    /// The second order is <b>one section</b>, not two with an inert one appended.
+    ///
+    /// <para><c>FilterPrototype.Sections</c> adds a first-order section for the real pole, and an
+    /// even-order design has no real pole: a <c>RealPole</c> of 0 realised as <c>0/(s+0)</c> would
+    /// be a section of gain zero, i.e. silence. The section count is what says the zero was read as
+    /// "none" rather than as a pole at the origin — and the gain assertions above would not catch a
+    /// *second* inert section that happened to be unity.</para>
+    /// </summary>
+    [Fact]
+    public void AnEvenOrderPrototype_HasNoRealPoleSection()
+    {
+        Assert.Single(FilterPrototype.SecondOrder.Sections(Fc, SampleRateHz));
+        Assert.Single(FilterPrototype.FirstOrder.Sections(Fc, SampleRateHz));
+        // And the odd-order case still has its: two pairs plus one real pole.
+        Assert.Equal(3, FilterPrototype.Butterworth.Sections(Fc, SampleRateHz).Length);
+    }
+
     [Theory]
     [InlineData(SimulatedDutModel.ButterworthLowPass)]
     [InlineData(SimulatedDutModel.ChebyshevLowPass)]
     [InlineData(SimulatedDutModel.BesselLowPass)]
     [InlineData(SimulatedDutModel.EllipticLowPass)]
-    public void EveryFilter_IsUnityAtDc_AndIsAClassicFilter(SimulatedDutModel model)
+    [InlineData(SimulatedDutModel.FirstOrderLowPass)]
+    [InlineData(SimulatedDutModel.SecondOrderLowPass)]
+    public void EveryFilter_IsUnityAtDc_AndIsAPrototypeFilter(SimulatedDutModel model)
     {
-        Assert.True(model.IsClassicFilter());
+        Assert.True(model.IsPrototypeFilter());
+        // IsClassicFilter still means the four alignments a reader compares against each other; the
+        // first- and second-order pair are orders to check a fit against, not alignments.
+        Assert.Equal(
+            model is not (SimulatedDutModel.FirstOrderLowPass or SimulatedDutModel.SecondOrderLowPass),
+            model.IsClassicFilter());
         Assert.False(model.IsImpedanceFixture());
         Assert.Equal(0, model.MeasuredChannel());
         Assert.Equal(0.0, GainDb(model, 1.0), 0.01);

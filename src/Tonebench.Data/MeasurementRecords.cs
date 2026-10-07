@@ -950,6 +950,34 @@ public sealed record FrequencyResponseParameters(
     /// <summary>How a Nyquist plot maps magnitude onto radius -- "Linear" or "Db".</summary>
     string? ChartNyquistRadius = null,
     double? ChartNyquistRadiusFloorDb = null,
+    /// <summary>
+    /// Nichols: whether the gain axis is fitted to the curve. Null on a type saved before the
+    /// control existed, treated as fitted -- which is what those builds always did, so an existing
+    /// type opens looking untouched.
+    ///
+    /// <para>There is deliberately no phase pair beside it. That axis carries <i>unwrapped</i>
+    /// degrees, so its span is a property of the DUT rather than a preference -- a loop with real
+    /// excess phase runs to thousands of degrees -- and the plotted frequency range is the control
+    /// that narrows it. See <c>response/projection.ts</c>'s <c>nicholsViewport</c>.</para>
+    /// </summary>
+    bool? ChartNicholsAutoGain = null,
+    /// <summary>Nichols: the gain axis' window in dB when <see cref="ChartNicholsAutoGain"/> is off.</summary>
+    double? ChartNicholsTopDb = null,
+    double? ChartNicholsBottomDb = null,
+    /// <summary>
+    /// Pole-zero map: whether the window is fitted to the roots. Null on a type saved before the
+    /// control existed, treated as fitted. A fitted window is drawn with equal aspect, because
+    /// damping reads as an angle from the origin there; a hand-set one is honoured exactly instead.
+    /// </summary>
+    bool? ChartPoleZeroAutoWindow = null,
+    /// <summary>
+    /// Pole-zero map: the window in hertz when <see cref="ChartPoleZeroAutoWindow"/> is off --
+    /// σ/2π along x and jω/2π up y, signed, and warped by whichever radius scale is in force.
+    /// </summary>
+    double? ChartPoleZeroXMinHz = null,
+    double? ChartPoleZeroXMaxHz = null,
+    double? ChartPoleZeroYMinHz = null,
+    double? ChartPoleZeroYMaxHz = null,
     /// <summary>Adds 180 degrees to the measured phase: the summing-junction inversion a loop-gain injection may or may not include, which the analyzer cannot see.</summary>
     bool? ChartInvertLoopSign = null,
     /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
@@ -976,9 +1004,11 @@ public sealed record FrequencyResponseParameters(
     /// <summary>The numerator order -- how many zeros -- pinned separately, and never more than <see cref="ChartFitPoles"/>.</summary>
     int? ChartFitZeros = null,
     /// <summary>
-    /// Pole-zero map: leave out the roots the fit placed outside the swept band. A display choice
-    /// only -- the fit, its residual and the panel's table are unchanged. Null on a type saved
-    /// before the map existed, treated as false.
+    /// Both s-plane views: leave out the roots the fit placed outside the swept band. A display
+    /// choice only -- the fit, its residual, the panel's table and H(s) are unchanged. Null on a
+    /// type saved before the map existed, treated as <b>on</b> since 2026-10-06: those roots are
+    /// the ones the sweep never constrained, and on a wide span they push every real one into the
+    /// origin marker.
     /// </summary>
     bool? ChartHideOutOfBandRoots = null,
     /// <summary>
@@ -1107,6 +1137,34 @@ public sealed record SteppedResponseParameters(
     /// <summary>How a Nyquist plot maps magnitude onto radius -- "Linear" or "Db".</summary>
     string? ChartNyquistRadius = null,
     double? ChartNyquistRadiusFloorDb = null,
+    /// <summary>
+    /// Nichols: whether the gain axis is fitted to the curve. Null on a type saved before the
+    /// control existed, treated as fitted -- which is what those builds always did, so an existing
+    /// type opens looking untouched.
+    ///
+    /// <para>There is deliberately no phase pair beside it. That axis carries <i>unwrapped</i>
+    /// degrees, so its span is a property of the DUT rather than a preference -- a loop with real
+    /// excess phase runs to thousands of degrees -- and the plotted frequency range is the control
+    /// that narrows it. See <c>response/projection.ts</c>'s <c>nicholsViewport</c>.</para>
+    /// </summary>
+    bool? ChartNicholsAutoGain = null,
+    /// <summary>Nichols: the gain axis' window in dB when <see cref="ChartNicholsAutoGain"/> is off.</summary>
+    double? ChartNicholsTopDb = null,
+    double? ChartNicholsBottomDb = null,
+    /// <summary>
+    /// Pole-zero map: whether the window is fitted to the roots. Null on a type saved before the
+    /// control existed, treated as fitted. A fitted window is drawn with equal aspect, because
+    /// damping reads as an angle from the origin there; a hand-set one is honoured exactly instead.
+    /// </summary>
+    bool? ChartPoleZeroAutoWindow = null,
+    /// <summary>
+    /// Pole-zero map: the window in hertz when <see cref="ChartPoleZeroAutoWindow"/> is off --
+    /// σ/2π along x and jω/2π up y, signed, and warped by whichever radius scale is in force.
+    /// </summary>
+    double? ChartPoleZeroXMinHz = null,
+    double? ChartPoleZeroXMaxHz = null,
+    double? ChartPoleZeroYMinHz = null,
+    double? ChartPoleZeroYMaxHz = null,
     /// <summary>Adds 180 degrees to the measured phase: the summing-junction inversion a loop-gain injection may or may not include, which the analyzer cannot see.</summary>
     bool? ChartInvertLoopSign = null,
     /// <summary>Put back the bulk delay the chirp estimator removed, so the contour is the physical one. No effect on a stepped run, which removes none.</summary>
@@ -1133,9 +1191,11 @@ public sealed record SteppedResponseParameters(
     /// <summary>The numerator order -- how many zeros -- pinned separately, and never more than <see cref="ChartFitPoles"/>.</summary>
     int? ChartFitZeros = null,
     /// <summary>
-    /// Pole-zero map: leave out the roots the fit placed outside the swept band. A display choice
-    /// only -- the fit, its residual and the panel's table are unchanged. Null on a type saved
-    /// before the map existed, treated as false.
+    /// Both s-plane views: leave out the roots the fit placed outside the swept band. A display
+    /// choice only -- the fit, its residual, the panel's table and H(s) are unchanged. Null on a
+    /// type saved before the map existed, treated as <b>on</b> since 2026-10-06: those roots are
+    /// the ones the sweep never constrained, and on a wide span they push every real one into the
+    /// origin marker.
     /// </summary>
     bool? ChartHideOutOfBandRoots = null,
     /// <summary>

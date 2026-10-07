@@ -145,12 +145,34 @@ public static class DeviceEndpoints
             }
         });
 
-        group.MapPost("/auto-range-step-down-delay", (AutoRangeStepDownDelayRequest request, DeviceSessionService session) =>
+        // Writes the device, the live setting and the stored document together, which is why it
+        // takes all three. It is on /device rather than /config because the refusal below is a
+        // property of the attached analyzer — but the value it writes outlives this session and this
+        // device: AnalyzerDeviceFactory applies it to every device it builds afterwards, which is
+        // what carries it across a restart and across an analyzer switch. Until 2026-10-06 it only
+        // wrote the device, and the delay went back to 1000 ms the next time the app started.
+        group.MapPost("/auto-range-step-down-delay", async (
+            AutoRangeStepDownDelayRequest request, DeviceSessionService session,
+            AutoRangeStepDownDelaySetting setting, ConfigRepository config, CancellationToken ct) =>
         {
             if (session.AutoRangeStepDownDelayMs is null)
                 return Results.BadRequest("The connected device has no input autoranging.");
 
-            session.SetAutoRangeStepDownDelayMs(request.DelayMs);
+            // Validated before anything is written: a NaN reaches the ranger as a comparison that is
+            // false forever, i.e. step-down silently off, and the document would then restore it on
+            // every start.
+            var stored = new AutoRangeStepDownDelayConfig(request.DelayMs);
+            if (!stored.IsValid)
+                return Results.BadRequest(
+                    $"The step-down delay must be between 0 and {AutoRangeStepDownDelayConfig.MaxDelayMs:0} ms.");
+
+            session.SetAutoRangeStepDownDelayMs(stored.DelayMs);
+            setting.Ms = stored.DelayMs;
+            await config.SetAsync(
+                ConfigRepository.AutoRangeStepDownDelayKey,
+                JsonSerializer.Serialize(stored, AppJsonContext.Default.AutoRangeStepDownDelayConfig),
+                ct);
+
             return Results.Ok(session.GetStatus());
         });
 

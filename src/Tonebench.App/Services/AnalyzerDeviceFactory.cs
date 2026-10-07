@@ -49,16 +49,19 @@ public class AnalyzerDeviceFactory
     private readonly IAnalyzerDevice? _pinned;
     private readonly SoundCardSetting _soundCard;
     private readonly Experimental384kSetting _experimental384k;
+    private readonly AutoRangeStepDownDelaySetting _stepDownDelay;
 
     public AnalyzerDeviceFactory(
         ILoggerFactory loggerFactory,
         DeviceKind initialKind,
         SoundCardSetting? soundCard = null,
-        Experimental384kSetting? experimental384k = null)
+        Experimental384kSetting? experimental384k = null,
+        AutoRangeStepDownDelaySetting? stepDownDelay = null)
     {
         _loggerFactory = loggerFactory;
         _soundCard = soundCard ?? new SoundCardSetting();
         _experimental384k = experimental384k ?? new Experimental384kSetting();
+        _stepDownDelay = stepDownDelay ?? new AutoRangeStepDownDelaySetting();
         InitialKind = initialKind;
     }
 
@@ -67,6 +70,7 @@ public class AnalyzerDeviceFactory
         _loggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
         _soundCard = new SoundCardSetting();
         _experimental384k = new Experimental384kSetting();
+        _stepDownDelay = new AutoRangeStepDownDelaySetting();
         _pinned = pinned;
 
         // A three-way test, not "simulator or else": a pinned sound card reported itself as
@@ -95,9 +99,32 @@ public class AnalyzerDeviceFactory
     /// </summary>
     public static AnalyzerDeviceFactory Pinned(IAnalyzerDevice device) => new(device);
 
+    /// <summary>
+    /// The device for <paramref name="kind"/>, with the settings that have to be <i>written</i> into
+    /// it applied — see <see cref="ApplyStoredSettings"/>.
+    /// </summary>
     public virtual IAnalyzerDevice Create(DeviceKind kind) =>
-        _pinned
-        ?? kind switch
+        // A pinned device belongs to its test, which may have set the very fields below; the
+        // factory's job there is to hand back what it was given, unaltered.
+        _pinned ?? ApplyStoredSettings(Build(kind));
+
+    /// <summary>
+    /// The settings a device cannot read for itself.
+    ///
+    /// <para><c>Allow384kHz</c> is a <c>Func</c> and needs nothing here. The step-down delay is a
+    /// plain field on the device's ranger, so it has to be pushed — and pushed on every device, not
+    /// just the QA403: the property is "ignored but harmlessly stored" on an analyzer with no ranger
+    /// (<c>IAnalyzerDevice.AutoRangeStepDownDelayMs</c>), and a device that is handed it anyway
+    /// cannot forget it if one ever grows one.</para>
+    /// </summary>
+    private IAnalyzerDevice ApplyStoredSettings(IAnalyzerDevice device)
+    {
+        device.AutoRangeStepDownDelayMs = _stepDownDelay.Ms;
+        return device;
+    }
+
+    private IAnalyzerDevice Build(DeviceKind kind) =>
+        kind switch
         {
             DeviceKind.Simulated => CreateSimulator(),
 
@@ -120,24 +147,37 @@ public class AnalyzerDeviceFactory
         };
 
     /// <summary>
-    /// The simulator as the app hands it to the user: noise floor and mains hum <b>off</b>, so a
-    /// straight wire reads as a straight wire and each impairment is something to switch on from the
-    /// status bar rather than something to explain away. The generator's fixed harmonic stack stays
-    /// <b>on</b> (since 2026-09-21, at Joost's request): without it the FFT screen's THD reads
-    /// 0.000 % on every linear model, which looks like a broken measurement rather than a clean one,
-    /// and the nonlinear models switch the stack off for themselves anyway
-    /// (<see cref="SimulatedDut.SuppliesOwnDistortion"/>). <see cref="SimulatedDevice"/>'s own
-    /// defaults keep all three on — a large number of tests are written against that bench, and a
-    /// device built directly still gets it.
+    /// The simulator as the app hands it to the user: noise floor and the generator's fixed harmonic
+    /// stack <b>on</b>, mains hum <b>off</b>.
+    ///
+    /// <para><b>Noise was off until 2026-10-06</b>, on the reasoning that a straight wire should read
+    /// as a straight wire and each impairment should be something to switch on rather than something
+    /// to explain away. The reasoning is sound and the default was still wrong, because a noise-free
+    /// bench is not a clean one — it is an <i>impossible</i> one, and several analyses here are built
+    /// on the assumption that no bin is ever exactly zero. A noise-free simulation drives a stopband
+    /// bin to the sample format's own rounding, which <c>FrequencyResponseEstimator.ToDb</c> floors
+    /// at −600 dB with a coherence of 1.0 (no noise means no disagreement between averages, so
+    /// coherence cannot catch it) and a phase that is whatever <c>atan2(0, 0)</c> and the removed
+    /// delay made of it. Measured on the Bessel over a 96 kHz span, that unwrapped to −1 311 194° by
+    /// 95 kHz and put three thousand critical-phase markers on a Nichols chart — see
+    /// <c>response/complexPlane.ts</c>'s <c>MIN_MEASURED_RELATIVE_DB</c>, which exists to clean up
+    /// after exactly this. Every one of those floors is a guard against an artefact of the default,
+    /// not against anything a bench can produce.</para>
+    ///
+    /// <para>Hum stays off: 50 Hz and two harmonics are a <i>fault</i> to demonstrate rather than a
+    /// property of a working bench, and they sit in the middle of the band where they obscure a real
+    /// measurement. The harmonic stack stays on (since 2026-09-21, at Joost's request): without it
+    /// the FFT screen's THD reads 0.000 % on every linear model, which looks like a broken
+    /// measurement rather than a clean one, and the nonlinear models switch the stack off for
+    /// themselves anyway (<see cref="SimulatedDut.SuppliesOwnDistortion"/>).</para>
+    ///
+    /// <para><see cref="SimulatedDevice"/>'s own defaults keep all three on — a large number of tests
+    /// are written against that bench, and a device built directly still gets it.</para>
     /// </summary>
     private SimulatedDevice CreateSimulator()
     {
         var device = new SimulatedDevice { Allow384kHz = () => _experimental384k.Enabled };
-        device.SignalProfile = device.SignalProfile with
-        {
-            NoiseEnabled = false,
-            HumEnabled = false,
-        };
+        device.SignalProfile = device.SignalProfile with { HumEnabled = false };
         return device;
     }
 }

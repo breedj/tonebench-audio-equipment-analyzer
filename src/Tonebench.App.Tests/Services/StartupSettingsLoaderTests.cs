@@ -52,10 +52,20 @@ public sealed class StartupSettingsLoaderTests : IDisposable
     /// constructor reaches <c>PortAudioNative.Shared</c> and starts a native audio stack; what is
     /// under test is which kind the factory captured, not what it then built.
     /// </summary>
-    private sealed class TestFactory(AnalyzerKindSetting kind, SoundCardSetting soundCard)
-        : AnalyzerDeviceFactory(NullLoggerFactory.Instance, kind.Kind, soundCard)
+    private sealed class TestFactory(
+        AnalyzerKindSetting kind, SoundCardSetting soundCard, AutoRangeStepDownDelaySetting stepDownDelay)
+        : AnalyzerDeviceFactory(NullLoggerFactory.Instance, kind.Kind, soundCard, stepDownDelay: stepDownDelay)
     {
         private readonly SoundCardSetting _soundCard = soundCard;
+        private readonly AutoRangeStepDownDelaySetting _stepDownDelay = stepDownDelay;
+
+        /// <summary>
+        /// What the device was handed as its step-down delay, which is the only thing that carries
+        /// that setting across a restart: the ranger's field cannot be read through a Func, so a
+        /// device built before the document was read keeps the ranger's own 1000 ms default for the
+        /// rest of the session. The same trap as the sound card's settings, one setting along.
+        /// </summary>
+        public double DelayWhenBuilt { get; private set; }
 
         /// <summary>
         /// What <see cref="SoundCardSetting"/> held at the instant the device was built — which is
@@ -68,7 +78,10 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         public override IAnalyzerDevice Create(DeviceKind _)
         {
             ConfigWhenBuilt = _soundCard.Config;
-            return new SimulatedDevice();
+            DelayWhenBuilt = _stepDownDelay.Ms;
+            var device = new SimulatedDevice();
+            device.AutoRangeStepDownDelayMs = _stepDownDelay.Ms;
+            return device;
         }
     }
 
@@ -83,6 +96,7 @@ public sealed class StartupSettingsLoaderTests : IDisposable
 
         services.AddSingleton<CaptureDelaySetting>();
         services.AddSingleton<Experimental384kSetting>();
+        services.AddSingleton<AutoRangeStepDownDelaySetting>();
         services.AddSingleton<ExternalGainSetting>();
         services.AddSingleton<SoundCardSetting>();
         services.AddSingleton<AnalyzerKindSetting>();
@@ -101,7 +115,8 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         // AnalyzerKindSetting when the factory is first resolved, not when it is registered.
         services.AddSingleton<AnalyzerDeviceFactory>(sp => new TestFactory(
             sp.GetRequiredService<AnalyzerKindSetting>(),
-            sp.GetRequiredService<SoundCardSetting>()));
+            sp.GetRequiredService<SoundCardSetting>(),
+            sp.GetRequiredService<AutoRangeStepDownDelaySetting>()));
         services.AddSingleton<DeviceSessionService>();
 
         return services.BuildServiceProvider();
@@ -198,5 +213,62 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         Assert.Equal(-20.0, provider.GetRequiredService<ExternalGainSetting>().LeftDb);
         Assert.Equal(-10.0, provider.GetRequiredService<ExternalGainSetting>().RightDb);
         Assert.True(provider.GetRequiredService<Experimental384kSetting>().Enabled);
+    }
+
+    /// <summary>
+    /// The step-down delay has to be in memory <i>before</i> the first device is built, for the same
+    /// reason the sound card's settings do and unlike the 384 kHz opt-in: the factory writes it into
+    /// each device it builds, because the ranger's field has no Func to read it through. Asserted at
+    /// the instant <c>Create</c> ran, so a version that loads it after the session resolves fails —
+    /// the setting itself is loaded either way.
+    /// </summary>
+    [Fact]
+    public async Task TheStepDownDelay_IsInTheFirstDeviceTheSessionBuilds()
+    {
+        await using ServiceProvider provider = BuildContainer();
+        await provider.GetRequiredService<ConfigRepository>().SetAsync(
+            ConfigRepository.AutoRangeStepDownDelayKey,
+            System.Text.Json.JsonSerializer.Serialize(
+                new AutoRangeStepDownDelayConfig(2500.0), AppJsonContext.Default.AutoRangeStepDownDelayConfig),
+            CancellationToken.None);
+
+        await StartupSettingsLoader.LoadAsync(provider, CancellationToken.None);
+
+        var factory = (TestFactory)provider.GetRequiredService<AnalyzerDeviceFactory>();
+        Assert.Equal(2500.0, factory.DelayWhenBuilt);
+        Assert.Equal(2500.0, provider.GetRequiredService<AutoRangeStepDownDelaySetting>().Ms);
+    }
+
+    /// <summary>A damaged or out-of-range document leaves the ranger's own default, not a NaN.</summary>
+    [Theory]
+    [InlineData("{\"delayMs\":-5}")]
+    [InlineData("{\"delayMs\":999999}")]
+    [InlineData("not json")]
+    public async Task AnUnusableStepDownDelayDocument_LeavesTheDefault(string stored)
+    {
+        await using ServiceProvider provider = BuildContainer();
+        await provider.GetRequiredService<ConfigRepository>().SetAsync(
+            ConfigRepository.AutoRangeStepDownDelayKey, stored, CancellationToken.None);
+
+        await StartupSettingsLoader.LoadAsync(provider, CancellationToken.None);
+
+        Assert.Equal(
+            AutoRangeStepDownDelayConfig.Default.DelayMs,
+            provider.GetRequiredService<AutoRangeStepDownDelaySetting>().Ms);
+    }
+
+    /// <summary>
+    /// The default this config record repeats is the ranger's own, which the compiler cannot check:
+    /// <c>Tonebench.Data</c> does not reference <c>Tonebench.Device</c>. Read off a device rather
+    /// than off <c>Qa40xAutoRanger</c>, which is internal — every device initialises the property
+    /// from that constant, so the simulator's is the same number by construction. A drift would
+    /// otherwise show only as the delay changing the first time anybody stored one.
+    /// </summary>
+    [Fact]
+    public void TheStoredDefault_IsTheRangersOwnDefault()
+    {
+        Assert.Equal(
+            new SimulatedDevice().AutoRangeStepDownDelayMs,
+            AutoRangeStepDownDelayConfig.Default.DelayMs);
     }
 }

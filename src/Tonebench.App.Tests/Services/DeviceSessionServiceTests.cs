@@ -188,7 +188,7 @@ public class DeviceSessionServiceTests
 
         // A directly constructed SimulatedDevice ships with all three on
         // (SimulatedSignalProfile.NoiseEnabled/HumEnabled/HarmonicsEnabled); the app's factory is
-        // what turns them off — see AnalyzerDeviceFactory_HandsOutTheSimulatorWithEveryImpairmentOff.
+        // what turns hum off — see AnalyzerDeviceFactory_HandsOutTheSimulatorWithNoiseAndHarmonicsOnAndHumOff.
         Assert.True(session.SimulatedNoiseEnabled);
         Assert.True(session.SimulatedHumEnabled);
         Assert.True(session.SimulatedHarmonicsEnabled);
@@ -211,16 +211,20 @@ public class DeviceSessionServiceTests
     /// written against has them.
     /// </summary>
     [Fact]
-    public void AnalyzerDeviceFactory_HandsOutTheSimulatorWithNoiseAndHumOffAndHarmonicsOn()
+    public void AnalyzerDeviceFactory_HandsOutTheSimulatorWithNoiseAndHarmonicsOnAndHumOff()
     {
         var factory = new AnalyzerDeviceFactory(NullLoggerFactory.Instance, DeviceKind.Simulated);
 
         var device = Assert.IsType<SimulatedDevice>(factory.Create(DeviceKind.Simulated));
 
-        Assert.False(device.SignalProfile.NoiseEnabled);
+        // Noise on since 2026-10-06, and the reason is in CreateSimulator's own remarks: a bench
+        // with no noise at all is not a clean one, it is one where a stopband bin is *exactly* zero
+        // and the phase of that bin is whatever atan2(0, 0) made of it. Coherence reads 1.0
+        // throughout, so nothing downstream can tell it is looking at an artefact.
+        Assert.True(device.SignalProfile.NoiseEnabled);
         Assert.False(device.SignalProfile.HumEnabled);
         Assert.True(device.SignalProfile.HarmonicsEnabled);
-        // Everything else is the device's own default — the factory only touches the two switches.
+        // Everything else is the device's own default — the factory only touches the one switch.
         Assert.Equal(new SimulatedDevice().SignalProfile.Dut, device.SignalProfile.Dut);
         Assert.Equal(new SimulatedDevice().SignalProfile.GeneratorLeft, device.SignalProfile.GeneratorLeft);
     }

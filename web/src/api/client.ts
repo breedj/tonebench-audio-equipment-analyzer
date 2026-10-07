@@ -163,7 +163,11 @@ export type SimulatedDutModel =
   // band) and a processor with real latency.
   | 'PhonoRiaa'
   | 'DigitalProcessor'
-  // The four classic low-pass alignments, fifth order at 2 kHz: one corner, four different trades.
+  // Low-pass filters, all at 2 kHz. The first two are the orders a pole-zero fit can be checked
+  // against exactly (one real pole; one pair at Q = 1/√2); the four below are the classic
+  // fifth-order alignments — one corner, four different trades.
+  | 'FirstOrderLowPass'
+  | 'SecondOrderLowPass'
   | 'ButterworthLowPass'
   | 'ChebyshevLowPass'
   | 'BesselLowPass'
@@ -852,6 +856,24 @@ export interface FrequencyResponseParameters {
   chartProjection?: ResponseProjection | null
   chartNyquistRadius?: NyquistRadiusName | null
   chartNyquistRadiusFloorDb?: number | null
+  /**
+   * Nichols: whether the gain axis is fitted to the curve, and the dB window it uses when it is
+   * not. Absent on a type saved before the control existed, which is treated as fitted — what those
+   * builds always did. There is deliberately no phase pair: that axis carries unwrapped degrees, so
+   * its span belongs to the DUT rather than to a preference (see response/projection.ts).
+   */
+  chartNicholsAutoGain?: boolean | null
+  chartNicholsTopDb?: number | null
+  chartNicholsBottomDb?: number | null
+  /**
+   * Pole-zero map: whether the window is fitted to the roots, and the window in hertz when it is
+   * not — σ/2π along x, jω/2π up y, signed, and warped by whichever radius scale is in force.
+   */
+  chartPoleZeroAutoWindow?: boolean | null
+  chartPoleZeroXMinHz?: number | null
+  chartPoleZeroXMaxHz?: number | null
+  chartPoleZeroYMinHz?: number | null
+  chartPoleZeroYMaxHz?: number | null
   chartInvertLoopSign?: boolean | null
   chartRestoreDelay?: boolean | null
   /** Nyquist and Nichols: draw the fitted model over the measurement. */
@@ -1184,6 +1206,24 @@ export interface SteppedResponseParameters {
   chartProjection?: ResponseProjection | null
   chartNyquistRadius?: NyquistRadiusName | null
   chartNyquistRadiusFloorDb?: number | null
+  /**
+   * Nichols: whether the gain axis is fitted to the curve, and the dB window it uses when it is
+   * not. Absent on a type saved before the control existed, which is treated as fitted — what those
+   * builds always did. There is deliberately no phase pair: that axis carries unwrapped degrees, so
+   * its span belongs to the DUT rather than to a preference (see response/projection.ts).
+   */
+  chartNicholsAutoGain?: boolean | null
+  chartNicholsTopDb?: number | null
+  chartNicholsBottomDb?: number | null
+  /**
+   * Pole-zero map: whether the window is fitted to the roots, and the window in hertz when it is
+   * not — σ/2π along x, jω/2π up y, signed, and warped by whichever radius scale is in force.
+   */
+  chartPoleZeroAutoWindow?: boolean | null
+  chartPoleZeroXMinHz?: number | null
+  chartPoleZeroXMaxHz?: number | null
+  chartPoleZeroYMinHz?: number | null
+  chartPoleZeroYMaxHz?: number | null
   chartInvertLoopSign?: boolean | null
   chartRestoreDelay?: boolean | null
   /** Nyquist and Nichols: draw the fitted model over the measurement. */

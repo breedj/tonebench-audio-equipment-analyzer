@@ -159,7 +159,7 @@ const markers: ManualMarker[] = [{ x: 0, color: 'grey' }]
         ['Choose order automatically', 'Searches orders and takes the lowest that fits about as well as the best one tried, with as many zeros as poles. It stops climbing once the model is already inside the measurement’s own ripple (0.1 dB rms), so a flat amplifier is described by a low order rather than by roots invented to chase noise. Untick it to set the two separately.'],
         ['Poles', 'The denominator order: how many poles the model may have, 1 to 10.'],
         ['Zeros', 'The numerator order, never more than Poles — a transfer function is proper. Set it to 0 for an all-pole DUT (any of the four classic filters, most amplifiers): with as many zeros as poles the fitter spends them on noise, and invents right-half-plane poles to go with them.'],
-        ['Remove out of band', 'A display option on the map: leaves out the roots the fit placed outside the swept band and rescales the plot to what is left. The fit is unchanged and the table goes on listing them, flagged.'],
+        ['Hide out of band from the plot', 'On by default. A display option on the two s-plane views: leaves out the roots the fit placed outside the swept band and rescales the plot to what is left. It does not touch the fit — the table goes on listing them, flagged, and H(s) keeps them. To get them out of the model, lower the order; see below.'],
       ]"
     />
 
@@ -224,9 +224,34 @@ const markers: ManualMarker[] = [{ x: 0, color: 'grey' }]
         is whatever the fit needed to bend the in-band curve — often roughly right, sometimes a
         decade out, and never a measurement. Widen the sweep rather than trusting one. Because the
         window is fitted to the roots, a single wild one also squeezes every real root into a pixel
-        at the origin, which is what <strong>Remove out of band</strong> is for.
+        at the origin, which is what <strong>Hide out of band from the plot</strong> is for, and why
+        it is ticked by default.
       </p>
     </div>
+
+    <h2>Out of band is not out of the model</h2>
+    <p>
+      That checkbox hides those roots from the <em>plot</em>. It leaves the table, the fit error and
+      <strong>H(s)</strong> exactly as they were, and that is deliberate rather than unfinished: a
+      rational fit is one function solved as a whole, and the residual printed under it is quoted
+      against all of it. Print a subset and the formula no longer matches either the number beneath
+      it or the dashed curve drawn over the measurement.
+    </p>
+    <p>
+      <strong>It also matters more than it sounds, because a root being out of band does not put its
+      effect out of band.</strong> Measured on the simulator's first-order filter over 4 Hz – 22.7 kHz:
+      the automatic order returned the correct 2.02 kHz pole plus a 24.1 kHz zero pair at Q 557 and a
+      58.2 kHz pole pair, all three flagged out of band. Deleting those three from H(s) would change
+      the model by 0.01 dB at 1 kHz — and by <strong>1.4 dB at 10 kHz, 9.1 dB at 20 kHz and 17.6 dB
+      at the band edge</strong>. A high-Q pair sitting just above the top of the sweep carries the
+      whole top of the band.
+    </p>
+    <p>
+      So the lever for "I do not want those roots in the model" is the <strong>order</strong>, not the
+      checkbox. Untick <strong>Choose order automatically</strong> and set <strong>Poles</strong> to
+      the number of entries the band actually constrained, with <strong>Zeros</strong> at 0 for an
+      all-pole DUT. The panel says so itself when most of the model is extrapolation.
+    </p>
 
     <h2>Hover and zoom</h2>
     <p>
@@ -237,6 +262,34 @@ const markers: ManualMarker[] = [{ x: 0, color: 'grey' }]
       <strong>Invert loop sign</strong> and <strong>Restore removed delay</strong> change the curve
       the fit is taken over, so they move the roots too — see above for which way to set the second
       one.
+    </p>
+
+    <h2>Pole/zero range</h2>
+    <p>
+      <strong>Auto</strong> — the default — is that fitted window: square, centred on the origin and
+      wide enough for every root drawn. Square matters here, because it is what lets damping be read
+      as an angle from the origin; stretch one axis and a 45° line is no longer ζ = 0.707.
+    </p>
+    <p>
+      Untick it and the four boxes are the window, in hertz, on the axes the chart labels:
+      <strong>σ/2π</strong> across (negative to the left, where a stable pole lives) and
+      <strong>jω/2π</strong> up. They open on the fitted window rounded out to three significant
+      figures, so unticking changes nothing by itself, and <strong>Autofit</strong> writes that
+      fitted window back into them. Under the <strong>Log</strong> s-plane radius the bounds are
+      warped exactly as the roots are, so a bound typed in lands where a root at that frequency
+      would.
+    </p>
+    <p>
+      A hand-set window is drawn exactly as given, which is the point — but two axes of different
+      spans tilt the angles damping is read from. Keep the two spans equal, or go back to Auto, when
+      taking ζ off the picture rather than off the hover readout or the panel's table, both of which
+      are unaffected by any of this.
+    </p>
+    <p>
+      This is the window and <em>not</em> a filter: a root outside it is off the plot but still in the
+      fit, still listed in the <strong>Poles and zeros</strong> panel and still part of H(s).
+      <strong>Hide out of band from the plot</strong> is the control that changes which roots are
+      drawn, and it moves the fitted window with them.
     </p>
   </div>
 </template>

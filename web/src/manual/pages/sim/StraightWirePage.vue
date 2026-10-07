@@ -42,16 +42,26 @@ const thd = 100 * Math.sqrt(GENERATOR_HARMONIC_DBC.reduce((s, dbc) => s + Math.p
       the measurement of the analyzer rather than of anything patched to it.
     </p>
     <p>
-      <strong>Noise</strong> and <strong>Hum</strong> start unchecked and <strong>Harmonics</strong>
-      starts checked. With all three off the wire carries the simulated <em>generator</em> and
-      nothing else: a tone is one line at exactly the level asked for, there is no floor under it,
-      and THD reads 0.000 %. Each box patches one impairment into that: <strong>Noise</strong> a
+      <strong>Noise</strong> and <strong>Harmonics</strong> start checked; <strong>Hum</strong>
+      starts unchecked. Each box patches one thing into the path: <strong>Noise</strong> a
       −150 dBV/√Hz white floor with a little 1/f rise below 300 Hz, <strong>Hum</strong> mains at
       50 Hz with two harmonics, and <strong>Harmonics</strong> a fixed stack on every generator tone
       — H2 −46 dBc, H3 −60 dBc, each order above 12 dB lower — that stands in for a distorting
       source and reads 0.51 % THD at any level. The linear models on the pages that follow add no
       distortion of their own, so with Harmonics off they read 0.000 % too, and with it on they
       read that same 0.51 % bent by their response.
+    </p>
+    <p>
+      <strong>Turning Noise off is worth knowing about rather than worth doing.</strong> With it off
+      the wire carries the generator and nothing else: a tone is one line at exactly the level asked
+      for, with no floor under it — which sounds like the ideal case and is in fact a bench no
+      instrument could ever see. Nothing real is <em>exactly</em> zero, and several analyses here
+      quietly depend on that: a stopband bin that rounds to zero gets a phase from
+      <code>atan2(0, 0)</code>, a coherence of 1.0 (with no noise, every average agrees), and a
+      −600 dB magnitude, after which the complex-plane views have to defend themselves with floors
+      rather than read a measurement. It was the default until October 2026 and the floors in those
+      views are what it cost. Use it to see a measurement's own arithmetic in isolation; leave it on
+      otherwise.
     </p>
 
     <h2>What to expect, in numbers</h2>

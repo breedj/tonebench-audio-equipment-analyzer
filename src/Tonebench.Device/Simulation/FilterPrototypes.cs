@@ -1,10 +1,11 @@
 namespace Tonebench.Device.Simulation;
 
 /// <summary>
-/// One classic low-pass alignment as an analog prototype: its poles, and for the elliptic its
-/// zeros, all normalised to a corner of 1 rad/s. Fifth order throughout — two conjugate pole pairs
-/// and one real pole — which is what "5 poles" means and what puts the roll-off at 100 dB per decade
-/// on the three all-pole designs.
+/// One low-pass alignment as an analog prototype: its poles, and for the elliptic its zeros, all
+/// normalised to a corner of 1 rad/s. Fifth order for the four classic alignments — two conjugate
+/// pole pairs and one real pole — which is what "5 poles" means and what puts the roll-off at
+/// 100 dB per decade on the three all-pole designs, plus a first- and a second-order entry for the
+/// textbook cases (see <see cref="FirstOrder"/>).
 ///
 /// <para>Four filters, each the textbook answer to a different question. <b>Butterworth</b> is
 /// maximally flat in the passband and −3 dB at its corner. <b>Chebyshev</b> (type I) buys a far
@@ -26,7 +27,12 @@ namespace Tonebench.Device.Simulation;
 /// </summary>
 /// <param name="Name">The alignment's name, as the enum and the UI use it.</param>
 /// <param name="PolePairs">Each conjugate pole pair's upper member as <c>(sigma, omega)</c>, i.e. the pole is <c>sigma + j omega</c>.</param>
-/// <param name="RealPole">The one real pole, as a positive distance down the negative real axis.</param>
+/// <param name="RealPole">
+/// The one real pole, as a positive distance down the negative real axis — <b>0 for an even-order
+/// design, which has none</b>. An odd-order low-pass always has exactly one; the second-order
+/// Butterworth is a single conjugate pair and nothing else, and appending a first-order section
+/// with <c>a = 0</c> would realise <c>0/(s+0)</c> and silence the DUT.
+/// </param>
 /// <param name="ZeroOmegas">
 /// The elliptic's zero pairs, <c>±j omega</c>, one per pole pair in the same order (each pole
 /// pair takes the zero nearest it, the usual pairing); empty for the all-pole designs.
@@ -37,6 +43,35 @@ internal sealed record FilterPrototype(
     double RealPole,
     double[] ZeroOmegas)
 {
+    /// <summary>
+    /// One real pole and nothing else: <c>1/(s+1)</c>, −3.01 dB at the corner, 20 dB per decade, and
+    /// phase approaching −90°.
+    ///
+    /// <para>Written out like the other five although it is the one case anybody can derive, because
+    /// the point of it is to be <i>exactly</i> a first-order section: a pole-zero fit of it must come
+    /// back with one pole, no zeros and a residual at the noise floor, which is the simplest possible
+    /// check that the fitter and the s-plane views are reading a DUT correctly rather than agreeing
+    /// with themselves. The fifth-order alignments cannot do that job — at order 5 a fit has enough
+    /// freedom to look right while being wrong.</para>
+    /// </summary>
+    public static FilterPrototype FirstOrder { get; } = new("First order", [], 1.0, []);
+
+    /// <summary>
+    /// A second-order Butterworth: one conjugate pair at <c>−cos45° ± j sin45°</c>, i.e.
+    /// <c>Q = 1/√2</c> and <c>ζ = 0.7071</c>, −3.01 dB at the corner and 40 dB per decade.
+    ///
+    /// <para>The companion to <see cref="FirstOrder"/>, and the reason it is Butterworth rather than
+    /// some other Q: <c>ζ = 1/√2</c> is the one second-order damping a reader can recognise on sight,
+    /// so the pole-zero panel's Q column and the 45° line on the s-plane map can both be checked
+    /// against a number that was chosen rather than measured. No real pole — see
+    /// <see cref="RealPole"/>, which is 0 here and is why <see cref="Sections"/> counts it.</para>
+    /// </summary>
+    public static FilterPrototype SecondOrder { get; } = new(
+        "Second order",
+        [(-0.707106781186548, 0.707106781186548)],
+        0.0,
+        []);
+
     /// <summary>Maximally flat: −3.01 dB at the corner, then 100 dB per decade.</summary>
     public static FilterPrototype Butterworth { get; } = new(
         "Butterworth",
@@ -88,7 +123,9 @@ internal sealed record FilterPrototype(
     public Biquad[] Sections(double cornerHz, double sampleRateHz)
     {
         double wc = 2.0 * Math.PI * cornerHz;
-        var sections = new Biquad[PolePairs.Length + 1];
+        // RealPole 0 means an even-order design with no real pole at all — not a pole at the origin.
+        bool hasRealPole = RealPole > 0.0;
+        var sections = new Biquad[PolePairs.Length + (hasRealPole ? 1 : 0)];
 
         for (int i = 0; i < PolePairs.Length; i++)
         {
@@ -110,8 +147,11 @@ internal sealed record FilterPrototype(
         }
 
         // The real pole: a / (s + a), first order, so the s^2 coefficients are zero on both sides.
-        double a = RealPole * wc;
-        sections[^1] = Biquad.FromAnalog(0.0, 0.0, a, 0.0, 1.0, a, sampleRateHz, cornerHz);
+        if (hasRealPole)
+        {
+            double a = RealPole * wc;
+            sections[^1] = Biquad.FromAnalog(0.0, 0.0, a, 0.0, 1.0, a, sampleRateHz, cornerHz);
+        }
 
         return sections;
     }

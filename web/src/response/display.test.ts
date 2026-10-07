@@ -32,6 +32,14 @@ describe('responseDisplayFromParams', () => {
       chartDelayBottomUs: -100,
       chartNyquistRadius: 'Db',
       chartNyquistRadiusFloorDb: -60,
+      chartNicholsAutoGain: false,
+      chartNicholsTopDb: 6,
+      chartNicholsBottomDb: -6,
+      chartPoleZeroAutoWindow: false,
+      chartPoleZeroXMinHz: -46000,
+      chartPoleZeroXMaxHz: 120,
+      chartPoleZeroYMinHz: -38000,
+      chartPoleZeroYMaxHz: 38000,
       chartInvertLoopSign: true,
       chartRestoreDelay: true,
       chartShowFittedModel: false,
@@ -67,6 +75,14 @@ describe('responseDisplayFromParams', () => {
       delayBottomUs: -100,
       nyquistRadius: 'Db',
       nyquistRadiusFloorDb: -60,
+      nicholsAutoGain: false,
+      nicholsTopDb: 6,
+      nicholsBottomDb: -6,
+      poleZeroAutoWindow: false,
+      poleZeroXMinHz: -46000,
+      poleZeroXMaxHz: 120,
+      poleZeroYMinHz: -38000,
+      poleZeroYMaxHz: 38000,
       invertLoopSign: true,
       restoreDelay: true,
       showFittedModel: false,
@@ -107,6 +123,33 @@ describe('responseDisplayFromParams', () => {
     expect(responseDisplayFromParams(JSON.stringify({ chartDelayView: 'group' })).delayView).toBe('None')
     expect(responseDisplayFromParams(JSON.stringify({ chartDelayView: 'Phase' })).delayView).toBe('Phase')
     expect(responseDisplayFromParams(JSON.stringify({ chartDelayTopUs: 'big' })).delayTopUs).toBe(1000)
+  })
+
+  /**
+   * The two axis windows are the one pair of fields whose *absence* has to mean something specific:
+   * every build before them fitted both axes, so a type stored then must keep doing that rather
+   * than opening on a ±100 kHz plane with its roots in the origin marker.
+   */
+  it('keeps both complex-plane windows fitted for a type saved before the controls existed', () => {
+    const display = responseDisplayFromParams(JSON.stringify({ chartView: 'Gain', chartProjection: 'Nichols' }))
+
+    expect(display.nicholsAutoGain).toBe(true)
+    expect(display.poleZeroAutoWindow).toBe(true)
+  })
+
+  /**
+   * The default change of 2026-10-06: a type stored before the box existed picks the new default up,
+   * while one that was explicitly saved with it off keeps it off. That is the whole contract of a
+   * guarded restore, and this is the first setting whose default has moved since.
+   */
+  it('hides out-of-band roots by default, and still honours a stored false', () => {
+    expect(responseDisplayFromParams(JSON.stringify({ chartView: 'Gain' })).hideOutOfBandRoots).toBe(true)
+    expect(responseDisplayFromParams(JSON.stringify({ chartHideOutOfBandRoots: false })).hideOutOfBandRoots).toBe(false)
+  })
+
+  it('ignores a non-finite axis window', () => {
+    expect(responseDisplayFromParams(JSON.stringify({ chartNicholsTopDb: 'loud' })).nicholsTopDb).toBe(20)
+    expect(responseDisplayFromParams(JSON.stringify({ chartPoleZeroXMinHz: null })).poleZeroXMinHz).toBe(-100000)
   })
 
   it('ignores a non-negative radius floor', () => {

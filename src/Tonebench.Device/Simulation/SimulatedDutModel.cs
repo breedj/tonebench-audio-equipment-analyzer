@@ -310,6 +310,33 @@ public enum SimulatedDutModel
     /// four, and a stopband that does not keep falling — which is what the zeros cost.
     /// </summary>
     EllipticLowPass = 21,
+
+    /// <summary>
+    /// A <b>first-order</b> low-pass at <see cref="SimulatedDut.FilterCornerHz"/>: one real pole,
+    /// −3.01 dB at the corner, 20 dB per decade, phase approaching −90°.
+    ///
+    /// <para>Here because it is the simplest DUT with a response at all, and because the pole-zero
+    /// map and the fitted H(s) have no simpler thing to be right about: a fit of this must come back
+    /// with <b>one pole, no zeros</b> and a residual at the noise floor, at the frequency it was
+    /// asked for. The four fifth-order alignments cannot make that check — an order-5 fit has enough
+    /// freedom to track a curve it has misunderstood — so when the s-plane views disagree with a
+    /// measurement, this is the model to point them at first.</para>
+    /// </summary>
+    FirstOrderLowPass = 22,
+
+    /// <summary>
+    /// A <b>second-order</b> Butterworth low-pass at <see cref="SimulatedDut.FilterCornerHz"/>: one
+    /// conjugate pole pair at <c>Q = 1/√2</c> (ζ = 0.7071), −3.01 dB at the corner, 40 dB per decade,
+    /// phase through −90° at the corner to −180°.
+    ///
+    /// <para>The companion to <see cref="FirstOrderLowPass"/>, and the one place a Q reading can be
+    /// checked against a number that was <i>chosen</i> rather than measured: the pole-zero panel must
+    /// report 0.707, the s-plane map must put the pair on the 45° line, and a two-pole fit must have
+    /// nothing left over. It is also the smallest model that rings at all, so it is where a group
+    /// delay that peaks at the corner can be seen without a fifth-order filter's four other poles
+    /// contributing to it.</para>
+    /// </summary>
+    SecondOrderLowPass = 23,
 }
 
 public static class SimulatedDutModelExtensions
@@ -338,4 +365,13 @@ public static class SimulatedDutModelExtensions
         or SimulatedDutModel.ChebyshevLowPass
         or SimulatedDutModel.BesselLowPass
         or SimulatedDutModel.EllipticLowPass;
+
+    /// <summary>
+    /// Every low-pass built from a <see cref="FilterPrototype"/>: the four classic alignments plus
+    /// the first- and second-order pair. Separate from <see cref="IsClassicFilter"/>, which still
+    /// means the four alignments a reader compares against each other — the two new ones are not
+    /// alignments, they are the orders a fit can be checked against.
+    /// </summary>
+    public static bool IsPrototypeFilter(this SimulatedDutModel model) => model.IsClassicFilter()
+        || model is SimulatedDutModel.FirstOrderLowPass or SimulatedDutModel.SecondOrderLowPass;
 }

@@ -118,8 +118,11 @@ const { showPage } = useManual()
         fixed harmonic stack standing in for a distorting source: H2 at −46 dBc, H3 at −60 dBc, and
         every order above that 12 dB further down. That stack is the same at 1 mV and at 1 V. It is
         why every <em>linear</em> model then reads 0.51 % THD at any level, and why the four
-        nonlinear amplifier models switch it off — see below. The box starts unchecked, as do
-        <strong>Noise</strong> and <strong>Hum</strong>, so an untouched simulator is a clean bench.
+        nonlinear amplifier models switch it off — see below. That box starts <em>checked</em>, as
+        does <strong>Noise</strong>; only <strong>Hum</strong> starts unchecked. So an untouched
+        simulator is a <em>plausible</em> bench rather than an impossible one — see
+        <button type="button" class="manual-link" @click="showPage('sim-straight-wire')">Straight wire</button>
+        for what each box adds and why a noise floor is a default rather than an impairment.
       </li>
       <li>
         <strong>A DUT model sits on the left input only.</strong> The left input measures the device;
@@ -284,13 +287,19 @@ const { showPage } = useManual()
       </tbody>
     </table>
 
-    <h3>Filters (the four classic low-pass alignments)</h3>
+    <h3>Filters (low-pass, all at 2 kHz)</h3>
     <p>
-      Four fifth-order low-pass filters with the same 2 kHz corner, each the textbook answer to a
-      different question, so a frequency-response run of each shows exactly the trade it made. All
-      four are unity at DC and none distorts; the
+      Six low-pass filters with the same 2 kHz corner. The first two are there to be
+      <em>checked against</em>: a first-order and a second-order section whose answers are written
+      down in advance, so a pole–zero fit, a Q reading or an s-plane view that disagrees with one of
+      them is wrong about the analysis rather than about the DUT. The four below them are the classic
+      fifth-order alignments, each the textbook answer to a different question, so a
+      frequency-response run of each shows exactly the trade it made. All six are unity at DC and
+      none distorts; the
       <button type="button" class="manual-link" @click="showPage('sim-butterworth')">Butterworth</button>
-      page draws them on one axis.
+      page draws the four alignments on one axis, and the
+      <button type="button" class="manual-link" @click="showPage('sim-second-order')">second order</button>
+      page compares the three Butterworth orders.
     </p>
     <table>
       <thead>
@@ -301,6 +310,20 @@ const { showPage } = useManual()
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('sim-first-order')">First order LP (2 kHz)</button>
+          </td>
+          <td>One real pole: −3 dB at 2 kHz, 20 dB per decade, −45° at the corner, no overshoot anywhere.</td>
+          <td>A pole–zero fit, which must return one pole and no zeros; the simplest check that an analysis is reading a DUT and not itself.</td>
+        </tr>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('sim-second-order')">Second order LP (2 kHz)</button>
+          </td>
+          <td>One pole pair at Q = 0.707 (a second-order Butterworth): 40 dB per decade, −90° at the corner.</td>
+          <td>The Q and ζ columns, and the 45° line on the s-plane map — a damping that was chosen rather than measured.</td>
+        </tr>
         <tr>
           <td>
             <button type="button" class="manual-link" @click="showPage('sim-butterworth')">Butterworth LP (2 kHz)</button>

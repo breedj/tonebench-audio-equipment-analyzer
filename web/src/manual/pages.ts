@@ -450,6 +450,20 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/sim/DspProcessorPage.vue')),
   },
   {
+    id: 'sim-first-order',
+    title: 'First order LP (2 kHz)',
+    summary: 'One real pole: the simplest response there is, and the one a pole–zero fit has an exact answer for.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/FirstOrderPage.vue')),
+  },
+  {
+    id: 'sim-second-order',
+    title: 'Second order LP (2 kHz)',
+    summary: 'One pole pair at Q = 0.707: a damping that was chosen rather than measured, for checking the Q readouts against.',
+    group: 'Simulator',
+    component: manualPage(() => import('./pages/sim/SecondOrderPage.vue')),
+  },
+  {
     id: 'sim-butterworth',
     title: 'Butterworth LP (2 kHz)',
     summary: 'The maximally flat fifth-order low-pass, and the four classic alignments side by side.',

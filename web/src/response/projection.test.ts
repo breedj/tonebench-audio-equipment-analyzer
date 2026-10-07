@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   MIN_DB_RADIUS,
   MIN_LINEAR_EXTENT,
+  NICHOLS_GAIN_MIN_SPAN_DB,
   criticalPhases,
   MAX_CRITICAL_MARKERS,
   nicholsPoint,
+  nicholsViewport,
   nyquistPoint,
   nyquistRadius,
+  orderedGainWindow,
   symmetricExtent,
 } from './projection'
 import type { ComplexPoint } from './complexPlane'
@@ -169,5 +172,72 @@ describe('symmetricExtent', () => {
     // map: the same curve, two windows nearly three orders of magnitude apart.
     expect(symmetricExtent([compressed], MIN_LINEAR_EXTENT)).toBeCloseTo(2.625, 6)
     expect(symmetricExtent([nyquistPoint(huge, 'Linear', -40)], MIN_LINEAR_EXTENT)).toBeGreaterThan(900)
+  })
+})
+
+describe('nicholsViewport', () => {
+  /** A loop with 26 dB of gain at the bottom of the band and 40 dB of loss at the top. */
+  const wideLoop = [at(26, -20), at(0, -140), at(-40, -260)]
+
+  it('fitted, contains every point and the critical marker', () => {
+    const v = nicholsViewport(wideLoop, null)
+
+    expect(v.yMax).toBeGreaterThan(26)
+    expect(v.yMin).toBeLessThan(-40)
+    expect(v.xMin).toBeLessThan(-260)
+    expect(v.xMax).toBeGreaterThan(-20)
+  })
+
+  /**
+   * The whole point of the control: on a DUT with 66 dB of range, a fit cannot show the ±6 dB about
+   * 0 where the gain margin is read. A window asked for is the window drawn — including one that
+   * leaves the 0 dB line out, which is why the panel says so rather than the chart second-guessing it.
+   */
+  it('hand-set, uses exactly the gain window given and still fits the phase axis', () => {
+    const v = nicholsViewport(wideLoop, { topDb: 6, bottomDb: -6 })
+
+    expect(v.yMax).toBe(6)
+    expect(v.yMin).toBe(-6)
+    expect(v.xMin).toBeLessThan(-260)
+    expect(v.xMax).toBeGreaterThan(-20)
+  })
+
+  it('fitted, always keeps 0 dB and −180° in view on a comfortable loop', () => {
+    const v = nicholsViewport([at(0.2, -12), at(-0.1, -30)], null)
+
+    expect(v.yMax).toBeGreaterThanOrEqual(6)
+    expect(v.yMin).toBeLessThanOrEqual(-6)
+    expect(v.xMin).toBeLessThanOrEqual(-190)
+    expect(v.xMax).toBeGreaterThanOrEqual(-170)
+  })
+
+  it('with nothing measured, still opens on a window a chart can draw', () => {
+    for (const v of [nicholsViewport([], null), nicholsViewport([at(Number.NaN, Number.NaN)], null)]) {
+      expect(v.xMax).toBeGreaterThan(v.xMin)
+      expect(v.yMax).toBeGreaterThan(v.yMin)
+    }
+    expect(nicholsViewport([], { topDb: 3, bottomDb: -3 }).yMax).toBe(3)
+  })
+})
+
+describe('orderedGainWindow', () => {
+  it('puts the larger value on top, whichever order it was typed in', () => {
+    expect(orderedGainWindow({ topDb: -40, bottomDb: 20 })).toEqual({ topDb: 20, bottomDb: -40 })
+  })
+
+  /** A zero-height viewport divides by zero in fitTransform and paints nothing at all. */
+  it('opens a degenerate pair to the minimum span, centred where it was', () => {
+    const w = orderedGainWindow({ topDb: 10, bottomDb: 10 })
+
+    expect(w.topDb - w.bottomDb).toBeCloseTo(NICHOLS_GAIN_MIN_SPAN_DB, 12)
+    expect((w.topDb + w.bottomDb) / 2).toBeCloseTo(10, 12)
+  })
+
+  it('falls back rather than passing a non-finite bound to the transform', () => {
+    const w = orderedGainWindow({ topDb: Number.NaN, bottomDb: Number.NEGATIVE_INFINITY })
+
+    expect(Number.isFinite(w.topDb)).toBe(true)
+    expect(Number.isFinite(w.bottomDb)).toBe(true)
+    expect(w.topDb).toBeGreaterThan(w.bottomDb)
   })
 })

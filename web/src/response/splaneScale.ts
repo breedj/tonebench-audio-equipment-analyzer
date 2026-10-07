@@ -156,3 +156,80 @@ export function axisTickHz(m: SPlaneMap, mappedExtent: number): number[] {
   }
   return out
 }
+
+/**
+ * A pole–zero map window as the panel's four boxes hold it: hertz on both axes, σ/2π along x and
+ * jω/2π up y, signed — a stable pole has a negative σ, and both halves of the jω axis are drawn.
+ */
+export interface PoleZeroWindowHz {
+  xMinHz: number
+  xMaxHz: number
+  yMinHz: number
+  yMaxHz: number
+}
+
+/** The narrowest window either axis will be drawn with, in hertz. */
+export const MIN_WINDOW_SPAN_HZ = 1e-3
+
+/**
+ * A radius in hertz through the warp, keeping its sign.
+ *
+ * `mappedRadius` takes a radius, which is unsigned by definition; an axis bound is a *coordinate* and
+ * the plane is drawn with the origin inside it, so each bound is warped by its own magnitude and the
+ * sign put back. That is exactly the restriction of `toMapped` to each axis (θ = 0, ±90°, 180° all
+ * map to themselves — see this module's remarks), so a window's edges land where a root on that axis
+ * lands, which is the only property this has to have.
+ */
+export function signedMappedRadius(m: SPlaneMap, hz: number): number {
+  if (!Number.isFinite(hz)) return 0
+  return Math.sign(hz) * mappedRadius(m, Math.abs(hz))
+}
+
+/** The inverse of `signedMappedRadius`. */
+export function signedPlainRadius(m: SPlaneMap, coordinate: number): number {
+  if (!Number.isFinite(coordinate)) return 0
+  return Math.sign(coordinate) * plainRadius(m, Math.abs(coordinate))
+}
+
+/**
+ * A hand-set window in hertz → the drawing viewport.
+ *
+ * Each edge is warped on its own, so the numbers in the boxes are the numbers on the axis under
+ * either radius scale. The bounds are ordered and separated here rather than trusted: two fields a
+ * user types into arrive in either order and can arrive equal, and a degenerate viewport divides by
+ * zero in `fitTransform` and paints nothing at all.
+ *
+ * **Note the aspect.** The map is drawn with equal aspect while the window is fitted, because ζ and Q
+ * read as an angle from the origin there. A window asked for by hand is honoured exactly instead —
+ * see `ResponsePolarChart.equalAspect` — so an x range and a y range of different spans tilt those
+ * angles. That is the trade for controls that mean what they say, and the panel's tooltip says so.
+ */
+export function mappedWindow(m: SPlaneMap, window: PoleZeroWindowHz): Viewport {
+  const x = orderedSpan(window.xMinHz, window.xMaxHz)
+  const y = orderedSpan(window.yMinHz, window.yMaxHz)
+  return {
+    xMin: signedMappedRadius(m, x.lo),
+    xMax: signedMappedRadius(m, x.hi),
+    yMin: signedMappedRadius(m, y.lo),
+    yMax: signedMappedRadius(m, y.hi),
+  }
+}
+
+/** A drawing viewport back to hertz — what seeds the four boxes from the fitted window. */
+export function windowHz(m: SPlaneMap, viewport: Viewport): PoleZeroWindowHz {
+  return {
+    xMinHz: signedPlainRadius(m, viewport.xMin),
+    xMaxHz: signedPlainRadius(m, viewport.xMax),
+    yMinHz: signedPlainRadius(m, viewport.yMin),
+    yMaxHz: signedPlainRadius(m, viewport.yMax),
+  }
+}
+
+function orderedSpan(a: number, b: number): { lo: number; hi: number } {
+  const lo = Math.min(Number.isFinite(a) ? a : 0, Number.isFinite(b) ? b : 0)
+  const hi = Math.max(Number.isFinite(a) ? a : 0, Number.isFinite(b) ? b : 0)
+  if (hi - lo >= MIN_WINDOW_SPAN_HZ) return { lo, hi }
+
+  const centre = (lo + hi) / 2
+  return { lo: centre - MIN_WINDOW_SPAN_HZ / 2, hi: centre + MIN_WINDOW_SPAN_HZ / 2 }
+}

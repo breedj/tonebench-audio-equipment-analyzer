@@ -109,3 +109,88 @@ export function criticalPhases(xMinDeg: number, xMaxDeg: number): number[] {
 
 /** Above this many −180° turns in view, `criticalPhases` draws none rather than a band. */
 export const MAX_CRITICAL_MARKERS = 24
+
+/** The Nichols gain axis' window when it is set by hand rather than fitted — see `nicholsViewport`. */
+export interface NicholsGainWindow {
+  topDb: number
+  bottomDb: number
+}
+
+/** The narrowest gain window the Nichols chart will draw, so a reversed or equal pair still plots. */
+export const NICHOLS_GAIN_MIN_SPAN_DB = 2
+
+/**
+ * The window a Nichols chart opens on: phase along x, gain in dB up y.
+ *
+ * The phase axis is always fitted. It carries *unwrapped* degrees, so its span is a property of the
+ * DUT rather than a preference — a three-pole loop is already past −270° and the DSP processor with
+ * its delay restored runs to tens of thousands — and a hand-set phase window would be wrong again on
+ * the next DUT. The plotted frequency range is the control that narrows it.
+ *
+ * The gain axis is fitted too when `gain` is null, and otherwise exactly what `gain` says. Fitted is
+ * the default and stays it: both axes are already logarithmic in the physical quantity, so a fit
+ * needs no floor of its own the way `MIN_LINEAR_EXTENT` does on Nyquist. A hand-set window is for
+ * reading crossover — ±6 dB about 0 is where the gain margin is — which a fit over a DUT with 60 dB
+ * of range cannot show.
+ *
+ * Note the critical point is forced into view in the fitted case and deliberately **not** in the
+ * hand-set one: a window asked for is a window drawn, and growing it to reach −180° would be the
+ * "the dropdowns appear inert" failure the chart docs describe.
+ */
+export function nicholsViewport(
+  points: readonly { phaseDeg: number; magDb: number }[],
+  gain: NicholsGainWindow | null,
+): { xMin: number; xMax: number; yMin: number; yMax: number } {
+  const y = gain ? orderedGainWindow(gain) : null
+
+  if (points.length === 0) {
+    return { xMin: -360, xMax: 0, yMin: y?.bottomDb ?? -40, yMax: y?.topDb ?? 20 }
+  }
+
+  let xMin = Infinity
+  let xMax = -Infinity
+  let yMin = Infinity
+  let yMax = -Infinity
+  for (const p of points) {
+    if (!Number.isFinite(p.phaseDeg) || !Number.isFinite(p.magDb)) continue
+    xMin = Math.min(xMin, p.phaseDeg)
+    xMax = Math.max(xMax, p.phaseDeg)
+    yMin = Math.min(yMin, p.magDb)
+    yMax = Math.max(yMax, p.magDb)
+  }
+  if (!Number.isFinite(xMin)) return { xMin: -360, xMax: 0, yMin: y?.bottomDb ?? -40, yMax: y?.topDb ?? 20 }
+
+  // The critical point must always be in view — a Nichols chart that fitted tightly to a
+  // comfortable loop would crop the one marker the reader is looking for.
+  xMin = Math.min(xMin, -190)
+  xMax = Math.max(xMax, -170)
+  if (!y) {
+    yMin = Math.min(yMin, -6)
+    yMax = Math.max(yMax, 6)
+  }
+
+  const padX = Math.max(15, (xMax - xMin) * 0.05)
+  if (y) return { xMin: xMin - padX, xMax: xMax + padX, yMin: y.bottomDb, yMax: y.topDb }
+
+  const padY = Math.max(3, (yMax - yMin) * 0.08)
+  return { xMin: xMin - padX, xMax: xMax + padX, yMin: yMin - padY, yMax: yMax + padY }
+}
+
+/**
+ * A hand-set gain window as the chart can use it: the larger value on top, and never narrower than
+ * `NICHOLS_GAIN_MIN_SPAN_DB`.
+ *
+ * Two fields a user types into can arrive in either order and can arrive equal — the panel clamps
+ * them, but a stored pair from an older build or a report rendering a type does not pass through the
+ * panel at all, and a zero-height viewport divides by zero in `fitTransform` and paints nothing.
+ */
+export function orderedGainWindow(gain: NicholsGainWindow): NicholsGainWindow {
+  const top = Number.isFinite(gain.topDb) ? gain.topDb : 20
+  const bottom = Number.isFinite(gain.bottomDb) ? gain.bottomDb : -40
+  const hi = Math.max(top, bottom)
+  const lo = Math.min(top, bottom)
+  if (hi - lo >= NICHOLS_GAIN_MIN_SPAN_DB) return { topDb: hi, bottomDb: lo }
+
+  const centre = (hi + lo) / 2
+  return { topDb: centre + NICHOLS_GAIN_MIN_SPAN_DB / 2, bottomDb: centre - NICHOLS_GAIN_MIN_SPAN_DB / 2 }
+}

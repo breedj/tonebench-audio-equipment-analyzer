@@ -114,7 +114,8 @@ try
         sp.GetRequiredService<ILoggerFactory>(),
         simulate ? DeviceKind.Simulated : sp.GetRequiredService<AnalyzerKindSetting>().Kind,
         sp.GetRequiredService<SoundCardSetting>(),
-        sp.GetRequiredService<Experimental384kSetting>()));
+        sp.GetRequiredService<Experimental384kSetting>(),
+        sp.GetRequiredService<AutoRangeStepDownDelaySetting>()));
 
     // WindowType/AveragingMode read back as "Hann"/"Linear" etc, matching what /spectrum-config
     // already accepts on the way in — one representation, not int-in/string-out. Enum-as-string
@@ -147,6 +148,7 @@ try
     builder.Services.AddSingleton<SpectrumPipeline>();
     builder.Services.AddSingleton<CaptureDelaySetting>();
     builder.Services.AddSingleton<Experimental384kSetting>();
+    builder.Services.AddSingleton<AutoRangeStepDownDelaySetting>();
     builder.Services.AddSingleton<ExternalGainSetting>();
     builder.Services.AddSingleton<SoundCardSetting>();
     builder.Services.AddSingleton<AnalyzerKindSetting>();

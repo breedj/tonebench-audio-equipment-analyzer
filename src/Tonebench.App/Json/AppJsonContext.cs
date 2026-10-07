@@ -111,6 +111,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(ImportWeightingRequest))]
 [JsonSerializable(typeof(StartupConfig))]
 [JsonSerializable(typeof(AutosaveConfig))]
+[JsonSerializable(typeof(AutoRangeStepDownDelayConfig))]
 [JsonSerializable(typeof(Experimental384kConfig))]
 [JsonSerializable(typeof(DiagnosticLoggingConfig))]
 [JsonSerializable(typeof(StreamRecordingConfig))]

@@ -13,12 +13,15 @@ import { dragZoomViewport } from '../charts/dragZoom'
 import {
   axisTickHz,
   mappedRadius,
+  mappedWindow,
   plainRadius,
   sPlaneMap,
   surfaceViewport,
   toMapped,
+  windowHz,
   type SPlaneScale,
 } from '../response/splaneScale'
+import type { ResponseAutoWindow } from '../response/autoWindow'
 import { useResponseComplexCurve } from '../composables/useResponseComplexCurve'
 import type { ComplexPoint } from '../response/complexPlane'
 import { stabilityMargins } from '../response/margins'
@@ -33,6 +36,7 @@ import {
   MIN_LINEAR_EXTENT,
   criticalPhases,
   nicholsPoint,
+  nicholsViewport,
   nyquistPoint,
   symmetricExtent,
   type NyquistRadiusMode,
@@ -72,6 +76,23 @@ const props = defineProps<{
    * root sits — see `response/splaneScale.ts` for why a DUT with decades of roots needs it.
    */
   scale: SPlaneScale
+  /**
+   * **Nichols**: whether the gain axis is fitted to the curve, and the dB window it uses when it is
+   * not. The phase axis is always fitted — see `nicholsViewport` for why it has no pair of its own.
+   */
+  nicholsAutoGain: boolean
+  nicholsTopDb: number
+  nicholsBottomDb: number
+  /**
+   * **Pole–zero map**: whether the window is fitted to the roots, and the window in hertz when it
+   * is not — σ/2π along x, jω/2π up y, signed, and warped by `scale` like everything else on that
+   * plane. See `equalAspect`: a hand-set window is honoured exactly rather than squared off.
+   */
+  poleZeroAutoWindow: boolean
+  poleZeroXMinHz: number
+  poleZeroXMaxHz: number
+  poleZeroYMinHz: number
+  poleZeroYMaxHz: number
   /** Adds 180°: the summing-junction inversion the measurement cannot see. */
   invertSign: boolean
   /**
@@ -211,10 +232,35 @@ function rootToPlane(root: RootPoint): PlanePoint {
   return { x: p.x, y: p.y, clamped: false }
 }
 
-const equalAspect = computed(() => props.projection !== 'Nichols')
+/**
+ * Equal pixels per unit on both axes — on Nyquist always, and on the pole–zero map only while its
+ * window is fitted.
+ *
+ * On Nyquist it is not cosmetic: the content of the picture is how close the contour passes to −1.
+ * On the map it is what lets ζ and Q be read as an angle from the origin, which is the affordance
+ * `response/splaneScale.ts` is built around — so the fitted window, the default, keeps it.
+ *
+ * A **hand-set** window drops it, because `fitTransform` honours an equal-aspect request by
+ * *widening* the roomier axis: an x range typed in beside a taller y range would silently grow to
+ * several times what the box said, which is precisely the "the dropdowns appear inert" failure the
+ * uPlot range callbacks in CLAUDE.md describe. Angles tilt instead, and the panel's tooltip says so.
+ * Nichols has no business being square at all — its axes are degrees and decibels.
+ */
+const equalAspect = computed(() => {
+  if (props.projection === 'Nichols') return false
+  if (props.projection === 'PoleZero' && !props.poleZeroAutoWindow) return false
+  return true
+})
+
+/** Every point drawn, live run and visible overlays, which is what a fit has to contain. */
+const allPoints = computed<ComplexPoint[]>(() => [
+  ...curve.value,
+  ...overlayCurves.value.flatMap((o) => o.points),
+])
 
 /**
- * The window the chart opens on, before any zoom.
+ * The window each projection fits to its own data — the chart's default, what the panel's **Auto**
+ * means, and (through `autoWindow`) what seeds its boxes when Auto is turned off.
  *
  * Nyquist fits the data, floored at ±MIN_LINEAR_EXTENT so a curve that lives near the unit circle
  * still shows it and the −1 marker. It opened on a *fixed* ±2 at first, and that drew an empty pair
@@ -224,44 +270,51 @@ const equalAspect = computed(() => props.projection !== 'Nichols')
  * Nichols needs no floor of its own: both of its axes are already logarithmic in the physical
  * quantity, so it fits to the data with a margin.
  */
-function baseViewport(): Viewport {
+const autoViewport = computed<Viewport>(() => {
   // `surfaceViewport` with no band is the warped equivalent of `poleZeroViewport` — square, fitted to
   // the roots and not to the measured band, so the band segment still clips the way it is meant to.
   // Under `Linear` the two are identical by construction, which `splaneScale.test.ts` pins.
   if (props.projection === 'PoleZero') return surfaceViewport(sMap.value, roots.value, null)
 
-  const points = [...curve.value, ...overlayCurves.value.flatMap((o) => o.points)]
-
   if (props.projection === 'Nyquist') {
     // Measured in *plane* coordinates, so the dB radius map's own compression is accounted for
     // rather than the raw |G| it was applied to.
-    const e = symmetricExtent(points.map(toPlane), MIN_LINEAR_EXTENT)
+    const e = symmetricExtent(allPoints.value.map(toPlane), MIN_LINEAR_EXTENT)
     return { xMin: -e, xMax: e, yMin: -e, yMax: e }
   }
 
-  if (points.length === 0) return { xMin: -360, xMax: 0, yMin: -40, yMax: 20 }
+  return nicholsViewport(allPoints.value, null)
+})
 
-  let xMin = Infinity
-  let xMax = -Infinity
-  let yMin = Infinity
-  let yMax = -Infinity
-  for (const p of points) {
-    xMin = Math.min(xMin, p.phaseDeg)
-    xMax = Math.max(xMax, p.phaseDeg)
-    yMin = Math.min(yMin, p.magDb)
-    yMax = Math.max(yMax, p.magDb)
+/**
+ * That fitted window in the panel's own units, so unticking Auto starts from where the curve is.
+ * Null under Nyquist, whose window is a single symmetric extent with no control over it.
+ */
+const autoWindow = computed<ResponseAutoWindow | null>(() => {
+  if (props.projection === 'Nichols') {
+    const v = autoViewport.value
+    return { kind: 'Nichols', topDb: v.yMax, bottomDb: v.yMin }
   }
+  if (props.projection === 'PoleZero') {
+    return { kind: 'PoleZero', ...windowHz(sMap.value, autoViewport.value) }
+  }
+  return null
+})
 
-  // The critical point must always be in view — a Nichols chart that fitted tightly to a
-  // comfortable loop would crop the one marker the reader is looking for.
-  xMin = Math.min(xMin, -190)
-  xMax = Math.max(xMax, -170)
-  yMin = Math.min(yMin, -6)
-  yMax = Math.max(yMax, 6)
-
-  const padX = Math.max(15, (xMax - xMin) * 0.05)
-  const padY = Math.max(3, (yMax - yMin) * 0.08)
-  return { xMin: xMin - padX, xMax: xMax + padX, yMin: yMin - padY, yMax: yMax + padY }
+/** The window the chart opens on, before any zoom: the fit, or whatever the panel's boxes say. */
+function baseViewport(): Viewport {
+  if (props.projection === 'Nichols' && !props.nicholsAutoGain) {
+    return nicholsViewport(allPoints.value, { topDb: props.nicholsTopDb, bottomDb: props.nicholsBottomDb })
+  }
+  if (props.projection === 'PoleZero' && !props.poleZeroAutoWindow) {
+    return mappedWindow(sMap.value, {
+      xMinHz: props.poleZeroXMinHz,
+      xMaxHz: props.poleZeroXMaxHz,
+      yMinHz: props.poleZeroYMinHz,
+      yMaxHz: props.poleZeroYMaxHz,
+    })
+  }
+  return autoViewport.value
 }
 
 /** Null while unzoomed; a dragged box replaces it, and Reset clears it. */
@@ -287,6 +340,16 @@ watch(
     props.scale,
     props.xFromHz,
     props.xToHz,
+    // Setting an axis window by hand moves the window the box was dragged inside of, so the box
+    // frames a different part of the plot than it was drawn around.
+    props.nicholsAutoGain,
+    props.nicholsTopDb,
+    props.nicholsBottomDb,
+    props.poleZeroAutoWindow,
+    props.poleZeroXMinHz,
+    props.poleZeroXMaxHz,
+    props.poleZeroYMinHz,
+    props.poleZeroYMaxHz,
   ],
   () => {
     zoomViewport.value = null
@@ -1066,6 +1129,14 @@ watch(
     props.fit,
     props.showFittedModel,
     props.hideOutOfBandRoots,
+    props.nicholsAutoGain,
+    props.nicholsTopDb,
+    props.nicholsBottomDb,
+    props.poleZeroAutoWindow,
+    props.poleZeroXMinHz,
+    props.poleZeroXMaxHz,
+    props.poleZeroYMinHz,
+    props.poleZeroYMaxHz,
     isDark.value,
   ],
   () => draw(),
@@ -1073,7 +1144,9 @@ watch(
 )
 
 // `curve` is the *read* curve: the pole-zero panel fits whatever the plot presents as run 0.
-defineExpose({ margins, curve: readCurve, exportPng })
+// `autoWindow` goes the same way round — App.vue hands it to the display panel, which seeds its own
+// boxes from it; see response/autoWindow.ts.
+defineExpose({ margins, curve: readCurve, autoWindow, exportPng })
 </script>
 
 <template>

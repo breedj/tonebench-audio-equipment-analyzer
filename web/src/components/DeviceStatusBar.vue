@@ -14,18 +14,19 @@ const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
 
 type DutGroup =
   | 'Linear — response, no distortion'
-  | 'Filters — the four classic low-pass alignments, 5th order at 2 kHz'
+  | 'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments'
   | 'Distorting — for THD and IMD'
   | 'Impedance fixtures — for the impedance screen'
 
 /**
  * What the simulator can pretend is patched in. A straight wire has no response and no memory,
  * which is enough for a spectrum and shows nothing at all on the measurements whose subject is
- * what a DUT does over time. Four groups, because twenty-two flat entries are unreadable: the
- * linear models (a shape and a memory, unity gain), the four classic filters (the same again, at
- * one corner, for comparing alignments), the nonlinear ones (distortion that depends on level or
- * frequency — the THD sweeps' models), and the impedance fixtures (dividers, so never unity,
- * wired bench-style with the load junction on the right input).
+ * what a DUT does over time. Four groups, because two dozen flat entries are unreadable: the
+ * linear models (a shape and a memory, unity gain), the filters (the same again, all at one corner —
+ * first and second order, where a pole-zero fit has an exact answer to be checked against, then the
+ * four classic fifth-order alignments to compare against each other), the nonlinear ones (distortion
+ * that depends on level or frequency — the THD sweeps' models), and the impedance fixtures
+ * (dividers, so never unity, wired bench-style with the load junction on the right input).
  */
 const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string; group: DutGroup }[] = [
   { value: 'StraightWire', label: 'Straight wire', title: 'No DUT: the generator reaches the input unaltered.', group: 'Linear — response, no distortion' },
@@ -79,32 +80,46 @@ const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string; grou
     group: 'Linear — response, no distortion',
   },
   {
+    value: 'FirstOrderLowPass',
+    label: 'First order LP (2 kHz)',
+    title:
+      'One real pole at 2 kHz: −3 dB at the corner, 20 dB per decade, phase heading for −90°. The simplest DUT with a response at all, and the one a pole-zero fit has an exact answer for — one pole, no zeros. Point the s-plane views at this when they disagree with a measurement.',
+    group: 'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments',
+  },
+  {
+    value: 'SecondOrderLowPass',
+    label: 'Second order LP (2 kHz)',
+    title:
+      'One conjugate pole pair at 2 kHz, Q = 0.707 (a second-order Butterworth): −3 dB at the corner, 40 dB per decade, phase through −90° at the corner to −180°. The Q is a number that was chosen rather than measured, so the Poles and zeros panel and the 45° line on the s-plane map can both be checked against it.',
+    group: 'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments',
+  },
+  {
     value: 'ButterworthLowPass',
     label: 'Butterworth LP (2 kHz)',
     title:
       'A fifth-order Butterworth low-pass at 2 kHz: maximally flat, −3 dB at the corner, then 100 dB per decade. The reference the other three filters are read against — same order, same corner, a different trade each.',
-    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+    group: 'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments',
   },
   {
     value: 'ChebyshevLowPass',
     label: 'Chebyshev LP (2 kHz)',
     title:
       'A fifth-order Chebyshev low-pass, 1 dB ripple: the passband ripples between 0 and −1 dB, the corner is the ripple edge at −1 dB, and the transition just above it is twice as steep as the Butterworth’s. Its group delay peaks at the corner — see the delay column on the response screens.',
-    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+    group: 'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments',
   },
   {
     value: 'BesselLowPass',
     label: 'Bessel LP (2 kHz)',
     title:
       'A fifth-order Bessel low-pass, −3 dB at 2 kHz: the flattest group delay of the four — 193 µs, constant across the passband — at the price of the gentlest roll-off, 28 dB down where the Butterworth is 48. The model for the group-delay and phase-delay columns.',
-    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+    group: 'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments',
   },
   {
     value: 'EllipticLowPass',
     label: 'Elliptic LP (2 kHz)',
     title:
       'A fifth-order elliptic (Cauer) low-pass, 1 dB passband ripple, 60 dB stopband: the only one with zeros — two notches at 3.5 and 5.3 kHz — and the steepest transition anything of this order can have, −60 dB by 4 kHz. Between and above the notches the stopband comes back up to −60 dB and stays there, which is what the zeros cost.',
-    group: 'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+    group: 'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments',
   },
   {
     value: 'TriodeSingleEnded',
@@ -180,7 +195,7 @@ const DUT_MODELS: { value: SimulatedDutModel; label: string; title: string; grou
 
 const DUT_GROUPS: DutGroup[] = [
   'Linear — response, no distortion',
-  'Filters — the four classic low-pass alignments, 5th order at 2 kHz',
+  'Filters — low-pass at 2 kHz, from first order to the four classic 5th-order alignments',
   'Distorting — for THD and IMD',
   'Impedance fixtures — for the impedance screen',
 ]
@@ -202,6 +217,7 @@ const emit = defineEmits<{
   setRangingMode: [mode: RangingModeName]
   setInputRange: [dbv: number]
   openSoundCard: []
+  openQa403: []
   setExternalGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
   setOutputRange: [dbv: number]
   connect: []
@@ -378,6 +394,23 @@ const telemetryStale = computed(() => props.status?.acquiring === true)
  * that is what the bar offers instead.
  */
 const isSoundCard = computed(() => props.status?.deviceKind === 'SoundCard')
+
+/**
+ * Whose gear button is the QA403's.
+ *
+ * <p>The simulator is included deliberately: it models a QA403 and mirrors its generator rate
+ * ceiling, so the experimental 384 kHz opt-in is read on that bench too — and it is the one setting
+ * in that dialog which is not about hardware being present. The ranging delay hides itself there,
+ * as it always did. The same reasoning already makes the external gain popover call that bench "the
+ * QA403 bench".</p>
+ */
+const isQa403 = computed(() => props.status?.deviceKind === 'Hardware' || props.status?.deviceKind === 'Simulated')
+
+const qa403Title = computed(() =>
+  props.status?.deviceKind === 'Simulated'
+    ? "The QA403's own settings — the experimental 384 kHz rate, which the simulator mirrors. The auto-ranging delay needs a real analyzer."
+    : "The QA403's own settings: the experimental 384 kHz sample rate and the auto-ranging step-down delay.",
+)
 
 /**
  * dB or a plain ratio, for whichever bench is live. The stored value is always dB — see
@@ -569,6 +602,22 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
           </select>
         </label>
       </template>
+      <!-- The QA403's own settings, in the same place and with the same glyph as the sound card's
+           below. Keyed on the selected analyzer, not on a connection: these are stored settings,
+           and one of them (the rate) decides what the FFT screen offers before anything is up. -->
+      <button
+        v-if="isQa403"
+        type="button"
+        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        aria-label="QA403 settings"
+        :title="qa403Title"
+        @click="emit('openQa403')"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+        </svg>
+      </button>
       <!-- Sound-card settings. Keyed on the selected analyzer rather than on a connection, for the
            same reason the simulator's controls are: the card has to be choosable before it is up,
            and when nothing is chosen yet this button is the only way to get anywhere. -->

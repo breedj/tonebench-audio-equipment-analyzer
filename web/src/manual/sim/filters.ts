@@ -1,8 +1,9 @@
-// The four classic low-pass alignments the simulator offers as DUTs, prototype for prototype as
-// `FilterPrototype` (src/Tonebench.Device/Simulation/FilterPrototypes.cs) holds them: fifth order,
-// normalised to a corner of 1 rad/s, computed with scipy.signal (butter, cheby1 rp=1,
-// bessel norm='mag', ellip rp=1 rs=60; analog=True, output='zpk'). Edit the two tables together —
-// the C# is the one that produces the samples, this one is what the manual draws.
+// The low-pass alignments the simulator offers as DUTs, prototype for prototype as
+// `FilterPrototype` (src/Tonebench.Device/Simulation/FilterPrototypes.cs) holds them: normalised to
+// a corner of 1 rad/s, the four classic ones fifth order and computed with scipy.signal (butter,
+// cheby1 rp=1, bessel norm='mag', ellip rp=1 rs=60; analog=True, output='zpk'), plus the first- and
+// second-order pair, whose poles are closed form. Edit the two tables together — the C# is the one
+// that produces the samples, this one is what the manual draws.
 //
 // Each prototype is realised the way `FilterPrototype.Sections` does it: one biquad per conjugate
 // pole pair (with the elliptic's zero pair in its numerator), a first-order section for the real
@@ -13,7 +14,11 @@ export interface FilterPrototype {
   name: string
   /** Each conjugate pole pair's upper member, `sigma + j·omega`. */
   polePairs: readonly (readonly [sigma: number, omega: number])[]
-  /** The one real pole, as a positive distance down the negative real axis. */
+  /**
+   * The one real pole, as a positive distance down the negative real axis — **0 for an even-order
+   * design, which has none**. Not a pole at the origin: `filterSections` skips the section entirely,
+   * because `0/(s+0)` would silence the DUT rather than pass it.
+   */
   realPole: number
   /** The elliptic's zero pairs `±j·omega`, one per pole pair in the same order; empty for the all-pole designs. */
   zeroOmegas: readonly number[]
@@ -24,6 +29,22 @@ export const FILTER_CORNER_HZ = 2000
 
 /** The Bessel prototype's group delay at DC in units of 1/ωc: 193 µs at 2 kHz. */
 export const BESSEL_DELAY_AT_DC = 2.4274107
+
+/** One real pole and nothing else — the exact answer a 1-pole/0-zero fit must come back with. */
+export const FIRST_ORDER: FilterPrototype = {
+  name: 'First order',
+  polePairs: [],
+  realPole: 1,
+  zeroOmegas: [],
+}
+
+/** One conjugate pair at Q = 1/√2, i.e. a second-order Butterworth. No real pole — see `realPole`. */
+export const SECOND_ORDER: FilterPrototype = {
+  name: 'Second order',
+  polePairs: [[-0.707106781186548, 0.707106781186548]],
+  realPole: 0,
+  zeroOmegas: [],
+}
 
 export const BUTTERWORTH: FilterPrototype = {
   name: 'Butterworth',
@@ -83,9 +104,20 @@ export function filterSections(prototype: FilterPrototype, cornerHz: number, sam
     }
   })
 
-  const a = prototype.realPole * wc
-  sections.push(fromAnalogPrewarped(0, 0, a, 0, 1, a, sampleRateHz, cornerHz))
+  // realPole 0 means an even-order design with no real pole at all, not a pole at the origin.
+  if (prototype.realPole > 0) {
+    const a = prototype.realPole * wc
+    sections.push(fromAnalogPrewarped(0, 0, a, 0, 1, a, sampleRateHz, cornerHz))
+  }
   return sections
+}
+
+export function firstOrderLowPass(sampleRateHz: number): Cascade {
+  return new Cascade(filterSections(FIRST_ORDER, FILTER_CORNER_HZ, sampleRateHz), sampleRateHz)
+}
+
+export function secondOrderLowPass(sampleRateHz: number): Cascade {
+  return new Cascade(filterSections(SECOND_ORDER, FILTER_CORNER_HZ, sampleRateHz), sampleRateHz)
 }
 
 export function butterworthLowPass(sampleRateHz: number): Cascade {
@@ -126,4 +158,29 @@ export function chebyshevDb(analogHz: number, cornerHz = FILTER_CORNER_HZ): numb
   const t5 = 16 * x ** 5 - 20 * x ** 3 + 5 * x
   const epsilonSquared = Math.pow(10, 0.1) - 1
   return -10 * Math.log10(1 + epsilonSquared * t5 * t5)
+}
+
+/**
+ * The first-order low-pass's closed form, in dB: `-10·log10(1 + (f/fc)²)`. Exactly −3.01 dB at the
+ * corner and 20 dB per decade above it, which is the whole reason the model exists.
+ */
+export function firstOrderDb(analogHz: number, cornerHz = FILTER_CORNER_HZ): number {
+  return -10 * Math.log10(1 + Math.pow(analogHz / cornerHz, 2))
+}
+
+/** The second-order Butterworth's closed form, in dB: `-10·log10(1 + (f/fc)⁴)`. */
+export function secondOrderDb(analogHz: number, cornerHz = FILTER_CORNER_HZ): number {
+  return -10 * Math.log10(1 + Math.pow(analogHz / cornerHz, 4))
+}
+
+/**
+ * The phase of an n-th order Butterworth low-pass in degrees, for n = 1 and 2 — what the Bode and
+ * the complex-plane views must read: −45° at the corner and −90° far above it at first order,
+ * −90° at the corner and −180° above it at second.
+ */
+export function butterworthPhaseDeg(analogHz: number, order: 1 | 2, cornerHz = FILTER_CORNER_HZ): number {
+  const x = analogHz / cornerHz
+  if (order === 1) return (-Math.atan(x) * 180) / Math.PI
+  // One pair at Q = 1/√2: ∠H = −atan2(x/Q, 1 − x²), which runs continuously from 0° to −180°.
+  return (-Math.atan2(Math.SQRT2 * x, 1 - x * x) * 180) / Math.PI
 }

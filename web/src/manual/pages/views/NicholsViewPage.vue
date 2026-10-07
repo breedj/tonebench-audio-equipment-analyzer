@@ -129,8 +129,32 @@ const markers: ManualMarker[] = [
       −86 400° and takes the −180° markers with it. The Nyquist page has
       <button type="button" class="manual-link" @click="showPage('view-nyquist')">when to leave it removed</button>.
       The <strong>Radius</strong> control is Nyquist-only and is not shown here — a Nichols plot's magnitude axis is in dB by construction. Drag a box to zoom
-      both axes; <strong>Reset zoom</strong> returns to the window the view opens on, which always
-      includes −180° and 0 dB even when the curve is nowhere near them.
+      both axes; <strong>Reset zoom</strong> returns to the window the view opens on.
+    </p>
+
+    <h2>Gain range</h2>
+    <p>
+      Its own section in the rail. <strong>Auto</strong> — the default — fits the gain axis to the
+      curve on every pass and always keeps 0 dB and the −180° marker in view, even when the curve is
+      nowhere near them. That is the right window for seeing the shape of a loop and the wrong one
+      for <em>reading</em> it: a DUT with 26 dB of gain at the bottom of the band and 40 dB of loss at
+      the top gives a 70 dB axis, on which the ±6 dB around 0 that the gain margin is measured in is
+      a few pixels tall. Untick Auto and set <strong>Top</strong> and <strong>Bottom</strong> — ±6 or
+      ±10 dB is the useful pair — and the crossing region fills the plot.
+    </p>
+    <p>
+      The window is drawn exactly as asked, including one that leaves the 0 dB line out: the gain
+      crossover and the −180° markers then sit off the plot and the panel says so under the boxes.
+      The boxes open on the window that was on screen when Auto was unticked, rounded out to whole
+      steps, so unticking changes nothing by itself. <strong>Autofit</strong> writes that fitted
+      window back into them rather than silently turning Auto on again.
+    </p>
+    <p>
+      There is deliberately no <em>phase</em> range beside it. That axis carries unwrapped degrees,
+      so its span is a property of the DUT rather than a preference — a loop with real excess phase
+      runs to thousands of degrees, and a window that suited one amplifier would be wrong on the
+      next. Narrow it with the <strong>Frequency range</strong> instead, which is what decides which
+      points are drawn at all.
     </p>
   </div>
 </template>

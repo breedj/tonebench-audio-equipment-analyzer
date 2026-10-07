@@ -3,6 +3,7 @@ import { magnitude, type Cascade } from './biquad'
 import {
   analogEquivalentHz,
   BESSEL_DELAY_AT_DC,
+  BUTTERWORTH,
   besselLowPass,
   butterworthDb,
   butterworthLowPass,
@@ -11,6 +12,14 @@ import {
   ELLIPTIC,
   ellipticLowPass,
   FILTER_CORNER_HZ,
+  filterSections,
+  firstOrderDb,
+  firstOrderLowPass,
+  FIRST_ORDER,
+  butterworthPhaseDeg,
+  secondOrderDb,
+  secondOrderLowPass,
+  SECOND_ORDER,
 } from './filters'
 
 // The same checks FilterDutTests runs on the C#, so the manual's curves and the simulator's samples
@@ -76,5 +85,49 @@ describe('the classic filter prototypes', () => {
     for (const build of [butterworthLowPass, chebyshevLowPass, besselLowPass, ellipticLowPass]) {
       expect(build(FS).magnitudeDb(1)).toBeCloseTo(0, 2)
     }
+  })
+})
+
+/**
+ * The two orders that exist to be checked against — the same assertions `FilterDutTests` makes on
+ * the C# side, so the manual's curves and the simulator's samples can only drift together.
+ */
+describe('the first- and second-order filters', () => {
+  it('match their closed forms at the analog-equivalent frequency', () => {
+    const first = firstOrderLowPass(FS)
+    const second = secondOrderLowPass(FS)
+    for (const f of [100, 1000, FC, 4000, 20000]) {
+      const analog = analogEquivalentHz(f, FS)
+      expect(first.magnitudeDb(f)).toBeCloseTo(firstOrderDb(analog), 3)
+      expect(second.magnitudeDb(f)).toBeCloseTo(secondOrderDb(analog), 3)
+    }
+  })
+
+  it('are −3.01 dB at the corner, which both share with the fifth-order Butterworth', () => {
+    expect(firstOrderLowPass(FS).magnitudeDb(FC)).toBeCloseTo(-3.0103, 3)
+    expect(secondOrderLowPass(FS).magnitudeDb(FC)).toBeCloseTo(-3.0103, 3)
+    expect(butterworthLowPass(FS).magnitudeDb(FC)).toBeCloseTo(-3.0103, 3)
+  })
+
+  /**
+   * Half the order's total phase at the corner — the reading the manual tells a user to identify an
+   * order by, and the one the complex-plane views have to reproduce.
+   */
+  it('are −45° and −90° at the corner', () => {
+    expect(firstOrderLowPass(FS).phaseDeg(FC)).toBeCloseTo(-45, 1)
+    expect(secondOrderLowPass(FS).phaseDeg(FC)).toBeCloseTo(-90, 1)
+    expect(butterworthPhaseDeg(FC, 1)).toBeCloseTo(-45, 6)
+    expect(butterworthPhaseDeg(FC, 2)).toBeCloseTo(-90, 6)
+  })
+
+  /**
+   * An even-order prototype is one section, not two with an inert one appended: `realPole` 0 means
+   * "no real pole", and realising it as `0/(s+0)` would be a section of gain zero — silence.
+   */
+  it('build one section each, and the fifth order still builds three', () => {
+    expect(filterSections(SECOND_ORDER, FC, FS)).toHaveLength(1)
+    expect(filterSections(FIRST_ORDER, FC, FS)).toHaveLength(1)
+    expect(filterSections(BUTTERWORTH, FC, FS)).toHaveLength(3)
+    expect(secondOrderLowPass(FS).magnitudeDb(1)).toBeCloseTo(0, 6)
   })
 })

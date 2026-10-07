@@ -396,8 +396,8 @@ const { showPage } = useManual()
       </li>
       <li>
         <strong>Show fitted model</strong> draws the Poles and zeros panel's model over the
-        measurement on Nyquist and Nichols, and <strong>Remove out of band</strong> leaves the
-        fit's extrapolated roots off the pole–zero map.
+        measurement on Nyquist and Nichols, and <strong>Hide out of band from the plot</strong>
+        (on by default) leaves the fit's extrapolated roots off the two s-plane views.
       </li>
       <li>
         <strong>Poles/zeros</strong> draws the fitted model's roots in the s-plane, in hertz: σ/2π

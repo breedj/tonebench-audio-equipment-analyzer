@@ -518,6 +518,17 @@ internal sealed class SimulatedDut
                 model, sampleRateHz, FilterPrototype.Elliptic.Sections(FilterCornerHz, sampleRateHz),
                 reflectionMs: 0.0, reflectionGain: 0.0),
 
+            // The two orders a pole-zero fit can be checked against exactly: one real pole, and one
+            // conjugate pair at Q = 1/sqrt(2). Same corner and same prewarped mapping as the four
+            // above, so the six read against each other.
+            SimulatedDutModel.FirstOrderLowPass => new SimulatedDut(
+                model, sampleRateHz, FilterPrototype.FirstOrder.Sections(FilterCornerHz, sampleRateHz),
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
+            SimulatedDutModel.SecondOrderLowPass => new SimulatedDut(
+                model, sampleRateHz, FilterPrototype.SecondOrder.Sections(FilterCornerHz, sampleRateHz),
+                reflectionMs: 0.0, reflectionGain: 0.0),
+
             _ => null,
         };
     }

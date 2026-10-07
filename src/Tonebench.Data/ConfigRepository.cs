@@ -267,6 +267,36 @@ public sealed record CaptureDelayConfig(double CaptureDelayMs = 0.0)
 }
 
 /// <summary>
+/// How long a deleted measurement or result stays in the trash before it is destroyed for real.
+/// Applied by <c>TrashRepository.PurgeOlderThanAsync</c>, which runs when a project file is opened.
+///
+/// <para>Here rather than in the project file, like every other setting: it describes how this bench
+/// wants to work, and a project copied to another machine must not carry one person's retention
+/// policy with it. The trash itself <em>is</em> per project file — it is rows in that file — so the
+/// same number governs whichever project is open.</para>
+/// </summary>
+/// <param name="Days">
+/// Days, at least <see cref="MinDays"/>. There is deliberately no "keep forever": the trash is a
+/// safety net for a misclick, and one that never empties is a second copy of the project file
+/// growing inside it — the captures a sweep saves run to megabytes each.
+/// </param>
+// The literal 14 rather than DefaultDays: a primary constructor's default cannot name a const
+// declared in its own body. The two are pinned together by TrashRetentionConfigTests.
+public sealed record TrashRetentionConfig(int Days = 14)
+{
+    public const int DefaultDays = 14;
+    public const int MinDays = 1;
+
+    /// <summary>Ten years. A bound, not a recommendation — see the remarks on <c>Days</c>.</summary>
+    public const int MaxDays = 3650;
+
+    public static TrashRetentionConfig Default { get; } = new();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid => Days >= MinDays && Days <= MaxDays;
+}
+
+/// <summary>
 /// The gain of whatever sits between the DUT and each analyzer input, in dB: a 10:1 divider in
 /// front of the left input is <c>LeftDb = -20</c>. The pipeline divides every sample by it as it
 /// arrives, so each level the app reports is the DUT's output rather than what reached the
@@ -472,6 +502,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The capture delay's key. One document, see <see cref="CaptureDelayConfig"/>.</summary>
     public const string CaptureDelayKey = "acquisition.captureDelay";
+
+    /// <summary>The trash retention's key. One document, see <see cref="TrashRetentionConfig"/>.</summary>
+    public const string TrashRetentionKey = "trash.retention";
 
     /// <summary>The experimental 384 kHz opt-in. One document, see <see cref="Experimental384kConfig"/>.</summary>
     public const string Experimental384kKey = "acquisition.experimental384k";

@@ -92,8 +92,9 @@ const { showPage } = useManual()
       </li>
       <li>
         <strong>Delete</strong> closes the project and deletes its file, after a confirmation that
-        names the file. Every measurement and result in it goes with it, and nothing goes to a
-        recycle bin: this cannot be undone.
+        names the file. Every measurement and result in it goes with it, including anything in its
+        trash — the trash lives inside the project file, so deleting the file is not the same as
+        deleting a measurement, and this one cannot be undone.
       </li>
       <li>
         <strong>Close</strong> closes the project and returns to the welcome screen.

@@ -10,6 +10,7 @@ import {
 import { stopRun } from '../deviceControl'
 import { deleteTypeConfirmation } from '../measurements/deleteTypePrompt'
 import { useConfirm } from './useConfirm'
+import { useTrash } from './useTrash'
 
 // Module-level, not inside the composable function, so every caller (the menu, the sidebar, the
 // save dialog's pickers, the history filter) shares one state instead of drifting out of sync
@@ -258,15 +259,18 @@ export function useProjects() {
   }
 
   /**
-   * Deletes a measurement type and every result stored under it, after asking. Resolves false when
-   * the question was declined (nothing was touched) and true once the delete has landed; a failed
-   * delete still throws, with the message on `error`.
+   * Moves a measurement type and every result stored under it to the trash, after asking. Resolves
+   * false when the question was declined (nothing was touched) and true once the delete has landed;
+   * a failed delete still throws, with the message on `error`.
    *
    * <p>The confirmation lives here rather than in the sidebar so that no caller can delete a
    * measurement without it, and the result count it quotes is read fresh for the question — see
    * api.countMeasurementTypeResults for why it cannot come off `types`. A count that cannot be read
    * does not block the question: the delete would fail for the same reason anyway, and the dialog
    * says the number is unknown rather than implying there is nothing to lose.</p>
+   *
+   * <p>The retention is read for the wording, and quietly: a setting that cannot be read leaves the
+   * dialog promising a restore without a deadline, which is still true (see deleteTypePrompt).</p>
    */
   async function deleteMeasurementType(id: number, projectId: number): Promise<boolean> {
     const name = types.value.find((t) => t.id === id)?.name ?? 'this measurement'
@@ -277,7 +281,11 @@ export function useProjects() {
       // Left null, which the dialog words as "how many could not be read".
     }
 
-    if (!(await useConfirm().confirm(deleteTypeConfirmation(name, resultCount)))) return false
+    const trash = useTrash()
+    await trash.loadRetention()
+
+    if (!(await useConfirm().confirm(deleteTypeConfirmation(name, resultCount, trash.retentionDays.value))))
+      return false
 
     try {
       await api.deleteMeasurementType(id)
@@ -288,6 +296,9 @@ export function useProjects() {
       }
       markClean(id)
       await loadTypes(projectId)
+      // The sidebar's badge is the only thing that says the trash is not empty, and this is the
+      // moment it stops being so.
+      void trash.refreshCount()
       error.value = null
       return true
     } catch (e) {

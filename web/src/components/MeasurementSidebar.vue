@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useProjects } from '../composables/useProjects'
 import { SIDEBAR_PIN_MIN_WIDTH_PX, useMediaQuery } from '../composables/useMediaQuery'
 import { useUiLayout } from '../composables/useUiLayout'
+import { useTrash } from '../composables/useTrash'
 import { dropIndex, moveItem } from '../measurements/reorder'
 import MeasurementKindIcon from './MeasurementKindIcon.vue'
 import NewMeasurementDialog from './NewMeasurementDialog.vue'
 
 const { types, currentTypeId, currentProjectId, dirtyTypeIds, selectType, deleteMeasurementType, reorderTypes, error } =
   useProjects()
+
+// The badge is the only thing on screen that says the trash holds anything, so it is refreshed
+// whenever the project changes as well as after each delete (useProjects/useMeasurements do that
+// half). A project switch is what the watcher catches; `immediate` covers the first paint.
+const { open: trashOpen, count: trashCount, openTrash, refreshCount } = useTrash()
+watch(currentProjectId, () => void refreshCount(), { immediate: true })
 
 const dialogOpen = ref(false)
 
@@ -165,6 +172,28 @@ async function onDelete(id: number) {
           ></span>
         </button>
       </nav>
+
+      <!-- The rail's trashcan. Same action as the footer button below; the count is a dot here,
+           because a number does not fit in 2rem and the tooltip carries it. -->
+      <button
+        type="button"
+        class="relative flex h-8 w-8 items-center justify-center rounded"
+        :class="
+          trashOpen
+            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+            : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+        "
+        :title="trashCount === 0 ? 'Trash (empty)' : `Trash (${trashCount})`"
+        :aria-label="trashCount === 0 ? 'Trash, empty' : `Trash, ${trashCount} items`"
+        @click="openTrash()"
+      >
+        <span aria-hidden="true">🗑</span>
+        <span
+          v-if="trashCount > 0"
+          class="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500"
+          aria-hidden="true"
+        ></span>
+      </button>
     </div>
 
     <!-- The full menu: in flow at the sidebar's width when pinned, floating over the content with
@@ -266,6 +295,29 @@ async function onDelete(id: number) {
           No measurements yet.
         </p>
       </nav>
+
+      <!-- The footer. `mt-auto` is what puts it at the bottom of the pinned column, which is
+           `h-full flex flex-col`; in the floating menu the container is `inset-y-0` and already
+           scrolls, so the same rule applies there. -->
+      <button
+        type="button"
+        class="mt-auto flex shrink-0 items-center gap-2 rounded px-2 py-1.5 text-left text-sm"
+        :class="
+          trashOpen
+            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+            : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+        "
+        title="Measurements and results you have deleted, and how long they are kept."
+        @click="openTrash()"
+      >
+        <span aria-hidden="true">🗑</span>
+        <span class="min-w-0 flex-1 truncate">Trash</span>
+        <span
+          v-if="trashCount > 0"
+          class="shrink-0 rounded-full bg-amber-100 px-1.5 text-xs text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+          >{{ trashCount }}</span
+        >
+      </button>
     </div>
 
     <NewMeasurementDialog :open="dialogOpen" @close="dialogOpen = false" />

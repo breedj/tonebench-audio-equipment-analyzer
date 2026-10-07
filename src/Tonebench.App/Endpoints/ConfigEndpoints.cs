@@ -46,6 +46,34 @@ public static class ConfigEndpoints
     }
 
     /// <summary>
+    /// The stored trash retention, or 14 days when nothing has been stored or the document cannot be
+    /// read -- the same contract as the capture delay. Shared with <c>ProjectSessionService</c>,
+    /// which reads it when it opens a project file and purges against it.
+    ///
+    /// <para>Deliberately no in-memory settings singleton and no <c>StartupSettingsLoader</c> entry,
+    /// unlike the capture delay: this is read once per project open rather than on a hot path, and
+    /// the order in that loader is load-bearing enough not to be lengthened for a number nothing
+    /// else depends on.</para>
+    /// </summary>
+    public static async Task<TrashRetentionConfig> ReadTrashRetentionAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? stored = await repo.GetAsync(ConfigRepository.TrashRetentionKey, ct);
+        if (string.IsNullOrWhiteSpace(stored))
+            return TrashRetentionConfig.Default;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.TrashRetentionConfig);
+            return config is { IsValid: true } ? config : TrashRetentionConfig.Default;
+        }
+        catch (JsonException)
+        {
+            return TrashRetentionConfig.Default;
+        }
+    }
+
+    /// <summary>
     /// The stored auto-ranging step-down delay, defaulting to the ranger's own 1000 ms for an
     /// absent, unreadable or out-of-range document — the same contract as the capture delay.
     /// Shared with <see cref="StartupSettingsLoader"/>, which loads it into
@@ -351,6 +379,31 @@ public static class ConfigEndpoints
                 JsonSerializer.Serialize(config, AppJsonContext.Default.CaptureDelayConfig),
                 ct);
             setting.Ms = config.CaptureDelayMs;
+
+            return Results.Ok(config);
+        });
+
+        // How long the trash keeps things. Written from the Trash view rather than from the
+        // Configuration dialog, so the number sits beside what it governs and there is only one
+        // write path for it. Nothing in memory to keep in step: ProjectSessionService reads the
+        // document when it opens a project file, which is the only moment it is used.
+        group.MapGet("/trash-retention", async (
+            ConfigRepository repo, CancellationToken ct) =>
+            Results.Ok(await ReadTrashRetentionAsync(repo, ct)));
+
+        group.MapPut("/trash-retention", async (
+            TrashRetentionConfig config, ConfigRepository repo, CancellationToken ct) =>
+        {
+            if (!config.IsValid)
+            {
+                return Results.BadRequest(
+                    $"The trash retention must be between {TrashRetentionConfig.MinDays} and {TrashRetentionConfig.MaxDays} days.");
+            }
+
+            await repo.SetAsync(
+                ConfigRepository.TrashRetentionKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.TrashRetentionConfig),
+                ct);
 
             return Results.Ok(config);
         });

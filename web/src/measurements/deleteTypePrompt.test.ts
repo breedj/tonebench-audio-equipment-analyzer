@@ -7,15 +7,37 @@ import { deleteTypeConfirmation } from './deleteTypePrompt'
  * file's "Amp 1 kHz at 1 W" and its five stored results on 2026-10-02. These pin the two things the
  * dialog has to get right: it is marked destructive, and it says how many results go, since the
  * sidebar row itself shows only a name.
+ *
+ * Since the trash exists it also has to stop claiming the delete is irreversible, which is a
+ * promise the app would be breaking in the other direction.
  */
 describe('deleteTypeConfirmation', () => {
-  it('is a destructive, explicitly irreversible question about the named measurement', () => {
+  it('is a destructive question about the named measurement', () => {
     const options = deleteTypeConfirmation('Amp 1 kHz at 1 W', 5)
 
     expect(options.danger).toBe(true)
     expect(options.confirmLabel).toBe('Delete')
     expect(options.message).toContain('"Amp 1 kHz at 1 W"')
-    expect(options.message).toContain('cannot be undone')
+  })
+
+  /** The delete goes to the trash now, so the old sentence would be a lie in both directions. */
+  it('says the measurement can be restored, and no longer that it cannot be undone', () => {
+    const message = deleteTypeConfirmation('Amp', 5, 14).message
+
+    expect(message).not.toContain('cannot be undone')
+    expect(message).toContain('trash')
+    expect(message).toContain('restored for 14 days')
+  })
+
+  it('does not say "1 days", and promises no deadline it has not read', () => {
+    expect(deleteTypeConfirmation('Amp', 5, 1).message).toContain('restored for 1 day.')
+    expect(deleteTypeConfirmation('Amp', 5, 1).message).not.toContain('1 days')
+
+    // The retention is a request of its own; until it answers, the restore is promised without a
+    // deadline rather than with a guessed one.
+    const unknown = deleteTypeConfirmation('Amp', 5, null).message
+    expect(unknown).toContain('can be restored')
+    expect(unknown).not.toContain('days')
   })
 
   it('names the number of stored results that go with the type', () => {

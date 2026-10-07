@@ -106,15 +106,18 @@ public static class ProjectsEndpoints
             return Results.Ok(new MeasurementTypeResultCountResponse(await repo.CountTypeResultsAsync(id, ct)));
         });
 
-        // Deletes the type's own results (and their captures/spectra/metrics) along with it — see
-        // ProjectRepository.DeleteTypeAsync — rather than rejecting while any exist. There is
-        // deliberately no 409 for "still has results": the sidebar asks first (useProjects.
-        // deleteMeasurementType, over the count above), which is where that refusal would otherwise
-        // have to live.
+        // Moves the type to the trash, results and all — see ProjectRepository.TrashTypeAsync, and
+        // TrashEndpoints for what then lists and restores it. Nothing is destroyed here: the
+        // permanent delete is DELETE /api/trash/measurement-types/{id}, and the retention purge.
+        //
+        // The route keeps its meaning rather than gaining a sibling, because there is one client
+        // and one ordinary way to delete a measurement. There is deliberately no 409 for "still
+        // has results": the sidebar asks first (useProjects.deleteMeasurementType, over the count
+        // above), which is where that refusal would otherwise have to live.
         typeGroup.MapDelete("/{id:long}", async (long id, ProjectRepository repo, CancellationToken ct) =>
         {
-            bool deleted = await repo.DeleteTypeAsync(id, ct);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            bool trashed = await repo.TrashTypeAsync(id, ct);
+            return trashed ? Results.NoContent() : Results.NotFound();
         });
 
         // Pushes this type's stored parameters (FFT size, window, averaging, band, ranges) into the

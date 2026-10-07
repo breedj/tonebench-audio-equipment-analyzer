@@ -344,6 +344,83 @@ public class ProjectSessionServiceTests : IDisposable
         Assert.Equal(In("p05.tbench"), (await _session.ReadRecentAsync(CancellationToken.None)).Entries[0].Path);
     }
 
+    /// <summary>
+    /// The retention purge runs on open, which is the one path every project file arrives through —
+    /// startup included, since ProjectStartupHostedService reopens the last file through it. No
+    /// hosted service can do it: none of them has a project file open.
+    /// </summary>
+    [Fact]
+    public async Task Open_PurgesWhatHasBeenInTheTrashLongerThanTheRetention()
+    {
+        var info = await _session.CreateAsync(In("amp"), "GM70 amp", null, CancellationToken.None);
+        var projects = new ProjectRepository(_factory);
+        long expired = await projects.CreateTypeAsync(info.Id, "FFTSpectrum", "Long gone", null, "{}", CancellationToken.None);
+        long recent = await projects.CreateTypeAsync(info.Id, "FFTSpectrum", "Just deleted", null, "{}", CancellationToken.None);
+        long live = await projects.CreateTypeAsync(info.Id, "FFTSpectrum", "Still here", null, "{}", CancellationToken.None);
+        await projects.TrashTypeAsync(expired, CancellationToken.None);
+        await projects.TrashTypeAsync(recent, CancellationToken.None);
+        await BackdateTrashedTypeAsync(expired, DateTimeOffset.UtcNow.AddDays(-20));
+        await BackdateTrashedTypeAsync(recent, DateTimeOffset.UtcNow.AddDays(-2));
+
+        await _session.CloseAsync(CancellationToken.None);
+        await _session.OpenAsync(info.Path, CancellationToken.None);
+
+        await using var connection = await _factory.OpenAsync(CancellationToken.None);
+        Assert.Equal(0L, await connection.ExecuteScalarAsync<long>(
+            $"SELECT COUNT(*) FROM measurement_type WHERE id = {expired};"));
+        // Inside the 14-day default, so still restorable; and the live one is never a candidate.
+        Assert.Equal(1L, await connection.ExecuteScalarAsync<long>(
+            $"SELECT COUNT(*) FROM measurement_type WHERE id = {recent};"));
+        Assert.Equal(1L, await connection.ExecuteScalarAsync<long>(
+            $"SELECT COUNT(*) FROM measurement_type WHERE id = {live};"));
+    }
+
+    [Fact]
+    public async Task Open_UsesTheStoredRetentionRatherThanTheDefault()
+    {
+        await _config.SetAsync(ConfigRepository.TrashRetentionKey, """{"days":1}""", CancellationToken.None);
+
+        var info = await _session.CreateAsync(In("amp"), "GM70 amp", null, CancellationToken.None);
+        var projects = new ProjectRepository(_factory);
+        long trashed = await projects.CreateTypeAsync(info.Id, "FFTSpectrum", "Deleted", null, "{}", CancellationToken.None);
+        await projects.TrashTypeAsync(trashed, CancellationToken.None);
+        await BackdateTrashedTypeAsync(trashed, DateTimeOffset.UtcNow.AddDays(-2));
+
+        await _session.CloseAsync(CancellationToken.None);
+        await _session.OpenAsync(info.Path, CancellationToken.None);
+
+        await using var connection = await _factory.OpenAsync(CancellationToken.None);
+        Assert.Equal(0L, await connection.ExecuteScalarAsync<long>(
+            $"SELECT COUNT(*) FROM measurement_type WHERE id = {trashed};"));
+    }
+
+    /// <summary>
+    /// A project that will not open because tidying up failed would be a worse fault than the one
+    /// the trash saves the user from. An unreadable retention document falls back to the default
+    /// rather than throwing, and anything else is logged and swallowed.
+    /// </summary>
+    [Fact]
+    public async Task Open_WithAnUnreadableRetentionDocument_StillOpensTheProject()
+    {
+        await _config.SetAsync(ConfigRepository.TrashRetentionKey, "not json at all", CancellationToken.None);
+
+        var info = await _session.CreateAsync(In("amp"), "GM70 amp", null, CancellationToken.None);
+        await _session.CloseAsync(CancellationToken.None);
+
+        var reopened = await _session.OpenAsync(info.Path, CancellationToken.None);
+
+        Assert.Equal(info.Path, reopened.Path);
+        Assert.Equal("GM70 amp", _session.Current!.Name);
+    }
+
+    private async Task BackdateTrashedTypeAsync(long typeId, DateTimeOffset when)
+    {
+        await using var connection = await _factory.OpenAsync(CancellationToken.None);
+        Assert.Equal(1, await connection.ExecuteAsync(
+            "UPDATE measurement_type SET deleted_utc = @when WHERE id = @typeId;",
+            new { when = TonebenchTimestamp.FormatUtc(when), typeId }));
+    }
+
     [Fact]
     public async Task RemoveRecent_DropsOneEntry()
     {

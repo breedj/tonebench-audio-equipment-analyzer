@@ -166,6 +166,125 @@ public class ProjectRepositoryTests
     }
 
     /// <summary>
+    /// The client sends the list it is showing, which is ListTypesAsync's — so "exactly the
+    /// project's own type ids" has to mean the ones not in the trash. Counting a trashed row would
+    /// make that list short by one and refuse every drag in a project that has ever had a
+    /// measurement deleted.
+    /// </summary>
+    [Fact]
+    public async Task ReorderTypes_WithTheVisibleListOnly_IsNotRefusedBecauseOfATrashedType()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var repo = new ProjectRepository(await TestDb.CreateMigratedFactoryAsync(path));
+            long projectId = await repo.CreateProjectAsync("GM70", null, CancellationToken.None);
+            long first = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "First", null, "{}", CancellationToken.None);
+            long second = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Second", null, "{}", CancellationToken.None);
+            long trashed = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Trashed", null, "{}", CancellationToken.None);
+
+            await repo.TrashTypeAsync(trashed, CancellationToken.None);
+
+            Assert.True(await repo.ReorderTypesAsync(projectId, [second, first], CancellationToken.None));
+
+            var types = await repo.ListTypesAsync(projectId, CancellationToken.None);
+            Assert.Equal([second, first], types.Select(t => t.Id));
+
+            // And a list that still names the trashed one is refused, as any wrong list is.
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                repo.ReorderTypesAsync(projectId, [second, first, trashed], CancellationToken.None));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The count is what the delete confirmation quotes, so it has to be what the delete is about to
+    /// move to the trash — not what is already in it.
+    /// </summary>
+    [Fact]
+    public async Task CountTypeResults_CountsOnlyTheResultsThatWouldGoToTheTrash()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            var repo = new ProjectRepository(factory);
+            var measurements = new MeasurementRepository(factory);
+            long projectId = await repo.CreateProjectAsync("GM70", null, CancellationToken.None);
+            long typeId = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Amp", null, "{}", CancellationToken.None);
+
+            long kept = await SaveBareResultAsync(factory, typeId, "kept");
+            long alreadyTrashed = await SaveBareResultAsync(factory, typeId, "already trashed");
+            await measurements.TrashResultAsync(alreadyTrashed, CancellationToken.None);
+
+            Assert.Equal(1, await repo.CountTypeResultsAsync(typeId, CancellationToken.None));
+            Assert.NotEqual(0L, kept);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// Save As without results makes a fresh file holding the measurements; carrying someone's
+    /// deleted ones into it would be a surprise. (Save As *with* results is a page-level database
+    /// copy and does carry the trash — see CopyTypesAsync's remarks.)
+    /// </summary>
+    [Fact]
+    public async Task CopyTypes_DoesNotCopyATrashedMeasurement()
+    {
+        string source = TestDb.CreateTempPath();
+        string destination = TestDb.CreateTempPath();
+        try
+        {
+            var sourceFactory = await TestDb.CreateMigratedFactoryAsync(source);
+            var destinationFactory = await TestDb.CreateMigratedFactoryAsync(destination);
+            var repo = new ProjectRepository(sourceFactory);
+            long projectId = await repo.CreateProjectAsync("GM70", null, CancellationToken.None);
+            await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Kept", null, "{}", CancellationToken.None);
+            long trashed = await repo.CreateTypeAsync(projectId, "FFTSpectrum", "Trashed", null, "{}", CancellationToken.None);
+            await repo.TrashTypeAsync(trashed, CancellationToken.None);
+
+            await using (var from = await sourceFactory.OpenAsync(CancellationToken.None))
+            await using (var to = await destinationFactory.OpenAsync(CancellationToken.None))
+            {
+                long copiedProject = await ProjectRepository.CreateProjectAsync(to, "GM70 copy", null);
+                await ProjectRepository.CopyTypesAsync(from, projectId, to, copiedProject);
+
+                var copied = await new ProjectRepository(destinationFactory)
+                    .ListTypesAsync(copiedProject, CancellationToken.None);
+                Assert.Equal("Kept", Assert.Single(copied).Name);
+            }
+        }
+        finally
+        {
+            TestDb.Cleanup(source);
+            TestDb.Cleanup(destination);
+        }
+    }
+
+    /// <summary>A result row with one capture — enough to be counted, without a spectrum blob.</summary>
+    private static async Task<long> SaveBareResultAsync(SqliteConnectionFactory factory, long typeId, string name)
+    {
+        await using var connection = await factory.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO measurement_result
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
+            VALUES (@typeId, @name, NULL, @ts, '{}', 'QA403 (Sim)', 'SIM-001', '1.0.0', 1)
+            RETURNING id;
+            """;
+        command.Parameters.AddWithValue("@typeId", typeId);
+        command.Parameters.AddWithValue("@name", name);
+        command.Parameters.AddWithValue("@ts", TonebenchTimestamp.Now());
+        return Convert.ToInt64(await command.ExecuteScalarAsync());
+    }
+
+    /// <summary>
     /// Migration 008 backfills the order every existing database already appeared to have -- the
     /// name sort ListTypesAsync did before sort_order existed -- so opening one after the upgrade
     /// moves nothing. Rolls the column back off a migrated database and re-runs the real runner,
@@ -192,7 +311,16 @@ public class ProjectRepositoryTests
                     // under test entirely and this passes for the wrong reason. Each later migration
                     // therefore has to undo whatever it created, which is why the impulse tables go
                     // too.
+                    // 013's partial index goes before its columns -- SQLite refuses to drop a column
+                    // an index refers to -- and the plain index has to come back in its place, or
+                    // 013's own DROP INDEX finds nothing to drop when the runner replays it.
                     command.CommandText = """
+                        DROP INDEX ix_measurement_type_name;
+                        DROP INDEX ix_measurement_type_trashed;
+                        DROP INDEX ix_measurement_result_trashed;
+                        ALTER TABLE measurement_type DROP COLUMN deleted_utc;
+                        ALTER TABLE measurement_result DROP COLUMN deleted_utc;
+                        CREATE UNIQUE INDEX ix_measurement_type_name ON measurement_type(project_id, name);
                         ALTER TABLE measurement_type DROP COLUMN sort_order;
                         DROP TABLE impulse_result;
                         DROP TABLE impulse_harmonic;

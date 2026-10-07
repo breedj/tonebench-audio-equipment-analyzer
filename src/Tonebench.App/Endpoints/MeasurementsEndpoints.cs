@@ -53,10 +53,13 @@ public static class MeasurementsEndpoints
             return updated ? Results.Ok() : Results.NotFound();
         });
 
+        // Moves the result to the trash — see MeasurementRepository.TrashResultAsync, and
+        // TrashEndpoints for what lists and restores it. Nothing is destroyed here; the permanent
+        // delete is DELETE /api/trash/measurements/{id}, and the retention purge.
         group.MapDelete("/{id:long}", async (long id, MeasurementRepository repo, CancellationToken ct) =>
         {
-            bool deleted = await repo.DeleteResultAsync(id, ct);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            bool trashed = await repo.TrashResultAsync(id, ct);
+            return trashed ? Results.NoContent() : Results.NotFound();
         });
 
         group.MapGet("/{id:long}/export.csv", async (long id, MeasurementRepository repo, CancellationToken ct) =>

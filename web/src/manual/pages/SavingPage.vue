@@ -56,9 +56,11 @@ const { showPage } = useManual()
     <p>
       The sidebar lists the measurements in the current project.
       <strong>+ New measurement</strong> picks a type and names it; the ✕ that appears on hover
-      deletes one. That ✕ takes every result ever saved under the measurement with it and cannot be
-      undone, so it asks first, naming how many stored results would go. A red dot means unsaved
-      settings changes — on the measurement's own name in the toolbar, and beside it in the sidebar.
+      deletes one. That ✕ takes every result ever saved under the measurement with it, so it asks
+      first, naming how many stored results would go — but nothing is destroyed: both the
+      measurement and its results go to the <strong>Trash</strong> (below), where they can be put
+      back. A red dot means unsaved settings changes — on the measurement's own name in the toolbar,
+      and beside it in the sidebar.
     </p>
     <p>
       <strong>Save</strong> writes the current settings into the selected measurement.
@@ -121,7 +123,8 @@ const { showPage } = useManual()
         timestamp and headline figures, filterable by date, with three actions:
         <strong>Edit</strong> to rename or re-note it, <strong>CSV</strong> to download the
         measurement as text, <strong>Report</strong> for a PDF of it (below), and
-        <strong>Delete</strong>, which asks for confirmation first.
+        <strong>Delete</strong>, which arms itself first — click again to confirm. A deleted result
+        goes to the <strong>Trash</strong>, not away.
       </li>
     </ul>
     <p>
@@ -136,6 +139,45 @@ const { showPage } = useManual()
       The one deliberate exception is the <strong>frequency response</strong> and the
       <strong>stepped sine response</strong>, which share a chart: they are two ways of measuring the
       same curve, and drawing a chirp run under a stepped one is a comparison worth having.
+    </p>
+
+    <h2>The trash</h2>
+    <p>
+      Deleting a measurement or a saved result moves it to the trash rather than destroying it.
+      <strong>🗑 Trash</strong> at the bottom of the measurement list opens it in place of the
+      measurement screen, with a count beside it when it holds anything. <strong>Close</strong>
+      returns to the measurement you were on, exactly as you left it.
+    </p>
+    <p>
+      The list has two levels. A deleted <em>measurement</em> is a block of its own, and
+      <strong>Restore</strong> brings it back with every result that was stored under it — the row
+      says how many. Deleted <em>results</em> are listed under their measurement, indented. When
+      that measurement is still in use it appears as a greyed heading reading
+      <em>not deleted — only the results below are</em>: there is nothing to restore about a
+      measurement you never deleted, so it has no Restore button of its own.
+    </p>
+    <p>
+      A result can only be restored while its measurement exists. If you deleted both, restore the
+      measurement first and the result's own Restore becomes available — a result put back under a
+      deleted measurement would stay hidden anyway, since the history list shows nothing from a
+      measurement in the trash. Note that a result you deleted on its own is <em>not</em> brought
+      back by restoring its measurement: you deleted that one deliberately and separately, so it
+      stays where you put it.
+    </p>
+    <p>
+      One restore can be refused, and the view says so instead of offering it: if you deleted a
+      measurement and then made a new one with the same name, the two cannot both exist. Rename
+      either of them and the Restore button comes back.
+    </p>
+    <p>
+      <strong>Delete permanently</strong> on any row, and <strong>Empty trash</strong> in the header,
+      really do destroy things — those are the two buttons in the app that cannot be undone, and both
+      say so before they act. Everything else in the trash goes by itself:
+      <strong>Keep deleted items for … days</strong> is how long it is held, 14 days by default and
+      at least one, and the clear-out runs when a project is opened. That setting belongs to this
+      bench rather than to the project, so it is the same whichever project you open; the trash
+      itself lives inside the project file, which is why each project has its own and why deleting a
+      project file takes its trash with it.
     </p>
 
     <h2>Screenshots and reports</h2>

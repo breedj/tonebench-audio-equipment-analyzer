@@ -55,6 +55,10 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(IEnumerable<MeasurementTypeResponse>))]
 [JsonSerializable(typeof(MeasurementTypeAppliedResponse))]
 [JsonSerializable(typeof(MeasurementTypeResultCountResponse))]
+[JsonSerializable(typeof(TrashListingResponse))]
+[JsonSerializable(typeof(TrashTypeResponse))]
+[JsonSerializable(typeof(TrashResultResponse))]
+[JsonSerializable(typeof(TrashEmptiedResponse))]
 [JsonSerializable(typeof(UpdateCheckResult))]
 
 // Report an issue. The report's own JSON is written with Utf8JsonWriter rather than serialized --
@@ -90,6 +94,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(ImpedanceFixtureConfig))]
 [JsonSerializable(typeof(UiLayoutConfig))]
 [JsonSerializable(typeof(CaptureDelayConfig))]
+[JsonSerializable(typeof(TrashRetentionConfig))]
 [JsonSerializable(typeof(ExternalGainConfig))]
 [JsonSerializable(typeof(SoundCardConfig))]
 [JsonSerializable(typeof(AnalyzerKindConfig))]

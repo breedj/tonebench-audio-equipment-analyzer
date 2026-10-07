@@ -159,6 +159,7 @@ async function onConfirmDelete(item: MeasurementSummary) {
                   v-else
                   type="button"
                   class="rounded border border-red-300 bg-red-50 px-2 py-1 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+                  title="Moves this result to the trash, where it can be restored."
                   @click="onDeleteClick(item)"
                 >
                   Delete

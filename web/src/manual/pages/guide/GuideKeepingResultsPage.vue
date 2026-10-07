@@ -88,6 +88,14 @@ const { showPage } = useManual()
       <strong>CSV</strong> to export the numbers as a text file for a spreadsheet,
       <strong>Report</strong> for a PDF, and <strong>Delete</strong>.
     </p>
+    <p>
+      Delete is safe to press. A deleted result — or a whole deleted measurement — goes to the
+      <strong>🗑 Trash</strong> at the bottom of the measurement list, and <strong>Restore</strong>
+      there puts it back. Restoring a measurement brings its results back with it. Things are kept
+      for a fortnight by default, which you can change in that same view, and only
+      <strong>Delete permanently</strong> and <strong>Empty trash</strong> actually throw anything
+      away.
+    </p>
 
     <h2>Getting results out of the app</h2>
     <ul>

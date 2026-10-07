@@ -4,6 +4,7 @@ using Dapper;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
+using Tonebench.App.Endpoints;
 using Tonebench.Data;
 
 namespace Tonebench.App.Services;
@@ -75,6 +76,7 @@ public sealed class ProjectSessionService(
 
                 await new MigrationRunner().RunAsync(connection, ct);
                 row = await SingleProjectAsync(connection, full);
+                await PurgeExpiredTrashAsync(connection, ct);
             }
 
             return await AdoptAsync(full, row, problem, ct);
@@ -356,6 +358,44 @@ public sealed class ProjectSessionService(
         await new MigrationRunner().RunAsync(connection, ct);
         await ProjectRepository.CreateProjectAsync(connection, name, notes);
         return await SingleProjectAsync(connection, path);
+    }
+
+    /// <summary>
+    /// Destroys whatever has been in this file's trash longer than the configured retention.
+    ///
+    /// <para>Here, and not in a hosted service, because <b>no project file is open when the hosted
+    /// services start</b> — <c>CurrentProjectFile.Path</c> is still null at that point. This is the
+    /// one method every open goes through, startup included (<c>ProjectStartupHostedService</c>
+    /// reopens the last file through it), it runs on the connection that has just migrated the file,
+    /// inside the session lock and before the project is adopted, so nothing can observe a
+    /// half-purged file and nothing can race it — <c>OpenAsync</c> has already called
+    /// <c>ThrowIfBusy</c>.</para>
+    ///
+    /// <para>It never throws. A project that will not open because tidying up failed would be a far
+    /// worse fault than the one this saves the user from, so a failure is logged and the open
+    /// continues — the same contract as the device connect and the startup reopen.</para>
+    /// </summary>
+    private async Task PurgeExpiredTrashAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        try
+        {
+            var retention = await ConfigEndpoints.ReadTrashRetentionAsync(config, ct);
+            var report = await TrashRepository.PurgeOlderThanAsync(
+                connection, DateTimeOffset.UtcNow - TimeSpan.FromDays(retention.Days));
+
+            // Only when it did something: a "purged nothing" line on every open would be noise in
+            // the one file a fault report is read from.
+            if (report.AnythingDeleted)
+            {
+                logger.LogInformation(
+                    "Trash purged: {Types} measurement(s) and {Results} result(s) deleted after {Days} day(s)",
+                    report.MeasurementTypes, report.Results, retention.Days);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Could not purge the trash; opening the project anyway");
+        }
     }
 
     private static async Task<ProjectRow> SingleProjectAsync(SqliteConnection connection, string path)

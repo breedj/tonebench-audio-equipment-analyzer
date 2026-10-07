@@ -497,6 +497,66 @@ public sealed record ProjectRow(long Id, string Name, string? Notes, DateTimeOff
 public sealed record MeasurementTypeRow(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
 
+/// <summary>
+/// What the trash holds, as the two levels the view draws: one entry per measurement that has
+/// anything of its own in the trash, with the results trashed individually nested under it.
+///
+/// <para>A <see cref="TrashTypeEntry"/> whose <c>DeletedUtc</c> is null is a measurement that is
+/// still there, present only as the parent of trashed results — the view draws it as a header that
+/// cannot itself be restored. Built server-side rather than grouped on the client because a trashed
+/// measurement's name and kind are no longer in the client's own type list at all.</para>
+/// </summary>
+public sealed record TrashListing(IReadOnlyList<TrashTypeEntry> Types, int TotalCount);
+
+/// <param name="DeletedUtc">Null when the measurement itself is not in the trash.</param>
+/// <param name="RestorableResultCount">
+/// How many results would come back with this measurement — the ones whose own <c>deleted_utc</c> is
+/// NULL. Results trashed individually are <em>not</em> among them; they are the nested entries, and
+/// they stay in the trash when their measurement is restored.
+/// </param>
+/// <param name="NameTaken">
+/// A live measurement already has this name, so restoring it is refused — see
+/// ProjectRepository.RestoreTypeAsync.
+/// </param>
+public sealed record TrashTypeEntry(
+    long MeasurementTypeId,
+    string Name,
+    string Kind,
+    DateTimeOffset? DeletedUtc,
+    int RestorableResultCount,
+    bool NameTaken,
+    IReadOnlyList<TrashResultEntry> Results);
+
+public sealed record TrashResultEntry(
+    long ResultId, string Name, string? Notes, DateTimeOffset TimestampUtc, DateTimeOffset DeletedUtc);
+
+/// <summary>What a purge or an Empty Trashcan destroyed. Counts rows, not bytes.</summary>
+public sealed record TrashPurgeReport(int MeasurementTypes, int Results)
+{
+    public static TrashPurgeReport Empty { get; } = new(0, 0);
+
+    public bool AnythingDeleted => MeasurementTypes > 0 || Results > 0;
+}
+
+/// <summary>Why a measurement could not come back out of the trash. See ProjectRepository.RestoreTypeAsync.</summary>
+public enum TypeRestoreStatus
+{
+    Restored,
+    NotFound,
+    NameTaken,
+}
+
+/// <param name="Name">The trashed measurement's name, for the message a <c>NameTaken</c> needs.</param>
+public sealed record TypeRestoreOutcome(TypeRestoreStatus Status, string? Name);
+
+/// <summary>Why a result could not come back out of the trash. See MeasurementRepository.RestoreResultAsync.</summary>
+public enum ResultRestoreStatus
+{
+    Restored,
+    NotFound,
+    ParentInTrash,
+}
+
 public sealed record MeasurementFilter(
     long? ProjectId = null,
     long? MeasurementTypeId = null,

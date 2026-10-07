@@ -9,6 +9,7 @@ import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
 import { curveOverlayScreen, type CurveOverlayScreen } from './measurements/overlayScope'
 import { useProjects } from './composables/useProjects'
+import { useTrash } from './composables/useTrash'
 import { useProjectSession } from './composables/useProjectSession'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
@@ -27,6 +28,7 @@ import { isWaveKind } from './periodicWave'
 import { stopRun } from './deviceControl'
 import DeviceStatusBar from './components/DeviceStatusBar.vue'
 import MeasurementSidebar from './components/MeasurementSidebar.vue'
+import TrashView from './components/TrashView.vue'
 import ProjectMenu, { type ProjectMenuAction } from './components/ProjectMenu.vue'
 import ProjectDialog from './components/ProjectDialog.vue'
 import FileBrowserDialog from './components/FileBrowserDialog.vue'
@@ -164,7 +166,7 @@ import {
 const { status, ranges, error, refreshStatus, refreshRanges } = useDevice()
 const soundCard = useSoundCard()
 const { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, setViewport, clearScope } = useSpectrumStream()
-const { overlays } = useMeasurements()
+const { overlays, load: loadMeasurements } = useMeasurements()
 const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
 // For the report's Metrics element — the power tiles need the load the Generator pane names.
@@ -306,6 +308,7 @@ const {
   loadedParams,
   dirtyTypeIds,
   hasDirty: hasAnyDirtyInProject,
+  loadTypes,
   markDirty,
   setAutosaveFlush,
   setLiveStateReset,
@@ -314,6 +317,24 @@ const {
   saveProject,
 } = useProjects()
 const projectSession = useProjectSession()
+
+// The trash view, which replaces <main>'s content. Selecting any measurement closes it — one
+// watcher rather than a closeTrash() at each of the sidebar's two row handlers and
+// NewMeasurementDialog's, which is three places to forget. Guarded on non-null because
+// deleteMeasurementType sets currentTypeId to null when the open measurement goes, and that must
+// not count as a selection.
+const { open: trashOpen, closeTrash } = useTrash()
+watch(currentTypeId, (id) => {
+  if (id !== null) closeTrash()
+})
+
+// A restore puts a measurement back in the sidebar or a result back in the history, neither of
+// which the trash view owns. The history panel is filtered to the open measurement, so reloading
+// it is cheap and always right.
+async function onTrashRestored() {
+  if (currentProjectId.value !== null) await loadTypes(currentProjectId.value)
+  await loadMeasurements()
+}
 // Configuration ▸ General ▸ Autosave — see the isCurrentTypeDirty watcher further down.
 const { autosaveEnabled, load: loadAutosave } = useAutosave()
 void loadAutosave()
@@ -3393,7 +3414,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       <MeasurementSidebar />
 
       <main class="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-        <template v-if="currentTypeId !== null">
+        <!-- The trash takes over <main> and leaves the sidebar alone, unlike WelcomeScreen, which
+             replaces both. It deliberately does *not* change the selection: no selectType, so none
+             of the live-state machinery below runs, and Close lands back on the same measurement
+             with its curves and staged settings intact. -->
+        <TrashView v-if="trashOpen" @close="closeTrash" @restored="onTrashRestored" />
+
+        <template v-else-if="currentTypeId !== null">
           <!-- THE MEASUREMENT BAR: the name of what is selected, everything that can be done to it,
                and the help button — the one row every screen shares. A bar rather than a row of
                loose buttons on the page ground (Joost, 2026-09-30): it bleeds out to the edges of

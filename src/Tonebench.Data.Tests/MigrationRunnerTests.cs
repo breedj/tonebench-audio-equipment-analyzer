@@ -94,7 +94,8 @@ public class MigrationRunnerTests
                  (4L, "004_capture_preview.sql"), (5L, "005_orphan_cleanup.sql"), (6L, "006_response_trace.sql"),
                  (7L, "007_response_trace_orphans.sql"), (8L, "008_measurement_type_sort_order.sql"),
                  (9L, "009_impulse_response.sql"), (10L, "010_impulse_orphans.sql"),
-                 (11L, "011_response_trace_reference.sql"), (12L, "012_response_trace_delay.sql")],
+                 (11L, "011_response_trace_reference.sql"), (12L, "012_response_trace_delay.sql"),
+                 (13L, "013_trash.sql")],
                 rows);
         }
         finally
@@ -123,6 +124,9 @@ public class MigrationRunnerTests
 
             await using (var command = connection.CreateCommand())
             {
+                // 013's partial index is dropped *before* its columns: SQLite refuses to drop a
+                // column an index refers to, and the plain index has to come back in its place or
+                // 013 cannot re-create it.
                 command.CommandText = """
                     DELETE FROM schema_version WHERE version >= 5;
                     DROP TABLE response_trace;
@@ -130,6 +134,12 @@ public class MigrationRunnerTests
                     DROP TABLE impulse_result;
                     DROP TABLE impulse_harmonic;
                     DROP TABLE impulse_reference;
+                    DROP INDEX ix_measurement_type_name;
+                    DROP INDEX ix_measurement_type_trashed;
+                    DROP INDEX ix_measurement_result_trashed;
+                    ALTER TABLE measurement_type DROP COLUMN deleted_utc;
+                    ALTER TABLE measurement_result DROP COLUMN deleted_utc;
+                    CREATE UNIQUE INDEX ix_measurement_type_name ON measurement_type(project_id, name);
                     INSERT INTO capture_preview (capture_id, channel, kind, x, min, max)
                     VALUES (4242, 0, 'fft', zeroblob(4), zeroblob(4), zeroblob(4));
                     INSERT INTO metric (capture_id, channel, name, value, unit)

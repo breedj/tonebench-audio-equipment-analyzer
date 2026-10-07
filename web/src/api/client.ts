@@ -2020,6 +2020,49 @@ export interface MeasurementTypeResultCount {
   count: number
 }
 
+/**
+ * The trash, as the two levels the view draws. Mirrors Tonebench.App.Endpoints.TrashListingResponse.
+ *
+ * `totalCount` is what the sidebar's badge shows: the measurements actually in the trash plus every
+ * trashed result. A header-only entry (one whose measurement is still there) is not an item.
+ */
+export interface TrashListing {
+  types: TrashTypeEntry[]
+  totalCount: number
+}
+
+export interface TrashTypeEntry {
+  measurementTypeId: number
+  name: string
+  kind: string
+  /** Null when the measurement itself is not in the trash — then this is only a header for its trashed results. */
+  deletedUtc: string | null
+  /** How many results would come back with this measurement. Not the nested ones: those were deleted separately and stay. */
+  restorableResultCount: number
+  /** A live measurement has taken this name, so the restore is refused until one of them is renamed. */
+  nameTaken: boolean
+  results: TrashResultEntry[]
+}
+
+export interface TrashResultEntry {
+  resultId: number
+  name: string
+  notes: string | null
+  timestampUtc: string
+  deletedUtc: string
+}
+
+/** What an Empty Trashcan destroyed. Mirrors Tonebench.App.Endpoints.TrashEmptiedResponse. */
+export interface TrashEmptied {
+  measurementTypes: number
+  results: number
+}
+
+/** How long the trash keeps things. Mirrors Tonebench.Data.TrashRetentionConfig; 1–3650 days. */
+export interface TrashRetentionConfig {
+  days: number
+}
+
 /** What a measurement type's stored generator/acquisition config actually is — same shape as DeviceStatus's generatorLeft/Right, so the UI's existing form-sync logic works from either source. */
 export interface MeasurementTypeAppliedResponse {
   generatorLeft: GeneratorChannelState
@@ -2886,7 +2929,12 @@ export const api = {
   countMeasurementTypeResults: (id: number) =>
     request<MeasurementTypeResultCount>(`/measurement-types/${id}/result-count`),
 
-  /** Takes every result stored under the type with it, irreversibly — ask first; see useProjects.deleteMeasurementType. */
+  /**
+   * Moves the measurement to the trash, every result stored under it included — nothing is
+   * destroyed, and `restoreTrashedMeasurementType` brings all of it back. It still asks first (see
+   * useProjects.deleteMeasurementType): the row is narrow and a stray click should not make a
+   * measurement vanish from the sidebar unannounced.
+   */
   deleteMeasurementType: (id: number) => request<void>(`/measurement-types/${id}`, { method: 'DELETE' }),
 
   /**
@@ -2916,7 +2964,34 @@ export const api = {
   updateMeasurement: (id: number, req: UpdateMeasurementRequest) =>
     request<void>(`/measurements/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
 
+  /** Moves the result to the trash. Nothing is destroyed; `restoreTrashedMeasurement` brings it back. */
   deleteMeasurement: (id: number) => request<void>(`/measurements/${id}`, { method: 'DELETE' }),
+
+  // The trash itself. Everything above deletes *into* it; these are what lists it, takes things back
+  // out, and destroys them for good.
+
+  listTrash: () => request<TrashListing>('/trash'),
+
+  /** 409 when a live measurement has taken the name — the listing's `nameTaken` says so beforehand. */
+  restoreTrashedMeasurementType: (id: number) =>
+    request<void>(`/trash/measurement-types/${id}/restore`, { method: 'POST' }),
+
+  /** 409 while the result's own measurement is in the trash too — restore that first. */
+  restoreTrashedMeasurement: (id: number) =>
+    request<void>(`/trash/measurements/${id}/restore`, { method: 'POST' }),
+
+  /** Permanent, one item. Ask first — see trash.ts's confirmations. */
+  purgeTrashedMeasurementType: (id: number) =>
+    request<void>(`/trash/measurement-types/${id}`, { method: 'DELETE' }),
+
+  purgeTrashedMeasurement: (id: number) => request<void>(`/trash/measurements/${id}`, { method: 'DELETE' }),
+
+  /** Empty Trashcan: permanently deletes everything in it, and says how much that was. */
+  emptyTrash: () => request<TrashEmptied>('/trash', { method: 'DELETE' }),
+
+  getTrashRetention: () => request<TrashRetentionConfig>('/config/trash-retention'),
+  setTrashRetention: (config: TrashRetentionConfig) =>
+    request<TrashRetentionConfig>('/config/trash-retention', { method: 'PUT', body: JSON.stringify(config) }),
 
   /** Not fetched through `request` — a plain download link the caller renders as an `<a href=... download>`. */
   measurementCsvExportUrl: (id: number) => `/api/measurements/${id}/export.csv`,

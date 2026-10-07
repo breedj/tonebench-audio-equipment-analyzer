@@ -225,6 +225,7 @@ try
     builder.Services.AddSingleton<LoopbackReferenceRepository>();
     builder.Services.AddSingleton<ProjectRepository>();
     builder.Services.AddSingleton<MeasurementRepository>();
+    builder.Services.AddSingleton<TrashRepository>();
     builder.Services.AddSingleton<MeasurementSaveService>();
 
     var app = builder.Build();
@@ -324,6 +325,7 @@ try
     app.MapProjectsEndpoints();
     app.MapProjectSessionEndpoints();
     app.MapMeasurementsEndpoints();
+    app.MapTrashEndpoints();
     app.MapReportsEndpoints();
     app.MapUpdateCheckEndpoints();
     app.MapIssueReportEndpoints();

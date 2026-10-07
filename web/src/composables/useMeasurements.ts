@@ -27,6 +27,7 @@ import { toImdSweepPoints } from '../imd/points'
 import { sweepEndFreqHzFromParams, sweepMethodFromParams, type SweepTraceFamily } from '../sweep/points'
 import type { ResponseTrace } from './useFrequencyResponse'
 import type { ImpedanceTrace } from './useImpedance'
+import { useTrash } from './useTrash'
 
 /**
  * How many overlays of one kind may be *shown* at once — the THD-vs-frequency and FFT-analysis
@@ -436,11 +437,18 @@ export function useMeasurements() {
     }
   }
 
+  /**
+   * Moves a stored result to the trash. Nothing is destroyed — useTrash restores it, or the
+   * retention purge destroys it in a fortnight. The overlay goes either way: a result that is not
+   * in the history list has no business still being drawn on the chart.
+   */
   async function remove(id: number) {
     try {
       await api.deleteMeasurement(id)
       removeOverlay(id)
       await load()
+      // The sidebar's badge is the only thing that says the trash is not empty.
+      void useTrash().refreshCount()
       error.value = null
     } catch (e) {
       error.value = (e as Error).message

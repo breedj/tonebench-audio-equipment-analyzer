@@ -692,7 +692,11 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
 
-        var conditions = new List<string>();
+        // The trash, unconditionally: a result is hidden when its own row is marked *or* when its
+        // measurement's is. That second half is what makes trashing a measurement take its whole
+        // history off screen while leaving every result row untouched, so restoring the measurement
+        // brings them all back without a second UPDATE. See migration 013.
+        var conditions = new List<string> { "mr.deleted_utc IS NULL", "mt.deleted_utc IS NULL" };
         var parameters = new DynamicParameters();
         if (filter.ProjectId is { } projectId)
         {
@@ -820,7 +824,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             JOIN measurement_type mt ON mt.id = mr.measurement_type_id
             JOIN project p ON p.id = mt.project_id
             JOIN capture c ON c.measurement_result_id = mr.id AND c.seq_index = 0
-            WHERE mr.id = @resultId;
+            WHERE mr.id = @resultId AND mr.deleted_utc IS NULL AND mt.deleted_utc IS NULL;
             """,
             new { resultId });
 
@@ -887,42 +891,77 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
         int affected = await connection.ExecuteAsync(
-            "UPDATE measurement_result SET name = @name, notes = @notes WHERE id = @resultId;",
+            """
+            UPDATE measurement_result SET name = @name, notes = @notes
+            WHERE id = @resultId AND deleted_utc IS NULL;
+            """,
             new { resultId, name, notes });
         return affected > 0;
     }
 
     /// <summary>
-    /// Deletes the result's captures (and their spectra, metrics, previews and response traces) then
-    /// the result itself.
+    /// Moves the result to the trash: one UPDATE, nothing destroyed. False when there is no such
+    /// result, or it is already in the trash.
+    /// </summary>
+    public async Task<bool> TrashResultAsync(long resultId, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        int affected = await connection.ExecuteAsync(
+            "UPDATE measurement_result SET deleted_utc = @now WHERE id = @resultId AND deleted_utc IS NULL;",
+            new { resultId, now = TonebenchTimestamp.Now() });
+        return affected > 0;
+    }
+
+    /// <summary>
+    /// Takes the result back out of the trash — but only while its measurement is still there.
     ///
-    /// <para>Every child table has to be listed here by hand: foreign keys are off (see
-    /// <c>SqliteConnectionFactory</c>), so a table missed from this cascade is orphaned silently and
-    /// then collides with a future capture that reuses the freed rowid. That has now happened twice
-    /// — <c>capture_preview</c> (migration 005) and <c>response_trace</c> (007) — both times because
-    /// the table was added after this method was written. A new child of <c>capture</c> belongs in
-    /// this list, in <c>ProjectRepository.DeleteTypeAsync</c>, and in a repair migration.</para>
+    /// <para>A result restored under a trashed measurement would be invisible anyway (the history
+    /// list hides a result whose type is marked, see <see cref="ListResultsAsync"/>), so it would
+    /// read as a restore that silently did nothing. Restoring the measurement first is the honest
+    /// order, and it is what <see cref="ResultRestoreStatus.ParentInTrash"/> tells the caller to
+    /// do. Note a result trashed on its own is <em>not</em> brought back by restoring its type, so
+    /// this is the only way back for one.</para>
+    /// </summary>
+    public async Task<ResultRestoreStatus> RestoreResultAsync(long resultId, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        // A CASE rather than deleted_utc itself, and a scalar rather than a row type: the column is
+        // NULL in the common case, and a single-column result set that is NULL throughout is the
+        // Dapper byte[] trap this file documents at ListResultsAsync. An INTEGER 0/1 can only ever
+        // be typed, and null then means "no such trashed result" and nothing else.
+        long? typeInTrash = await connection.ExecuteScalarAsync<long?>(
+            """
+            SELECT CASE WHEN mt.deleted_utc IS NULL THEN 0 ELSE 1 END
+            FROM measurement_result mr
+            JOIN measurement_type mt ON mt.id = mr.measurement_type_id
+            WHERE mr.id = @resultId AND mr.deleted_utc IS NOT NULL;
+            """,
+            new { resultId });
+
+        if (typeInTrash is null)
+            return ResultRestoreStatus.NotFound;
+        if (typeInTrash != 0)
+            return ResultRestoreStatus.ParentInTrash;
+
+        await connection.ExecuteAsync(
+            "UPDATE measurement_result SET deleted_utc = NULL WHERE id = @resultId;", new { resultId });
+        return ResultRestoreStatus.Restored;
+    }
+
+    /// <summary>
+    /// <b>Permanently</b> deletes the result's captures (and their spectra, metrics, previews,
+    /// response traces and impulse rows) then the result itself. This is what Empty Trashcan, a
+    /// per-item permanent delete and the retention purge call; the ordinary delete is
+    /// <see cref="TrashResultAsync"/>. The cascade itself lives in <see cref="CaptureCascade"/> —
+    /// read its remarks before adding a child table of <c>capture</c>.
     /// </summary>
     public async Task<bool> DeleteResultAsync(long resultId, CancellationToken ct)
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
         await using var transaction = connection.BeginTransaction();
 
-        var captureIds = (await connection.QueryAsync<long>(
-            "SELECT id FROM capture WHERE measurement_result_id = @resultId;", new { resultId }, transaction)).ToList();
-
-        if (captureIds.Count > 0)
-        {
-            await connection.ExecuteAsync("DELETE FROM metric WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
-            await connection.ExecuteAsync("DELETE FROM spectrum WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
-            await connection.ExecuteAsync("DELETE FROM capture_preview WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
-            await connection.ExecuteAsync("DELETE FROM response_trace WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
-            await connection.ExecuteAsync("DELETE FROM impulse_result WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
-            await connection.ExecuteAsync("DELETE FROM impulse_harmonic WHERE capture_id IN @captureIds;", new { captureIds }, transaction);
-            await connection.ExecuteAsync("DELETE FROM capture WHERE id IN @captureIds;", new { captureIds }, transaction);
-        }
-
-        int affected = await connection.ExecuteAsync("DELETE FROM measurement_result WHERE id = @resultId;", new { resultId }, transaction);
+        int affected = await CaptureCascade.DeleteResultsAsync(connection, transaction, [resultId]);
 
         await transaction.CommitAsync(ct);
         return affected > 0;

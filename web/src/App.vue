@@ -8,6 +8,7 @@ import { DEVICE_STATUS_KEY } from './simulator/hints'
 import { useSpectrumStream } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
 import { curveOverlayScreen, type CurveOverlayScreen } from './measurements/overlayScope'
+import { spectrumAxisOverlay } from './measurements/spectrumOverlayColors'
 import { useProjects } from './composables/useProjects'
 import { useTrash } from './composables/useTrash'
 import { useProjectSession } from './composables/useProjectSession'
@@ -2221,27 +2222,43 @@ function chartOnScreen() {
   return spectrumChart.value
 }
 
-/** Whether the chart on screen has something to draw. */
+/**
+ * Whether the chart on screen has something to draw.
+ *
+ * <p>**A checked history item counts**, not only the live measurement. Every arm used to ask about
+ * the live state alone, so pressing <strong>Clear</strong> with an overlay still ticked disabled
+ * the Screenshot button over a chart that was plainly showing a curve — reported 2026-10-08, and
+ * the obvious thing to want a picture of: a stored run on its own, with nothing live drawn over
+ * it. Each arm therefore ORs in the same per-screen visible-overlay list the chart is handed, so
+ * the button is enabled exactly when the chart has a trace, whichever of the two put it there.</p>
+ *
+ * <p>The two decay surfaces are the deliberate exception: they are computed from the live impulse
+ * response and no overlay contributes one, so there is nothing of an overlay's to photograph.</p>
+ */
 const screenshotAvailable = computed(() => {
-  if (isFrequencyResponse.value || isCrosstalk.value) return responseTraces.value.length > 0
-  if (isOutputImpedance.value) return outputImpedanceTrace.value !== null
-  if (isSweepKind.value) return sweepPoints.value.length > 0
+  if (isFrequencyResponse.value) return responseTraces.value.length > 0 || visibleResponseOverlays.value.length > 0
+  if (isCrosstalk.value) return responseTraces.value.length > 0 || visibleCrosstalkOverlays.value.length > 0
+  if (isOutputImpedance.value)
+    return outputImpedanceTrace.value !== null || visibleOutputImpedanceOverlays.value.length > 0
+  if (isSweepKind.value) return sweepPoints.value.length > 0 || visibleSweepOverlays.value.length > 0
   if (isImpulseResponse.value) {
     switch (impulseView.value) {
       case 'Impulse':
-        return impulseTrace.value !== null
+        return impulseTrace.value !== null || visibleImpulseOverlays.value.length > 0
       case 'Response':
-        return impulseTraces.value.length > 0
+        return impulseTraces.value.length > 0 || visibleImpulseResponseOverlays.value.length > 0
       case 'Harmonics':
-        return impulseHarmonics.value.length > 0
+        return impulseHarmonics.value.length > 0 || visibleHarmonicOverlays.value.length > 0
       case 'Csd':
         return impulseCsdSurface.value !== null
       default:
         return impulseBurstSurface.value !== null
     }
   }
-  if (isImpedance.value) return impedanceTraces.value.length > 0
-  return Object.keys(spectrum.value).length > 0
+  if (isImpedance.value) return impedanceTraces.value.length > 0 || visibleImpedanceOverlays.value.length > 0
+  // spectrumAxisOverlay is the same test the chart itself makes for "can I draw from an overlay
+  // with no live frame" — a visible FFT overlay that actually carries a channel.
+  return Object.keys(spectrum.value).length > 0 || spectrumAxisOverlay(overlays.value) !== null
 })
 
 /**

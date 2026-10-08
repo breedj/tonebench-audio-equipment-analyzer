@@ -192,8 +192,11 @@ const { showPage } = useManual()
         window on screen, zoom included, with the measurement's name and a legend above the plot and
         units on the axes. Every view and projection exports — the spectrum, the distortion sweep,
         the Bode, Nyquist and Nichols responses, the impulse screen's five views, the impedance
-        curve and its locus — and the history items ticked on in the checklist come along. The
-        dialog's answers are remembered for the next screenshot:
+        curve and its locus — and the history items ticked on in the checklist come along. A ticked
+        history item is enough on its own: press <strong>Clear</strong> to take the live trace off
+        the chart and the button stays available for a picture of the stored run by itself. It is
+        greyed out only when the chart really has nothing on it.
+        The dialog's answers are remembered for the next screenshot:
         <ul>
           <li>
             <strong>Title</strong> — printed centred above the chart; empty for none.

@@ -46,6 +46,31 @@ export function spectrumAxisOverlay(overlays: OverlayEntry[]): OverlayEntry | nu
 }
 
 /**
+ * The one stored overlay whose min/max band the spectrum chart draws, or null.
+ *
+ * <p>Overlays are plotted as their column *maxima* only, and that is a real bias rather than a
+ * cosmetic one: max-over-N-bins puts a decimated noise floor about 6 dB above where the min/max
+ * band sits, so a saved run laid over a live one reads as quieter at the floor than the same
+ * measurement does live. Comparing a saved run against a live one is what overlays are *for*, so
+ * the one case where the bias actually misleads is worth drawing the band for.</p>
+ *
+ * <p>Only when it is the single visible one, which is the whole of the rule: up to three overlays
+ * plus the live trace can be on screen, and four translucent bands over each other is a picture
+ * nobody can read — which is why the band was live-only to begin with. Two or more visible and
+ * every overlay goes back to its max line.</p>
+ *
+ * <p>A channel is still required: an overlay carrying no spectrum (a sweep, a response curve)
+ * is not a candidate, the same check <see cref="spectrumAxisOverlay"/> makes.</p>
+ */
+export function soleBandOverlay(overlays: OverlayEntry[]): OverlayEntry | null {
+  const visible = fftOverlays(overlays).filter((o) => o.visible)
+  if (visible.length !== 1) return null
+
+  const only = visible[0]
+  return only.detail.channelsData.some((c) => c.channel === 0 || c.channel === 1) ? only : null
+}
+
+/**
  * The color one FFT overlay draws in, by its position among the other currently-*visible* FFT
  * overlays — recomputed on every call rather than assigned once when the overlay was added, the
  * same convention ThdSweepChart's OVERLAY_DASH indexing uses. That is what guarantees the up-to-3

@@ -504,6 +504,15 @@ const { showPage } = useManual()
       is how you catch an intermittent spur.
     </p>
     <p>
+      A history item gets the same band, <em>when it is the only one ticked</em>, drawn in its own
+      run colour. That is the case where it matters: a saved run is otherwise plotted as its column
+      maxima alone, which puts its noise floor several dB above where the live trace's band sits
+      for the very same measurement — so comparing one against the other would read as a change in
+      the DUT that is really an artefact of how the picture is drawn. Tick a second history item
+      and every overlay goes back to its line, because four bands over each other is not a picture
+      anyone can read.
+    </p>
+    <p>
       <strong>FFT data</strong> is the live capture — the trace and the min/max band under it, which
       is the same data — and it is the one to uncheck once peak-hold has caught what you were waiting
       for. Unchecking it clears <strong>Min/max</strong> with it and leaves the peak-hold curve on

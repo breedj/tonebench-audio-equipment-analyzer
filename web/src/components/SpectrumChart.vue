@@ -22,7 +22,7 @@ import ToolbarIcon from './ToolbarIcon.vue'
 import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
-import { FFT_LIVE_COLOR, fftOverlayColor, spectrumAxisOverlay } from '../measurements/spectrumOverlayColors'
+import { FFT_LIVE_COLOR, fftOverlayColor, soleBandOverlay, spectrumAxisOverlay } from '../measurements/spectrumOverlayColors'
 import { api, type MeasurementChannel, type WeightingCurveResponse } from '../api/client'
 import { unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useUserWeighting } from '../composables/useUserWeighting'
@@ -234,6 +234,11 @@ const PEAK_HOLD_COLOR = '#ca8a04'
 // line above it now does. It keeps its own two-hue blue/orange distinction rather than switching to
 // LIVE_COLOR for both, which is the only way left to tell an overlapping L band from an R band.
 const CHANNEL_BAND_COLORS = ['rgba(59, 130, 246, 0.35)', 'rgba(249, 115, 22, 0.35)']
+// A stored overlay's band, when it earns one, is drawn in that run's own (opaque) colour with
+// this alpha instead — the live colours bake 0.35 in, and an overlay's comes from
+// fftOverlayColor, which has no translucent form. A shade lighter than the live band so the
+// two are still told apart where they cross.
+const OVERLAY_BAND_ALPHA = 0.3
 // Peak-hold: running per-bin maximum, keyed by that bin's column frequency (as broadcast — stable
 // across ticks for a given FFT size/zoom window, since the server's log-decimation always picks
 // the same center bin for the same range/budget). Cleared only by the Reset button (see
@@ -329,7 +334,10 @@ let plotIsDark = isDark.value
 // Drawn in `drawAxes` (fires after the grid, before the series) so the band sits above the gridlines
 // and under each channel's max trace. One Path2D per channel, stroked once — 1600 columns × 2
 // channels per frame is fine as a single batched path, but not as 3200 individual stroke calls.
-function minMaxBandPlugin(getSpectrum: () => Record<number, SpectrumFrame>): uPlot.Plugin {
+function minMaxBandPlugin(
+  getSpectrum: () => Record<number, SpectrumFrame>,
+  getOverlays: () => OverlayEntry[],
+): uPlot.Plugin {
   return {
     hooks: {
       drawAxes: [
@@ -369,6 +377,35 @@ function minMaxBandPlugin(getSpectrum: () => Record<number, SpectrumFrame>): uPl
             ctx.strokeStyle = CHANNEL_BAND_COLORS[ch]
             ctx.lineWidth = 1
             ctx.stroke(path)
+          }
+
+          // And the stored overlay's band, when it is the only one on screen — see
+          // soleBandOverlay for why only then, and why it is worth drawing at all. In that run's
+          // own colour rather than the live blue/orange, because here hue identifies the *run*;
+          // both its channels share it, so an overlay with L and R on draws two bands the same
+          // colour, which is the price of not spending hue on channel.
+          const overlays = getOverlays()
+          const banded = soleBandOverlay(overlays)
+          if (banded) {
+            ctx.globalAlpha = OVERLAY_BAND_ALPHA
+            ctx.strokeStyle = fftOverlayColor(overlays, banded.id)
+            ctx.lineWidth = 1
+
+            for (let ch = 0; ch < CHANNEL_LABELS.length; ch++) {
+              const channel = channelByIndex(banded.detail, ch)
+              if (!channel) continue
+              const offset = channelOffset(channel)
+              if (offset === null) continue
+
+              const path = new Path2D()
+              for (const column of channel.columns) {
+                if (!(column.freqHz > 0)) continue
+                const x = u.valToPos(column.freqHz, 'x', true)
+                path.moveTo(x, u.valToPos(column.minDbv + offset, 'y', true))
+                path.lineTo(x, u.valToPos(column.maxDbv + offset, 'y', true))
+              }
+              ctx.stroke(path)
+            }
           }
 
           ctx.restore()
@@ -657,7 +694,7 @@ function buildOptions(
     // (live L/R) and the overlay list (each stored trace), both driving null-fill instead of
     // uPlot's `show`, so there's exactly one place that decides what's visible.
     legend: { show: false },
-    plugins: [minMaxBandPlugin(() => props.spectrum), harmonicMarkersPlugin(theme, interactive), weightingCurvePlugin()],
+    plugins: [minMaxBandPlugin(() => props.spectrum, () => props.overlays), harmonicMarkersPlugin(theme, interactive), weightingCurvePlugin()],
   }
 }
 

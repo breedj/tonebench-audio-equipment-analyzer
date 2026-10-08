@@ -50,7 +50,9 @@ import SettingsTable from '../components/SettingsTable.vue'
     <p>
       Zooming the spectrum chart does more than scale the picture: the server re-sends that
       frequency window at full resolution, so a zoomed spectrum genuinely resolves more than the
-      overview did.
+      overview did — down to one FFT bin per column if you zoom far enough, at which point the
+      min/max band has nothing left to show. It works the same on a stopped capture and on a saved
+      result drawn as an overlay, not only on a running one.
     </p>
 
     <p>

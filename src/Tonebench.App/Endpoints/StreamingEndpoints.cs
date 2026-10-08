@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Net.WebSockets;
 using System.Threading.Channels;
 using Tonebench.App.Streaming;
@@ -11,7 +11,8 @@ public static class StreamingEndpoints
     public static void MapStreamingEndpoints(this WebApplication app)
     {
         app.Map("/ws/stream", async (
-            HttpContext context, SpectrumBroadcastHub hub, IHostApplicationLifetime lifetime, ILogger<SpectrumBroadcastHub> logger) =>
+            HttpContext context, SpectrumBroadcastHub hub, SpectrumPipeline pipeline,
+            IHostApplicationLifetime lifetime, ILogger<SpectrumBroadcastHub> logger) =>
         {
             if (!context.WebSockets.IsWebSocketRequest)
             {
@@ -52,7 +53,7 @@ public static class StreamingEndpoints
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(
                 context.RequestAborted, lifetime.ApplicationStopping);
 
-            var receiveTask = ReceiveClientMessagesAsync(socket, hub, id, cts);
+            var receiveTask = ReceiveClientMessagesAsync(socket, hub, pipeline, id, cts);
             try
             {
                 await PumpFramesAsync(socket, reader, cts.Token);
@@ -110,7 +111,8 @@ public static class StreamingEndpoints
     /// instead of blocking on a dead connection.
     /// </summary>
     private static async Task ReceiveClientMessagesAsync(
-        WebSocket socket, SpectrumBroadcastHub hub, Guid clientId, CancellationTokenSource cts)
+        WebSocket socket, SpectrumBroadcastHub hub, SpectrumPipeline pipeline, Guid clientId,
+        CancellationTokenSource cts)
     {
         var buffer = new byte[256];
         while (!cts.IsCancellationRequested)
@@ -137,7 +139,15 @@ public static class StreamingEndpoints
             float hiFreqHz = BinaryPrimitives.ReadSingleLittleEndian(buffer.AsSpan(5, 4));
 
             bool valid = float.IsFinite(loFreqHz) && float.IsFinite(hiFreqHz) && hiFreqHz > loFreqHz && loFreqHz >= 0.0f;
-            hub.SetViewport(clientId, valid ? new SpectrumViewport(loFreqHz, hiFreqHz) : null);
+            var viewport = valid ? new SpectrumViewport(loFreqHz, hiFreqHz) : null;
+            hub.SetViewport(clientId, viewport);
+
+            // A running capture answers the new window on its next tick. A stopped one never ticks
+            // again, so without this the chart would keep showing the frame it already had, at the
+            // resolution it already had, while the full trace sat in the pipeline's retained
+            // snapshot. Also on the invalid branch above, which clears the viewport: zooming back
+            // out has to restore the overview, not leave the last zoomed frame on screen.
+            pipeline.ResendRetainedTo(clientId, viewport);
         }
     }
 }

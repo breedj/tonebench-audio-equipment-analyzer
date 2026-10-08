@@ -367,6 +367,65 @@ public sealed class SpectrumPipeline(
         }
     }
 
+    /// <summary>
+    /// Rebuilds one client's spectrum frames from the retained snapshot and sends them, so that
+    /// zooming a <b>stopped</b> capture resolves more of it instead of showing the same columns
+    /// larger.
+    ///
+    /// <para>While a capture is running the client's window is honoured by the next tick
+    /// (<see cref="BroadcastSpectrumFrame"/>), but a stopped pipeline produces no ticks at all, so
+    /// the chart kept whatever overview frame happened to arrive last — with the full-resolution
+    /// trace sitting unused in <see cref="_retained"/> the whole time. That trace is exactly what
+    /// <see cref="BuildSpectrumFrame"/> needs, and this is one encode per user gesture rather than
+    /// per tick, so <b>no <see cref="ZoomedFrameMinFactor"/> applies here</b>: any zoom at all earns
+    /// its frame. A null <paramref name="viewport"/> rebuilds the overview, or zooming back out
+    /// would leave the last zoomed frame on screen.</para>
+    ///
+    /// <para>A no-op while the worker is running: the tick is about to send a better frame anyway,
+    /// and a second frame carrying a <see cref="RetainedSpectrum.Seq"/> the client has already seen
+    /// is how a tick comes to look torn.</para>
+    ///
+    /// <para><b>Every retained channel, never just one.</b> The client draws R only when R's point
+    /// count and zoom flag match L's — the guard that covers the one live tick where L has switched
+    /// windows and R has not (SpectrumChart's <c>computeFrame</c>) — so re-sending L alone would
+    /// take R off the chart until the next RUN.</para>
+    /// </summary>
+    public void ResendRetainedTo(Guid clientId, SpectrumViewport? viewport)
+    {
+        if (_worker is not null)
+            return;
+
+        int maxColumns = Options.DisplayColumns;
+        double displayLoFreqHz = Options.DisplayLoFreqHz;
+
+        lock (_retainedLock)
+        {
+            for (int ch = 0; ch < MaxChannels; ch++)
+            {
+                var retained = _retained[ch];
+                if (retained.AmpPower is null || retained.BinSizeHz <= 0.0)
+                    continue;
+
+                int specLen = retained.AmpPower.Length;
+                if (specLen < 3)
+                    continue;
+
+                int overviewLoBin = Math.Clamp((int)Math.Round(displayLoFreqHz / retained.BinSizeHz), 1, specLen - 2);
+                bool zoomed = ResolveWindowBins(
+                    viewport, retained.BinSizeHz, specLen, overviewLoBin, out int loBin, out int hiBin);
+                if (!zoomed)
+                {
+                    loBin = overviewLoBin;
+                    hiBin = specLen - 1;
+                }
+
+                hub.Send(clientId, BuildSpectrumFrame(
+                    ch == 0 ? StreamChannel.Left : StreamChannel.Right, retained.Seq, retained.AmpPower,
+                    retained.BinSizeHz, loBin, hiBin, maxColumns, zoomed));
+            }
+        }
+    }
+
     public async Task StopAsync()
     {
         var cts = _cts;
@@ -936,16 +995,26 @@ public sealed class SpectrumPipeline(
     }
 
     /// <summary>
-    /// How much narrower than the full span a client's zoom window has to be before it is worth
-    /// encoding a separate, denser frame for it.
+    /// How much narrower than the full span a <b>live</b> client's zoom window has to be before it
+    /// is worth encoding a separate, denser frame for it on every tick.
     ///
     /// Measured on the log axis, because that is what the column budget is spread over: a window
     /// covering 1/4 of the span's decades receives 1/4 of the overview's columns, so a dedicated
-    /// frame gives it 4x the resolution. Below this the gain does not justify a second decimation
-    /// and encode per tick per distinct window — and the overwhelmingly common case (nobody
-    /// zoomed) then costs exactly what it did before this existed: one decimation, one broadcast.
+    /// frame gives it 4x the resolution.
+    ///
+    /// <para>It was 4.0, and that made a modest zoom look broken: drag a 2x box and the chart
+    /// re-scaled while the bytes on the wire did not change at all, so the min/max band stayed
+    /// exactly as coarse as it had been (Joost, 2026-10-08, asking why zooming into the band did
+    /// not expand it). 1.5 is the smallest zoom still worth a second encode — below that the
+    /// resolution gained is under half a column per column.</para>
+    ///
+    /// <para>What it protects is the per-tick cost, and only that: one extra decimation and encode
+    /// per distinct window, twenty times a second. The overwhelmingly common case (nobody zoomed)
+    /// is unaffected at any value, since a client with no viewport never takes this path — and
+    /// <see cref="ResendRetainedTo"/>, which encodes once per gesture rather than per tick,
+    /// deliberately ignores this constant.</para>
     /// </summary>
-    private const double ZoomedFrameMinFactor = 4.0;
+    private const double ZoomedFrameMinFactor = 1.5;
 
     private void BroadcastSpectrumFrame(StreamChannel channel, uint seq, ReadOnlySpan<double> ampPower, double binSizeHz, SpectrumPipelineOptions options)
     {
@@ -1003,22 +1072,45 @@ public sealed class SpectrumPipeline(
         loBin >= 1 && hiBin > loBin ? Math.Log((double)hiBin / loBin) : 0.0;
 
     /// <summary>
-    /// Turns a client's requested window into a bin range, and decides whether it is zoomed in far
-    /// enough to earn its own frame. Returns false (and leaves the bins unset) for no viewport, a
+    /// Turns a client's requested window into a bin range, clamped inside the displayed span.
+    /// Returns false (bins unset) when there is no window to resolve — no viewport, or a
+    /// degenerate one.
+    ///
+    /// <para>Separate from the threshold below because the two callers disagree about the
+    /// threshold and must not disagree about the arithmetic: the live path pays per tick and
+    /// applies <see cref="ZoomedFrameMinFactor"/>, while <see cref="ResendRetainedTo"/> pays once
+    /// per gesture and honours any window at all.</para>
+    /// </summary>
+    private static bool ResolveWindowBins(
+        SpectrumViewport? viewport, double binSizeHz, int specLen, int overviewLoBin,
+        out int loBin, out int hiBin)
+    {
+        loBin = 0;
+        hiBin = 0;
+
+        if (viewport is null)
+            return false;
+
+        loBin = Math.Clamp((int)Math.Floor(viewport.LoFreqHz / binSizeHz), overviewLoBin, specLen - 2);
+        hiBin = Math.Clamp((int)Math.Ceiling(viewport.HiFreqHz / binSizeHz), loBin + 1, specLen - 1);
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="ResolveWindowBins"/>, plus the live path's question: is this zoomed in far enough
+    /// to be worth a second decimation and encode on every tick? Returns false for no viewport, a
     /// degenerate one, or anything under <see cref="ZoomedFrameMinFactor"/>.
     /// </summary>
     private static bool TryResolveZoom(
         SpectrumViewport? viewport, double binSizeHz, int specLen, int overviewLoBin, double fullDecades,
         out int loBin, out int hiBin)
     {
-        loBin = 0;
-        hiBin = 0;
-
-        if (viewport is null || fullDecades <= 0.0)
+        if (fullDecades <= 0.0 || !ResolveWindowBins(viewport, binSizeHz, specLen, overviewLoBin, out loBin, out hiBin))
+        {
+            loBin = 0;
+            hiBin = 0;
             return false;
-
-        loBin = Math.Clamp((int)Math.Floor(viewport.LoFreqHz / binSizeHz), overviewLoBin, specLen - 2);
-        hiBin = Math.Clamp((int)Math.Ceiling(viewport.HiFreqHz / binSizeHz), loBin + 1, specLen - 1);
+        }
 
         return LogSpan(loBin, hiBin) * ZoomedFrameMinFactor <= fullDecades;
     }

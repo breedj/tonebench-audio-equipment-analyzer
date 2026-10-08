@@ -2961,6 +2961,20 @@ export const api = {
 
   getMeasurement: (id: number) => request<MeasurementDetail>(`/measurements/${id}`),
 
+  /**
+   * A saved measurement's spectrum columns, re-decimated server-side over `window` — the same
+   * bins the detail call returns, but with the display budget spread across the zoom instead of
+   * the whole span, so a stored trace resolves more of itself as you zoom in. Omit the window for
+   * the whole span. Only the columns come back: the metrics and parameters a zoom does not change
+   * stay on the detail call.
+   */
+  getMeasurementSpectrum: (id: number, window: { loFreqHz: number; hiFreqHz: number } | null) =>
+    request<{ channelsData: MeasurementChannel[] }>(
+      window === null
+        ? `/measurements/${id}/spectrum`
+        : `/measurements/${id}/spectrum?loHz=${window.loFreqHz}&hiHz=${window.hiFreqHz}`,
+    ),
+
   updateMeasurement: (id: number, req: UpdateMeasurementRequest) =>
     request<void>(`/measurements/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
 

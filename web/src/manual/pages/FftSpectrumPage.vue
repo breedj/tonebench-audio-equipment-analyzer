@@ -643,10 +643,24 @@ const { showPage } = useManual()
     <h2>Zooming</h2>
     <p>
       Drag horizontally across the spectrum to zoom the frequency axis; double-click, or press
-      <strong>Reset zoom</strong> in the chart header, to go back to the full span. A zoom asks the
-      server for that window at full resolution, so zooming in genuinely reveals more detail rather
-      than magnifying what was already drawn. The level axis is not draggable — set it from the
-      display rail.
+      <strong>Reset zoom</strong> in the chart header, to go back to the full span. The level axis
+      is not draggable — set it from the display rail.
+    </p>
+    <p>
+      <strong>A zoom resolves more of the measurement, it does not magnify the picture.</strong>
+      Every bin of the analysis is kept — all 32 769 of them at a 65 536-point FFT — and the chart
+      only ever draws about 1600 columns of it, so each column stands for however many bins fell
+      inside it. That is what the <strong>Min/max</strong> band shows, and why it is widest at the
+      top of the band, where a log axis puts hundreds of bins in one column. Zoom in and the same
+      1600 columns are spread over the smaller range instead, so the band narrows into separate
+      points. Keep going and you reach one bin per column: the band disappears entirely and what
+      is left is the raw FFT.
+    </p>
+    <p>
+      This works on a capture that is <strong>stopped</strong> as well as a running one — the full
+      trace is kept after Stop — and on a saved result drawn from the History checklist, whose
+      stored spectrum is re-read at the window you zoom to. One thing it cannot do is reload: open
+      the page again and the chart is empty until the next RUN.
     </p>
 
     <h2>Saving a result</h2>

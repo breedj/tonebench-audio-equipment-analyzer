@@ -47,6 +47,43 @@ public static class MeasurementsEndpoints
             return response is null ? Results.NotFound() : Results.Ok(response);
         });
 
+        // A saved trace's columns on their own, optionally re-decimated over a zoom window. The
+        // detail route above gives the same columns over the whole span, together with the metrics
+        // and parameters — none of which change when the chart is zoomed, which is the whole reason
+        // this is its own route: a drag asks for it repeatedly.
+        //
+        // Omit either bound and it is the whole span, i.e. exactly what the detail route returns.
+        group.MapGet("/{id:long}/spectrum", async (
+            long id, double? loHz, double? hiHz, MeasurementRepository repo, SpectrumPipeline pipeline,
+            CancellationToken ct) =>
+        {
+            var detail = await repo.GetResultAsync(id, ct);
+            if (detail is null)
+                return Results.NotFound();
+
+            // Silently the whole span rather than a 400: the window comes from a chart's axis, so a
+            // degenerate one means a zoom that has not settled, and the honest answer to "show me
+            // this nonsense range" is the overview the client already knows how to draw.
+            SpectrumViewport? window = null;
+            if (loHz is { } lo && hiHz is { } hi && double.IsFinite(lo) && double.IsFinite(hi) && hi > lo && lo >= 0.0)
+                window = new SpectrumViewport(lo, hi);
+
+            var options = pipeline.Options;
+            var channels = new List<MeasurementChannelResponse>();
+            foreach (int channel in detail.AvailableChannels)
+            {
+                var spectrum = await repo.GetSpectrumAsync(detail.CaptureId, channel, ct);
+                if (spectrum is null)
+                    continue;
+
+                var columns = DecimateForDisplay(spectrum, options.DisplayLoFreqHz, options.DisplayColumns, window);
+                var metrics = detail.MetricsByChannel.TryGetValue(channel, out var m) ? m : new Dictionary<string, double>();
+                channels.Add(new MeasurementChannelResponse(channel, columns, metrics, spectrum.EnbwHz));
+            }
+
+            return Results.Ok(new MeasurementSpectrumResponse(channels.ToArray()));
+        });
+
         group.MapPut("/{id:long}", async (long id, UpdateMeasurementRequest request, MeasurementRepository repo, CancellationToken ct) =>
         {
             bool updated = await repo.UpdateResultAsync(id, request.Name, request.Notes, ct);
@@ -162,17 +199,43 @@ public static class MeasurementsEndpoints
     /// and low-frequency edge the live chart uses. Reusing <see cref="SpectrumDecimator"/> is what
     /// makes a stored trace's columns come out built exactly the way the pipeline's own display
     /// frames are, so the chart's existing column-handling code works unchanged on stored traces.
+    ///
+    /// <para><paramref name="window"/> narrows it to a zoom: the span is sliced at the window's
+    /// top bin and the decimator spreads the same column budget across what is left, so a shorter
+    /// span is a denser one — the identical trick <c>SpectrumPipeline.BuildSpectrumFrame</c> plays
+    /// for the live chart, and the reason a saved trace can sharpen on zoom at all. Every bin is
+    /// in the database (<c>SpectrumCodec</c>, 2 bytes each); it is only this step that was
+    /// throwing the detail away, once, over the whole span. Null is the whole span, and must stay
+    /// byte-for-byte what it always produced — the detail endpoint still calls it that way.</para>
+    ///
+    /// <para>Note this min/maxes dBV where the pipeline min/maxes power and converts afterwards.
+    /// Equivalent, because the conversion is monotone; worth knowing before anyone "aligns" them.</para>
     /// </summary>
-    private static MeasurementColumnResponse[] DecimateForDisplay(StoredSpectrum spectrum, double displayLoFreqHz, int displayColumns)
+    internal static MeasurementColumnResponse[] DecimateForDisplay(
+        StoredSpectrum spectrum, double displayLoFreqHz, int displayColumns, SpectrumViewport? window = null)
     {
         int specLen = spectrum.Dbv.Length;
-        int loBin = Math.Clamp((int)Math.Round(displayLoFreqHz / spectrum.BinSizeHz), 1, specLen - 2);
+        if (specLen < 3)
+            return [];
+
+        int overviewLoBin = Math.Clamp((int)Math.Round(displayLoFreqHz / spectrum.BinSizeHz), 1, specLen - 2);
+
+        int loBin = overviewLoBin;
         int hiBin = specLen - 1;
+        if (window is not null)
+        {
+            loBin = Math.Clamp((int)Math.Floor(window.LoFreqHz / spectrum.BinSizeHz), overviewLoBin, specLen - 2);
+            hiBin = Math.Clamp((int)Math.Ceiling(window.HiFreqHz / spectrum.BinSizeHz), loBin + 1, specLen - 1);
+        }
+
+        // Never more columns than there are bins to put in them — past that point extra columns
+        // repeat single bins. This is also the floor a tight zoom reaches: one bin per column, no
+        // min/max band left, the raw FFT.
         int columnCount = Math.Clamp(hiBin - loBin + 1, 1, displayColumns);
 
         var columns = new MinMax[columnCount];
         var centerBins = new double[columnCount];
-        SpectrumDecimator.DecimateLogWithCenters(spectrum.Dbv, columns, centerBins, loBin);
+        SpectrumDecimator.DecimateLogWithCenters(spectrum.Dbv.AsSpan(0, hiBin + 1), columns, centerBins, loBin);
 
         var result = new MeasurementColumnResponse[columnCount];
         for (int i = 0; i < columnCount; i++)
@@ -211,5 +274,12 @@ public sealed record MeasurementDetailResponse(
 
 /// <param name="EnbwHz">The stored window's equivalent noise bandwidth at the capture's sample rate and FFT size — what converts the columns' dBV to dBV/√Hz on the client, per result, since an overlay's window need not match the live one's.</param>
 public sealed record MeasurementChannelResponse(int Channel, MeasurementColumnResponse[] Columns, IReadOnlyDictionary<string, double> Metrics, double EnbwHz = 0.0);
+
+/// <summary>
+/// A saved measurement's decimated columns on their own, for a chart that has been zoomed. A
+/// wrapper rather than a bare array so one AppJsonContext entry covers it — a collection return
+/// type needs its own registration there, and a missing one fails only in the trimmed publish.
+/// </summary>
+public sealed record MeasurementSpectrumResponse(MeasurementChannelResponse[] ChannelsData);
 
 public sealed record MeasurementColumnResponse(float FreqHz, float MinDbv, float MaxDbv);

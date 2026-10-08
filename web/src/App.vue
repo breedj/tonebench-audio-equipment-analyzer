@@ -166,7 +166,7 @@ import {
 const { status, ranges, error, refreshStatus, refreshRanges } = useDevice()
 const soundCard = useSoundCard()
 const { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, setViewport, clearScope } = useSpectrumStream()
-const { overlays, load: loadMeasurements } = useMeasurements()
+const { overlays, load: loadMeasurements, setOverlayWindow } = useMeasurements()
 const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
 // For the report's Metrics element — the power tiles need the load the Generator pane names.
@@ -317,6 +317,22 @@ const {
   saveProject,
 } = useProjects()
 const projectSession = useProjectSession()
+
+/**
+ * The FFT chart's zoom window has two consumers, so the emit goes through here rather than
+ * straight at one of them. `setViewport` tells the *server* which window this client is looking
+ * at, so the live frames — and, while stopped, a frame rebuilt from the retained snapshot — are
+ * decimated over it; `setOverlayWindow` re-fetches any saved overlay's columns at the same window.
+ * Both exist for the same reason: every bin is kept, and it is only the display decimation that
+ * was spending the whole column budget on the whole span.
+ *
+ * Already debounced and already null-at-full-span by the chart (`reportViewport`), so this is one
+ * call per settled zoom rather than one per frame.
+ */
+function onSpectrumViewportChange(viewport: { loFreqHz: number; hiFreqHz: number } | null) {
+  setViewport(viewport)
+  setOverlayWindow(viewport)
+}
 
 // The trash view, which replaces <main>'s content. Selecting any measurement closes it — one
 // watcher rather than a closeTrash() at each of the sidebar's two row handlers and
@@ -4808,7 +4824,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 :multitone="multitone"
                 :overlays="overlays"
                 :weighting-label="weightingAnnunciator"
-                @viewport-change="setViewport"
+                @viewport-change="onSpectrumViewportChange"
               />
               <!-- v-show, not v-if: the waterfall's history is collected frame by frame by the
                    mounted instance (it is what the report exports, see WaterfallChart.exportPng),

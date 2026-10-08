@@ -28,6 +28,7 @@ import { sweepEndFreqHzFromParams, sweepMethodFromParams, type SweepTraceFamily 
 import type { ResponseTrace } from './useFrequencyResponse'
 import type { ImpedanceTrace } from './useImpedance'
 import { useTrash } from './useTrash'
+import { overlaysNeedingFetch, shouldApplyFetch, type SpectrumWindow } from '../measurements/overlayZoom'
 
 /**
  * How many overlays of one kind may be *shown* at once — the THD-vs-frequency and FFT-analysis
@@ -100,6 +101,14 @@ export interface OverlayEntry {
    * a plausible curve that means nothing.
    */
   impedanceTraces?: ImpedanceTrace[]
+
+  /**
+   * The zoom window `detail.channelsData` was decimated over, or undefined/null for the whole
+   * span — which is how an overlay starts, since `addOverlay` fetches the detail unwindowed.
+   * Written by `setOverlayWindow`; the chart never reads it, it is only how this store knows
+   * whether an overlay's columns already answer the window the chart is on.
+   */
+  spectrumWindow?: SpectrumWindow | null
 }
 
 /**
@@ -233,6 +242,10 @@ export function toSweepPoints(stored: StoredSweepPoint[]): ThdSweepPoint[] {
 const items = ref<MeasurementSummary[]>([])
 const filter = ref<MeasurementFilter>({})
 const overlays = ref<OverlayEntry[]>([])
+// The zoom window the FFT chart is on, so a spectrum fetch that lands late can tell whether it is
+// still wanted. Not a ref: nothing renders from it, and it is read at the moment a promise
+// resolves rather than during a render.
+let overlayWindow: SpectrumWindow | null = null
 const error = ref<string | null>(null)
 
 /**
@@ -527,6 +540,59 @@ export function useMeasurements() {
     }
   }
 
+  /**
+   * Re-fetches every visible overlay's spectrum columns, decimated over the chart's current zoom
+   * window, so a saved trace resolves more of itself as you zoom in instead of being magnified.
+   * Every bin is in the database; it is only the display decimation that was throwing the detail
+   * away, once, over the whole span.
+   *
+   * <p>Driven by the chart's `viewportChange`, which is already debounced 150 ms and already
+   * reports null at full span — so this is called once per settled zoom, not per frame. The
+   * ordering rules live in `overlayZoom.ts` where they can be tested; all that is left here is
+   * performing the fetches and applying the ones still wanted when they land.</p>
+   *
+   * <p>Failures are swallowed on purpose. The overlay keeps the columns it already had, which are
+   * correct, just coarser than the zoom could be — and a project closed mid-drag (409) would
+   * otherwise put an error banner on screen for a zoom gesture.</p>
+   */
+  async function refetchOverlaysForWindow(window: SpectrumWindow | null) {
+    const ids = overlaysNeedingFetch(
+      overlays.value.map((o) => ({ id: o.id, visible: o.visible, fetchedWindow: o.spectrumWindow ?? null })),
+      window,
+    )
+
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const fetched = await api.getMeasurementSpectrum(id, window)
+          const state = overlays.value.map((o) => ({ id: o.id, visible: o.visible, fetchedWindow: o.spectrumWindow ?? null }))
+          if (!shouldApplyFetch(state, id, window, overlayWindow)) return
+
+          // Patched in place rather than replacing the entry: the chart reads
+          // `detail.channelsData` every frame, and swapping the object would restart every other
+          // derived value hanging off this overlay for a change that is only its resolution.
+          const entry = overlays.value.find((o) => o.id === id)
+          if (!entry) return
+          entry.detail = { ...entry.detail, channelsData: fetched.channelsData }
+          entry.spectrumWindow = window
+          overlays.value = [...overlays.value]
+        } catch {
+          // See the remarks above: a coarser overlay is not worth an error banner.
+        }
+      }),
+    )
+  }
+
+  /**
+   * The window the chart is on now, which is what decides whether a result that has just arrived
+   * is still wanted. Module-level rather than passed through, because the answer has to be read
+   * at the moment a fetch *lands*, not the moment it was sent.
+   */
+  function setOverlayWindow(window: SpectrumWindow | null) {
+    overlayWindow = window
+    void refetchOverlaysForWindow(window)
+  }
+
   /** Detaches an overlay from the chart — does not delete the stored measurement (see remove() for that). */
   function removeOverlay(id: number) {
     overlays.value = overlays.value.filter((o) => o.id !== id)
@@ -552,5 +618,5 @@ export function useMeasurements() {
 
   return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOutputImpedance,
     update, remove,
-    addOverlay, removeOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays }
+    addOverlay, removeOverlay, setOverlayVisible, setOverlayWindow, visibleOverlayCount, canShowMoreOverlays }
 }

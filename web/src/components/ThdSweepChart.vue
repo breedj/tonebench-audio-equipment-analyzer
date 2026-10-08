@@ -7,7 +7,7 @@ import {
   CHART_EXPORT_HEADER_PX,
   composeChartPng,
   nextPaint,
-  exportAxisLabel,
+  axisLabel,
   type ChartExportOptions,
   type ExportLegendEntry,
 } from '../charts/exportChart'
@@ -543,7 +543,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
     axes: [
       {
         ...sweepXAxis(props.xAxis),
-        ...exportAxisLabel(interactive, `${sweepXLabel(props.xAxis)} (${sweepXUnit(props.xAxis)})`),
+        ...axisLabel(true, interactive, `${sweepXLabel(props.xAxis)} (${sweepXUnit(props.xAxis)})`),
         stroke: theme.axis,
         grid: { stroke: decadeGridX ? theme.gridMajor : theme.grid, width: (decadeGridX ? 1.5 : 1) * theme.gridWidth },
         ticks: { stroke: theme.grid, width: theme.gridWidth },
@@ -551,7 +551,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
       {
         scale: 'y',
         size: 62,
-        ...exportAxisLabel(interactive, props.unit === 'percent' ? 'Distortion (%)' : 'Distortion (dB V/V)'),
+        ...axisLabel(true, interactive, props.unit === 'percent' ? 'Distortion (%)' : 'Distortion (dB V/V)'),
         ...(decadeGridY
           ? {
               splits: (u, axisIdx, scaleMin, scaleMax) =>

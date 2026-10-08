@@ -6,6 +6,7 @@ import {
   ISSUE_QUESTIONS,
   answersFor,
   describeBytes,
+  describeIssueReportProblem,
   estimateReportBytes,
   hasSomethingToReport,
   logsWithin,
@@ -70,7 +71,7 @@ watch(
       contents.value = await api.getIssueReportContents()
     } catch (e) {
       contents.value = null
-      problem.value = e instanceof Error ? e.message : String(e)
+      problem.value = describeIssueReportProblem(e, 'listing')
     }
 
     // Measured rather than guessed, because the chart's PNG is most of a small report's size and
@@ -129,7 +130,7 @@ async function build() {
       clientStateJson,
     })
   } catch (e) {
-    problem.value = e instanceof Error ? e.message : String(e)
+    problem.value = describeIssueReportProblem(e, 'building')
   } finally {
     building.value = false
   }
@@ -139,7 +140,7 @@ async function openFolder() {
   try {
     await api.openIssueReportFolder()
   } catch (e) {
-    problem.value = e instanceof Error ? e.message : String(e)
+    problem.value = describeIssueReportProblem(e, 'openingFolder')
   }
 }
 </script>

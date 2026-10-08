@@ -26,9 +26,29 @@ export function useMediaQuery(query: string): Ref<boolean> {
 }
 
 /**
- * The width from which the measurement sidebar honours its pin. Below it the sidebar behaves as
- * the hover rail whatever the stored preference says — a pinned 15.4rem column on a 1024 px
- * window takes a quarter of it — and the preference itself is left alone, so widening the window
- * brings the pinned sidebar back.
+ * The four widths the measurement screens are arranged against, and the order they fold in.
+ * Joost's, 2026-10-08, and the order is the point: each one buys the chart back the width of the
+ * thing it folds, so what goes first is what the chart can best do without.
+ *
+ *   ≥ 1440   everything open: the sidebar honours its pin, both rails are columns.
+ *   1280     the sidebar folds to its icon rail (hover still floats the full menu over the page).
+ *   1080     the display rail folds to its strip — the chart's own controls, so it goes late.
+ *   1024     the settings rail folds to its strip. Below this, and only below this, the three
+ *            regions stop being columns and stack (MeasurementLayout's `lg`).
+ *
+ * Each is a *minimum*: below it the thing folds whatever the stored preference says, and the
+ * preference is left untouched, so widening the window restores the layout the user last chose.
+ * The two rails can still be opened by hand at any width — see `railCollapse.ts`.
+ *
+ * Until now there was one such width, 1080, for the sidebar pin, and everything else keyed off
+ * Tailwind's `xl`: at 1280 and below the display rail stopped being a column and flowed *under*
+ * the chart instead of folding, which is what Joost reported — a panel moving to the bottom when
+ * what he wanted was the chart to keep its width.
  */
-export const SIDEBAR_PIN_MIN_WIDTH_PX = 1080
+export const SIDEBAR_PIN_MIN_WIDTH_PX = 1440
+
+/** @see SIDEBAR_PIN_MIN_WIDTH_PX */
+export const DISPLAY_RAIL_MIN_WIDTH_PX = 1280
+
+/** @see SIDEBAR_PIN_MIN_WIDTH_PX */
+export const SETTINGS_RAIL_MIN_WIDTH_PX = 1080

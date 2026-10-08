@@ -203,3 +203,58 @@ export function answersFor(values: Record<string, string>): { id: string; questi
 export function hasSomethingToReport(values: Record<string, string>): boolean {
   return ISSUE_QUESTIONS.some((q) => (values[q.id] ?? '').trim().length > 0)
 }
+
+/** Which request failed, so the message can say what was being attempted rather than only that it was. */
+export type IssueReportStep = 'listing' | 'building' | 'openingFolder'
+
+/**
+ * A failure the dialog can show, in words that name what went wrong.
+ *
+ * <p>It used to print `Error.message` straight through, and for the commonest failure of all that
+ * is the browser's own <b>"Failed to fetch"</b> — the wording `fetch` uses when the request never
+ * reached a server at all. On screen it said nothing about what had failed, what had been
+ * attempted, or what to do, next to a panel reading "0 files" and "About 0 bytes" that had been
+ * emptied by the same failure (reported 2026-10-08, with a screenshot of exactly that). Here the
+ * app is served by the app, so "no server" has one overwhelmingly likely cause: the Tonebench
+ * window was closed, restarted or rebuilt while this tab stayed open.</p>
+ *
+ * <p>A 409 is worth its own sentence for the same reason — every repository call raises it when no
+ * project is open — and anything the server did answer with keeps its own text, since that is the
+ * part a developer reading the report will need.</p>
+ */
+export function describeIssueReportProblem(error: unknown, step: IssueReportStep): string {
+  const attempt: Record<IssueReportStep, string> = {
+    listing: 'Could not read what can go into a report',
+    building: 'Could not write the report',
+    openingFolder: 'Could not open the reports folder',
+  }
+
+  const status = errorStatus(error)
+  if (status === null) {
+    return (
+      `${attempt[step]}: the Tonebench app is not answering. ` +
+      'It has probably been closed or restarted since this page was opened — start it again and reload this page.'
+    )
+  }
+
+  const reason = serverReason(error)
+  if (status === 409) return `${attempt[step]}: ${reason || 'the app refused the request.'}`
+  return `${attempt[step]} (error ${status}): ${reason || 'the app gave no reason.'}`
+}
+
+/** The HTTP status an ApiError carries, or null when the request never got an answer at all. */
+function errorStatus(error: unknown): number | null {
+  const status = (error as { status?: unknown } | null)?.status
+  return typeof status === 'number' ? status : null
+}
+
+/**
+ * What the server itself said: an ApiError's `body`, and only that. Never its `message`, which is
+ * prefixed with the method, the path and the status for the console's benefit — none of which
+ * belongs in a sentence on screen, and an answer with an empty body is better described by the
+ * caller's own "gave no reason" than by leaking that prefix.
+ */
+function serverReason(error: unknown): string {
+  const body = (error as { body?: unknown } | null)?.body
+  return typeof body === 'string' ? body.trim() : ''
+}

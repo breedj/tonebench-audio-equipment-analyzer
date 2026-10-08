@@ -67,9 +67,18 @@ const { showPage } = useManual()
       measurement, still selectable, with the name in a tooltip — and gives the chart the width it
       was using; moving the pointer onto the column opens the full menu over the chart, and moving
       off it closes it again. Pin it back with the same button. Whether it is pinned is remembered
-      on this machine, for every browser tab. On a window narrower than 1080 px a pinned sidebar
+      on this machine, for every browser tab. On a window narrower than 1440 px a pinned sidebar
       behaves as the column of icons anyway, and comes back as a column when the window is wider
       again.
+    </p>
+    <p>
+      The two rails beside the chart fold the same way as the window narrows, each at its own width,
+      so the chart keeps as much room as it can instead of a panel dropping below it: the
+      <strong>display options</strong> on the right fold below 1280 px, the <strong>settings</strong>
+      on the left below 1080 px, and only below 1024 px do all three stack into one column. A fold
+      leaves a narrow strip with an arrow on it — press that to open the rail again at any width.
+      Opening one the window folded for you lasts until the window changes size; the arrows you
+      press on a wide window are remembered.
     </p>
     <p>
       A red dot next to a measurement's name means its settings have been changed but not saved.

@@ -383,14 +383,41 @@ public sealed class SpectrumPipeline(
     ///
     /// <para>A no-op while the worker is running: the tick is about to send a better frame anyway,
     /// and a second frame carrying a <see cref="RetainedSpectrum.Seq"/> the client has already seen
-    /// is how a tick comes to look torn.</para>
+    /// is how a tick comes to look torn. Same for <see cref="SendRetainedSnapshotTo"/>.</para>
     ///
     /// <para><b>Every retained channel, never just one.</b> The client draws R only when R's point
     /// count and zoom flag match L's — the guard that covers the one live tick where L has switched
     /// windows and R has not (SpectrumChart's <c>computeFrame</c>) — so re-sending L alone would
     /// take R off the chart until the next RUN.</para>
     /// </summary>
-    public void ResendRetainedTo(Guid clientId, SpectrumViewport? viewport)
+    public void ResendRetainedTo(Guid clientId, SpectrumViewport? viewport) =>
+        SendRetained(clientId, viewport, withFigures: false);
+
+    /// <summary>
+    /// Pushes the whole retained snapshot — trace, noise figures and meters — to a client that has
+    /// just connected, so that reloading the page while stopped shows the capture that is there
+    /// instead of an empty chart until the next RUN.
+    ///
+    /// <para>Frames only ever left on a tick, so a new client saw nothing at all until one ran: on
+    /// a stopped pipeline, never. The snapshot is the same one Save writes, so what comes back is
+    /// what the chart had before the reload.</para>
+    ///
+    /// <para>The figures come too, in the tick's own order — <b>noise before spectrum</b>, because
+    /// the client stamps each spectrum frame with the ENBW of the most recent noise frame and that
+    /// is what converts it to dBV/√Hz; a trace restored without it would be drawn at the wrong
+    /// level in that unit. Meters follow, carrying the harmonics, the other peaks and any IMD or
+    /// multitone reading, so the tiles and tables come back with the trace rather than sitting
+    /// empty beside it.</para>
+    ///
+    /// <para>What does not come back is the oscilloscope: the snapshot keeps no time-domain
+    /// samples (see <see cref="RetainedSpectrum"/>), so the scope stays empty until the next RUN.
+    /// Deliberate — retaining a second copy of the record for a view that is only meaningful live
+    /// would cost more than it buys.</para>
+    /// </summary>
+    public void SendRetainedSnapshotTo(Guid clientId) =>
+        SendRetained(clientId, viewport: null, withFigures: true);
+
+    private void SendRetained(Guid clientId, SpectrumViewport? viewport, bool withFigures)
     {
         if (_worker is not null)
             return;
@@ -410,6 +437,12 @@ public sealed class SpectrumPipeline(
                 if (specLen < 3)
                     continue;
 
+                var channel = ch == 0 ? StreamChannel.Left : StreamChannel.Right;
+
+                // Ahead of the spectrum frame it describes, exactly as a tick sends them.
+                if (withFigures && retained.Noise is { } noise)
+                    hub.Send(clientId, StreamFrame.EncodeNoiseFigures(channel, retained.Seq, noise, held: false));
+
                 int overviewLoBin = Math.Clamp((int)Math.Round(displayLoFreqHz / retained.BinSizeHz), 1, specLen - 2);
                 bool zoomed = ResolveWindowBins(
                     viewport, retained.BinSizeHz, specLen, overviewLoBin, out int loBin, out int hiBin);
@@ -420,8 +453,24 @@ public sealed class SpectrumPipeline(
                 }
 
                 hub.Send(clientId, BuildSpectrumFrame(
-                    ch == 0 ? StreamChannel.Left : StreamChannel.Right, retained.Seq, retained.AmpPower,
-                    retained.BinSizeHz, loBin, hiBin, maxColumns, zoomed));
+                    channel, retained.Seq, retained.AmpPower, retained.BinSizeHz, loBin, hiBin, maxColumns, zoomed));
+
+                if (!withFigures || retained.Meters is not { } meters)
+                    continue;
+
+                // `held: false` throughout: the snapshot does not record whether the capture that
+                // produced it was a single shot, and that flag means "your SINGLE has completed" —
+                // a claim this is in no position to make to a client that was not there for it.
+                hub.Send(clientId, StreamFrame.EncodeMeters(
+                    channel, retained.Seq, meters.FundamentalFreqHz, meters.BinSizeHz,
+                    meters.ThdPercent, meters.ThdNPercent, meters.SnrDb, meters.FundamentalDbv,
+                    meters.NoiseFloorDbv, meters.PeakDbv, meters.TotalRmsDbv, meters.Harmonics,
+                    meters.OtherPeaks, (uint)meters.AveragesTaken, held: false));
+
+                if (meters.Intermodulation is { } intermodulation)
+                    hub.Send(clientId, StreamFrame.EncodeIntermodulation(channel, retained.Seq, intermodulation, held: false));
+                if (meters.Multitone is { } multitone)
+                    hub.Send(clientId, StreamFrame.EncodeMultitone(channel, retained.Seq, multitone, held: false));
             }
         }
     }

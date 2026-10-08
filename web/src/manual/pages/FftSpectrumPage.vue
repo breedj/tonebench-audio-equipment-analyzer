@@ -659,8 +659,10 @@ const { showPage } = useManual()
     <p>
       This works on a capture that is <strong>stopped</strong> as well as a running one — the full
       trace is kept after Stop — and on a saved result drawn from the History checklist, whose
-      stored spectrum is re-read at the window you zoom to. One thing it cannot do is reload: open
-      the page again and the chart is empty until the next RUN.
+      stored spectrum is re-read at the window you zoom to. Reloading the page is fine too: the
+      stopped capture comes back with its readings, so you can leave a measurement on screen,
+      reopen the app later and go on zooming into it. Only the oscilloscope stays empty until the
+      next RUN, since no time-domain samples are kept.
     </p>
 
     <h2>Saving a result</h2>

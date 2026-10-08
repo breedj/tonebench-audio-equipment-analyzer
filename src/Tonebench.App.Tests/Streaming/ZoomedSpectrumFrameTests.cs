@@ -312,6 +312,53 @@ public class ZoomedSpectrumFrameTests
         }
     }
 
+    /// <summary>
+    /// A client that connects while stopped gets the retained capture pushed to it, rather than an
+    /// empty chart until the next RUN — the case a page reload lands in.
+    /// </summary>
+    [Fact]
+    public async Task ConnectingToAStoppedPipeline_IsSentTheRetainedSnapshot()
+    {
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = NewPipeline(hub);
+        var (_, liveReader) = hub.Subscribe();
+
+        pipeline.Start(SampleRateHz, channelCount: 1);
+        EnqueueTone(pipeline, FftSize);
+        await ReadSpectrumHeaderAsync(liveReader);
+        await pipeline.StopAsync();
+
+        var (newcomerId, newcomerReader) = hub.Subscribe();
+        pipeline.SendRetainedSnapshotTo(newcomerId);
+
+        var types = new List<StreamMsgType>();
+        while (newcomerReader.TryRead(out byte[]? frame))
+            types.Add(StreamFrame.DecodeHeader(frame).MsgType);
+
+        // The whole overview, in the tick's own order. Noise *before* spectrum: the client stamps
+        // each spectrum frame with the most recent noise frame's ENBW, which is what converts it
+        // to dBV/sqrt(Hz), so the other order would restore the trace at the wrong level there.
+        Assert.Contains(StreamMsgType.Spectrum, types);
+        Assert.Contains(StreamMsgType.NoiseFigures, types);
+        Assert.Contains(StreamMsgType.Meters, types);
+        Assert.True(
+            types.IndexOf(StreamMsgType.NoiseFigures) < types.IndexOf(StreamMsgType.Spectrum),
+            $"noise must precede the spectrum it describes: {string.Join(", ", types)}");
+    }
+
+    [Fact]
+    public async Task ConnectingBeforeAnythingHasBeenCaptured_IsSentNothing()
+    {
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = NewPipeline(hub);
+
+        var (id, reader) = hub.Subscribe();
+        pipeline.SendRetainedSnapshotTo(id);
+
+        Assert.False(reader.TryRead(out _));
+        await Task.CompletedTask;
+    }
+
     private static void EnqueueStereoTone(SpectrumPipeline pipeline, int framesPerChannel)
     {
         int sampleCount = framesPerChannel * 2;

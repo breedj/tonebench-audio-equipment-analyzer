@@ -23,6 +23,13 @@ public static class StreamingEndpoints
             using var socket = await context.WebSockets.AcceptWebSocketAsync();
             var (id, reader) = hub.Subscribe();
 
+            // Frames only ever left on a tick, so a client that connected to a *stopped* pipeline
+            // saw an empty chart until the next RUN — including the common case of reloading the
+            // page to look at a capture that is sitting right there in the retained snapshot.
+            // Queued before the pump starts, so it is the first thing this client is sent; a
+            // no-op while running, where the next tick serves it anyway.
+            pipeline.SendRetainedSnapshotTo(id);
+
             // Which browser is on the other end, once per client. It belongs in the log for the
             // same reason the OS line does: the client is half of this app, several of its faults
             // have been rendering ones (a ResizeObserver that never fires, a canvas that comes out

@@ -9,7 +9,7 @@ import {
   CHART_EXPORT_HEADER_PX,
   composeChartPng,
   nextPaint,
-  exportAxisLabel,
+  axisLabel,
   type ChartExportOptions,
   type ExportLegendEntry,
 } from '../charts/exportChart'
@@ -635,7 +635,7 @@ function buildOptions(
         // the two axes agree column for column — see the reasoning there for why uPlot's own
         // log-axis ticking isn't usable once you zoom in.
         ...freqAxis(),
-        ...exportAxisLabel(interactive, 'Frequency (Hz)'),
+        ...axisLabel(true, interactive, 'Frequency (Hz)'),
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: theme.gridWidth },
         ticks: { stroke: theme.grid, width: theme.gridWidth },
@@ -643,7 +643,7 @@ function buildOptions(
       {
         values: (_u, vals) => vals.map(formatDbTick),
         size: 50,
-        ...exportAxisLabel(interactive, unitAxisLabel(spectrumUnit.value)),
+        ...axisLabel(true, interactive, unitAxisLabel(spectrumUnit.value)),
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: theme.gridWidth },
         ticks: { stroke: theme.grid, width: theme.gridWidth },

@@ -9,7 +9,7 @@ import { unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useAppTheme } from '../composables/useAppTheme'
 // Shared with SpectrumChart.vue — the two charts sit on one x span and must label it identically.
 import { freqAxis } from '../freqAxis'
-import { CHART_EXPORT_HEADER_PX, composeChartPng, exportAxisLabel, nextPaint, type ChartExportOptions } from '../charts/exportChart'
+import { axisLabel, CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import { exportGridTheme } from '../charts/palette'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import ExpandToggle from './ExpandToggle.vue'
@@ -202,7 +202,7 @@ function buildOptions(
         stroke: theme.axis,
         grid: { show: false },
         ticks: { stroke: theme.grid, width: theme.gridWidth },
-        ...exportAxisLabel(interactive, 'Frequency (Hz)'),
+        ...axisLabel(true, interactive, 'Frequency (Hz)'),
       },
       {
         // size: 50 matches SpectrumChart's y axis exactly, which is what keeps the two plot areas
@@ -217,7 +217,7 @@ function buildOptions(
         stroke: theme.axis,
         grid: { show: false },
         ticks: { stroke: theme.grid, width: theme.gridWidth },
-        ...exportAxisLabel(interactive, 'Seconds ago'),
+        ...axisLabel(true, interactive, 'Seconds ago'),
       },
     ],
     // A placeholder: the image is the content (see waterfallPlugin), but uPlot still needs a

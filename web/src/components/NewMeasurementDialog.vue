@@ -45,11 +45,16 @@ async function onCreate() {
         Select or create a project first.
       </p>
       <div class="grid max-h-[80vh] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+        <!-- bg-blue-50 is #eff6ff, Joost's choice (2026-10-08), and the same tint the sidebar gives
+             the selected measurement — so a card here reads as the same kind of thing. Not a
+             surface token: those four are the page's own greys, and this is an accent. The dark
+             counterpart is the sidebar's too, since a light blue card under a dark theme would be
+             the one bright patch on the screen. -->
         <button
           v-for="k in MEASUREMENT_KINDS"
           :key="k.kind"
           type="button"
-          class="flex items-start gap-3 rounded border border-neutral-200 p-3 text-left hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-800 dark:hover:bg-neutral-800"
+          class="flex items-start gap-3 rounded border border-neutral-200 bg-blue-50 p-3 text-left hover:bg-blue-100 disabled:opacity-40 dark:border-neutral-800 dark:bg-blue-900/30 dark:hover:bg-blue-900/50"
           :disabled="currentProjectId === null"
           @click="pickKind(k.kind)"
         >

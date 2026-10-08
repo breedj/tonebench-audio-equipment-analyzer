@@ -14,8 +14,19 @@ const { types, currentTypeId, currentProjectId, dirtyTypeIds, selectType, delete
 // The badge is the only thing on screen that says the trash holds anything, so it is refreshed
 // whenever the project changes as well as after each delete (useProjects/useMeasurements do that
 // half). A project switch is what the watcher catches; `immediate` covers the first paint.
-const { open: trashOpen, count: trashCount, openTrash, refreshCount } = useTrash()
+const { open: trashOpen, count: trashCount, openTrash, closeTrash, refreshCount } = useTrash()
 watch(currentProjectId, () => void refreshCount(), { immediate: true })
+
+// Clicking a row while the trash is showing means "take me back to that measurement", and that has
+// to be handled here rather than left to App.vue's watcher on currentTypeId: the row most likely to
+// be clicked is the highlighted one — the measurement that was open when the trashcan was pressed —
+// and selecting it sets currentTypeId to the value it already holds, so the watcher never fires and
+// the trash stays on screen. Every other row worked, which is how it was reported. The watcher is
+// still what covers the paths that do not come through here, NewMeasurementDialog above all.
+function onSelect(id: number) {
+  closeTrash()
+  void selectType(id)
+}
 
 const dialogOpen = ref(false)
 
@@ -162,7 +173,7 @@ async function onDelete(id: number) {
           "
           :title="t.name"
           :aria-label="t.name"
-          @click="selectType(t.id)"
+          @click="onSelect(t.id)"
         >
           <MeasurementKindIcon :kind="t.kind" />
           <span
@@ -272,7 +283,7 @@ async function onDelete(id: number) {
             @mousedown="gripHeldIndex = index"
             >⠿</span
           >
-          <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left text-sm" @click="selectType(t.id)">
+          <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left text-sm" @click="onSelect(t.id)">
             <MeasurementKindIcon :kind="t.kind" class="shrink-0" />
             <span class="min-w-0 flex-1 truncate" :title="t.name">{{ t.name }}</span>
             <span

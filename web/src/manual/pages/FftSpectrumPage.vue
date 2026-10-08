@@ -163,10 +163,13 @@ const { showPage } = useManual()
           <td>Snap to bin</td>
           <td>
             Moves each tone to the nearest exact FFT bin so it lands on one bin with no leakage into
-            its neighbours. Leave it on for distortion work. The frequency you typed stays in the
-            field; the grey figure beneath it is what is really playing, which depends on the FFT
-            size. Sine tones and the multitone comb (snapped tone by tone); noise and the chirp
-            have nothing to snap, and a square or triangle has its own rounding instead (below).
+            its neighbours. <strong>On by default</strong> for a new measurement, and leave it on for
+            distortion work. The frequency you typed stays in the field; the grey figure beneath it
+            is what is really playing, which depends on the FFT size. Sine tones and the multitone
+            comb (snapped tone by tone); noise and the chirp have nothing to snap, and a square or
+            triangle has its own rounding instead (below). Switching to a stimulus that can snap
+            turns it back on; selecting a saved measurement restores whatever that one was saved
+            with.
           </td>
         </tr>
         <tr>

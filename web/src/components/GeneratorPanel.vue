@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef, watch } from 'vue'
-import type { DeviceRanges, DeviceStatus, GeneratorChannelRequest } from '../api/client'
+import type { DeviceRanges, DeviceStatus, GeneratorChannelRequest, GeneratorKind } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { canSnapToBin as canSnapToBinKind, snapToBinOnLoad } from '../measurements/snapToBin'
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import { generatorRateCeilingNotice } from '../generatorRateCeiling'
 import GeneratorChannelPanel from './GeneratorChannelPanel.vue'
@@ -53,17 +54,27 @@ const rightEnabled = ref(false)
 const snapToBin = ref(true)
 const { kind: stimulusKind } = useGeneratorStimulus()
 
-// Snapping only ever rewrites a channel's `tones` list (see DeviceSessionService.SnapTones) — a
-// silent no-op for Multitone/WhiteNoise, which have none. Disabled rather than just documented so
-// it can't look like it's doing something for those kinds.
-// Sine tones and the multitone comb: the server snaps a comb tone by tone (DeviceSessionService.
-// SnapTones), and the multitone TD+N reading depends on it -- unsnapped, every gap between two
-// tones reads their own Hann sidelobes, about -60 dBr on a straight wire, as if it were distortion.
-const canSnapToBin = computed(() => stimulusKind.value === 'Tones' || stimulusKind.value === 'Multitone')
+// Which kinds snap is `snapToBin.ts`'s to say, for both this and the watcher below — the rule
+// used to be written out twice here, in two different spellings, and they disagreed.
+const canSnapToBin = computed(() => canSnapToBinKind(stimulusKind.value))
+
 // Switching to a snappable stimulus re-enables it by default (the common case wants it on);
-// switching away disables it, same as before.
+// switching away disables it.
+//
+// Not when the change came from *loading* a measurement, though: applying a stored type also moves
+// the kind, a tick after the watcher below has already restored the box from what that measurement
+// saved, so without this guard arriving at a Multitone measurement from a Tones one would tick a
+// box its own parameters say is off — and arriving at it from another Multitone one would not,
+// which is a setting that depends on where you came from.
+// The kind the child is about to sync to on behalf of a load, if any — matched by value rather
+// than held as a bare flag, because a load whose kind is the one already selected moves nothing
+// and would leave a flag set, swallowing the user's next real stimulus change instead.
+let pendingLoadKind: GeneratorKind | null = null
 watch(stimulusKind, (kind) => {
-  snapToBin.value = kind === 'Tones' || kind === 'Multitone'
+  const expected = pendingLoadKind
+  pendingLoadKind = null
+  if (kind === expected) return
+  snapToBin.value = canSnapToBinKind(kind)
 })
 
 watch(
@@ -72,10 +83,12 @@ watch(
     if (!params) return
     leftEnabled.value = params.generatorLeft.enabled
     rightEnabled.value = params.generatorRight.enabled
-    // Clamped against the loaded kind directly, rather than against stimulusKind (synced from the
-    // child a tick later) — a measurement saved before this gate existed could have snapToBin true
-    // alongside a Multitone/WhiteNoise kind, and this must not resurrect it as checked.
-    snapToBin.value = params.snapToBin && params.generatorLeft.kind === 'Tones'
+    // Judged against the loaded kind rather than stimulusKind, which the child syncs a tick later
+    // — see snapToBin.ts for the two things that are easy to get wrong here, both of which this
+    // line had: the multitone comb does snap, and `Off` is not a stimulus.
+    snapToBin.value = snapToBinOnLoad(params.snapToBin, params.generatorLeft.kind)
+    // `Off` leaves the child's own default selected (GeneratorChannelPanel), so nothing is coming.
+    pendingLoadKind = params.generatorLeft.kind === 'Off' ? null : params.generatorLeft.kind
   },
   { immediate: true },
 )

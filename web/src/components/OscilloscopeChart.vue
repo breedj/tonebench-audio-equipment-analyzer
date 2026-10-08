@@ -15,7 +15,7 @@ import ExpandToggle from './ExpandToggle.vue'
 import {
   CHART_EXPORT_HEADER_PX,
   composeChartPng,
-  exportAxisLabel,
+  axisLabel,
   nextPaint,
   type ChartExportOptions,
   type ExportLegendEntry,
@@ -94,7 +94,7 @@ function buildOptions(width: number, height: number, theme: (typeof THEME)[keyof
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: theme.gridWidth },
         ticks: { stroke: theme.grid, width: theme.gridWidth },
-        ...exportAxisLabel(interactive, 'Time (ms)'),
+        ...axisLabel(true, interactive, 'Time (ms)'),
       },
       {
         values: (_u, vals) => vals.map((v) => (v == null ? null : `${v}`)),
@@ -102,7 +102,7 @@ function buildOptions(width: number, height: number, theme: (typeof THEME)[keyof
         stroke: theme.axis,
         grid: { stroke: theme.grid, width: theme.gridWidth },
         ticks: { stroke: theme.grid, width: theme.gridWidth },
-        ...exportAxisLabel(interactive, residualMode.value ? 'Residual (V)' : 'Volts'),
+        ...axisLabel(true, interactive, residualMode.value ? 'Residual (V)' : 'Volts'),
       },
     ],
     series: [

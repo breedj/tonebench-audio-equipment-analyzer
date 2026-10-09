@@ -139,14 +139,7 @@ public static class CsvExporter
             throw new ArgumentException("A response with at least one trace is required.", nameof(traces));
 
         var sb = new StringBuilder();
-        WriteComment(sb, "project", detail.ProjectName);
-        WriteComment(sb, "measurement_type", detail.MeasurementTypeName);
-        WriteComment(sb, "kind", detail.Kind);
-        WriteComment(sb, "name", detail.Name);
-        WriteComment(sb, "notes", detail.Notes ?? "");
-        WriteComment(sb, "timestamp_utc", TonebenchTimestamp.FormatUtc(detail.TimestampUtc));
-        WriteComment(sb, "sample_rate_hz", detail.SampleRateHz.ToString(CultureInfo.InvariantCulture));
-        WriteComment(sb, "fft_size", detail.FftSize.ToString(CultureInfo.InvariantCulture));
+        WriteResultComments(sb, detail);
         WriteComment(sb, "params_json", detail.ParamsJson);
 
         // The Measurements table's numbers, as comments: they are properties of a whole curve, not
@@ -247,14 +240,7 @@ public static class CsvExporter
             throw new ArgumentException("An impedance result with at least one trace is required.", nameof(traces));
 
         var sb = new StringBuilder();
-        WriteComment(sb, "project", detail.ProjectName);
-        WriteComment(sb, "measurement_type", detail.MeasurementTypeName);
-        WriteComment(sb, "kind", detail.Kind);
-        WriteComment(sb, "name", detail.Name);
-        WriteComment(sb, "notes", detail.Notes ?? "");
-        WriteComment(sb, "timestamp_utc", TonebenchTimestamp.FormatUtc(detail.TimestampUtc));
-        WriteComment(sb, "sample_rate_hz", detail.SampleRateHz.ToString(CultureInfo.InvariantCulture));
-        WriteComment(sb, "fft_size", detail.FftSize.ToString(CultureInfo.InvariantCulture));
+        WriteResultComments(sb, detail);
 
         // Carries the reference resistor and both calibrations, without which none of these numbers
         // can be reproduced.
@@ -361,6 +347,157 @@ public static class CsvExporter
     }
 
     /// <summary>
+    /// A swept-sine impulse response's own samples as CSV: one row per sample, in volts.
+    ///
+    /// <para>Its own renderer, and its own <c>part</c> of the export, because an impulse-response
+    /// result holds <b>three different grids</b> and no single table can carry them: these samples
+    /// against time, the gated magnitude/phase curves against frequency (<c>response_trace</c> rows,
+    /// rendered by <see cref="ExportResponse"/>) and the harmonic curves against fundamental
+    /// frequency (<see cref="ExportImpulseHarmonics"/>). Writing one row that meant a time in one
+    /// column group and a frequency in another is the thing <see cref="ExportImpedance"/> refused to
+    /// do with units, for the same reason.</para>
+    ///
+    /// <para>This is the one <b>full-resolution</b> thing an impulse result stores — up to
+    /// <c>MeasurementSaveService.MaxStoredIrSamples</c> samples, not a decimated display curve — so
+    /// it is what the default part exports: the frequency curves can be re-derived from these
+    /// samples, and these samples cannot be re-derived from anything else.</para>
+    ///
+    /// <para><b><c>time_ms</c> is relative to the peak</b>, so a band-limited impulse's pre-ringing
+    /// reads as negative time rather than as the end of the record. That is what
+    /// <c>impulse_result.peak_index</c> is stored for; a reader that assumed index 0 was the peak
+    /// would report the pre-ringing as post-ringing. Milliseconds rather than the stored seconds for
+    /// the reason the response export writes delays in microseconds: every impulse an audio DUT has
+    /// fits in a few tens of milliseconds, and a spreadsheet column of 2.08e-05 is unreadable.</para>
+    /// </summary>
+    public static string ExportImpulse(MeasurementDetail detail, StoredImpulseResult impulse)
+    {
+        if (impulse.Impulses.Count == 0)
+            throw new ArgumentException("An impulse result with at least one impulse is required.", nameof(impulse));
+
+        var impulses = impulse.Impulses;
+        var sb = new StringBuilder();
+        WriteResultComments(sb, detail);
+
+        foreach (var trace in impulses)
+        {
+            WriteComment(sb, $"{trace.Kind}_peak_volts", trace.PeakVolts.ToString("F6", CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_peak_index", trace.PeakIndex.ToString(CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_ir_samples", trace.Ir.Length.ToString(CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_sample_rate_hz", trace.SampleRateHz.ToString(CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_gate_pre_ms", trace.GatePreMs.ToString("F4", CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_gate_post_ms", trace.GatePostMs.ToString("F4", CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_gate_window", trace.GateWindow);
+
+            // The finest frequency the gate leaves meaningful — a property of the whole curve, like
+            // the response export's corners, and not derivable from the samples below.
+            WriteComment(sb, $"{trace.Kind}_resolution_limit_hz", trace.ResolutionLimitHz.ToString("F4", CultureInfo.InvariantCulture));
+            WriteComment(sb, $"{trace.Kind}_reference_mode", trace.ReferenceMode);
+            if (!string.IsNullOrEmpty(trace.ReferenceName))
+                WriteComment(sb, $"{trace.Kind}_reference_name", trace.ReferenceName);
+
+            // Omitted rather than written empty where there was no measured reference to remove a
+            // delay against — the reference_db policy. See FrequencyResponseEstimator: against the
+            // synthetic chirp the rotation is the record's arbitrary start point, not a delay.
+            if (trace.LatencySamples is { } latency)
+                WriteComment(sb, $"{trace.Kind}_latency_samples", latency.ToString("F4", CultureInfo.InvariantCulture));
+        }
+
+        // Every impulse of one result is centred the same way by MeasurementSaveService and shares
+        // the acquisition's sample rate, so one time column serves them all. Said out loud rather
+        // than assumed: a disagreement would put every row of the odd one out at the wrong time, and
+        // the comments above are the only other place a reader could notice.
+        var reference = impulses[0];
+        foreach (var trace in impulses.Skip(1))
+        {
+            if (trace.PeakIndex != reference.PeakIndex || trace.SampleRateHz != reference.SampleRateHz)
+            {
+                WriteComment(
+                    sb,
+                    "warning",
+                    $"{trace.Kind} is centred at sample {trace.PeakIndex.ToString(CultureInfo.InvariantCulture)} at "
+                        + $"{trace.SampleRateHz.ToString(CultureInfo.InvariantCulture)} Hz, not {reference.PeakIndex.ToString(CultureInfo.InvariantCulture)} at "
+                        + $"{reference.SampleRateHz.ToString(CultureInfo.InvariantCulture)} Hz — its samples are not on the time column below");
+            }
+        }
+
+        WriteComment(sb, "params_json", detail.ParamsJson);
+
+        sb.Append("time_ms");
+        foreach (var trace in impulses)
+            sb.Append(',').Append(trace.Kind).Append("_volts");
+        sb.Append('\n');
+
+        // The shortest, defensively, the way ExportResponse treats its curves: a ragged row would
+        // silently shift columns.
+        int rows = impulses.Min(t => t.Ir.Length);
+        double sampleRateHz = reference.SampleRateHz > 0.0 ? reference.SampleRateHz : 1.0;
+
+        for (int i = 0; i < rows; i++)
+        {
+            double timeMs = (i - reference.PeakIndex) / sampleRateHz * 1000.0;
+            sb.Append(timeMs.ToString("F6", CultureInfo.InvariantCulture));
+            foreach (var trace in impulses)
+                sb.Append(',').Append(trace.Ir[i].ToString("F9", CultureInfo.InvariantCulture));
+
+            sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The harmonic-distortion curves a swept-sine impulse response extracts, as CSV: one row per
+    /// (order, point).
+    ///
+    /// <para><b>Long format, not a column per order</b>, because each order carries its own
+    /// frequency grid: the k-th harmonic can only be observed for fundamentals up to the sweep's end
+    /// over k, so the curves are genuinely different lengths and end at different frequencies
+    /// (<c>impulse_harmonic.upper_valid_hz</c>). Side-by-side columns would need the shortest grid
+    /// and would throw away the top of every lower order, or pad with empties that read as missing
+    /// data rather than as out-of-range.</para>
+    ///
+    /// <para><c>level_dbc</c> is relative to the fundamental at that frequency, the same convention
+    /// the harmonics chart plots.</para>
+    /// </summary>
+    public static string ExportImpulseHarmonics(MeasurementDetail detail, StoredImpulseResult impulse)
+    {
+        if (impulse.Harmonics.Count == 0)
+            throw new ArgumentException("An impulse result with at least one harmonic curve is required.", nameof(impulse));
+
+        var curves = impulse.Harmonics.OrderBy(c => c.Order).ToList();
+        var sb = new StringBuilder();
+        WriteResultComments(sb, detail);
+
+        foreach (var curve in curves)
+        {
+            WriteComment(
+                sb,
+                $"h{curve.Order.ToString(CultureInfo.InvariantCulture)}_upper_valid_hz",
+                curve.UpperValidHz.ToString("F4", CultureInfo.InvariantCulture));
+        }
+
+        WriteComment(sb, "params_json", detail.ParamsJson);
+
+        sb.Append("order,fundamental_hz,level_dbc\n");
+
+        foreach (var curve in curves)
+        {
+            // The shortest of the pair, defensively: the two blobs are written together and so
+            // cannot normally disagree, but a row that ran off the end of one would be a silent
+            // reading of whatever followed it.
+            int rows = Math.Min(curve.FundamentalHz.Length, curve.LevelDbc.Length);
+            for (int i = 0; i < rows; i++)
+            {
+                sb.Append(curve.Order.ToString(CultureInfo.InvariantCulture)).Append(',');
+                sb.Append(curve.FundamentalHz[i].ToString("F6", CultureInfo.InvariantCulture)).Append(',');
+                sb.Append(curve.LevelDbc[i].ToString("F4", CultureInfo.InvariantCulture)).Append('\n');
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Renders a saved sweep as CSV: one row per point, one column group per channel. A sweep
     /// result has no <c>spectrum</c> rows at all (metrics only, by design -- see
     /// <see cref="SweepSaveRequest"/>), so <see cref="Export"/> cannot render one and this is the
@@ -403,14 +540,7 @@ public static class CsvExporter
             columns = [.. columns, .. NormalizedSweepColumns];
 
         var sb = new StringBuilder();
-        WriteComment(sb, "project", detail.ProjectName);
-        WriteComment(sb, "measurement_type", detail.MeasurementTypeName);
-        WriteComment(sb, "kind", detail.Kind);
-        WriteComment(sb, "name", detail.Name);
-        WriteComment(sb, "notes", detail.Notes ?? "");
-        WriteComment(sb, "timestamp_utc", TonebenchTimestamp.FormatUtc(detail.TimestampUtc));
-        WriteComment(sb, "sample_rate_hz", detail.SampleRateHz.ToString(CultureInfo.InvariantCulture));
-        WriteComment(sb, "fft_size", detail.FftSize.ToString(CultureInfo.InvariantCulture));
+        WriteResultComments(sb, detail);
         WriteComment(sb, "point_count", points.Count.ToString(CultureInfo.InvariantCulture));
         WriteComment(sb, "params_json", detail.ParamsJson);
 
@@ -493,6 +623,24 @@ public static class CsvExporter
                     + $"s2={spectrum.S2.ToString(CultureInfo.InvariantCulture)} enbw_hz={spectrum.EnbwHz.ToString(CultureInfo.InvariantCulture)} "
                     + $"norm={norm}");
         }
+    }
+
+    /// <summary>
+    /// The identifying header comments every non-FFT renderer opens with, in one place so the four
+    /// of them cannot drift apart. <c>params_json</c> is deliberately <b>not</b> here: each renderer
+    /// writes its own extras between these lines and it, and the sweep's <c>point_count</c> sits in
+    /// exactly that gap.
+    /// </summary>
+    private static void WriteResultComments(StringBuilder sb, MeasurementDetail detail)
+    {
+        WriteComment(sb, "project", detail.ProjectName);
+        WriteComment(sb, "measurement_type", detail.MeasurementTypeName);
+        WriteComment(sb, "kind", detail.Kind);
+        WriteComment(sb, "name", detail.Name);
+        WriteComment(sb, "notes", detail.Notes ?? "");
+        WriteComment(sb, "timestamp_utc", TonebenchTimestamp.FormatUtc(detail.TimestampUtc));
+        WriteComment(sb, "sample_rate_hz", detail.SampleRateHz.ToString(CultureInfo.InvariantCulture));
+        WriteComment(sb, "fft_size", detail.FftSize.ToString(CultureInfo.InvariantCulture));
     }
 
     private static void WriteComment(StringBuilder sb, string key, string value)

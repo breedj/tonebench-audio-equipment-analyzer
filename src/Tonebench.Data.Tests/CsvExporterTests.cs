@@ -526,6 +526,135 @@ public class CsvExporterTests
         return double.Parse(row.Split(',')[index], CultureInfo.InvariantCulture);
     }
 
+    /// <summary>
+    /// The one thing a reader cannot get wrong by accident, and the reason
+    /// <c>impulse_result.peak_index</c> is stored at all: a band-limited impulse rings on both sides
+    /// of its peak, so the samples before it must read as negative time. A renderer that started the
+    /// clock at index 0 would report every bit of that pre-ringing as post-ringing.
+    /// </summary>
+    [Fact]
+    public void ExportImpulse_TimesEverySampleFromThePeak_SoPreRingingIsNegative()
+    {
+        string csv = CsvExporter.ExportImpulse(BuildImpulseDetail(), BuildImpulseResult());
+        string[] lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        string[] data = lines.Where(l => !l.StartsWith('#')).ToArray();
+
+        Assert.Equal("time_ms,left_volts", data[0]);
+
+        // Five samples at 48 kHz with the peak at index 2: -2, -1, 0, +1, +2 sample periods, i.e.
+        // 1/48 ms apart.
+        Assert.Equal(5, data.Length - 1);
+        Assert.Equal(-2.0 / 48.0, Field(data, "-0.0416", data[0], "time_ms"), 6);
+        Assert.Equal(0.0, Field(data, "0.000000", data[0], "time_ms"), 9);
+
+        // The peak sample itself, at t = 0.
+        Assert.Equal(1.0, Field(data, "0.000000", data[0], "left_volts"), 6);
+    }
+
+    /// <summary>
+    /// The settings a gated impulse cannot be interpreted without — the gate, the reference it was
+    /// taken against and the resolution it leaves — are properties of the whole curve, so they are
+    /// header comments rather than columns, the way the response export's corners are.
+    /// </summary>
+    [Fact]
+    public void ExportImpulse_HeaderCarriesTheGateTheReferenceAndTheResolution()
+    {
+        string csv = CsvExporter.ExportImpulse(BuildImpulseDetail(), BuildImpulseResult());
+
+        Assert.Contains("# kind: ImpulseResponse", csv);
+        Assert.Contains("# left_gate_pre_ms: 1.0000", csv);
+        Assert.Contains("# left_gate_post_ms: 10.0000", csv);
+        Assert.Contains("# left_gate_window: Hann", csv);
+        Assert.Contains("# left_resolution_limit_hz: 90.9091", csv);
+        Assert.Contains("# left_reference_mode: RightChannel", csv);
+        Assert.Contains("# left_peak_index: 2", csv);
+        Assert.Contains("# left_latency_samples: 12.5000", csv);
+        Assert.Contains("# params_json:", csv);
+    }
+
+    /// <summary>
+    /// The policy every other renderer here follows for a field that was never recorded: omitted,
+    /// not written empty. A measurement against the synthetic chirp removed no delay, and a blank
+    /// <c>latency_samples</c> would read as "zero samples", which is a measurement it never made.
+    /// </summary>
+    [Fact]
+    public void ExportImpulse_WithNoMeasuredReference_OmitsTheLatencyRatherThanWritingItEmpty()
+    {
+        var result = BuildImpulseResult(latencySamples: null, referenceName: null);
+
+        string csv = CsvExporter.ExportImpulse(BuildImpulseDetail(), result);
+
+        Assert.DoesNotContain("latency_samples", csv);
+        Assert.DoesNotContain("reference_name", csv);
+    }
+
+    /// <summary>
+    /// Long format, one row per (order, point), because each order has its own grid: the k-th
+    /// harmonic is only observable for fundamentals up to the sweep's end over k, so the curves are
+    /// genuinely different lengths. Columns side by side would need the shortest grid and would
+    /// throw away the top of every lower order.
+    /// </summary>
+    [Fact]
+    public void ExportImpulseHarmonics_IsLongFormat_SoOrdersMayHaveDifferentLengths()
+    {
+        string csv = CsvExporter.ExportImpulseHarmonics(BuildImpulseDetail(), BuildImpulseResult());
+        string[] lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        string[] data = lines.Where(l => !l.StartsWith('#')).ToArray();
+
+        Assert.Equal("order,fundamental_hz,level_dbc", data[0]);
+
+        // H2 has three points and H3 two, which is the whole point of the shape.
+        Assert.Equal(3, data.Count(l => l.StartsWith("2,")));
+        Assert.Equal(2, data.Count(l => l.StartsWith("3,")));
+
+        // Orders ascending, whatever order the rows came back in.
+        Assert.StartsWith("2,", data[1]);
+        Assert.StartsWith("3,", data[4]);
+
+        // Per order, and not derivable from the rows: where that harmonic stopped being observable.
+        Assert.Contains("# h2_upper_valid_hz: 10000.0000", csv);
+        Assert.Contains("# h3_upper_valid_hz: 6666.0000", csv);
+    }
+
+    [Fact]
+    public void ExportImpulse_WithNothingMeasured_IsRejectedRatherThanWritingAnEmptyTable()
+    {
+        var empty = new StoredImpulseResult([], []);
+
+        Assert.Throws<ArgumentException>(() => CsvExporter.ExportImpulse(BuildImpulseDetail(), empty));
+        Assert.Throws<ArgumentException>(() => CsvExporter.ExportImpulseHarmonics(BuildImpulseDetail(), empty));
+    }
+
+    private static MeasurementDetail BuildImpulseDetail() => BuildDetail() with
+    {
+        Kind = "ImpulseResponse",
+        MeasurementTypeName = "Driver impulse",
+        ParamsJson = """{"gatePreMs":1,"gatePostMs":10}""",
+    };
+
+    /// <summary>
+    /// Five samples with the peak in the middle, so the time column has to run negative; two
+    /// harmonic curves of deliberately different lengths.
+    /// </summary>
+    private static StoredImpulseResult BuildImpulseResult(
+        double? latencySamples = 12.5, string? referenceName = "bench loopback") =>
+        new(
+            [
+                new StoredImpulseTrace(
+                    ImpulseTraceKind.Left, SampleRateHz: 48000.0, PeakIndex: 2, PeakVolts: 1.0,
+                    GatePreMs: 1.0, GatePostMs: 10.0, GateWindow: "Hann", ResolutionLimitHz: 90.9091,
+                    ReferenceMode: "RightChannel", ReferenceName: referenceName,
+                    LatencySamples: latencySamples,
+                    Ir: [-0.01f, 0.25f, 1.0f, 0.25f, -0.01f]),
+            ],
+            [
+                new StoredHarmonicCurve(
+                    Order: 3, UpperValidHz: 6666.0, FundamentalHz: [100.0f, 200.0f], LevelDbc: [-80.0f, -82.0f]),
+                new StoredHarmonicCurve(
+                    Order: 2, UpperValidHz: 10000.0,
+                    FundamentalHz: [100.0f, 200.0f, 400.0f], LevelDbc: [-60.0f, -62.0f, -64.0f]),
+            ]);
+
     private static MeasurementDetail BuildImpedanceDetail() => BuildDetail() with
     {
         Kind = "Impedance",

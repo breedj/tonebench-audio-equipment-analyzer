@@ -3007,8 +3007,17 @@ export const api = {
   setTrashRetention: (config: TrashRetentionConfig) =>
     request<TrashRetentionConfig>('/config/trash-retention', { method: 'PUT', body: JSON.stringify(config) }),
 
-  /** Not fetched through `request` — a plain download link the caller renders as an `<a href=... download>`. */
-  measurementCsvExportUrl: (id: number) => `/api/measurements/${id}/export.csv`,
+  /**
+   * Not fetched through `request` — a plain download link the caller renders as an
+   * `<a href=... download>`.
+   *
+   * `part` is read by an impulse-response result alone, whose three grids cannot share one table:
+   * `impulse` (its samples against time, the default), `curves` (the gated magnitude and phase
+   * against frequency) or `harmonics`. Every other kind ignores it, so a caller that does not know
+   * the kind can leave it out.
+   */
+  measurementCsvExportUrl: (id: number, part?: 'impulse' | 'curves' | 'harmonics') =>
+    part ? `/api/measurements/${id}/export.csv?part=${part}` : `/api/measurements/${id}/export.csv`,
 
   startThdSweep: (req: ThdSweepStartRequest) =>
     request<ThdSweepStarted>('/sweep/thd-vs-frequency/start', { method: 'POST', body: JSON.stringify(req) }),

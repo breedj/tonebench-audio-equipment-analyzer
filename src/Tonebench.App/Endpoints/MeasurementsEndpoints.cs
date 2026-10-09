@@ -99,7 +99,12 @@ public static class MeasurementsEndpoints
             return trashed ? Results.NoContent() : Results.NotFound();
         });
 
-        group.MapGet("/{id:long}/export.csv", async (long id, MeasurementRepository repo, CancellationToken ct) =>
+        // `part` is read by exactly one kind — an impulse response, whose result holds three grids
+        // that cannot share a table (see CsvExporter.ExportImpulse). Every other kind ignores it
+        // rather than rejecting it: a stray query string must not turn a working download into a
+        // 400, and there is nothing for it to mean there.
+        group.MapGet("/{id:long}/export.csv", async (
+            long id, string? part, MeasurementRepository repo, CancellationToken ct) =>
         {
             var detail = await repo.GetResultAsync(id, ct);
             if (detail is null)
@@ -109,29 +114,68 @@ public static class MeasurementsEndpoints
             // renderer -- one row per frequency. Branching on the stored kind rather than on
             // "found no spectra" keeps a genuinely empty FFT result a 404 instead of a 0-row CSV.
             string csv;
-            if (MeasurementSaveService.IsImpedanceKind(detail.Kind) || MeasurementSaveService.IsOutputImpedanceKind(detail.Kind))
+            string suffix = string.Empty;
+            if (ExportShapeFor(detail.Kind) == CsvExportShape.Impulse)
             {
-                // Impedance stores its curves in the same response_trace rows but in different
-                // units, so it is checked before the response branch rather than folded into it.
-                // An output-impedance result is a Zout curve in those units plus two gain rows in
-                // plain dB, which the impedance exporter writes as _db columns.
+                // Before the response branch, although an impulse result's magnitude and phase are
+                // response_trace rows: its *own* grid — the impulse samples, the one full-resolution
+                // thing it stores — is the default, and the response rows are one part of three.
+                // Without this arm the kind matched nothing, fell through to the spectrum branch,
+                // found no spectrum rows and answered 404 to a CSV button the history panel renders
+                // on every row.
+                if (ImpulsePart(part) is not { } resolved)
+                    return Results.BadRequest(ImpulsePartMessage);
+
+                if (resolved == ImpulseCsvPart.Curves)
+                {
+                    var impulseTraces = await repo.GetResponseTracesAsync(detail.ResultId, ct);
+                    if (impulseTraces.Count == 0)
+                        return Results.NotFound();
+
+                    csv = CsvExporter.ExportResponse(detail, impulseTraces);
+                    suffix = "-curves";
+                }
+                else
+                {
+                    var impulse = await repo.GetImpulseResultAsync(detail.ResultId, ct);
+
+                    // A 404 rather than an empty file. Harmonic extraction is a checkbox on the
+                    // measurement, so a result with no curves was asked not to have any, and an
+                    // impulse result with no impulse is one no build of this app can write.
+                    if (resolved == ImpulseCsvPart.Harmonics)
+                    {
+                        if (impulse is null || impulse.Harmonics.Count == 0)
+                            return Results.NotFound();
+
+                        csv = CsvExporter.ExportImpulseHarmonics(detail, impulse);
+                        suffix = "-harmonics";
+                    }
+                    else
+                    {
+                        if (impulse is null || impulse.Impulses.Count == 0)
+                            return Results.NotFound();
+
+                        csv = CsvExporter.ExportImpulse(detail, impulse);
+                    }
+                }
+            }
+            else if (ExportShapeFor(detail.Kind) == CsvExportShape.Impedance)
+            {
                 var traces = await repo.GetResponseTracesAsync(detail.ResultId, ct);
                 if (traces.Count == 0)
                     return Results.NotFound();
 
                 csv = CsvExporter.ExportImpedance(detail, traces);
             }
-            else if (MeasurementSaveService.IsFrequencyResponseKind(detail.Kind) || MeasurementSaveService.IsCrosstalkKind(detail.Kind))
+            else if (ExportShapeFor(detail.Kind) == CsvExportShape.Response)
             {
-                // Crosstalk rows are response rows in plain dB, so the generic per-kind columns
-                // (xtalk_l2r_min_db, ...) are exactly right for them.
                 var traces = await repo.GetResponseTracesAsync(detail.ResultId, ct);
                 if (traces.Count == 0)
                     return Results.NotFound();
 
                 csv = CsvExporter.ExportResponse(detail, traces);
             }
-            else if (MeasurementSaveService.IsSweepKind(detail.Kind))
+            else if (ExportShapeFor(detail.Kind) == CsvExportShape.Sweep)
             {
                 var points = await repo.GetSweepPointsAsync(detail.ResultId, ct);
                 if (points.Count == 0)
@@ -156,11 +200,104 @@ public static class MeasurementsEndpoints
             }
 
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(csv);
-            return Results.File(bytes, "text/csv", $"{SanitizeFileName(detail.Name)}.csv");
+
+            // The suffix is what keeps an impulse response's three parts from overwriting each other
+            // in a downloads folder; it is empty for every other kind, so their file names are
+            // unchanged.
+            return Results.File(bytes, "text/csv", $"{SanitizeFileName(detail.Name)}{suffix}.csv");
         });
     }
 
+    /// <summary>
+    /// Which renderer a stored kind exports through, i.e. which tables its result actually wrote.
+    ///
+    /// <para>A kind missing an arm here does not fail — it falls to <see cref="Spectrum"/>, finds no
+    /// <c>spectrum</c> rows and answers 404 to a CSV button the history panel renders on every row.
+    /// That is what <c>ImpulseResponse</c> did. Hence <see cref="MeasurementsEndpoints.ExportShapeFor"/>
+    /// and the coverage test over every kind constant.</para>
+    /// </summary>
+    internal enum CsvExportShape
+    {
+        /// <summary>Full-resolution <c>spectrum</c> blobs, one row per bin. Also the fallback, which is why a new kind must be added above.</summary>
+        Spectrum,
+
+        /// <summary><c>metric</c> rows per capture, one row per sweep point.</summary>
+        Sweep,
+
+        /// <summary><c>response_trace</c> rows in plain dB.</summary>
+        Response,
+
+        /// <summary>The same rows read as ohms.</summary>
+        Impedance,
+
+        /// <summary>Three grids that cannot share a table — see <see cref="ImpulseCsvPart"/>.</summary>
+        Impulse,
+    }
+
+    /// <summary>Which of an impulse result's three grids the caller asked for.</summary>
+    internal enum ImpulseCsvPart
+    {
+        /// <summary>The impulse samples against time: the one full-resolution thing the result stores, and the default.</summary>
+        Impulse,
+
+        /// <summary>The gated magnitude, phase and coherence against frequency — <c>response_trace</c> rows, rendered like any other response.</summary>
+        Curves,
+
+        /// <summary>The harmonic-distortion curves against fundamental frequency, long format.</summary>
+        Harmonics,
+    }
+
+    internal const string ImpulsePartMessage =
+        "An impulse response exports as part=impulse (the samples, the default), "
+            + "part=curves (the gated magnitude and phase) or part=harmonics.";
+
+    /// <summary>
+    /// The one place a stored kind is mapped to its exporter, so the route's branches and any test
+    /// of them cannot disagree about it.
+    ///
+    /// <para><b>The order is the rule.</b> Impulse is asked first although its magnitude and phase
+    /// are <c>response_trace</c> rows, because its <i>own</i> grid is the default part. Impedance is
+    /// asked before response for the same reason the other way round: it stores its curves in those
+    /// same rows but in different units all the way down, so the response renderer would write
+    /// ohms-in-dB into a column headed <c>_db</c> — true and useless. An output-impedance result is
+    /// a Zout curve in those units plus two gain rows in plain dB, which the impedance renderer
+    /// writes as <c>_db</c> columns. Crosstalk rows <i>are</i> response rows in plain dB, so the
+    /// generic per-kind columns (<c>xtalk_l2r_min_db</c>, …) are exactly right for them.</para>
+    /// </summary>
+    internal static CsvExportShape ExportShapeFor(string kind)
+    {
+        if (MeasurementSaveService.IsImpulseResponseKind(kind))
+            return CsvExportShape.Impulse;
+
+        if (MeasurementSaveService.IsImpedanceKind(kind) || MeasurementSaveService.IsOutputImpedanceKind(kind))
+            return CsvExportShape.Impedance;
+
+        if (MeasurementSaveService.IsFrequencyResponseKind(kind) || MeasurementSaveService.IsCrosstalkKind(kind))
+            return CsvExportShape.Response;
+
+        if (MeasurementSaveService.IsSweepKind(kind))
+            return CsvExportShape.Sweep;
+
+        return CsvExportShape.Spectrum;
+    }
+
+    /// <summary>
+    /// The requested part, or null when the name is not one of the three.
+    ///
+    /// <para>An absent or empty <c>part</c> is the default rather than an error: that is the plain
+    /// link the history panel renders, and the query string only exists because one kind needs it.
+    /// Case-insensitive, because this arrives typed into a URL as often as clicked.</para>
+    /// </summary>
+    internal static ImpulseCsvPart? ImpulsePart(string? part) => part?.ToLowerInvariant() switch
+    {
+        null or "" or "impulse" => ImpulseCsvPart.Impulse,
+        "curves" => ImpulseCsvPart.Curves,
+        "harmonics" => ImpulseCsvPart.Harmonics,
+        _ => null,
+    };
+
     private static string SanitizeFileName(string name)
+
     {
         var invalid = Path.GetInvalidFileNameChars();
         return string.Concat(name.Select(c => invalid.Contains(c) ? '_' : c));

@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { api, type MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
+import { isImpulseResponseKind } from '../measurements/kinds'
 import EditMeasurementDialog from './EditMeasurementDialog.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const emit = defineEmits<{ error: [message: string]; report: [resultId: number] }>()
 
-const { currentTypeId } = useProjects()
+const { currentTypeId, types } = useProjects()
 const { items, filter, error, load, remove } = useMeasurements()
+
+// This panel is always scoped to the measurement the sidebar has open, so every row shares its
+// kind and the CSV links can be decided once rather than per row. An impulse response is the one
+// kind whose result holds three grids that cannot share a table, so it offers one link each -- see
+// CsvExporter.ExportImpulse.
+const isImpulseResponse = computed(() =>
+  isImpulseResponseKind(types.value.find((t) => t.id === currentTypeId.value)?.kind),
+)
 
 const form = reactive({ fromDate: '', toDate: '' })
 
@@ -127,9 +136,32 @@ async function onConfirmDelete(item: MeasurementSummary) {
                     :href="api.measurementCsvExportUrl(item.resultId)"
                     download
                     class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                    :title="isImpulseResponse ? 'The impulse response itself, one row per sample, at full resolution.' : undefined"
                   >
                     CSV
                   </a>
+                  <!-- An impulse response's other two grids. Separate links rather than one file:
+                       its samples are against time, its gated magnitude and phase against
+                       frequency, and its harmonic curves against fundamental frequency, each on
+                       its own grid -- see CsvExporter.ExportImpulse. -->
+                  <template v-if="isImpulseResponse">
+                    <a
+                      :href="api.measurementCsvExportUrl(item.resultId, 'curves')"
+                      download
+                      class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                      title="The gated magnitude, phase and coherence against frequency."
+                    >
+                      Curves
+                    </a>
+                    <a
+                      :href="api.measurementCsvExportUrl(item.resultId, 'harmonics')"
+                      download
+                      class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                      title="The harmonic-distortion curves against fundamental frequency. Only measurements run with harmonic extraction on have them."
+                    >
+                      Harmonics
+                    </a>
+                  </template>
                   <button
                     type="button"
                     class="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"

@@ -18,6 +18,7 @@ public class Qa40xUsbDeviceHardwareTests
 
     private const double LoopbackOutputRangeDbv = 8.0;
 
+
     [Fact]
     public async Task EnumerateAndConnect_FindsRealQa403()
     {
@@ -33,6 +34,18 @@ public class Qa40xUsbDeviceHardwareTests
     /// <summary>
     /// The acceptance criterion for this whole task: until this passes on every input range,
     /// the calibration path (Qa40xCalibration) is not proven correct on real hardware.
+    ///
+    /// <para>Nothing here waits for the 24 dB input attenuator, and that is the point — the device
+    /// does it, through <see cref="Qa40xAutoRanger.AttenuatorReleaseSettleMs"/>. Until 2026-10-08
+    /// this theory failed at 0 and 6 dBV and nowhere else, and had for as long as it existed, for a
+    /// reason that was never the calibration it was written to prove: xUnit runs the cases
+    /// 6, 42, 18, 30, 0, 24, 12, 36, so the 0 dBV case always follows 30 dBV and the 6 dBV case
+    /// follows whatever the previous run left behind — both of them *releases* of the attenuator,
+    /// which lag the register write by about a second while the samples are already scaled for the
+    /// new range. Nine of the 23 averaged blocks were therefore exactly 24 dB down, which is a
+    /// broadband RMS 2.15 dB low: the -8.14 dBV it reported, to three decimals. With the relay
+    /// settled every range reads -6.001 dBV against a commanded -6, so a reappearance of this is a
+    /// calibration fault again and not a timing one.</para>
     /// </summary>
     [Theory]
     [InlineData(0.0)]

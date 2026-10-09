@@ -107,13 +107,56 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     public bool StepDownEnabled { get; set; } = true;
 
     /// <summary>
-    /// TODO: no relay settling time is documented anywhere in docs/protocol.md for register 5 —
-    /// none of the three reference trees state one either (qa40x-rs-main's internal timing
-    /// constant is deliberately not used here per the task instruction: if protocol.md doesn't
-    /// state it, don't invent/borrow a plausible-sounding number). This is an unverified
-    /// placeholder — confirm against real hardware and replace before relying on it.
+    /// Settle after a range change that leaves the 24 dB input attenuator where it was — i.e. any
+    /// step within 0-18 dBV or within 24-42 dBV, and any step that *engages* the attenuator.
+    ///
+    /// <para>Still the unverified 50 ms it has always been: no relay settling time is documented in
+    /// docs/protocol.md for register 5, and none of the three reference trees state one. What has
+    /// now been measured is that it is not the number that mattered — see
+    /// <see cref="AttenuatorReleaseSettleMs"/>.</para>
     /// </summary>
-    public const int SettleTimeMsTodoPlaceholder = 50;
+    public const int GainStepSettleMs = 50;
+
+    /// <summary>
+    /// Input ranges at this level and above engage the QA403's 24 dB input attenuator; below it the
+    /// front end runs unattenuated. The ladder's own step is 6 dB, so this is the one boundary in it
+    /// that is a relay rather than a gain setting — which is also why
+    /// <c>Qa40xUsbDeviceHardwareTests</c>'s loopback theory measured the 24 dBV range as a 21 dB
+    /// cliff rather than another 6 dB rung.
+    /// </summary>
+    public const double AttenuatedRangeFloorDbv = 24.0;
+
+    /// <summary>
+    /// Settle after the 24 dB attenuator is *released* (a change from 24-42 dBV down to 0-18).
+    ///
+    /// <para>The relay is asymmetric, and this is the half that costs. Measured on serial
+    /// 1077527945 (fw 60) on 2026-10-08, loopback, 48 kHz, 4096-frame blocks: engaging it takes
+    /// effect inside the first block, but releasing it lags about a second — on a 30 -> 0 dBV change
+    /// the capture reads **exactly 24 dB low** (the attenuator still in circuit while
+    /// <see cref="Qa40xCalibration"/> already scales for the new range) until 1.05 s after the
+    /// register write, then jumps through one block carrying a 1.52 V transient and is correct from
+    /// there on. It is wall time from the write, not from stream start: with 0 / 500 / 1000 / 2000 ms
+    /// inserted between the two, the switch landed at 1055 ms / 1054 ms / before the first block /
+    /// before the first block. A change within 0-18 dBV (12 -> 0) shows none of it.</para>
+    ///
+    /// <para>1500 rather than 1050 because the same change measured on a *running* stream put the
+    /// switch between 1.13 and 1.23 s, and nothing here pins down what that spread depends on. The
+    /// cost is paid only on this one transition, which an ordinary bench session at 0-18 dBV never
+    /// makes.</para>
+    /// </summary>
+    public const int AttenuatorReleaseSettleMs = 1500;
+
+    /// <summary>
+    /// Whether moving from <paramref name="fromRangeDbv"/> to <paramref name="toRangeDbv"/> releases
+    /// the 24 dB attenuator, which is the only range change that needs
+    /// <see cref="AttenuatorReleaseSettleMs"/> rather than <see cref="GainStepSettleMs"/>.
+    /// </summary>
+    public static bool ReleasesAttenuator(double fromRangeDbv, double toRangeDbv) =>
+        fromRangeDbv >= AttenuatedRangeFloorDbv && toRangeDbv < AttenuatedRangeFloorDbv;
+
+    /// <summary>Settle time owed by a change from <paramref name="fromRangeDbv"/> to <paramref name="toRangeDbv"/>, in ms.</summary>
+    public static int SettleMsFor(double fromRangeDbv, double toRangeDbv) =>
+        ReleasesAttenuator(fromRangeDbv, toRangeDbv) ? AttenuatorReleaseSettleMs : GainStepSettleMs;
 
     private double _underRangeElapsedMs;
 
@@ -172,9 +215,18 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
         return inputRangesDbv[nextIndex];
     }
 
-    /// <summary>Number of frames to discard after a range step, for a given sample rate — derived from <see cref="SettleTimeMsTodoPlaceholder"/>.</summary>
-    public static int SettleFrameCount(double sampleRateHz) =>
-        (int)Math.Ceiling(SettleTimeMsTodoPlaceholder / 1000.0 * sampleRateHz);
+    /// <summary>
+    /// Number of frames to discard after a range step from <paramref name="fromRangeDbv"/> to
+    /// <paramref name="toRangeDbv"/>, at a given sample rate. A time rather than a frame count for
+    /// the reason the TX queue depth is one: the relay takes the time it takes whatever the stream
+    /// is doing, so a fixed count would shrink the window as the sample rate rose.
+    /// </summary>
+    public static int SettleFrameCount(double sampleRateHz, double fromRangeDbv, double toRangeDbv) =>
+        SettleFrameCountFor(sampleRateHz, SettleMsFor(fromRangeDbv, toRangeDbv));
+
+    /// <summary>Frames in <paramref name="settleMs"/> at <paramref name="sampleRateHz"/>.</summary>
+    public static int SettleFrameCountFor(double sampleRateHz, double settleMs) =>
+        (int)Math.Ceiling(settleMs / 1000.0 * sampleRateHz);
 
     /// <summary>Clears the under-range hysteresis timer — call after any explicit (non-autorange) range change.</summary>
     public void Reset() => _underRangeElapsedMs = 0;

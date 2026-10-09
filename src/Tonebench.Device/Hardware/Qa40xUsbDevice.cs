@@ -122,6 +122,19 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     // immediately after ConnectAsync (DeviceSessionService.ConnectAsync), so these values are
     // never relied on to reflect the device's actual power-on register-5/6 state.
     private double _inputRangeDbv = 12.0;
+
+    /// <summary>
+    /// <see cref="Stopwatch"/> timestamp at which the 24 dB input attenuator will have finished
+    /// releasing, or 0 when nothing is owed. See <see cref="Qa40xAutoRanger.AttenuatorReleaseSettleMs"/>
+    /// for the measurement.
+    ///
+    /// <para>A running stream books the settle as frames on the chunk that follows its own register
+    /// write, which is exact. This covers the other half: a range written while *idle* has no stream
+    /// to attach frames to, and the relay goes on releasing across the gap — so
+    /// <see cref="StreamAsync"/> converts whatever is left of this window into an opening discard.
+    /// Every sweep runner pre-ranges before it starts acquiring, which is exactly that shape.</para>
+    /// </summary>
+    private long _attenuatorSettledAtTicks;
     private double _outputRangeDbv = 8.0;
 
     private GeneratorConfig _generatorConfig = GeneratorConfig.Off;
@@ -370,6 +383,21 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 logger.LogDebug(ex, "QA403 did not accept the front-panel I2S stop at connect — continuing");
             }
 
+            // Input range programmed to what this instance believes it is, in the same position and
+            // for the same reason as the I2S stop above: register 5 is leftover device state that
+            // survives the process that set it. Without this write, connecting to a QA403 another
+            // session left on 42 dBV left _inputRangeDbv claiming 12 — its field initialiser — and
+            // every sample scaled 30 dB wrong until something happened to write the range.
+            //
+            // The write is also the one case where the previous range is genuinely unknowable, so the
+            // attenuator settle is armed unconditionally rather than from a comparison: the device may
+            // have been on any of the four attenuated ranges, and this write may therefore be
+            // releasing the relay. It costs nothing unless a stream starts inside the window.
+            double initialRangeDbv = Volatile.Read(ref _inputRangeDbv);
+            await transport.WriteRegisterAsync(
+                Qa40xRegisters.InputRange, Qa40xRegisters.InputRangeDbvToRegister(initialRangeDbv), ct).ConfigureAwait(false);
+            NoteInputRangeWrite(Qa40xAutoRanger.AttenuatedRangeFloorDbv, initialRangeDbv);
+
             var calibration = await Qa40xCalibration.LoadAsync(transport, ct).ConfigureAwait(false);
 
             // Tier-2 registers (docs/protocol.md §2.4: sourced from qa40x-rs-main's own USB-traffic
@@ -458,8 +486,37 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             throw;
         }
 
+        NoteInputRangeWrite(Volatile.Read(ref _inputRangeDbv), dbv);
         Volatile.Write(ref _inputRangeDbv, dbv);
         _autoRanger?.Reset();
+    }
+
+    /// <summary>
+    /// Arms <see cref="_attenuatorSettledAtTicks"/> when a just-issued input-range write releases the
+    /// 24 dB attenuator. Called for every write of register 5 — from here, from the pump's own
+    /// autorange step, and from <see cref="ConnectAsync"/> — so no path can set a range and forget
+    /// that the hardware has not caught up with it yet.
+    /// </summary>
+    private void NoteInputRangeWrite(double fromDbv, double toDbv)
+    {
+        if (!Qa40xAutoRanger.ReleasesAttenuator(fromDbv, toDbv))
+            return;
+
+        Volatile.Write(
+            ref _attenuatorSettledAtTicks,
+            Stopwatch.GetTimestamp()
+                + (long)(Qa40xAutoRanger.AttenuatorReleaseSettleMs / 1000.0 * Stopwatch.Frequency));
+    }
+
+    /// <summary>Frames a stream starting now must discard for the attenuator still to be releasing, or 0.</summary>
+    private int AttenuatorSettleFramesAt(double sampleRateHz)
+    {
+        long settledAt = Volatile.Read(ref _attenuatorSettledAtTicks);
+        if (settledAt == 0)
+            return 0;
+
+        double remainingMs = (settledAt - Stopwatch.GetTimestamp()) * 1000.0 / Stopwatch.Frequency;
+        return remainingMs <= 0 ? 0 : Qa40xAutoRanger.SettleFrameCountFor(sampleRateHz, remainingMs);
     }
 
     /// <summary>
@@ -551,10 +608,21 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             Volatile.Read(ref _inputRangeDbv), () => AutoRangeEnabled, config.SampleRateHz, () => _stopRequested,
             // Keep the device's own view of the input range in step with what autoranging actually
             // programmed, so a later SetInputRangeAsync/status read isn't working from a stale value.
-            stepped => Volatile.Write(ref _inputRangeDbv, stepped),
+            // Noting the transition first keeps the attenuator window armed across a stop/start too:
+            // the pump's own settle frames cover the rest of this stream, but a stream restarted
+            // inside the window would otherwise open on audio the relay has not caught up with.
+            stepped =>
+            {
+                NoteInputRangeWrite(Volatile.Read(ref _inputRangeDbv), stepped);
+                Volatile.Write(ref _inputRangeDbv, stepped);
+            },
             // A Func for the same reason the autorange flag is one: the recorder is armed and
             // disarmed while a stream is up, and a latched null would record nothing all run.
-            () => _stimulusTap);
+            () => _stimulusTap,
+            // Whatever is left of an attenuator release booked while there was no stream to attach
+            // it to — see _attenuatorSettledAtTicks. Read here rather than at Start() so it is the
+            // remaining time, not the whole window.
+            AttenuatorSettleFramesAt(config.SampleRateHz));
 
         // Calibration and block assembly run on their own thread, not on thread-pool continuations —
         // see BlockAssembler. Measured on real hardware before this existed: a 100 s sweep dropped 75
@@ -1255,7 +1323,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         Qa40xTransport transport, Qa40xCalibration calibration, Qa40xAutoRanger autoRanger,
         ILogger logger, Func<GeneratorConfig> getGeneratorConfig, double initialOutputRangeDbv,
         double initialInputRangeDbv, Func<bool> isAutoRangeEnabled, double sampleRateHz, Func<bool> isStopRequested,
-        Action<double> onInputRangeStepped, Func<IStimulusTap?> getStimulusTap)
+        Action<double> onInputRangeStepped, Func<IStimulusTap?> getStimulusTap, int initialSettleFrames)
     {
         private readonly Queue<(Task<int> Task, byte[] Buffer)> _pendingReads = new();
         private readonly Queue<(Task<int> Task, byte[] Buffer)> _pendingWrites = new();
@@ -1333,8 +1401,12 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// </summary>
         private double _outputRangeDbv = initialOutputRangeDbv;
 
-        /// <summary>Settle window owed to the consumer, attached to the next chunk emitted after a range step.</summary>
-        private int _pendingSettleFrames;
+        /// <summary>
+        /// Settle window owed to the consumer, attached to the next chunk emitted after a range step.
+        /// Seeded with <c>initialSettleFrames</c> so a release booked before this stream existed is
+        /// discarded off the front of it.
+        /// </summary>
+        private int _pendingSettleFrames = initialSettleFrames;
 
         /// <summary>
         /// Register writes requested from outside while this pump owns the bus. They are applied on
@@ -1390,7 +1462,13 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             {
                 try
                 {
-                    QuiesceAndWriteRegister(pending.Register, pending.Value, () => ApplyRange(pending));
+                    // An output-range write moves no input relay, so it keeps the plain gain-step
+                    // settle; an input-range one is priced on the transition it actually makes.
+                    int settleFrames = pending.InputRangeDbv is { } toDbv
+                        ? Qa40xAutoRanger.SettleFrameCount(sampleRateHz, Volatile.Read(ref _inputRangeDbv), toDbv)
+                        : -1;
+
+                    QuiesceAndWriteRegister(pending.Register, pending.Value, () => ApplyRange(pending), settleFrames);
                     pending.Completion.TrySetResult();
                 }
                 catch (Exception ex)
@@ -1428,7 +1506,8 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// <see cref="_outputRangeDbv"/>, so updating that afterwards puts a queue's worth of audio out
         /// at the wrong level — see <see cref="SetOutputRangeAsync"/> for what that measured.</para>
         /// </summary>
-        private void QuiesceAndWriteRegister(byte register, uint value, Action? applyBeforePrime = null)
+        private void QuiesceAndWriteRegister(
+            byte register, uint value, Action? applyBeforePrime = null, int settleFrames = -1)
         {
             // Timed because this is a *known* DAC gap, not a suspected one: Drain() waits for every
             // outstanding TX transfer to complete, which is precisely the device having consumed all
@@ -1444,7 +1523,14 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             Prime();
             _quiesceMs += Elapsed(tRegisterStart, Stopwatch.GetTimestamp());
 
-            _pendingSettleFrames = Qa40xAutoRanger.SettleFrameCount(sampleRateHz);
+            // A settle already owed is extended, never replaced: two writes in a row (an external
+            // range request immediately followed by an autorange step, say) must not let the second
+            // one's short gain-step window cancel the first one's attenuator release.
+            _pendingSettleFrames = Math.Max(
+                _pendingSettleFrames,
+                settleFrames >= 0
+                    ? settleFrames
+                    : Qa40xAutoRanger.SettleFrameCountFor(sampleRateHz, Qa40xAutoRanger.GainStepSettleMs));
         }
 
         public void Start(CancellationToken ct)
@@ -1647,7 +1733,8 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 {
                     Volatile.Write(ref _inputRangeDbv, nextRangeDbv);
                     onInputRangeStepped(nextRangeDbv);
-                });
+                },
+                Qa40xAutoRanger.SettleFrameCount(sampleRateHz, currentRangeDbv, nextRangeDbv));
 
             logger.LogDebug(
                 "Input range {Decision} to {RangeDbv} dBV, discarding {Frames} settle frames",

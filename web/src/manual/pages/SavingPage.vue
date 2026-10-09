@@ -55,8 +55,8 @@ const { showPage } = useManual()
     <h2>Measurements</h2>
     <p>
       The sidebar lists the measurements in the current project.
-      <strong>+ New measurement</strong> picks a type and names it; the ✕ that appears on hover
-      deletes one. That ✕ takes every result ever saved under the measurement with it, so it asks
+      <strong>+ New measurement</strong> picks a type — from four sections, Distortion through
+      Channels — and names it; the ✕ that appears on hover deletes one. That ✕ takes every result ever saved under the measurement with it, so it asks
       first, naming how many stored results would go — but nothing is destroyed: both the
       measurement and its results go to the <strong>Trash</strong> (below), where they can be put
       back. A red dot means unsaved settings changes — on the measurement's own name in the toolbar,

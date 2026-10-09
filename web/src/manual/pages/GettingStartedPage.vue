@@ -53,7 +53,15 @@ const { showPage } = useManual()
         Create a project with <strong>New project…</strong> on the welcome screen, or open one from
         its recent list — later, from the <strong>Project</strong> menu at the top left.
       </li>
-      <li>Press <strong>+ New measurement</strong> in the sidebar and choose a type.</li>
+      <li>
+        Press <strong>+ New measurement</strong> in the sidebar and choose a type. The picker
+        groups the ten types into four sections — <strong>Distortion</strong>,
+        <strong>Frequency &amp; time response</strong>, <strong>Impedance</strong> and
+        <strong>Channels</strong> — each with the number of types in it beside the heading, and
+        each type with a sentence saying what it answers. Choosing one offers a name, filled in
+        with the type's own; it is the name the sidebar will show, so give it the one you will
+        recognise in a month — <em>"1 kHz THD at 1 W"</em> rather than <em>"THD vs amplitude"</em>.
+      </li>
       <li>Set it up, run it, and save the readings you want to keep.</li>
     </ol>
     <p>
@@ -87,7 +95,14 @@ const { showPage } = useManual()
       measurement in the project at once.
     </p>
 
-    <h2>The five measurement types</h2>
+    <h2>The ten measurement types</h2>
+    <p>
+      These are the four sections of the <strong>+ New measurement</strong> picker, in the order it
+      lists them. Every type has its own chapter here — follow a name below, or press the
+      <strong>?</strong> button on the measurement screen itself, which lands on the same page.
+    </p>
+
+    <h3>Distortion — what the device under test adds to a signal</h3>
     <table>
       <thead>
         <tr>
@@ -97,39 +112,127 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
-          <td>FFT analysis</td>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('fft-spectrum')">FFT analysis</button>
+          </td>
           <td>What is in the signal right now — spectrum, THD, harmonics, hum, noise floor.</td>
         </tr>
         <tr>
-          <td>THD vs frequency</td>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('thd-vs-frequency')">THD vs frequency</button>
+          </td>
           <td>How distortion changes across the band at one drive level.</td>
         </tr>
         <tr>
-          <td>THD vs amplitude</td>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('thd-vs-amplitude')">THD vs amplitude</button>
+          </td>
           <td>How distortion changes with level at one frequency — where clipping starts.</td>
         </tr>
         <tr>
-          <td>IMD vs amplitude</td>
-          <td>Two-tone intermodulation (SMPTE, DIN or CCIF) against level — the distortion test that still works past a class-D output filter.</td>
-        </tr>
-        <tr>
-          <td>Frequency response</td>
-          <td>Gain and phase across the band, measured fast with a chirp.</td>
-        </tr>
-        <tr>
-          <td>Stepped sine response</td>
-          <td>The same curves, one tone at a time — slower, but nothing else is playing.</td>
-        </tr>
-        <tr>
-          <td>Crosstalk</td>
-          <td>How much one channel leaks into the other, in dB against frequency, one direction or both.</td>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('imd-vs-amplitude')">IMD vs amplitude</button>
+          </td>
+          <td>
+            Two-tone intermodulation (SMPTE, DIN or CCIF) against level — the distortion test that
+            still works past a class-D output filter.
+          </td>
         </tr>
       </tbody>
     </table>
-    <p>
-      Each has its own chapter in this manual, reachable from the index or from the
-      <strong>?</strong> button on the measurement screen itself.
-    </p>
+
+    <h3>Frequency &amp; time response — what it does to one across the band</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Answers</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('frequency-response')">
+              Frequency response
+            </button>
+          </td>
+          <td>Gain and phase across the band, measured fast with a chirp.</td>
+        </tr>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('impulse-response')">
+              Impulse response
+            </button>
+          </td>
+          <td>
+            The same chirp deconvolved to an impulse, for a gated (reflection-free) response and
+            harmonic distortion against frequency — the loudspeaker measurement.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('stepped-response')">
+              Stepped sine response
+            </button>
+          </td>
+          <td>The same curves, one tone at a time — slower, but nothing else is playing.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Impedance — what it looks like as a load, or as a source</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Answers</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('impedance')">Impedance</button>
+          </td>
+          <td>
+            Magnitude in ohms and phase against frequency, through a series reference resistor —
+            drivers, crossovers, transformers, and an amplifier's own input.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('output-impedance')">
+              Output impedance / damping factor
+            </button>
+          </td>
+          <td>
+            What an amplifier looks like <em>as a source</em>, measured by changing the load it
+            drives.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Channels — what one does to the other</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Answers</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <button type="button" class="manual-link" @click="showPage('crosstalk')">Crosstalk</button>
+          </td>
+          <td>
+            How much one channel leaks into the other, in dB against frequency, one direction or
+            both.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
     <p>
       Three buttons sit at the top right of the window, in that order: the <strong>book</strong>
       opens this manual at its contents, the <strong>i</strong> opens <strong>About</strong> — the

@@ -36,8 +36,10 @@ const { showPage } = useManual()
 
     <h2>3. Make a measurement</h2>
     <p>
-      Press <strong>+ New measurement</strong> in the list on the left, choose
-      <strong>FFT analysis</strong>, and call it <em>Loopback 1 kHz</em>.
+      Press <strong>+ New measurement</strong> in the list on the left. What opens is a card for
+      each kind of measurement the app can make, in four groups; the one you want is
+      <strong>FFT analysis</strong>, first under <strong>Distortion</strong>. Pick it, and call it
+      <em>Loopback 1 kHz</em>.
     </p>
     <p>
       A "measurement" here is a <em>saved setup</em>, not a reading. Think of it as an instrument you

@@ -25,8 +25,10 @@ const { showPage } = useManual()
         <tr>
           <td>Far left</td>
           <td>
-            The list of your measurements, with <strong>+ New measurement</strong> at the top. Click
-            one to switch to it. Nothing starts playing when you do.
+            The list of your measurements, with <strong>+ New measurement</strong> at the top —
+            which opens a card for every kind of measurement there is, grouped, with a sentence on
+            each saying what it answers. Click a measurement to switch to it. Nothing starts
+            playing when you do.
           </td>
         </tr>
         <tr>

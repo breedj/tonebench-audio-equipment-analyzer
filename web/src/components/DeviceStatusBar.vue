@@ -807,8 +807,8 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       </div>
       <!--
         Auto is the default and is what every measurement needs: the input range tracks the signal
-        (the device's own hardware ranger, or App.vue's live peak monitor where there is none — see
-        determineAttenuation in attenuation.ts) and the output range is derived from the generator
+        (the device's own hardware ranger, or the session's SessionInputRanger where there is
+        none) and the output range is derived from the generator
         amplitude (OutputRangeSelector). Manual pins both, which is what reproducing another
         analyzer's reading takes — the same 8.6 dBV loopback measured on the 12 dBV input range and
         on the 18 dBV one differs by 5 dB of H3 and 1.7 dB of noise floor, and nothing but the range

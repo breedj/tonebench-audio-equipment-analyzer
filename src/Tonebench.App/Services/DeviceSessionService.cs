@@ -17,9 +17,25 @@ namespace Tonebench.App.Services;
 public sealed class DeviceSessionService(
     AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
     ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
-    SoundCardSetting? soundCard = null, StreamRecorder? streamRecorder = null)
+    SoundCardSetting? soundCard = null, StreamRecorder? streamRecorder = null,
+    AutoRangeStepDownDelaySetting? stepDownDelay = null)
     : IDisposable, IMeasurementRun
 {
+    /// <summary>
+    /// The step-down delay the ranger of a device that has none of its own uses — the same
+    /// Configuration setting the QA403's own ranger is given, for the same question. Optional so
+    /// every pinned-device test constructor keeps working; the default is the document's default.
+    /// </summary>
+    private readonly AutoRangeStepDownDelaySetting _stepDownDelay = stepDownDelay ?? new AutoRangeStepDownDelaySetting();
+
+    /// <summary>
+    /// Chooses the input range while acquiring on a device with no ranger of its own — null on a
+    /// QA403, which ranges inside the device, and null while nothing is acquiring. Built per
+    /// acquisition, so it can never outlive the device whose ladder it was given (see
+    /// <see cref="SwitchDeviceAsync"/>) and so its under-range clock starts fresh with the run.
+    /// See <see cref="SessionInputRanger"/> for why this is not in the browser any more.
+    /// </summary>
+    private SessionInputRanger? _sessionRanger;
     private readonly ExternalGainSetting _externalGain = externalGain ?? new ExternalGainSetting();
 
     /// <summary>
@@ -761,6 +777,7 @@ public sealed class DeviceSessionService(
     private async Task TearDownDeviceAsync()
     {
         _isAcquiring = false;
+        _sessionRanger = null;
         await spectrumPipeline.StopAsync();
         await StopStreamIfRunningAsync();
 
@@ -1166,6 +1183,11 @@ public sealed class DeviceSessionService(
         await _device.SetInputRangeAsync(dbv, ct);
         _inputRangeDbv = dbv;
 
+        // Whoever just wrote the range — this session's own ranger, a runner, or the status bar —
+        // the under-range clock is about the range that was in force, so it restarts here. A quiet
+        // patch that straddles a range change must not count towards stepping down from the new one.
+        _sessionRanger?.Reset();
+
         // A range change is a gain step in the analog path — same reasoning as the generator
         // change in ConfigureGeneratorAsync. (An *autorange* step originates inside the device and
         // so cannot be flushed from here; it announces itself in-band instead, on the first block
@@ -1527,6 +1549,14 @@ public sealed class DeviceSessionService(
 
         bool streamOpened = await EnsureStreamRunningAsync(config, ct);
         spectrumPipeline.Start(config.SampleRateHz, config.ChannelCount);
+
+        // Built per acquisition rather than per device, so it is given this device's ladder and
+        // starts its under-range clock with the run. Null on a device that ranges inside itself:
+        // two rangers on one range is the hunting this was written to end, not twice the coverage.
+        _sessionRanger = _device.HasInputAutoRanging
+            ? null
+            : new SessionInputRanger(Capabilities.InputRangesDbv) { StepDownDelayMs = _stepDownDelay.Ms };
+
         _isAcquiring = true;
 
         // **The device's own stream-start settling is not booked here any more, and must not be.**
@@ -1763,6 +1793,11 @@ public sealed class DeviceSessionService(
                         spectrumPipeline.FlushAfterRangeStep();
                     }
 
+                    // The ranger for a device that has none of its own, fed the same way the
+                    // hardware one is: block by block, off the peak the block carries. Before the
+                    // enqueue, for the same reason the recorder is — the pipeline disposes it.
+                    await MaybeStepInputRangeAsync(block, ct).ConfigureAwait(false);
+
                     // Before the enqueue, which takes ownership and disposes the block: the
                     // recorder copies what it needs and keeps nothing.
                     streamRecorder?.WriteInput(block);
@@ -1782,6 +1817,76 @@ public sealed class DeviceSessionService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Device stream faulted");
+        }
+    }
+
+    /// <summary>
+    /// Runs one block past <see cref="SessionInputRanger"/> and writes the range it asks for.
+    /// Nothing happens at all on a device that ranges itself, with the ranges pinned to Manual, or
+    /// on a ladder with one rung — and in the ordinary case the whole of this is a scan of the
+    /// block and a comparison.
+    ///
+    /// <para>Three things about the write. It goes through <see cref="SetInputRangeCoreAsync"/>, so
+    /// a range change made here flushes the analysis window exactly like one made by hand — the
+    /// record spanning a gain step is not a measurement of anything. It takes the session lock with
+    /// a <b>zero timeout</b>, like the liveness ping: this is the consumer thread, and a block not
+    /// taken is a dropped block, so a range step that collides with a request simply waits for the
+    /// next block. And it can only ever reach a device with no ranger of its own, which is why
+    /// writing a register from here is safe — on a QA403 this is exactly the mid-stream EP1 write
+    /// that wedges the device, and that is the one device this never runs on.</para>
+    /// </summary>
+    private async ValueTask MaybeStepInputRangeAsync(PcmBlock block, CancellationToken ct)
+    {
+        if (_sessionRanger is not { } ranger || _rangingMode != RangingMode.Auto)
+            return;
+
+        var options = spectrumPipeline.Options;
+        double peakDbv = SessionInputRanger.BlockPeakDbv(
+            block.Samples, block.ChannelCount, options.ProcessLeft, options.ProcessRight);
+
+        ranger.StepDownDelayMs = _stepDownDelay.Ms;
+        double blockDurationMs = block.SampleRateHz > 0.0 ? block.FrameCount * 1000.0 / block.SampleRateHz : 0.0;
+
+        // Every runner sets SingleShot and ranges for itself; the live FFT screen's free-running
+        // acquisition is the only consumer that does not. See the parameter's own remarks.
+        if (ranger.Evaluate(_device.InputRangeDbv, peakDbv, blockDurationMs, stepDownAllowed: !options.SingleShot)
+            is not { } targetDbv)
+            return;
+
+        if (!await _sessionLock.WaitAsync(0, ct).ConfigureAwait(false))
+            return;
+
+        try
+        {
+            // Re-checked under the lock: a stop, a switch, a pinned range or someone else's write
+            // could all have landed while this block was being scanned.
+            if (_info is null || !_isAcquiring || _rangingMode != RangingMode.Auto
+                || Math.Abs(_device.InputRangeDbv - targetDbv) < 1e-9)
+            {
+                return;
+            }
+
+            await SetInputRangeCoreAsync(targetDbv, ct).ConfigureAwait(false);
+
+            // Information, like the hardware ranger's own step line, and for the same reason: it is
+            // what makes a one-record noise-floor jump attributable afterwards. Repeated lines about
+            // a second apart mean the ranger is hunting at a threshold rather than tracking a level.
+            logger.LogInformation(
+                "Input range stepped to {RangeDbv} dBV for a measured peak of {PeakDbv:0.00} dBV — "
+                    + "this analyzer has no ranger of its own, so the session chose it",
+                targetDbv, peakDbv);
+        }
+        catch (Exception ex)
+        {
+            // A range the device refuses, or one lost under us: say so once and stop ranging for
+            // this acquisition rather than asking again on every block. The measurement continues
+            // on the range it is on, which is the same place a device with no ranger starts from.
+            _sessionRanger = null;
+            logger.LogWarning(ex, "Input ranging stopped for this acquisition: the range write failed");
+        }
+        finally
+        {
+            _sessionLock.Release();
         }
     }
 
@@ -1827,6 +1932,7 @@ public sealed class DeviceSessionService(
             return;
 
         _isAcquiring = false;
+        _sessionRanger = null;
         await spectrumPipeline.StopAsync();
         await EndStreamRecordingAsync();
 

@@ -111,7 +111,8 @@ const { showPage } = useManual()
       disappear with the hardware inside a dialog whose first line says nothing in it depends on the
       device. Both are stored with the bench and survive a restart; neither is part of a
       measurement's saved settings. The simulator shows this dialog too,
-      because it mirrors the QA403's rate limits; it has no ranger, so it offers only the first.
+      because it mirrors the QA403's rate limits; its own ranging is done by the app rather than by
+      a register, and it takes the same step-down delay this field sets.
     </p>
     <table>
       <thead>

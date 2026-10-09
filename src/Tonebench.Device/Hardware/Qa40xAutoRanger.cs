@@ -1,4 +1,4 @@
-namespace Tonebench.Device.Hardware;
+﻿namespace Tonebench.Device.Hardware;
 
 /// <summary>What <see cref="Qa40xAutoRanger.Evaluate"/> decided the input range should do next.</summary>
 internal enum RangeStepDecision
@@ -23,7 +23,7 @@ internal enum RangeStepDecision
 /// autoranging — but it is not an arbitrary tuning constant either: it is the previous WinForms
 /// app's <c>QaLibrary.DetermineAttenuation</c> (reference/previous version/.../Libraries/QaLibrary.cs:272-283),
 /// "add 5 dBV extra for a better THD measurement", already ported once for the simulator's
-/// client-side ranger (<c>web/src/attenuation.ts</c>'s <c>determineAttenuation</c>). This is the
+/// ranger an analyzer without one of its own gets (<c>SessionInputRanger</c>). This is the
 /// same 5 dB figure applied to the hardware ranger, so both rangers keep a signal at least 5 dB
 /// below whichever range's nominal full scale it's sitting in. Unlike <c>determineAttenuation</c>,
 /// which picks the target range directly from one measurement, this stays a deliberately simple
@@ -39,7 +39,7 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     /// this far below the next lower range's full scale — plus
     /// <see cref="StepDownHysteresisDb"/>, without which the two comparisons are the same boundary.
     /// Same 5 dB figure as
-    /// <c>QaLibrary.DetermineAttenuation</c> / <c>attenuation.ts</c>' <c>determineAttenuation</c>.
+    /// <c>QaLibrary.DetermineAttenuation</c> / <c>InputRangeSelector.HeadroomDb</c>.
     /// </summary>
     public const double HeadroomDb = 5.0;
 

@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -1746,7 +1746,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// the same peak-to-RMS-equivalent step <c>SpectrumPipeline.ComputeTimeDomainLevels</c> uses
         /// for its "Pk dBV" meter (<c>peakVrms = peakVpk / sqrt(2)</c>), not a bare peak-volts log.
         /// <see cref="Qa40xAutoRanger.HeadroomDb"/> (ported from the previous app's
-        /// <c>QaLibrary.DetermineAttenuation</c> / <c>attenuation.ts</c>) was calibrated against that
+        /// <c>QaLibrary.DetermineAttenuation</c> / <c>InputRangeSelector</c>) was calibrated against that
         /// same RMS-equivalent "Pk dBV" reading, not a true-peak one — a true-peak dBV would read
         /// 20*log10(sqrt(2)) ≈ 3.01 dB hotter than the level the rest of the app (and a signal
         /// generator's own dBV setpoint) reports for the same sine, which would eat into the

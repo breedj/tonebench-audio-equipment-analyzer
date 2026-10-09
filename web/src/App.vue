@@ -23,7 +23,6 @@ import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
 import { useCaptureDelay } from './composables/useCaptureDelay'
 import { useExternalGain } from './composables/useExternalGain'
 import { useAutosave } from './composables/useAutosave'
-import { determineAttenuation, nearestInputRange } from './attenuation'
 import { formatAveraging, stimulusSummary } from './metrics'
 import { isWaveKind } from './periodicWave'
 import { stopRun } from './deviceControl'
@@ -284,9 +283,10 @@ watch(
 // applied server-side (see useCaptureDelay).
 const { load: loadCaptureDelay } = useCaptureDelay()
 void loadCaptureDelay()
-// Loaded for the simulator's ranging watcher below, which must hand the range ladder the
-// analyzer's peak, not the DUT-referred one the meters frame carries.
-const { load: loadExternalGain, gainDb: externalGainDb, set: setSharedExternalGain } = useExternalGain()
+// Loaded so the status bar's Ext. gain popover opens on the stored figures; the ranging that
+// used to read them here is the session's now (SessionInputRanger), which takes the peak from the
+// block itself — analyzer volts, before the pipeline divides this gain out of them.
+const { load: loadExternalGain, set: setSharedExternalGain } = useExternalGain()
 void loadExternalGain()
 
 // Moved out of SystemMetricsPanel's Sys:* grid into its own readout between the Metrics button
@@ -2084,36 +2084,17 @@ function onSampleRateChange() {
   if (status.value?.acquiring) return runFromCurrentSettings()
 }
 
-// Live input-range monitoring: while acquiring, continuously reads the peak level off whichever
-// channel(s) are enabled and runs it through determineAttenuation() (ported from the previous
-// app's QaLibrary — see attenuation.ts) to keep the input range matched to the actual signal.
-// Deliberately stays out of the way of real hardware's own auto-ranger rather than fighting it —
-// this is what gives the simulator equivalent auto-ranging, since it has no hardware ranger of its
-// own. Never marks the measurement dirty: this is the software tracking the live signal, not the
-// user changing a setting they'd want saved — same as hardware auto-ranging never marking it dirty
-// either (that stepping happens entirely server-side, invisible to the client).
+// Which runners hold the session. Read by the Measurements panel (`runner-active`), and the
+// reason a few controls stand down while a measurement is up: every runner ranges for itself,
+// and the server refuses an input-range write under one with a 409.
 //
-// Requires the same determined target 3 frames running before acting — this is a coarse (6 dB step)
-// decision already, but a peak sitting right on a step boundary could still ping-pong frame to
-// frame; on real hardware every step is an audible relay click, so this is not just "avoid churn."
-// Qa40xAutoRanger.cs uses an analogous under-range hysteresis for the real hardware ranger, but
-// time-based (StepDownDelayMs, configurable in the Configuration dialog) rather than frame-count
-// based — this frame count and that delay are not the same figure and don't need to match.
-const RANGE_STABILITY_FRAMES = 3
-let pendingRangeTarget: number | null = null
-let pendingRangeCount = 0
-
-//
-// And never while a measurement runner is up: every runner ranges for itself, and a range written
-// under it lands as a flush inside whatever it is capturing — the server refuses it with a 409 for
-// that reason, and this gate is what keeps that refusal from surfacing as an error banner on every
-// probe. Measured on the simulator's RIAA stage: this watcher stepped the range 30 -> 36 dBV on
-// the frequency-response probe's own meters frames, and in one run out of eight the step landed
-// on the capture the level probe was waiting for.
-// The sound card's calibration is in this list for the same reason as the rest, and it was the
-// one that proved it: its steps run with the session acquiring, so this watcher posted a range
-// into the middle of one and the second press of "Estimate peak input mV" came back as "a
-// measurement is running and controls the input range". Reported 2026-10-01.
+// It used to gate a ranging watcher here as well. That watcher is gone: the input range of an
+// analyzer with no ranger of its own is now chosen in the session, block by block
+// (`SessionInputRanger`), because a decision made per browser tab is a decision two open windows
+// can disagree about — and each disagreement is a range write, which flushes the analysis window
+// and restarts averaging. Measured on the simulator 2026-10-09: two attached clients wrote 18 and
+// 12 dBV alternately about once a second, and a 15-average FFT restarted every third record,
+// three being this file's own RANGE_STABILITY_FRAMES.
 const runnerActive = computed(
   () =>
     responseRunning.value ||
@@ -2123,55 +2104,6 @@ const runnerActive = computed(
     outputImpedanceRunning.value ||
     soundCard.active.value,
 )
-
-watch(meters, (m) => {
-  // A device with one input range has no range to choose, so there is nothing for this watcher to
-  // do -- and more than nothing to get wrong. A sound card's single rung is derived from its
-  // calibration in millivolts, so a ladder fetched before a recalibration differs from the
-  // device's by microdecibels, and posting it back came up as 'this card's only range is
-  // 16.278229126255518 dBV, actual value was 16.278233778585854'. Standing down outright is the
-  // honest rule, rather than relying on nearestInputRange happening to return the same bits.
-  if ((ranges.value?.inputRangesDbv.length ?? 8) <= 1) {
-    pendingRangeTarget = null
-    pendingRangeCount = 0
-    return
-  }
-
-  const hardwareAutoActive = status.value?.autoRangeEnabled !== null && status.value?.autoRangeEnabled !== undefined
-  // Manual is the third reason not to range, and it is the one this watcher has to obey itself:
-  // on the simulator there is no hardware ranger for the server to switch off, so this loop *is*
-  // the auto-ranging, and a pinned range would be walked away from within three meters frames.
-  const pinned = status.value?.rangingMode === 'Manual'
-  if (!status.value?.acquiring || hardwareAutoActive || pinned || runnerActive.value) {
-    pendingRangeTarget = null
-    pendingRangeCount = 0
-    return
-  }
-
-  // The meters frame carries the DUT-referred peak; the ladder is in the analyzer's own dBV, so
-  // the external input gain goes back on first (a divider-fed input would otherwise range wide).
-  const peaks: number[] = []
-  if ((spectrumConfig.value?.processLeft ?? true) && m[0]) peaks.push(m[0].peakDbv + externalGainDb(0))
-  if ((spectrumConfig.value?.processRight ?? true) && m[1]) peaks.push(m[1].peakDbv + externalGainDb(1))
-  if (peaks.length === 0) return
-
-  const options = ranges.value?.inputRangesDbv ?? [0, 6, 12, 18, 24, 30, 36, 42]
-  const target = nearestInputRange(determineAttenuation(Math.max(...peaks)), options)
-
-  if (target === pendingRangeTarget) pendingRangeCount++
-  else {
-    pendingRangeTarget = target
-    pendingRangeCount = 1
-  }
-
-  const currentRangeDbv = status.value?.inputRangeDbv
-  if (pendingRangeCount >= RANGE_STABILITY_FRAMES && currentRangeDbv != null && target !== currentRangeDbv) {
-    pendingRangeCount = 0
-    withErrorReporting(async () => {
-      status.value = await api.setInputRange(target)
-    })
-  }
-})
 
 function reportError(message: string) {
   error.value = message

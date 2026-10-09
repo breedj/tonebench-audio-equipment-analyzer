@@ -723,8 +723,8 @@ public sealed class ThdSweepRunner(
     ///
     /// Deliberately built from <see cref="DeviceCapabilities.InputRangesDbv"/> rather than porting
     /// the previous app's hard-coded 0/6/12/18/24/30/36/42 ladder — that list is a QA402-era
-    /// constant, and the client already carries its own copy in <c>web/src/attenuation.ts</c>; a
-    /// third one in C# would be the copy that goes stale. The 5 dB of headroom is from that same
+    /// constant, and <see cref="InputRangeSelector"/> is the one place it is spelled; a second copy
+    /// here would be the one that goes stale. The 5 dB of headroom is from that same
     /// reference: enough that the tone's own peaks stay off the clip point, which matters far more
     /// for a distortion measurement than for a level one.
     ///

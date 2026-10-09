@@ -2,9 +2,10 @@ import type { GeneratorKind } from './api/client'
 
 /**
  * The square/triangle period quantisation, client side — a second implementation of
- * `Tonebench.Device.PeriodicWave`, the way attenuation.ts is a second implementation of
- * InputRangeSelector's ladder. The two must agree about *which* frequency is played; that they are
- * two copies is what the periodicWave.test.ts cases pin.
+ * `Tonebench.Device.PeriodicWave`. The two must agree about *which* frequency is played; that
+ * they are two copies is what the periodicWave.test.ts cases pin. (The app's other client-side
+ * duplicate, attenuation.ts' copy of the input-range ladder, is gone: its one reader was the
+ * browser's ranging watcher, which is `SessionInputRanger` now.)
  *
  * It exists because two things on screen have to know the played frequency before (and after) the
  * device is ever asked: the Generator panel, which shows it beneath the typed value, and the

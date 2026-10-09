@@ -172,10 +172,14 @@ const { showPage } = useManual()
       </li>
       <li>
         <strong>Hum and noise are added after the DUT</strong>, and the whole thing then meets the
-        ADC's soft clip at the selected input range. The simulator has <strong>no autoranging</strong>
-        of its own: a screen that ranges — the frequency-response and stepped-sine screens do — is
-        safe with a DUT that has gain; a screen that does not will clip a loud low tone through the
-        phono stage on the default range, exactly as the hardware would.
+        ADC's soft clip at the selected input range. The simulated device has
+        <strong>no autoranging inside it</strong>, the way a QA403 has; the app supplies it instead,
+        from the session, so the input range tracks the signal on the live FFT screen as it does on
+        hardware. The measurement screens that range for themselves — frequency response, stepped
+        sine, impedance and the sweeps — still do, and a step <em>up</em> stays available under them
+        as the clip backstop. Set <strong>Ranging</strong> to Manual on the status bar and nothing
+        moves: a loud low tone through the phono stage will then clip on whatever range is pinned,
+        exactly as the hardware would.
       </li>
       <li>
         <strong>The generator's output is hard-clipped at the output range</strong> before the DUT,

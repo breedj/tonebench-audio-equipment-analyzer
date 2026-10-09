@@ -1,12 +1,12 @@
-namespace Tonebench.App.Services;
+﻿namespace Tonebench.App.Services;
 
 /// <summary>
 /// Picks an input range for a level a measurement already knows about, rather than waiting for the
 /// device's own ranger to discover it.
 ///
-/// <para>Same ladder and same headroom as <c>Qa40xAutoRanger</c> and the browser's
-/// <c>attenuation.ts</c>, which is what lets the three disagree only about <i>when</i> a range
-/// changes, never about <i>which</i> one is right. All three descend from the previous WinForms
+/// <para>Same ladder and same headroom as <c>Qa40xAutoRanger</c> and <c>SessionInputRanger</c>,
+/// which is what lets the three disagree only about <i>when</i> a range changes, never about
+/// <i>which</i> one is right. All three descend from the previous WinForms
 /// app's <c>QaLibrary.DetermineAttenuation</c> ("add 5 dBV extra for a better THD measurement").</para>
 ///
 /// <para><b>The level is an RMS-referenced peak</b> — <c>20·log10(peak_volts / √2)</c>, the same

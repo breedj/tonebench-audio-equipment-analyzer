@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { manualPageForKind } from '../manual/pages'
 import {
   CROSSTALK_KIND,
+  groupedMeasurementKinds,
   isCrosstalkKind,
   isFrequencyResponseKind,
   isImpedanceKind,
   isOutputImpedanceKind,
   isSweepKind,
+  MEASUREMENT_KIND_GROUPS,
   MEASUREMENT_KINDS,
   OUTPUT_IMPEDANCE_KIND,
 } from './kinds'
@@ -33,5 +35,31 @@ describe('measurement kinds', () => {
     expect(isSweepKind(CROSSTALK_KIND)).toBe(false)
     expect(isCrosstalkKind('FrequencyResponse')).toBe(false)
     expect(isCrosstalkKind(null)).toBe(false)
+  })
+
+  // The "new measurement" picker lists `groupedMeasurementKinds()`, so a kind whose group nothing
+  // shows would simply not be creatable — with nothing failing, since the grid it fell out of still
+  // renders. These three pin the whole path from the array to the sections.
+  it('shows every kind exactly once across the picker’s sections', () => {
+    const shown = groupedMeasurementKinds().flatMap((s) => s.kinds.map((k) => k.kind))
+    expect([...shown].sort()).toEqual(MEASUREMENT_KINDS.map((k) => k.kind).sort())
+    expect(new Set(shown).size).toBe(shown.length)
+  })
+
+  it('keeps each section in MEASUREMENT_KINDS order, and drops a section with nothing in it', () => {
+    const distortion = groupedMeasurementKinds().find((s) => s.group.id === 'distortion')
+    expect(distortion?.kinds.map((k) => k.kind)).toEqual(
+      MEASUREMENT_KINDS.filter((k) => k.group === 'distortion').map((k) => k.kind),
+    )
+    expect(groupedMeasurementKinds([]).length).toBe(0)
+    expect(groupedMeasurementKinds(MEASUREMENT_KINDS.filter((k) => k.group === 'channels')).map((s) => s.group.id)).toEqual([
+      'channels',
+    ])
+  })
+
+  it('gives every group a distinct position and every kind a tone', () => {
+    const ids = MEASUREMENT_KIND_GROUPS.map((g) => g.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const k of MEASUREMENT_KINDS) expect(k.tone).toBeTruthy()
   })
 })

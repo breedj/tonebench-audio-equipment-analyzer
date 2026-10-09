@@ -146,7 +146,7 @@ async function openFolder() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Report an issue" wide @close="emit('close')">
+  <Modal :open="props.open" title="Report an issue" size="lg" @close="emit('close')">
     <div class="flex max-h-[70vh] flex-col gap-4 overflow-y-auto text-sm">
       <p class="text-xs text-neutral-500 dark:text-neutral-400">
         Answer what you can — anything is better than nothing — and press <strong>Build report</strong>. It

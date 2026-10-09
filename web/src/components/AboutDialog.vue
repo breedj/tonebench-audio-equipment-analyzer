@@ -45,7 +45,7 @@ watch(
 </script>
 
 <template>
-  <Modal :open="props.open" :title="view === 'about' ? 'About' : 'Open-source libraries'" wide @close="emit('close')">
+  <Modal :open="props.open" :title="view === 'about' ? 'About' : 'Open-source libraries'" size="lg" @close="emit('close')">
     <template v-if="view === 'about'">
       <div class="flex items-center gap-4">
         <TonebenchLogo :size="76" class="shrink-0" />

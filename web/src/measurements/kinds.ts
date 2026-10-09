@@ -1,10 +1,75 @@
 // The set of measurement kinds the app can create — one entry per backend `MeasurementType.kind`
 // value. New kinds get a new entry here plus a matching case in MeasurementKindIcon.vue, and
-// immediately show up in the "new measurement" picker.
+// immediately show up in the "new measurement" picker — under the section their `group` names, in
+// the accent `tone` their card's icon chip is drawn in.
 export interface MeasurementKindMeta {
   kind: string
   label: string
   description: string
+  /** Which section of the "new measurement" picker it is listed under. */
+  group: MeasurementKindGroupId
+  /** Its accent hue in that picker — the colour of the round icon chip on its card. */
+  tone: MeasurementKindTone
+}
+
+/**
+ * The accent hues the picker draws from. Each one is a pair of CSS variables defined once in
+ * `style.css` (`--kind-<tone>-chip-bg` / `-fg`) with a dark counterpart, rather than a Tailwind
+ * class pair per card: the values are the design's own, they belong to no Tailwind scale, and a
+ * colour spelled in a template would need a `dark:` twin beside it in ten places.
+ */
+export type MeasurementKindTone =
+  | 'blue'
+  | 'violet'
+  | 'pink'
+  | 'orange'
+  | 'cyan'
+  | 'red'
+  | 'indigo'
+  | 'teal'
+  | 'amber'
+  | 'green'
+
+/**
+ * The four hues a *group badge* is drawn in — deliberately a subset of the card tones, because a
+ * badge needs three values rather than two (it carries a border in the dark theme) and only these
+ * four are defined. A new group reaching for a tone outside this set fails to compile instead of
+ * rendering a transparent badge.
+ */
+export type MeasurementGroupTone = Extract<MeasurementKindTone, 'orange' | 'blue' | 'teal' | 'violet'>
+
+export type MeasurementKindGroupId = 'distortion' | 'response' | 'impedance' | 'channels'
+
+export interface MeasurementKindGroup {
+  id: MeasurementKindGroupId
+  label: string
+  tone: MeasurementGroupTone
+}
+
+/** The picker's sections, in the order they are shown. */
+export const MEASUREMENT_KIND_GROUPS: MeasurementKindGroup[] = [
+  { id: 'distortion', label: 'Distortion', tone: 'orange' },
+  { id: 'response', label: 'Frequency & time response', tone: 'blue' },
+  { id: 'impedance', label: 'Impedance', tone: 'teal' },
+  { id: 'channels', label: 'Channels', tone: 'violet' },
+]
+
+/**
+ * The picker's contents: the groups in `MEASUREMENT_KIND_GROUPS` order, each holding its kinds in
+ * `MEASUREMENT_KINDS` order, with empty groups dropped — a badge reading "0" beside a section with
+ * nothing in it is worse than no section.
+ *
+ * A function rather than a shape maintained by hand, and exported so it can be tested: nothing in a
+ * `.vue` is testable here, and the thing that breaks silently is a kind added to `MEASUREMENT_KINDS`
+ * and left out of the picker. `groupedMeasurementKinds` cannot lose one — every kind carries its
+ * group — and `kinds.test.ts` pins that every kind comes back exactly once.
+ */
+export function groupedMeasurementKinds(
+  kinds: MeasurementKindMeta[] = MEASUREMENT_KINDS,
+): { group: MeasurementKindGroup; kinds: MeasurementKindMeta[] }[] {
+  return MEASUREMENT_KIND_GROUPS.map((group) => ({ group, kinds: kinds.filter((k) => k.group === group.id) })).filter(
+    (section) => section.kinds.length > 0,
+  )
 }
 
 /** Mirrors MeasurementSaveService.ThdVsFrequencyKind — a sweep of frequencies at one drive level. */
@@ -131,58 +196,78 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     kind: 'FFTSpectrum',
     label: 'FFT analysis',
     description: 'Spectrum, THD, harmonics and noise floor from a single FFT capture.',
+    group: 'distortion',
+    tone: 'blue',
   },
   {
     kind: THD_VS_FREQUENCY_KIND,
     label: 'THD vs frequency',
     description: 'Steps a tone across the band and plots THD, D2–D5 and D6+ against frequency.',
+    group: 'distortion',
+    tone: 'violet',
   },
   {
     kind: THD_VS_AMPLITUDE_KIND,
     label: 'THD vs amplitude',
     description:
       'Steps the generator level at one fixed frequency and plots THD, D2–D5 and D6+ against output voltage, output power or input voltage.',
+    group: 'distortion',
+    tone: 'pink',
   },
   {
     kind: IMD_VS_AMPLITUDE_KIND,
     label: 'IMD vs amplitude',
     description:
       'Plays a two-tone pair (SMPTE, DIN or CCIF) and steps the drive level, plotting intermodulation distortion and its 2nd–5th order products against output voltage, output power or input voltage.',
+    group: 'distortion',
+    tone: 'orange',
   },
   {
     kind: FREQUENCY_RESPONSE_KIND,
     label: 'Frequency response',
     description:
       'Sweeps a chirp across the band and plots gain or level against frequency, with −1 dB and −3 dB bandwidth markers.',
+    group: 'response',
+    tone: 'cyan',
   },
   {
     kind: IMPULSE_RESPONSE_KIND,
     label: 'Impulse response',
     description:
       'Sweeps a chirp and deconvolves it to the impulse response, then reads a gated (reflection-free) magnitude and phase off it, plus harmonic distortion against frequency.',
+    group: 'response',
+    tone: 'red',
   },
   {
     kind: IMPEDANCE_KIND,
     label: 'Impedance',
     description:
       'Measures impedance against frequency through a series reference resistor, and plots magnitude in ohms with phase — for loudspeakers, crossovers, transformers and an amplifier\u2019s input impedance.',
+    group: 'impedance',
+    tone: 'teal',
   },
   {
     kind: STEPPED_RESPONSE_KIND,
     label: 'Stepped sine response',
     description:
       'Steps one tone at a time across the band and plots the same level, gain and phase curves — slower than the chirp, but nothing else is playing while each point is measured.',
+    group: 'response',
+    tone: 'indigo',
   },
   {
     kind: CROSSTALK_KIND,
     label: 'Crosstalk',
     description:
       'Drives one channel with a stepped sine and reads how much of it reaches the other input, in dB against frequency — left to right, right to left, or both in one run.',
+    group: 'channels',
+    tone: 'green',
   },
   {
     kind: OUTPUT_IMPEDANCE_KIND,
     label: 'Output impedance / damping factor',
     description:
       'Measures an amplifier\u2019s gain with the load connected and again with it removed, and plots its output impedance in ohms and damping factor against frequency.',
+    group: 'impedance',
+    tone: 'amber',
   },
 ]

@@ -117,3 +117,118 @@
     @apply dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40;
   }
 }
+
+/* THE MEASUREMENT PICKER'S ACCENT PALETTE (NewMeasurementDialog). Ten hues for the round icon chip
+   on a kind's card, and four of them again — lighter in the dark theme, and carrying a border there
+   — for the badge on a group heading. Both sets are Joost's two mockups, measured (2026-10-09).
+
+   Variables rather than Tailwind class pairs in the template, for two reasons. The values are the
+   design's own and belong to no Tailwind scale (its #dbe7fe is near blue-100's #dbeafe and is not
+   it), and a colour spelled in a template needs a `dark:` twin beside it — twenty-eight of them
+   here, which is precisely the drift the surface tones above exist to prevent. The template picks a
+   hue by name: `var(--kind-${tone}-chip-bg)`.
+
+   The chip's dark backgrounds are the same hex as its foreground at 24/255 alpha, which is what
+   lets one hue carry both themes: a tint of the accent over whatever surface it lands on, rather
+   than a second colour that has to be kept in step with the panel. */
+:root {
+  --kind-blue-chip-bg: #dbe7fe;
+  --kind-blue-chip-fg: #1d4ed8;
+  --kind-violet-chip-bg: #ede4fe;
+  --kind-violet-chip-fg: #6d28d9;
+  --kind-pink-chip-bg: #fce3ef;
+  --kind-pink-chip-fg: #be185d;
+  --kind-orange-chip-bg: #ffe6d5;
+  --kind-orange-chip-fg: #c2410c;
+  --kind-cyan-chip-bg: #d5f3f9;
+  --kind-cyan-chip-fg: #0e7490;
+  --kind-red-chip-bg: #fde2e2;
+  --kind-red-chip-fg: #b91c1c;
+  --kind-indigo-chip-bg: #e2e3fd;
+  --kind-indigo-chip-fg: #4338ca;
+  --kind-teal-chip-bg: #d3f2ee;
+  --kind-teal-chip-fg: #0f766e;
+  --kind-amber-chip-bg: #fdeccb;
+  --kind-amber-chip-fg: #b45309;
+  --kind-green-chip-bg: #d8f5e0;
+  --kind-green-chip-fg: #15803d;
+
+  /* The light badges carry no border — the tint alone is enough against a white header — so the
+     border is transparent rather than absent, keeping the pill the same size in both themes. */
+  --kind-orange-badge-bg: #ffedd5;
+  --kind-orange-badge-fg: #c2410c;
+  --kind-orange-badge-border: transparent;
+  --kind-blue-badge-bg: #dbeafe;
+  --kind-blue-badge-fg: #1d4ed8;
+  --kind-blue-badge-border: transparent;
+  --kind-teal-badge-bg: #ccfbf1;
+  --kind-teal-badge-fg: #0f766e;
+  --kind-teal-badge-border: transparent;
+  --kind-violet-badge-bg: #ede9fe;
+  --kind-violet-badge-fg: #6d28d9;
+  --kind-violet-badge-border: transparent;
+
+  /* A card lifts on hover by darkening its border and casting a shadow in the light theme, and by
+     lightening its own surface in the dark one — where a shadow against a near-black ground is
+     invisible and a brighter card is what reads as raised. The one background in the app that is
+     not a surface tone, for the same reason `.btn-action`'s is not: it is a transient state on a
+     card, not the card. */
+  --kind-card-hover-bg: var(--surface-panel);
+  --kind-card-hover-border: #94a3b8;
+  --kind-card-hover-shadow: 0 4px 14px rgb(15 23 42 / 0.08);
+}
+.dark {
+  --kind-blue-chip-bg: #60a5fa24;
+  --kind-blue-chip-fg: #60a5fa;
+  --kind-violet-chip-bg: #a78bfa24;
+  --kind-violet-chip-fg: #a78bfa;
+  --kind-pink-chip-bg: #f472b624;
+  --kind-pink-chip-fg: #f472b6;
+  --kind-orange-chip-bg: #fb923c24;
+  --kind-orange-chip-fg: #fb923c;
+  --kind-cyan-chip-bg: #22d3ee24;
+  --kind-cyan-chip-fg: #22d3ee;
+  --kind-red-chip-bg: #f8717124;
+  --kind-red-chip-fg: #f87171;
+  --kind-indigo-chip-bg: #818cf824;
+  --kind-indigo-chip-fg: #818cf8;
+  --kind-teal-chip-bg: #2dd4bf24;
+  --kind-teal-chip-fg: #2dd4bf;
+  --kind-amber-chip-bg: #fbbf2424;
+  --kind-amber-chip-fg: #fbbf24;
+  --kind-green-chip-bg: #4ade8024;
+  --kind-green-chip-fg: #4ade80;
+
+  --kind-orange-badge-bg: #fb923c24;
+  --kind-orange-badge-fg: #fdba74;
+  --kind-orange-badge-border: #fb923c40;
+  --kind-blue-badge-bg: #60a5fa24;
+  --kind-blue-badge-fg: #93c5fd;
+  --kind-blue-badge-border: #60a5fa40;
+  --kind-teal-badge-bg: #2dd4bf24;
+  --kind-teal-badge-fg: #5eead4;
+  --kind-teal-badge-border: #2dd4bf40;
+  --kind-violet-badge-bg: #a78bfa24;
+  --kind-violet-badge-fg: #c4b5fd;
+  --kind-violet-badge-border: #a78bfa40;
+
+  --kind-card-hover-bg: #1f2330;
+  --kind-card-hover-border: #3f4659;
+  --kind-card-hover-shadow: none;
+}
+
+/* In `components` so a template's own `bg-*`/`border-*` utility still wins, like `.btn-action`. */
+@layer components {
+  .kind-card {
+    background-color: var(--surface-panel);
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease,
+      box-shadow 0.12s ease;
+  }
+  .kind-card:hover:not(:disabled) {
+    background-color: var(--kind-card-hover-bg);
+    border-color: var(--kind-card-hover-border);
+    box-shadow: var(--kind-card-hover-shadow);
+  }
+}

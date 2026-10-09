@@ -47,7 +47,7 @@ function confirm() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Screenshot" wide @close="emit('close')">
+  <Modal :open="props.open" title="Screenshot" size="lg" @close="emit('close')">
     <div class="flex flex-col gap-4 text-sm">
       <p class="text-xs text-neutral-500 dark:text-neutral-400">
         The chart on screen as a PNG in the light colour scheme, at the zoom shown —

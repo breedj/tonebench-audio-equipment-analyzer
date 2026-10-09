@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import MeasurementKindIcon from './MeasurementKindIcon.vue'
 import { useProjects } from '../composables/useProjects'
-import { MEASUREMENT_KINDS } from '../measurements/kinds'
+import { groupedMeasurementKinds, MEASUREMENT_KINDS } from '../measurements/kinds'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -12,6 +12,9 @@ const { currentProjectId, createMeasurementType, selectType, error } = useProjec
 
 const selectedKind = ref<string | null>(null)
 const name = ref('')
+
+// Computed once: the grouping is static, and a `computed` here would only re-run on nothing.
+const sections = groupedMeasurementKinds()
 
 watch(
   () => props.open,
@@ -36,36 +39,79 @@ async function onCreate() {
 </script>
 
 <template>
-  <!-- Wide, and the kinds in two columns: eleven of them in one column ran past the bottom of an
+  <!-- Wide, and the kinds in two columns: ten of them in one column ran past the bottom of an
        ordinary window, so the last few were only found by scrolling a list that gave no sign it
-       scrolled. Two columns of six fit without one. -->
-  <Modal :open="props.open" title="New measurement" :wide="selectedKind === null" @close="emit('close')">
-    <div v-if="selectedKind === null" class="flex flex-col gap-2 text-sm">
-      <p v-if="currentProjectId === null" class="text-xs text-neutral-400 dark:text-neutral-600">
+       scrolled. Grouped into four sections as well (Joost's design, 2026-10-09) — the badge and the
+       count on each heading are what say how much list there is, which a flat grid could not, and a
+       section cut off at the bottom edge is itself the sign that it scrolls.
+
+       The second step, naming the measurement, is an ordinary form: `md`, padded, no sheet. -->
+  <Modal
+    :open="props.open"
+    title="New measurement"
+    :subtitle="selectedKind === null ? 'Pick what you want to measure' : undefined"
+    :size="selectedKind === null ? 'xl' : 'md'"
+    :flush="selectedKind === null"
+    @close="emit('close')"
+  >
+    <!-- The sheet is the *ground* tone and every card the *panel* tone, which is what makes a card
+         read as raised rather than as a patch — the design draws the same two steps in its own
+         greys, and these are the app's.
+
+         It rounds its own bottom corners rather than the dialog clipping them: a `<dialog>` is
+         `overflow: auto` in the UA stylesheet, which is what lets the long dialogs (Configuration,
+         the library list) scroll at all, and an `overflow-hidden` on the element to clip this one
+         sheet would take that away from every one of them. -->
+    <div
+      v-if="selectedKind === null"
+      class="flex max-h-[72vh] flex-col gap-5 overflow-y-auto rounded-b-lg bg-[var(--surface-ground)] px-5 pb-5 pt-[18px] text-sm"
+    >
+      <p v-if="currentProjectId === null" class="text-xs text-neutral-500 dark:text-neutral-400">
         Select or create a project first.
       </p>
-      <div class="grid max-h-[80vh] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
-        <!-- #f9fcff, Joost's choice (2026-10-08, after an afternoon at #eff6ff) — a hint of blue
-             rather than the sidebar's selection tint, which on a grid of twelve cards read as
-             twelve selected rows. Spelled as a literal because it is between Tailwind's blue-50
-             and white and belongs to no scale. Not a surface token either: those four are the
-             page's own greys, and this is an accent. The dark counterpart stays the sidebar's,
-             since a near-white card under a dark theme would be the one bright patch on screen. -->
-        <button
-          v-for="k in MEASUREMENT_KINDS"
-          :key="k.kind"
-          type="button"
-          class="flex items-start gap-3 rounded border border-neutral-200 bg-[#f9fcff] p-3 text-left hover:bg-blue-100 disabled:opacity-40 dark:border-neutral-800 dark:bg-blue-900/30 dark:hover:bg-blue-900/50"
-          :disabled="currentProjectId === null"
-          @click="pickKind(k.kind)"
-        >
-          <MeasurementKindIcon :kind="k.kind" class="mt-0.5 shrink-0 text-neutral-500 dark:text-neutral-400" />
-          <span class="min-w-0">
-            <span class="block font-medium text-neutral-900 dark:text-neutral-100">{{ k.label }}</span>
-            <span class="block text-xs text-neutral-500 dark:text-neutral-400">{{ k.description }}</span>
-          </span>
-        </button>
-      </div>
+
+      <section v-for="section in sections" :key="section.group.id" class="flex flex-col gap-2.5">
+        <div class="flex items-center gap-2">
+          <h3
+            class="rounded-full border px-2.5 py-[3px] text-[11px] font-semibold uppercase tracking-[0.06em]"
+            :style="{
+              color: `var(--kind-${section.group.tone}-badge-fg)`,
+              backgroundColor: `var(--kind-${section.group.tone}-badge-bg)`,
+              borderColor: `var(--kind-${section.group.tone}-badge-border)`,
+            }"
+          >
+            {{ section.group.label }}
+          </h3>
+          <span class="text-xs text-neutral-500 dark:text-neutral-400">{{ section.kinds.length }}</span>
+          <span class="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" aria-hidden="true"></span>
+        </div>
+
+        <div class="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+          <button
+            v-for="k in section.kinds"
+            :key="k.kind"
+            type="button"
+            class="kind-card flex items-start gap-3.5 rounded-xl border border-neutral-200 p-4 text-left disabled:opacity-40 dark:border-neutral-800"
+            :disabled="currentProjectId === null"
+            @click="pickKind(k.kind)"
+          >
+            <!-- The app's own icon for the kind, not the mockup's: this is the same glyph the
+                 sidebar will show beside the measurement once it exists, and the picker is where
+                 that association is learnt. Sized up to the design's 22px; the 20px the component
+                 declares is a presentation attribute, which the class beats. -->
+            <span
+              class="flex size-11 shrink-0 items-center justify-center rounded-full"
+              :style="{ backgroundColor: `var(--kind-${k.tone}-chip-bg)`, color: `var(--kind-${k.tone}-chip-fg)` }"
+            >
+              <MeasurementKindIcon :kind="k.kind" class="size-[22px]" />
+            </span>
+            <span class="flex min-w-0 flex-col gap-1">
+              <span class="text-[15px] font-semibold text-neutral-900 dark:text-neutral-100">{{ k.label }}</span>
+              <span class="text-[13px] leading-[1.45] text-neutral-600 dark:text-neutral-400">{{ k.description }}</span>
+            </span>
+          </button>
+        </div>
+      </section>
     </div>
 
     <div v-else class="flex flex-col gap-3 text-sm">

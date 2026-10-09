@@ -426,7 +426,7 @@ function mv(value: number | null | undefined) {
 </script>
 
 <template>
-  <Modal :open="open" title="Sound card" wide @close="close">
+  <Modal :open="open" title="Sound card" size="lg" @close="close">
     <div class="flex flex-col gap-5 text-xs">
       <p
         v-if="inventory && !inventory.available"

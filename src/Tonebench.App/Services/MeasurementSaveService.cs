@@ -519,42 +519,8 @@ public sealed class MeasurementSaveService(
         var metrics = new List<MeasurementMetric>();
         foreach (var snapshot in snapshots)
         {
-            // Ahead of the fundamental check: these two need none, and a noise measurement with
-            // the generator off is exactly the case where there is none.
-            if (snapshot.Noise is { } noise)
-            {
-                int noiseChannel = ChannelIndex(snapshot.Channel);
-                metrics.Add(new MeasurementMetric(noiseChannel, "band_rms_dbv", noise.BandRmsDbv, "dBV"));
-                metrics.Add(new MeasurementMetric(noiseChannel, "noise_density_dbv_per_root_hz", noise.NoiseDensityDbvPerRootHz, "dBV/√Hz"));
-            }
-
-            // No fundamental found in band for this channel this tick — its spectrum is still
-            // saved above (via `spectra`), just with no derived metric rows to go with it. See
-            // SpectrumSnapshot.Meters.
-            if (snapshot.Meters is not { } m)
-                continue;
-
-            int channel = ChannelIndex(snapshot.Channel);
-
-            metrics.Add(new MeasurementMetric(channel, "thd_percent", m.ThdPercent, "%"));
-            metrics.Add(new MeasurementMetric(channel, "thd_n_percent", m.ThdNPercent, "%"));
-            metrics.Add(new MeasurementMetric(channel, "snr_db", m.SnrDb, "dB"));
-            metrics.Add(new MeasurementMetric(channel, "fundamental_hz", m.FundamentalFreqHz, "Hz"));
-            metrics.Add(new MeasurementMetric(channel, "fundamental_dbv", m.FundamentalDbv, "dBV"));
-            metrics.Add(new MeasurementMetric(channel, "noise_floor_dbv", m.NoiseFloorDbv, "dBV"));
-            metrics.Add(new MeasurementMetric(channel, "peak_dbv", m.PeakDbv, "dBV"));
-            metrics.Add(new MeasurementMetric(channel, "total_rms_dbv", m.TotalRmsDbv, "dBV"));
-
-            foreach (var harmonic in m.Harmonics)
-            {
-                metrics.Add(new MeasurementMetric(channel, $"h{harmonic.Order}_hz", harmonic.Bin * snapshot.BinSizeHz, "Hz"));
-                metrics.Add(new MeasurementMetric(channel, $"h{harmonic.Order}_dbc", harmonic.Dbc, "dBc"));
-            }
-
-            if (m.Intermodulation is { } imd)
-                metrics.AddRange(IntermodulationMetrics(channel, imd));
-            if (m.Multitone is { } multitone)
-                metrics.AddRange(MultitoneMetrics(channel, multitone));
+            AppendChannelMetrics(
+                metrics, ChannelIndex(snapshot.Channel), snapshot.Meters, snapshot.Noise, snapshot.BinSizeHz);
         }
 
         var info = session.Info;
@@ -566,6 +532,52 @@ public sealed class MeasurementSaveService(
             spectra, metrics);
 
         return await measurementRepository.SaveResultAsync(request, ct);
+    }
+
+    /// <summary>
+    /// The metric rows one analysed channel contributes. Shared with the simulation import
+    /// (<see cref="SimulationImportService"/>) rather than reimplemented there, and that is
+    /// load-bearing rather than tidy: the names are a contract several readers depend on, and
+    /// <c>thd_percent</c>, <c>thd_n_percent</c> and <c>snr_db</c> in particular are what the
+    /// history list quotes as a result's headline while <c>fundamental_hz</c> is what
+    /// <c>SelectHeadlineCapture</c> picks a capture by. A second copy that drifted would leave an
+    /// imported result looking blank in the list for no visible reason.
+    /// </summary>
+    internal static void AppendChannelMetrics(
+        List<MeasurementMetric> metrics, int channel, SpectrumMeters? meters, NoiseFigures? noise, double binSizeHz)
+    {
+        // Ahead of the fundamental check: these two need none, and a noise measurement with
+        // the generator off is exactly the case where there is none.
+        if (noise is { } n)
+        {
+            metrics.Add(new MeasurementMetric(channel, "band_rms_dbv", n.BandRmsDbv, "dBV"));
+            metrics.Add(new MeasurementMetric(channel, "noise_density_dbv_per_root_hz", n.NoiseDensityDbvPerRootHz, "dBV/√Hz"));
+        }
+
+        // No fundamental found in band for this channel this tick -- its spectrum is still
+        // saved, just with no derived metric rows to go with it. See SpectrumSnapshot.Meters.
+        if (meters is not { } m)
+            return;
+
+        metrics.Add(new MeasurementMetric(channel, "thd_percent", m.ThdPercent, "%"));
+        metrics.Add(new MeasurementMetric(channel, "thd_n_percent", m.ThdNPercent, "%"));
+        metrics.Add(new MeasurementMetric(channel, "snr_db", m.SnrDb, "dB"));
+        metrics.Add(new MeasurementMetric(channel, "fundamental_hz", m.FundamentalFreqHz, "Hz"));
+        metrics.Add(new MeasurementMetric(channel, "fundamental_dbv", m.FundamentalDbv, "dBV"));
+        metrics.Add(new MeasurementMetric(channel, "noise_floor_dbv", m.NoiseFloorDbv, "dBV"));
+        metrics.Add(new MeasurementMetric(channel, "peak_dbv", m.PeakDbv, "dBV"));
+        metrics.Add(new MeasurementMetric(channel, "total_rms_dbv", m.TotalRmsDbv, "dBV"));
+
+        foreach (var harmonic in m.Harmonics)
+        {
+            metrics.Add(new MeasurementMetric(channel, $"h{harmonic.Order}_hz", harmonic.Bin * binSizeHz, "Hz"));
+            metrics.Add(new MeasurementMetric(channel, $"h{harmonic.Order}_dbc", harmonic.Dbc, "dBc"));
+        }
+
+        if (m.Intermodulation is { } imd)
+            metrics.AddRange(IntermodulationMetrics(channel, imd));
+        if (m.Multitone is { } multitone)
+            metrics.AddRange(MultitoneMetrics(channel, multitone));
     }
 
     /// <summary>

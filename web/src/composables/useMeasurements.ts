@@ -627,6 +627,34 @@ export function useMeasurements() {
     void refetchOverlaysForWindow(window)
   }
 
+  /**
+   * Re-fetches an overlay that is already on the chart, because its stored rows have changed
+   * underneath it — which today means an imported simulation that has just been re-analysed at a
+   * different window, FFT size, level offset or band.
+   *
+   * <p>A no-op when that result is not on the chart: there is nothing on screen to correct, and
+   * the next `addOverlay` will fetch the new rows anyway.</p>
+   *
+   * <p>Clearing `spectrumWindow` is what makes the zoom path pick it up: the detail that has just
+   * arrived is decimated over the full span, so an overlay the chart is holding zoomed needs one
+   * more fetch at that window — `refetchOverlaysForWindow` decides that, rather than this
+   * re-deriving the rule.</p>
+   */
+  async function reloadOverlay(resultId: number) {
+    const entry = overlays.value.find((o) => o.id === resultId)
+    if (!entry) return
+    try {
+      entry.detail = await api.getMeasurement(resultId)
+      entry.spectrumWindow = null
+      overlays.value = [...overlays.value]
+      await refetchOverlaysForWindow(overlayWindow)
+      error.value = null
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   /** Detaches an overlay from the chart — does not delete the stored measurement (see remove() for that). */
   function removeOverlay(id: number) {
     overlays.value = overlays.value.filter((o) => o.id !== id)
@@ -652,5 +680,5 @@ export function useMeasurements() {
 
   return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOutputImpedance,
     update, remove,
-    addOverlay, removeOverlay, setOverlayVisible, setOverlayWindow, visibleOverlayCount, canShowMoreOverlays }
+    addOverlay, reloadOverlay, removeOverlay, setOverlayVisible, setOverlayWindow, visibleOverlayCount, canShowMoreOverlays }
 }

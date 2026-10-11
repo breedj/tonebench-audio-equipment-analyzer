@@ -218,6 +218,14 @@ const GUIDE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/guide/GuideKeepingResultsPage.vue')),
   },
   {
+    id: 'guide-simulation',
+    title: 'Comparing with a simulation',
+    summary: 'Put the LTspice version of your circuit on the same chart as the real one — and what the differences mean.',
+    group: 'Afterwards',
+    counterpart: 'simulation-import',
+    component: manualPage(() => import('./pages/guide/GuideSimulationPage.vue')),
+  },
+  {
     id: 'guide-problems',
     title: 'When something looks wrong',
     summary: 'The dozen things that go wrong most often, what each looks like on screen, and what to do.',
@@ -603,6 +611,13 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     summary: 'Global settings, attenuation, and what the warnings mean.',
     group: 'Reference',
     component: manualPage(() => import('./pages/SettingsPage.vue')),
+  },
+  {
+    id: 'simulation-import',
+    title: 'Importing a simulation',
+    summary: 'Reading an LTspice or QSpice transient run as a trace on the FFT chart: which directives reach the measurement, why resolution follows the run length, and what is refused.',
+    group: 'Measurements',
+    component: manualPage(() => import('./pages/SimulationImportPage.vue')),
   },
   {
     id: 'reporting-issues',

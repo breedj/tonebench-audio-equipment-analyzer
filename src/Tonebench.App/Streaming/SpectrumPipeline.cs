@@ -354,7 +354,7 @@ public sealed class SpectrumPipeline(
 
                 var dbv = new double[retained.AmpPower.Length];
                 for (int i = 0; i < dbv.Length; i++)
-                    dbv[i] = 10.0 * Math.Log10(Math.Max(retained.AmpPower[i] / 2.0, double.Epsilon));
+                    dbv[i] = SpectrumRecordAnalyzer.PowerToDbv(retained.AmpPower[i]);
 
                 (result ??= []).Add(new SpectrumSnapshot(
                     ch == 0 ? StreamChannel.Left : StreamChannel.Right, retained.Seq, retained.CapturedUtc,
@@ -892,10 +892,10 @@ public sealed class SpectrumPipeline(
             // further out for no reason.
             Volatile.Write(ref _lastAverageWritten[channelIndex], writtenAtSnapshot);
 
-            (float peakDbv, float totalRmsDbv) = ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
-            var meters = ComputeMeters(psd, psdWeighted, peakDbv, totalRmsDbv, options, averagesTaken,
+            (float peakDbv, float totalRmsDbv) = SpectrumRecordAnalyzer.ComputeTimeDomainLevels(timeBuf.AsSpan(0, n));
+            var meters = SpectrumRecordAnalyzer.ComputeMeters(psd, psdWeighted, peakDbv, totalRmsDbv, options, averagesTaken,
                 (float)(externalGain?.GainDb(channelIndex) ?? 0.0));
-            var noise = ComputeNoiseFigures(psdWeighted, meters, window.Sums.EnbwHz(_sampleRateHz), options);
+            var noise = SpectrumRecordAnalyzer.ComputeNoiseFigures(psdWeighted, meters, window.Sums.EnbwHz(_sampleRateHz), options);
 
             // Past the flush-generation check above, so a record that gets discarded is never logged
             // as though it had been displayed -- the log has to describe what the user actually saw.
@@ -1199,157 +1199,14 @@ public sealed class SpectrumPipeline(
         for (int i = 0; i < columns.Length; i++)
         {
             columns[i] = new MinMax(
-                10.0 * Math.Log10(Math.Max(columns[i].Min / 2.0, double.Epsilon)),
-                10.0 * Math.Log10(Math.Max(columns[i].Max / 2.0, double.Epsilon)));
+                SpectrumRecordAnalyzer.PowerToDbv(columns[i].Min),
+                SpectrumRecordAnalyzer.PowerToDbv(columns[i].Max));
             columnFreqsHz[i] = (float)(centerBins[i] * binSizeHz);
         }
 
         return StreamFrame.EncodeSpectrum(
             channel, seq, (float)(loBin * binSizeHz), (float)(hiBin * binSizeHz),
             columnFreqsHz, columns, StreamMsgType.Spectrum, logSpaced: true, zoomed: zoomed);
-    }
-
-    /// <summary>
-    /// True instantaneous peak and broadband RMS from the raw (unwindowed) time-domain snapshot —
-    /// not spectral estimates. Peak is expressed as its RMS-equivalent (peakVpk/sqrt2), matching
-    /// every other dBV value in this app's convention (see <c>SignalSynthesizer.DbvToPeakV</c>).
-    ///
-    /// The DC component is removed first, for the same reason the noise integrations exclude bin 0:
-    /// a DC-coupled input's offset is not part of the signal being measured. Leaving it in added
-    /// itself straight onto the peak — a 4.6 mV offset read as +0.03 dBV on a 1 V tone, which is
-    /// why Pk Vrms sat above 1.0000 for a 1.0000 Vrms generator.
-    /// </summary>
-    private static (float PeakDbv, float TotalRmsDbv) ComputeTimeDomainLevels(ReadOnlySpan<double> timeDomainSamples)
-    {
-        double mean = 0.0;
-        foreach (double v in timeDomainSamples)
-            mean += v;
-        mean /= timeDomainSamples.Length;
-
-        double peakVpk = 0.0;
-        double sumSquares = 0.0;
-        foreach (double sample in timeDomainSamples)
-        {
-            double v = sample - mean;
-            double a = Math.Abs(v);
-            if (a > peakVpk)
-                peakVpk = a;
-            sumSquares += v * v;
-        }
-
-        double peakVrms = peakVpk / Math.Sqrt(2.0);
-        double totalRmsVrms = Math.Sqrt(sumSquares / timeDomainSamples.Length);
-
-        float peakDbv = (float)(20.0 * Math.Log10(Math.Max(peakVrms, double.Epsilon)));
-        float totalRmsDbv = (float)(20.0 * Math.Log10(Math.Max(totalRmsVrms, double.Epsilon)));
-        return (peakDbv, totalRmsDbv);
-    }
-
-    /// <summary>
-    /// Everything the meters panel shows, computed once per channel per tick and shared by both
-    /// the live broadcast (<see cref="BroadcastMetersFrame"/>) and <see cref="LatestSnapshots"/> --
-    /// so a saved measurement's metrics are exactly what was on screen, never re-derived
-    /// separately. Returns <see langword="null"/> when no fundamental (and so no harmonics) could
-    /// be found, matching the old inline logic's "nothing to broadcast this tick" behaviour.
-    /// </summary>
-    private static SpectrumMeters? ComputeMeters(
-        PsdSpectrum psd, PsdSpectrum psdWeighted, float peakDbv, float totalRmsDbv, SpectrumPipelineOptions options, int averagesTaken,
-        float externalGainDb = 0f)
-    {
-        int minSearchBin = Math.Max(1, (int)Math.Round(options.FundamentalMinSearchHz / psd.BinSizeHz));
-        int fundamentalBin = FindGlobalPeakBin(psd.ValuesV2PerHz, minSearchBin);
-        if (fundamentalBin <= 0)
-            return null;
-
-        // The measurement bandwidth for every noise-integrated figure below, and the upper bound
-        // on which harmonics count toward THD. See SpectrumPipelineOptions.MeasurementLoFreqHz —
-        // passing this rather than the full spectrum is what keeps DC and out-of-band noise out
-        // of THD+N/SNR.
-        var band = psd.BandOf(options.MeasurementLoFreqHz, options.MeasurementHiFreqHz);
-
-        // Harmonics may be counted past the measurement band -- see
-        // SpectrumPipelineOptions.HarmonicMaxFreqHz. Everything else below stays on `band`.
-        int harmonicMaxBin = options.HarmonicMaxFreqHz is { } harmonicMaxHz
-            ? Math.Min(psd.ValuesV2PerHz.Length - 1, psd.BinOfFrequency(harmonicMaxHz))
-            : band.HiBinInclusive;
-
-        int harmonicCount = Math.Max(1, options.HarmonicCount);
-        var harmonicsBuf = new Harmonic[harmonicCount];
-        int written = HarmonicAnalyzer.Analyze(
-            psd, fundamentalBin, harmonicCount, harmonicsBuf, maxBinInclusive: harmonicMaxBin);
-        if (written == 0)
-            return null;
-
-        var harmonics = written == harmonicsBuf.Length ? harmonicsBuf : harmonicsBuf[..written];
-        var fundamental = harmonics[0];
-
-        float fundamentalFreqHz = (float)(fundamentalBin * psd.BinSizeHz);
-        float thdPercent = (float)(SpectrumMetrics.Thd(harmonics) * 100.0);
-        // The two noise-integrated figures read the *weighted* PSD; their reference, the fundamental,
-        // was measured above on the unweighted one -- every standard curve is 0 dB at 1 kHz, but a
-        // tone elsewhere must still be reported at its true level.
-        float thdNPercent = (float)(SpectrumMetrics.ThdPlusN(psdWeighted, fundamental, band, options.NotchOctaves) * 100.0);
-        float snrDb = (float)SpectrumMetrics.SnrDb(psdWeighted, harmonics, band, options.NotchOctaves);
-        float fundamentalDbv = (float)fundamental.AmplitudeDbv;
-        float noiseFloorDbv = fundamentalDbv - snrDb;
-
-        var otherPeaks = FindOtherPeaks(psd, harmonics, fundamentalDbv, options);
-
-        IntermodulationResult? intermodulation = null;
-        if (options.Intermodulation is { } imdSpec)
-        {
-            // Products above the band limit are omitted, not zero — see IntermodulationSpec.
-            int maxProductBin = imdSpec.MaxProductFreqHz is { } maxProductHz
-                ? Math.Min(psd.ValuesV2PerHz.Length - 1, psd.BinOfFrequency(maxProductHz))
-                : band.HiBinInclusive;
-            intermodulation = IntermodulationAnalyzer.Analyze(
-                psd, psd.BinOfFrequency(imdSpec.ToneLowHz), psd.BinOfFrequency(imdSpec.ToneHighHz),
-                imdSpec.Method, imdSpec.MaxOrder, maxProductBin);
-        }
-
-        // Same band-limit convention as IMD: gaps above MeasurementHiFreqHz (or the spec's own
-        // limit) do not count, so the figure is in-band distortion the way THD+N is.
-        MultitoneResult? multitone = null;
-        if (options.Multitone is { } multitoneSpec && multitoneSpec.ToneFreqsHz.Count >= 2)
-        {
-            int maxGapBin = multitoneSpec.MaxProductFreqHz is { } maxGapHz
-                ? Math.Min(psd.ValuesV2PerHz.Length - 1, psd.BinOfFrequency(maxGapHz))
-                : band.HiBinInclusive;
-            int[] toneBins = new int[multitoneSpec.ToneFreqsHz.Count];
-            for (int i = 0; i < toneBins.Length; i++)
-                toneBins[i] = psd.BinOfFrequency(multitoneSpec.ToneFreqsHz[i]);
-            multitone = MultitoneAnalyzer.Analyze(psd, toneBins, maxGapBin);
-        }
-
-        return new SpectrumMeters(
-            fundamentalFreqHz, (float)psd.BinSizeHz, thdPercent, thdNPercent, snrDb,
-            fundamentalDbv, noiseFloorDbv, peakDbv, totalRmsDbv, harmonics, otherPeaks, averagesTaken,
-            intermodulation, multitone, externalGainDb);
-    }
-
-    /// <summary>
-    /// The band RMS and the noise density, on the weighted PSD, whether or not a fundamental was
-    /// found -- <see cref="ComputeMeters"/> returns null without one and the meters frame is then not
-    /// sent at all, which is fine for THD and useless for a noise measurement with the generator
-    /// off. With meters, the density excludes what SNR excludes (the fundamental's notch and the
-    /// harmonics' lobes); without, it is the mean over the whole band. Never NaN: an empty band reads
-    /// as the floor of the float scale rather than poisoning a JSON body.
-    /// </summary>
-    private static NoiseFigures ComputeNoiseFigures(PsdSpectrum psdWeighted, SpectrumMeters? meters, double enbwHz, SpectrumPipelineOptions options)
-    {
-        var band = psdWeighted.BandOf(options.MeasurementLoFreqHz, options.MeasurementHiFreqHz);
-        double bandRmsVrms = SpectrumMetrics.BandRmsVrms(psdWeighted, band);
-        double densityV2PerHz = meters is { Harmonics.Length: > 0 }
-            ? SpectrumMetrics.NoiseDensityV2PerHz(psdWeighted, meters.Harmonics, band, options.NotchOctaves)
-            : SpectrumMetrics.NoiseDensityV2PerHz(psdWeighted, band);
-
-        return new NoiseFigures(
-            (float)(20.0 * Math.Log10(Math.Max(bandRmsVrms, double.Epsilon))),
-            (float)(10.0 * Math.Log10(Math.Max(densityV2PerHz, double.Epsilon))),
-            (float)enbwHz,
-            (float)options.MeasurementLoFreqHz,
-            (float)options.MeasurementHiFreqHz,
-            options.Weighting);
     }
 
     /// <summary>
@@ -1563,8 +1420,8 @@ public sealed class SpectrumPipeline(
         for (int i = 0; i < columnCount; i++)
         {
             freqHz[i] = (float)(centerBins[i] * binSizeHz);
-            dbvMin[i] = (float)(10.0 * Math.Log10(Math.Max(columns[i].Min / 2.0, double.Epsilon)));
-            dbvMax[i] = (float)(10.0 * Math.Log10(Math.Max(columns[i].Max / 2.0, double.Epsilon)));
+            dbvMin[i] = (float)(SpectrumRecordAnalyzer.PowerToDbv(columns[i].Min));
+            dbvMax[i] = (float)(SpectrumRecordAnalyzer.PowerToDbv(columns[i].Max));
         }
 
         return new SweepPreviewSeries(freqHz, dbvMin, dbvMax);
@@ -1678,55 +1535,4 @@ public sealed class SpectrumPipeline(
         public Complex[]? Complex;
     }
 
-    /// <summary>
-    /// Everything else worth calling out in the spectrum: mains hum, its own harmonics, and real
-    /// intermodulation/mixing products between multiple simultaneous generator tones (the shared
-    /// soft-clip in SimulatedDevice is a genuine nonlinearity, so these are real products, not
-    /// synthesized ones). Scanned from <see cref="SpectrumPipelineOptions.DisplayLoFreqHz"/>, not
-    /// <see cref="SpectrumPipelineOptions.FundamentalMinSearchHz"/> — hum at 50/100 Hz is exactly
-    /// what this is for.
-    /// </summary>
-    private static (float FreqHz, float Dbc)[] FindOtherPeaks(
-        PsdSpectrum psd, ReadOnlySpan<Harmonic> harmonics, float fundamentalDbv, SpectrumPipelineOptions options)
-    {
-        int otherPeaksCount = Math.Max(0, options.OtherPeaksCount);
-        if (otherPeaksCount == 0)
-            return [];
-
-        Span<BinRange> excluded = harmonics.Length <= 32 ? stackalloc BinRange[harmonics.Length] : new BinRange[harmonics.Length];
-        for (int i = 0; i < harmonics.Length; i++)
-        {
-            excluded[i] = new BinRange(
-                harmonics[i].Bin - HarmonicAnalyzer.DefaultSkirtHalfWidthBins, harmonics[i].Bin + HarmonicAnalyzer.DefaultSkirtHalfWidthBins);
-        }
-
-        int minBin = Math.Max(1, (int)Math.Round(options.DisplayLoFreqHz / psd.BinSizeHz));
-        Span<SpectralPeak> peaks = otherPeaksCount <= 32 ? stackalloc SpectralPeak[otherPeaksCount] : new SpectralPeak[otherPeaksCount];
-        int written = PeakFinder.FindPeaks(psd, excluded, otherPeaksCount, peaks, minBin);
-
-        var result = new (float FreqHz, float Dbc)[written];
-        for (int i = 0; i < written; i++)
-            result[i] = ((float)(peaks[i].Bin * psd.BinSizeHz), (float)(peaks[i].AmplitudeDbv - fundamentalDbv));
-
-        return result;
-    }
-
-    private static int FindGlobalPeakBin(ReadOnlySpan<double> psdValues, int loBinInclusive)
-    {
-        if (loBinInclusive >= psdValues.Length)
-            return -1;
-
-        int peak = loBinInclusive;
-        double peakValue = psdValues[loBinInclusive];
-        for (int k = loBinInclusive + 1; k < psdValues.Length; k++)
-        {
-            if (psdValues[k] > peakValue)
-            {
-                peakValue = psdValues[k];
-                peak = k;
-            }
-        }
-
-        return peak;
-    }
 }

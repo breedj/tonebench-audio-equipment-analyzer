@@ -50,6 +50,7 @@ import OtherPeaksTable from './components/OtherPeaksTable.vue'
 import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
 import MeasurementNotesPanel from './components/MeasurementNotesPanel.vue'
 import MeasurementChecklist from './components/MeasurementChecklist.vue'
+import SimulationImportDialog from './components/SimulationImportDialog.vue'
 import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
@@ -394,6 +395,15 @@ interface RunConfig {
 const generatorPanel = ref<InstanceType<typeof GeneratorPanel> | null>(null)
 const spectrumConfigPanel = ref<InstanceType<typeof SpectrumConfigPanel> | null>(null)
 const saveDialogOpen = ref(false)
+// Importing an LTspice simulation as a trace on the FFT chart. Only reachable from the FFT
+// screen's History section -- a .tran run is a spectrum, not a sweep.
+const simulationImportOpen = ref(false)
+
+async function onSimulationImported() {
+  // The new result has to appear in the History list before it can be checked, and the trash
+  // badge is unaffected -- this adds a row rather than removing one.
+  await loadMeasurements()
+}
 // Reports — see report/buildReport.ts. One dialog serves the measurement on screen and a stored
 // result alike; `reportSubject` is which.
 const reportOpen = ref(false)
@@ -4948,7 +4958,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
             <template #aside>
               <ChartDisplayPanel>
-                <MeasurementChecklist @error="reportError" />
+                <MeasurementChecklist @error="reportError" @import-simulation="simulationImportOpen = true" />
               </ChartDisplayPanel>
             </template>
           </MeasurementLayout>
@@ -5020,6 +5030,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
     />
 
     <SaveMeasurementDialog :open="saveDialogOpen" @close="saveDialogOpen = false" />
+    <SimulationImportDialog
+      :open="simulationImportOpen"
+      :measurement-type-id="currentTypeId"
+      @close="simulationImportOpen = false"
+      @imported="onSimulationImported"
+    />
     <SaveAsDialog
       :open="saveTypeAsOpen"
       title="Save measurement as…"

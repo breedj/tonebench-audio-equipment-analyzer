@@ -303,7 +303,12 @@ public static class MeasurementsEndpoints
         return string.Concat(name.Select(c => invalid.Contains(c) ? '_' : c));
     }
 
-    private static async Task<MeasurementDetailResponse?> BuildDetailResponseAsync(
+    /// <summary>
+    /// Internal so a test can pin the mapping rather than only the record's shape: adding a field
+    /// to <see cref="MeasurementDetailResponse"/> and leaving this constructor call passing none
+    /// of it compiles cleanly and answers null on the wire.
+    /// </summary>
+    internal static async Task<MeasurementDetailResponse?> BuildDetailResponseAsync(
         long resultId, MeasurementRepository repo, SpectrumPipeline pipeline, CancellationToken ct)
     {
         var detail = await repo.GetResultAsync(resultId, ct);
@@ -328,7 +333,8 @@ public static class MeasurementsEndpoints
             detail.Kind,
             detail.Name, detail.Notes, detail.TimestampUtc, detail.ParamsJson,
             detail.SampleRateHz, detail.FftSize, detail.Channels,
-            detail.InRangeDbv, detail.OutRangeDbv, detail.GenJson, channels.ToArray());
+            detail.InRangeDbv, detail.OutRangeDbv, detail.GenJson, channels.ToArray(),
+            detail.Source, detail.PcmSampleRateHz);
     }
 
     /// <summary>
@@ -386,7 +392,8 @@ public static class MeasurementsEndpoints
 
     private static MeasurementSummaryResponse ToSummaryResponse(MeasurementSummary summary) => new(
         summary.ResultId, summary.ProjectName, summary.MeasurementTypeName, summary.Name, summary.Notes,
-        summary.TimestampUtc, summary.SampleRateHz, summary.FftSize, summary.Channels, summary.ChannelHeadlines);
+        summary.TimestampUtc, summary.SampleRateHz, summary.FftSize, summary.Channels, summary.ChannelHeadlines,
+        summary.Source);
 }
 
 public sealed record SaveMeasurementRequest(long MeasurementTypeId, string Name, string? Notes);
@@ -398,7 +405,15 @@ public sealed record MeasurementListResponse(MeasurementSummaryResponse[] Items)
 public sealed record MeasurementSummaryResponse(
     long ResultId, string ProjectName, string MeasurementTypeName, string Name, string? Notes,
     DateTimeOffset TimestampUtc, double SampleRateHz, int FftSize, int Channels,
-    IReadOnlyDictionary<int, ChannelHeadline> ChannelHeadlines);
+    IReadOnlyDictionary<int, ChannelHeadline> ChannelHeadlines,
+    /// <summary>
+    /// <c>measurement_result.source</c>: null for a measured run, <c>'simulation'</c> for an
+    /// imported one. <b>On the response record and not only on the domain record</b> -- threading
+    /// a field through the repository and forgetting the endpoint's own DTO is a silent default
+    /// rather than an error, and it showed up as every imported simulation rendering in the
+    /// history list as though it had been measured.
+    /// </summary>
+    string? Source = null);
 
 public sealed record MeasurementDetailResponse(
     long ResultId, long MeasurementTypeId, string ProjectName, string MeasurementTypeName,
@@ -407,7 +422,14 @@ public sealed record MeasurementDetailResponse(
     string Name, string? Notes, DateTimeOffset TimestampUtc, string ParamsJson,
     double SampleRateHz, int FftSize, int Channels,
     double? InRangeDbv, double? OutRangeDbv, string? GenJson,
-    MeasurementChannelResponse[] ChannelsData);
+    MeasurementChannelResponse[] ChannelsData,
+    /// <summary>See <see cref="MeasurementSummaryResponse.Source"/>.</summary>
+    string? Source = null,
+    /// <summary>
+    /// The rate of this capture's stored samples, when it has any. Non-null is what says the result
+    /// can be re-analysed at a different window or FFT size without the source file.
+    /// </summary>
+    double? PcmSampleRateHz = null);
 
 /// <param name="EnbwHz">The stored window's equivalent noise bandwidth at the capture's sample rate and FFT size — what converts the columns' dBV to dBV/√Hz on the client, per result, since an overlay's window need not match the live one's.</param>
 public sealed record MeasurementChannelResponse(int Channel, MeasurementColumnResponse[] Columns, IReadOnlyDictionary<string, double> Metrics, double EnbwHz = 0.0);

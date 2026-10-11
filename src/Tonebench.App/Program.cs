@@ -227,6 +227,7 @@ try
     builder.Services.AddSingleton<MeasurementRepository>();
     builder.Services.AddSingleton<TrashRepository>();
     builder.Services.AddSingleton<MeasurementSaveService>();
+    builder.Services.AddSingleton<SimulationImportService>();
 
     var app = builder.Build();
 
@@ -325,6 +326,7 @@ try
     app.MapProjectsEndpoints();
     app.MapProjectSessionEndpoints();
     app.MapMeasurementsEndpoints();
+    app.MapSimulationEndpoints();
     app.MapTrashEndpoints();
     app.MapReportsEndpoints();
     app.MapUpdateCheckEndpoints();

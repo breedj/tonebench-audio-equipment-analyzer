@@ -2228,6 +2228,74 @@ export interface MeasurementSummary {
   channels: number
   /** Keyed by channel index as a string ("0"/"1") — System.Text.Json's default int-key dictionary shape. */
   channelHeadlines: Record<string, ChannelHeadline>
+  /**
+   * `null` for a measured run, `'simulation'` for one imported from an LTspice .raw. On the
+   * summary so the history list can group by it without a fetch per row.
+   */
+  source: string | null
+}
+
+export const SIMULATION_SOURCE = 'simulation'
+
+export interface SimulationTrace {
+  index: number
+  name: string
+  /** `V` or `A`. A branch-current trace is in amps, so the unit travels with it. */
+  unit: string
+}
+
+export interface SimulationFileInfo {
+  path: string
+  title: string
+  date: string | null
+  plotname: string
+  flags: string[]
+  pointCount: number
+  startTimeS: number
+  endTimeS: number
+  durationS: number
+  nativeRateHz: number
+  minStepS: number
+  medianStepS: number
+  maxStepS: number
+  largestFftSize: number
+  suggestedFftSize: number
+  /**
+   * What the result's resolution will be, at *any* FFT size — it is 1/duration. Only a longer
+   * simulation improves it.
+   */
+  binWidthHz: number
+  traces: SimulationTrace[]
+  warnings: string[]
+}
+
+export interface ImportSimulationRequest {
+  path: string
+  leftTraceIndex: number
+  rightTraceIndex?: number | null
+  startTimeS?: number
+  levelOffsetDb?: number
+  fftSize?: number
+  window?: string
+  measurementLoFreqHz?: number
+  measurementHiFreqHz?: number
+  name?: string | null
+  notes?: string | null
+  periodicRecord?: boolean
+}
+
+export interface ReanalyzeSimulationRequest {
+  startTimeS?: number
+  levelOffsetDb?: number
+  fftSize?: number
+  window?: string
+  measurementLoFreqHz?: number
+  measurementHiFreqHz?: number
+  periodicRecord?: boolean
+}
+
+export interface ImportedSimulation {
+  resultId: number
 }
 
 export interface MeasurementListResponse {
@@ -2287,6 +2355,10 @@ export interface MeasurementDetail {
   outRangeDbv: number | null
   genJson: string | null
   channelsData: MeasurementChannel[]
+  /** `null` for a measured run, `'simulation'` for an imported one. */
+  source?: string | null
+  /** Non-null when this result carries stored samples, i.e. can be re-analysed. */
+  pcmSampleRateHz?: number | null
 }
 
 export interface SaveMeasurementRequest {
@@ -3032,6 +3104,30 @@ export const api = {
     request<MeasurementListResponse>(measurementsQuery(filter)),
 
   getMeasurement: (id: number) => request<MeasurementDetail>(`/measurements/${id}`),
+
+  /**
+   * Reads an LTspice .raw's header and time axis. A path rather than an upload, because the
+   * browser cannot read a local file — the same shape the user-weighting import uses, and the
+   * same FileBrowserDialog picks it.
+   */
+  inspectSimulation: (path: string, measurementHiFreqHz?: number, measurementLoFreqHz?: number) =>
+    request<SimulationFileInfo>('/simulations/inspect', {
+      method: 'POST',
+      body: JSON.stringify({ path, measurementHiFreqHz, measurementLoFreqHz }),
+    }),
+
+  importSimulation: (measurementTypeId: number, body: ImportSimulationRequest) =>
+    request<ImportedSimulation>(`/simulations/${measurementTypeId}/import`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Rebuilds a stored simulation's spectrum from its own samples at new settings. */
+  reanalyzeSimulation: (resultId: number, body: ReanalyzeSimulationRequest) =>
+    request<ImportedSimulation>(`/measurements/${resultId}/reanalyze`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   /**
    * A saved measurement's spectrum columns, re-decimated server-side over `window` — the same

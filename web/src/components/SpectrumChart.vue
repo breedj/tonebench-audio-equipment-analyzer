@@ -23,6 +23,7 @@ import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { FFT_LIVE_COLOR, fftOverlayColor, soleBandOverlay, spectrumAxisOverlay } from '../measurements/spectrumOverlayColors'
+import { overviewSpan } from '../measurements/overviewSpan'
 import { api, type MeasurementChannel, type WeightingCurveResponse } from '../api/client'
 import { unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useUserWeighting } from '../composables/useUserWeighting'
@@ -1000,7 +1001,8 @@ function computeFrame(): FrameData | null {
   const primary = ch0 ?? ch1
   // The overlay the x grid falls back to when nothing is streaming — deliberately not `overlays[0]`,
   // see spectrumAxisOverlay for what that cost.
-  const firstOverlay = spectrumAxisOverlay(props.overlays)?.detail
+  const firstOverlayEntry = spectrumAxisOverlay(props.overlays)
+  const firstOverlay = firstOverlayEntry?.detail
   const firstOverlayChannel = firstOverlay && (channelByIndex(firstOverlay, 0) ?? channelByIndex(firstOverlay, 1))
 
   if (!primary && !firstOverlayChannel) return null
@@ -1014,10 +1016,13 @@ function computeFrame(): FrameData | null {
   if (primary && (primary.header.flags & STREAM_FLAG_ZOOMED) === 0) {
     lo = primary.loFreqHz
     hi = primary.hiFreqHz
-  } else if (!primary && firstOverlayChannel && firstOverlayChannel.columns.length > 0) {
-    lo = firstOverlayChannel.columns[0].freqHz
-    hi = firstOverlayChannel.columns[firstOverlayChannel.columns.length - 1].freqHz
+  } else if (!primary && firstOverlayEntry && firstOverlayChannel) {
+    // `spectrumWindow` is the overlay's STREAM_FLAG_ZOOMED. The rule, and the request loop that
+    // not applying it here produced, are written out in overviewSpan -- which is where it lives so
+    // it can be tested, nothing in a .vue being testable here.
+    ;({ lo, hi } = overviewSpan({ lo, hi }, firstOverlayChannel.columns, firstOverlayEntry.spectrumWindow))
   }
+
   if (hi <= 0) return null
 
   // The active x grid: whichever of L/R is actually streaming (L preferred when both are, matching

@@ -4,10 +4,11 @@ import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
 import { useSweep } from '../composables/useSweep'
 import { dashAttr, sweepOverlayDash } from '../measurements/sweepOverlayStyles'
-import { isSweepKind } from '../measurements/kinds'
+import { isSweepKind, FFT_SPECTRUM_KIND } from '../measurements/kinds'
+import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
 import CollapsibleSection from './CollapsibleSection.vue'
 
-const emit = defineEmits<{ error: [message: string] }>()
+const emit = defineEmits<{ error: [message: string]; importSimulation: [] }>()
 
 const { currentTypeId, types } = useProjects()
 const { items, overlays, addOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays } =
@@ -23,6 +24,17 @@ const { points: sweepPoints } = useSweep()
 // own doc): this checklist is reused on both the sweep and FFT screens, and a result loaded on one
 // screen stays loaded, just hidden, when the other is open.
 const currentKind = computed(() => types.value.find((t) => t.id === currentTypeId.value)?.kind ?? null)
+
+// Measured runs and imported simulations are both results of this same measurement (migration
+// 014), so they arrive in one list and are split for display only. The arithmetic is in
+// historyGroups.ts, where it can be tested — nothing in a .vue is.
+const groups = computed(() => groupHistory(items.value))
+const withHeaders = computed(() => showsGroupHeaders(groups.value))
+
+// Only the FFT screen can import one: a simulation is a spectrum, and a sweep or a response curve
+// is not something an LTspice .tran can be turned into (see the plan's follow-ups -- a .ac run
+// could become a frequency response later).
+const canImport = computed(() => currentKind.value === FFT_SPECTRUM_KIND)
 
 // Checkbox state mirrors the overlay's visibility (checked = plotted on the chart), matching the
 // design's "check it to see it" model. Unchecking hides rather than removes the overlay, so its
@@ -52,6 +64,10 @@ function sweepDashFor(resultId: number): string | undefined {
 // why). The remaining boxes are disabled rather than left clickable-and-rejected, so the ceiling is
 // visible before the click instead of arriving as an error afterwards; the checked ones stay live
 // so a slot can always be freed.
+//
+// Simulations share that one budget with measured runs, deliberately: the cap is about how many
+// traces a chart can carry legibly, which does not depend on where a trace came from — and
+// splitting it would stop someone comparing three simulations against the measurement itself.
 function isDisabled(resultId: number): boolean {
   return currentKind.value !== null && !canShowMoreOverlays(currentKind.value) && !isChecked(resultId)
 }
@@ -78,51 +94,84 @@ async function onToggle(resultId: number, event: Event) {
 <template>
   <CollapsibleSection title="History" size="xs">
     <template #header-right>
-      <span
-        v-if="currentKind !== null && items.length > 0"
-        class="font-mono text-[10px] text-neutral-400 dark:text-neutral-600"
-        :title="`At most ${MAX_VISIBLE_OVERLAYS} history items can be plotted at once.`"
-      >
-        {{ visibleOverlayCount(currentKind) }}/{{ MAX_VISIBLE_OVERLAYS }}
-      </span>
+      <div class="flex items-center gap-2">
+        <button
+          v-if="canImport && currentTypeId !== null"
+          type="button"
+          class="rounded border px-1.5 py-0.5 text-[10px] btn-action"
+          title="Import an LTspice simulation (.raw) as a trace on this chart."
+          @click="emit('importSimulation')"
+        >
+          Import simulation…
+        </button>
+        <span
+          v-if="currentKind !== null && items.length > 0"
+          class="font-mono text-[10px] text-neutral-400 dark:text-neutral-600"
+          :title="`At most ${MAX_VISIBLE_OVERLAYS} history items can be plotted at once.`"
+        >
+          {{ visibleOverlayCount(currentKind) }}/{{ MAX_VISIBLE_OVERLAYS }}
+        </span>
+      </div>
     </template>
     <p v-if="currentTypeId === null" class="text-xs text-neutral-400 dark:text-neutral-600">No measurement selected.</p>
-    <ul v-else class="flex flex-col gap-1.5 text-sm">
-      <li v-for="item in items" :key="item.resultId" class="flex items-center gap-2">
-        <input
-          type="checkbox"
-          :checked="isChecked(item.resultId)"
-          :disabled="isDisabled(item.resultId)"
-          class="h-4 w-4 shrink-0 rounded border-neutral-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-600"
-          :title="isDisabled(item.resultId) ? `Uncheck one of the ${MAX_VISIBLE_OVERLAYS} plotted items first.` : undefined"
-          @change="onToggle(item.resultId, $event)"
-        />
-        <!-- Reserved even when unchecked (the <line> is simply omitted), so ticking a box doesn't
-             shift every name in the list sideways. -->
-        <svg
-          v-if="showsSweepDash"
-          width="22"
-          height="6"
-          viewBox="0 0 22 6"
-          aria-hidden="true"
-          class="shrink-0 overflow-visible text-neutral-500 dark:text-neutral-400"
+    <template v-else>
+      <div v-for="group in groups" :key="group.id" class="flex flex-col gap-1.5">
+        <!-- Only when there is more than one section: a lone "Measurements" header above a list
+             that is obviously measurements is noise, and that is the ordinary case. -->
+        <p
+          v-if="withHeaders"
+          class="mt-1.5 text-[10px] font-semibold tracking-wide text-neutral-400 uppercase first:mt-0 dark:text-neutral-500"
         >
-          <line
-            v-if="isChecked(item.resultId)"
-            x1="0"
-            y1="3"
-            x2="22"
-            y2="3"
-            stroke="currentColor"
-            stroke-width="1.5"
-            :stroke-dasharray="sweepDashFor(item.resultId)"
-          />
-        </svg>
-        <span class="truncate" :class="{ 'text-neutral-400 dark:text-neutral-600': isDisabled(item.resultId) }">
-          {{ item.name }}
-        </span>
-      </li>
-      <li v-if="items.length === 0" class="text-xs text-neutral-400 dark:text-neutral-600">No measurements saved yet.</li>
-    </ul>
+          {{ group.label }}
+        </p>
+        <ul class="flex flex-col gap-1.5 text-sm">
+          <li v-for="item in group.items" :key="item.resultId" class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              :checked="isChecked(item.resultId)"
+              :disabled="isDisabled(item.resultId)"
+              class="h-4 w-4 shrink-0 rounded border-neutral-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-600"
+              :title="isDisabled(item.resultId) ? `Uncheck one of the ${MAX_VISIBLE_OVERLAYS} plotted items first.` : undefined"
+              @change="onToggle(item.resultId, $event)"
+            />
+            <!-- Reserved even when unchecked (the <line> is simply omitted), so ticking a box doesn't
+                 shift every name in the list sideways. -->
+            <svg
+              v-if="showsSweepDash"
+              width="22"
+              height="6"
+              viewBox="0 0 22 6"
+              aria-hidden="true"
+              class="shrink-0 overflow-visible text-neutral-500 dark:text-neutral-400"
+            >
+              <line
+                v-if="isChecked(item.resultId)"
+                x1="0"
+                y1="3"
+                x2="22"
+                y2="3"
+                stroke="currentColor"
+                stroke-width="1.5"
+                :stroke-dasharray="sweepDashFor(item.resultId)"
+              />
+            </svg>
+            <span class="truncate" :class="{ 'text-neutral-400 dark:text-neutral-600': isDisabled(item.resultId) }">
+              {{ item.name }}
+            </span>
+            <!-- Colour identifies the run and dash identifies the channel, both already spoken
+                 for, so provenance is a chip rather than a line style. -->
+            <span
+              v-if="isSimulation(item)"
+              class="shrink-0 rounded px-1 text-[9px] font-semibold tracking-wide uppercase"
+              :class="'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300'"
+              title="Imported from an LTspice simulation, not measured."
+            >
+              sim
+            </span>
+          </li>
+        </ul>
+      </div>
+      <p v-if="items.length === 0" class="text-xs text-neutral-400 dark:text-neutral-600">No measurements saved yet.</p>
+    </template>
   </CollapsibleSection>
 </template>

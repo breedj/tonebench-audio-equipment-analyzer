@@ -315,6 +315,9 @@ public class ProjectRepositoryTests
                     // an index refers to -- and the plain index has to come back in its place, or
                     // 013's own DROP INDEX finds nothing to drop when the runner replays it.
                     command.CommandText = """
+                        DROP INDEX ix_measurement_result_source;
+                        ALTER TABLE measurement_result DROP COLUMN source;
+                        ALTER TABLE capture DROP COLUMN pcm_fs;
                         DROP INDEX ix_measurement_type_name;
                         DROP INDEX ix_measurement_type_trashed;
                         DROP INDEX ix_measurement_result_trashed;

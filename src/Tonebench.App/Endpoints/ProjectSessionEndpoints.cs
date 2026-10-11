@@ -77,7 +77,11 @@ public static class ProjectSessionEndpoints
                 // of .qa403 files would list as an empty folder.
                 return Results.Ok(string.IsNullOrWhiteSpace(ext)
                     ? browser.Browse(path, ProjectPaths.OpenableExtensions)
-                    : browser.Browse(path, ext));
+                    // Comma-separated, so one dialog can offer a family of them: the simulation
+                    // import takes LTspice's `.raw` and QSpice's `.qraw`, which are the same
+                    // container. Browse already lists several extensions; this is only the wire
+                    // spelling for it.
+                    : browser.Browse(path, ext.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
             }
             catch (ProjectFileException ex)
             {

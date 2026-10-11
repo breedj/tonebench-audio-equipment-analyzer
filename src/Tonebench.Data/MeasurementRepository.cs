@@ -76,6 +76,191 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         return resultId;
     }
 
+
+    /// <summary>
+    /// Saves an imported simulation: the result row marked <c>source = 'simulation'</c>, one
+    /// capture carrying the time-domain samples in <c>pcm</c>, and the rendered spectrum and
+    /// metrics derived from them.
+    ///
+    /// <para>The samples are the durable part and the spectrum is a view of them, which is what
+    /// <see cref="ReplaceRenderedSpectrumAsync"/> rewrites when the window, the FFT size, the
+    /// level offset or the band changes. Nothing about the source file is kept beyond what
+    /// <c>params_json</c> records: an LTspice <c>.raw</c> is a disposable artifact that the next
+    /// run overwrites, so it cannot be read back later.</para>
+    ///
+    /// <para>A separate method from <see cref="SaveResultAsync"/> for the same reason
+    /// <see cref="SaveSweepResultAsync"/> is: that path is the working FFT save, and widening it
+    /// to carry a pcm blob would put every existing measurement through new code for no gain.</para>
+    /// </summary>
+    public async Task<long> SaveSimulationResultAsync(SimulationSaveRequest request, CancellationToken ct)
+    {
+        if (request.Samples.Count == 0)
+            throw new ArgumentException("A simulation needs at least one channel of samples.", nameof(request));
+
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        await using var transaction = connection.BeginTransaction();
+
+        long resultId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO measurement_result
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated, source)
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, NULL, NULL, NULL, 1, @Source);
+            SELECT last_insert_rowid();
+            """,
+            new
+            {
+                request.MeasurementTypeId,
+                request.Name,
+                request.Notes,
+                Ts = TonebenchTimestamp.Now(),
+                request.ParamsJson,
+                Source = MeasurementSource.Simulation,
+            },
+            transaction);
+
+        int channels = request.Samples.Count;
+        int frames = request.Samples[0].Length;
+        int pcmBytes = PcmCodec.ByteLength(channels, frames);
+
+        // in_range_dbv / out_range_dbv stay null: a simulation has no analyzer front end and no
+        // generator, and a zero there would read as "the 0 dBV range" rather than as absent.
+        long captureId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO capture
+                (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels, pcm, pcm_fs)
+            VALUES (@ResultId, 0, @Ts, @Fs, @N, NULL, NULL, NULL, @Channels, zeroblob(@PcmBytes), @PcmFs);
+            SELECT last_insert_rowid();
+            """,
+            new
+            {
+                ResultId = resultId,
+                Ts = TonebenchTimestamp.Now(),
+                // Rounded: capture.fs is declared INTEGER and a fractional value stored there
+                // comes back as REAL, which Dapper then cannot match. See ResultSummaryRowRaw.
+                // Nothing reads this for arithmetic -- spectrum.bin_hz is what frequencies are
+                // computed from, and params_json carries the exact analysed rate.
+                Fs = (long)Math.Round(request.AnalysisRateHz),
+                N = request.FftSize,
+                Channels = channels,
+                PcmBytes = pcmBytes,
+                PcmFs = request.PcmSampleRateHz,
+            },
+            transaction);
+
+        byte[] pcm = new byte[pcmBytes];
+        PcmCodec.EncodeTo(request.Samples, pcm);
+        using (var blob = new SqliteBlob(connection, "capture", "pcm", captureId))
+            await blob.WriteAsync(pcm, ct);
+
+        foreach (var spectrum in request.Spectra)
+            await InsertSpectrumAsync(connection, transaction, captureId, spectrum, ct);
+
+        foreach (var metric in request.Metrics)
+        {
+            await connection.ExecuteAsync(
+                "INSERT INTO metric (capture_id, channel, name, value, unit) VALUES (@CaptureId, @Channel, @Name, @Value, @Unit);",
+                new { CaptureId = captureId, metric.Channel, metric.Name, metric.Value, metric.Unit },
+                transaction);
+        }
+
+        await transaction.CommitAsync(ct);
+        return resultId;
+    }
+
+    /// <summary>
+    /// The stored time-domain samples of a capture, de-interleaved, with the rate they are on, or
+    /// null when that capture carries none (which is every measured one).
+    /// </summary>
+    public async Task<StoredPcm?> GetCapturePcmAsync(long captureId, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        var row = await connection.QuerySingleOrDefaultAsync<PcmRowRaw>(
+            """
+            SELECT channels AS Channels, pcm_fs AS SampleRateHz, length(pcm) AS ByteLength
+            FROM capture WHERE id = @captureId;
+            """,
+            new { captureId });
+
+        if (row is null || row.SampleRateHz is null || row.ByteLength is null or 0)
+            return null;
+
+        byte[] buffer = new byte[row.ByteLength.Value];
+        using (var blob = new SqliteBlob(connection, "capture", "pcm", captureId, readOnly: true))
+        {
+            int totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                int read = await blob.ReadAsync(buffer.AsMemory(totalRead), ct);
+                if (read <= 0)
+                    break;
+                totalRead += read;
+            }
+        }
+
+        return new StoredPcm(PcmCodec.Decode(buffer, (int)row.Channels), row.SampleRateHz.Value);
+    }
+
+    /// <summary>
+    /// Rewrites the rendered view of an already-stored result: its spectrum blobs, its metric rows,
+    /// the analysed rate and FFT size on its capture, and its <c>params_json</c>. The pcm is not
+    /// touched -- it is the thing being re-read.
+    ///
+    /// <para><c>params_json</c> is rewritten deliberately, following
+    /// <c>ApplyBandwidthReference</c>: a stored row has to keep saying what produced it, so
+    /// re-analysing at a different window must record that window rather than leave the row
+    /// claiming the one it was imported with.</para>
+    /// </summary>
+    public async Task ReplaceRenderedSpectrumAsync(
+        long resultId,
+        string paramsJson,
+        double analysisRateHz,
+        int fftSize,
+        IReadOnlyList<StoredSpectrumInput> spectra,
+        IReadOnlyList<MeasurementMetric> metrics,
+        CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        await using var transaction = connection.BeginTransaction();
+
+        long captureId = await connection.ExecuteScalarAsync<long>(
+            "SELECT id FROM capture WHERE measurement_result_id = @resultId AND seq_index = 0;",
+            new { resultId },
+            transaction);
+
+        // Deleting a spectrum row frees its rowid, which is the recycled-rowid trap CaptureCascade
+        // exists for -- harmless here only because `spectrum` has no children of its own. If one
+        // ever gains any, this has to cascade them the same way a delete does.
+        await connection.ExecuteAsync(
+            "DELETE FROM spectrum WHERE capture_id = @captureId;", new { captureId }, transaction);
+        await connection.ExecuteAsync(
+            "DELETE FROM metric WHERE capture_id = @captureId;", new { captureId }, transaction);
+
+        await connection.ExecuteAsync(
+            "UPDATE capture SET fs = @Fs, n = @N WHERE id = @captureId;",
+            new { Fs = (long)Math.Round(analysisRateHz), N = fftSize, captureId },
+            transaction);
+        await connection.ExecuteAsync(
+            "UPDATE measurement_result SET params_json = @paramsJson WHERE id = @resultId;",
+            new { paramsJson, resultId },
+            transaction);
+
+        foreach (var spectrum in spectra)
+            await InsertSpectrumAsync(connection, transaction, captureId, spectrum, ct);
+
+        foreach (var metric in metrics)
+        {
+            await connection.ExecuteAsync(
+                "INSERT INTO metric (capture_id, channel, name, value, unit) VALUES (@CaptureId, @Channel, @Name, @Value, @Unit);",
+                new { CaptureId = captureId, metric.Channel, metric.Name, metric.Value, metric.Unit },
+                transaction);
+        }
+
+        await transaction.CommitAsync(ct);
+    }
+
+    private sealed record PcmRowRaw(long Channels, double? SampleRateHz, long? ByteLength);
+
     /// <summary>
     /// Saves one sweep: a result row plus one <c>capture</c> row per frequency, at ascending
     /// <c>seq_index</c>, each carrying that point's per-channel metrics. One transaction, per the
@@ -836,7 +1021,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             $"""
             SELECT mr.id AS ResultId, p.name AS ProjectName, mt.name AS MeasurementTypeName,
                    mr.name AS Name, mr.notes AS Notes, mr.ts AS TimestampUtc,
-                   c.id AS CaptureId, c.fs AS SampleRateHz, c.n AS FftSize, c.channels AS Channels
+                   c.id AS CaptureId, c.fs AS SampleRateHz, c.n AS FftSize, c.channels AS Channels,
+                   mr.source AS Source
             FROM measurement_result mr
             JOIN measurement_type mt ON mt.id = mr.measurement_type_id
             JOIN project p ON p.id = mt.project_id
@@ -914,7 +1100,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
 
             return new MeasurementSummary(
                 r.ResultId, r.ProjectName, r.MeasurementTypeName, r.Name, r.Notes,
-                TonebenchTimestamp.Parse(r.TimestampUtc), r.SampleRateHz, (int)r.FftSize, (int)r.Channels, channels);
+                TonebenchTimestamp.Parse(r.TimestampUtc), r.SampleRateHz, (int)r.FftSize, (int)r.Channels, channels,
+                r.Source);
         }).ToList();
     }
 
@@ -928,7 +1115,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                    p.name AS ProjectName, mt.name AS MeasurementTypeName, mt.kind AS Kind,
                    mr.name AS Name, mr.notes AS Notes, mr.ts AS TimestampUtc, mr.params_json AS ParamsJson,
                    c.id AS CaptureId, c.fs AS SampleRateHz, c.n AS FftSize, c.channels AS Channels,
-                   c.in_range_dbv AS InRangeDbv, c.out_range_dbv AS OutRangeDbv, c.gen_json AS GenJson
+                   c.in_range_dbv AS InRangeDbv, c.out_range_dbv AS OutRangeDbv, c.gen_json AS GenJson,
+                   mr.source AS Source, c.pcm_fs AS PcmSampleRateHz
             FROM measurement_result mr
             JOIN measurement_type mt ON mt.id = mr.measurement_type_id
             JOIN project p ON p.id = mt.project_id
@@ -957,7 +1145,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             row.Name, row.Notes, TonebenchTimestamp.Parse(row.TimestampUtc), row.ParamsJson,
             row.CaptureId, row.SampleRateHz, (int)row.FftSize, (int)row.Channels,
             row.InRangeDbv, row.OutRangeDbv, row.GenJson,
-            availableChannels, metricsByChannel);
+            availableChannels, metricsByChannel, row.Source, row.PcmSampleRateHz);
     }
 
     public async Task<StoredSpectrum?> GetSpectrumAsync(long captureId, int channel, CancellationToken ct)
@@ -1095,15 +1283,41 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     // dynamic typing returns Int64 for every INTEGER-affinity column regardless of what CLR type
     // wrote it, and Dapper's record/constructor binding requires an exact type match (unlike its
     // single-column scalar path, which is more lenient). Narrowed to `int` at the call site.
+    /// <summary>
+    /// <c>SampleRateHz</c> reads <c>capture.fs</c> as a <c>long</c>, and that is why
+    /// <see cref="SaveSimulationResultAsync"/> rounds the rate it stores there.
+    ///
+    /// <para>SQLite's column affinity is advisory: a value that is not losslessly an integer is
+    /// kept as REAL in an INTEGER column. An imported simulation's analysis rate is derived from
+    /// the run's duration -- 86231.58 Hz, say -- so it would be stored that way, and Dapper matches
+    /// a record's constructor against the types the <i>reader</i> reports, strictly and in both
+    /// directions: a measured row hands back Int64 and a <c>double</c> parameter fails, an imported
+    /// one hands back Double and a <c>long</c> parameter fails. There is no parameter type that
+    /// serves both.</para>
+    ///
+    /// <para>Casting the column in the query was tried and is worse: a cast is a computed column,
+    /// and a computed column has no declared type at all when the result set is empty -- which the
+    /// trash tests hit at once, listing a trashed measurement's results and getting none -- so
+    /// Dapper reports it as <c>byte[]</c> and fails the same unhelpful way. No <c>IFNULL</c> fixes
+    /// that, because there is no row to take a type from. So the column keeps the integer the
+    /// schema declares, and the exact rate lives where it is actually read from: the analysed rate
+    /// in <c>params_json</c>, and the bin size -- which is what every displayed frequency is
+    /// computed from -- in <c>spectrum.bin_hz</c>, both REAL.</para>
+    ///
+    /// <para>Sibling of the all-NULL-column trap the headline query documents, and it announces
+    /// itself the same way: "a parameterless default constructor ... is required", naming nothing
+    /// that is wrong.</para>
+    /// </summary>
     private sealed record ResultSummaryRowRaw(
         long ResultId, string ProjectName, string MeasurementTypeName, string Name, string? Notes,
-        string TimestampUtc, long CaptureId, long SampleRateHz, long FftSize, long Channels);
+        string TimestampUtc, long CaptureId, long SampleRateHz, long FftSize, long Channels,
+        string? Source);
 
     private sealed record ResultDetailRowRaw(
         long ResultId, long MeasurementTypeId, string ProjectName, string MeasurementTypeName, string Kind,
         string Name, string? Notes, string TimestampUtc, string ParamsJson,
         long CaptureId, long SampleRateHz, long FftSize, long Channels,
-        double? InRangeDbv, double? OutRangeDbv, string? GenJson);
+        double? InRangeDbv, double? OutRangeDbv, string? GenJson, string? Source, double? PcmSampleRateHz);
 
     /// <summary>
     /// The fundamental a headline THD figure is quoted at. 1 kHz because that is what every

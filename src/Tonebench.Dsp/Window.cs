@@ -163,7 +163,12 @@ public static class Window
     /// Abramowitz &amp; Stegun 9.8.2 polynomial is only good to ~2e-7 relative, which is coarse
     /// against a window whose whole point is a −170 dB sidelobe floor.</para>
     /// </summary>
-    private static double BesselI0(double x)
+    /// <remarks>
+    /// Internal rather than private because <see cref="Resampler"/> needs the same series for its
+    /// Kaiser-windowed FIR, and the reasons above for not taking one from a package apply there
+    /// too. Shared rather than copied: two power series that must agree is one too many.
+    /// </remarks>
+    internal static double BesselI0(double x)
     {
         double halfSquared = x * x / 4.0;
         double term = 1.0;

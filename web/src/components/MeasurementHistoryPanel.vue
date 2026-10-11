@@ -4,13 +4,15 @@ import { api, type MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
 import { isImpulseResponseKind } from '../measurements/kinds'
+import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
 import EditMeasurementDialog from './EditMeasurementDialog.vue'
+import SimulationReanalyzeDialog from './SimulationReanalyzeDialog.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const emit = defineEmits<{ error: [message: string]; report: [resultId: number] }>()
 
 const { currentTypeId, types } = useProjects()
-const { items, filter, error, load, remove } = useMeasurements()
+const { items, filter, error, load, remove, reloadOverlay } = useMeasurements()
 
 // This panel is always scoped to the measurement the sidebar has open, so every row shares its
 // kind and the CSV links can be decided once rather than per row. An impulse response is the one
@@ -20,6 +22,12 @@ const isImpulseResponse = computed(() =>
   isImpulseResponseKind(types.value.find((t) => t.id === currentTypeId.value)?.kind),
 )
 
+// Measured runs and imported simulations are both results of this measurement (migration 014),
+// split for display only. Same module the checklist uses, so the two lists cannot disagree about
+// what belongs where.
+const groups = computed(() => groupHistory(items.value))
+const withHeaders = computed(() => showsGroupHeaders(groups.value))
+
 const form = reactive({ fromDate: '', toDate: '' })
 
 const editDialogOpen = ref(false)
@@ -28,6 +36,31 @@ const editingItem = ref<MeasurementSummary | null>(null)
 function onEdit(item: MeasurementSummary) {
   editingItem.value = item
   editDialogOpen.value = true
+}
+
+// Re-analysing an imported simulation -- offered only on those rows, because it is the stored
+// samples that make it possible and only a simulation has any (migration 014's capture.pcm).
+const reanalyzeId = ref<number | null>(null)
+const reanalyzeOpen = ref(false)
+
+function onReanalyze(item: MeasurementSummary) {
+  reanalyzeId.value = item.resultId
+  reanalyzeOpen.value = true
+}
+
+/**
+ * The result's spectrum, its metrics and its params_json have all been rewritten, so the list's
+ * headline figures are stale and so is anything the chart is drawing from it. Reloading the list
+ * covers the first; `reloadOverlay` covers the second and is a no-op when the result is not
+ * checked.
+ */
+async function onReanalyzed(resultId: number) {
+  try {
+    await load()
+    await reloadOverlay(resultId)
+  } catch (e) {
+    emit('error', (e as Error).message)
+  }
 }
 
 function applyFilter() {
@@ -108,10 +141,22 @@ async function onConfirmDelete(item: MeasurementSummary) {
     </p>
     <div v-else class="overflow-x-auto">
       <table class="w-full text-sm">
-        <tbody>
-          <tr v-for="item in items" :key="item.resultId" class="border-t border-neutral-100 dark:border-neutral-800">
+        <tbody v-for="group in groups" :key="group.id">
+          <tr v-if="withHeaders">
+            <td colspan="4" class="pt-3 pb-1 text-[10px] font-semibold tracking-wide text-neutral-400 uppercase dark:text-neutral-500">
+              {{ group.label }}
+            </td>
+          </tr>
+          <tr v-for="item in group.items" :key="item.resultId" class="border-t border-neutral-100 dark:border-neutral-800">
             <td class="py-1 pr-2">
               {{ item.name }}
+              <span
+                v-if="isSimulation(item)"
+                class="ml-1 rounded bg-violet-100 px-1 text-[9px] font-semibold tracking-wide text-violet-700 uppercase dark:bg-violet-950 dark:text-violet-300"
+                title="Imported from an LTspice simulation, not measured."
+              >
+                sim
+              </span>
               <span v-if="item.notes" class="text-neutral-400"> — {{ item.notes }}</span>
             </td>
             <td class="py-1 pr-2 whitespace-nowrap text-neutral-400">{{ new Date(item.timestampUtc).toLocaleString() }}</td>
@@ -131,6 +176,16 @@ async function onConfirmDelete(item: MeasurementSummary) {
                     @click="onEdit(item)"
                   >
                     Edit
+                  </button>
+                  <!-- Only a simulation carries the samples this works from. -->
+                  <button
+                    v-if="isSimulation(item)"
+                    type="button"
+                    class="rounded border px-2 py-1 btn-action"
+                    title="Change the window, FFT size, level offset, start time or band and recompute this simulation's spectrum from the samples stored with it. The file is not needed."
+                    @click="onReanalyze(item)"
+                  >
+                    Re-analyse
                   </button>
                   <a
                     :href="api.measurementCsvExportUrl(item.resultId)"
@@ -199,7 +254,9 @@ async function onConfirmDelete(item: MeasurementSummary) {
               </div>
             </td>
           </tr>
-          <tr v-if="items.length === 0">
+        </tbody>
+        <tbody v-if="items.length === 0">
+          <tr>
             <td colspan="4" class="py-1 text-xs text-neutral-400 dark:text-neutral-600">No measurements saved yet.</td>
           </tr>
         </tbody>
@@ -207,5 +264,12 @@ async function onConfirmDelete(item: MeasurementSummary) {
     </div>
 
     <EditMeasurementDialog :open="editDialogOpen" :item="editingItem" @close="editDialogOpen = false" />
+
+    <SimulationReanalyzeDialog
+      :open="reanalyzeOpen"
+      :result-id="reanalyzeId"
+      @close="reanalyzeOpen = false"
+      @reanalyzed="onReanalyzed"
+    />
   </CollapsibleSection>
 </template>

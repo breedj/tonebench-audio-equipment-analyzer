@@ -158,7 +158,97 @@ public sealed record FftSpectrumParameters(
     /// measurement the user has merely selected.
     /// </summary>
     string? ChartHarmonicsSort = null,
-    string? ChartOtherPeaksSort = null);
+    string? ChartOtherPeaksSort = null)
+{
+    /// <summary>
+    /// Set only on a result imported from a circuit simulation -- see migration 014. Null means a
+    /// measured capture, which is every row an older build wrote and every row the live FFT screen
+    /// writes. Its presence is what says the result has stored samples behind it and can therefore
+    /// be re-analysed at a different window, FFT size, level offset or band.
+    /// </summary>
+    public SimulationParameters? Simulation { get; init; }
+}
+
+/// <summary>
+/// Where an imported simulation came from. Kept in full so the result can say what produced it
+/// after the fact, and so a changed circuit can be re-imported the same way -- but note nothing
+/// reads <see cref="Path"/> back: an LTspice <c>.raw</c> is overwritten by the next run and deleted
+/// without warning, which is exactly why the samples are stored instead.
+/// </summary>
+public sealed record SimulationSource(
+    string Path,
+    string Title,
+    string? Date,
+    string Plotname,
+    IReadOnlyList<string> Flags,
+    string LeftTrace,
+    /// <summary>
+    /// <c>V</c> or <c>A</c>. A branch-current trace is a legitimate thing to look at and is in
+    /// amps, so the unit travels with the result rather than being assumed to be volts.
+    /// </summary>
+    string LeftUnit,
+    string? RightTrace,
+    string? RightUnit,
+    double NativeRateHz,
+    int PointCount,
+    double SourceStartS,
+    double SourceEndS,
+    IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// The re-appliable half of an imported simulation's settings: the ones that are not already
+/// <see cref="FftSpectrumParameters"/> members. Changing any of these and re-analysing rebuilds the
+/// spectrum from the stored samples without the source file.
+/// </summary>
+/// <param name="StartTimeS">
+/// Absolute simulation time the analysed record starts at, i.e. the number as LTspice shows it.
+/// Exists because a tube amplifier's <c>.tran</c> begins with a startup transient -- coupling caps
+/// and bias settling -- and a record straddling it measures the settling rather than the circuit.
+/// </param>
+/// <param name="LevelOffsetDb">
+/// Applied to the samples at analysis time, never baked into them. A simulated node may be read
+/// through a divider or a pad on the real bench, and keeping this outside the stored waveform is
+/// what lets it be corrected afterwards.
+/// </param>
+/// <param name="RemovedDcV">
+/// The DC each stored channel had subtracted at import, in its own unit, in channel order.
+///
+/// <para>Removed before the samples are quantised to f32, and that ordering is the whole point. A
+/// simulator trace carries its node's operating point, and on a tube plate that is several hundred
+/// volts under a signal of a few: f32 precision is relative to the largest value present, so
+/// storing the rail costs the signal most of its resolution -- measured, a 1 V tone on a 300 V rail
+/// reads a distortion floor of 0.00015 % against 0.00000029 % for the same tone around zero, a
+/// factor of 517. Taking the mean off first makes the stored precision relative to the signal, and
+/// nothing is lost: the figure is kept here, so the operating point is still reported and could be
+/// added back.</para>
+///
+/// <para>It is also what keeps the noise figures meaningful at all. A few hundred volts in bin 0
+/// leaks out of any window far enough to swamp the bottom of the measurement band -- the same
+/// capture read THD+N 8373 % and SNR -38.5 dB with the rail left on, which is arithmetically
+/// correct and describes nothing anyone wants to know.</para>
+/// </param>
+/// <param name="PcmStartS">
+/// Absolute simulation time the <i>stored samples</i> begin at, which is where
+/// <see cref="StartTimeS"/> was when they were written and never moves afterwards.
+///
+/// <para>The two are the same thing until the first re-analysis and then they are not, which is
+/// why this exists: the samples behind a result start where the import left them, so a later
+/// re-analysis can move the record's start <i>forward</i> into them but can never recover anything
+/// earlier. Without it a re-analysis at a later start time would shorten the record arithmetically
+/// while still reading from the first stored sample -- trimming the end instead of skipping the
+/// beginning, which is the opposite of what the setting says.</para>
+///
+/// <para><b>Null means the samples begin at <see cref="StartTimeS"/></b>, which is true of every
+/// row written before this was recorded: at import the two are equal by construction, and nothing
+/// but a re-analysis can separate them.</para>
+/// </param>
+public sealed record SimulationParameters(
+    SimulationSource Source,
+    double StartTimeS,
+    double LevelOffsetDb,
+    bool PeriodicRecord,
+    IReadOnlyList<double>? RemovedDcV = null,
+    double? PcmStartS = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
@@ -589,7 +679,13 @@ public sealed record MeasurementSummary(
     double SampleRateHz,
     int FftSize,
     int Channels,
-    IReadOnlyDictionary<int, ChannelHeadline> ChannelHeadlines);
+    IReadOnlyDictionary<int, ChannelHeadline> ChannelHeadlines,
+    /// <summary>
+    /// <c>measurement_result.source</c>: null for a measured run, <c>'simulation'</c> for one
+    /// imported from an LTspice <c>.raw</c>. On the summary rather than only the detail because the
+    /// history list groups by it, and a second fetch per row to find out would be absurd.
+    /// </summary>
+    string? Source = null);
 
 public sealed record StoredSpectrum(
     int Channel, WindowType Window, double S1, double S2, double EnbwHz, double BinSizeHz,
@@ -615,7 +711,16 @@ public sealed record MeasurementDetail(
     double? OutRangeDbv,
     string? GenJson,
     IReadOnlyList<int> AvailableChannels,
-    IReadOnlyDictionary<int, IReadOnlyDictionary<string, double>> MetricsByChannel);
+    IReadOnlyDictionary<int, IReadOnlyDictionary<string, double>> MetricsByChannel,
+    /// <summary>See <see cref="MeasurementSummary.Source"/>.</summary>
+    string? Source = null,
+    /// <summary>
+    /// The sample rate of <c>capture.pcm</c>, when this capture carries one -- the simulator's own
+    /// grid, not <see cref="SampleRateHz"/>, which is the rate the stored spectrum was analysed at.
+    /// Null for every measured capture, and what tells a caller whether this result can be
+    /// re-analysed at all.
+    /// </summary>
+    double? PcmSampleRateHz = null);
 
 /// <summary>
 /// One frequency-response curve on the way into the database — a <c>response_trace</c> row.
@@ -1545,3 +1650,38 @@ public sealed record ImpulseResponseParameters(
     /// </summary>
     double? ExternalGainLeftDb = null,
     double? ExternalGainRightDb = null);
+
+/// <summary>
+/// The values <c>measurement_result.source</c> takes. Null in the database means a measured run --
+/// see migration 014 -- so there is deliberately no constant for that.
+/// </summary>
+public static class MeasurementSource
+{
+    public const string Simulation = "simulation";
+}
+
+/// <summary>Time-domain samples read back out of <c>capture.pcm</c>, with the rate they are on.</summary>
+public sealed record StoredPcm(double[][] Channels, double SampleRateHz);
+
+/// <summary>
+/// One imported simulation on its way into the database. <see cref="Samples"/> is the durable part
+/// -- the simulator's own waveform on a uniform grid, with no level offset and no start-time slice
+/// applied, so both stay changeable -- and <see cref="Spectra"/> and <see cref="Metrics"/> are the
+/// rendered view of it at the parameters <see cref="ParamsJson"/> records.
+/// </summary>
+/// <param name="AnalysisRateHz">
+/// The rate the spectrum was analysed at, derived from the run's duration and the FFT size. Stored
+/// on <c>capture.fs</c>, and not the same thing as <see cref="PcmSampleRateHz"/>.
+/// </param>
+/// <param name="PcmSampleRateHz">The simulator's own grid, stored on <c>capture.pcm_fs</c>.</param>
+public sealed record SimulationSaveRequest(
+    long MeasurementTypeId,
+    string Name,
+    string? Notes,
+    string ParamsJson,
+    double AnalysisRateHz,
+    int FftSize,
+    double PcmSampleRateHz,
+    IReadOnlyList<double[]> Samples,
+    IReadOnlyList<StoredSpectrumInput> Spectra,
+    IReadOnlyList<MeasurementMetric> Metrics);

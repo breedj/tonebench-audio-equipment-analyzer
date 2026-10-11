@@ -1012,7 +1012,19 @@ public sealed record ImpedanceParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null)
+{
+    /// <summary>
+    /// Present when this result was imported from a simulator's <c>.ac</c> run rather than
+    /// measured, and null — the default — on every measured one. The same block
+    /// <see cref="FrequencyResponseParameters.AcSimulation"/> carries, so one reader serves both,
+    /// and it is how the server and the client tell an imported impedance curve from a bench one.
+    ///
+    /// <para>Its <c>LevelOffsetDb</c> is unused here and stays 0: an offset is a claim about how
+    /// the bench sees a level, and ohms are ohms.</para>
+    /// </summary>
+    public AcSimulationParameters? AcSimulation { get; init; }
+}
 
 /// <summary>One save of a frequency-response measurement: a result row, its single capture, and the curves.</summary>
 public sealed record ResponseSaveRequest(

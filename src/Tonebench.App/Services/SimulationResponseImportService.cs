@@ -439,6 +439,218 @@ public sealed class SimulationResponseImportService(
     }
 
     /// <summary>
+    /// Imports an <c>.ac</c> run as an <b>impedance</b> result: one voltage trace over one current
+    /// trace, which is Z in ohms at every frequency the simulator solved.
+    ///
+    /// <para>The same file-level refusals as the response import — it goes through the same
+    /// <c>Inspect</c> — and the same one-result-per-sweep shape. What differs is two lines of
+    /// arithmetic and where the rows land.</para>
+    ///
+    /// <para><b>Both traces are required and their units are checked</b>, because an impedance is
+    /// volts over amps and nothing else. <see cref="LtspiceVariable.Unit"/> already maps
+    /// <c>device_current</c> and its relatives to A, so the mistake can be named rather than
+    /// divided. Requiring the current also removes the "drive it with 1 A and read the voltage as
+    /// ohms" shortcut's assumption without removing the shortcut: with a 1 A source that column is
+    /// a constant 1, and dividing by it costs nothing.</para>
+    ///
+    /// <para><b>The sign is the trap, and the data settles it.</b> LTspice's <c>I(V1)</c> flows
+    /// <i>into</i> the source's + terminal, so V/I comes out half a turn round as often as not —
+    /// the same signature <see cref="ImpedanceMath.NegativeRealFraction"/> already exists to catch
+    /// on a bench measurement, where it can only warn because the fix there is physical rewiring.
+    /// Here the fix is a sign and the data proves which one, since a passive one-port cannot
+    /// present a negative real part over most of its band. So
+    /// <see cref="AcImpedanceCurrentDirection.Auto"/> flips it and says so in a warning, and the
+    /// two explicit settings are there for anyone who disagrees.</para>
+    /// </summary>
+    public async Task<IReadOnlyList<long>> ImportImpedanceAsync(
+        long measurementTypeId, AcImpedanceImportRequest request, CancellationToken ct)
+    {
+        var info = Inspect(request.Path, ct);
+        var header = LtspiceRawFile.ReadHeader(request.Path);
+        var chosen = ResolveSweeps(info, request.SweepIndices);
+
+        var voltage = header.Variables[RequireTraceIndex(header, request.VoltageTraceIndex, "voltage")];
+        var current = header.Variables[RequireTraceIndex(header, request.CurrentTraceIndex, "current")];
+        RequireUnit(voltage, "V", "a voltage", request.Path);
+        RequireUnit(current, "A", "a current", request.Path);
+
+        var columns = LtspiceRawFile.ReadComplexColumns(
+            request.Path, header, [header.FrequencyVariable!.Index, voltage.Index, current.Index], ct);
+
+        var resultIds = new List<long>(chosen.Count);
+        foreach (var sweep in chosen)
+        {
+            resultIds.Add(await ImportImpedanceSweepAsync(
+                measurementTypeId, request, info, voltage, current, columns, sweep, ct));
+        }
+
+        return resultIds;
+    }
+
+    private async Task<long> ImportImpedanceSweepAsync(
+        long measurementTypeId,
+        AcImpedanceImportRequest request,
+        AcSimulationFileInfo info,
+        LtspiceVariable voltage,
+        LtspiceVariable current,
+        Complex[][] columns,
+        AcSimulationSweep sweep,
+        CancellationToken ct)
+    {
+        double[] freqHz = [.. columns[0].Skip(sweep.FirstPoint).Take(sweep.PointCount).Select(c => c.Real)];
+        Complex[] v = [.. columns[1].Skip(sweep.FirstPoint).Take(sweep.PointCount)];
+        Complex[] i = [.. columns[2].Skip(sweep.FirstPoint).Take(sweep.PointCount)];
+
+        var warnings = new List<string>(info.Warnings);
+        var z = DivideToImpedance(v, i, request.CurrentDirection, warnings);
+
+        var trace = ImpedanceTraceBuilder.BuildPoints(
+            ImpedanceTraceKind.Impedance,
+            freqHz,
+            z,
+            // Exact arithmetic on an exact curve, so there is no second estimate for it to agree
+            // with -- which is what coherence reports. The same 1.0 BuildPointTrace writes.
+            [.. Enumerable.Repeat(1.0, freqHz.Length)]);
+
+        var source = new AcSimulationSource(
+            Path: info.Path,
+            Title: info.Title,
+            Date: info.Date,
+            Plotname: info.Plotname,
+            Flags: info.Flags,
+            OutputTrace: voltage.Name,
+            OutputUnit: voltage.Unit,
+            ReferenceTrace: current.Name,
+            ReferenceUnit: current.Unit,
+            PointCount: sweep.PointCount,
+            StartFreqHz: sweep.StartFreqHz,
+            EndFreqHz: sweep.EndFreqHz,
+            PointsPerDecade: sweep.PointsPerDecade,
+            Warnings: warnings,
+            SweepCount: info.Sweeps.Count,
+            SweepIndex: info.Sweeps.Count > 1 ? sweep.Index : null,
+            SweepLabel: sweep.Label);
+
+        string stem = string.IsNullOrWhiteSpace(request.Name)
+            ? $"{Path.GetFileNameWithoutExtension(request.Path)} - {voltage.Name}/{current.Name}"
+            : request.Name.Trim();
+        string name = info.Sweeps.Count <= 1
+            ? stem
+            : $"{stem} - {sweep.Label ?? $"step {sweep.Index + 1} of {info.Sweeps.Count}"}";
+
+        long resultId = await measurementRepository.SaveResponseResultAsync(
+            new ResponseSaveRequest(
+                measurementTypeId, name, request.Notes,
+                ImpedanceParamsJson(source, sweep),
+                DeviceName: null, Serial: null, FwVer: null, IsSimulated: true,
+                SampleRateHz: 0.0, FftSize: sweep.PointCount,
+                Channels: 2,
+                InRangeDbv: null, OutRangeDbv: null,
+                Traces: [MeasurementSaveService.ToImpedanceTraceInput(trace, ResponseTraceKind.Impedance)],
+                PointPreviews: null,
+                Source: MeasurementSource.Simulation),
+            ct);
+
+        logger.LogInformation(
+            "Imported AC simulation {Name} from {Path} as impedance: {Voltage}/{Current}, sweep {Sweep} of " +
+            "{Sweeps}, {Points} points over {StartHz:F3}-{EndHz:F0} Hz, peak {PeakDb:F2} dB-ohm at {PeakHz:F1} Hz",
+            name, request.Path, voltage.Name, current.Name, sweep.Index + 1, info.Sweeps.Count,
+            sweep.PointCount, sweep.StartFreqHz, sweep.EndFreqHz, trace.PeakDbOhms, trace.PeakFreqHz);
+
+        return resultId;
+    }
+
+    /// <summary>
+    /// Z = V / I, with the current's reference direction resolved.
+    ///
+    /// <para>A zero current reads as zero ohms rather than as infinity: a non-finite value on this
+    /// curve is stored by SQLite as NULL and truncates the JSON response part way through on the
+    /// way back out — the <c>ImpedanceStatusJsonTests</c> rule — and a node the source cannot drive
+    /// has no impedance worth reporting anyway.</para>
+    /// </summary>
+    private static Complex[] DivideToImpedance(
+        Complex[] voltage, Complex[] current, AcImpedanceCurrentDirection direction, List<string> warnings)
+    {
+        var z = new Complex[voltage.Length];
+        for (int k = 0; k < z.Length; k++)
+            z[k] = current[k] == Complex.Zero ? Complex.Zero : voltage[k] / current[k];
+
+        bool invert = direction == AcImpedanceCurrentDirection.Inverted;
+        if (direction == AcImpedanceCurrentDirection.Auto)
+        {
+            double negative = ImpedanceMath.NegativeRealFraction(z, 0, z.Length - 1);
+            if (negative > 0.5)
+            {
+                invert = true;
+                warnings.Add(
+                    $"{negative * 100.0:F0} % of this curve had a negative real part, which a passive one-port " +
+                    "cannot present, so the current's sign has been flipped. That is the usual case rather than " +
+                    "a fault: a simulator's source current flows into its own + terminal, which puts V/I half a " +
+                    "turn round. Set the current direction explicitly if that is not what you meant.");
+            }
+        }
+
+        if (invert)
+        {
+            for (int k = 0; k < z.Length; k++)
+                z[k] = -z[k];
+        }
+
+        return z;
+    }
+
+    /// <summary>
+    /// The settings document an imported impedance carries. Most of <see cref="ImpedanceParameters"/>
+    /// describes a bench fixture, and the honest answer for a V/I division is that there is none:
+    /// no reference resistor, no calibration standards, no drive level. Zeros and nulls say that,
+    /// where plausible-looking figures would claim a fixture that never existed — the reasoning
+    /// behind the response import's <c>LevelMode: "NotApplicable"</c>.
+    /// </summary>
+    private string ImpedanceParamsJson(AcSimulationSource source, AcSimulationSweep sweep) =>
+        JsonSerializer.Serialize(
+            new ImpedanceParameters(
+                Method: ImpedanceMethod.ReferenceResistor.ToString(),
+                Stimulus: ImpedanceStimulus.SteppedSine.ToString(),
+                ReferenceOhms: 0.0,
+                RightChannelIsReference: false,
+                FrequencySpanHz: sweep.EndFreqHz,
+                ResolutionMultiplier: 1,
+                ChirpStartHz: sweep.StartFreqHz,
+                LevelValue: 0.0,
+                LevelUnit: "",
+                SmoothingDenominator: 0,
+                AverageCount: 1,
+                CableMode: ImpedanceCableMode.None.ToString(),
+                FixedCableOhms: 0.0,
+                FixedCableMillihenry: 0.0,
+                StartFreqHz: sweep.StartFreqHz,
+                EndFreqHz: sweep.EndFreqHz)
+            {
+                AcSimulation = new AcSimulationParameters(source, 0.0, sweep.StartFreqHz, sweep.EndFreqHz),
+            },
+            SerializerOptions);
+
+    private static int RequireTraceIndex(LtspiceRawHeader header, int index, string what)
+    {
+        if (index < 0 || index >= header.Variables.Count)
+            throw new ArgumentException($"There is no trace {index} to read the {what} from.");
+
+        return index;
+    }
+
+    private static void RequireUnit(LtspiceVariable variable, string unit, string what, string path)
+    {
+        if (variable.Unit == unit)
+            return;
+
+        string isWhat = variable.Unit.Length == 0 ? $"a \"{variable.Type}\" trace" : $"in {variable.Unit}";
+        throw new FormatException(
+            $"{Path.GetFileName(path)}'s {variable.Name} is {isWhat}, not {what}. An impedance is volts over " +
+            "amps, so this import needs one of each -- a node voltage, and the current through the source " +
+            "driving it.");
+    }
+
+    /// <summary>
     /// Re-analyses a stored AC simulation from its own curves at new settings, rewriting its
     /// <c>response_trace</c> rows and its <c>params_json</c>.
     ///

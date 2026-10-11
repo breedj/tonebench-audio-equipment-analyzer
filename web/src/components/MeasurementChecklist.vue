@@ -4,11 +4,14 @@ import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
 import { useSweep } from '../composables/useSweep'
 import { dashAttr, sweepOverlayDash } from '../measurements/sweepOverlayStyles'
-import { isSweepKind, isFrequencyResponseKind, FFT_SPECTRUM_KIND } from '../measurements/kinds'
+import { isSweepKind, isFrequencyResponseKind, isImpedanceKind, FFT_SPECTRUM_KIND } from '../measurements/kinds'
 import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
+// A module store rather than an emit, because every screen mounts its own checklist and the
+// handler was forgotten twice -- see simulationImport.ts.
+import { openSimulationImport } from '../measurements/simulationImport'
 import CollapsibleSection from './CollapsibleSection.vue'
 
-const emit = defineEmits<{ error: [message: string]; importSimulation: [] }>()
+const emit = defineEmits<{ error: [message: string] }>()
 
 const { currentTypeId, types } = useProjects()
 const { items, overlays, addOverlay, setOverlayVisible, visibleOverlayCount, canShowMoreOverlays } =
@@ -31,16 +34,27 @@ const currentKind = computed(() => types.value.find((t) => t.id === currentTypeI
 const groups = computed(() => groupHistory(items.value))
 const withHeaders = computed(() => showsGroupHeaders(groups.value))
 
-// Two screens can import one, and which file each takes is the whole distinction: an FFT
+// Three screens can import one, and what each takes of the file is the whole distinction: an FFT
 // measurement takes a transient (.tran) run, because a spectrum is what a waveform becomes; a
-// frequency response takes an AC (.ac) sweep, because that already is one. A sweep screen takes
-// neither -- nothing a simulator writes is a distortion-against-level curve.
+// frequency response takes an AC (.ac) sweep, because that already is one; an impedance
+// measurement takes the same AC sweep but reads a voltage over a current, which is ohms. A sweep
+// screen takes none of them -- nothing a simulator writes is a distortion-against-level curve.
 //
 // The dialog that opens follows from this too, and a file of the wrong kind is refused by name,
 // pointing at the screen it does belong on.
 const canImport = computed(
-  () => currentKind.value === FFT_SPECTRUM_KIND || isFrequencyResponseKind(currentKind.value),
+  () =>
+    currentKind.value === FFT_SPECTRUM_KIND ||
+    isFrequencyResponseKind(currentKind.value) ||
+    isImpedanceKind(currentKind.value),
 )
+
+/** What the button says it will read, which is the thing most often got wrong. */
+const importsWhat = computed(() => {
+  if (isImpedanceKind(currentKind.value)) return 'a voltage and a current from a simulated .ac sweep'
+  if (isFrequencyResponseKind(currentKind.value)) return 'a simulated .ac sweep'
+  return 'a simulated .tran run'
+})
 
 // Checkbox state mirrors the overlay's visibility (checked = plotted on the chart), matching the
 // design's "check it to see it" model. Unchecking hides rather than removes the overlay, so its
@@ -105,8 +119,8 @@ async function onToggle(resultId: number, event: Event) {
           v-if="canImport && currentTypeId !== null"
           type="button"
           class="rounded border px-1.5 py-0.5 text-[10px] btn-action"
-          :title="`Import a simulated ${isFrequencyResponseKind(currentKind) ? '.ac sweep' : '.tran run'} (.raw or .qraw) as a trace on this chart.`"
-          @click="emit('importSimulation')"
+          :title="`Import ${importsWhat} (.raw or .qraw) as a trace on this chart.`"
+          @click="openSimulationImport()"
         >
           Import simulation…
         </button>

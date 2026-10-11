@@ -125,7 +125,13 @@ describe('the log window', () => {
   })
 
   it('keeps today alone at one day', () => {
-    const today = `tonebench-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.log`
+    // Built from the *local* date, as the app's own log names are and as logsWithin compares.
+    // `toISOString()` is UTC, which is a different day here between midnight and 02:00 in summer
+    // time -- so this read as a broken window for two hours a night and passed the other
+    // twenty-two. Found at 00:05 on 2026-10-12.
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const today = `tonebench-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.log`
     const logs = [file(today, 10), file('tonebench-20200101.log', 10)]
 
     expect(logsWithin(logs, 1).map((f) => f.name)).toEqual([today])

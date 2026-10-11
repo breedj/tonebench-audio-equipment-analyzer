@@ -76,6 +76,29 @@ public static class SimulationEndpoints
                 return Results.Ok(new ImportedSimulationsResponse(resultIds));
             }));
 
+        // The same `.ac` file read as ohms instead of as a gain. Its own route rather than a mode
+        // on the one above: the two take different traces, produce different rows and land on
+        // different measurement kinds, and a shape carrying both would be four optional fields
+        // serving two callers that never read each other's.
+        group.MapPost("/{measurementTypeId:long}/import-impedance", async (
+            long measurementTypeId,
+            ImportAcImpedanceRequest request,
+            SimulationResponseImportService import,
+            CancellationToken ct) =>
+            await GuardAsync(async () =>
+            {
+                if (!EnumParsing.TryParse(
+                        request.CurrentDirection, AcImpedanceCurrentDirection.Auto,
+                        out AcImpedanceCurrentDirection direction, out var directionError))
+                {
+                    return Results.BadRequest(directionError);
+                }
+
+                var resultIds = await import.ImportImpedanceAsync(
+                    measurementTypeId, request.ToRequest(direction), ct);
+                return Results.Ok(new ImportedSimulationsResponse(resultIds));
+            }));
+
         app.MapPost("/api/measurements/{resultId:long}/reanalyze-response", async (
             long resultId,
             ReanalyzeAcSimulationRequest request,
@@ -278,6 +301,24 @@ public sealed record ImportAcSimulationRequest(
         Path, OutputTraceIndex, ReferenceTraceIndex, LevelOffsetDb, AnalysisLowHz, AnalysisHighHz,
         new BandwidthReferenceSpec(mode, BandwidthReferenceLowHz, BandwidthReferenceHighHz), Name, Notes,
         SweepIndices);
+}
+
+/// <param name="CurrentDirection">
+/// Auto, AsStored or Inverted. Auto is what is wanted almost always — a simulator's source current
+/// flows into its own + terminal, which puts V/I half a turn round, and a passive one-port's real
+/// part cannot be negative across its band.
+/// </param>
+public sealed record ImportAcImpedanceRequest(
+    string Path,
+    int VoltageTraceIndex,
+    int CurrentTraceIndex,
+    string? CurrentDirection = null,
+    string? Name = null,
+    string? Notes = null,
+    IReadOnlyList<int>? SweepIndices = null)
+{
+    internal AcImpedanceImportRequest ToRequest(AcImpedanceCurrentDirection direction) => new(
+        Path, VoltageTraceIndex, CurrentTraceIndex, direction, Name, Notes, SweepIndices);
 }
 
 public sealed record ReanalyzeAcSimulationRequest(

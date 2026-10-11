@@ -61,6 +61,63 @@ function hasStandard(cal: ImpedanceCalibrationJson | null | undefined): boolean 
   return !!cal && Array.isArray(cal.freqHz) && cal.freqHz.length > 0
 }
 
+/**
+ * The Settings rows of an impedance curve that was *imported* from a simulator's `.ac` run, or null
+ * when the result is a measurement.
+ *
+ * <p>Tried before everything below, because almost none of it applies: there was no fixture, so the
+ * reference resistor is 0 and there are no standards; there was no stimulus and no drive level. The
+ * bench rows would print a run that never happened — the same reason the response chapter has an
+ * arm of its own.</p>
+ */
+function acImpedanceSettingsRows(params: Record<string, unknown>): ReportRow[] | null {
+  const simulation = params['acSimulation'] as Record<string, unknown> | null | undefined
+  const source = simulation?.['source'] as Record<string, unknown> | null | undefined
+  if (!simulation || !source) return null
+
+  const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null)
+  const num = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null
+
+  const rows: ReportRow[] = [{ label: 'Source', value: 'Simulated (.ac sweep)' }]
+  const path = str(source['path'])
+  if (path) rows.push({ label: 'File', value: path })
+
+  const startHz = num(source['startFreqHz'])
+  const endHz = num(source['endFreqHz'])
+  if (startHz !== null && endHz !== null) {
+    rows.push({ label: 'Sweep', value: `${formatHz(startHz)} – ${formatHz(endHz)}` })
+  }
+
+  const points = num(source['pointCount'])
+  const perDecade = num(source['pointsPerDecade'])
+  if (points !== null) {
+    rows.push({
+      label: 'Points',
+      value:
+        perDecade !== null && perDecade > 0
+          ? `${points.toLocaleString()} (${perDecade.toFixed(0)} per decade)`
+          : points.toLocaleString(),
+    })
+  }
+
+  const voltage = str(source['outputTrace'])
+  const current = str(source['referenceTrace'])
+  if (voltage && current) rows.push({ label: 'Impedance', value: `${voltage} / ${current}` })
+
+  const label = str(source['sweepLabel'])
+  const index = num(source['sweepIndex'])
+  const count = num(source['sweepCount'])
+  if (count !== null && count > 1) {
+    rows.push({
+      label: 'Step',
+      value: label ?? `${(index ?? 0) + 1} of ${count}`,
+    })
+  }
+
+  return rows
+}
+
 /** The Settings section's rows for an impedance run, in the config panel's order: fixture, calibration, measurement, advanced. */
 export function impedanceSettingsRows(paramsJson: string): ReportRow[] {
   let params: Partial<ImpedanceParameters>
@@ -70,6 +127,9 @@ export function impedanceSettingsRows(paramsJson: string): ReportRow[] {
     return []
   }
   if (!params || typeof params !== 'object') return []
+
+  const simulated = acImpedanceSettingsRows(params as unknown as Record<string, unknown>)
+  if (simulated) return simulated
 
   const rows: ReportRow[] = []
   const stimulus = params.stimulus

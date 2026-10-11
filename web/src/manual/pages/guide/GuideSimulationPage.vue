@@ -161,6 +161,24 @@
       or three of them and they draw over each other, which is the comparison you were after.
     </p>
 
+    <h2>A simulated loudspeaker impedance</h2>
+
+    <p>
+      The same AC sweep can be read as <strong>ohms</strong> instead of gain, which is the quickest
+      way to see whether a driver model, a crossover or an output transformer behaves the way the
+      datasheet implies. Make sure the simulation saves the source's current as well as the node
+      voltage — in LTspice, that is automatic unless you have a <code>.save</code> line, where it is
+      <code>.save V(spk) I(V1)</code> — then open an <strong>Impedance</strong> measurement and
+      import there.
+    </p>
+
+    <p>
+      Pick the node and the source's current; the dialog does the division. It will usually tell you
+      it flipped the current's sign, which is normal rather than a mistake: a simulator counts a
+      source's current as flowing into itself, so the answer comes out upside down and the import
+      turns it back the right way up.
+    </p>
+
     <h2>Reading the comparison</h2>
 
     <p>

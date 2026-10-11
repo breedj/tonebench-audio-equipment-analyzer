@@ -2365,6 +2365,26 @@ export interface ImportedSimulations {
   resultIds: number[]
 }
 
+/**
+ * The same `.ac` file read as ohms: one voltage trace over one current trace. Both are required —
+ * with a 1 A source the current column is a constant 1, so the "read the voltage as ohms" shortcut
+ * is just picking that source's current trace, and no assumption is left to get wrong.
+ */
+export interface ImportAcImpedanceRequest {
+  path: string
+  voltageTraceIndex: number
+  currentTraceIndex: number
+  /**
+   * `Auto`, `AsStored` or `Inverted`. Auto is almost always right: a simulator's source current
+   * flows into its own + terminal, which puts V/I half a turn round, and a passive one-port cannot
+   * present a negative real part across its band — so the data says which sign is meant.
+   */
+  currentDirection?: string | null
+  name?: string | null
+  notes?: string | null
+  sweepIndices?: number[]
+}
+
 /** Everything optional: null leaves that setting as it was stored. */
 export interface ReanalyzeAcSimulationRequest {
   levelOffsetDb?: number
@@ -3217,6 +3237,13 @@ export const api = {
 
   importAcSimulation: (measurementTypeId: number, body: ImportAcSimulationRequest) =>
     request<ImportedSimulations>(`/simulations/${measurementTypeId}/import-ac`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** The same file as an impedance curve, onto an Impedance measurement. */
+  importAcImpedance: (measurementTypeId: number, body: ImportAcImpedanceRequest) =>
+    request<ImportedSimulations>(`/simulations/${measurementTypeId}/import-impedance`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

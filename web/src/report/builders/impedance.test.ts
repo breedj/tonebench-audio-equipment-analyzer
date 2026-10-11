@@ -71,6 +71,62 @@ function rowsToObject(rows: { label: string; value: string }[]) {
 }
 
 describe('impedanceSettingsRows', () => {
+  /**
+   * An imported `.ac` curve has no fixture at all, and the bench rows would describe a run that
+   * never happened -- "Reference resistor 0.000 Ω", a stimulus, a drive level. The simulation arm
+   * is tried first and replaces the lot, which is also what the response chapter does.
+   */
+  it('describes an imported sweep instead of the bench run it never was', () => {
+    const params = JSON.stringify({
+      method: 'ReferenceResistor',
+      stimulus: 'SteppedSine',
+      referenceOhms: 0,
+      rightChannelIsReference: false,
+      averageCount: 1,
+      startFreqHz: 10,
+      endFreqHz: 100000,
+      cableMode: 'None',
+      acSimulation: {
+        source: {
+          path: 'C:/amp/woofer.raw',
+          startFreqHz: 10,
+          endFreqHz: 100000,
+          pointCount: 201,
+          pointsPerDecade: 50,
+          outputTrace: 'V(spk)',
+          referenceTrace: 'I(V1)',
+          sweepCount: 3,
+          sweepIndex: 1,
+          sweepLabel: 'vas=55',
+        },
+        analysisLowHz: 10,
+        analysisHighHz: 100000,
+      },
+    })
+
+    expect(rowsToObject(impedanceSettingsRows(params))).toEqual({
+      Source: 'Simulated (.ac sweep)',
+      File: 'C:/amp/woofer.raw',
+      Sweep: '10.00 Hz – 100.0 kHz',
+      Points: '201 (50 per decade)',
+      Impedance: 'V(spk) / I(V1)',
+      Step: 'vas=55',
+    })
+  })
+
+  it('numbers an imported step the simulator did not name', () => {
+    const params = JSON.stringify({
+      referenceOhms: 0,
+      acSimulation: {
+        source: { pointCount: 50, sweepCount: 3, sweepIndex: 2, sweepLabel: null },
+        analysisLowHz: 10,
+        analysisHighHz: 1000,
+      },
+    })
+
+    expect(rowsToObject(impedanceSettingsRows(params))['Step']).toBe('3 of 3')
+  })
+
   it('labels a calibrated chirp run the way the config panel does', () => {
     expect(rowsToObject(impedanceSettingsRows(chirpParams))).toEqual({
       'Reference resistor': '100.0 Ω',

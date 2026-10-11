@@ -1175,7 +1175,12 @@ public sealed class MeasurementSaveService(
         ToImpedanceTraceInput(trace, ImpedanceTraceKindName(trace.Kind));
 
     /// <param name="kindName">The stored kind — the trace's own for an impedance result, <see cref="ResponseTraceKind.OutputImpedance"/> for a Zout curve, which is an impedance trace on the wire.</param>
-    private static ResponseTraceInput ToImpedanceTraceInput(ImpedanceTrace trace, string kindName) =>
+    /// <remarks>
+    /// <c>internal</c> for the same reason <see cref="ToTraceInput"/> is: the simulation import
+    /// builds its own traces and has to store them in exactly the shape a measured one is stored
+    /// in, and a second converter is a second place for the zeroed bandwidth blocks to drift.
+    /// </remarks>
+    internal static ResponseTraceInput ToImpedanceTraceInput(ImpedanceTrace trace, string kindName) =>
         new(
             kindName,
             trace.StartFreqHz,

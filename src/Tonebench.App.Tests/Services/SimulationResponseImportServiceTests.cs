@@ -794,6 +794,156 @@ public class SimulationResponseImportServiceTests : IDisposable
         });
     }
 
+    // ---- an .ac run read as an impedance ----
+
+    /// <summary>
+    /// The oracle is arithmetic again: a series R–L is <c>Z = R + j2πfL</c> in closed form at every
+    /// frequency, so the magnitude, the phase <i>and</i> the resonance-free shape are all checkable
+    /// against a formula rather than against the app's own output. Driven by a 1 A source, which is
+    /// also the case that proves requiring the current trace costs nothing — its column is a
+    /// constant 1, and dividing by it is the identity.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]  // LTspice: a complex abscissa
+    [InlineData(true)]   // QSpice:  a bare f64 abscissa
+    public async Task ImportImpedance_OfASeriesResistorAndInductor_ReadsTheFormula(bool qspice)
+    {
+        const double ohms = 6.8;
+        const double henry = 0.6e-3;
+
+        double[] freqHz = LogSweep(10.0, 100_000.0, 50);
+        Complex[] current = [.. freqHz.Select(_ => Complex.One)];
+        Complex[] voltage = [.. freqHz.Select(f => new Complex(ohms, 2.0 * Math.PI * f * henry))];
+
+        string raw = WriteAcSweep($"rl-{qspice}.raw", freqHz, voltage, qspice: qspice, current: current);
+
+        await WithHarnessAsync(async h =>
+        {
+            long resultId = Assert.Single(await h.ImportImpedanceAsync(raw, voltageIndex: 1, currentIndex: 2));
+            var z = await h.ImpedanceAsync(resultId);
+
+            Assert.Equal(freqHz.Length, z.FreqHz.Length);
+            for (int k = 0; k < freqHz.Length; k++)
+            {
+                var expected = new Complex(ohms, 2.0 * Math.PI * freqHz[k] * henry);
+
+                // Stored as dB relative to 1 ohm -- the impedance convention, not a gain.
+                Assert.Equal(20.0 * Math.Log10(expected.Magnitude), z.MagnitudeMaxDb[k], 1e-3);
+                Assert.Equal(expected.Phase * 180.0 / Math.PI, z.PhaseDeg[k], 1e-3);
+                Assert.Equal(1.0, z.Coherence[k], 1e-6);
+            }
+
+            // At 10 Hz the coil contributes 0.038 ohm of 6.8, so the bottom of the sweep is the
+            // resistor to three decimals -- which is what makes the top end the interesting half.
+            Assert.Equal(ohms, Math.Pow(10.0, z.MagnitudeMaxDb[0] / 20.0), 1e-3);
+        });
+    }
+
+    /// <summary>
+    /// A simulator's source current flows into its own + terminal, so <c>V/I</c> comes out half a
+    /// turn round — a flat 6.8 Ω load reads −6.8 Ω at ±180°, which is exactly the swapped-channel
+    /// signature the app already detects on a bench measurement. There it can only warn, because
+    /// the fix is rewiring; here the fix is a sign and the data proves which one, so Auto corrects
+    /// it and says so.
+    /// </summary>
+    [Fact]
+    public async Task ImportImpedance_WithTheCurrentTheOtherWayRound_FlipsItAndSaysSo()
+    {
+        double[] freqHz = LogSweep(20.0, 20_000.0, 20);
+        Complex[] backwards = [.. freqHz.Select(_ => -Complex.One)];
+        Complex[] voltage = [.. freqHz.Select(_ => new Complex(6.8, 0.0))];
+
+        string raw = WriteAcSweep("backwards.raw", freqHz, voltage, current: backwards);
+
+        await WithHarnessAsync(async h =>
+        {
+            var auto = await h.ImpedanceAsync(Assert.Single(
+                await h.ImportImpedanceAsync(raw, 1, 2, name: "auto")));
+            var asStored = await h.ImpedanceAsync(Assert.Single(
+                await h.ImportImpedanceAsync(raw, 1, 2, direction: AcImpedanceCurrentDirection.AsStored,
+                    name: "as stored")));
+
+            // Auto: a real 6.8 ohm resistor at 0 degrees.
+            Assert.Equal(20.0 * Math.Log10(6.8), auto.MagnitudeMaxDb[0], 1e-3);
+            Assert.Equal(0.0, auto.PhaseDeg[0], 1e-3);
+
+            // AsStored: the same magnitude at half a turn, which is the reading the flip exists to
+            // avoid -- correct arithmetic about a physically impossible load.
+            Assert.Equal(20.0 * Math.Log10(6.8), asStored.MagnitudeMaxDb[0], 1e-3);
+            Assert.Equal(180.0, Math.Abs(asStored.PhaseDeg[0]), 1e-3);
+
+            var stored = await h.StoredImpedanceSimulationAsync("auto");
+            Assert.Contains(
+                stored.Source.Warnings,
+                w => w.Contains("negative real part", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// An impedance is volts over amps, so a second voltage trace is refused by name rather than
+    /// divided into a dimensionless number that would be stored and drawn as ohms.
+    /// </summary>
+    [Fact]
+    public async Task ImportImpedance_WithTwoVoltages_IsRefusedByUnit()
+    {
+        double[] freqHz = LogSweep(20.0, 20_000.0, 10);
+        string raw = WriteAcSweep("units.raw", freqHz, OnePole(freqHz), reference: OnePole(freqHz));
+
+        await WithHarnessAsync(async h =>
+        {
+            var ex = await Assert.ThrowsAsync<FormatException>(
+                () => h.ImportImpedanceAsync(raw, voltageIndex: 1, currentIndex: 2));
+
+            Assert.Contains("V(in)", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("volts over amps", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// The resonance is what an impedance curve is read for, and <c>BuildPoints</c> finds it on the
+    /// log axis the simulator wrote rather than on a uniform one. A parallel RLC peaks at
+    /// <c>1/(2π√(LC))</c>, which is a number to check against.
+    /// </summary>
+    [Fact]
+    public async Task ImportImpedance_OfAParallelResonance_PutsThePeakWhereTheFormulaDoes()
+    {
+        const double ohms = 40.0;
+        const double henry = 10e-3;
+        const double farad = 253.3e-6;   // 1/(2*pi*sqrt(LC)) = 100.0 Hz
+
+        double[] freqHz = LogSweep(10.0, 1000.0, 200);
+        Complex[] current = [.. freqHz.Select(_ => Complex.One)];
+        Complex[] voltage =
+        [
+            .. freqHz.Select(f =>
+            {
+                double w = 2.0 * Math.PI * f;
+                Complex y = (1.0 / ohms) + (Complex.One / new Complex(0.0, w * henry)) + new Complex(0.0, w * farad);
+                return Complex.One / y;
+            }),
+        ];
+
+        string raw = WriteAcSweep("resonance.raw", freqHz, voltage, current: current);
+
+        await WithHarnessAsync(async h =>
+        {
+            long resultId = Assert.Single(await h.ImportImpedanceAsync(raw, 1, 2));
+            var rows = await h.RowsAsync(resultId);
+
+            var z = Assert.Single(rows);
+            Assert.Equal(ResponseTraceKind.Impedance, z.Kind);
+
+            double resonanceHz = 1.0 / (2.0 * Math.PI * Math.Sqrt(henry * farad));
+            Assert.Equal(resonanceHz, z.PeakHz, resonanceHz * 0.01);
+            Assert.Equal(20.0 * Math.Log10(ohms), z.PeakDb, 0.01);
+
+            // The bandwidth columns are zeros, as every impedance row's are: corners are a response
+            // concept and the reader branches on the kind.
+            Assert.Equal(0.0, z.OneDb.LowerHz);
+            Assert.Equal(0.0, z.ThreeDb.UpperHz);
+        });
+    }
+
     // ---- helpers ----
 
     /// <summary>What LTspice writes for a stepped AC run, verbatim.</summary>
@@ -833,14 +983,17 @@ public class SimulationResponseImportServiceTests : IDisposable
         Complex[]? reference = null,
         bool qspice = false,
         string plotname = "AC Analysis",
-        string? flags = null)
+        string? flags = null,
+        Complex[]? current = null)
     {
-        var columns = new List<(string Name, Complex[] Values)>
+        var columns = new List<(string Name, string Type, Complex[] Values)>
         {
-            ("V(out)", output),
+            ("V(out)", "voltage", output),
         };
         if (reference is not null)
-            columns.Add(("V(in)", reference));
+            columns.Add(("V(in)", "voltage", reference));
+        if (current is not null)
+            columns.Add(("I(V1)", "device_current", current));
 
         int variables = columns.Count + 1;
         int points = freqHz.Length;
@@ -861,7 +1014,7 @@ public class SimulationResponseImportServiceTests : IDisposable
         header.Append("Variables:\n");
         header.Append(CultureInfo.InvariantCulture, $"\t0\t{(qspice ? "Frequency" : "frequency")}\tfrequency\n");
         for (int v = 0; v < columns.Count; v++)
-            header.Append(CultureInfo.InvariantCulture, $"\t{v + 1}\t{columns[v].Name}\tvoltage\n");
+            header.Append(CultureInfo.InvariantCulture, $"\t{v + 1}\t{columns[v].Name}\t{columns[v].Type}\n");
         header.Append("Binary:\n");
 
         var encoding = qspice ? (Encoding)Encoding.Latin1 : Encoding.Unicode;
@@ -934,6 +1087,30 @@ public class SimulationResponseImportServiceTests : IDisposable
 
         public async Task<StoredResponseTrace> GainAsync(long resultId) =>
             (await RowsAsync(resultId)).Single(r => r.Kind == ResponseTraceKind.Gain);
+
+        public Task<IReadOnlyList<long>> ImportImpedanceAsync(
+            string path,
+            int voltageIndex,
+            int currentIndex,
+            AcImpedanceCurrentDirection direction = AcImpedanceCurrentDirection.Auto,
+            string? name = null) =>
+            Service.ImportImpedanceAsync(
+                TypeId,
+                new AcImpedanceImportRequest(path, voltageIndex, currentIndex, direction, name, Notes: null),
+                CancellationToken.None);
+
+        public async Task<StoredResponseTrace> ImpedanceAsync(long resultId) =>
+            (await RowsAsync(resultId)).Single(r => r.Kind == ResponseTraceKind.Impedance);
+
+        /// <summary>The AC block out of an imported impedance's own <c>params_json</c>.</summary>
+        public async Task<AcSimulationParameters> StoredImpedanceSimulationAsync(string name)
+        {
+            var listed = await Measurements.ListResultsAsync(
+                new MeasurementFilter(MeasurementTypeId: TypeId), CancellationToken.None);
+            long id = listed.Single(r => r.Name == name).ResultId;
+            string paramsJson = (await Measurements.GetResultAsync(id, CancellationToken.None))!.ParamsJson;
+            return JsonSerializer.Deserialize<ImpedanceParameters>(paramsJson, serializerOptions)!.AcSimulation!;
+        }
 
         public async Task<IReadOnlyList<string>> NamesAsync(IReadOnlyList<long> resultIds)
         {

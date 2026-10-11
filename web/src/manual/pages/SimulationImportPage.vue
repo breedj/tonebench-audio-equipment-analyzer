@@ -637,13 +637,79 @@
       </tbody>
     </table>
 
-    <h2>A current trace</h2>
+    <h2>The same sweep as an impedance</h2>
 
     <p>
-      Branch currents can be imported and are measured correctly, but they are in amps: their levels
-      are dB relative to 1&nbsp;A, while the chart's axis and the noise-density figures are written
-      for volts. Read the shape and the relative figures, not the absolute levels. The dialog says
-      so when a current trace is chosen.
+      Open the file on an <strong>Impedance</strong> measurement instead and it is read as ohms: one
+      node voltage divided by the current through the source driving it, at every frequency the
+      simulator solved. A modelled driver, crossover or output transformer then draws under the
+      measured one, and the resonance readout and the component fit work off it exactly as they work
+      off a bench curve.
+    </p>
+
+    <p>
+      The schematic has to <em>save</em> a current for this. LTspice saves everything by default; if
+      you have a <code>.save</code> line, add the source's current to it:
+    </p>
+
+    <p><code>.save V(spk) I(V1)</code></p>
+
+    <table class="manual-wrap">
+      <thead>
+        <tr>
+          <th>Control</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Voltage across it</td>
+          <td>The node the source drives — the top of the thing being measured.</td>
+        </tr>
+        <tr>
+          <td>Current through it</td>
+          <td>
+            Normally the source's own, <code>I(V1)</code>. Both are required, which removes an
+            assumption rather than adding work: with a 1&nbsp;A source the current column is a
+            constant 1, so picking it <em>is</em> the "read the voltage as ohms" shortcut.
+          </td>
+        </tr>
+        <tr>
+          <td>Current direction</td>
+          <td>
+            A source's current flows into its own <strong>+</strong> terminal, so V/I usually comes
+            out half a turn round — a flat 6.8&nbsp;Ω load reading −6.8&nbsp;Ω at 180°, which is the
+            same signature a swapped bench fixture gives. <strong>Automatic</strong> flips it when
+            most of the curve has a negative real part, which no passive one-port can have, and
+            says so in a warning. The other two settings are there if you disagree.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      <strong>There is no fixture, and the stored settings say so</strong> — no reference resistor,
+      no open or short standard, no drive level. A division of two solved quantities needs none of
+      them, so those rows carry zeros rather than figures that would describe a bench run that never
+      happened, and a report on the result prints what produced it instead.
+    </p>
+
+    <p>
+      Nothing here is re-appliable afterwards: there is no band and no reference level to change,
+      and the sign is settled at import. Re-import if one of the two traces was the wrong pick. And
+      the usual caveat applies with force — an AC analysis is a linearisation, so a driver's
+      impedance rise with excursion, a core's saturation and an inductor going non-linear at power
+      are all absent from it.
+    </p>
+
+    <h2>A current trace on a response measurement</h2>
+
+    <p>
+      Branch currents can be imported there too and are measured correctly, but they are in amps:
+      their levels are dB relative to 1&nbsp;A, while the chart's axis and the noise-density figures
+      are written for volts. Read the shape and the relative figures, not the absolute levels. The
+      dialog says so when a current trace is chosen. To get <em>ohms</em> rather than amps, use the
+      impedance import above.
     </p>
   </div>
 </template>

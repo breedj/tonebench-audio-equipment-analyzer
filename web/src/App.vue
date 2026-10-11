@@ -50,8 +50,10 @@ import OtherPeaksTable from './components/OtherPeaksTable.vue'
 import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
 import MeasurementNotesPanel from './components/MeasurementNotesPanel.vue'
 import MeasurementChecklist from './components/MeasurementChecklist.vue'
+import { closeSimulationImport, simulationImportOpen } from './measurements/simulationImport'
 import SimulationImportDialog from './components/SimulationImportDialog.vue'
 import AcSimulationImportDialog from './components/AcSimulationImportDialog.vue'
+import AcImpedanceImportDialog from './components/AcImpedanceImportDialog.vue'
 import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
@@ -396,9 +398,10 @@ interface RunConfig {
 const generatorPanel = ref<InstanceType<typeof GeneratorPanel> | null>(null)
 const spectrumConfigPanel = ref<InstanceType<typeof SpectrumConfigPanel> | null>(null)
 const saveDialogOpen = ref(false)
-// Importing an LTspice simulation as a trace on the FFT chart. Only reachable from the FFT
-// screen's History section -- a .tran run is a spectrum, not a sweep.
-const simulationImportOpen = ref(false)
+// Importing a simulation as a trace. The flag is a module store rather than a ref here, because
+// every measurement screen mounts its own MeasurementChecklist and the wiring was forgotten twice
+// -- see measurements/simulationImport.ts. Which dialog it opens is still decided here, from the
+// kind, since what a file means depends on the screen it lands on.
 
 async function onSimulationImported() {
   // The new result has to appear in the History list before it can be checked, and the trash
@@ -4277,7 +4280,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:autofit-on-done="responseAutofitOnDone"
                 />
 
-                <MeasurementChecklist @error="reportError" @import-simulation="simulationImportOpen = true" />
+                <MeasurementChecklist @error="reportError" />
               </template>
             </MeasurementLayout>
           </template>
@@ -4959,7 +4962,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
             <template #aside>
               <ChartDisplayPanel>
-                <MeasurementChecklist @error="reportError" @import-simulation="simulationImportOpen = true" />
+                <MeasurementChecklist @error="reportError" />
               </ChartDisplayPanel>
             </template>
           </MeasurementLayout>
@@ -5031,17 +5034,34 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
     />
 
     <SaveMeasurementDialog :open="saveDialogOpen" @close="saveDialogOpen = false" />
+    <!--
+      One flag, three dialogs, chosen by the open measurement's kind -- the same thing the Import
+      button's own tooltip says it will read. The transient one is the `else`, so a kind that grew
+      an Import button without a dialog of its own lands somewhere rather than nowhere; today
+      MeasurementChecklist's canImport never raises the flag on one.
+    -->
     <AcSimulationImportDialog
       :open="simulationImportOpen && isFrequencyResponseKind(currentType?.kind)"
       :measurement-type-id="currentTypeId"
-      @close="simulationImportOpen = false"
+      @close="closeSimulationImport()"
+      @imported="onSimulationImported"
+    />
+
+    <AcImpedanceImportDialog
+      :open="simulationImportOpen && isImpedanceKind(currentType?.kind)"
+      :measurement-type-id="currentTypeId"
+      @close="closeSimulationImport()"
       @imported="onSimulationImported"
     />
 
     <SimulationImportDialog
-      :open="simulationImportOpen && !isFrequencyResponseKind(currentType?.kind)"
+      :open="
+        simulationImportOpen &&
+        !isFrequencyResponseKind(currentType?.kind) &&
+        !isImpedanceKind(currentType?.kind)
+      "
       :measurement-type-id="currentTypeId"
-      @close="simulationImportOpen = false"
+      @close="closeSimulationImport()"
       @imported="onSimulationImported"
     />
     <SaveAsDialog

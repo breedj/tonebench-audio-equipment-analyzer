@@ -6,7 +6,7 @@ Developed with the help of Claude.ai
 
 Ten measurement kinds, each with its own settings, charts and stored results:
 
-| | |
+| Measurement | What it does |
 |---|---|
 | **FFT analysis** | Spectrum, THD, harmonics, IMD (SMPTE/DIN/CCIF), multitone TD+N, noise floor and weighted noise figures from a live or single capture, with an oscilloscope and spectrogram beside it. |
 | **THD vs frequency** | A tone stepped across the band: THD, D2–D5 and D6+ against frequency. |

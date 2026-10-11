@@ -68,6 +68,14 @@ result with gain and phase. The traces you pick are stored inside the project fi
 overwrite and often auto-delete their output — and imported runs appear in the history list under
 their own heading, to be overlaid, re-analysed, exported and reported on like any measured result.
 
+## The manual
+
+The app carries its own manual, opened from the book button in the header, in two editions over the
+same contents: a **Simple guide** (15 pages, plain language and no formulas — what to plug in, what
+to press, what the numbers mean) and the **Full manual** (55 pages: every screen, control and
+convention, the wiring diagrams, the simulator's DUT models and the measured figures behind them).
+Each measurement screen also has a **?** button that opens straight at its own page.
+
 ## Installing
 
 The user-facing guide is [INSTALL.md](INSTALL.md); the short version follows.

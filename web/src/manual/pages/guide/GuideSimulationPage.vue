@@ -145,6 +145,22 @@
       transient run above is for.
     </p>
 
+    <h2>Trying several component values at once</h2>
+
+    <p>
+      If you are choosing a resistor rather than checking one, add a <code>.step</code> line and let
+      the simulator run the sweep once for each value:
+    </p>
+
+    <p><code>.step param ra 22k 35k 1k</code></p>
+
+    <p>
+      Import it the same way. The dialog notices that the file holds several sweeps, lists them, and
+      brings each one in as its own row in the History panel — named after the value it came from if
+      you kept LTspice's <code>.log</code> file beside the raw one, and numbered otherwise. Tick two
+      or three of them and they draw over each other, which is the comparison you were after.
+    </p>
+
     <h2>Reading the comparison</h2>
 
     <p>

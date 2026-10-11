@@ -185,3 +185,19 @@ export function parseStoredAcSimulation(
 export function hasReferenceCurve(stored: StoredAcSimulation): boolean {
   return stored.source.referenceTrace !== null
 }
+
+/**
+ * What one sweep of a `.step`ped file is called in the import dialog: the simulator's own words
+ * where there are any, and its position where there are not.
+ *
+ * <p>Here rather than in the dialog because the fallback is the whole of it, and it is the half
+ * that only ever shows up on a QSpice file — QSpice prints its `.step` lines to the console and
+ * writes no log, so every sweep of one arrives unlabelled, where every sweep of an LTspice run
+ * arrives named. A dialog that reads `label` directly shows an empty checkbox list on one
+ * simulator and not the other, which is exactly the kind of thing nothing in a `.vue` can test.</p>
+ */
+export function sweepLabel(sweep: { index: number; label: string | null }): string {
+  return sweep.label === null || sweep.label.trim() === ''
+    ? `Step ${sweep.index + 1}`
+    : sweep.label
+}

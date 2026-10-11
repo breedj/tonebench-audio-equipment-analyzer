@@ -524,6 +524,63 @@
       traces were imported, and — if only one was — what to divide it by.
     </p>
 
+    <h3 id="stepped">A <code>.step</code>ped sweep becomes one result per step</h3>
+
+    <p>
+      <code>.step param ra 22k 35k 1k</code> beside an <code>.ac</code> directive runs the sweep
+      once per value and writes them all into one file. The import reads it: the dialog says how
+      many sweeps the file holds and offers them as a list of tick boxes, all ticked, and each one
+      you keep is stored as a <strong>result of its own</strong>.
+    </p>
+
+    <p>
+      Separate results rather than one result holding fourteen curves, and that is the useful shape
+      rather than a compromise: each appears on its own row in the History list, so you tick the two
+      you want to compare, or delete the eight that were a dead end, or report on one. Three at a
+      time can be shown over each other, which is the overlay limit everywhere in the app.
+    </p>
+
+    <table class="manual-wrap">
+      <thead>
+        <tr>
+          <th>What you see</th>
+          <th>Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Names like <code>… - ra=29000</code> from LTspice</td>
+          <td>
+            The step values are not in the <code>.raw</code> at all — the header says
+            <code>stepped</code> and nothing more. LTspice writes one <code>.step ra=29000</code>
+            line per step into the <code>.log</code> beside it, and that is where the names come
+            from. Keep the log next to the raw file and the results name themselves.
+          </td>
+        </tr>
+        <tr>
+          <td>Names like <code>… - step 2 of 3</code> from QSpice</td>
+          <td>
+            QSpice prints the same lines to its console and writes no log file, so there is nothing
+            on disk to read them from. The sweeps are numbered in the order they ran.
+          </td>
+        </tr>
+        <tr>
+          <td>Each result has its own corners</td>
+          <td>
+            Every sweep is analysed on its own — its own passband reference, its own ±1 dB and
+            −3 dB corners, its own delay curves. That is the point of stepping: the figures are what
+            you are comparing.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      A stepped <strong>transient</strong> run is still refused. The same splitting would work, but
+      what a stepped <code>.tran</code> is usually for — a tone stepped across the band — is a THD
+      sweep rather than a stack of spectra, and that is a different measurement to land it on.
+    </p>
+
     <h2>What is refused, and why</h2>
 
     <table class="manual-wrap">
@@ -542,17 +599,18 @@
           </td>
         </tr>
         <tr>
-          <td>An <code>.op.raw</code></td>
+          <td>An <code>.op.raw</code> or <code>.qopraw</code></td>
           <td>
-            Refused: that is the operating-point file LTspice writes beside every run, and it holds
-            one solution rather than a waveform.
+            Refused: that is the operating-point file the simulator writes beside every run, and it
+            holds one solution rather than a waveform.
           </td>
         </tr>
         <tr>
           <td>An <code>.ac</code> run</td>
           <td>
-            Refused — it is a frequency response rather than a waveform. Importing one as a Bode
-            plot would be a useful thing to add, and is not built yet.
+            Refused <em>here</em>, and the message says where it belongs: it is a frequency response
+            rather than a waveform, so it imports on a <strong>Frequency response</strong>
+            measurement instead. See below.
           </td>
         </tr>
         <tr>
@@ -563,10 +621,17 @@
           </td>
         </tr>
         <tr>
-          <td>A <code>.step</code>ped run</td>
+          <td>A <code>.step</code>ped transient run</td>
           <td>
-            Refused: several sweeps sit in one file with the time axis restarting, and the import
-            cannot separate them. Run a single simulation instead.
+            Refused: several runs sit in one file with the time axis restarting, and this import
+            reads one waveform. A stepped <code>.ac</code> run <em>is</em> read — see
+            <a href="#stepped">below</a>.
+          </td>
+        </tr>
+        <tr>
+          <td>A <code>.dc</code>, <code>.noise</code> or <code>.tf</code> run</td>
+          <td>
+            Refused, echoing the run's own name back. No screen here takes one.
           </td>
         </tr>
       </tbody>

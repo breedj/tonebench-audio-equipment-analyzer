@@ -72,8 +72,8 @@ public static class SimulationEndpoints
                     return Results.BadRequest(referenceError);
                 }
 
-                long resultId = await import.ImportAsync(measurementTypeId, request.ToRequest(mode), ct);
-                return Results.Ok(new ImportedSimulationResponse(resultId));
+                var resultIds = await import.ImportAsync(measurementTypeId, request.ToRequest(mode), ct);
+                return Results.Ok(new ImportedSimulationsResponse(resultIds));
             }));
 
         app.MapPost("/api/measurements/{resultId:long}/reanalyze-response", async (
@@ -196,7 +196,9 @@ public static class SimulationEndpoints
         info.PointsPerDecade,
         info.IsLogSpaced,
         [.. info.Traces.Select(t => new SimulationTraceResponse(t.Index, t.Name, t.Unit))],
-        info.Warnings);
+        info.Warnings,
+        [.. info.Sweeps.Select(s => new AcSimulationSweepResponse(
+            s.Index, s.PointCount, s.StartFreqHz, s.EndFreqHz, s.PointsPerDecade, s.IsLogSpaced, s.Label))]);
 
     private static SimulationFileResponse ToResponse(SimulationFileInfo info, double measurementHiFreqHz)
     {
@@ -241,7 +243,21 @@ public sealed record AcSimulationFileResponse(
     double PointsPerDecade,
     bool IsLogSpaced,
     IReadOnlyList<SimulationTraceResponse> Traces,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<AcSimulationSweepResponse> Sweeps);
+
+/// <summary>
+/// One sweep of an <c>.ac</c> file, so the dialog can say how many there are and offer them
+/// individually. An ordinary run carries exactly one.
+/// </summary>
+public sealed record AcSimulationSweepResponse(
+    int Index,
+    int PointCount,
+    double StartFreqHz,
+    double EndFreqHz,
+    double PointsPerDecade,
+    bool IsLogSpaced,
+    string? Label);
 
 /// <param name="BandwidthReference">BandMedian or Peak, as the response measurements spell it.</param>
 public sealed record ImportAcSimulationRequest(
@@ -255,11 +271,13 @@ public sealed record ImportAcSimulationRequest(
     double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
     double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz,
     string? Name = null,
-    string? Notes = null)
+    string? Notes = null,
+    IReadOnlyList<int>? SweepIndices = null)
 {
     internal AcSimulationImportRequest ToRequest(BandwidthReferenceMode mode) => new(
         Path, OutputTraceIndex, ReferenceTraceIndex, LevelOffsetDb, AnalysisLowHz, AnalysisHighHz,
-        new BandwidthReferenceSpec(mode, BandwidthReferenceLowHz, BandwidthReferenceHighHz), Name, Notes);
+        new BandwidthReferenceSpec(mode, BandwidthReferenceLowHz, BandwidthReferenceHighHz), Name, Notes,
+        SweepIndices);
 }
 
 public sealed record ReanalyzeAcSimulationRequest(
@@ -335,3 +353,9 @@ public sealed record ReanalyzeSimulationRequest(
 }
 
 public sealed record ImportedSimulationResponse(long ResultId);
+
+/// <summary>
+/// What an `.ac` import returns: one result id per sweep imported, in sweep order. A list rather
+/// than a single id even for an ordinary one-sweep file, so the client has one shape to read.
+/// </summary>
+public sealed record ImportedSimulationsResponse(IReadOnlyList<long> ResultIds);

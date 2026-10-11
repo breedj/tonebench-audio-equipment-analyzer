@@ -190,12 +190,22 @@ async function onConfirmDelete(item: MeasurementSummary) {
                   >
                     Edit
                   </button>
-                  <!-- Only a simulation carries the samples this works from. -->
+                  <!--
+                    Only a simulation carries what this works from, and the two kinds carry
+                    different things -- a transient run's stored samples, an AC run's stored
+                    curves -- so the tooltip has to follow the same `isResponseMeasurement` the
+                    button's own dialog does. Naming an FFT size and a window over an AC sweep
+                    describes a form it will not show.
+                  -->
                   <button
                     v-if="isSimulation(item)"
                     type="button"
                     class="rounded border px-2 py-1 btn-action"
-                    title="Change the window, FFT size, level offset, start time or band and recompute this simulation's spectrum from the samples stored with it. The file is not needed."
+                    :title="
+                      isResponseMeasurement
+                        ? 'Change the analysed band, the bandwidth reference or the level offset and rebuild the curves of this simulation from the ones stored with it. The file is not needed.'
+                        : 'Change the window, FFT size, level offset, start time or band and recompute the spectrum of this simulation from the samples stored with it. The file is not needed.'
+                    "
                     @click="onReanalyze(item)"
                   >
                     Re-analyse

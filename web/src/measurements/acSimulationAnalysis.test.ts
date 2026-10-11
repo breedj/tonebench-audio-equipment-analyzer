@@ -5,6 +5,7 @@ import {
   MAX_REFERENCE_HZ,
   parseStoredAcSimulation,
   referenceBandError,
+  sweepLabel,
 } from './acSimulationAnalysis'
 
 /** The EL84 reference sweep: `.ac dec 100 0.1 5Meg`, 771 points over 7.7 decades. */
@@ -151,5 +152,19 @@ describe('parseStoredAcSimulation', () => {
 
     expect(hasReferenceCurve(one)).toBe(false)
     expect(hasReferenceCurve(two)).toBe(true)
+  })
+})
+
+describe('sweepLabel', () => {
+  it('uses the simulator own words when the log gave any', () => {
+    expect(sweepLabel({ index: 0, label: 'freq=1000' })).toBe('freq=1000')
+    expect(sweepLabel({ index: 7, label: 'ra=29000' })).toBe('ra=29000')
+  })
+
+  // Every QSpice sweep arrives here: it prints its `.step` lines to the console and writes no log.
+  it('numbers a sweep the log could not name, from one', () => {
+    expect(sweepLabel({ index: 0, label: null })).toBe('Step 1')
+    expect(sweepLabel({ index: 2, label: null })).toBe('Step 3')
+    expect(sweepLabel({ index: 1, label: '   ' })).toBe('Step 2')
   })
 })

@@ -452,6 +452,54 @@ public class LtspiceRawFileTests : IDisposable
         Assert.Contains("real data", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Both simulators announce a <c>.step</c>ped run in the header, which is the one thing about
+    /// these files that needs no inference. Measured 2026-10-11 on four generated runs: LTspice
+    /// writes <c>complex double forward log nocompression stepped</c> and
+    /// <c>real double forward nocompression stepped</c>, QSpice <c>complex stepped</c> and
+    /// <c>real stepped</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("real double forward nocompression stepped", true)]
+    [InlineData("complex stepped", true)]
+    [InlineData("real double forward nocompression", false)]
+    public void ReadHeader_ReadsTheSteppedFlag(string flags, bool expected)
+    {
+        string path = WriteRaw(
+            $"stepflag-{expected}-{flags.Length}.raw", "Transient Analysis", flags, Columns(4, 2),
+            complexData: flags.Contains("complex", StringComparison.Ordinal));
+
+        Assert.Equal(expected, LtspiceRawFile.ReadHeader(path).IsStepped);
+    }
+
+    /// <summary>
+    /// The sweeps of a stepped run are <b>not the same length</b> — measured, a
+    /// <c>.step param freq 1k 3k 1k</c> transient came back as 5353 / 5682 / 5964 points from
+    /// LTspice and 5311 / 5604 / 5949 from QSpice, because each run takes the timesteps it needs.
+    /// So the boundaries have to be read off the axis; dividing the point count by the number of
+    /// steps is right only for an <c>.ac</c> run, and silently wrong for every transient.
+    /// </summary>
+    [Fact]
+    public void SweepStarts_FindsEveryRestart_WhateverTheSweepLengths()
+    {
+        double[] axis = [1e-6, 2e-6, 3e-6, 1e-6, 2e-6, 1e-6, 2e-6, 3e-6, 4e-6];
+
+        Assert.Equal([0, 3, 5], LtspiceRawFile.SweepStarts(axis));
+    }
+
+    /// <summary>
+    /// One sweep is one entry rather than none, so a caller never has to special-case the ordinary
+    /// file. A repeated value counts as a restart too: a flat run of the abscissa is not a sweep
+    /// continuing, and the readers downstream need every segment strictly increasing.
+    /// </summary>
+    [Fact]
+    public void SweepStarts_OnAnOrdinaryRun_IsASingleEntry()
+    {
+        Assert.Equal([0], LtspiceRawFile.SweepStarts([0.0, 1e-6, 2e-6]));
+        Assert.Equal([], LtspiceRawFile.SweepStarts([]));
+        Assert.Equal([0, 2], LtspiceRawFile.SweepStarts([0.0, 1e-6, 1e-6, 2e-6]));
+    }
+
     // ---- fixture writing ----
 
     private static double[][] Columns(int points, int variables)

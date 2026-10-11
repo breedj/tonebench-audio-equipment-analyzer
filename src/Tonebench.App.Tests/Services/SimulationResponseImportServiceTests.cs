@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
@@ -440,21 +440,23 @@ public class SimulationResponseImportServiceTests : IDisposable
     }
 
     /// <summary>
-    /// A <c>.step</c>ped AC run writes several sweeps into one file, which shows up as a frequency
-    /// axis that restarts. Refusing it here is load-bearing: <c>GroupDelay.FromPhaseOnGrid</c>
-    /// would otherwise throw a bare "Frequencies must be strictly increasing" naming no file and no
-    /// fix.
+    /// A frequency axis that restarts in a file that does <b>not</b> claim to be stepped is still
+    /// refused, and that is the whole job of the header flag. Both simulators write <c>stepped</c>
+    /// on a <c>.step</c>ped run (measured), so a backwards axis without it is a damaged or
+    /// rewritten file -- and the arithmetic would otherwise turn it into several
+    /// plausible-looking results rather than saying anything.
     /// </summary>
     [Fact]
-    public void Inspect_OfAFrequencyAxisThatRestarts_SaysItIsASteppedRun()
+    public void Inspect_OfAnAxisThatRestartsWithoutTheSteppedFlag_IsRefused()
     {
         double[] freqHz = [.. LogSweep(10.0, 1000.0, 20), .. LogSweep(10.0, 1000.0, 20)];
-        string raw = WriteAcSweep("stepped.raw", freqHz, OnePole(freqHz));
+        string raw = WriteAcSweep("not-stepped.raw", freqHz, OnePole(freqHz));
 
         WithService(service =>
         {
             var ex = Assert.Throws<FormatException>(() => service.Inspect(raw));
             Assert.Contains(".step", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("stepped` flag", ex.Message, StringComparison.Ordinal);
         });
     }
 
@@ -657,11 +659,145 @@ public class SimulationResponseImportServiceTests : IDisposable
         {
             var ex = Assert.Throws<FormatException>(() => service.Inspect(raw));
             Assert.Contains(".step", ex.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains($"point {sweep.Length + 1}.", ex.Message, StringComparison.Ordinal);
+            Assert.Contains($"point {sweep.Length + 1}", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
+    // ---- stepped runs ----
+
+    /// <summary>
+    /// The oracle for a stepped run is arithmetic, which is why the fixtures step the source
+    /// amplitude: an AC analysis is a linearisation, so stepping an <c>AC {acmag}</c> source 1/2/3
+    /// must offset the whole curve by exactly 0, 20log10(2) and 20log10(3) dB and leave the phase
+    /// untouched. Measured on the generated LTspice and QSpice files, that is what both do, to four
+    /// decimals — so the same shape here checks the splitting against a number rather than against
+    /// itself.
+    /// </summary>
+    [Fact]
+    public async Task Import_OfASteppedRun_MakesOneResultPerSweepAtItsOwnLevel()
+    {
+        double[] one = LogSweep(10.0, 100_000.0, 20);
+        double[] freqHz = [.. one, .. one, .. one];
+        var pole = OnePole(one);
+        Complex[] output = [.. pole, .. pole.Select(c => c * 2.0), .. pole.Select(c => c * 3.0)];
+        string raw = WriteAcSweep("stepped.raw", freqHz, output, flags: SteppedFlags);
+
+        await WithHarnessAsync(async h =>
+        {
+            var ids = await h.ImportAllAsync(raw, PeakReferenced());
+            Assert.Equal(3, ids.Count);
+
+            var levels = new List<double>();
+            foreach (long id in ids)
+            {
+                var gain = await h.GainAsync(id);
+                Assert.Equal(one.Length, gain.FreqHz.Length);
+                Assert.Equal(one[0], gain.FreqHz[0], one[0] * 1e-5);
+                levels.Add(gain.MagnitudeMaxDb[0]);
+            }
+
+            // The stored magnitude is absolute (dB re 1 V), so the three results differ by exactly
+            // the two logarithms -- which is the whole oracle: each sweep was cut out at the right
+            // place and analysed on its own, rather than the file's first sweep being read three
+            // times. The tolerance is f32 storage, not arithmetic.
+            Assert.Equal(20.0 * Math.Log10(2.0), levels[1] - levels[0], 1e-4);
+            Assert.Equal(20.0 * Math.Log10(3.0), levels[2] - levels[0], 1e-4);
+
+            // Each one's own reference moved with it, so a peak-referenced corner is unchanged
+            // across the three -- the curves are the same shape at three levels.
+            var corners = new List<double>();
+            foreach (long id in ids)
+                corners.Add((await h.GainAsync(id)).ThreeDb.UpperHz);
+
+            Assert.Equal(corners[0], corners[1], corners[0] * 1e-6);
+            Assert.Equal(corners[0], corners[2], corners[0] * 1e-6);
+        });
+    }
+
+    /// <summary>
+    /// Several results of one file have to be told apart in the History list, and the only place
+    /// the step values exist is the simulator's log — the <c>.raw</c> header says <c>stepped</c> and
+    /// nothing more. LTspice writes one <c>.step freq=1000</c> line per step; QSpice writes no log
+    /// at all, which is what the numbered fallback is for.
+    /// </summary>
+    [Fact]
+    public async Task Import_OfASteppedRun_TakesEachResultsNameFromTheLog()
+    {
+        double[] one = LogSweep(10.0, 10_000.0, 10);
+        double[] freqHz = [.. one, .. one];
+        var pole = OnePole(one);
+        Complex[] output = [.. pole, .. pole];
+
+        string labelled = WriteAcSweep("labelled.raw", freqHz, output, flags: SteppedFlags);
+        File.WriteAllText(
+            Path.ChangeExtension(labelled, ".log"),
+            "Circuit: whatever\n.step ra=22000\n.step ra=23000\nTotal elapsed time: 1.3 seconds.\n");
+
+        string bare = WriteAcSweep("bare.raw", freqHz, output, flags: SteppedFlags);
+
+        await WithHarnessAsync(async h =>
+        {
+            var withLog = await h.ImportAllAsync(labelled, PeakReferenced(), name: "Amp");
+            var withoutLog = await h.ImportAllAsync(bare, PeakReferenced(), name: "Amp");
+
+            Assert.Equal(["Amp - ra=22000", "Amp - ra=23000"], await h.NamesAsync(withLog));
+            Assert.Equal(["Amp - step 1 of 2", "Amp - step 2 of 2"], await h.NamesAsync(withoutLog));
+        });
+    }
+
+    [Fact]
+    public async Task Import_OfChosenSweeps_ImportsOnlyThose()
+    {
+        double[] one = LogSweep(10.0, 10_000.0, 10);
+        double[] freqHz = [.. one, .. one, .. one];
+        var pole = OnePole(one);
+        Complex[] output = [.. pole, .. pole, .. pole];
+        string raw = WriteAcSweep("subset.raw", freqHz, output, flags: SteppedFlags);
+
+        await WithHarnessAsync(async h =>
+        {
+            var ids = await h.ImportAllAsync(raw, PeakReferenced(), name: "Amp", sweeps: [2, 0]);
+
+            // Sweep order, not the order they were asked for: a History list sorted by anything
+            // else would show step 3 above step 1.
+            Assert.Equal(["Amp - step 1 of 3", "Amp - step 3 of 3"], await h.NamesAsync(ids));
+
+            var ex = await Assert.ThrowsAsync<ArgumentException>(
+                () => h.ImportAllAsync(raw, PeakReferenced(), sweeps: [3]));
+            Assert.Contains("no sweep 4", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// The point cap is per sweep, because <c>No. Points</c> is the grand total over every step: a
+    /// cap applied to it refuses a file whose own sweeps are perfectly ordinary. 771 points stepped
+    /// 85 times reaches 65 535, which is the ceiling.
+    /// </summary>
+    [Fact]
+    public void Inspect_OfManySmallSweeps_IsNotRefusedForTheirTotal()
+    {
+        double[] one = LogSweep(1.0, 100.0, 4);
+        var freqHz = new List<double>();
+        for (int s = 0; s < 40; s++)
+            freqHz.AddRange(one);
+
+        string raw = WriteAcSweep("many.raw", [.. freqHz], OnePole([.. freqHz]), flags: SteppedFlags);
+
+        WithService(service =>
+        {
+            var info = service.Inspect(raw);
+
+            Assert.Equal(40, info.Sweeps.Count);
+            Assert.Equal(one.Length, info.PointCount);
+            Assert.All(info.Sweeps, s => Assert.Equal(one.Length, s.PointCount));
+            Assert.Contains(info.Warnings, w => w.Contains("40 sweeps", StringComparison.Ordinal));
         });
     }
 
     // ---- helpers ----
+
+    /// <summary>What LTspice writes for a stepped AC run, verbatim.</summary>
+    private const string SteppedFlags = "complex double forward log nocompression stepped";
 
     private static AcSimulationImportRequest PeakReferenced() => new(
         Path: "", OutputTraceIndex: 0, ReferenceTraceIndex: null, LevelOffsetDb: 0.0,
@@ -765,8 +901,22 @@ public class SimulationResponseImportServiceTests : IDisposable
         public MeasurementRepository Measurements { get; } = measurements;
         public long TypeId { get; } = typeId;
 
-        public Task<long> ImportAsync(
+        /// <summary>
+        /// One sweep's result, which is what all but the stepped cases want — and
+        /// <see cref="Assert.Single{T}(IEnumerable{T})"/> is doing a second job here: every one of
+        /// those cases writes a single-sweep fixture, so a file that unexpectedly split into
+        /// several fails here rather than silently having its first sweep asserted.
+        /// </summary>
+        public async Task<long> ImportAsync(
             string path, AcSimulationImportRequest template, bool referenceTrace = false, string? name = null) =>
+            Assert.Single(await ImportAllAsync(path, template, referenceTrace, name));
+
+        public Task<IReadOnlyList<long>> ImportAllAsync(
+            string path,
+            AcSimulationImportRequest template,
+            bool referenceTrace = false,
+            string? name = null,
+            IReadOnlyList<int>? sweeps = null) =>
             Service.ImportAsync(
                 TypeId,
                 template with
@@ -775,6 +925,7 @@ public class SimulationResponseImportServiceTests : IDisposable
                     OutputTraceIndex = 1,
                     ReferenceTraceIndex = referenceTrace ? 2 : null,
                     Name = name,
+                    SweepIndices = sweeps,
                 },
                 CancellationToken.None);
 
@@ -783,6 +934,15 @@ public class SimulationResponseImportServiceTests : IDisposable
 
         public async Task<StoredResponseTrace> GainAsync(long resultId) =>
             (await RowsAsync(resultId)).Single(r => r.Kind == ResponseTraceKind.Gain);
+
+        public async Task<IReadOnlyList<string>> NamesAsync(IReadOnlyList<long> resultIds)
+        {
+            var names = new List<string>();
+            foreach (long id in resultIds)
+                names.Add((await Measurements.GetResultAsync(id, CancellationToken.None))!.Name);
+
+            return names;
+        }
 
         public AcSimulationAnalysis ReadAnalysis(string paramsJson) =>
             AcSimulationAnalysis.FromParamsJson(paramsJson, serializerOptions)!;

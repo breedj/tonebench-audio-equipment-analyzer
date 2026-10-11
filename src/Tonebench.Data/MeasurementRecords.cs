@@ -1318,7 +1318,16 @@ public sealed record AcSimulationSource(
     double StartFreqHz,
     double EndFreqHz,
     double PointsPerDecade,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    /// <summary>
+    /// Which sweep of a <c>.step</c>ped file this result came from, and what the simulator called
+    /// it. <c>SweepCount</c> is 1 and the other two are null for an ordinary run, which is also what
+    /// a row written before stepped files were read deserialises to — so "one sweep, unlabelled" is
+    /// both the default and the truth about those rows.
+    /// </summary>
+    int SweepCount = 1,
+    int? SweepIndex = null,
+    string? SweepLabel = null);
 
 /// <summary>
 /// The re-appliable half of an imported <c>.ac</c> sweep's settings: the ones that are not already

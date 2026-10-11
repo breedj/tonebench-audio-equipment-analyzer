@@ -2318,6 +2318,29 @@ export interface AcSimulationFileInfo {
   isLogSpaced: boolean
   traces: SimulationTrace[]
   warnings: string[]
+  /**
+   * The sweeps the file holds, always at least one. A `.step`ped run holds one per step, written
+   * end to end, and each is imported as a result of its own — `UNIQUE(capture_id, kind)` holds one
+   * curve of each kind per result, and separate results are what makes them independently
+   * overlayable anyway.
+   */
+  sweeps: AcSimulationSweep[]
+}
+
+/** One sweep of an `.ac` file. `pointCount`/`startFreqHz`/... on the parent describe the first. */
+export interface AcSimulationSweep {
+  index: number
+  pointCount: number
+  startFreqHz: number
+  endFreqHz: number
+  pointsPerDecade: number
+  isLogSpaced: boolean
+  /**
+   * What the simulator called this step, e.g. `freq=2000`, read from the sibling `.log`. Null when
+   * there is nothing to read it from, which is every QSpice run: it prints its `.step` lines to the
+   * console and writes no log file.
+   */
+  label: string | null
 }
 
 export interface ImportAcSimulationRequest {
@@ -2333,6 +2356,13 @@ export interface ImportAcSimulationRequest {
   bandwidthReferenceHighHz?: number
   name?: string | null
   notes?: string | null
+  /** Which sweeps of a stepped file to import, or omitted for all of them. */
+  sweepIndices?: number[]
+}
+
+/** One result id per sweep imported, in sweep order. One entry for an ordinary run. */
+export interface ImportedSimulations {
+  resultIds: number[]
 }
 
 /** Everything optional: null leaves that setting as it was stored. */
@@ -3186,7 +3216,7 @@ export const api = {
     }),
 
   importAcSimulation: (measurementTypeId: number, body: ImportAcSimulationRequest) =>
-    request<ImportedSimulation>(`/simulations/${measurementTypeId}/import-ac`, {
+    request<ImportedSimulations>(`/simulations/${measurementTypeId}/import-ac`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

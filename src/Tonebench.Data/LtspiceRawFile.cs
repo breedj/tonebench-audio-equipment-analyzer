@@ -122,6 +122,20 @@ public sealed record LtspiceRawHeader(
     public bool IsFastAccess => Flags.Contains("fastaccess");
 
     /// <summary>
+    /// A <c>.step</c>ped run: several sweeps written end to end into one file, with
+    /// <see cref="PointCount"/> their grand total.
+    ///
+    /// <para><b>Both simulators write this flag</b>, which is the one thing about stepped files that
+    /// needs no inference — measured 2026-10-11 on four generated runs:
+    /// <c>complex double forward log nocompression stepped</c> and
+    /// <c>real double forward nocompression stepped</c> from LTspice 24.1.10, and
+    /// <c>complex stepped</c> and <c>real stepped</c> from QSpice. It says <i>that</i> there are
+    /// several sweeps; <see cref="LtspiceRawFile.SweepStarts"/> is what says where they begin, and
+    /// the two are cross-checked because a flag cannot be trusted over the data.</para>
+    /// </summary>
+    public bool IsStepped => Flags.Contains("stepped");
+
+    /// <summary>
     /// False when LTspice compressed the waveform, i.e. <c>.options plotwinsize=0</c> was missing.
     /// Measured on a real amplifier run: compression kept 5.7 % of the points and made the same
     /// capture read THD 0.626 % against a true 0.378 %, with H3 4.2 dB wrong. It does not look
@@ -311,6 +325,37 @@ public static class LtspiceRawFile
     }
 
     /// <summary>
+    /// Where each sweep of a <c>.step</c>ped file begins, from the abscissa itself: index 0, then
+    /// every point whose abscissa is not greater than the one before it. A file holding one sweep
+    /// returns one entry, so every caller can treat the answer uniformly.
+    ///
+    /// <para><b>From the data rather than from arithmetic</b>, because the sweeps are not the same
+    /// length. Measured on a generated <c>.step param freq 1k 3k 1k</c> transient: 5353, 5682 and
+    /// 5964 points from LTspice and 5311, 5604 and 5949 from QSpice — the simulator takes the steps
+    /// each run needs. Dividing <c>No. Points</c> by the number of steps would be right only for an
+    /// <c>.ac</c> run, where the grid is fixed.</para>
+    ///
+    /// <para>The header's <see cref="LtspiceRawHeader.IsStepped"/> says whether to expect more than
+    /// one; this says where they are. Both exist because either alone can be wrong in a way the
+    /// other catches — a flag with one sweep behind it, or a restart in a file that claims to hold
+    /// a single run.</para>
+    /// </summary>
+    public static int[] SweepStarts(ReadOnlySpan<double> abscissa)
+    {
+        if (abscissa.Length == 0)
+            return [];
+
+        var starts = new List<int> { 0 };
+        for (int i = 1; i < abscissa.Length; i++)
+        {
+            if (abscissa[i] <= abscissa[i - 1])
+                starts.Add(i);
+        }
+
+        return [.. starts];
+    }
+
+    /// <summary>
     /// Reads the given columns in one sequential pass. One pass rather than one per column because
     /// a real run is ~100 MB of which two or three columns of 141 are wanted, and a pass per column
     /// is a pass over the whole file per column.
@@ -319,9 +364,14 @@ public static class LtspiceRawFile
     /// The time column comes back as absolute seconds: <c>abs(stored) + Offset</c>. The offset is
     /// LTspice's <c>.tran</c> start-save time (5 ms in the measured file) and the stored values are
     /// relative to it, so without the add, "analyse from t =" would not mean the number the user
-    /// reads in LTspice. The <c>abs</c> is because LTspice is known to set the sign bit on some
-    /// stored time values; none of the measured files did, but a non-monotonic axis breaks the
-    /// resampler and the guard costs nothing.
+    /// reads in LTspice. QSpice writes no <c>Offset:</c> line at all and rebases its own saved
+    /// window to zero, so the same experiment reads 15-25 ms from one and 0-10 ms from the other.
+    /// <para>The <c>abs</c> is a guard against a sign bit that LTspice is said to set on stored time
+    /// values. <b>It is not a step marker, which is what folklore makes of it.</b> Measured
+    /// 2026-10-11 on two generated <c>.step</c>ped runs, one per simulator: bit 63 is clear at every
+    /// sweep boundary in both, and what marks a boundary is the abscissa restarting, plus the
+    /// <c>stepped</c> flag in the header. So the <c>abs</c> costs nothing and signals nothing; see
+    /// <see cref="SweepStarts"/>.</para>
     /// </remarks>
     public static double[][] ReadColumns(
         string path, LtspiceRawHeader header, IReadOnlyList<int> variableIndices, CancellationToken ct = default)
@@ -411,7 +461,8 @@ public static class LtspiceRawFile
     /// one's <c>abs(stored) + Offset</c> fix-up is a statement about a <c>.tran</c> start-save time
     /// that means nothing on a frequency axis. The abscissa comes back real-only — LTspice writes a
     /// zero imaginary part there and QSpice writes none at all — with <c>abs</c> applied for the
-    /// same cheap reason time has it.</para>
+    /// same cheap reason time has it, and as little meaning: a stepped <c>.ac</c> run from either
+    /// simulator leaves bit 63 clear at every sweep boundary (see <see cref="SweepStarts"/>).</para>
     /// </summary>
     public static Complex[][] ReadComplexColumns(
         string path, LtspiceRawHeader header, IReadOnlyList<int> variableIndices, CancellationToken ct = default)

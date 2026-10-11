@@ -15,12 +15,13 @@ import {
   acSimulationFit,
   MAX_REFERENCE_HZ,
   referenceBandError,
+  sweepLabel,
 } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 
 const props = defineProps<{ open: boolean; measurementTypeId: number | null }>()
-const emit = defineEmits<{ close: []; imported: [resultId: number] }>()
+const emit = defineEmits<{ close: []; imported: [resultIds: number[]] }>()
 
 const { openManual } = useManual()
 
@@ -81,8 +82,12 @@ async function inspect(path: string) {
     const input = voltages.find((t) => /^v\((in|input|src|source|vin)\d*\)$/i.test(t.name))
     form.referenceTraceIndex = input && input.index !== form.outputTraceIndex ? input.index : null
     form.name = ''
+
+    // Every sweep of a stepped run, because the comparison is the whole reason for stepping one.
+    chosenSweeps.value = found.sweeps.map((sw) => sw.index)
   } catch (e) {
     info.value = null
+    chosenSweeps.value = []
     error.value = (e as Error).message
     // Deliberately keeps lastPath: a refused file is almost always in the folder the usable one is
     // in, and the first thing anyone does next is pick a different file from it.
@@ -120,11 +125,28 @@ const bandError = computed(() =>
   ),
 )
 
+/**
+ * Which sweeps of a `.step`ped file to import. Every one by default, which is what a user who
+ * stepped a component wants to see — the point of stepping is the comparison. Empty means "all"
+ * too, so a file with one sweep never touches this.
+ */
+const chosenSweeps = ref<number[]>([])
+
+const sweeps = computed(() => info.value?.sweeps ?? [])
+const isStepped = computed(() => sweeps.value.length > 1)
+
+function toggleSweep(index: number, on: boolean) {
+  chosenSweeps.value = on
+    ? [...chosenSweeps.value, index].sort((a, b) => a - b)
+    : chosenSweeps.value.filter((i) => i !== index)
+}
+
 const canImport = computed(
   () =>
     props.measurementTypeId !== null &&
     info.value !== null &&
     form.outputTraceIndex !== null &&
+    (!isStepped.value || chosenSweeps.value.length > 0) &&
     !fit.value.bandInvalid &&
     bandError.value === null &&
     !busy.value,
@@ -153,8 +175,9 @@ async function submit() {
       bandwidthReferenceHighHz: form.bandwidthReferenceHighHz,
       name: form.name.trim() || null,
       notes: form.notes.trim() || null,
+      ...(isStepped.value ? { sweepIndices: chosenSweeps.value } : {}),
     })
-    emit('imported', result.resultId)
+    emit('imported', result.resultIds)
     emit('close')
   } catch (e) {
     error.value = (e as Error).message
@@ -206,8 +229,34 @@ async function submit() {
               <dd class="inline"> {{ info.pointsPerDecade.toFixed(0) }}/decade</dd>
             </div>
             <div><dt class="inline text-neutral-500">Traces</dt> <dd class="inline"> {{ info.traces.length }}</dd></div>
+            <div v-if="isStepped">
+              <dt class="inline text-neutral-500">Sweeps</dt>
+              <dd class="inline"> {{ sweeps.length }} (stepped)</dd>
+            </div>
           </dl>
         </div>
+
+        <!--
+          A stepped run's sweeps. Each becomes a result of its own, so this is a selection and not
+          a setting: nothing here changes how a curve is analysed, only how many curves arrive.
+        -->
+        <fieldset v-if="isStepped" class="mb-3 rounded border border-neutral-200 p-2 dark:border-neutral-700">
+          <legend class="px-1 text-xs text-neutral-500 dark:text-neutral-400">Sweeps to import</legend>
+          <div class="flex flex-wrap gap-x-4 gap-y-1">
+            <label v-for="sweep in sweeps" :key="sweep.index" class="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                :checked="chosenSweeps.includes(sweep.index)"
+                @change="toggleSweep(sweep.index, ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="font-mono text-xs">{{ sweepLabel(sweep) }}</span>
+            </label>
+          </div>
+          <p class="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+            Each one is stored as its own result, named after the step, so they can be shown over
+            each other in the History list and deleted separately.
+          </p>
+        </fieldset>
 
         <p
           v-for="warning in info.warnings"

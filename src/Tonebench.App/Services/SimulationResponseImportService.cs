@@ -12,6 +12,41 @@ namespace Tonebench.App.Services;
 /// for the dialog to offer its trace pickers, show what the sweep covers, and say what is wrong
 /// with it before anything is committed.
 /// </summary>
+/// <summary>
+/// One sweep of an <c>.ac</c> file. An ordinary run holds exactly one; a <c>.step</c>ped run holds
+/// one per step, written end to end, which is why every caller walks a list rather than reading the
+/// file's figures directly.
+/// </summary>
+/// <param name="FirstPoint">
+/// Where it begins in the file's own numbering, after any leading 0 Hz point has been left out —
+/// so the pair (FirstPoint, PointCount) is what the importer reads and what the user can count to.
+/// </param>
+/// <param name="Label">
+/// What the simulator called this step, e.g. <c>freq=2000</c>, read from the sibling <c>.log</c>.
+/// Null when there is nothing to read it from, which is every QSpice run: it prints its
+/// <c>.step</c> lines to the console and writes no log file at all.
+/// </param>
+public sealed record AcSimulationSweep(
+    int Index,
+    int FirstPoint,
+    int PointCount,
+    double StartFreqHz,
+    double EndFreqHz,
+    double PointsPerDecade,
+    bool IsLogSpaced,
+    string? Label);
+
+/// <summary>
+/// What <see cref="SimulationResponseImportService.Inspect"/> found in an <c>.ac</c> file: enough
+/// for the dialog to offer its trace pickers, show what the sweep covers, and say what is wrong
+/// with it before anything is committed.
+/// </summary>
+/// <param name="PointCount">
+/// The <b>first sweep's</b>, not the file's — as are <c>StartFreqHz</c>, <c>EndFreqHz</c>,
+/// <c>PointsPerDecade</c> and <c>IsLogSpaced</c>. On a stepped <c>.ac</c> run every step shares one
+/// grid (measured: all three steps of both generated fixtures are 121 points over 1 Hz – 1 MHz), so
+/// these describe every sweep; <c>Sweeps</c> carries each one's own figures regardless.
+/// </param>
 public sealed record AcSimulationFileInfo(
     string Path,
     string Title,
@@ -24,7 +59,8 @@ public sealed record AcSimulationFileInfo(
     double PointsPerDecade,
     bool IsLogSpaced,
     IReadOnlyList<SimulationTrace> Traces,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<AcSimulationSweep> Sweeps);
 
 /// <summary>What to import from an <c>.ac</c> run, and how to analyse it.</summary>
 /// <param name="ReferenceTraceIndex">
@@ -32,6 +68,11 @@ public sealed record AcSimulationFileInfo(
 /// own. Dividing is what a bench measurement does, and it is the only way to be right when the
 /// simulator's AC source is not exactly 1 — measured on the QSpice reference circuit, whose source
 /// sags to 0.9914 at 1 kHz, that is 0.075 dB.
+/// </param>
+/// <param name="SweepIndices">
+/// Which sweeps of a <c>.step</c>ped file to import, or null for all of them. Each becomes a result
+/// of its own, because <c>UNIQUE(capture_id, kind)</c> allows one curve per kind per result — which
+/// is also what makes them independently overlayable and separately deletable.
 /// </param>
 public sealed record AcSimulationImportRequest(
     string Path,
@@ -42,7 +83,8 @@ public sealed record AcSimulationImportRequest(
     double AnalysisHighHz,
     BandwidthReferenceSpec Reference,
     string? Name,
-    string? Notes);
+    string? Notes,
+    IReadOnlyList<int>? SweepIndices = null);
 
 /// <summary>
 /// Imports a simulator's <c>.ac</c> run as a frequency-response result, and re-analyses one that is
@@ -89,35 +131,26 @@ public sealed class SimulationResponseImportService(
 
         var frequency = LtspiceRawFile.ReadComplexColumns(path, header, [header.FrequencyVariable!.Index], ct)[0];
         double[] whole = [.. frequency.Select(c => c.Real)];
-        int skipped = LeadingDcPoints(whole);
-        var freqHz = whole.AsSpan(skipped);
+        var sweeps = SplitSweeps(whole, header, path);
 
-        if (freqHz.Length < 2)
-        {
-            throw new FormatException(
-                $"{Path.GetFileName(path)} has {freqHz.Length} point above 0 Hz, which is not a sweep. " +
-                "Every point of it is DC.");
-        }
-
-        if (freqHz[0] <= 0.0)
-        {
-            throw new FormatException(
-                $"{Path.GetFileName(path)} has a negative frequency at point {skipped}, so it is not a " +
-                "frequency sweep this import can read.");
-        }
-
+        // The first sweep is what the file's own figures describe, and on a stepped `.ac` run every
+        // step shares its grid, so the warnings below are the whole file's as well.
+        var first = sweeps[0];
+        int skipped = first.FirstPoint;
+        var freqHz = whole.AsSpan(first.FirstPoint, first.PointCount);
         var axis = AcFrequencyAxis.Of(freqHz);
 
-        if (!axis.IsMonotonic)
-        {
-            throw new FormatException(
-                // Named in the file's own numbering, which is why `skipped` is added back.
-                $"{Path.GetFileName(path)} has a frequency axis that goes backwards at point " +
-                $"{axis.FirstNonMonotonicIndex + skipped}. A stepped (`.step`) run writes several sweeps into " +
-                "one file, which this import cannot separate; run a single simulation instead.");
-        }
-
         var warnings = new List<string>();
+
+        if (sweeps.Count > 1)
+        {
+            warnings.Add(
+                $"This is a stepped (`.step`) run: {sweeps.Count} sweeps in one file. Each one is imported as a " +
+                "result of its own, so they can be shown over each other and deleted separately." +
+                (sweeps[^1].Label is null
+                    ? " They are numbered, because the simulator records what it stepped only on the console."
+                    : ""));
+        }
 
         if (skipped > 0)
         {
@@ -163,16 +196,109 @@ public sealed class SimulationResponseImportService(
             PointsPerDecade: axis.PointsPerDecade,
             IsLogSpaced: axis.IsLogSpaced,
             Traces: traces,
-            Warnings: warnings);
+            Warnings: warnings,
+            Sweeps: sweeps);
     }
 
-    /// <summary>Imports the selected traces into <paramref name="measurementTypeId"/>.</summary>
-    public async Task<long> ImportAsync(
+    /// <summary>
+    /// Splits a file into its sweeps and validates each one on its own, which is what makes a
+    /// <c>.step</c>ped run readable instead of refused.
+    ///
+    /// <para><see cref="LtspiceRawFile.SweepStarts"/> cuts at every point where the axis fails to
+    /// increase, so <b>every segment it returns is strictly increasing by construction</b> — there
+    /// is no monotonicity left to check, only the leading-DC slice and the sizes.</para>
+    ///
+    /// <para>The header's <c>stepped</c> flag is what tells a stepped run from a damaged one. Both
+    /// simulators set it, and a file with a backwards axis that does <i>not</i> claim to be stepped
+    /// is still refused — the arithmetic would otherwise cheerfully turn a corrupt or
+    /// viewer-rewritten file into several plausible-looking results.</para>
+    /// </summary>
+    private static List<AcSimulationSweep> SplitSweeps(double[] whole, LtspiceRawHeader header, string path)
+    {
+        string name = Path.GetFileName(path);
+
+        // Before splitting, because a run of equal values is a restart by SweepStarts' reckoning:
+        // an all-DC file would otherwise be reported as a stepped run of one-point sweeps, which is
+        // arithmetically true and useless to read.
+        if (LeadingDcPoints(whole) == whole.Length)
+            throw new FormatException($"{name} has no point above 0 Hz, so it is not a sweep. Every point is DC.");
+
+        var starts = LtspiceRawFile.SweepStarts(whole);
+
+        if (starts.Length > 1 && !header.IsStepped)
+        {
+            throw new FormatException(
+                $"{name} has a frequency axis that goes backwards at point {starts[1]}, and its header does not " +
+                "say it is a stepped (`.step`) run -- a stepped file from either simulator carries a `stepped` " +
+                "flag, and this one does not. Re-run the simulation.");
+        }
+
+        var labels = starts.Length > 1 ? SpiceStepLog.ReadLabels(path) : [];
+        var sweeps = new List<AcSimulationSweep>(starts.Length);
+
+        for (int s = 0; s < starts.Length; s++)
+        {
+            int from = starts[s];
+            int upTo = s + 1 < starts.Length ? starts[s + 1] : whole.Length;
+            int skipped = LeadingDcPoints(whole.AsSpan(from, upTo - from));
+            from += skipped;
+            int count = upTo - from;
+
+            string where = starts.Length > 1 ? $" of sweep {s + 1} of {starts.Length}" : "";
+
+            if (count < 2)
+            {
+                throw new FormatException(
+                    $"{name} has {count} point{where} above 0 Hz, which is not a sweep.");
+            }
+
+            if (whole[from] <= 0.0)
+            {
+                throw new FormatException(
+                    $"{name} has a negative frequency at point {from}, so it is not a frequency sweep this " +
+                    "import can read.");
+            }
+
+            if (count > AcSimulationAnalysis.MaxPoints)
+            {
+                throw new FormatException(
+                    $"{name} holds {count:N0} points{where}, more than the " +
+                    $"{AcSimulationAnalysis.MaxPoints:N0} this import stores. A `.ac dec 100` sweep of the audio " +
+                    "band is a few hundred; use a lower density, or a narrower range.");
+            }
+
+            var axis = AcFrequencyAxis.Of(whole.AsSpan(from, count));
+            sweeps.Add(new AcSimulationSweep(
+                Index: s,
+                FirstPoint: from,
+                PointCount: count,
+                StartFreqHz: axis.StartHz,
+                EndFreqHz: axis.EndHz,
+                PointsPerDecade: axis.PointsPerDecade,
+                IsLogSpaced: axis.IsLogSpaced,
+                Label: s < labels.Count ? labels[s] : null));
+        }
+
+        return sweeps;
+    }
+
+    /// <summary>
+    /// Imports the selected traces into <paramref name="measurementTypeId"/>, one result per sweep.
+    ///
+    /// <para>An ordinary run returns one id. A <c>.step</c>ped run returns one per step it was asked
+    /// for, because <c>UNIQUE(capture_id, kind)</c> holds one curve of each kind per result — and
+    /// separate results are the better shape anyway: the History list already groups imported
+    /// simulations together, each can be shown or hidden on its own, and each keeps its own corners
+    /// and its own re-analysis.</para>
+    /// </summary>
+    public async Task<IReadOnlyList<long>> ImportAsync(
         long measurementTypeId, AcSimulationImportRequest request, CancellationToken ct)
     {
         var info = Inspect(request.Path, ct);
         var header = LtspiceRawFile.ReadHeader(request.Path);
         request.Reference.Validate();
+
+        var chosen = ResolveSweeps(info, request.SweepIndices);
 
         int frequencyIndex = header.FrequencyVariable!.Index;
         var indices = new List<int> { frequencyIndex, request.OutputTraceIndex };
@@ -181,14 +307,56 @@ public sealed class SimulationResponseImportService(
         if (hasReference)
             indices.Add(request.ReferenceTraceIndex!.Value);
 
+        // One pass over the file whatever the sweep count: the columns hold every sweep end to end,
+        // and each AcSimulationSweep is the window into them.
         var columns = LtspiceRawFile.ReadComplexColumns(request.Path, header, indices, ct);
-        // The same leading-DC slice Inspect applied, recomputed from the same column rather than
-        // carried on the wire record: it is a pure function of the data, so the two cannot disagree,
-        // and info's PointCount and StartFreqHz already describe the sliced sweep.
-        int skipped = LeadingDcPoints([.. columns[0].Select(c => c.Real)]);
-        double[] freqHz = [.. columns[0].Skip(skipped).Select(c => c.Real)];
-        Complex[] output = [.. columns[1].Skip(skipped)];
-        Complex[]? reference = hasReference ? [.. columns[2].Skip(skipped)] : null;
+
+        var resultIds = new List<long>(chosen.Count);
+        foreach (var sweep in chosen)
+            resultIds.Add(await ImportSweepAsync(measurementTypeId, request, info, header, columns, sweep, hasReference, ct));
+
+        return resultIds;
+    }
+
+    /// <summary>Which sweeps an import asked for, refusing an index the file does not have.</summary>
+    private static List<AcSimulationSweep> ResolveSweeps(AcSimulationFileInfo info, IReadOnlyList<int>? requested)
+    {
+        if (requested is null || requested.Count == 0)
+            return [.. info.Sweeps];
+
+        var chosen = new List<AcSimulationSweep>(requested.Count);
+        foreach (int index in requested.Distinct().Order())
+        {
+            if (index < 0 || index >= info.Sweeps.Count)
+            {
+                // No parameter name: this message is read by a user in a dialog, and
+                // ArgumentException appends "(Parameter 'requested')" to anything that names one.
+                throw new ArgumentException(
+                    $"This file holds {info.Sweeps.Count} sweep{(info.Sweeps.Count == 1 ? "" : "s")}, so there " +
+                    $"is no sweep {index + 1} to import.");
+            }
+
+            chosen.Add(info.Sweeps[index]);
+        }
+
+        return chosen;
+    }
+
+    private async Task<long> ImportSweepAsync(
+        long measurementTypeId,
+        AcSimulationImportRequest request,
+        AcSimulationFileInfo info,
+        LtspiceRawHeader header,
+        Complex[][] columns,
+        AcSimulationSweep sweep,
+        bool hasReference,
+        CancellationToken ct)
+    {
+        double[] freqHz = [.. columns[0].Skip(sweep.FirstPoint).Take(sweep.PointCount).Select(c => c.Real)];
+        Complex[] output = [.. columns[1].Skip(sweep.FirstPoint).Take(sweep.PointCount)];
+        Complex[]? reference = hasReference
+            ? [.. columns[2].Skip(sweep.FirstPoint).Take(sweep.PointCount)]
+            : null;
 
         var warnings = new List<string>(info.Warnings);
         AddCurveWarnings(warnings, freqHz, reference, request);
@@ -203,11 +371,14 @@ public sealed class SimulationResponseImportService(
             OutputUnit: header.Variables[request.OutputTraceIndex].Unit,
             ReferenceTrace: hasReference ? header.Variables[request.ReferenceTraceIndex!.Value].Name : null,
             ReferenceUnit: hasReference ? header.Variables[request.ReferenceTraceIndex!.Value].Unit : null,
-            PointCount: info.PointCount,
-            StartFreqHz: info.StartFreqHz,
-            EndFreqHz: info.EndFreqHz,
-            PointsPerDecade: info.PointsPerDecade,
-            Warnings: warnings);
+            PointCount: sweep.PointCount,
+            StartFreqHz: sweep.StartFreqHz,
+            EndFreqHz: sweep.EndFreqHz,
+            PointsPerDecade: sweep.PointsPerDecade,
+            Warnings: warnings,
+            SweepCount: info.Sweeps.Count,
+            SweepIndex: info.Sweeps.Count > 1 ? sweep.Index : null,
+            SweepLabel: sweep.Label);
 
         var spec = new AcSimulationAnalysis(
             source, request.LevelOffsetDb, request.AnalysisLowHz, request.AnalysisHighHz,
@@ -220,9 +391,7 @@ public sealed class SimulationResponseImportService(
         var referenceCurve = reference is null ? null : ToCurve(reference);
         var traces = BuildTraces(freqHz, outputCurve, referenceCurve, spec);
 
-        string name = string.IsNullOrWhiteSpace(request.Name)
-            ? $"{Path.GetFileNameWithoutExtension(request.Path)} - {source.OutputTrace}"
-            : request.Name.Trim();
+        string name = SweepName(request, source, sweep, info.Sweeps.Count);
 
         long resultId = await measurementRepository.SaveResponseResultAsync(
             new ResponseSaveRequest(
@@ -231,7 +400,7 @@ public sealed class SimulationResponseImportService(
                 // A simulated sweep has no sample rate and no record length: it is N points of
                 // exact arithmetic. Zero rather than a plausible-looking figure, for the reason
                 // the transient import writes a silenced generator.
-                SampleRateHz: 0.0, FftSize: info.PointCount,
+                SampleRateHz: 0.0, FftSize: sweep.PointCount,
                 Channels: hasReference ? 2 : 1,
                 InRangeDbv: null, OutRangeDbv: null,
                 Traces: traces,
@@ -240,14 +409,33 @@ public sealed class SimulationResponseImportService(
             ct);
 
         logger.LogInformation(
-            "Imported AC simulation {Name} from {Path}: {Output}{Reference}, {Points} points over " +
-            "{StartHz:F3}-{EndHz:F0} Hz ({PerDecade:F0}/decade), band {LowHz:F0}-{HighHz:F0} Hz",
+            "Imported AC simulation {Name} from {Path}: {Output}{Reference}, sweep {Sweep} of {Sweeps}, " +
+            "{Points} points over {StartHz:F3}-{EndHz:F0} Hz ({PerDecade:F0}/decade), band {LowHz:F0}-{HighHz:F0} Hz",
             name, request.Path, source.OutputTrace,
             source.ReferenceTrace is null ? "" : $" / {source.ReferenceTrace}",
-            info.PointCount, info.StartFreqHz, info.EndFreqHz, info.PointsPerDecade,
+            sweep.Index + 1, info.Sweeps.Count,
+            sweep.PointCount, sweep.StartFreqHz, sweep.EndFreqHz, sweep.PointsPerDecade,
             spec.AnalysisLowHz, spec.AnalysisHighHz);
 
         return resultId;
+    }
+
+    /// <summary>
+    /// What a result is called. One sweep keeps the name the user typed, or the file and trace;
+    /// several have to be told apart, so each carries its step's own label — the simulator's own
+    /// words where there are any (<c>freq=2000</c>), and its position where there are not.
+    /// </summary>
+    private static string SweepName(
+        AcSimulationImportRequest request, AcSimulationSource source, AcSimulationSweep sweep, int sweepCount)
+    {
+        string stem = string.IsNullOrWhiteSpace(request.Name)
+            ? $"{Path.GetFileNameWithoutExtension(request.Path)} - {source.OutputTrace}"
+            : request.Name.Trim();
+
+        if (sweepCount <= 1)
+            return stem;
+
+        return $"{stem} - {sweep.Label ?? $"step {sweep.Index + 1} of {sweepCount}"}";
     }
 
     /// <summary>
@@ -555,12 +743,9 @@ public sealed class SimulationResponseImportService(
         if (header.PointCount < 2)
             throw new FormatException($"{name} holds {header.PointCount} point, which is not a sweep.");
 
-        if (header.PointCount > AcSimulationAnalysis.MaxPoints)
-        {
-            throw new FormatException(
-                $"{name} holds {header.PointCount:N0} points, more than the {AcSimulationAnalysis.MaxPoints:N0} " +
-                "this import stores. A `.ac dec 100` sweep of the audio band is a few hundred; use a lower " +
-                "density, or a narrower range.");
-        }
+        // The point cap is deliberately *not* here: `No. Points` is the grand total over every sweep
+        // of a stepped run, so a cap applied to it refuses a file whose individual sweeps are small
+        // -- 771 points stepped 85 times reaches 65 535. It is checked per sweep in SplitSweeps,
+        // which is the number that decides how much is stored.
     }
 }

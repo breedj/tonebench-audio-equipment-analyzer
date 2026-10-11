@@ -615,7 +615,7 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
   {
     id: 'simulation-import',
     title: 'Importing a simulation',
-    summary: 'Reading an LTspice or QSpice transient run as a trace on the FFT chart: which directives reach the measurement, why resolution follows the run length, and what is refused.',
+    summary: 'Reading an LTspice or QSpice run as a trace: a transient run on the FFT chart or an AC sweep on the frequency response, which directives reach the measurement, and what is refused.',
     group: 'Measurements',
     component: manualPage(() => import('./pages/SimulationImportPage.vue')),
   },

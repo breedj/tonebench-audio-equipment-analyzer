@@ -1042,7 +1042,14 @@ public sealed record ResponseSaveRequest(
     /// through a child table (<c>response_trace</c>) or pins <c>seq_index = 0</c>, so the extra rows
     /// are invisible to all of them.</para>
     /// </summary>
-    IReadOnlyList<ResponsePreviewCaptureInput>? PointPreviews = null);
+    IReadOnlyList<ResponsePreviewCaptureInput>? PointPreviews = null,
+    /// <summary>
+    /// <c>MeasurementSource.Simulation</c> for a curve imported from a simulator's <c>.ac</c> run,
+    /// null for one this bench measured — see migration 014, where **null means a row an older
+    /// build wrote**, i.e. a measured one. Optional and defaulted so the five existing callers in
+    /// <c>MeasurementSaveService</c> keep writing null without being touched.
+    /// </summary>
+    string? Source = null);
 
 /// <summary>One measured point of a stepped-sine response: its tone, and both inputs' previews.</summary>
 public sealed record ResponsePreviewCaptureInput(
@@ -1266,7 +1273,77 @@ public sealed record FrequencyResponseParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null)
+{
+    /// <summary>
+    /// Set only on a result imported from a simulator's <c>.ac</c> run — the frequency-domain
+    /// counterpart of <see cref="FftSpectrumParameters.Simulation"/>. Null means a measured sweep,
+    /// which is every row an older build wrote and every row a chirp or stepped run writes.
+    ///
+    /// <para>Its presence is also what says the result can be re-analysed at a different band or
+    /// bandwidth reference, and it is what the server keys on rather than the type's current kind:
+    /// a result's own stored settings outlive any later change to the measurement it sits in.</para>
+    /// </summary>
+    public AcSimulationParameters? AcSimulation { get; init; }
+}
+
+/// <summary>
+/// Where an imported <c>.ac</c> sweep came from. A sibling of <see cref="SimulationSource"/> rather
+/// than a reuse of it: that record's <c>NativeRateHz</c>, <c>SourceStartS</c> and <c>SourceEndS</c>
+/// are all seconds, an AC run has none of them, and filling them with zeros would be the same
+/// mistake as writing a 0 dBV input range for a simulation that has no analyzer front end. A
+/// misnamed field in a stored document is permanent.
+///
+/// <para>Nothing reads <see cref="Path"/> back. Both simulators can be told to delete the result
+/// file as soon as they close, which is exactly why the curve itself is stored.</para>
+/// </summary>
+public sealed record AcSimulationSource(
+    string Path,
+    string Title,
+    string? Date,
+    string Plotname,
+    IReadOnlyList<string> Flags,
+    /// <summary>The node whose response this is, as the simulator spells it — <c>V(out)</c>.</summary>
+    string OutputTrace,
+    /// <summary><c>V</c> or <c>A</c>; the unit travels with the trace as it does on the transient side.</summary>
+    string OutputUnit,
+    /// <summary>
+    /// The node the output was divided by, or null when the output was taken as the transfer
+    /// function on its own. Null means the levels are dB relative to 1 V, which is the gain only
+    /// if the simulator's AC source amplitude was 1 — LTspice's <c>AC 1</c> default.
+    /// </summary>
+    string? ReferenceTrace,
+    string? ReferenceUnit,
+    int PointCount,
+    double StartFreqHz,
+    double EndFreqHz,
+    double PointsPerDecade,
+    IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// The re-appliable half of an imported <c>.ac</c> sweep's settings: the ones that are not already
+/// <see cref="FrequencyResponseParameters"/> members.
+///
+/// <para>Deliberately tiny, because three of the four settings a re-analysis can change already
+/// have homes on the parent record — <c>BandwidthReference</c> with its two edges, and
+/// <c>RightChannelIsReference</c>, which already means precisely "the right-hand curve is the
+/// reference, so Gain = L/R". Adding fields that duplicate those would be two places to read one
+/// setting from.</para>
+/// </summary>
+/// <param name="LevelOffsetDb">
+/// Applied to the stored curve at analysis time, never baked into it — for a node the bench sees
+/// through a divider or a pad, the same lever the transient import has.
+/// </param>
+/// <param name="AnalysisLowHz">
+/// The band the corners and the reference are searched over. A <b>window, not a slice</b>: the
+/// whole sweep is always stored, so narrowing the band and widening it again returns the original
+/// corners. Narrowing by trimming the curve would make the narrowing permanent.
+/// </param>
+public sealed record AcSimulationParameters(
+    AcSimulationSource Source,
+    double LevelOffsetDb,
+    double AnalysisLowHz,
+    double AnalysisHighHz);
 
 /// <summary>
 /// A stepped-sine response measurement type's <c>params_json</c>: the run settings, then the chart's

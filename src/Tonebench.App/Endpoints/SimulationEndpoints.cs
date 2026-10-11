@@ -1,4 +1,4 @@
-using Tonebench.App.Services;
+﻿using Tonebench.App.Services;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Endpoints;
@@ -45,6 +45,78 @@ public static class SimulationEndpoints
             {
                 long resultId = await import.ImportAsync(measurementTypeId, request.ToRequest(), ct);
                 return Results.Ok(new ImportedSimulationResponse(resultId));
+            }));
+
+        // ---- the .ac sweeps, which become frequency-response results rather than spectra ----
+        //
+        // Separate routes rather than a discriminated one, because the two inspect responses have
+        // nothing in common: a transient run is described by a duration and a timestep, a sweep by
+        // a range and a point density, and a shape carrying both would be eight optional fields
+        // serving two callers that never read each other's.
+
+        group.MapPost("/inspect-ac", (
+            InspectSimulationRequest request, SimulationResponseImportService import, CancellationToken ct) =>
+            Guard(() => Results.Ok(ToAcResponse(import.Inspect(request.Path, ct)))));
+
+        group.MapPost("/{measurementTypeId:long}/import-ac", async (
+            long measurementTypeId,
+            ImportAcSimulationRequest request,
+            SimulationResponseImportService import,
+            CancellationToken ct) =>
+            await GuardAsync(async () =>
+            {
+                if (!EnumParsing.TryParse(
+                        request.BandwidthReference, BandwidthReferenceMode.BandMedian,
+                        out BandwidthReferenceMode mode, out var referenceError))
+                {
+                    return Results.BadRequest(referenceError);
+                }
+
+                long resultId = await import.ImportAsync(measurementTypeId, request.ToRequest(mode), ct);
+                return Results.Ok(new ImportedSimulationResponse(resultId));
+            }));
+
+        app.MapPost("/api/measurements/{resultId:long}/reanalyze-response", async (
+            long resultId,
+            ReanalyzeAcSimulationRequest request,
+            SimulationResponseImportService import,
+            CancellationToken ct) =>
+            await GuardAsync(async () =>
+            {
+                // The reference is sent whole or not at all: a mode without its band, or a band
+                // without its mode, would leave the other half to be guessed from a default and
+                // quietly move a setting the caller did not mention.
+                BandwidthReferenceSpec? reference = null;
+                if (request.BandwidthReference is not null)
+                {
+                    if (!EnumParsing.TryParse(
+                            request.BandwidthReference, BandwidthReferenceMode.BandMedian,
+                            out BandwidthReferenceMode mode, out var referenceError))
+                    {
+                        return Results.BadRequest(referenceError);
+                    }
+
+                    if (request.BandwidthReferenceLowHz is not { } lowHz ||
+                        request.BandwidthReferenceHighHz is not { } highHz)
+                    {
+                        return Results.BadRequest(
+                            "A bandwidth reference needs its band as well as its mode.");
+                    }
+
+                    reference = new BandwidthReferenceSpec(mode, lowHz, highHz);
+                }
+
+                bool done = await import.ReanalyzeAsync(
+                    resultId,
+                    new AcSimulationReanalyzeRequest(
+                        request.LevelOffsetDb, request.AnalysisLowHz, request.AnalysisHighHz,
+                        reference, request.RightChannelIsReference),
+                    ct);
+                return done
+                    ? Results.Ok(new ImportedSimulationResponse(resultId))
+                    : Results.Conflict(
+                        "This result did not come from an imported .ac sweep, so it cannot be re-analysed. " +
+                        "Only imported simulations can.");
             }));
 
         // On /api/measurements rather than here, because it is an operation on a stored result
@@ -112,6 +184,20 @@ public static class SimulationEndpoints
         }
     }
 
+    private static AcSimulationFileResponse ToAcResponse(AcSimulationFileInfo info) => new(
+        info.Path,
+        info.Title,
+        info.Date,
+        info.Plotname,
+        info.Flags,
+        info.PointCount,
+        info.StartFreqHz,
+        info.EndFreqHz,
+        info.PointsPerDecade,
+        info.IsLogSpaced,
+        [.. info.Traces.Select(t => new SimulationTraceResponse(t.Index, t.Name, t.Unit))],
+        info.Warnings);
+
     private static SimulationFileResponse ToResponse(SimulationFileInfo info, double measurementHiFreqHz)
     {
         double usableS = info.DurationS;
@@ -141,6 +227,49 @@ public static class SimulationEndpoints
 
 public sealed record InspectSimulationRequest(
     string Path, double? MeasurementHiFreqHz = null, double? MeasurementLoFreqHz = null);
+
+/// <summary>What an <c>.ac</c> sweep looks like, for the dialog's pickers and its readout.</summary>
+public sealed record AcSimulationFileResponse(
+    string Path,
+    string Title,
+    string? Date,
+    string Plotname,
+    IReadOnlyList<string> Flags,
+    int PointCount,
+    double StartFreqHz,
+    double EndFreqHz,
+    double PointsPerDecade,
+    bool IsLogSpaced,
+    IReadOnlyList<SimulationTraceResponse> Traces,
+    IReadOnlyList<string> Warnings);
+
+/// <param name="BandwidthReference">BandMedian or Peak, as the response measurements spell it.</param>
+public sealed record ImportAcSimulationRequest(
+    string Path,
+    int OutputTraceIndex,
+    int? ReferenceTraceIndex = null,
+    double LevelOffsetDb = 0.0,
+    double AnalysisLowHz = 20.0,
+    double AnalysisHighHz = 20_000.0,
+    string? BandwidthReference = null,
+    double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
+    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz,
+    string? Name = null,
+    string? Notes = null)
+{
+    internal AcSimulationImportRequest ToRequest(BandwidthReferenceMode mode) => new(
+        Path, OutputTraceIndex, ReferenceTraceIndex, LevelOffsetDb, AnalysisLowHz, AnalysisHighHz,
+        new BandwidthReferenceSpec(mode, BandwidthReferenceLowHz, BandwidthReferenceHighHz), Name, Notes);
+}
+
+public sealed record ReanalyzeAcSimulationRequest(
+    double? LevelOffsetDb = null,
+    double? AnalysisLowHz = null,
+    double? AnalysisHighHz = null,
+    string? BandwidthReference = null,
+    double? BandwidthReferenceLowHz = null,
+    double? BandwidthReferenceHighHz = null,
+    bool? RightChannelIsReference = null);
 
 public sealed record SimulationTraceResponse(int Index, string Name, string Unit);
 

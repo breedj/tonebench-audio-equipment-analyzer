@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using Tonebench.Data;
@@ -317,6 +317,141 @@ public class LtspiceRawFileTests : IDisposable
     public void Variable_CarriesTheUnitItsTypeImplies(string type, string expected) =>
         Assert.Equal(expected, new LtspiceVariable(0, "x", type).Unit);
 
+    /// <summary>
+    /// A complex run has two layouts of its own, and they differ only in the abscissa: LTspice
+    /// gives frequency an imaginary part like every other column, QSpice writes it as a bare f64.
+    /// Measured on the real files -- 141 variables is 2256 bytes a point one way, 97 variables is
+    /// 1544 the other -- and the only thing that can tell them apart is the file's own size.
+    /// </summary>
+    [Theory]
+    [InlineData(false, 4, 64)]   // LTspice: 4 * 16
+    [InlineData(true, 4, 56)]    // QSpice:  8 + 3 * 16
+    public void ReadHeader_OnAComplexFile_ResolvesWhichAbscissaLayoutFromTheSize(
+        bool bareAbscissa, int variables, int expectedBytesPerPoint)
+    {
+        string path = WriteRaw(
+            $"ac-{bareAbscissa}.raw", "AC Analysis", "complex forward", Columns(8, variables),
+            complexData: true, abscissa: "frequency", bareAbscissa: bareAbscissa);
+
+        var header = LtspiceRawFile.ReadHeader(path);
+
+        Assert.True(header.IsComplex);
+        Assert.Equal(expectedBytesPerPoint, header.BytesPerPoint);
+        Assert.Equal(!bareAbscissa, header.AbscissaIsComplex);
+    }
+
+    /// <summary>
+    /// The `double` flag is absent from QSpice's AC header and its values are f64 pairs anyway --
+    /// the same lie the transient path already measures around. Both complex layouts are
+    /// all-double, so the flag can say nothing and still be right.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReadHeader_OnAComplexFile_IsAllDoubleWhateverTheFlagSays(bool bareAbscissa)
+    {
+        string path = WriteRaw(
+            $"ac-flagless-{bareAbscissa}.raw", "AC Analysis", "complex", Columns(8, 4),
+            complexData: true, abscissa: "frequency", bareAbscissa: bareAbscissa);
+
+        Assert.True(LtspiceRawFile.ReadHeader(path).ValuesAreDouble);
+    }
+
+    [Fact]
+    public void ReadHeader_OnAComplexFileOfNeitherLayout_NamesBothShapes()
+    {
+        // Written in LTspice's layout (8 points of 4 complex columns = 64 bytes each), then given
+        // eight stray bytes so the data divides to 65 and matches neither candidate.
+        string path = WriteRaw(
+            "ac-wrong.raw", "AC Analysis", "complex forward", Columns(8, 4),
+            complexData: true, abscissa: "frequency");
+        using (var stream = new FileStream(path, FileMode.Append))
+            stream.Write(new byte[8]);
+
+        var ex = Assert.Throws<FormatException>(() => LtspiceRawFile.ReadHeader(path));
+
+        // The message has to name both complex shapes and the figure that fits neither, or the
+        // next simulator's dialect is a mystery instead of a diagnosis.
+        Assert.Contains("imaginary part", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("64", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("56", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("65", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReadHeader_FindsTheFrequencyVariable_WhateverTheSimulatorCallsIt()
+    {
+        // QSpice spells the name "Frequency" and LTspice "frequency"; both write the type word
+        // "frequency", which is what IsFrequency keys off.
+        string path = WriteRaw(
+            "ac-named.raw", "AC Analysis", "complex forward", Columns(4, 3),
+            complexData: true, abscissa: "frequency", abscissaName: "Frequency");
+
+        var header = LtspiceRawFile.ReadHeader(path);
+
+        Assert.NotNull(header.FrequencyVariable);
+        Assert.Equal(0, header.FrequencyVariable!.Index);
+        Assert.Equal("Hz", header.FrequencyVariable.Unit);
+        Assert.Null(header.TimeVariable);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReadComplexColumns_ReturnsBothPartsOfEachColumn(bool bareAbscissa)
+    {
+        var real = Columns(6, 3);
+        var imaginary = Columns(6, 3);
+        for (int v = 1; v < 3; v++)
+        {
+            for (int p = 0; p < 6; p++)
+                imaginary[v][p] = -(v + (p * 0.5));
+        }
+
+        string path = WriteRaw(
+            $"ac-read-{bareAbscissa}.raw", "AC Analysis", "complex forward", real,
+            complexData: true, abscissa: "frequency", bareAbscissa: bareAbscissa, imaginary: imaginary);
+
+        var header = LtspiceRawFile.ReadHeader(path);
+        var columns = LtspiceRawFile.ReadComplexColumns(path, header, [0, 2]);
+
+        for (int p = 0; p < 6; p++)
+        {
+            Assert.Equal(real[0][p], columns[0][p].Real, 12);
+            Assert.Equal(0.0, columns[0][p].Imaginary);       // the abscissa is handed back real-only
+            Assert.Equal(real[2][p], columns[1][p].Real, 12);
+            Assert.Equal(imaginary[2][p], columns[1][p].Imaginary, 12);
+        }
+    }
+
+    /// <summary>
+    /// <c>Offset:</c> is the transient start-save time. Adding it to a frequency would be reading a
+    /// time-domain field on a sweep, so the complex reader must leave the abscissa alone.
+    /// </summary>
+    [Fact]
+    public void ReadComplexColumns_DoesNotAddTheTransientOffsetToTheFrequency()
+    {
+        var real = Columns(4, 2);
+        string path = WriteRaw(
+            "ac-offset.raw", "AC Analysis", "complex forward", real,
+            offsetS: 5e-3, complexData: true, abscissa: "frequency");
+
+        var columns = LtspiceRawFile.ReadComplexColumns(path, LtspiceRawFile.ReadHeader(path), [0]);
+
+        for (int p = 0; p < 4; p++)
+            Assert.Equal(real[0][p], columns[0][p].Real, 12);
+    }
+
+    [Fact]
+    public void ReadComplexColumns_OnARealFile_SaysSo()
+    {
+        string path = WriteRaw("real.raw", "Transient Analysis", "real forward", Columns(4, 2));
+
+        var ex = Assert.Throws<FormatException>(
+            () => LtspiceRawFile.ReadComplexColumns(path, LtspiceRawFile.ReadHeader(path), [0]));
+        Assert.Contains("real data", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ---- fixture writing ----
 
     private static double[][] Columns(int points, int variables)
@@ -342,7 +477,11 @@ public class LtspiceRawFileTests : IDisposable
         bool textValues = false,
         bool? dataAsDouble = null,
         string command = "Linear Technology Corporation LTspice",
-        IReadOnlyList<string>? extraHeaderLines = null)
+        IReadOnlyList<string>? extraHeaderLines = null,
+        string abscissa = "time",
+        string? abscissaName = null,
+        bool bareAbscissa = false,
+        double[][]? imaginary = null)
     {
         int variables = columns.Length;
         int points = columns[0].Length;
@@ -363,8 +502,8 @@ public class LtspiceRawFileTests : IDisposable
         header.Append("Variables:\n");
         for (int v = 0; v < variables; v++)
         {
-            string varName = v == 0 ? "time" : $"V({v})";
-            string varType = v == 0 ? "time" : "voltage";
+            string varName = v == 0 ? abscissaName ?? abscissa : $"V({v})";
+            string varType = v == 0 ? abscissa : "voltage";
             header.Append(CultureInfo.InvariantCulture, $"\t{v}\t{varName}\t{varType}\n");
         }
         header.Append(textValues ? "Values:\n" : "Binary:\n");
@@ -380,7 +519,10 @@ public class LtspiceRawFileTests : IDisposable
             return path;
         }
 
-        int bytesPerPoint = complexData ? variables * 16 : isDouble ? variables * 8 : 8 + ((variables - 1) * 4);
+        int bytesPerPoint = complexData
+            ? (bareAbscissa ? 8 + ((variables - 1) * 16) : variables * 16)
+            : isDouble ? variables * 8 : 8 + ((variables - 1) * 4);
+        int abscissaBytes = bareAbscissa ? 8 : 16;
         var point = new byte[bytesPerPoint];
         for (int p = 0; p < points; p++)
         {
@@ -388,8 +530,15 @@ public class LtspiceRawFileTests : IDisposable
             {
                 if (complexData)
                 {
-                    BinaryPrimitives.WriteDoubleLittleEndian(point.AsSpan(v * 16), columns[v][p]);
-                    BinaryPrimitives.WriteDoubleLittleEndian(point.AsSpan((v * 16) + 8), 0.0);
+                    // The abscissa is a complex pair on LTspice and a bare f64 on QSpice, which is
+                    // what shifts every value column after it by eight bytes.
+                    int at = v == 0 ? 0 : abscissaBytes + ((v - 1) * 16);
+                    BinaryPrimitives.WriteDoubleLittleEndian(point.AsSpan(at), columns[v][p]);
+                    if (v > 0 || !bareAbscissa)
+                    {
+                        double im = v > 0 && imaginary is not null ? imaginary[v][p] : 0.0;
+                        BinaryPrimitives.WriteDoubleLittleEndian(point.AsSpan(at + 8), im);
+                    }
                 }
                 else if (isDouble)
                 {

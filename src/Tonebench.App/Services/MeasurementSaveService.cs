@@ -1198,7 +1198,7 @@ public sealed class MeasurementSaveService(
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown impedance trace kind."),
     };
 
-    private static ResponseTraceInput ToTraceInput(FrequencyResponseTrace trace) =>
+    internal static ResponseTraceInput ToTraceInput(FrequencyResponseTrace trace) =>
         new(
             TraceKindName(trace.Kind),
             trace.StartFreqHz,
@@ -1217,7 +1217,7 @@ public sealed class MeasurementSaveService(
             trace.GroupDelayS,
             trace.PhaseDelayS);
 
-    private static string TraceKindName(FrequencyResponseTraceKind kind) => kind switch
+    internal static string TraceKindName(FrequencyResponseTraceKind kind) => kind switch
     {
         FrequencyResponseTraceKind.Left => ResponseTraceKind.Left,
         FrequencyResponseTraceKind.Right => ResponseTraceKind.Right,

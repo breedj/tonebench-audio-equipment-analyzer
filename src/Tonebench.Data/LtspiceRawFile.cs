@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 
 namespace Tonebench.Data;
@@ -53,6 +54,13 @@ public sealed record LtspiceVariable(int Index, string Name, string Type)
     };
 
     public bool IsTime => Type == "time";
+
+    /// <summary>
+    /// The abscissa of an <c>.ac</c> run. Matched on LTspice's <i>type</i> word rather than on the
+    /// name, because the two simulators disagree about the name and agree about the type: LTspice
+    /// writes <c>frequency</c> and QSpice writes <c>Frequency</c>.
+    /// </summary>
+    public bool IsFrequency => Type == "frequency";
 }
 
 /// <summary>
@@ -93,8 +101,22 @@ public sealed record LtspiceRawHeader(
     /// </summary>
     public bool ValuesAreDouble { get; init; }
 
-    /// <summary>An <c>.ac</c> run or an FFT: each value is a complex pair. Not importable here.</summary>
+    /// <summary>An <c>.ac</c> run or an FFT: each value is a complex pair, read by <see cref="LtspiceRawFile.ReadComplexColumns"/>.</summary>
     public bool IsComplex => Flags.Contains("complex");
+
+    /// <summary>
+    /// On a complex file, whether the abscissa is stored as a complex pair like every other column
+    /// or as a bare float64 — resolved from the file's own size, like <see cref="ValuesAreDouble"/>
+    /// and for the same reason.
+    ///
+    /// <para>The two simulators differ here and neither announces it. Measured: LTspice's 141-variable
+    /// AC run is <b>2256</b> bytes a point, i.e. <c>16 x 141</c> — the frequency carries a zero
+    /// imaginary part like everything else. QSpice's 97-variable run is <b>1544</b>, i.e.
+    /// <c>8 + 16 x 96</c> — the frequency is one plain float64 and only the values are pairs. A
+    /// reader that assumes either one reads the other eight bytes out of step from the first value
+    /// onwards, which is not a failure, just wrong numbers.</para>
+    /// </summary>
+    public bool AbscissaIsComplex { get; init; } = true;
 
     /// <summary>Columns stored transposed instead of interleaved. Produced by the waveform viewer, not by a run.</summary>
     public bool IsFastAccess => Flags.Contains("fastaccess");
@@ -108,6 +130,9 @@ public sealed record LtspiceRawHeader(
     public bool IsUncompressed => Flags.Contains("nocompression");
 
     public LtspiceVariable? TimeVariable => Variables.FirstOrDefault(v => v.IsTime);
+
+    /// <summary>The abscissa of an <c>.ac</c> run, the counterpart of <see cref="TimeVariable"/>.</summary>
+    public LtspiceVariable? FrequencyVariable => Variables.FirstOrDefault(v => v.IsFrequency);
 
     /// <summary>
     /// Which simulator wrote this, from the <c>Command:</c> line — "QSPICE64, Build ..." or
@@ -223,15 +248,17 @@ public static class LtspiceRawFile
         bool isComplex = flags.Contains("complex");
         bool isDouble = flags.Contains("double");
 
-        // Two layouts are possible for a real run: every column float64, or float64 time with
-        // float32 values. Which one a file uses is settled by its own size, not by the `double`
-        // flag -- see ValuesAreDouble for why the flag cannot be trusted across simulators. The
-        // flag only decides it when there is nothing to measure against (an ASCII body, or no
-        // points).
+        // Two layouts are possible for a real run -- every column float64, or float64 time with
+        // float32 values -- and two more for a complex one, which differ only in whether the
+        // abscissa carries an imaginary part. Which one a file uses is settled by its own size, not
+        // by the `double` flag: see ValuesAreDouble and AbscissaIsComplex for why neither flag can
+        // be trusted across simulators. The flags only decide it when there is nothing to measure
+        // against (an ASCII body, or no points).
         int allDouble = isComplex ? variableCount * 16 : variableCount * 8;
-        int mixed = isComplex ? variableCount * 16 : 8 + ((variableCount - 1) * 4);
+        int mixed = isComplex ? 8 + ((variableCount - 1) * 16) : 8 + ((variableCount - 1) * 4);
         bool valuesAreDouble = isDouble || isComplex;
         int bytesPerPoint = valuesAreDouble ? allDouble : mixed;
+        bool abscissaIsComplex = true;
 
         if (isBinary && pointCount > 0)
         {
@@ -244,15 +271,23 @@ public static class LtspiceRawFile
             }
             else if (actual == mixed)
             {
-                valuesAreDouble = false;
+                // Both complex layouts store f64 pairs -- they differ only in the abscissa -- so a
+                // complex file matching the shorter stride is still all-double. Only the real
+                // mixed layout has f32 values.
+                valuesAreDouble = isComplex;
+                abscissaIsComplex = false;
                 bytesPerPoint = mixed;
             }
             else
             {
+                string shapes = isComplex
+                    ? $"is {allDouble} bytes per point if the frequency column carries an imaginary part like " +
+                      $"every other column and {mixed} if it is a plain float64"
+                    : $"is {allDouble} bytes per point if every column is double precision and {mixed} if only " +
+                      "the time column is";
                 throw new FormatException(
                     $"{Path.GetFileName(path)} does not match either known layout: {variableCount} variables " +
-                    $"is {allDouble} bytes per point if every column is double precision and {mixed} if only " +
-                    $"the time column is, but {dataBytes} bytes of data over {pointCount} points is {actual}.");
+                    $"{shapes}, but {dataBytes} bytes of data over {pointCount} points is {actual}.");
             }
         }
 
@@ -271,6 +306,7 @@ public static class LtspiceRawFile
             Command: fields.GetValueOrDefault("Command", "").Trim())
         {
             ValuesAreDouble = valuesAreDouble,
+            AbscissaIsComplex = abscissaIsComplex,
         };
     }
 
@@ -364,6 +400,111 @@ public static class LtspiceRawFile
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Reads the given columns of a <b>complex</b> (<c>.ac</c>) run in one sequential pass, as
+    /// <see cref="ComplexColumn"/> pairs.
+    ///
+    /// <para>A separate method rather than an overload of <see cref="ReadColumns"/>, which keeps
+    /// its "real columns only" contract and its refusal: the two return different shapes, and that
+    /// one's <c>abs(stored) + Offset</c> fix-up is a statement about a <c>.tran</c> start-save time
+    /// that means nothing on a frequency axis. The abscissa comes back real-only — LTspice writes a
+    /// zero imaginary part there and QSpice writes none at all — with <c>abs</c> applied for the
+    /// same cheap reason time has it.</para>
+    /// </summary>
+    public static Complex[][] ReadComplexColumns(
+        string path, LtspiceRawHeader header, IReadOnlyList<int> variableIndices, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(header);
+        ArgumentNullException.ThrowIfNull(variableIndices);
+
+        if (!header.IsBinary)
+            throw new FormatException(
+                $"{Path.GetFileName(path)} stores its data as text (\"Values:\"), which this import does not read. " +
+                "Re-run the simulation so the simulator writes a binary .raw.");
+        if (header.IsFastAccess)
+            throw new FormatException(
+                $"{Path.GetFileName(path)} is saved in LTspice's Fast Access format, which stores the columns " +
+                "transposed. Re-run the simulation without converting the waveform file.");
+        if (!header.IsComplex)
+            throw new FormatException(
+                $"{Path.GetFileName(path)} holds real data ({header.Plotname}), not a complex sweep.");
+
+        foreach (int index in variableIndices)
+        {
+            if (index < 0 || index >= header.Variables.Count)
+                throw new ArgumentOutOfRangeException(
+                    nameof(variableIndices), $"No variable {index} in {Path.GetFileName(path)}.");
+        }
+
+        var result = new Complex[variableIndices.Count][];
+        for (int c = 0; c < result.Length; c++)
+            result[c] = new Complex[header.PointCount];
+
+        int bytesPerPoint = header.BytesPerPoint;
+
+        const int TargetBufferBytes = 1 << 20;
+        int pointsPerBuffer = Math.Max(1, TargetBufferBytes / bytesPerPoint);
+        byte[] buffer = new byte[(long)pointsPerBuffer * bytesPerPoint <= int.MaxValue
+            ? pointsPerBuffer * bytesPerPoint
+            : bytesPerPoint];
+
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 0, FileOptions.SequentialScan);
+        stream.Seek(header.DataOffset, SeekOrigin.Begin);
+
+        int point = 0;
+        while (point < header.PointCount)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            int wanted = Math.Min(pointsPerBuffer, header.PointCount - point);
+            int bytes = wanted * bytesPerPoint;
+            int got = stream.ReadAtLeast(buffer.AsSpan(0, bytes), bytes, throwOnEndOfStream: false);
+            int complete = got / bytesPerPoint;
+            if (complete == 0)
+                throw new FormatException(
+                    $"{Path.GetFileName(path)} ends after {point} of its declared {header.PointCount} points.");
+
+            for (int c = 0; c < variableIndices.Count; c++)
+            {
+                int index = variableIndices[c];
+                Complex[] column = result[c];
+                (int fieldOffset, bool hasImaginary) = ComplexFieldLayout(index, header.AbscissaIsComplex);
+                bool isAbscissa = index == 0;
+
+                for (int p = 0; p < complete; p++)
+                {
+                    var span = buffer.AsSpan((p * bytesPerPoint) + fieldOffset);
+                    double real = BinaryPrimitives.ReadDoubleLittleEndian(span);
+
+                    // The abscissa is handed back real-only whichever way it was stored, so the
+                    // caller never has to know which layout it was reading.
+                    double imaginary = hasImaginary && !isAbscissa
+                        ? BinaryPrimitives.ReadDoubleLittleEndian(span[8..])
+                        : 0.0;
+                    column[point + p] = new Complex(isAbscissa ? Math.Abs(real) : real, imaginary);
+                }
+            }
+
+            point += complete;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Where column <paramref name="index"/> sits inside one point of a complex run, and whether
+    /// the slot carries an imaginary part. Every value column is a pair; the abscissa is a pair on
+    /// LTspice and a bare float64 on QSpice, which is what shifts everything after it by eight bytes.
+    /// </summary>
+    private static (int Offset, bool HasImaginary) ComplexFieldLayout(int index, bool abscissaIsComplex)
+    {
+        int abscissaBytes = abscissaIsComplex ? 16 : 8;
+        return index == 0
+            ? (0, abscissaIsComplex)
+            : (abscissaBytes + ((index - 1) * 16), true);
     }
 
     /// <summary>

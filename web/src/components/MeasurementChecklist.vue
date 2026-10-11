@@ -4,7 +4,7 @@ import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
 import { useSweep } from '../composables/useSweep'
 import { dashAttr, sweepOverlayDash } from '../measurements/sweepOverlayStyles'
-import { isSweepKind, FFT_SPECTRUM_KIND } from '../measurements/kinds'
+import { isSweepKind, isFrequencyResponseKind, FFT_SPECTRUM_KIND } from '../measurements/kinds'
 import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
 import CollapsibleSection from './CollapsibleSection.vue'
 
@@ -31,10 +31,16 @@ const currentKind = computed(() => types.value.find((t) => t.id === currentTypeI
 const groups = computed(() => groupHistory(items.value))
 const withHeaders = computed(() => showsGroupHeaders(groups.value))
 
-// Only the FFT screen can import one: a simulation is a spectrum, and a sweep or a response curve
-// is not something an LTspice .tran can be turned into (see the plan's follow-ups -- a .ac run
-// could become a frequency response later).
-const canImport = computed(() => currentKind.value === FFT_SPECTRUM_KIND)
+// Two screens can import one, and which file each takes is the whole distinction: an FFT
+// measurement takes a transient (.tran) run, because a spectrum is what a waveform becomes; a
+// frequency response takes an AC (.ac) sweep, because that already is one. A sweep screen takes
+// neither -- nothing a simulator writes is a distortion-against-level curve.
+//
+// The dialog that opens follows from this too, and a file of the wrong kind is refused by name,
+// pointing at the screen it does belong on.
+const canImport = computed(
+  () => currentKind.value === FFT_SPECTRUM_KIND || isFrequencyResponseKind(currentKind.value),
+)
 
 // Checkbox state mirrors the overlay's visibility (checked = plotted on the chart), matching the
 // design's "check it to see it" model. Unchecking hides rather than removes the overlay, so its
@@ -99,7 +105,7 @@ async function onToggle(resultId: number, event: Event) {
           v-if="canImport && currentTypeId !== null"
           type="button"
           class="rounded border px-1.5 py-0.5 text-[10px] btn-action"
-          title="Import an LTspice simulation (.raw) as a trace on this chart."
+          :title="`Import a simulated ${isFrequencyResponseKind(currentKind) ? '.ac sweep' : '.tran run'} (.raw or .qraw) as a trace on this chart.`"
           @click="emit('importSimulation')"
         >
           Import simulation…

@@ -3,10 +3,11 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api, type MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
-import { isImpulseResponseKind } from '../measurements/kinds'
+import { isFrequencyResponseKind, isImpulseResponseKind } from '../measurements/kinds'
 import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
 import EditMeasurementDialog from './EditMeasurementDialog.vue'
 import SimulationReanalyzeDialog from './SimulationReanalyzeDialog.vue'
+import AcSimulationReanalyzeDialog from './AcSimulationReanalyzeDialog.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const emit = defineEmits<{ error: [message: string]; report: [resultId: number] }>()
@@ -38,14 +39,26 @@ function onEdit(item: MeasurementSummary) {
   editDialogOpen.value = true
 }
 
-// Re-analysing an imported simulation -- offered only on those rows, because it is the stored
-// samples that make it possible and only a simulation has any (migration 014's capture.pcm).
+// Re-analysing an imported simulation -- offered only on those rows, because it is what was
+// stored with them that makes it possible and only a simulation has it.
+//
+// Which dialog opens is decided by the measurement's *kind*, not by the row: a .tran import is a
+// spectrum rebuilt from stored samples, an .ac import is a curve rebuilt from stored rows, and the
+// two offer different settings and POST to different routes. Keying on isSimulation alone -- which
+// is all the row itself knows -- would open the transient form over an AC result, read an FFT size
+// and a window that are not in its params_json, silently fall back to 8192/Hann, and then 409.
 const reanalyzeId = ref<number | null>(null)
 const reanalyzeOpen = ref(false)
+const reanalyzeAcOpen = ref(false)
+
+const isResponseMeasurement = computed(() =>
+  isFrequencyResponseKind(types.value.find((t) => t.id === currentTypeId.value)?.kind),
+)
 
 function onReanalyze(item: MeasurementSummary) {
   reanalyzeId.value = item.resultId
-  reanalyzeOpen.value = true
+  if (isResponseMeasurement.value) reanalyzeAcOpen.value = true
+  else reanalyzeOpen.value = true
 }
 
 /**
@@ -269,6 +282,13 @@ async function onConfirmDelete(item: MeasurementSummary) {
       :open="reanalyzeOpen"
       :result-id="reanalyzeId"
       @close="reanalyzeOpen = false"
+      @reanalyzed="onReanalyzed"
+    />
+
+    <AcSimulationReanalyzeDialog
+      :open="reanalyzeAcOpen"
+      :result-id="reanalyzeId"
+      @close="reanalyzeAcOpen = false"
       @reanalyzed="onReanalyzed"
     />
   </CollapsibleSection>

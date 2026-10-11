@@ -473,14 +473,24 @@ internal static class SteppedCaptureSupport
     /// reference reads as the peak, the same convention the impedance rows use; the peak itself is
     /// still found, since for a crosstalk trace it is the worst case.</para>
     /// </summary>
+    /// <param name="firstIndex">
+    /// Where the corner and peak searches start, and where they stop. The whole curve is still
+    /// stored — <b>the band is a search window, never a slice</b>. A caller that narrowed the band
+    /// by trimming the arrays instead would make the narrowing permanent, so re-widening it later
+    /// could only invent the points it had thrown away; it is the same trap
+    /// <c>SimulationParameters.PcmStartS</c> exists to document on the transient side. Defaulted to
+    /// the whole curve, so the two stepped runners that do not pass a band are unchanged.
+    /// </param>
     public static FrequencyResponseTrace BuildPointTrace(
         FrequencyResponseTraceKind kind,
         double[] freqHz,
         double[] magnitudeDb,
         double[] phaseDeg,
-        BandwidthReferenceSpec? reference)
+        BandwidthReferenceSpec? reference,
+        int firstIndex = 0,
+        int lastIndex = int.MaxValue)
     {
-        var peak = BandwidthAnalyzer.FindPeak(magnitudeDb, freqHz);
+        var peak = BandwidthAnalyzer.FindPeak(magnitudeDb, freqHz, firstIndex, lastIndex);
 
         BandwidthReading oneDb;
         BandwidthReading threeDb;
@@ -489,9 +499,11 @@ internal static class SteppedCaptureSupport
         bool fellBackToPeak;
         if (reference is { } spec)
         {
-            var found = BandwidthAnalyzer.FindReference(magnitudeDb, freqHz, spec);
-            oneDb = BandwidthReading.From(BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 1.0, found, symmetric: true));
-            threeDb = BandwidthReading.From(BandwidthAnalyzer.Find(magnitudeDb, freqHz, dropDb: 3.0, found, symmetric: false));
+            var found = BandwidthAnalyzer.FindReference(magnitudeDb, freqHz, spec, firstIndex, lastIndex);
+            oneDb = BandwidthReading.From(BandwidthAnalyzer.Find(
+                magnitudeDb, freqHz, dropDb: 1.0, found, symmetric: true, firstIndex, lastIndex));
+            threeDb = BandwidthReading.From(BandwidthAnalyzer.Find(
+                magnitudeDb, freqHz, dropDb: 3.0, found, symmetric: false, firstIndex, lastIndex));
             referenceDb = found.LevelDb;
             referenceMode = found.Mode;
             fellBackToPeak = found.FellBackToPeak;

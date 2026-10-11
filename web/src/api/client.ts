@@ -2298,6 +2298,55 @@ export interface ImportedSimulation {
   resultId: number
 }
 
+/**
+ * What an `.ac` sweep holds. A separate shape from `SimulationFileInfo`, not an extension of it:
+ * a transient run is described by a duration and a timestep and a sweep by a range and a point
+ * density, and neither set means anything to the other.
+ */
+export interface AcSimulationFileInfo {
+  path: string
+  title: string
+  date: string | null
+  plotname: string
+  flags: string[]
+  pointCount: number
+  startFreqHz: number
+  endFreqHz: number
+  /** How finely the sweep is sampled — `.ac dec 100` gives 100. */
+  pointsPerDecade: number
+  /** False for an `.ac lin` sweep, which puts almost every point in its top decade. */
+  isLogSpaced: boolean
+  traces: SimulationTrace[]
+  warnings: string[]
+}
+
+export interface ImportAcSimulationRequest {
+  path: string
+  outputTraceIndex: number
+  /** The node to divide by, or null to take the output as the transfer function on its own. */
+  referenceTraceIndex?: number | null
+  levelOffsetDb?: number
+  analysisLowHz?: number
+  analysisHighHz?: number
+  bandwidthReference?: string | null
+  bandwidthReferenceLowHz?: number
+  bandwidthReferenceHighHz?: number
+  name?: string | null
+  notes?: string | null
+}
+
+/** Everything optional: null leaves that setting as it was stored. */
+export interface ReanalyzeAcSimulationRequest {
+  levelOffsetDb?: number
+  analysisLowHz?: number
+  analysisHighHz?: number
+  /** Sent whole or not at all — a mode without its band would leave the band to be guessed. */
+  bandwidthReference?: string | null
+  bandwidthReferenceLowHz?: number
+  bandwidthReferenceHighHz?: number
+  rightChannelIsReference?: boolean
+}
+
 export interface MeasurementListResponse {
   items: MeasurementSummary[]
 }
@@ -3125,6 +3174,29 @@ export const api = {
   /** Rebuilds a stored simulation's spectrum from its own samples at new settings. */
   reanalyzeSimulation: (resultId: number, body: ReanalyzeSimulationRequest) =>
     request<ImportedSimulation>(`/measurements/${resultId}/reanalyze`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Reads an `.ac` sweep's header and frequency axis — the response counterpart of inspectSimulation. */
+  inspectAcSimulation: (path: string) =>
+    request<AcSimulationFileInfo>('/simulations/inspect-ac', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+
+  importAcSimulation: (measurementTypeId: number, body: ImportAcSimulationRequest) =>
+    request<ImportedSimulation>(`/simulations/${measurementTypeId}/import-ac`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * Rebuilds a stored `.ac` sweep's curves from its own rows at a new band or reference. Nothing
+   * is re-read from the file: the rows hold the sweep at full resolution.
+   */
+  reanalyzeAcSimulation: (resultId: number, body: ReanalyzeAcSimulationRequest) =>
+    request<ImportedSimulation>(`/measurements/${resultId}/reanalyze-response`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

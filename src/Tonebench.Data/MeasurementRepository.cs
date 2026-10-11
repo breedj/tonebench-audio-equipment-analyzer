@@ -259,6 +259,51 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         await transaction.CommitAsync(ct);
     }
 
+    /// <summary>
+    /// Rewrites the curves of an already-stored response result, and its <c>params_json</c> — the
+    /// frequency-domain counterpart of <see cref="ReplaceRenderedSpectrumAsync"/>, for re-analysing
+    /// an imported <c>.ac</c> sweep at a different band or bandwidth reference.
+    ///
+    /// <para>There is nothing else to rewrite: a simulated sweep stores its curve at full
+    /// resolution (<c>BuildPointTrace</c> neither smooths nor decimates), so the
+    /// <c>response_trace</c> rows <i>are</i> the durable data, and a re-analysis is a lossless
+    /// re-read of them rather than a re-render of something else. That is why this needs no
+    /// <c>capture.pcm</c>, no new column and no migration.</para>
+    ///
+    /// <para>Deleting the rows frees their rowids, which is the recycled-rowid trap
+    /// <c>CaptureCascade</c> exists for — harmless here only because <c>response_trace</c> has no
+    /// children of its own. If it ever gains any, this has to cascade them the way a delete does.
+    /// The delete is also what keeps <c>UNIQUE(capture_id, kind)</c> satisfied when the same kinds
+    /// are written back.</para>
+    /// </summary>
+    public async Task ReplaceResponseTracesAsync(
+        long resultId,
+        string paramsJson,
+        IReadOnlyList<ResponseTraceInput> traces,
+        CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        await using var transaction = connection.BeginTransaction();
+
+        long captureId = await connection.ExecuteScalarAsync<long>(
+            "SELECT id FROM capture WHERE measurement_result_id = @resultId AND seq_index = 0;",
+            new { resultId },
+            transaction);
+
+        await connection.ExecuteAsync(
+            "DELETE FROM response_trace WHERE capture_id = @captureId;", new { captureId }, transaction);
+
+        foreach (var trace in traces)
+            await InsertResponseTraceAsync(connection, transaction, captureId, trace);
+
+        await connection.ExecuteAsync(
+            "UPDATE measurement_result SET params_json = @paramsJson WHERE id = @resultId;",
+            new { paramsJson, resultId },
+            transaction);
+
+        await transaction.CommitAsync(ct);
+    }
+
     private sealed record PcmRowRaw(long Channels, double? SampleRateHz, long? ByteLength);
 
     /// <summary>
@@ -377,8 +422,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         long resultId = await connection.ExecuteScalarAsync<long>(
             """
             INSERT INTO measurement_result
-                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
-            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated)
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated, source)
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated, @Source)
             RETURNING id;
             """,
             new
@@ -392,6 +437,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                 request.Serial,
                 request.FwVer,
                 request.IsSimulated,
+                request.Source,
             },
             transaction);
 
@@ -406,7 +452,14 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             {
                 ResultId = resultId,
                 Ts = TonebenchTimestamp.Now(),
-                Fs = request.SampleRateHz,
+                // Rounded for the reason ResultSummaryRowRaw sets out at length: capture.fs is
+                // declared INTEGER, SQLite's affinity is advisory, and a non-integral value is
+                // stored as REAL -- which Dapper then refuses to bind to that record's `long`.
+                // ListResultsAsync reads every row of a measurement in one query, so a single
+                // fractional row would break the whole History list rather than only itself. Every
+                // chirp caller passes 48000/96000/192000 and has never come near it; a simulated
+                // sweep has no sample rate at all and passes 0.
+                Fs = (long)Math.Round(request.SampleRateHz),
                 N = request.FftSize,
                 request.InRangeDbv,
                 request.OutRangeDbv,
@@ -415,50 +468,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             transaction);
 
         foreach (var trace in request.Traces)
-        {
-            await connection.ExecuteAsync(
-                """
-                INSERT INTO response_trace
-                    (capture_id, kind, start_hz, end_hz, peak_db, peak_hz,
-                     bw1_lower_hz, bw1_upper_hz, bw1_lower_clamped, bw1_upper_clamped,
-                     bw3_lower_hz, bw3_upper_hz, bw3_lower_clamped, bw3_upper_clamped,
-                     freq_hz, mag_min_db, mag_max_db, phase_deg, coherence,
-                     reference_db, reference_mode, group_delay_s, phase_delay_s)
-                VALUES
-                    (@CaptureId, @Kind, @StartHz, @EndHz, @PeakDb, @PeakHz,
-                     @Bw1LowerHz, @Bw1UpperHz, @Bw1LowerClamped, @Bw1UpperClamped,
-                     @Bw3LowerHz, @Bw3UpperHz, @Bw3LowerClamped, @Bw3UpperClamped,
-                     @FreqHz, @MagMinDb, @MagMaxDb, @PhaseDeg, @Coherence,
-                     @ReferenceDb, @ReferenceMode, @GroupDelayS, @PhaseDelayS);
-                """,
-                new
-                {
-                    CaptureId = captureId,
-                    trace.Kind,
-                    trace.StartHz,
-                    trace.EndHz,
-                    trace.PeakDb,
-                    trace.PeakHz,
-                    Bw1LowerHz = trace.OneDb.LowerHz,
-                    Bw1UpperHz = trace.OneDb.UpperHz,
-                    Bw1LowerClamped = trace.OneDb.LowerClamped ? 1 : 0,
-                    Bw1UpperClamped = trace.OneDb.UpperClamped ? 1 : 0,
-                    Bw3LowerHz = trace.ThreeDb.LowerHz,
-                    Bw3UpperHz = trace.ThreeDb.UpperHz,
-                    Bw3LowerClamped = trace.ThreeDb.LowerClamped ? 1 : 0,
-                    Bw3UpperClamped = trace.ThreeDb.UpperClamped ? 1 : 0,
-                    FreqHz = PreviewCodec.Encode(trace.FreqHz),
-                    MagMinDb = PreviewCodec.Encode(trace.MagnitudeMinDb),
-                    MagMaxDb = PreviewCodec.Encode(trace.MagnitudeMaxDb),
-                    PhaseDeg = PreviewCodec.Encode(trace.PhaseDeg),
-                    Coherence = PreviewCodec.Encode(trace.Coherence),
-                    trace.ReferenceDb,
-                    trace.ReferenceMode,
-                    GroupDelayS = trace.GroupDelayS is null ? null : PreviewCodec.Encode(trace.GroupDelayS),
-                    PhaseDelayS = trace.PhaseDelayS is null ? null : PreviewCodec.Encode(trace.PhaseDelayS),
-                },
-                transaction);
-        }
+            await InsertResponseTraceAsync(connection, transaction, captureId, trace);
 
         // One extra capture per measured point, numbered from 1 so the curves keep seq_index 0 --
         // see ResponseSaveRequest.PointPreviews for why this needs no table of its own. The
@@ -949,6 +959,58 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     private sealed record SweepMetricRowRaw(long SeqIndex, long Channel, string Name, double Value);
 
     private sealed record SweepPreviewRowRaw(long SeqIndex, long Channel, string Kind, byte[] X, byte[] Min, byte[] Max);
+
+    /// <summary>
+    /// One <c>response_trace</c> row. Shared by the save path and the re-analysis rewrite so the
+    /// twenty-three columns are listed once: a second copy is how a column comes to be written by
+    /// one of them and not the other.
+    /// </summary>
+    private static async Task InsertResponseTraceAsync(
+        SqliteConnection connection, SqliteTransaction transaction, long captureId, ResponseTraceInput trace)
+    {
+        await connection.ExecuteAsync(
+            """
+            INSERT INTO response_trace
+                (capture_id, kind, start_hz, end_hz, peak_db, peak_hz,
+                 bw1_lower_hz, bw1_upper_hz, bw1_lower_clamped, bw1_upper_clamped,
+                 bw3_lower_hz, bw3_upper_hz, bw3_lower_clamped, bw3_upper_clamped,
+                 freq_hz, mag_min_db, mag_max_db, phase_deg, coherence,
+                 reference_db, reference_mode, group_delay_s, phase_delay_s)
+            VALUES
+                (@CaptureId, @Kind, @StartHz, @EndHz, @PeakDb, @PeakHz,
+                 @Bw1LowerHz, @Bw1UpperHz, @Bw1LowerClamped, @Bw1UpperClamped,
+                 @Bw3LowerHz, @Bw3UpperHz, @Bw3LowerClamped, @Bw3UpperClamped,
+                 @FreqHz, @MagMinDb, @MagMaxDb, @PhaseDeg, @Coherence,
+                 @ReferenceDb, @ReferenceMode, @GroupDelayS, @PhaseDelayS);
+            """,
+            new
+            {
+                CaptureId = captureId,
+                trace.Kind,
+                trace.StartHz,
+                trace.EndHz,
+                trace.PeakDb,
+                trace.PeakHz,
+                Bw1LowerHz = trace.OneDb.LowerHz,
+                Bw1UpperHz = trace.OneDb.UpperHz,
+                Bw1LowerClamped = trace.OneDb.LowerClamped ? 1 : 0,
+                Bw1UpperClamped = trace.OneDb.UpperClamped ? 1 : 0,
+                Bw3LowerHz = trace.ThreeDb.LowerHz,
+                Bw3UpperHz = trace.ThreeDb.UpperHz,
+                Bw3LowerClamped = trace.ThreeDb.LowerClamped ? 1 : 0,
+                Bw3UpperClamped = trace.ThreeDb.UpperClamped ? 1 : 0,
+                FreqHz = PreviewCodec.Encode(trace.FreqHz),
+                MagMinDb = PreviewCodec.Encode(trace.MagnitudeMinDb),
+                MagMaxDb = PreviewCodec.Encode(trace.MagnitudeMaxDb),
+                PhaseDeg = PreviewCodec.Encode(trace.PhaseDeg),
+                Coherence = PreviewCodec.Encode(trace.Coherence),
+                trace.ReferenceDb,
+                trace.ReferenceMode,
+                GroupDelayS = trace.GroupDelayS is null ? null : PreviewCodec.Encode(trace.GroupDelayS),
+                PhaseDelayS = trace.PhaseDelayS is null ? null : PreviewCodec.Encode(trace.PhaseDelayS),
+            },
+            transaction);
+    }
 
     private static async Task InsertSpectrumAsync(
         SqliteConnection connection, SqliteTransaction transaction, long captureId, StoredSpectrumInput spectrum, CancellationToken ct)

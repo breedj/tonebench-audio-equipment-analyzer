@@ -120,6 +120,31 @@
       never kept.
     </p>
 
+    <h2>The quick one: where does it roll off?</h2>
+
+    <p>
+      Everything above is about distortion, which needs a long simulation. There is a second, much
+      faster thing worth doing: an <strong>AC sweep</strong>, which tells you where the amplifier
+      rolls off at each end and what its phase is doing. It runs in a second or two.
+    </p>
+
+    <p>Put this in the schematic instead of the <code>.tran</code> line:</p>
+
+    <p><code>.ac dec 100 1 1Meg</code></p>
+
+    <p>
+      Then open a <strong>Frequency response</strong> measurement rather than an FFT one and import
+      it there. Pick the output node, and — if the schematic has one — the input node as the
+      reference, which makes the answer the amplifier's own gain. You get the same −3 dB corners the
+      bench measurement gives you, to put side by side.
+    </p>
+
+    <p>
+      One thing it will not tell you: an AC sweep assumes the amplifier behaves itself. It says
+      nothing about distortion or clipping, however hard you imagine driving it. That is what the
+      transient run above is for.
+    </p>
+
     <h2>Reading the comparison</h2>
 
     <p>

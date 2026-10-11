@@ -51,6 +51,7 @@ import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
 import MeasurementNotesPanel from './components/MeasurementNotesPanel.vue'
 import MeasurementChecklist from './components/MeasurementChecklist.vue'
 import SimulationImportDialog from './components/SimulationImportDialog.vue'
+import AcSimulationImportDialog from './components/AcSimulationImportDialog.vue'
 import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
@@ -4276,7 +4277,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:autofit-on-done="responseAutofitOnDone"
                 />
 
-                <MeasurementChecklist @error="reportError" />
+                <MeasurementChecklist @error="reportError" @import-simulation="simulationImportOpen = true" />
               </template>
             </MeasurementLayout>
           </template>
@@ -5030,8 +5031,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
     />
 
     <SaveMeasurementDialog :open="saveDialogOpen" @close="saveDialogOpen = false" />
+    <AcSimulationImportDialog
+      :open="simulationImportOpen && isFrequencyResponseKind(currentType?.kind)"
+      :measurement-type-id="currentTypeId"
+      @close="simulationImportOpen = false"
+      @imported="onSimulationImported"
+    />
+
     <SimulationImportDialog
-      :open="simulationImportOpen"
+      :open="simulationImportOpen && !isFrequencyResponseKind(currentType?.kind)"
       :measurement-type-id="currentTypeId"
       @close="simulationImportOpen = false"
       @imported="onSimulationImported"

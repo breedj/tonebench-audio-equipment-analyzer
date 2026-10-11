@@ -3,12 +3,44 @@
     <h1>Importing a simulation</h1>
 
     <p>
-      A simulated spectrum can be drawn on the FFT chart beside a measured one, so a change in the
-      circuit can be checked against the bench without leaving the app. The import reads a
-      <strong>transient</strong> run — LTspice's <code>.raw</code> or QSpice's <code>.qraw</code>,
-      which are the same container — takes the traces you choose, and analyses them with the same
-      code the live FFT screen uses. Its THD, THD+N, SNR and harmonic figures therefore mean
-      exactly what a measured capture's do.
+      A simulated result can be drawn beside a measured one, so a change in the circuit can be
+      checked against the bench without leaving the app. There are two imports, and which one you
+      get follows from the measurement you are looking at:
+    </p>
+
+    <table class="manual-wrap">
+      <thead>
+        <tr>
+          <th>On this measurement</th>
+          <th>Import this run</th>
+          <th>And you get</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>FFT analysis</strong></td>
+          <td>a transient run — <code>.tran</code></td>
+          <td>
+            a spectrum, with THD, THD+N, SNR and harmonic markers that mean exactly what a measured
+            capture's do
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Frequency response</strong></td>
+          <td>an AC sweep — <code>.ac</code></td>
+          <td>
+            a Bode curve, with phase, group and phase delay, and ±1 dB and −3 dB corners found the
+            same way a chirp's are
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Both read the same container — LTspice's <code>.raw</code> or QSpice's <code>.qraw</code> —
+      and a file of the wrong kind is refused by name, pointing at the screen it does belong on. The
+      first half of this page is the transient import; <a href="#ac">the AC sweep</a> is further
+      down.
     </p>
 
     <p>
@@ -377,6 +409,116 @@
       Nyquist back into the audio band, where it would read as distortion the circuit does not have.
       Measured on a test signal, a component at 200&nbsp;kHz reappears at 27.5&nbsp;kHz at nearly
       full amplitude without the filter, and is 129&nbsp;dB down with it.
+    </p>
+
+    <h2 id="ac">A frequency response from an <code>.ac</code> sweep</h2>
+
+    <p>
+      An AC analysis is the quickest useful thing a simulator can tell you about an amplifier:
+      where it rolls off, how much phase is left at the top of the band, and whether the feedback
+      loop has any margin. It runs in a second or two where a transient run takes minutes, and the
+      answer is exact rather than estimated from a windowed record. Import it on a
+      <strong>Frequency response</strong> measurement and it draws on the Bode chart under the
+      measured curve, with the Nyquist, Nichols, pole-zero and |H(s)| projections all working off
+      it as they do off a chirp.
+    </p>
+
+    <h3>What to put in the schematic</h3>
+
+    <p>
+      One directive: <code>.ac dec 100 1 1Meg</code> — logarithmic spacing, 100 points per decade,
+      then the range.
+    </p>
+
+    <table class="manual-wrap">
+      <thead>
+        <tr>
+          <th>Part</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>dec</code></td>
+          <td>
+            Points spread evenly in <em>ratio</em>, which is how the chart draws them. Use this
+            rather than <code>lin</code>: a linear sweep puts almost every point in its top decade,
+            so the bottom of the band is drawn from a handful of them. The import says so if you do.
+          </td>
+        </tr>
+        <tr>
+          <td><code>100</code></td>
+          <td>
+            Points per decade, which is how closely a corner can be located — 100 is 2.3 % between
+            points, 20 is 12 %, 5 is 58 %. Below about 20 the import warns.
+          </td>
+        </tr>
+        <tr>
+          <td>the range</td>
+          <td>
+            Go well past the band you care about in both directions. Corners outside the sweep
+            cannot be found and read as clamped.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      <code>.options plotwinsize=0</code> and <code>numdgt=7</code> do nothing here. They are about
+      how a transient waveform is stored, and an AC run has no waveform.
+    </p>
+
+    <h3>Pick a reference trace</h3>
+
+    <p>
+      The output trace on its own is the transfer function only if the simulator's AC source is
+      exactly 1 — LTspice's <code>AC 1</code> default. Picking the <strong>input node</strong> as
+      the reference divides one by the other, which is what a bench measurement does and what makes
+      the answer the circuit's own gain. On the QSpice reference circuit the input sags to 0.9914 at
+      1 kHz under its own loading, which is 0.075 dB of difference; the import warns when the
+      reference varies by more than a tenth of a decibel.
+    </p>
+
+    <p>
+      With a reference picked the result keeps three curves — the gain and both of the singles it
+      came from — so the division can be undone and redone later. Without one it keeps the single
+      gain curve.
+    </p>
+
+    <h3>What an AC run cannot tell you</h3>
+
+    <p>
+      <strong>An AC analysis is a small-signal linearisation about the operating point.</strong>
+      The simulator finds the bias, linearises everything around it, and solves the resulting linear
+      circuit at each frequency. That has two consequences worth being clear about:
+    </p>
+
+    <ul>
+      <li>
+        <strong>It says nothing about distortion, clipping or slew limiting.</strong> A circuit that
+        sounds dreadful at real levels still shows a perfectly clean AC response. The transient
+        import on an FFT measurement is what answers that question.
+      </li>
+      <li>
+        <strong>The drive level does not exist.</strong> Every level gives the same curve, which is
+        why the import offers no level control and the stored result records none.
+      </li>
+    </ul>
+
+    <h3>There is no smoothing, deliberately</h3>
+
+    <p>
+      Fractional-octave smoothing exists to tame measurement noise, and a simulated curve has none
+      — smoothing it would only throw detail away. Leaving it alone is also what lets the sweep be
+      stored at full resolution, which is what makes the band and the bandwidth reference
+      changeable afterwards: <strong>Re-analyse</strong> on the row re-runs the corner search over
+      the stored curve without the file. Narrow the band and widen it again and the original
+      corners come back.
+    </p>
+
+    <p>
+      Two things a re-analysis cannot change, for the same reason as on the transient side: which
+      traces were imported, and — if only one was — what to divide it by.
     </p>
 
     <h2>What is refused, and why</h2>

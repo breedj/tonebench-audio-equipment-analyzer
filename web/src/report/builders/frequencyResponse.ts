@@ -90,6 +90,60 @@ function push(rows: ReportRow[], row: ReportRow | null) {
   if (row) rows.push(row)
 }
 
+/**
+ * What produced an imported `.ac` sweep, in place of the run settings a measured one has. Null
+ * when the result is measured, which is what keeps the two apart.
+ */
+function acSimulationSettingsRows(params: Record<string, unknown>): ReportRow[] | null {
+  const simulation = params['acSimulation'] as Record<string, unknown> | null | undefined
+  const source = simulation?.['source'] as Record<string, unknown> | null | undefined
+  if (!simulation || !source) return null
+
+  const rows: ReportRow[] = []
+  const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null)
+  const num = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null
+
+  rows.push({ label: 'Source', value: 'Simulated (.ac sweep)' })
+  push(rows, str(source['path']) ? { label: 'File', value: str(source['path'])! } : null)
+
+  const startHz = num(source['startFreqHz'])
+  const endHz = num(source['endFreqHz'])
+  if (startHz !== null && endHz !== null)
+    rows.push({ label: 'Sweep', value: `${formatHz(startHz)} – ${formatHz(endHz)}` })
+
+  const points = num(source['pointCount'])
+  const perDecade = num(source['pointsPerDecade'])
+  if (points !== null) {
+    rows.push({
+      label: 'Points',
+      value: perDecade !== null && perDecade > 0
+        ? `${points.toLocaleString()} (${perDecade.toFixed(0)} per decade)`
+        : points.toLocaleString(),
+    })
+  }
+
+  const output = str(source['outputTrace'])
+  const reference = str(source['referenceTrace'])
+  if (output) rows.push({ label: 'Output trace', value: output })
+  rows.push({
+    label: 'Reference trace',
+    value: reference ?? 'None — levels are dB relative to 1 V',
+  })
+
+  const lowHz = num(simulation['analysisLowHz'])
+  const highHz = num(simulation['analysisHighHz'])
+  if (lowHz !== null && highHz !== null)
+    rows.push({ label: 'Analysed band', value: `${formatHz(lowHz)} – ${formatHz(highHz)}` })
+
+  const offset = num(simulation['levelOffsetDb'])
+  if (offset !== null && offset !== 0) rows.push({ label: 'Level offset', value: `${offset.toFixed(2)} dB` })
+
+  push(rows, bandwidthReferenceRow(params))
+  rows.push({ label: 'Smoothing', value: 'None — a simulated curve has no noise to smooth' })
+  return rows
+}
+
 function chirpSettingsRows(params: Partial<FrequencyResponseParameters & { captureDelayMs?: number | null }>): ReportRow[] {
   const rows: ReportRow[] = []
   if (typeof params.frequencySpanHz === 'number') {
@@ -164,6 +218,13 @@ export function frequencyResponseSettingsRows(kind: string, paramsJson: string):
     return []
   }
   if (!params || typeof params !== 'object') return []
+
+  // An imported .ac sweep first: its params_json is a FrequencyResponseParameters like any other,
+  // but the chirp fields in it are placeholders (span 0, no level, one average) and printing them
+  // would put "Sweep: to 0 Hz" and "Level: 0 dBV" on paper, which is worse than printing nothing.
+  const acRows = acSimulationSettingsRows(params)
+  if (acRows) return acRows
+
   return isSteppedResponseKind(kind) ? steppedSettingsRows(params) : chirpSettingsRows(params)
 }
 

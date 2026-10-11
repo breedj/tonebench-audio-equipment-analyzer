@@ -228,6 +228,7 @@ try
     builder.Services.AddSingleton<TrashRepository>();
     builder.Services.AddSingleton<MeasurementSaveService>();
     builder.Services.AddSingleton<SimulationImportService>();
+    builder.Services.AddSingleton<SimulationResponseImportService>();
 
     var app = builder.Build();
 

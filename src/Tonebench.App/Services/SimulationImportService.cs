@@ -457,7 +457,8 @@ public sealed class SimulationImportService(
                     "an operating-point file (the .op.raw that LTspice writes beside every run), which holds one " +
                     "solution and no waveform",
                 LtspiceAnalysis.AcAnalysis =>
-                    "an AC analysis, which is a frequency response rather than a waveform",
+                    "an AC analysis, which is a frequency response rather than a waveform. Open it on a " +
+                    "Frequency response measurement instead",
                 LtspiceAnalysis.Fft =>
                     "LTspice's own FFT export, which is already a spectrum. Import the transient run itself instead, " +
                     "so the window and the resolution are this app's to choose",

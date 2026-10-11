@@ -36,12 +36,12 @@ const autofitOnDone = ref(false)
 // live stream as the spectrum chart, so hiding one is purely about how much of the screen a
 // measurement is allowed to take -- nothing here reaches the pipeline.
 //
-// The Oscilloscope and Harmonics default to on; the Waterfall and Other peaks default to *off*
+// The Oscilloscope and Harmonics default to on; the Spectrogram and Other peaks default to *off*
 // (Joost, 2026-09-29) -- they are the two a bench measurement least often wants, and between them
 // they push the harmonics table off the bottom of the screen. Note what a default means here: a
 // stored type carries an explicit boolean per panel, so only a row saved before these fields existed
 // (null) picks the default up, and those two now come back hidden rather than shown.
-const showWaterfall = ref(false)
+const showSpectrogram = ref(false)
 const showOscilloscope = ref(true)
 const showHarmonics = ref(true)
 const showOtherPeaks = ref(false)
@@ -85,7 +85,7 @@ let restoring = false
 watch([
   yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold, showFftTrace,
   autofitOnDone,
-  showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
+  showSpectrogram, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
   showHarmonicMarkers,
   harmonicsSort, otherPeaksSort,
 ], () => {
@@ -116,7 +116,7 @@ watch(showFftTrace, (shown) => {
 // From/To dropdowns above, a drag-zoom on the chart, and the double-click reset, all of which end
 // up in the same setScale('x'). Published by SpectrumChart.vue rather than derived here, because
 // only the chart knows the full span (it comes off the streamed frames) and therefore what a zoom
-// is relative to. Read by WaterfallChart.vue, which is stacked directly beneath it and has to
+// is relative to. Read by SpectrogramChart.vue, which is stacked directly beneath it and has to
 // share the exact same axis for the two to be readable as one picture. Null until the first frame
 // establishes a span.
 const activeXRange = ref<{ min: number; max: number } | null>(null)
@@ -148,7 +148,7 @@ export interface StoredSpectrumDisplay {
   chartShowPeakHold?: boolean | null
   chartShowFftTrace?: boolean | null
   chartAutofitOnDone?: boolean | null
-  chartShowWaterfall?: boolean | null
+  chartShowSpectrogram?: boolean | null
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
   chartShowOtherPeaks?: boolean | null
@@ -277,7 +277,7 @@ export function useChartDisplay() {
     showPeakHold.value = loaded?.chartShowPeakHold ?? false
     showFftTrace.value = loaded?.chartShowFftTrace ?? true
     autofitOnDone.value = loaded?.chartAutofitOnDone ?? false
-    showWaterfall.value = loaded?.chartShowWaterfall ?? false
+    showSpectrogram.value = loaded?.chartShowSpectrogram ?? false
     showOscilloscope.value = loaded?.chartShowOscilloscope ?? true
     showHarmonics.value = loaded?.chartShowHarmonics ?? true
     showOtherPeaks.value = loaded?.chartShowOtherPeaks ?? false
@@ -317,7 +317,7 @@ export function useChartDisplay() {
     showPeakHold,
     showFftTrace,
     autofitOnDone,
-    showWaterfall,
+    showSpectrogram,
     showOscilloscope,
     showHarmonics,
     showOtherPeaks,

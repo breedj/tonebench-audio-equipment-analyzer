@@ -191,7 +191,7 @@ public sealed record StagedMeasurementConfig(
     double? ChartYTopDbv = null, double? ChartYBottomDbv = null, double? ChartXFromHz = null, double? ChartXToHz = null,
     bool? ChartThickLines = null, bool? ChartShowDataPoints = null, bool? ChartShowMinMax = null, bool? ChartShowPeakHold = null,
     bool? ChartAutofitOnDone = null,
-    bool? ChartShowWaterfall = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null,
+    bool? ChartShowSpectrogram = null, bool? ChartShowOscilloscope = null, bool? ChartShowHarmonics = null, bool? ChartShowOtherPeaks = null,
     /// <summary>The generator panel's IMD template and analysis choice -- see <see cref="Tonebench.Data.FftSpectrumParameters.ImdPreset"/>. The tones themselves ride in the generator config.</summary>
     string? ImdPreset = null, string? ImdMethod = null, int? ImdMaxOrder = null,
     /// <summary>The DUT gain under the chart's unit dropdown, and that unit -- see <see cref="Tonebench.Data.FftSpectrumParameters.DutGainDb"/>.</summary>
@@ -238,7 +238,7 @@ public sealed record MeasurementTypeAppliedResponse(
     bool? ChartShowMinMax,
     bool? ChartShowPeakHold,
     bool? ChartAutofitOnDone,
-    bool? ChartShowWaterfall,
+    bool? ChartShowSpectrogram,
     bool? ChartShowOscilloscope,
     bool? ChartShowHarmonics,
     bool? ChartShowOtherPeaks,

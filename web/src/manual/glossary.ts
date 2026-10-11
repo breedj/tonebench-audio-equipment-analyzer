@@ -568,6 +568,13 @@ export const GLOSSARY: GlossaryEntry[] = [
     see: ['fft-spectrum'],
   },
   {
+    term: 'Spectrogram',
+    aliases: ['waterfall'],
+    definition:
+      'Successive spectra stacked in time, newest at the front, so that changes show up as streaks and a steady tone as a ridge. It is a live view of history rather than a measurement of its own. Called a waterfall elsewhere, and still the name the impulse-response screen’s decay surface uses for its own stacked-curve projections.',
+    see: ['fft-spectrum'],
+  },
+  {
     term: 'Stepped sine',
     definition:
       'Measuring a response one tone at a time, moving up the band in steps, instead of sweeping continuously. It is much slower than a chirp and much more literal: every point is its own capture at its own frequency, so nothing is deconvolved and nothing is assumed.',
@@ -613,12 +620,6 @@ export const GLOSSARY: GlossaryEntry[] = [
     definition:
       'Undoing the 360° jumps that appear when a measured phase runs off the end of its range, so that a response that has turned through several revolutions reads as continuous. It needs a trustworthy phase at every step, which is why bins far below the trace’s peak — where there is no real phase to read — are held rather than unwrapped.',
     see: ['frequency-response'],
-  },
-  {
-    term: 'Waterfall',
-    definition:
-      'Successive spectra stacked in time, newest at the front, so that changes show up as streaks and a steady tone as a ridge. It is a live view of history rather than a measurement of its own.',
-    see: ['fft-spectrum'],
   },
   {
     term: 'Weighting',

@@ -535,7 +535,7 @@ const { showPage } = useManual()
       <strong>ITU-R 468</strong>, <strong>User 1 (name)</strong> …) tag sits beside the chart's title
       so a weighted trace is never mistaken for a flat one. The harmonic markers are still placed at
       the harmonics' unweighted levels, so on a weighted trace they can sit off the line by the
-      curve's value at that frequency. Peak-hold and the waterfall are cleared whenever the
+      curve's value at that frequency. Peak-hold and the spectrogram are cleared whenever the
       weighting or the unit changes, since their history would otherwise mix two scales.
       <strong>Weighting curve</strong> in the Display panel draws the curve in effect (the standard
       one combined with any ticked user table) as a dashed amber line — its shape, not a level: a
@@ -545,7 +545,7 @@ const { showPage } = useManual()
       whatever is selected now rather than what the result was captured under.
     </p>
 
-    <h3>Waterfall</h3>
+    <h3>Spectrogram</h3>
     <p>
       The last several seconds of spectra stacked downward in time, with level as colour — one
       channel at a time, chosen with the L/R buttons, because the colour axis is already spent on
@@ -652,10 +652,10 @@ const { showPage } = useManual()
       <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (on for a
       newly created measurement), the <strong>Channels</strong> row, the FFT data, Min/max,
       Peak-hold, Harmonic markers and Weighting curve toggles, and finally four checkboxes that show or hide the
-      Waterfall, Oscilloscope, Harmonics and Other peaks panels — so a measurement that only needs
+      Spectrogram, Oscilloscope, Harmonics and Other peaks panels — so a measurement that only needs
       the spectrum does not have to scroll past the rest. A new measurement starts with the
-      Oscilloscope and Harmonics shown and the Waterfall and Other peaks hidden; tick them on where
-      you want them, and the choice is saved with the measurement. The waterfall and oscilloscope
+      Oscilloscope and Harmonics shown and the Spectrogram and Other peaks hidden; tick them on where
+      you want them, and the choice is saved with the measurement. The spectrogram and oscilloscope
       are only hidden: what they showed is still there when they are ticked back on.
     </p>
 

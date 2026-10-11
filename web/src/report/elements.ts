@@ -27,7 +27,7 @@ export type ReportElementId =
   | 'metrics'
   | 'harmonics'
   | 'oscilloscope'
-  | 'waterfall'
+  | 'spectrogram'
 
 export interface ReportElement {
   id: ReportElementId
@@ -119,10 +119,10 @@ const OSCILLOSCOPE: ReportElement = {
   hint: 'The waveform under the spectrum. Only for the measurement on screen — a stored result keeps no waveform.',
 }
 
-const WATERFALL: ReportElement = {
-  id: 'waterfall',
-  label: 'Waterfall',
-  hint: 'The waterfall under the spectrum, with the history it has collected. Only for the measurement on screen, and only while the waterfall is shown.',
+const SPECTROGRAM: ReportElement = {
+  id: 'spectrogram',
+  label: 'Spectrogram',
+  hint: 'The spectrogram under the spectrum, with the history it has collected. Only for the measurement on screen, and only while the spectrogram is shown.',
 }
 
 /** What every kind offers. */
@@ -135,7 +135,7 @@ export function reportElementsForKind(kind: string | null | undefined): readonly
   if (isSweepKind(kind)) return [CHART, DESCRIPTION, SETTINGS, SWEEP_MEASUREMENTS]
   if (isImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPEDANCE_MEASUREMENTS, IMPEDANCE_COMPONENT, IMPEDANCE_EQUIVALENT]
   if (isImpulseResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPULSE_MEASUREMENTS]
-  if (kind === FFT_SPECTRUM_KIND) return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, OSCILLOSCOPE, WATERFALL]
+  if (kind === FFT_SPECTRUM_KIND) return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, OSCILLOSCOPE, SPECTROGRAM]
   return GENERIC_REPORT_ELEMENTS
 }
 
@@ -159,13 +159,19 @@ export function defaultReportElements(kind: string | null | undefined): ReportEl
  * migration 008's backfill, which reproduced the order the list already appeared to have. A choice
  * that mentions either new id was made after the split and is taken exactly as it stands.</p>
  *
+ * <p>The FFT screen's spectrogram chapter was called `waterfall` until the chart was renamed. The id
+ * is what a stored choice holds, and the caller filters an unknown id out, so a choice made before
+ * the rename would silently lose that chapter. Renamed on the way in rather than kept as a second
+ * accepted id, so only one id reaches the rest of the client.</p>
+ *
  * <p>Takes plain strings, because this is what came back out of a stored settings document and may
  * hold ids no build of this client knows; the caller filters it against what the kind offers.</p>
  */
 export function migrateStoredElements(stored: readonly string[]): string[] {
-  const split = stored.includes('component') || stored.includes('equivalent')
-  if (split || !stored.includes('measurements')) return [...stored]
-  return [...stored, 'component']
+  const renamed = stored.map((id) => (id === 'waterfall' ? 'spectrogram' : id))
+  const split = renamed.includes('component') || renamed.includes('equivalent')
+  if (split || !renamed.includes('measurements')) return renamed
+  return [...renamed, 'component']
 }
 
 /** Whether a kind's report can carry its chart — i.e. its chart component exposes `exportPng`. Every kind's does. */

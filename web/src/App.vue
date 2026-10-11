@@ -39,7 +39,7 @@ import GeneratorPanel from './components/GeneratorPanel.vue'
 import SpectrumConfigPanel from './components/SpectrumConfigPanel.vue'
 import BandwidthWeightingPanel from './components/BandwidthWeightingPanel.vue'
 import SpectrumChart from './components/SpectrumChart.vue'
-import WaterfallChart from './components/WaterfallChart.vue'
+import SpectrogramChart from './components/SpectrogramChart.vue'
 import OscilloscopeChart from './components/OscilloscopeChart.vue'
 import MetricsPanel from './components/MetricsPanel.vue'
 import GeneratorMetricsPanel from './components/GeneratorMetricsPanel.vue'
@@ -184,7 +184,7 @@ const {
   showPeakHold: chartShowPeakHold,
   showFftTrace: chartShowFftTrace,
   autofitOnDone: chartAutofitOnDone,
-  showWaterfall: chartShowWaterfall,
+  showSpectrogram: chartShowSpectrogram,
   showOscilloscope: chartShowOscilloscope,
   showHarmonics: chartShowHarmonics,
   showOtherPeaks: chartShowOtherPeaks,
@@ -208,7 +208,7 @@ const weightingAnnunciator = computed(() =>
 )
 
 // A weighting or unit change redraws every level on the chart, so the histories the chart keeps --
-// the peak-hold maps and the waterfall's rows -- would mix two scales. Clear them. The DUT gain only
+// the peak-hold maps and the spectrogram's rows -- would mix two scales. Clear them. The DUT gain only
 // matters while the input-referred unit is selected.
 watch(
   () => [
@@ -221,7 +221,7 @@ watch(
   (next, previous) => {
     if (previous === undefined || next.every((v, i) => v === previous[i])) return
     requestChartResetPeakHold()
-    waterfallChart.value?.clearHistory()
+    spectrogramChart.value?.clearHistory()
   },
 )
 // Gates the fundamental/harmonic markers and tables to Sine — Multitone's comb has no single
@@ -2252,9 +2252,9 @@ const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(nul
 const impedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const outputImpedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const impedancePlaneChart = ref<InstanceType<typeof ImpedancePlaneChart> | null>(null)
-// The FFT screen's waterfall, for the report's Waterfall element (not the Screenshot, which takes
+// The FFT screen's spectrogram, for the report's Spectrogram element (not the Screenshot, which takes
 // the main chart): mounted only while the display panel shows it, null otherwise.
-const waterfallChart = ref<InstanceType<typeof WaterfallChart> | null>(null)
+const spectrogramChart = ref<InstanceType<typeof SpectrogramChart> | null>(null)
 
 /** The chart on screen — whichever view or projection the screen is showing. */
 function chartOnScreen() {
@@ -2550,8 +2550,8 @@ function buildLiveSubject(): ReportSubject | null {
       facts.push({ label: 'Window', value: spectrumConfig.value.window })
     }
     // The screen's own display singleton: the report draws exactly what the display panel shows.
-    // The scope frames and the mounted waterfall come along for the report's two secondary charts —
-    // the waterfall's picture is the history the chart on screen collected, and only it can draw it.
+    // The scope frames and the mounted spectrogram come along for the report's two secondary charts —
+    // the spectrogram's picture is the history the chart on screen collected, and only it can draw it.
     subject.data = {
       kind: 'spectrum',
       spectrum: spectrum.value,
@@ -2570,7 +2570,7 @@ function buildLiveSubject(): ReportSubject | null {
       scope: scope.value,
       scopeResidual: scopeResidual.value,
       status: status.value,
-      waterfall: waterfallChart.value,
+      spectrogram: spectrogramChart.value,
     }
   }
 
@@ -2683,7 +2683,7 @@ function discardLiveStore(store: LiveStore): Promise<unknown> {
       // The two histories the charts keep themselves, which no frame can re-derive — the same pair
       // the weighting/unit watcher near the top of this file clears, and for the same reason.
       requestChartResetPeakHold()
-      waterfallChart.value?.clearHistory()
+      spectrogramChart.value?.clearHistory()
       return api.clearSpectrum()
     case 'sweep':
       return clearSweepRun()
@@ -2737,7 +2737,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowFftTrace: chartShowFftTrace.value,
     chartShowHarmonicMarkers: chartShowHarmonicMarkers.value,
     chartAutofitOnDone: chartAutofitOnDone.value,
-    chartShowWaterfall: chartShowWaterfall.value,
+    chartShowSpectrogram: chartShowSpectrogram.value,
     chartShowOscilloscope: chartShowOscilloscope.value,
     chartShowHarmonics: chartShowHarmonics.value,
     chartShowOtherPeaks: chartShowOtherPeaks.value,
@@ -4947,12 +4947,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 :weighting-label="weightingAnnunciator"
                 @viewport-change="onSpectrumViewportChange"
               />
-              <!-- v-show, not v-if: the waterfall's history is collected frame by frame by the
-                   mounted instance (it is what the report exports, see WaterfallChart.exportPng),
+              <!-- v-show, not v-if: the spectrogram's history is collected frame by frame by the
+                   mounted instance (it is what the report exports, see SpectrogramChart.exportPng),
                    and the oscilloscope's period count and channel are its own state. Unchecking
                    the panel hides it; unmounting it would throw all of that away. Both charts
                    skip a zero-width resize while hidden and refit when shown again. -->
-              <WaterfallChart v-show="chartShowWaterfall" ref="waterfallChart" class="mt-3" :spectrum="spectrum" />
+              <SpectrogramChart v-show="chartShowSpectrogram" ref="spectrogramChart" class="mt-3" :spectrum="spectrum" />
               <OscilloscopeChart v-show="chartShowOscilloscope" class="mt-3" :scope="scope" :residual="scopeResidual" :status="status" />
             </div>
 

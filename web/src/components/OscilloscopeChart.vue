@@ -403,7 +403,7 @@ const residualMissing = computed(
 let resizeObserver: ResizeObserver | null = null
 function handleResize() {
   if (!plot || !containerRef.value) return
-  // Zero while the panel is hidden (App.vue's v-show) -- see WaterfallChart's handleResize.
+  // Zero while the panel is hidden (App.vue's v-show) -- see SpectrogramChart's handleResize.
   const width = containerRef.value.getBoundingClientRect().width
   if (width > 0) plot.setSize({ width, height: chartHeight.value })
 }

@@ -257,9 +257,9 @@ const { showPage } = useManual()
         generator level and the removed DUT delay) and, when harmonics were extracted, each order's
         level at 100 Hz, 1 kHz and 10 kHz with the frequency it stays valid to. For an FFT the <strong>Metrics</strong> tiles chosen
         with the Metrics button, the <strong>Harmonics table</strong>, and the
-        <strong>Oscilloscope</strong> and <strong>Waterfall</strong> under the spectrum. Those last
+        <strong>Oscilloscope</strong> and <strong>Spectrogram</strong> under the spectrum. Those last
         two exist only for the measurement on screen (a stored result keeps no waveform and no
-        history), and the waterfall only while the display panel shows it. Until you choose, a report
+        history), and the spectrogram only while the display panel shows it. Until you choose, a report
         has the current measurement ticked, every element but the settings, and a chart per
         measurement. <strong>Charts in black and white</strong> renders every chart in greys, for a
         monochrome printer; it is one setting for every kind. Views, layout and elements are

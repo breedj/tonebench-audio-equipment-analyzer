@@ -1596,7 +1596,7 @@ public sealed class MeasurementSaveService(
             parameters.ChartShowMinMax,
             parameters.ChartShowPeakHold,
             parameters.ChartAutofitOnDone,
-            parameters.ChartShowWaterfall,
+            parameters.ChartShowSpectrogram,
             parameters.ChartShowOscilloscope,
             parameters.ChartShowHarmonics,
             parameters.ChartShowOtherPeaks,
@@ -1655,7 +1655,7 @@ public sealed class MeasurementSaveService(
             staged?.ChartYTopDbv, staged?.ChartYBottomDbv, staged?.ChartXFromHz, staged?.ChartXToHz,
             staged?.ChartThickLines, staged?.ChartShowDataPoints, staged?.ChartShowMinMax, staged?.ChartShowPeakHold,
             staged?.ChartAutofitOnDone,
-            staged?.ChartShowWaterfall, staged?.ChartShowOscilloscope, staged?.ChartShowHarmonics, staged?.ChartShowOtherPeaks)
+            staged?.ChartShowSpectrogram, staged?.ChartShowOscilloscope, staged?.ChartShowHarmonics, staged?.ChartShowOtherPeaks)
         {
             // The spec itself is live pipeline state (the FFT screen pushes it through
             // spectrum-config the moment the stimulus changes), so it is read from the options like

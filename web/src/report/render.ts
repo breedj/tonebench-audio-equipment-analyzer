@@ -97,7 +97,7 @@ function exportOptions(primaryLabel: string | null, monochrome: boolean): ChartE
 /**
  * The FFT chapter's two secondary charts, when their elements are chosen and the subject has them:
  * the oscilloscope (rendered headless from the subject's scope frames, like any chart) and the
- * waterfall, which only the instance on screen can draw — its picture is the history it collected
+ * spectrogram, which only the instance on screen can draw — its picture is the history it collected
  * frame by frame, and a fresh instance would have one row. Neither is combinable, so they are
  * per subject; a stored result has neither, and simply gets none.
  */
@@ -116,9 +116,9 @@ export async function renderExtraCharts(
     charts.push({ png, caption: 'Oscilloscope' })
   }
 
-  if (elements.includes('waterfall') && data.waterfall) {
-    const png = await data.waterfall.exportPng({ ...SIZE, captureZoom: false })
-    charts.push({ png: monochrome ? await monochromeChartPng(png) : png, caption: 'Waterfall' })
+  if (elements.includes('spectrogram') && data.spectrogram) {
+    const png = await data.spectrogram.exportPng({ ...SIZE, captureZoom: false })
+    charts.push({ png: monochrome ? await monochromeChartPng(png) : png, caption: 'Spectrogram' })
   }
 
   return charts

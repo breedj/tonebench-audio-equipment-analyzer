@@ -131,7 +131,7 @@ const { showPage } = useManual()
             <strong>What it is for:</strong> capturing a signal something <em>else</em> is driving —
             an ultrasonic source, a switching supply's residue, a transmitter, anything whose content
             runs past the 96 kHz a 192 kHz capture can show. Everything the FFT screen measures from
-            an input works normally at it: the spectrum, the waterfall, the noise figures, the
+            an input works normally at it: the spectrum, the spectrogram, the noise figures, the
             harmonics table.
             <strong>What it is not for:</strong> anything that needs this analyzer's own generator.
             <strong>The generator cannot be used at 384 kHz</strong>, so there is no loopback, no THD

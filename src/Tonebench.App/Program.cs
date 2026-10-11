@@ -37,7 +37,7 @@ string poolFloorNote;
 // drains the DAC's queue (Qa40xUsbDevice.TargetInFlightSeconds) and puts a flat span in the
 // generator output. That span is a real
 // dropout — measured at 0.3-3.6 ms in captured waveforms, enough to lift a 341 ms FFT record's
-// broadband floor by ~70 dB and show up as one bright row in the waterfall.
+// broadband floor by ~70 dB and show up as one bright row in the spectrogram.
 //
 // The pool's own starvation response is the problem: past its minimum it injects roughly one thread
 // per second, so a burst of DSP/broadcast work parks completions behind a queue that takes seconds

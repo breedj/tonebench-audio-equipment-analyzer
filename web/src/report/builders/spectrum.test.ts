@@ -85,7 +85,7 @@ function subjectOf(selectedMetrics: string[], stimulus: StimulusSummary | null =
       loadOhms: 8,
       scope: {},
       status: null,
-      waterfall: null,
+      spectrogram: null,
     },
   }
 }
@@ -242,12 +242,12 @@ describe('report element defaults', () => {
       'metrics',
       'harmonics',
       'oscilloscope',
-      'waterfall',
+      'spectrogram',
     ])
   })
 
   it('includes everything a kind offers except the settings until the user chooses', () => {
-    expect(defaultReportElements('FFTSpectrum')).toEqual(['chart', 'description', 'metrics', 'harmonics', 'oscilloscope', 'waterfall'])
+    expect(defaultReportElements('FFTSpectrum')).toEqual(['chart', 'description', 'metrics', 'harmonics', 'oscilloscope', 'spectrogram'])
     expect(defaultReportElements('FrequencyResponse')).toEqual(['chart', 'description', 'measurements'])
     expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description', 'measurements'])
     expect(defaultReportElements('Impedance')).toEqual(['chart', 'description', 'measurements', 'component', 'equivalent'])
@@ -268,6 +268,14 @@ describe('report element defaults', () => {
     expect(migrateStoredElements(['chart', 'component'])).toEqual(['chart', 'component'])
     // Nothing to backfill onto: the component fit was never part of a choice without Measurements.
     expect(migrateStoredElements(['chart', 'description'])).toEqual(['chart', 'description'])
+  })
+
+  it('reads a choice saved when the spectrogram was called the waterfall', () => {
+    // The id is what a stored choice holds and the caller drops an id this build does not know, so
+    // without the rename the chapter would quietly stop being printed.
+    expect(migrateStoredElements(['chart', 'metrics', 'waterfall'])).toEqual(['chart', 'metrics', 'spectrogram'])
+    expect(migrateStoredElements(['waterfall'])).toEqual(['spectrogram'])
+    expect(migrateStoredElements(['chart', 'spectrogram'])).toEqual(['chart', 'spectrogram'])
   })
 })
 

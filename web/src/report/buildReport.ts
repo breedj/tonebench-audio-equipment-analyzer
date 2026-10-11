@@ -169,7 +169,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       loadOhms: useLoadOhms().loadOhms.value,
       scope: {},
       status: null,
-      waterfall: null,
+      spectrogram: null,
     }
   }
 
@@ -377,7 +377,7 @@ async function ownChartSections(subject: ReportSubject, views: readonly string[]
   return sections
 }
 
-/** The secondary charts a kind's elements ask for (the FFT's oscilloscope and waterfall), as image sections. */
+/** The secondary charts a kind's elements ask for (the FFT's oscilloscope and spectrogram), as image sections. */
 async function extraChartSections(subject: ReportSubject, elements: readonly ReportElementId[], monochrome: boolean): Promise<ReportSection[]> {
   const sections: ReportSection[] = []
   for (const chart of await renderExtraCharts(subject, elements, monochrome)) {
@@ -441,7 +441,7 @@ async function buildCombinedChapter(plan: ReportPlan, onProgress?: (message: str
     }
   }
 
-  // The secondary charts are per subject even here: a waterfall or a waveform is one measurement's.
+  // The secondary charts are per subject even here: a spectrogram or a waveform is one measurement's.
   const textElements = plan.elements.filter((e) => e !== 'chart')
   for (const subject of plan.subjects) {
     sections.push({ kind: 'keyValues', title: subjectLabel(subject), rows: subjectMeta(subject) })

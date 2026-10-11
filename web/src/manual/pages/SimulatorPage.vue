@@ -108,6 +108,29 @@ const { showPage } = useManual()
       Changing one part-way through a <em>sweep</em> quietly gives you a result measured under two
       different conditions, so don't.
     </p>
+    <p>
+      <strong>The row shows only the controls the open measurement can read.</strong> The harmonic
+      stack reaches the analyzer through a sine tone and nothing else, so <strong>Harmonics</strong>
+      appears on the FFT screen and the three distortion sweeps: a chirp carries no stack at all, and
+      a stepped sine is read one bin at a time, which the stack never lands in.
+      <strong>Crosstalk</strong> appears wherever two channels are read against each other — the FFT
+      screen and every ratio measurement — and <strong>Zout</strong> with <strong>Load</strong> on
+      the output-impedance screen, the one measurement whose subject they are.
+      <strong>Noise</strong>, <strong>Hum</strong> and <strong>DUT</strong> are always there: the
+      first two are added to both channels after everything else, so they set the floor of every
+      measurement there is, and the DUT list is never narrowed because picking a model that does not
+      suit the screen is what prompts the amber line that explains why.
+    </p>
+    <p>
+      Two things follow. <strong>A control that is doing something is never hidden.</strong> An
+      output stage with a load on it divides the left channel on every measurement, not only the
+      load-step one, so once both are set they stay on screen everywhere until you put them back to
+      <em>None</em> and <em>Open</em> — and the two are shown and hidden together, or setting one
+      would hide the other. A ticked <strong>Crosstalk</strong> box is the same. Second, the
+      <strong>⋯</strong> button at the end of the row brings the whole set back, for when you want to
+      switch something on from a screen that does not use it; it lasts as long as the window and is
+      not remembered.
+    </p>
 
     <h2>How it is wired</h2>
     <p>The simulated bench follows the way a real one is patched, and reading its results depends on knowing that.</p>
@@ -362,7 +385,8 @@ const { showPage } = useManual()
     <h3>Nonlinear amplifiers (the Distorting group)</h3>
     <p>
       Selecting any of these switches the generator's harmonic stack <em>off</em> whatever the
-      <strong>Harmonics</strong> box says — the box is greyed out to show it: the left channel then
+      <strong>Harmonics</strong> box says — on the screens that show the box it is greyed out rather
+      than hidden, because "off because this DUT distorts on its own" is worth reading: the left channel then
       carries only what the model does to the signal, and the right is a clean generator tap. The
       box's own setting comes back into force when a linear model is selected again.
     </p>

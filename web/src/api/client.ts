@@ -2127,8 +2127,8 @@ export interface MeasurementTypeAppliedResponse {
   chartOtherPeaksSort?: string | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
-  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */
-  chartShowWaterfall?: boolean | null
+  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
+  chartShowSpectrogram?: boolean | null
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
   chartShowOtherPeaks?: boolean | null
@@ -2185,8 +2185,8 @@ export interface StagedMeasurementConfig {
   chartOtherPeaksSort?: string | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
-  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */
-  chartShowWaterfall?: boolean | null
+  /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
+  chartShowSpectrogram?: boolean | null
   chartShowOscilloscope?: boolean | null
   chartShowHarmonics?: boolean | null
   chartShowOtherPeaks?: boolean | null

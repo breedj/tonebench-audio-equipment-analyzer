@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DeviceKindName, DeviceRanges, DeviceStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
+import { useProjects } from '../composables/useProjects'
+import { DISTORTING_DUTS } from '../simulator/hints'
+import { allSimulatorKnobsVisible, visibleSimulatorKnobs } from '../simulator/knobs'
 import { formatGain, type GainUnit } from '../soundcard/gainUnits'
 import ExternalGainPopover from './ExternalGainPopover.vue'
 
@@ -343,13 +346,42 @@ function onSimulatedLoadChange(e: Event) {
 }
 
 /**
+ * Which of the knobs above to show, from the open measurement and the knobs' own values — the rules
+ * and their reasoning are in simulator/knobs.ts. The open measurement comes from `useProjects()`
+ * rather than a prop, as SimulatorHint.vue already takes it: those refs are module-level singletons,
+ * and this component's props are deliberately device-only.
+ */
+const { types, currentTypeId } = useProjects()
+
+const currentKind = computed(() => types.value.find((t) => t.id === currentTypeId.value)?.kind ?? null)
+
+/**
+ * The escape hatch. Without it a knob the bar has hidden cannot be switched on from the screen that
+ * hides it — turning Crosstalk on to watch what it does to a THD sweep would mean leaving the
+ * sweep — so one button reveals the lot. Session-local and deliberately not persisted: the point is
+ * a glance at the full set, not a preference about it.
+ */
+const showAllKnobs = ref(false)
+
+const knobs = computed(() =>
+  showAllKnobs.value ? allSimulatorKnobsVisible() : visibleSimulatorKnobs(currentKind.value, props.status),
+)
+
+const anyKnobHidden = computed(() => Object.values(knobs.value).some((shown) => !shown))
+
+/**
  * The four nonlinear amplifier models carry their own distortion and switch the generator's
  * harmonic stack off whatever the profile says, so the checkbox is shown but disabled under one of
- * them — a live checkbox that changes nothing reads as a bug.
+ * them — a live checkbox that changes nothing reads as a bug. It is shown rather than hidden on
+ * purpose, unlike the knobs `visibleSimulatorKnobs` rules on: "off because this DUT distorts on its
+ * own" is worth reading.
+ *
+ * From `DISTORTING_DUTS` rather than by matching the group label, so this and the hint above the
+ * chart cannot drift apart or out of step with the server's `SuppliesOwnDistortion`.
  */
 const harmonicsSwitchInert = computed(() => {
   const dut = props.status?.simulatedDut
-  return dut != null && DUT_MODELS.some((m) => m.value === dut && m.group === 'Distorting — for THD and IMD')
+  return dut != null && DISTORTING_DUTS.includes(dut)
 })
 
 const harmonicsSwitchTitle = computed(() =>
@@ -517,9 +549,13 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
 
       <!-- Simulator-only: what the synthesized DUT adds on top of the generator's stimulus. Keyed on
            the *selected* analyzer rather than on isSimulated, so the DUT can be chosen while the
-           simulator is still coming up. -->
+           simulator is still coming up. Each knob is then shown only where the open measurement can
+           read it, or while it is engaged — see simulator/knobs.ts. The DUT dropdown is never
+           hidden: picking a model that does not suit the screen is how the hint above the chart gets
+           its chance to say so. -->
       <template v-if="status?.deviceKind === 'Simulated'">
         <label
+          v-if="knobs.noise"
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="Simulated DUT noise floor (white + 1/f). Turn off for a clean spectrum."
         >
@@ -527,6 +563,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
           Noise
         </label>
         <label
+          v-if="knobs.hum"
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="Simulated mains hum: 50 Hz plus two harmonics, each 6 dB down."
         >
@@ -534,6 +571,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
           Hum
         </label>
         <label
+          v-if="knobs.harmonics"
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           :class="{ 'opacity-50': harmonicsSwitchInert }"
           :title="harmonicsSwitchTitle"
@@ -547,6 +585,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
           Harmonics
         </label>
         <label
+          v-if="knobs.crosstalk"
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="Simulated inter-channel coupling: each channel leaks into the other at −70 dB through the audio band, rising 6 dB per octave above 6 kHz (≈ −59 dB at 20 kHz sampled at 192 kHz, −53 dB at 48 kHz) — a capacitive coupling. Off, the channels are perfectly separate."
         >
@@ -554,6 +593,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
           Crosstalk
         </label>
         <label
+          v-if="knobs.outputStage"
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="The output impedance the simulated amplifier presents at its terminals — a property of the amplifier, separate from the DUT model, which is its open-circuit behaviour. None by default; the other two only take effect once a load is connected below, and then on every measurement, not only the output-impedance one."
         >
@@ -567,6 +607,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
           </select>
         </label>
         <label
+          v-if="knobs.load"
           class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
           title="What hangs on the simulated amplifier's output. Change it between the two passes of an output-impedance run, the way you would swap the resistor on a bench."
         >
@@ -601,6 +642,22 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
             </optgroup>
           </select>
         </label>
+        <button
+          v-if="anyKnobHidden || showAllKnobs"
+          type="button"
+          class="rounded px-1 leading-none text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-100"
+          :class="{ 'text-neutral-900 dark:text-neutral-100': showAllKnobs }"
+          :aria-pressed="showAllKnobs"
+          :aria-label="showAllKnobs ? 'Hide the simulator controls this measurement does not use' : 'Show all simulator controls'"
+          :title="
+            showAllKnobs
+              ? 'Showing every simulator control. Click to go back to the ones this measurement reads.'
+              : 'Some simulator controls are hidden because this measurement cannot read them. Click to show them all.'
+          "
+          @click="showAllKnobs = !showAllKnobs"
+        >
+          ⋯
+        </button>
       </template>
       <!-- The QA403's own settings, in the same place and with the same glyph as the sound card's
            below. Keyed on the selected analyzer, not on a connection: these are stored settings,

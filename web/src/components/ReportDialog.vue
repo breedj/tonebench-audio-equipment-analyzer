@@ -93,15 +93,15 @@ const selectionCount = computed(() => selected.value.size + (includeLive.value ?
 
 /**
  * Whether an element can appear in *this* report, given what is ticked: the oscilloscope and the
- * waterfall exist only for the measurement on screen (a stored result keeps neither), and the
- * waterfall only while it is shown. Ticking one anyway is harmless — the chapter simply has no
+ * spectrogram exist only for the measurement on screen (a stored result keeps neither), and the
+ * spectrogram only while it is shown. Ticking one anyway is harmless — the chapter simply has no
  * such picture — but the label is dimmed so the absence is not a surprise.
  */
 function elementAvailable(id: ReportElementId): boolean {
   const live = props.liveSubject
   const liveSpectrum = includeLive.value && live?.data.kind === 'spectrum' ? live.data : null
   if (id === 'oscilloscope') return liveSpectrum !== null && Object.keys(liveSpectrum.scope).length > 0
-  if (id === 'waterfall') return liveSpectrum !== null && liveSpectrum.waterfall !== null
+  if (id === 'spectrogram') return liveSpectrum !== null && liveSpectrum.spectrogram !== null
   return true
 }
 const canGenerate = computed(

@@ -10,7 +10,7 @@ import { descriptionSections, genericSettingsSection } from './generic'
  * The FFT chapter's text sections: the metric tiles and the harmonics table, per channel, from the
  * same formulas the screen's MetricsPanel and HarmonicsTable use (channelTiles, and the table's own
  * dBV = fundamental + dBc), so the paper and the screen cannot disagree. The oscilloscope and the
- * waterfall are images the orchestrator renders, not sections built here.
+ * spectrogram are images the orchestrator renders, not sections built here.
  */
 
 const CHANNEL_LABELS = ['L', 'R'] as const

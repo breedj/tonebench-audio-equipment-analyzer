@@ -19,7 +19,7 @@ const {
   showPeakHold,
   showFftTrace,
   autofitOnDone,
-  showWaterfall,
+  showSpectrogram,
   showOscilloscope,
   showHarmonics,
   showOtherPeaks,
@@ -264,13 +264,13 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
       <!-- Which of the secondary panels the FFT screen draws at all. Unlike the toggles above,
            these are not about the spectrum chart's own content: they show and hide whole panels
            under it, so a measurement that only needs the spectrum doesn't have to scroll past the
-           three that come with it. Oscilloscope and Harmonics are on by default, Waterfall and Other
-           peaks off -- see useChartDisplay.ts. Waterfall and Oscilloscope are hidden rather than
+           three that come with it. Oscilloscope and Harmonics are on by default, Spectrogram and Other
+           peaks off -- see useChartDisplay.ts. Spectrogram and Oscilloscope are hidden rather than
            unmounted (App.vue), so what they showed comes back. -->
       <section class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 text-xs dark:border-neutral-800">
         <label class="flex items-center gap-1.5">
-          <input v-model="showWaterfall" type="checkbox" />
-          Waterfall
+          <input v-model="showSpectrogram" type="checkbox" />
+          Spectrogram
         </label>
         <label class="flex items-center gap-1.5">
           <input v-model="showOscilloscope" type="checkbox" />

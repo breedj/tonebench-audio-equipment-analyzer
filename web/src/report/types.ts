@@ -104,8 +104,8 @@ export type ReportSubjectData =
       scopeResidual?: Record<number, ScopeFrame>
       /** What the oscilloscope triggers from; null for a stored result. */
       status: DeviceStatus | null
-      /** The waterfall chart on screen, whose collected history only it can draw; null off screen or for a stored result. */
-      waterfall: ExportableChart | null
+      /** The spectrogram chart on screen, whose collected history only it can draw; null off screen or for a stored result. */
+      spectrogram: ExportableChart | null
     }
   | {
       kind: 'sweep'

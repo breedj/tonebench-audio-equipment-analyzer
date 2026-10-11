@@ -1,7 +1,7 @@
 import type uPlot from 'uplot'
 
 /**
- * The frequency x-axis shared by SpectrumChart.vue and WaterfallChart.vue.
+ * The frequency x-axis shared by SpectrumChart.vue and SpectrogramChart.vue.
  *
  * The two charts are stacked and deliberately show one x span (see useChartDisplay.ts's
  * activeXRange) — they are only readable as one picture if a column means the same frequency in

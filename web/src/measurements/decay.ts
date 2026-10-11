@@ -112,7 +112,7 @@ export function acrossX(layout: DecayLayout, originX: number, fraction: number):
 type Stop = [number, number, number, number]
 
 const PALETTES: Record<DecayPalette, Stop[]> = {
-  // The same ramp as the live waterfall's, and for the same reason: sharp hue transitions are what
+  // The same ramp as the live spectrogram's, and for the same reason: sharp hue transitions are what
   // let a ridge be picked out of a floor at a glance, which a monotone lightness ramp does badly.
   Jet: [
     [0.0, 8, 12, 64],

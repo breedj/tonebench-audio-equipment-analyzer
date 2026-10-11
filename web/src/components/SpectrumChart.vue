@@ -429,7 +429,7 @@ function reportViewport(u: uPlot) {
   const max = u.scales.x.max
   if (min == null || max == null) return
 
-  // Published before (and independently of) the server-facing viewport below: the waterfall
+  // Published before (and independently of) the server-facing viewport below: the spectrogram
   // stacked underneath has to track *every* x change, zoomed or not and debounced or not, or its
   // columns stop lining up with the spectrum's for 150 ms after each one. See useChartDisplay.ts.
   if (activeXRange.value?.min !== min || activeXRange.value?.max !== max)
@@ -669,7 +669,7 @@ function buildOptions(
     },
     axes: [
       {
-        // Ticks and labels come from freqAxis.ts, shared with the waterfall stacked underneath so
+        // Ticks and labels come from freqAxis.ts, shared with the spectrogram stacked underneath so
         // the two axes agree column for column — see the reasoning there for why uPlot's own
         // log-axis ticking isn't usable once you zoom in.
         ...freqAxis(),
@@ -996,7 +996,7 @@ function computeFrame(): FrameData | null {
   // The frame that drives the x grid this tick — L when it's being processed, otherwise R. A
   // measurement with only Right enabled (SpectrumConfigPanel's Left checkbox off) never populates
   // spectrum[0] at all, so gating everything below on ch0 specifically left the chart permanently
-  // on "Waiting for data…" while Waterfall/Oscilloscope (which have no such L-only assumption) kept
+  // on "Waiting for data…" while Spectrogram/Oscilloscope (which have no such L-only assumption) kept
   // working off the very same stream.
   const primary = ch0 ?? ch1
   // The overlay the x grid falls back to when nothing is streaming — deliberately not `overlays[0]`,

@@ -20,7 +20,7 @@ export interface ResultChartHeightOptions {
   /**
    * A fixed drawing height to keep **in the page**, for a chart that is not the view's main one.
    *
-   * <p>The oscilloscope and the waterfall sit under the spectrum chart, and the two sweep previews
+   * <p>The oscilloscope and the spectrogram sit under the spectrum chart, and the two sweep previews
    * stack in the rail: fitting any of them to the view is exactly wrong, because several of them
    * share it. They keep the height they have always had, and this composable is used only for the
    * other half of its job - knowing that the root has been pinned over the viewport and giving it

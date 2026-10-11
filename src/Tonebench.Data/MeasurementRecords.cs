@@ -58,11 +58,11 @@ public sealed record FftSpectrumParameters(
     // with it on (MeasurementSaveService.BuildDefaultParametersJsonForNewType); null on a type saved
     // before this existed, same as the toggles above, and treated as false so nothing changes for it.
     bool? ChartAutofitOnDone = null,
-    // Which of the FFT screen's secondary panels (waterfall, oscilloscope, harmonics, other peaks)
+    // Which of the FFT screen's secondary panels (spectrogram, oscilloscope, harmonics, other peaks)
     // are drawn -- another display-only preference, on the same terms as the four above. Null means
     // "shown", which is what a row saved before these existed has to mean: the panels were always
     // drawn then, so a load must not make them disappear.
-    bool? ChartShowWaterfall = null,
+    bool? ChartShowSpectrogram = null,
     bool? ChartShowOscilloscope = null,
     bool? ChartShowHarmonics = null,
     bool? ChartShowOtherPeaks = null,

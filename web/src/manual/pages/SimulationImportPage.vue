@@ -18,6 +18,58 @@
       annotated, exported to CSV, put in a report and deleted the same way.
     </p>
 
+    <h2>The file is a scratch file, and both simulators can delete it</h2>
+
+    <p>
+      A <code>.raw</code> or <code>.qraw</code> is working data, not a document. The next run of the
+      same schematic overwrites it, and <strong>both simulators have a setting that deletes it by
+      itself</strong>:
+    </p>
+
+    <table class="manual-wrap">
+      <thead>
+        <tr>
+          <th>Simulator</th>
+          <th>Setting</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>LTspice</td>
+          <td>
+            <strong>Automatically delete .raw files</strong>, in
+            Tools&nbsp;&rsaquo;&nbsp;Control&nbsp;Panel&nbsp;&rsaquo;&nbsp;Operation.
+          </td>
+        </tr>
+        <tr>
+          <td>QSpice</td>
+          <td><strong>Auto delete simulation data files</strong>, in its settings.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      With either of those ticked the file exists only <em>while the simulator still has the run
+      open</em>. Close the simulator after simulating and the file goes with it — so import it
+      first, with the simulator left open, and only then close it. If the file browser shows an
+      empty folder where you expected a <code>.raw</code>, that setting is the usual reason: run the
+      simulation again and leave the window open.
+    </p>
+
+    <p>
+      You can also simply untick it, which is worth doing on a schematic you are iterating on. The
+      cost is disk: these files are large, because they hold every node of every timestep. The run
+      used as the example throughout this page is <strong>107&nbsp;MB</strong> for 95&nbsp;ms of a
+      push-pull amplifier.
+    </p>
+
+    <p>
+      None of this affects a simulation you have already imported. Tonebench stores the samples of
+      the traces you chose <em>inside the project file</em>, precisely because the source cannot be
+      relied on to still be there — see
+      <strong>Changing the settings afterwards</strong> below.
+    </p>
+
     <h2>What the simulator's directives do to the spectrum</h2>
 
     <p>

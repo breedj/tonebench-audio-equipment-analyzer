@@ -68,6 +68,23 @@
 
     <p>There is no compression setting to worry about in QSpice.</p>
 
+    <h2>Import it before you close the simulator</h2>
+
+    <p>
+      Both simulators can throw the result file away on their own — it is
+      <strong>Automatically delete .raw files</strong> in LTspice
+      (Tools&nbsp;&rsaquo;&nbsp;Control&nbsp;Panel&nbsp;&rsaquo;&nbsp;Operation) and
+      <strong>Auto delete simulation data files</strong> in QSpice. If either is ticked, the file
+      only exists while the simulator still has the run open, so do the import first and close the
+      simulator afterwards.
+    </p>
+
+    <p>
+      If you would rather not think about it, untick the setting. The files are big — a tenth of a
+      second of an amplifier runs to about a hundred megabytes — but once a simulation is imported
+      Tonebench keeps its own copy of the traces you picked, so the original is not needed again.
+    </p>
+
     <h2>Importing it</h2>
 
     <ol>

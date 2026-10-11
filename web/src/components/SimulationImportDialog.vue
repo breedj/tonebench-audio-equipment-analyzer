@@ -6,10 +6,17 @@ import {
   SIMULATION_FFT_SIZES,
   SIMULATION_WINDOWS,
 } from '../measurements/simulationAnalysis'
+import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 
 const props = defineProps<{ open: boolean; measurementTypeId: number | null }>()
 const emit = defineEmits<{ close: []; imported: [resultId: number] }>()
+
+// The manual page is the long form of the help block below -- the directives and what each does to
+// the spectrum, the resolution arithmetic, what is refused and why. Its own <dialog> opens into the
+// top layer, so it lands over this one and leaves the form behind it untouched, the same way the
+// sound-card dialog's link does.
+const { openManual } = useManual()
 
 const browserOpen = ref(false)
 // Where the file browser reopens. Choosing another file should land back in the folder the last
@@ -384,6 +391,13 @@ async function submit() {
               Fourier table to the log, independently of anything here. It analyses one cycle where
               this analyses the whole run, so expect close agreement rather than identical numbers.
             </p>
+            <p>
+              <strong>Import before closing the simulator.</strong> LTspice's
+              <em>Automatically delete .raw files</em> (Tools &rsaquo; Control Panel &rsaquo;
+              Operation) and QSpice's <em>Auto delete simulation data files</em> each throw the
+              result away when the simulator closes, so with either ticked the file exists only
+              while the run is still open. Untick it, or import first and close afterwards.
+            </p>
           </div>
         </details>
       </template>
@@ -391,9 +405,23 @@ async function submit() {
       <p v-else-if="!error" class="text-sm text-neutral-500 dark:text-neutral-400">Reading the file…</p>
 
       <div class="mt-5 flex justify-between gap-2">
-        <button type="button" class="rounded border px-3 py-1.5 text-sm btn-action" @click="browserOpen = true">
-          Choose another file…
-        </button>
+        <div class="flex gap-2">
+          <button type="button" class="rounded border px-3 py-1.5 text-sm btn-action" @click="browserOpen = true">
+            Choose another file…
+          </button>
+          <button
+            type="button"
+            class="flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm btn-action"
+            title="Importing a simulation: the directives to use, what each does to the spectrum, and what is refused."
+            @click="openManual('simulation-import')"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+            </svg>
+            Manual
+          </button>
+        </div>
         <div class="flex gap-2">
           <button type="button" class="rounded border px-3 py-1.5 text-sm btn-action" @click="emit('close')">Cancel</button>
           <button

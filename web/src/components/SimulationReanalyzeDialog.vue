@@ -24,9 +24,14 @@ import {
   SIMULATION_WINDOWS,
   type StoredSimulation,
 } from '../measurements/simulationAnalysis'
+import { useManual } from '../manual/useManual'
 
 const props = defineProps<{ open: boolean; resultId: number | null }>()
 const emit = defineEmits<{ close: []; reanalyzed: [resultId: number] }>()
+
+// Same page as the import dialog links to; "Changing the settings afterwards" on it is about
+// exactly this form.
+const { openManual } = useManual()
 
 const stored = ref<StoredSimulation | null>(null)
 const resultName = ref('')
@@ -330,16 +335,29 @@ async function submit() {
       <p v-else-if="!error" class="text-sm text-neutral-500 dark:text-neutral-400">Reading the stored settings…</p>
 
       <div class="mt-5 flex justify-between gap-2">
-        <button
-          v-if="stored"
-          type="button"
-          class="rounded border px-3 py-1.5 text-sm btn-action disabled:cursor-not-allowed disabled:opacity-40"
-          :disabled="!changed"
-          @click="reset"
-        >
-          Back to stored
-        </button>
-        <span v-else></span>
+        <div class="flex gap-2">
+          <button
+            v-if="stored"
+            type="button"
+            class="rounded border px-3 py-1.5 text-sm btn-action disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="!changed"
+            @click="reset"
+          >
+            Back to stored
+          </button>
+          <button
+            type="button"
+            class="flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm btn-action"
+            title="Importing a simulation: what each setting does, and which of them can be changed after an import."
+            @click="openManual('simulation-import')"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+            </svg>
+            Manual
+          </button>
+        </div>
         <div class="flex gap-2">
           <button type="button" class="rounded border px-3 py-1.5 text-sm btn-action" @click="emit('close')">Cancel</button>
           <button

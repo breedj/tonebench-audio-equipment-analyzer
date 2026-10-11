@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using Tonebench.App.Services;
 using Tonebench.Dsp;
 
@@ -70,6 +70,14 @@ public enum StreamMsgType : byte
     /// measurable. See <see cref="StreamFrame.EncodeMultitone"/>.
     /// </summary>
     Multitone = 13,
+
+    /// <summary>
+    /// The small FFT/waveform capture behind one measured point of a stepped-sine response, on one
+    /// input — what the two preview charts beside that chart draw. The header's channel byte is the
+    /// input (0/1) and its origin flag says which screen the point belongs to, exactly as
+    /// <see cref="FrequencyResponse"/>'s does. See <see cref="StreamFrame.EncodeResponsePreview"/>.
+    /// </summary>
+    ResponsePreview = 14,
 }
 
 public enum StreamChannel : byte
@@ -723,6 +731,44 @@ public static class StreamFrame
             buffer, StreamMsgType.FrequencyResponseProgress, (byte)StreamChannel.Left,
             origin,
             (uint)phase, (float)generatorAmpDbv, total, (uint)Math.Max(0, taken));
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// One measured point's decimated spectrum and waveform, on one input. Header: x0 = the point's
+    /// frequency (Hz), dx = 0, nPoints = 0, seq = the point's index in the run, channel = the input
+    /// (0 left, 1 right). Payload, all little-endian:
+    /// <code>
+    /// 20  u32 fftCount, (f32 freqHz, f32 dbvMin, f32 dbvMax) * fftCount      -- 0 = absent
+    /// ..  u32 scopeCount, (f32 timeS, f32 vMin, f32 vMax) * scopeCount       -- 0 = absent
+    /// </code>
+    ///
+    /// <para>Its own message type rather than a field on <see cref="FrequencyResponse"/>: a preview
+    /// belongs to one point and never changes, while the trace frames are rebuilt and resent in full
+    /// after every point — carrying the previews with them would re-encode the whole set once per
+    /// point, which grows quadratically with the length of the run.</para>
+    ///
+    /// <para><paramref name="origin"/> is the same discriminator the trace and progress frames
+    /// carry, so a client routes all three by one rule — see <see cref="RequireOriginFlag"/>. Only
+    /// the stepped-sine response sends these today; a chirp has no points.</para>
+    /// </summary>
+    public static byte[] EncodeResponsePreview(ResponsePointPreview preview, uint pointIndex, StreamFlags origin)
+    {
+        RequireOriginFlag(origin);
+
+        int fftCount = preview.Fft?.X.Length ?? 0;
+        int scopeCount = preview.Scope?.X.Length ?? 0;
+
+        byte[] buffer = new byte[HeaderLength
+            + sizeof(uint) + (fftCount * 3 * sizeof(float))
+            + sizeof(uint) + (scopeCount * 3 * sizeof(float))];
+
+        var channel = preview.Channel == 1 ? StreamChannel.Right : StreamChannel.Left;
+        WriteHeader(buffer, StreamMsgType.ResponsePreview, channel, origin, pointIndex, (float)preview.FreqHz, 0f, 0);
+
+        int offset = WriteSweepPreview(buffer, HeaderLength, preview.Fft);
+        WriteSweepPreview(buffer, offset, preview.Scope);
 
         return buffer;
     }

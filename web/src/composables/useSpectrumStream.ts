@@ -11,6 +11,7 @@ import {
   decodeSweepProgressFrame,
   decodeFrequencyResponseFrame,
   decodeFrequencyResponseProgressFrame,
+  decodeResponsePreviewFrame,
   decodeImpedanceFrame,
   decodeImpedanceProgressFrame,
   decodeMultitoneFrame,
@@ -245,6 +246,10 @@ const outputImpedance = useOutputImpedance()
         response.ingestTrace(decodeFrequencyResponseFrame(event.data))
       } else if (header.msgType === StreamMsgType.FrequencyResponseProgress) {
         response.ingestProgress(decodeFrequencyResponseProgressFrame(event.data))
+      } else if (header.msgType === StreamMsgType.ResponsePreview) {
+        // One point's capture for the preview rail. Routed by the same origin flag the trace and
+        // progress frames carry, so it lands in the run it belongs to and not the screen on top.
+        response.ingestPreview(decodeResponsePreviewFrame(event.data))
       } else if (header.msgType === StreamMsgType.Impedance) {
         // Its own message type rather than a flagged frequency-response frame: the payload really is
         // different, since an impedance curve has no bandwidth blocks. See StreamMsgType.Impedance.

@@ -89,7 +89,7 @@ const { showPage } = useManual()
       </li>
       <li>Leave <strong>Output level</strong> at <strong>−6 dB</strong>.</li>
       <li>
-        Press <strong>Generate sine (400 Hz)</strong>. The card starts playing a steady tone and
+        Press <strong>Generate sine (100 Hz)</strong>. The card starts playing a steady tone and
         keeps playing it. You may hear it, if speakers are connected.
       </li>
       <li>

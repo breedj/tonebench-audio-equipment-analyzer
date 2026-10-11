@@ -275,9 +275,118 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                 transaction);
         }
 
+        // One extra capture per measured point, numbered from 1 so the curves keep seq_index 0 --
+        // see ResponseSaveRequest.PointPreviews for why this needs no table of its own. The
+        // frequency rides as a metric because `capture` has no column for one, which is also how a
+        // sweep records its points' frequencies.
+        foreach (var point in request.PointPreviews ?? [])
+        {
+            long previewCaptureId = await connection.ExecuteScalarAsync<long>(
+                """
+                INSERT INTO capture
+                    (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels)
+                VALUES (@ResultId, @SeqIndex, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, NULL, @Channels)
+                RETURNING id;
+                """,
+                new
+                {
+                    ResultId = resultId,
+                    point.SeqIndex,
+                    Ts = TonebenchTimestamp.Now(),
+                    Fs = request.SampleRateHz,
+                    N = request.FftSize,
+                    request.InRangeDbv,
+                    request.OutRangeDbv,
+                    request.Channels,
+                },
+                transaction);
+
+            await connection.ExecuteAsync(
+                "INSERT INTO metric (capture_id, channel, name, value, unit) VALUES (@CaptureId, 0, 'fundamental_hz', @Value, 'Hz');",
+                new { CaptureId = previewCaptureId, Value = point.FreqHz },
+                transaction);
+
+            foreach (var preview in point.Previews)
+            {
+                await connection.ExecuteAsync(
+                    """
+                    INSERT INTO capture_preview (capture_id, channel, kind, x, min, max)
+                    VALUES (@CaptureId, @Channel, @Kind, @X, @Min, @Max);
+                    """,
+                    new
+                    {
+                        CaptureId = previewCaptureId,
+                        preview.Channel,
+                        preview.Kind,
+                        X = PreviewCodec.Encode(preview.X),
+                        Min = PreviewCodec.Encode(preview.Min),
+                        Max = PreviewCodec.Encode(preview.Max),
+                    },
+                    transaction);
+            }
+        }
+
         await transaction.CommitAsync(ct);
         return resultId;
     }
+
+    /// <summary>
+    /// A saved stepped-sine response's per-point captures, for the preview charts beside the chart.
+    ///
+    /// <para>Empty for every other kind of response result, which stores none -- a chirp has no
+    /// points. Two queries stitched by <c>seq_index</c>, for the reason
+    /// <see cref="GetSweepPointsAsync"/>'s pair are: joining the frequency metric against the
+    /// preview rows would multiply one by the other.</para>
+    /// </summary>
+    public async Task<IReadOnlyList<StoredResponsePreview>> GetResponsePreviewsAsync(long resultId, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+
+        // seq_index > 0 by construction: 0 is the curves' own capture, which carries no previews.
+        var frequencyRows = await connection.QueryAsync<ResponsePreviewFreqRaw>(
+            """
+            SELECT c.seq_index AS SeqIndex, m.value AS FreqHz
+            FROM capture c
+            JOIN metric m ON m.capture_id = c.id AND m.name = 'fundamental_hz'
+            WHERE c.measurement_result_id = @resultId AND c.seq_index > 0
+            ORDER BY c.seq_index;
+            """,
+            new { resultId });
+
+        var frequencyBySeq = frequencyRows.ToDictionary(r => (int)r.SeqIndex, r => r.FreqHz);
+        if (frequencyBySeq.Count == 0)
+            return [];
+
+        var previewRows = await connection.QueryAsync<SweepPreviewRowRaw>(
+            """
+            SELECT c.seq_index AS SeqIndex, cp.channel AS Channel, cp.kind AS Kind, cp.x AS X, cp.min AS Min, cp.max AS Max
+            FROM capture c
+            JOIN capture_preview cp ON cp.capture_id = c.id
+            WHERE c.measurement_result_id = @resultId AND c.seq_index > 0
+            ORDER BY c.seq_index;
+            """,
+            new { resultId });
+
+        return
+        [
+            .. previewRows
+                .GroupBy(r => (int)r.SeqIndex)
+                .Where(g => frequencyBySeq.ContainsKey(g.Key))
+                .OrderBy(g => g.Key)
+                .Select(g => new StoredResponsePreview(
+                    frequencyBySeq[g.Key],
+                    (IReadOnlyDictionary<int, IReadOnlyDictionary<string, StoredPreviewSeries>>)g
+                        .GroupBy(r => (int)r.Channel)
+                        .ToDictionary(
+                            c => c.Key,
+                            c => (IReadOnlyDictionary<string, StoredPreviewSeries>)c.ToDictionary(
+                                r => r.Kind,
+                                r => new StoredPreviewSeries(
+                                    PreviewCodec.Decode(r.X), PreviewCodec.Decode(r.Min), PreviewCodec.Decode(r.Max)))))),
+        ];
+    }
+
+    private sealed record ResponsePreviewFreqRaw(long SeqIndex, double FreqHz);
 
     /// <summary>Every curve of a saved frequency-response measurement, for redrawing or overlaying it.</summary>
     public async Task<IReadOnlyList<StoredResponseTrace>> GetResponseTracesAsync(long resultId, CancellationToken ct)

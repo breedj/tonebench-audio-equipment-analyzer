@@ -72,7 +72,31 @@ const props = defineProps<{
    * an embedding with no room for them can say so.
    */
   axisTitles?: boolean
+  /**
+   * The pinned cursor's frequency, or null when nothing is pinned — one of this chart's own plotted
+   * columns, emitted by `cursorPin` below and owned by the parent, which is what makes it survive
+   * the pointer leaving the plot. Drawn here as a vertical line and held in the readout above;
+   * on the stepped-sine screen it also holds the two preview charts in the rail, which is what it
+   * was asked for (Joost, 2026-10-11).
+   *
+   * Absent on the report's headless render, which has no cursor and draws no line.
+   */
+  pinnedX?: number | null
 }>()
+
+/**
+ * A click on the plot: the nearest plotted column's frequency, or null to release.
+ *
+ * <p>Separate from the hover (which stays internal to this component, since the readout is drawn
+ * here) because a pin is a choice that has to outlive the pointer: the whole point of it is that
+ * reaching for a preview chart's expand button, or simply looking away, no longer takes the reading
+ * with it.</p>
+ */
+const emit = defineEmits<{ cursorPin: [freqHz: number | null] }>()
+
+function clearPin() {
+  emit('cursorPin', null)
+}
 
 const { isDark } = useAppTheme()
 
@@ -124,6 +148,18 @@ const PHASE_COLOR = ['#7c3aed', '#a78bfa'] as const
 const COHERENCE_COLOR = ['#059669', '#34d399'] as const
 /** Pink: distinct from the violet phase, the green coherence, the blue/orange inputs and the amber/blue markers. */
 const DELAY_COLOR = ['#db2777', '#f472b6'] as const
+
+/**
+ * The pinned cursor's vertical — [light, dark] like every pair here, and deliberately the inverse of
+ * the gridline it crosses (`#e5e5e5` light / `#404040` dark), so it is the highest-contrast line on
+ * the plot in either theme.
+ *
+ * <p>Neutral rather than a colour, and the same pair the sweep chart uses: the pin is chrome, not a
+ * reading. A colour would also have to dodge seven others on this chart — the two inputs, the gain,
+ * phase, coherence, delay and the amber ±1 dB markers — and the one it picked would read as an
+ * eighth curve.</p>
+ */
+const PINNED_CURSOR_COLOR = ['#404040', '#e5e5e5'] as const
 
 /** The dashed verticals and the double-headed arrow the ±1 dB / −3 dB readings are drawn with. */
 const BANDWIDTH_COLORS = {
@@ -685,7 +721,62 @@ function buildReadoutSeries(p: Palette): ReadoutSeries[] {
 
 const readoutSeries = computed<ReadoutSeries[]>(() => buildReadoutSeries(palette.value))
 
-const cursorReadout = ref<{ freqHz: number; entries: (ReadoutSeries & { text: string })[] } | null>(null)
+type CursorReadout = { freqHz: number; entries: (ReadoutSeries & { text: string })[] }
+
+const cursorReadout = ref<CursorReadout | null>(null)
+
+/**
+ * Every curve's value at one plotted column, for the readout above the chart. Null for an index
+ * that is not on the plot — which is what uPlot hands over once the pointer leaves it.
+ */
+function readoutAt(u: uPlot, idx: number): CursorReadout | null {
+  const xs = u.data[0]
+  if (idx < 0 || xs == null || xs[idx] == null) return null
+
+  return {
+    freqHz: xs[idx] as number,
+    entries: readoutSeries.value.map((series, i) => {
+      const value = u.data[i + 1]?.[idx]
+      return { ...series, text: value == null ? '—' : formatReading(value as number, series) }
+    }),
+  }
+}
+
+/**
+ * The plotted column nearest a frequency, or -1 when there is nothing plotted.
+ *
+ * <p>A scan rather than a binary search: the x array is ascending, but this runs once per pin and
+ * once per pass, not per pointer move, and a scan cannot be wrong about a grid that is ever not
+ * monotone (an overlay measured on another grid is merged into this one, and the merge is what
+ * guarantees the order — not this).</p>
+ */
+function nearestColumn(u: uPlot, freqHz: number): number {
+  const xs = u.data[0]
+  if (xs == null || xs.length === 0) return -1
+
+  let best = -1
+  let bestDistance = Infinity
+  for (let i = 0; i < xs.length; i++) {
+    const x = xs[i]
+    if (x == null) continue
+    const distance = Math.abs((x as number) - freqHz)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = i
+    }
+  }
+  return best
+}
+
+/**
+ * Puts the readout back on the pinned column — after a pin is made or moved, and after every pass
+ * of a continuous run, whose new numbers the frozen row would otherwise not show.
+ */
+function refreshPinnedReadout() {
+  const u = plot.value
+  if (!u) return
+  cursorReadout.value = props.pinnedX == null ? null : readoutAt(u, nearestColumn(u, props.pinnedX))
+}
 
 function formatReading(value: number, series: ReadoutSeries): string {
   if (!Number.isFinite(value)) return '—'
@@ -929,25 +1020,16 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
           // series at it. null once the pointer leaves the plot (uPlot clears idx on mouseleave).
           setCursor: [
             (u: uPlot) => {
-              const idx = u.cursor.idx
-              const xs = u.data[0]
-              if (idx == null || idx < 0 || xs == null || xs[idx] == null) {
-                cursorReadout.value = null
-                return
-              }
-
-              cursorReadout.value = {
-                freqHz: xs[idx] as number,
-                entries: readoutSeries.value.map((series, i) => {
-                  const value = u.data[i + 1]?.[idx]
-                  return { ...series, text: value == null ? '—' : formatReading(value as number, series) }
-                }),
-              }
+              // Pinned, the hover is ignored outright rather than restored afterwards: this fires
+              // on every pointer move, and recomputing the same frozen row sixty times a second to
+              // arrive back where it started is work for nothing.
+              if (props.pinnedX != null) return
+              cursorReadout.value = readoutAt(u, u.cursor.idx ?? -1)
             },
           ],
         }
       : {},
-    plugins: [minMaxBandPlugin(p), bandwidthPlugin(p)],
+    plugins: [minMaxBandPlugin(p), bandwidthPlugin(p), pinnedCursorPlugin(p)],
   }
 }
 
@@ -1032,6 +1114,79 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
 
 defineExpose({ exportPng })
 
+/**
+ * The pinned cursor's vertical line — a dashed amber rule through the column the readout (and, on
+ * the stepped screen, the preview charts) are frozen on.
+ *
+ * <p>Amber rather than one of the curve colours for the reason the sweep chart's is: it is not a
+ * reading, it is the user having frozen one. Drawn in `draw`, after the series, because a line under
+ * a dense response disappears beneath it. Out of the current window it is skipped rather than
+ * clamped to the edge — a line against the axis would claim a column that is not there — and the pin
+ * itself survives, since it is a frequency and not a position.</p>
+ */
+function pinnedCursorPlugin(p: Palette): uPlot.Plugin {
+  return {
+    hooks: {
+      draw: [
+        (u) => {
+          const pinned = props.pinnedX
+          if (pinned == null) return
+
+          const x = u.valToPos(pinned, 'x', true)
+          if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return
+
+          const ctx = u.ctx
+          ctx.save()
+          ctx.setLineDash([5, 4])
+          ctx.strokeStyle = p.color(PINNED_CURSOR_COLOR)
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.moveTo(x, u.bbox.top)
+          ctx.lineTo(x, u.bbox.top + u.bbox.height)
+          ctx.stroke()
+          ctx.restore()
+        },
+      ],
+    },
+  }
+}
+
+/**
+ * Where the button went down, so a drag-zoom can be told from a click: a zoom gesture ends with a
+ * `click` on the same element, and without this every zoom would also move the pin. The threshold is
+ * in CSS pixels and deliberately small — a hand is never perfectly still on a press, and anything
+ * larger would swallow a very short drag.
+ */
+const CLICK_SLOP_PX = 4
+let pressOrigin: { x: number; y: number } | null = null
+
+function notePressOrigin(event: MouseEvent) {
+  pressOrigin = { x: event.clientX, y: event.clientY }
+}
+
+/**
+ * A click pins the nearest plotted column, moves the pin there if one is up elsewhere, or releases
+ * it when it is already on that column. Both sides of the comparison come from the same x array, so
+ * the equality is exact and there is no tolerance to tune.
+ */
+function onPlotClick(event: MouseEvent) {
+  const origin = pressOrigin
+  pressOrigin = null
+
+  const u = plot.value
+  if (!u) return
+  if (origin && (Math.abs(event.clientX - origin.x) > CLICK_SLOP_PX || Math.abs(event.clientY - origin.y) > CLICK_SLOP_PX)) {
+    return
+  }
+
+  const idx = u.cursor.idx
+  const xs = u.data[0]
+  const freqHz = idx != null && idx >= 0 ? (xs?.[idx] as number | undefined) : undefined
+  if (freqHz == null) return
+
+  emit('cursorPin', props.pinnedX === freqHz ? null : freqHz)
+}
+
 function rebuild() {
   const el = container.value
   if (!el) return
@@ -1064,10 +1219,18 @@ function rebuild() {
   // second and actually gets back out. See resetZoom.
   u.over.addEventListener('dblclick', resetZoom)
 
+  // Pinning. Both on uPlot's own `over`, which is the plot area and nothing else, so a click on an
+  // axis or a label is not a click on a column.
+  u.over.addEventListener('mousedown', notePressOrigin)
+  u.over.addEventListener('click', onPlotClick)
+
   // Safe here, unlike the sweep chart's deferred restore: the data is passed to the constructor, so
   // no setData follows to clobber the scales.
   if (restore?.x) u.setScale('x', restore.x)
   if (restore?.y) u.setScale('y', restore.y)
+
+  // The rebuild above cleared the readout; a pin outlives a rebuild, so put its row back.
+  refreshPinnedReadout()
 }
 
 function refresh() {
@@ -1078,6 +1241,10 @@ function refresh() {
 
   plot.value.setData(buildData())
   plot.value.redraw()
+
+  // A continuous run replaces the curves under a pin that has not moved — the frozen row has to
+  // show the new pass's numbers, not the pass it was made on.
+  refreshPinnedReadout()
 }
 
 let observer: ResizeObserver | null = null
@@ -1096,6 +1263,16 @@ onBeforeUnmount(() => {
   plot.value?.destroy()
   plot.value = null
 })
+
+// Moving the pin is a repaint and a readout rebuild, never a plot rebuild: rebuilding would throw
+// away the zoom on every click.
+watch(
+  () => props.pinnedX,
+  () => {
+    plot.value?.redraw(false)
+    refreshPinnedReadout()
+  },
+)
 
 watch(signature, () => rebuild())
 watch([() => props.traces, () => props.overlays], refresh)
@@ -1128,6 +1305,19 @@ watch(delayRange, () => refresh())
       </span>
       <span v-else>Hover the plot for values at a frequency</span>
 
+      <!-- Only shown while something is pinned, and it is also the way out: the pin is released by
+           clicking its own line, which is discoverable once you know it and not before. -->
+      <button
+        v-if="props.pinnedX != null"
+        type="button"
+        class="inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 btn-action"
+        title="The readings above are held at this frequency, and hovering the chart no longer moves them. Click here, or the pinned line itself, to release."
+        @click="clearPin"
+      >
+        <ToolbarIcon name="pin" />
+        Pinned
+      </button>
+
       <!-- The only visible sign that the axes are no longer the window the display panel names —
            double-clicking does the same thing, but nothing on screen would say so. The hint takes
            its place while unzoomed, so the header never carries two messages about one gesture. -->
@@ -1141,7 +1331,7 @@ watch(delayRange, () => refresh())
         <ToolbarIcon name="reset-zoom" />
         Reset zoom
       </button>
-      <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
+      <span v-else class="shrink-0">Click to pin · drag to zoom</span>
     </div>
 
     <div ref="plotBox" class="relative w-full" :style="{ height: `${chartHeight}px` }">

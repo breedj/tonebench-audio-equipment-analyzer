@@ -1,6 +1,8 @@
 // Hand-written client for the endpoints in docs/tonebench-stack-spec.md §4.1.
 // Wire shapes must stay in sync with Tonebench.App/Endpoints/*.cs by hand — no codegen.
 
+import { apiErrorMessage } from './errorMessage'
+
 export interface DeviceStatus {
   connected: boolean
   productName: string
@@ -1344,6 +1346,21 @@ export interface FrequencyResponseStatus {
   phaseKind?: ResponsePhaseKindName
   /** The right input was a yardstick rather than a measurement, so it is not offered as a trace. */
   rightChannelIsReference?: boolean
+  /**
+   * Each measured point's small FFT/waveform capture, one entry per point per input — the two
+   * preview charts beside a stepped-sine response. Absent for every runner that takes none (a chirp
+   * has no points) and on a status from a build that predates them.
+   */
+  pointPreviews?: ResponsePointPreviewJson[]
+}
+
+/** One point's decimated spectrum and waveform on one input. Mirrors Tonebench.App.Services.ResponsePointPreview. */
+export interface ResponsePointPreviewJson {
+  freqHz: number
+  /** The input: 0 left, 1 right. Not a trace kind — a preview is a capture, and the gain curve is derived. */
+  channel: number
+  fft: SweepPreviewSeries | null
+  scope: SweepPreviewSeries | null
 }
 
 /** What an impulse-response run divides the captured response by. Mirrors `ImpulseReferenceMode`. */
@@ -1658,6 +1675,20 @@ export interface StoredResponseTrace {
 
 export interface StoredResponseTracesResponse {
   traces: StoredResponseTrace[]
+}
+
+/**
+ * One stored point of a stepped-sine response, as `GET /api/measurements/{id}/response-previews`
+ * returns it: the tone, and each input's two decimated captures keyed by kind ('fft' / 'scope').
+ * A kind a run did not record is simply absent.
+ */
+export interface StoredResponsePreviewPoint {
+  freqHz: number
+  byChannel: Record<string, { fft?: SweepPreviewSeries; scope?: SweepPreviewSeries }>
+}
+
+export interface StoredResponsePreviewsResponse {
+  points: StoredResponsePreviewPoint[]
 }
 
 export interface DeviceRanges {
@@ -2091,6 +2122,9 @@ export interface MeasurementTypeAppliedResponse {
   chartShowFftTrace?: boolean | null
   /** Whether the harmonic markers are drawn over the spectrum — see ChartDisplayPanel.vue's "Harmonic markers" checkbox. Null means drawn. */
   chartShowHarmonicMarkers?: boolean | null
+  /** How the Harmonics and Other peaks tables are sorted — see measurements/peakSort.ts. Null is each table's natural order. */
+  chartHarmonicsSort?: string | null
+  chartOtherPeaksSort?: string | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */
@@ -2146,6 +2180,9 @@ export interface StagedMeasurementConfig {
   chartShowFftTrace?: boolean | null
   /** Whether the harmonic markers are drawn over the spectrum — see ChartDisplayPanel.vue's "Harmonic markers" checkbox. Null means drawn. */
   chartShowHarmonicMarkers?: boolean | null
+  /** How the Harmonics and Other peaks tables are sorted — see measurements/peakSort.ts. Null is each table's natural order. */
+  chartHarmonicsSort?: string | null
+  chartOtherPeaksSort?: string | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Waterfall and Other peaks hidden. */
@@ -2283,19 +2320,32 @@ export interface UpdateStatus {
 }
 
 /**
- * A non-2xx response. `message` is the technical line every error banner has always shown
- * (`POST /api/x failed: 503 …`); `body` is the server's own text, for the few places whose body
- * is written for the user — the status bar's Connect, say — and should be shown as it is.
+ * A non-2xx response.
+ *
+ * <p>`message` is <b>the server's own sentence and nothing else</b> — every endpoint here that
+ * refuses something writes one for the person at the bench ("A measurement type named 'Frequency
+ * response' already exists in this project."), and an error banner is where a person reads it.
+ * Until 2026-10-11 it was prefixed with the method, the path and the status
+ * (`POST /api/projects/1/measurement-types failed: 409 …`), which put a line of plumbing in front
+ * of every refusal and made each one read as a fault in the app rather than an answer to what was
+ * asked (Joost). Two panels had already grown their own regex to strip it back off.</p>
+ *
+ * <p>`body` is that same text unprocessed, kept for the places that must quote the server verbatim
+ * or not at all — see issueReport.ts's `serverReason`. `request` is the method and path, which no
+ * longer reach the screen; it is there so a log or a bug report can still say which call failed.</p>
  */
 export class ApiError extends Error {
   readonly status: number
   readonly body: string
+  /** `POST /api/projects/1/measurement-types` — for diagnostics, never for a banner. */
+  readonly request: string
 
-  constructor(status: number, body: string, message: string) {
+  constructor(status: number, body: string, request: string, message: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.body = body
+    this.request = request
   }
 }
 
@@ -2307,7 +2357,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.text()
-    throw new ApiError(response.status, body, `${init?.method ?? 'GET'} /api${path} failed: ${response.status} ${body}`)
+    throw new ApiError(
+      response.status,
+      body,
+      `${init?.method ?? 'GET'} /api${path}`,
+      apiErrorMessage(response.status, body),
+    )
   }
 
   // Every endpoint until now always returned a full JSON body. The project/measurement CRUD
@@ -2531,6 +2586,23 @@ export interface SweepPreviewSeries {
   x: number[]
   min: number[]
   max: number[]
+}
+
+/**
+ * The least the two small preview charts need of a point: which input it was captured on, the tone
+ * that was playing, and the two decimated captures.
+ *
+ * <p>A structural type rather than a base interface, because two unrelated measurements produce it:
+ * a sweep point (<see cref="ThdSweepPoint"/> and the IMD sweep's) and a stepped-sine response point
+ * (useFrequencyResponse's ResponsePreviewPoint). Both satisfy it as they stand, which is what lets
+ * SweepFftPreviewChart/SweepScopePreviewChart and `nearestSweepPoint` serve both screens with no
+ * conversion in between.</p>
+ */
+export interface PreviewPoint {
+  channel: number
+  freqHz: number
+  previewFft: SweepPreviewSeries | null
+  previewScope: SweepPreviewSeries | null
 }
 
 export interface ThdSweepPoint {
@@ -3085,7 +3157,9 @@ export const api = {
     })
     if (!response.ok) {
       const body = await response.text()
-      throw new Error(`POST /api/reports/pdf failed: ${response.status} ${body}`)
+      // The same sentence an ApiError would carry -- this one call reads the response itself (it
+      // wants a Blob), so it cannot go through `request`.
+      throw new Error(apiErrorMessage(response.status, body))
     }
     return response.blob()
   },
@@ -3250,6 +3324,11 @@ export const api = {
 
   getStoredResponse: (measurementId: number) =>
     request<StoredResponseTracesResponse>(`/measurements/${measurementId}/response-traces`),
+
+  // Answers for any result; a kind that stores no per-point captures (a chirp, or a stepped run
+  // saved before they were recorded) comes back with an empty list rather than a 404.
+  getStoredResponsePreviews: (measurementId: number) =>
+    request<StoredResponsePreviewsResponse>(`/measurements/${measurementId}/response-previews`),
 
   getUpdateStatus: () => request<UpdateStatus>('/update-check'),
 

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import type { ThdSweepPoint } from '../api/client'
+import type { PreviewPoint } from '../api/client'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import ExpandToggle from './ExpandToggle.vue'
@@ -39,8 +39,8 @@ import {
  * impossible to compare by eye.
  */
 const props = defineProps<{
-  pointLeft: ThdSweepPoint | null
-  pointRight: ThdSweepPoint | null
+  pointLeft: PreviewPoint | null
+  pointRight: PreviewPoint | null
   label?: string
   fitRange?: PreviewAxisRange | null
 }>()

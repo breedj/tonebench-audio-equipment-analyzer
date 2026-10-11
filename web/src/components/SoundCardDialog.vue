@@ -31,6 +31,7 @@ const {
   probe,
   calibrationResult,
   playingDbFs,
+  calibrationToneHz,
   busy,
   error,
   isCalibrated,
@@ -672,7 +673,7 @@ function mv(value: number | null | undefined) {
             :disabled="busy"
             @click="toggleTone"
           >
-            {{ playingDbFs !== null ? 'Stop tone' : 'Generate sine (400 Hz)' }}
+            {{ playingDbFs !== null ? 'Stop tone' : `Generate sine (${calibrationToneHz} Hz)` }}
           </button>
           <span v-if="playingDbFs !== null" class="text-emerald-700 dark:text-emerald-400">
             Playing at {{ playingDbFs }} dBFS

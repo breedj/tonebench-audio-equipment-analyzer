@@ -120,6 +120,16 @@ const props = defineProps<{
    * everything else here is shared. Defaults to the THD family for the two THD screens.
    */
   traceFamily?: SweepTraceFamily
+  /**
+   * The pinned cursor's x value, or null when nothing is pinned — one of this chart's own grid
+   * values, emitted by `cursorPin` below and owned by the parent (App.vue), which is what makes it
+   * survive the pointer leaving the plot. Drawn here as a vertical line; everything that *reads*
+   * it — the metrics table's rows, the small FFT/scope previews — gets it through `selectedLeft`/
+   * `selectedRight` as before, so there is one answer to "which point is selected" and not two.
+   *
+   * Absent on the report's headless render, which has no cursor and draws no line.
+   */
+  pinnedX?: number | null
 }>()
 
 const family = computed(() => props.traceFamily ?? 'thd')
@@ -137,7 +147,24 @@ function familyOf(overlay: OverlayEntry): SweepTraceFamily {
  * on that grid it may be one only an *overlay* measured, which is why the consumer (App.vue's
  * selectedSweepPointFor) resolves it through nearestSweepPoint.
  */
-const emit = defineEmits<{ cursorX: [x: number | null] }>()
+/**
+ * `cursorX` is the hover; `cursorPin` is a click.
+ *
+ * <p>Two events rather than one because they mean different things to the consumer: a hover is
+ * transient and is dropped the moment the pointer leaves the plot area, where a pin is a choice that
+ * has to outlive that — which is the whole bug it fixes. Reaching for the expand button on one of
+ * the small FFT/oscilloscope previews takes the pointer off the chart, so the previews reset to the
+ * last point measured just as the user goes to look at them more closely (Joost, 2026-10-10).</p>
+ *
+ * <p>The pin is a <b>grid value, not a pixel</b> — uPlot's `cursor.idx` is already snapped to the
+ * nearest x in the data, so a click lands on the nearest measurement by construction and the line
+ * below is drawn through a point rather than between two. Null unpins.</p>
+ */
+const emit = defineEmits<{ cursorX: [x: number | null]; cursorPin: [x: number | null] }>()
+
+function clearPin() {
+  emit('cursorPin', null)
+}
 
 // The screen's run from the shared store, or a stored result's when a report renders this chart
 // headless — see SWEEP_POINTS_KEY.
@@ -208,12 +235,19 @@ interface Theme {
   gridMinor: string
   /** Device pixels a grid line is drawn at — wider on an export, which is shown scaled down. */
   gridWidth: number
+  /**
+   * The pinned cursor's vertical — deliberately the inverse of the gridline it crosses, so it is the
+   * highest-contrast line on the plot in either theme. Neutral rather than a colour, and the same
+   * pair FrequencyResponseChart's pin uses: the pin is chrome, not a reading, and a colour would
+   * read as one more trace on a chart that already carries up to seven.
+   */
+  pinned: string
 }
 
 // Not `as const`: an export darkens each grey, so the greys are strings rather than literals.
 const THEME: { dark: Theme; light: Theme } = {
-  dark: { axis: '#a3a3a3', grid: '#404040', gridMajor: '#585858', gridMinor: '#333333', gridWidth: 1 },
-  light: { axis: '#525252', grid: '#e5e5e5', gridMajor: '#c8c8c8', gridMinor: '#ededed', gridWidth: 1 },
+  dark: { axis: '#a3a3a3', grid: '#404040', gridMajor: '#585858', gridMinor: '#333333', gridWidth: 1, pinned: '#e5e5e5' },
+  light: { axis: '#525252', grid: '#e5e5e5', gridMajor: '#c8c8c8', gridMinor: '#ededed', gridWidth: 1, pinned: '#404040' },
 }
 
 // Threaded through as an argument (which theme, via `dark`) rather than read at draw time — the
@@ -442,6 +476,46 @@ const outOfRange = computed(() => {
 })
 
 /**
+ * The pinned cursor's vertical line — a dashed amber rule through the point the previews and the
+ * metrics table are frozen on.
+ *
+ * <p>In `draw` rather than `drawAxes` (where the impulse chart's t = 0 marker lives): this is a
+ * reading of the chart rather than part of its frame, and at the low end of a dense sweep a line
+ * drawn under the traces disappears beneath them. Drawn on the export too, so a screenshot shows
+ * what the figures beneath it are quoting.</p>
+ *
+ * <p>Out-of-window is skipped rather than clamped to the edge: a line parked against the axis
+ * would claim a point that is not there. The pin itself survives the zoom — it is a value, not a
+ * position — so zooming back out brings the line back.</p>
+ */
+function pinnedCursorPlugin(theme: Theme): uPlot.Plugin {
+  return {
+    hooks: {
+      draw: [
+        (u) => {
+          const pinned = props.pinnedX
+          if (pinned == null) return
+
+          const x = u.valToPos(pinned, 'x', true)
+          if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return
+
+          const ctx = u.ctx
+          ctx.save()
+          ctx.setLineDash([5, 4])
+          ctx.strokeStyle = theme.pinned
+          ctx.lineWidth = 1.5 * theme.gridWidth
+          ctx.beginPath()
+          ctx.moveTo(x, u.bbox.top)
+          ctx.lineTo(x, u.bbox.top + u.bbox.height)
+          ctx.stroke()
+          ctx.restore()
+        },
+      ],
+    },
+  }
+}
+
+/**
  * @param dark Which theme to build with — see themeFor.
  * @param interactive False for the export's offscreen plot: no cursor, and none of the hooks that
  *   feed the zoom flag and the preview charts.
@@ -574,6 +648,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
       ...(decadeGridY ? [minorGridAxis('y', 3, theme)] : []),
     ],
     series,
+    plugins: [pinnedCursorPlugin(theme)],
     cursor: interactive
       ? {
           points: { show: false },
@@ -814,6 +889,47 @@ function ensurePlot() {
   // uPlot's own double-click resets the x axis to the *data* extent, which on an auto:false chart
   // is whatever the zoom already shows — a no-op, and no way back out. Ours runs after it.
   plot.over.addEventListener('dblclick', resetZoom)
+
+  // Pinning. Both listeners go on uPlot's own `over` element, which is the plot area and nothing
+  // else, so a click on an axis or a label is not a click on a point.
+  plot.over.addEventListener('mousedown', notePressOrigin)
+  plot.over.addEventListener('click', onPlotClick)
+}
+
+/**
+ * Where the button went down, so a drag-zoom can be told from a click.
+ *
+ * A zoom gesture ends with a `click` on the same element, so without this every zoom would also
+ * move the pin. The threshold is in CSS pixels and deliberately small: uPlot's own drag threshold
+ * is a pixel, so anything bigger here would swallow a very short drag — but a hand is never
+ * perfectly still on a press either, which is what the few pixels are for.
+ */
+const CLICK_SLOP_PX = 4
+let pressOrigin: { x: number; y: number } | null = null
+
+function notePressOrigin(event: MouseEvent) {
+  pressOrigin = { x: event.clientX, y: event.clientY }
+}
+
+/**
+ * A click pins the nearest measurement, moves the pin there if one is already up somewhere else,
+ * or releases it when it is already on that point — the three behaviours Joost asked for, and the
+ * last of them is why this compares values rather than just writing the new one. Both sides come
+ * from the same `xValues` array, so the comparison is exact: there is no tolerance to tune.
+ */
+function onPlotClick(event: MouseEvent) {
+  const origin = pressOrigin
+  pressOrigin = null
+  if (!plot) return
+  if (origin && (Math.abs(event.clientX - origin.x) > CLICK_SLOP_PX || Math.abs(event.clientY - origin.y) > CLICK_SLOP_PX)) {
+    return
+  }
+
+  const idx = plot.cursor.idx
+  const x = idx != null && idx >= 0 ? (xValues.value[idx] ?? null) : null
+  if (x == null) return
+
+  emit('cursorPin', props.pinnedX === x ? null : x)
 }
 
 /** Reapplies a zoom carried across a plot rebuild. Called after setData, never before — see pendingScaleRestore. */
@@ -971,6 +1087,14 @@ watch(
   () => update(),
 )
 
+// The line is drawn by a hook, so moving the pin needs a repaint and nothing else — redraw(false)
+// skips rebuilding the series paths, which have not changed. Not part of signature(): a pin must
+// not destroy and rebuild the plot, which would throw away the zoom on every click.
+watch(
+  () => props.pinnedX,
+  () => plot?.redraw(false),
+)
+
 // Observes the container rather than the window: the column this chart sits in also changes width
 // when the measurement sidebar is pinned or unpinned, which is not a window resize — measured, the
 // canvas stayed at 432 px inside a column that had grown to 661 px. Same mechanism as the
@@ -998,8 +1122,22 @@ onBeforeUnmount(() => {
 <template>
   <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
-    <div class="min-h-6 pr-9 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-      <span>Distortion vs {{ sweepXLabel(props.xAxis).toLowerCase() }}</span>
+    <div class="min-h-6 pr-9 flex items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+      <span class="flex items-center gap-2">
+        <span>Distortion vs {{ sweepXLabel(props.xAxis).toLowerCase() }}</span>
+        <!-- Only shown while something is pinned, and it is also the way out: the pin is released
+             by clicking its own line, which is discoverable once you know it and not before. -->
+        <button
+          v-if="props.pinnedX != null"
+          type="button"
+          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 btn-action"
+          title="The readings below and the FFT/oscilloscope previews are held at this point, and hovering the chart no longer moves them. Click here, or the pinned line itself, to release."
+          @click="clearPin"
+        >
+          <ToolbarIcon name="pin" />
+          Pinned
+        </button>
+      </span>
       <span v-if="!hasData">No sweep data yet — press Run sweep.</span>
       <!-- The only visible sign that the axes are no longer the window the display panel's
            dropdowns name — double-clicking the plot does the same thing, but nothing on screen
@@ -1015,7 +1153,7 @@ onBeforeUnmount(() => {
         <ToolbarIcon name="reset-zoom" />
         Reset zoom
       </button>
-      <span v-else>Drag to zoom · double-click to reset</span>
+      <span v-else>Click a point to pin · drag to zoom</span>
     </div>
     <div class="relative">
       <div ref="containerRef" class="sweep-chart w-full"></div>

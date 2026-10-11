@@ -7,6 +7,7 @@ import {
   type MeasurementFilter,
   type MeasurementSummary,
   type SaveMeasurementRequest,
+  type StoredResponsePreviewPoint,
   type StoredResponseTrace,
   type StoredSweepPoint,
   type ThdMethodName,
@@ -25,7 +26,7 @@ import {
 } from '../measurements/kinds'
 import { toImdSweepPoints } from '../imd/points'
 import { sweepEndFreqHzFromParams, sweepMethodFromParams, type SweepTraceFamily } from '../sweep/points'
-import type { ResponseTrace } from './useFrequencyResponse'
+import type { ResponsePreviewPoint, ResponseTrace } from './useFrequencyResponse'
 import type { ImpedanceTrace } from './useImpedance'
 import { useTrash } from './useTrash'
 import { overlaysNeedingFetch, shouldApplyFetch, type SpectrumWindow } from '../measurements/overlayZoom'
@@ -74,6 +75,14 @@ export interface OverlayEntry {
   responseTraces?: ResponseTrace[]
 
   /**
+   * A stepped-sine response result's per-point captures, in the shape the live run holds them — so
+   * the preview charts draw a stored run through the same code path. Undefined for every kind that
+   * stores none: a chirp has no points, and nor does a stepped run saved before these were
+   * recorded, which reads back as an empty list.
+   */
+  responsePreviews?: ResponsePreviewPoint[]
+
+  /**
    * An impulse-response result's waveform, gated and decimated server-side into exactly the shape
    * the live measurement produces — so ImpulseResponseChart draws a stored impulse through the same
    * code path it draws the running one with. Undefined for every other kind, and null for an impulse
@@ -109,6 +118,25 @@ export interface OverlayEntry {
    * whether an overlay's columns already answer the window the chart is on.
    */
   spectrumWindow?: SpectrumWindow | null
+}
+
+/**
+ * A stored point's previews back into the shape a live point has — one entry per input, which is
+ * how the rail reads them, where the stored row nests both inputs under one frequency.
+ *
+ * <p>A channel with neither capture is dropped rather than kept with two nulls: that is a channel
+ * the run did not process, and an entry for it would put an empty chart on screen where there
+ * should be none.</p>
+ */
+function toResponsePreviewPoint(stored: StoredResponsePreviewPoint): ResponsePreviewPoint[] {
+  return Object.entries(stored.byChannel)
+    .map(([channel, kinds]) => ({
+      channel: Number(channel),
+      freqHz: stored.freqHz,
+      previewFft: kinds.fft ?? null,
+      previewScope: kinds.scope ?? null,
+    }))
+    .filter((p) => p.previewFft !== null || p.previewScope !== null)
 }
 
 /**
@@ -515,6 +543,12 @@ export function useMeasurements() {
         isFrequencyResponseKind(detail.kind) || isImpulseResponseKind(detail.kind) || isCrosstalkKind(detail.kind)
           ? toResponseTraces((await api.getStoredResponse(resultId)).traces)
           : undefined
+      // The per-point captures behind a stepped-sine response, for the preview charts in the rail.
+      // Only that kind stores them, and only the stepped screen draws them — but the route answers
+      // for any result, so the guard is the kind rather than the answer.
+      const responsePreviews = isSteppedResponseKind(detail.kind)
+        ? (await api.getStoredResponsePreviews(resultId)).points.flatMap(toResponsePreviewPoint)
+        : undefined
       // The impulse waveform itself, which is not a response_trace row and so needs its own call.
       // Gated and windowed by the runner's own code server-side, so an overlay and the live trace
       // are the same kind of object rather than two decimations that disagree.
@@ -531,7 +565,7 @@ export function useMeasurements() {
         : undefined
       overlays.value = [
         ...overlays.value,
-        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepFamily, sweepEndFreqHz, responseTraces, impulseTrace, harmonicCurves, impedanceTraces },
+        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepFamily, sweepEndFreqHz, responseTraces, responsePreviews, impulseTrace, harmonicCurves, impedanceTraces },
       ]
       error.value = null
     } catch (e) {

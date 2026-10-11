@@ -69,6 +69,13 @@ export const StreamMsgType = {
    * frame whenever the generator plays a multitone comb. See decodeMultitoneFrame.
    */
   Multitone: 13,
+  /**
+   * The small FFT/waveform capture behind one measured point of a stepped-sine response, on one
+   * input — what the two preview charts beside that chart draw. The header's channel byte is the
+   * input and its origin flag says which screen the point belongs to, exactly as a FrequencyResponse
+   * frame's does. See decodeResponsePreviewFrame.
+   */
+  ResponsePreview: 14,
 } as const
 export type StreamMsgType = (typeof StreamMsgType)[keyof typeof StreamMsgType]
 
@@ -1107,6 +1114,55 @@ export function decodeImpedanceProgressFrame(buffer: ArrayBuffer): ImpedanceProg
     total: Math.round(header.dx),
     phase: header.seq as ResponsePhase,
     generatorAmpDbv: header.x0,
+  }
+}
+
+export interface ResponsePreviewFrame {
+  header: StreamFrameHeader
+  /** The input the capture came from — 0 left, 1 right. */
+  channel: StreamChannel
+  /** The point's index in the run, in the order it was measured. */
+  pointIndex: number
+  /** The tone that was playing. The key the client files the preview under. */
+  freqHz: number
+  previewFft: SweepPreviewSeries | null
+  previewScope: SweepPreviewSeries | null
+}
+
+/**
+ * Decodes a ResponsePreview frame — `u32 fftCount, (f32 x, f32 min, f32 max) * fftCount`, then the
+ * same again for the waveform. Either count may be 0, which is an absent preview rather than an
+ * empty one; see StreamFrame.EncodeResponsePreview.
+ */
+export function decodeResponsePreviewFrame(buffer: ArrayBuffer): ResponsePreviewFrame {
+  const header = decodeHeader(buffer)
+  const view = new DataView(buffer)
+  let offset = HEADER_LENGTH
+
+  const readPreview = (): SweepPreviewSeries | null => {
+    const count = view.getUint32(offset, true)
+    offset += 4
+    if (count === 0) return null
+
+    const x = new Array<number>(count)
+    const min = new Array<number>(count)
+    const max = new Array<number>(count)
+    for (let i = 0; i < count; i++) {
+      x[i] = view.getFloat32(offset, true)
+      min[i] = view.getFloat32(offset + 4, true)
+      max[i] = view.getFloat32(offset + 8, true)
+      offset += 12
+    }
+    return { x, min, max }
+  }
+
+  return {
+    header,
+    channel: header.channel,
+    pointIndex: header.seq,
+    freqHz: header.x0,
+    previewFft: readPreview(),
+    previewScope: readPreview(),
   }
 }
 

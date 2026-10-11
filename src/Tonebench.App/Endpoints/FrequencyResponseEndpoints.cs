@@ -1,4 +1,4 @@
-using Tonebench.App.Services;
+﻿using Tonebench.App.Services;
 using Tonebench.Data;
 using Tonebench.Dsp;
 
@@ -111,6 +111,14 @@ public static class FrequencyResponseEndpoints
             var traces = await repo.GetResponseTracesAsync(id, ct);
             return traces.Count == 0 ? Results.NotFound() : Results.Ok(new StoredResponseTracesResponse(traces));
         });
+
+        // The per-point captures behind a stored stepped-sine response, for the preview charts
+        // beside the chart. An empty list rather than a 404 for a result that has none: a chirp
+        // stores no points, and so does a stepped run saved before these were recorded — neither is
+        // a missing result, and the client checks every response overlay through this one route.
+        app.MapGet("/api/measurements/{id:long}/response-previews", async (
+            long id, MeasurementRepository repo, CancellationToken ct) =>
+            Results.Ok(new StoredResponsePreviewsResponse(await repo.GetResponsePreviewsAsync(id, ct))));
     }
 }
 
@@ -194,3 +202,6 @@ public sealed record FrequencyResponseStartRequest(
 public sealed record SaveFrequencyResponseRequest(long MeasurementTypeId, string Name, string? Notes);
 
 public sealed record StoredResponseTracesResponse(IReadOnlyList<StoredResponseTrace> Traces);
+
+/// <summary>A stored stepped-sine response's per-point captures — see <see cref="MeasurementRepository.GetResponsePreviewsAsync"/>.</summary>
+public sealed record StoredResponsePreviewsResponse(IReadOnlyList<StoredResponsePreview> Points);

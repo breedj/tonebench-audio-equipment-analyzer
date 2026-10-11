@@ -595,6 +595,16 @@ const { showPage } = useManual()
       starts collapsed; its ▸ opens it.
     </p>
     <p>
+      <strong>Click a column heading</strong> — Frequency, Level or dBc — to sort either table by
+      it. The first click puts the loudest first on the two level columns and the lowest frequency
+      first on Frequency; clicking the same heading again reverses it, and a third click returns the
+      table to its own natural order: the harmonics by order, the peaks by the strongest-first
+      ranking the <strong>Show top</strong> count selects on. That ranking is what the
+      <strong>#</strong> column keeps printing however the rows are arranged, so a peak can still be
+      identified after a sort. The two tables sort independently, each sort applies to both channels
+      at once, and both are saved with the measurement.
+    </p>
+    <p>
       <strong>Multitone</strong> takes the Harmonics table's place while a Multitone comb plays. With
       every tone's own bins set aside, whatever is left <em>between</em> adjacent tones is the DUT's
       distortion products plus the noise floor, and the table reads it per gap: one row per tone,

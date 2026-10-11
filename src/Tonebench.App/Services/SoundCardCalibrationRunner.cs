@@ -22,7 +22,7 @@ public sealed record SoundCardCalibrationResult(
 /// rather than a detail: it makes <c>MeasurementRunGuard</c> refuse every sweep while a calibration
 /// tone is playing, and refuse a calibration while a sweep runs, with the 409s already wired. A
 /// dialog driving <c>/api/generator</c> and <c>/api/acquisition</c> itself would be invisible to
-/// that guard — nothing would stop a THD sweep starting under a 400 Hz calibration tone — and would
+/// that guard — nothing would stop a THD sweep starting under a calibration tone — and would
 /// leave the tone playing if the browser tab were closed mid-step.</para>
 ///
 /// <para>The two steps are deliberately shaped differently, because the physical work is. The
@@ -37,8 +37,19 @@ public sealed class SoundCardCalibrationRunner(
     ConfigRepository config,
     ILogger<SoundCardCalibrationRunner> logger) : IMeasurementRun
 {
-    /// <summary>ARTA's tone, and a good one: well above any mains hum, well below any card's roll-off.</summary>
-    public const double ToneHz = 400.0;
+    /// <summary>
+    /// The calibration tone, well below any card's roll-off and well inside the band an ordinary
+    /// bench voltmeter reads accurately — which is the one that matters, because the output step's
+    /// whole answer is a figure the user reads off a DMM. 100 Hz rather than ARTA's 400 (Joost,
+    /// 2026-10-10): a true-RMS handheld is specified to a few hundred hertz at best, and several
+    /// read low well before that, so a reading taken at 400 Hz can carry the meter's own
+    /// bandwidth error straight into the stored full scale. Nothing here is coherent — every step
+    /// reads a broadband *peak* (see ToDbFs) — so the tone's frequency buys no resolution and is
+    /// free to suit the instrument. Mains hum adds to that peak whatever the tone is, and the tone
+    /// sits 60 dB or more above it at every offered level, so moving onto 2×50 Hz costs nothing
+    /// measurable.
+    /// </summary>
+    public const double ToneHz = 100.0;
 
     /// <summary>The levels the dialog offers, in dB below full scale.</summary>
     public static readonly double[] OutputLevelsDbFs = [-3.0, -6.0, -9.0, -12.0, -20.0];
@@ -55,7 +66,7 @@ public sealed class SoundCardCalibrationRunner(
     /// <summary>
     /// The record length every step analyses at, instead of inheriting the measurement screen's.
     ///
-    /// <para>These steps read one number — the loudest sample a 400 Hz tone produced — and a record
+    /// <para>These steps read one number — the loudest sample the tone produced — and a record
     /// is the unit of latency in getting it: the step cannot answer until a whole one has been
     /// filled and analysed. Inheriting the screen's size made that latency a property of a setting
     /// on an unrelated screen, which is how the input step came to fail intermittently:
@@ -104,7 +115,7 @@ public sealed class SoundCardCalibrationRunner(
     }
 
     /// <summary>
-    /// Starts the 400 Hz tone at <paramref name="dbFs"/> below full scale and leaves it playing, so
+    /// Starts the <see cref="ToneHz"/> tone at <paramref name="dbFs"/> below full scale and leaves it playing, so
     /// the user can read a voltmeter across it.
     /// </summary>
     public async Task StartOutputToneAsync(double dbFs, CancellationToken ct)

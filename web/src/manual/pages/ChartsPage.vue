@@ -70,7 +70,11 @@ import SettingsTable from '../components/SettingsTable.vue'
       </li>
       <li>
         <strong>Frequency response:</strong> the header lists the value of every visible trace at
-        the frequency under the pointer, with a coloured dot per trace.
+        the frequency under the pointer, with a coloured dot per trace. <strong>Clicking</strong>
+        pins that frequency: a dashed line marks it, a <strong>Pinned</strong> badge appears beside
+        the readings, and moving the pointer no longer changes them. On the stepped-sine screen the
+        FFT and oscilloscope previews in the left rail are held with it. Click a different frequency
+        to move the pin, and click the pinned line again, or the badge, to release it.
       </li>
       <li>
         <strong>Nyquist / Nichols:</strong> the header shows frequency, magnitude, phase and the
@@ -79,7 +83,12 @@ import SettingsTable from '../components/SettingsTable.vue'
       <li>
         <strong>Distortion sweeps:</strong> moving the cursor selects the measured point nearest to
         it. Its full set of readings appears in the table under the chart, and the FFT and
-        oscilloscope previews in the left rail switch to that point's own capture. Each of those
+        oscilloscope previews in the left rail switch to that point's own capture.
+        <strong>Clicking</strong> pins that point: a dashed amber line marks it, a
+        <strong>Pinned</strong> badge appears beside the chart's title, and moving the pointer —
+        including off the chart entirely, to expand one of the previews — no longer changes what is
+        shown. Click a different point to move the pin, and click the pinned line again, or the
+        badge, to release it. Each of those
         previews has a <strong>Fit all</strong> button that holds its axis still across the switch
         — one window covering every point of every sweep on the chart, a 20 dB grid for the
         spectrum and a round number of volts for the waveform — and both are saved with the

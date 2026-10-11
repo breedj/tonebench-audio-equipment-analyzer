@@ -5,9 +5,11 @@ import {
   type FrequencyResponseStatus,
   type FrequencyResponseTraceJson,
   type ResponsePhaseKindName,
+  type ResponsePointPreviewJson,
   type ResponseReferenceModeName,
   type ResponseTraceKindName,
   type SteppedResponseStartRequest,
+  type SweepPreviewSeries,
   type CrosstalkStartRequest,
 } from '../api/client'
 import {
@@ -18,6 +20,7 @@ import {
   STREAM_FLAG_STEPPED_RESPONSE,
   type FrequencyResponseFrame,
   type FrequencyResponseProgressFrame,
+  type ResponsePreviewFrame,
 } from '../streaming/protocol'
 
 /**
@@ -40,6 +43,23 @@ import {
  * simply stayed. `target` picks which state the verbs and the exported refs read; a live frame picks
  * its own by the origin flag it carries, so a background run can never paint the screen you are on.
  */
+
+/**
+ * One measured point's capture, on one input — the shape the two small preview charts take, and
+ * deliberately the same one a sweep point presents (`channel`, `freqHz`, `previewFft`,
+ * `previewScope`), so `nearestSweepPoint` and the preview components serve both screens unchanged.
+ */
+export interface ResponsePreviewPoint {
+  /** The input: 0 left, 1 right. */
+  channel: number
+  freqHz: number
+  previewFft: SweepPreviewSeries | null
+  previewScope: SweepPreviewSeries | null
+}
+
+function toPreviewPoint(json: ResponsePointPreviewJson): ResponsePreviewPoint {
+  return { channel: json.channel, freqHz: json.freqHz, previewFft: json.fft, previewScope: json.scope }
+}
 
 /** One curve as the UI holds it. Plain arrays rather than the wire's Float32Array, so a stored result and a live one are the same shape. */
 export interface ResponseTrace {
@@ -104,6 +124,12 @@ interface ResponseState {
   pointsMeasured: Ref<number>
   pointCount: Ref<number>
   traces: Ref<ResponseTrace[]>
+  /**
+   * The small FFT/waveform capture behind each measured point, one entry per point per input — what
+   * the two preview charts beside a stepped-sine response draw. Empty for a chirp, which has no
+   * points, and for crosstalk, whose runner does not take them.
+   */
+  previews: Ref<ResponsePreviewPoint[]>
   phaseKind: Ref<ResponsePhaseKindName>
   rightChannelIsReference: Ref<boolean>
   /** Crosstalk only: how many passes the run makes (1 or 2), for the progress line. */
@@ -133,6 +159,10 @@ function createResponseState(): ResponseState {
     // shallowRef + whole-array replacement: a curve is immutable once measured, and replacing the
     // array is what makes the chart's watcher fire without deep-watching thousands of numbers.
     traces: shallowRef<ResponseTrace[]>([]),
+
+    // shallowRef and whole-array replacement, for the same reason the traces are: a preview is
+    // immutable once measured, and a fifty-point stereo run holds a hundred of them.
+    previews: shallowRef<ResponsePreviewPoint[]>([]),
 
     // 'PerTrace' is the chirp's behaviour and the server's own default, so a status from a build
     // that predates the field reads as the behaviour that build had.
@@ -172,6 +202,7 @@ const error = computed(() => active.value.error.value)
 const pointsMeasured = computed(() => active.value.pointsMeasured.value)
 const pointCount = computed(() => active.value.pointCount.value)
 const traces = computed(() => active.value.traces.value)
+const previews = computed(() => active.value.previews.value)
 const phaseKind = computed(() => active.value.phaseKind.value)
 const rightChannelIsReference = computed(() => active.value.rightChannelIsReference.value)
 
@@ -368,6 +399,11 @@ function applyStatus(state: ResponseState, status: FrequencyResponseStatus) {
   state.pointCount.value = status.pointCount
   state.traces.value = status.traces.map(fromJson)
 
+  // Null on a status from a runner that takes no previews, and on one from a build that predates
+  // them -- which is an empty rail, not a preserved stale one: the traces have just been replaced,
+  // so previews kept from before would belong to a different run.
+  state.previews.value = (status.pointPreviews ?? []).map(toPreviewPoint)
+
   // Guarded, unlike the rest: absent on a status from a build that predates the field, where the
   // right answer is to keep the default rather than write undefined over it.
   if (status.phaseKind) state.phaseKind.value = status.phaseKind
@@ -387,6 +423,28 @@ function ingestTrace(frame: FrequencyResponseFrame) {
   // A continuous run sends a whole set of curves per pass. The Left frame is the first of each set,
   // so counting those is what advances the pass number without needing a frame of its own.
   if (state.continuous.value && trace.kind === 'Left') state.passesCompleted.value += 1
+}
+
+/**
+ * Folds one point's preview in, replacing any entry already held for the same input at the same
+ * frequency.
+ *
+ * <p>Replaced rather than appended because a rerun at the same grid would otherwise stack two
+ * captures per point and the nearest-point lookup would return whichever came first — the one from
+ * the previous run. Sorted by frequency on the way in so the rail's lookup walks a monotone list,
+ * which is also the order a reattach gets them in from the status.</p>
+ */
+function ingestPreview(frame: ResponsePreviewFrame) {
+  const state = stateForFrame(frame.header.flags)
+  const point: ResponsePreviewPoint = {
+    channel: frame.channel,
+    freqHz: frame.freqHz,
+    previewFft: frame.previewFft,
+    previewScope: frame.previewScope,
+  }
+
+  const rest = state.previews.value.filter((p) => p.channel !== point.channel || p.freqHz !== point.freqHz)
+  state.previews.value = [...rest, point].sort((a, b) => a.freqHz - b.freqHz)
 }
 
 function ingestProgress(frame: FrequencyResponseProgressFrame) {
@@ -442,6 +500,7 @@ export function useFrequencyResponse() {
     latencySamples,
     error,
     traces,
+    previews,
     progressLabel,
     pointsMeasured,
     pointCount,
@@ -453,6 +512,7 @@ export function useFrequencyResponse() {
 
     ingestTrace,
     ingestProgress,
+    ingestPreview,
 
     /**
      * Points this measurement at one of the two runners. Set from the selected measurement kind, and
@@ -514,6 +574,9 @@ export function useFrequencyResponse() {
       const state = states.Stepped
       state.error.value = null
       state.traces.value = []
+      // With the curves: a preview left from the previous run is a capture of a DUT that may since
+      // have been rewired, and the rail would show it for the minutes before the first new point.
+      state.previews.value = []
       state.continuous.value = false
       state.passesCompleted.value = 0
       state.pointsMeasured.value = 0

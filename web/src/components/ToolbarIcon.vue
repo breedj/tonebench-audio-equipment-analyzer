@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * The small line icons on the measurement toolbar's buttons (Save, Save as…, Save … result, Clear,
- * Screenshot, Report…) and on the charts' Reset zoom and the FFT screen's Metrics button. Inline SVG
+ * Screenshot, Report…), on the charts' Reset zoom and pinned-cursor badges, and on the FFT screen's
+ * Metrics button. Inline SVG
  * paths — the outlines are Lucide's (ISC licence), drawn with `currentColor` so they follow the
  * button's own text colour in both themes and its disabled opacity.
  *
@@ -17,6 +18,7 @@ export type ToolbarIconName =
   | 'report'
   | 'reset-zoom'
   | 'metrics'
+  | 'pin'
 
 const PATHS: Record<ToolbarIconName, string[]> = {
   save: [
@@ -49,6 +51,10 @@ const PATHS: Record<ToolbarIconName, string[]> = {
   ],
   'reset-zoom': ['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z', 'm21 21-4.35-4.35', 'M8 11h6'],
   metrics: ['M11 12H3', 'M16 6H3', 'M16 18H3', 'M18 9v6', 'M21 12h-6'],
+  pin: [
+    'M12 17v5',
+    'M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z',
+  ],
 }
 
 const props = defineProps<{ name: ToolbarIconName }>()

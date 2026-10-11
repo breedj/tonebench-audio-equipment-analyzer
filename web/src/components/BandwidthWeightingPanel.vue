@@ -51,7 +51,9 @@ async function importWeighting(path: string) {
   try {
     await userWeighting.importFrom(slot, path)
   } catch (e) {
-    weightingImportError.value = (e as Error).message.replace(/^POST \S+ failed: \d+ /, '')
+    // No prefix to strip any more -- an ApiError's message is the server's own sentence; see
+    // api/client.ts's apiErrorMessage.
+    weightingImportError.value = (e as Error).message
   }
 }
 

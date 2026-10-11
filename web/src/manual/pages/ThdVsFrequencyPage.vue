@@ -370,6 +370,17 @@ const { showPage } = useManual()
       which. Each checked history run gets its own preview pair below.
     </p>
     <p>
+      <strong>Click the chart to pin a point.</strong> A dashed amber line marks it, a
+      <strong>Pinned</strong> badge appears beside the chart's title, and from then on the readings
+      table and both previews stay on that point however the pointer moves — which is what lets you
+      take the pointer off the chart to expand a preview and study it, instead of watching it jump
+      back to the last point measured. Click another point to move the pin, and click the pinned
+      line again, or the badge, to release it and go back to following the cursor. The pin is
+      dropped when the sweep is cleared, when you leave the measurement, and on the amplitude
+      screen when the x axis is changed; it is deliberately kept across a re-run, so the same point
+      can be watched before and after a change to the DUT.
+    </p>
+    <p>
       <strong>Fit all</strong>, in the spectrum preview's header, fixes its level axis instead of
       scaling it to the point on screen: the window then covers every point of every sweep the
       chart is drawing — the live run's and each checked history run's — with a grid line every

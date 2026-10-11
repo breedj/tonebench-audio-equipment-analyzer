@@ -26,6 +26,14 @@ const inventory = ref<SoundCardInventory | null>(null)
 const probe = ref<SoundCardProbe | null>(null)
 const calibrationResult = ref<SoundCardCalibrationResult | null>(null)
 const playingDbFs = ref<number | null>(null)
+
+/**
+ * The calibration tone's frequency, read from the server rather than written out here — it is
+ * SoundCardCalibrationRunner.ToneHz, and the dialog's own button names it. Seeded with that
+ * constant's value so the label is right on the first paint, before syncCalibrationState has
+ * answered; every path that opens the dialog refreshes it.
+ */
+const calibrationToneHz = ref(100)
 const levels = ref<SoundCardLevels | null>(null)
 const busy = ref(false)
 
@@ -169,12 +177,14 @@ export function useSoundCard() {
    * Every path that could have silenced it ends here, including the failing ones. A failed apply
    * silences the tone server-side before it throws, and without this the button went on saying
    * 'Stop tone' over a card that had stopped -- or, worse on a path that did not silence, said
-   * nothing while a 400 Hz tone was still going into whatever is patched to the outputs. Heard on
+   * nothing while the calibration tone was still going into whatever is patched to the outputs. Heard on
    * the bench, not found in a test.
    */
   async function syncCalibrationState() {
     try {
-      playingDbFs.value = (await api.getSoundCardCalibration()).playingDbFs
+      const state = await api.getSoundCardCalibration()
+      playingDbFs.value = state.playingDbFs
+      calibrationToneHz.value = state.toneHz
     } catch {
       playingDbFs.value = null
     }
@@ -307,6 +317,7 @@ export function useSoundCard() {
     probe,
     calibrationResult,
     playingDbFs,
+    calibrationToneHz,
     busy,
     error,
     isCalibrated,

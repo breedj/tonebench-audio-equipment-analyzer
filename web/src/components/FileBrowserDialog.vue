@@ -71,7 +71,8 @@ async function browse(path: string | null) {
     pathInput.value = listing.value.path
     selectedFile.value = null
   } catch (e) {
-    error.value = (e as Error).message.replace(/^GET \S+ failed: \d+ /, '')
+    // No prefix to strip any more -- see api/client.ts's apiErrorMessage.
+    error.value = (e as Error).message
   } finally {
     loading.value = false
   }

@@ -105,8 +105,17 @@ internal static class SteppedCaptureSupport
     /// the single-shot completion check false forever and every point would time out waiting for a
     /// capture that can never complete.</para>
     /// </summary>
+    /// <param name="capturePreview">
+    /// Decimate a small FFT and waveform of every analysed record into the snapshot — see
+    /// <see cref="SpectrumPipelineOptions.CapturePreview"/>. Off for the three runners whose points
+    /// nobody looks inside (crosstalk, output impedance, stepped impedance): it is a second
+    /// decimation per record per channel, and at these FFT sizes that is not free. The stepped-sine
+    /// <i>response</i> turns it on, because its rail draws exactly that capture per point and the
+    /// samples are gone the moment the tone moves on.
+    /// </param>
     public static SpectrumPipelineOptions BuildSteppedOptions(
-        SpectrumPipelineOptions current, int fftSize, WindowType window, int averageCount, double startFreqHz, double sampleRateHz) =>
+        SpectrumPipelineOptions current, int fftSize, WindowType window, int averageCount, double startFreqHz, double sampleRateHz,
+        bool capturePreview = false) =>
         current with
         {
             FftSize = fftSize,
@@ -122,8 +131,7 @@ internal static class SteppedCaptureSupport
             // with the rest of the saved options afterwards.
             Weighting = WeightingSpec.None,
 
-            // Nothing here reads a preview, and at these FFT sizes it is not free.
-            CapturePreview = false,
+            CapturePreview = capturePreview,
 
             AverageHopFraction = AverageHopFraction,
 

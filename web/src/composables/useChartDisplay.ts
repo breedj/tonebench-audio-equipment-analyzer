@@ -1,5 +1,6 @@
 import { nextTick, ref, watch, type InjectionKey, type Ref } from 'vue'
 import { DEFAULT_SPECTRUM_UNIT, parseSpectrumUnit, type SpectrumUnit } from '../spectrumUnits'
+import { formatPeakSort, parsePeakSort, type PeakSort } from '../measurements/peakSort'
 import { useProjects } from './useProjects'
 
 // Module-level singleton, same pattern as useMeasurements.ts / useSpectrumConfig.ts — the chart
@@ -64,6 +65,13 @@ const showWeightingCurve = ref(false)
 // same numbers either way.
 const showHarmonicMarkers = ref(true)
 
+// How the two peak tables are sorted, one setting each, shared by their L and R instances -- see
+// HarmonicsTable.vue and measurements/peakSort.ts. Null is each table's own natural order (order
+// 1, 2, 3 ... for the harmonics; the server's strongest-first ranking for the peaks), which is
+// also what a type saved before this existed means.
+const harmonicsSort = ref<PeakSort | null>(null)
+const otherPeaksSort = ref<PeakSort | null>(null)
+
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
 // stored params — loading is the opposite of an unsaved edit. Same pattern as
 // SweepConfigPanel.vue's own `restoring` flag.
@@ -79,6 +87,7 @@ watch([
   autofitOnDone,
   showWaterfall, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
   showHarmonicMarkers,
+  harmonicsSort, otherPeaksSort,
 ], () => {
   if (!restoring) useProjects().markDirty()
 })
@@ -147,6 +156,9 @@ export interface StoredSpectrumDisplay {
   dutGainDb?: number | null
   chartShowWeightingCurve?: boolean | null
   chartShowHarmonicMarkers?: boolean | null
+  /** How the two peak tables are sorted, in peakSort.ts's stored form. Null is the natural order. */
+  chartHarmonicsSort?: string | null
+  chartOtherPeaksSort?: string | null
 }
 
 /**
@@ -273,6 +285,8 @@ export function useChartDisplay() {
     dutGainDb.value = loaded?.dutGainDb ?? 0
     showWeightingCurve.value = loaded?.chartShowWeightingCurve ?? false
     showHarmonicMarkers.value = loaded?.chartShowHarmonicMarkers ?? true
+    harmonicsSort.value = parsePeakSort(loaded?.chartHarmonicsSort)
+    otherPeaksSort.value = parsePeakSort(loaded?.chartOtherPeaksSort)
     void nextTick(() => {
       restoring = false
     })
@@ -311,6 +325,11 @@ export function useChartDisplay() {
     dutGainDb,
     showWeightingCurve,
     showHarmonicMarkers,
+    harmonicsSort,
+    otherPeaksSort,
+    /** The two sorts in the form params_json stores them -- see buildStagedConfig in App.vue. */
+    storedHarmonicsSort: () => formatPeakSort(harmonicsSort.value),
+    storedOtherPeaksSort: () => formatPeakSort(otherPeaksSort.value),
     activeXRange,
     resetPeakHoldTrigger,
     autofitYTrigger,

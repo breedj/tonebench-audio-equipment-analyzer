@@ -1,4 +1,4 @@
-using Tonebench.Device;
+﻿using Tonebench.Device;
 using Tonebench.Dsp;
 
 namespace Tonebench.Data;
@@ -146,7 +146,19 @@ public sealed record FftSpectrumParameters(
     /// (<see cref="ChartShowHarmonics"/>): the markers are what crowd a chart whose harmonics sit a
     /// few pixels apart at the low end, and the table reads the same numbers without them.
     /// </summary>
-    bool? ChartShowHarmonicMarkers = null);
+    bool? ChartShowHarmonicMarkers = null,
+    /// <summary>
+    /// How the FFT screen's two peak tables are sorted -- the client's <c>peakSort.ts</c> stored
+    /// form, e.g. <c>"level-desc"</c>. Display only, like the toggles above, and one setting per
+    /// table rather than per channel: the L and R tables are one listing read twice. <b>Null means
+    /// each table's own natural order</b> -- order 1, 2, 3 ... for the harmonics and the
+    /// strongest-first ranking <c>PeakFinder</c> produces for the peaks -- which is also what a row
+    /// saved before these existed has to mean. Never validated here: an unrecognised string is read
+    /// back as no sort (<c>parsePeakSort</c>), so a params_json another build wrote cannot fail a
+    /// measurement the user has merely selected.
+    /// </summary>
+    string? ChartHarmonicsSort = null,
+    string? ChartOtherPeaksSort = null);
 
 /// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
@@ -912,7 +924,29 @@ public sealed record ResponseSaveRequest(
     int Channels,
     double? InRangeDbv,
     double? OutRangeDbv,
-    IReadOnlyList<ResponseTraceInput> Traces);
+    IReadOnlyList<ResponseTraceInput> Traces,
+    /// <summary>
+    /// A stepped-sine run's per-point captures, for the two small preview charts beside the chart —
+    /// null or empty for a chirp, which has no points.
+    ///
+    /// <para>Stored as the sweep stores its own: one extra <c>capture</c> row per point, numbered
+    /// from <c>seq_index</c> 1 (the curves keep 0), carrying the point's frequency as a
+    /// <c>fundamental_hz</c> metric and its previews as <c>capture_preview</c> rows. No new table,
+    /// and therefore no migration and nothing to add to <c>CaptureCascade</c> — the rows hang off
+    /// <c>capture</c>, which the cascade already sweeps. Every reader of a response result joins
+    /// through a child table (<c>response_trace</c>) or pins <c>seq_index = 0</c>, so the extra rows
+    /// are invisible to all of them.</para>
+    /// </summary>
+    IReadOnlyList<ResponsePreviewCaptureInput>? PointPreviews = null);
+
+/// <summary>One measured point of a stepped-sine response: its tone, and both inputs' previews.</summary>
+public sealed record ResponsePreviewCaptureInput(
+    int SeqIndex, double FreqHz, IReadOnlyList<CapturePreviewInput> Previews);
+
+/// <summary>One stored point's previews, by input channel then kind ('fft' / 'scope').</summary>
+public sealed record StoredResponsePreview(
+    double FreqHz,
+    IReadOnlyDictionary<int, IReadOnlyDictionary<string, StoredPreviewSeries>> ByChannel);
 
 /// <summary>One frequency-response curve read back out of the database.</summary>
 public sealed record StoredResponseTrace(

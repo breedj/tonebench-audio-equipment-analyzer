@@ -440,8 +440,13 @@ const { showPage } = useManual()
         meter.
       </li>
       <li>
-        Press <strong>Generate sine (400 Hz)</strong>. The tone starts and keeps playing — the
+        Press <strong>Generate sine (100 Hz)</strong>. The tone starts and keeps playing — the
         button changes to <strong>Stop tone</strong> — so you can read the meter while it does.
+        100 Hz rather than ARTA's 400 because the answer here is a figure <em>your meter</em>
+        produces: a true-RMS handheld is specified to a few hundred hertz at best, and several read
+        low well before that, so a reading taken higher up can carry the meter's own bandwidth
+        error into the stored full scale. The step reads a broadband peak, so the frequency costs
+        nothing in resolution.
       </li>
       <li>
         Type what the meter reads into <strong>Voltmeter reads</strong>, and set the unit to

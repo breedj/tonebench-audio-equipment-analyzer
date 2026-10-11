@@ -191,6 +191,8 @@ const {
   dutGainDb: chartDutGainDb,
   showWeightingCurve: chartShowWeightingCurve,
   showHarmonicMarkers: chartShowHarmonicMarkers,
+  storedHarmonicsSort: chartStoredHarmonicsSort,
+  storedOtherPeaksSort: chartStoredOtherPeaksSort,
   applyLoaded: applyLoadedChartDisplay,
   requestAutofitY: requestChartAutofitY,
   requestAutofitX: requestChartAutofitX,
@@ -464,6 +466,7 @@ provide(DEVICE_STATUS_KEY, status)
 const {
   running: responseRunning,
   traces: responseTraces,
+  previews: responsePreviews,
   error: responseError,
   progressLabel: responseProgressLabel,
   generatorAmpDbv: responseGeneratorAmpDbv,
@@ -541,6 +544,88 @@ const isAmplitudeSweep = computed(() => isAmplitudeSweepKind(currentType.value?.
 const isFrequencyResponse = computed(() => isFrequencyResponseKind(currentType.value?.kind))
 const isSteppedResponse = computed(() => isSteppedResponseKind(currentType.value?.kind))
 const isChirpResponse = computed(() => isFrequencyResponse.value && !isSteppedResponse.value)
+
+/**
+ * The response chart's pinned frequency — a click freezes the cursor readout, and on the stepped
+ * screen the two preview charts in the rail with it (see FrequencyResponseChart's `cursorPin`).
+ *
+ * <p>Owned here rather than in the chart for the reason the sweep screen's is: the whole point of a
+ * pin is that it outlives the pointer leaving the plot, which is exactly what reaching for a
+ * preview's expand button does. Joost, 2026-10-11.</p>
+ *
+ * <p>Dropped when the measurement changes — a frequency from another run's grid would freeze this
+ * one's rail on an arbitrary point — and when the curves are cleared. Kept across a re-run, so the
+ * same frequency can be watched before and after a change to the DUT.</p>
+ */
+const pinnedResponseHz = ref<number | null>(null)
+function onResponseCursorPin(freqHz: number | null) {
+  pinnedResponseHz.value = freqHz
+}
+
+watch(currentTypeId, () => {
+  pinnedResponseHz.value = null
+})
+
+/**
+ * The point each input's preview charts draw: the one being measured while a stepped run is going,
+ * the pinned one once it is pinned, and otherwise the last point measured.
+ *
+ * <p>No hover case, unlike the sweep screen's: the response chart keeps its hover to itself (it
+ * draws its own readout from it), and a rail that followed the pointer as well as the pin would
+ * need that hover routed out through a second event for no gain — the pin is what this screen was
+ * asked for.</p>
+ */
+function selectedResponsePreview(channel: number) {
+  const onChannel = responsePreviews.value.filter((p) => p.channel === channel)
+  if (onChannel.length === 0) return null
+
+  if (responseRunning.value) return onChannel[onChannel.length - 1]
+
+  const target = pinnedResponseHz.value ?? onChannel[onChannel.length - 1].freqHz
+  return nearestSweepPoint(responsePreviews.value, channel, target, (p) => p.freqHz)
+}
+
+const responseSelectedLeft = computed(() => selectedResponsePreview(0))
+const responseSelectedRight = computed(() => selectedResponsePreview(1))
+
+/**
+ * The checked history runs whose previews this screen can draw: visible, of the stepped kind, and
+ * actually carrying captures — a stepped result saved before they were recorded comes back with
+ * none, and an empty pair on screen says nothing.
+ */
+const visibleResponsePreviewOverlays = computed(() =>
+  overlays.value.filter((o) => o.visible && o.responsePreviews?.length && isSteppedResponseKind(o.detail.kind)),
+)
+
+/** selectedResponsePreview's counterpart for a stored run — never "running", so it always follows the pin. */
+function selectedResponsePreviewForOverlay(overlay: OverlayEntry, channel: number) {
+  const points = overlay.responsePreviews ?? []
+  const onChannel = points.filter((p) => p.channel === channel)
+  if (onChannel.length === 0) return null
+
+  const target = pinnedResponseHz.value ?? onChannel[onChannel.length - 1].freqHz
+  return nearestSweepPoint(points, channel, target, (p) => p.freqHz)
+}
+
+/**
+ * The y window the stepped screen's spectrum previews share while their Fit-all toggle is on: every
+ * point of the live run and of every checked history run, so reading one stacked preview against
+ * another is a comparison on one axis — the sweep screen's rule, for its reason.
+ */
+const responsePreviewFitRange = computed(() =>
+  fitPreviewAxis([
+    ...responsePreviews.value.map((p) => p.previewFft),
+    ...visibleResponsePreviewOverlays.value.flatMap((o) => (o.responsePreviews ?? []).map((p) => p.previewFft)),
+  ]),
+)
+
+/** The same, in volts, for the oscilloscope previews underneath them. */
+const responseScopeFitRange = computed(() =>
+  fitScopePreviewAxis([
+    ...responsePreviews.value.map((p) => p.previewScope),
+    ...visibleResponsePreviewOverlays.value.flatMap((o) => (o.responsePreviews ?? []).map((p) => p.previewScope)),
+  ]),
+)
 
 // A fourth screen. It shares the chirp with the response screen and even redraws its gated magnitude
 // with the same chart, but the impulse itself, the gate and the harmonic curves have no counterpart
@@ -621,6 +706,21 @@ function onSweepCursorX(x: number | null) {
   hoveredSweepX.value = x
 }
 
+/**
+ * The pinned point, which beats the hover everywhere below — a click on the sweep chart freezes the
+ * two preview charts and the metrics rows on one measurement until it is released (see
+ * ThdSweepChart's `cursorPin`).
+ *
+ * <p>It lives here rather than in the chart because the whole point of it is to outlive the pointer
+ * leaving the plot: reaching for the expand button on one of the previews is exactly that, and it
+ * used to reset them to the last point measured just as the user went to look closer. Joost,
+ * 2026-10-10.</p>
+ */
+const pinnedSweepX = ref<number | null>(null)
+function onSweepCursorPin(x: number | null) {
+  pinnedSweepX.value = x
+}
+
 /** The x accessor the chart is currently plotting with — what "nearest to the cursor" is measured along. */
 function sweepXOf(point: ThdSweepPoint): number {
   return sweepXValue(point, sweepChartXAxis.value)
@@ -632,7 +732,7 @@ function selectedSweepPointFor(channel: number) {
 
   if (sweepRunning.value) return onChannel[onChannel.length - 1]
 
-  const target = hoveredSweepX.value ?? sweepXOf(onChannel[onChannel.length - 1])
+  const target = pinnedSweepX.value ?? hoveredSweepX.value ?? sweepXOf(onChannel[onChannel.length - 1])
   return nearestSweepPoint(sweepPoints.value, channel, target, sweepXOf)
 }
 
@@ -756,7 +856,7 @@ function selectedSweepPointForOverlay(overlay: OverlayEntry, channel: number) {
   const onChannel = (overlay.sweepPoints ?? []).filter((p) => p.channel === channel)
   if (onChannel.length === 0) return null
 
-  const target = hoveredSweepX.value ?? sweepXOf(onChannel[onChannel.length - 1])
+  const target = pinnedSweepX.value ?? hoveredSweepX.value ?? sweepXOf(onChannel[onChannel.length - 1])
   return nearestSweepPoint(overlay.sweepPoints ?? [], channel, target, sweepXOf)
 }
 
@@ -828,6 +928,19 @@ const sweepChartXAxis = computed<SweepXAxis>({
     // one; guarded anyway so a stray write cannot leave that screen on a volt axis.
     if (isAmplitudeSweep.value && value !== 'frequency') sweepAmplitudeXAxis.value = value
   },
+})
+
+/**
+ * A pin is an x value on a particular sweep's grid, so it has to be dropped whenever that grid
+ * stops being what is on screen: a different measurement, or the amplitude screen's axis dropdown
+ * (a figure in volts means nothing in hertz, and a pin left over would freeze the previews on an
+ * arbitrary point of the new axis). Clearing drops it too — see clearSweep. A re-run deliberately
+ * does *not*: re-running the same sweep to watch one point is a real bench action, the previews
+ * follow the running sweep regardless (see selectedSweepPointFor), and the chart header says a pin
+ * is up the whole time. Unlike the hover, nothing drops it on its own.
+ */
+watch([currentTypeId, sweepChartXAxis], () => {
+  pinnedSweepX.value = null
 })
 
 /** The x bounds for whichever axis is showing — the Hz pair, or the current amplitude axis' own pair. */
@@ -1621,6 +1734,9 @@ function cancelFrequencyResponse() {
 function clearFrequencyResponse() {
   return withErrorReporting(async () => {
     await clearResponseRun()
+    // With the curves: the pin names a frequency on a grid that no longer exists, and the rail it
+    // was holding has just gone with it.
+    pinnedResponseHz.value = null
   })
 }
 
@@ -1731,6 +1847,7 @@ function clearSweep() {
     if (isImdSweep.value) await imdSweep.clear()
     else await clearSweepRun()
     hoveredSweepX.value = null
+    pinnedSweepX.value = null
   })
 }
 
@@ -2614,6 +2731,9 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowOscilloscope: chartShowOscilloscope.value,
     chartShowHarmonics: chartShowHarmonics.value,
     chartShowOtherPeaks: chartShowOtherPeaks.value,
+    // How the harmonics and other-peaks tables are sorted -- display only, like the toggles above.
+    chartHarmonicsSort: chartStoredHarmonicsSort(),
+    chartOtherPeaksSort: chartStoredOtherPeaksSort(),
     imdPreset: stimulusImd.preset,
     imdMethod: stimulusImd.method,
     imdMaxOrder: stimulusImd.maxOrder,
@@ -3908,6 +4028,42 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   @run="runSteppedResponse"
                 />
 
+                <!-- The spectrum and waveform behind the point being measured (while a sweep runs)
+                     or the pinned one (once it is pinned) — the sweep screen's pair, fed this
+                     screen's points. Only the stepped sine has points to look inside: a chirp
+                     excites the whole band at once, so there is no "the capture at 1 kHz" to show.
+                     Hidden entirely until something has been measured, so Clear makes them
+                     disappear rather than go blank. -->
+                <template v-if="isSteppedResponse && responsePreviews.length > 0">
+                  <SweepFftPreviewChart
+                    :point-left="responseSelectedLeft"
+                    :point-right="responseSelectedRight"
+                    :fit-range="responsePreviewFitRange"
+                  />
+                  <SweepScopePreviewChart
+                    :point-left="responseSelectedLeft"
+                    :point-right="responseSelectedRight"
+                    :fit-range="responseScopeFitRange"
+                  />
+                </template>
+
+                <!-- One more pair per checked history run, underneath the live one and fed that
+                     run's own points at the same pinned frequency — the sweep screen's arrangement. -->
+                <template v-for="overlay in (isSteppedResponse ? visibleResponsePreviewOverlays : [])" :key="overlay.id">
+                  <SweepFftPreviewChart
+                    :label="overlay.detail.name"
+                    :point-left="selectedResponsePreviewForOverlay(overlay, 0)"
+                    :point-right="selectedResponsePreviewForOverlay(overlay, 1)"
+                    :fit-range="responsePreviewFitRange"
+                  />
+                  <SweepScopePreviewChart
+                    :label="overlay.detail.name"
+                    :point-left="selectedResponsePreviewForOverlay(overlay, 0)"
+                    :point-right="selectedResponsePreviewForOverlay(overlay, 1)"
+                    :fit-range="responseScopeFitRange"
+                  />
+                </template>
+
                 <!-- Margins belong to the contour views; the pole–zero map has no −1 point to measure from. -->
                 <ResponseStabilityPanel
                   v-if="(activeResponseProjection === 'Nyquist' || activeResponseProjection === 'Nichols') && responsePolarChart"
@@ -3968,6 +4124,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :delay-top-us="responseDelayTopUs"
                   :delay-bottom-us="responseDelayBottomUs"
                   :axis-titles="true"
+                  :pinned-x="pinnedResponseHz"
+                  @cursor-pin="onResponseCursorPin"
                 />
                 <ResponseSPlaneChart
                   v-else-if="activeResponseProjection === 'SPlane'"
@@ -4193,6 +4351,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :phase-top-deg="180"
                   :phase-bottom-deg="-180"
                   :axis-titles="true"
+                  :pinned-x="pinnedResponseHz"
+                  @cursor-pin="onResponseCursorPin"
                 />
 
                 <MeasurementNotesPanel />
@@ -4624,9 +4784,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :overlays="overlays"
                   :selected-left="sweepSelectedLeft"
                   :selected-right="sweepSelectedRight"
+                  :pinned-x="pinnedSweepX"
                   :overlay-selections="sweepOverlaySelections"
                   :trace-family="sweepTraceFamily"
                   @cursor-x="onSweepCursorX"
+                  @cursor-pin="onSweepCursorPin"
                 />
 
                 <MeasurementNotesPanel />

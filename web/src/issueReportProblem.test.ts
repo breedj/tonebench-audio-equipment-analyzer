@@ -27,7 +27,12 @@ describe('describeIssueReportProblem', () => {
 
   /** Every repository call raises this one when no project is open, so it is worth its own sentence. */
   it('passes a refusal through in the server’s own words', () => {
-    const refused = new ApiError(409, 'No project is open. Open or create a project first.', 'GET /api/x failed: 409 ...')
+    const refused = new ApiError(
+      409,
+      'No project is open. Open or create a project first.',
+      'GET /api/x',
+      'No project is open. Open or create a project first.',
+    )
 
     const message = describeIssueReportProblem(refused, 'building')
 
@@ -37,21 +42,23 @@ describe('describeIssueReportProblem', () => {
   })
 
   /**
-   * The body, not the Error's message: that one is prefixed with the method, the path and the
-   * status for the console's benefit, none of which belongs in a sentence on screen.
+   * The body, not the Error's message. They now read the same for an ordinary refusal (see
+   * api/client.ts's apiErrorMessage), but only the body is guaranteed to be the server's own words
+   * and nothing else — the message falls back to a sentence of our own when the body is empty,
+   * JSON or a page of HTML, and that fallback would read as the server's reason here.
    */
   it('quotes the server’s reason and the status for anything else', () => {
-    const failed = new ApiError(500, 'The log file is in use.', 'POST /api/issue-report failed: 500 The log file is in use.')
+    const failed = new ApiError(500, 'The log file is in use.', 'POST /api/issue-report', 'The log file is in use.')
 
     const message = describeIssueReportProblem(failed, 'building')
 
     expect(message).toContain('error 500')
     expect(message).toContain('The log file is in use.')
-    expect(message).not.toContain('POST /api/issue-report failed')
+    expect(message).not.toContain('POST /api/issue-report')
   })
 
   it('still says something when there is no reason to quote', () => {
-    const silent = new ApiError(503, '', 'GET /api/x failed: 503 ')
+    const silent = new ApiError(503, '', 'GET /api/x', 'The request failed (HTTP 503).')
 
     expect(describeIssueReportProblem(silent, 'listing')).toContain('gave no reason')
   })

@@ -49,6 +49,14 @@ public sealed class SteppedResponseRunner(
     private ResponsePhaseKind _phaseKind = ResponsePhaseKind.None;
     private bool _rightChannelIsReference;
     private List<FrequencyResponseTrace> _traces = [];
+
+    /// <summary>
+    /// Every measured point's small FFT/waveform capture, two per point (one per input), in the
+    /// order they were measured. Kept for the whole run and handed out on <see cref="Status"/>, so a
+    /// browser that reloads — or one that arrives at the screen after the run finished — can fill
+    /// its preview rail without the run having to measure anything again.
+    /// </summary>
+    private List<ResponsePointPreview> _pointPreviews = [];
     private SteppedResponseRequest? _lastRequest;
 
     /// <summary>
@@ -96,7 +104,8 @@ public sealed class SteppedResponseRunner(
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize,
                     LatencySamples: null, _error, [.. _traces],
                     PointsMeasured: _pointsMeasured, PointCount: _pointCount,
-                    PhaseKind: _phaseKind, RightChannelIsReference: _rightChannelIsReference);
+                    PhaseKind: _phaseKind, RightChannelIsReference: _rightChannelIsReference,
+                    PointPreviews: [.. _pointPreviews]);
             }
         }
     }
@@ -210,6 +219,7 @@ public sealed class SteppedResponseRunner(
 
             _traces = [];
             _lastPoints = null;
+            _pointPreviews = [];
             _phase = FrequencyResponsePhase.Idle;
             _pointsMeasured = 0;
             _pointCount = 0;
@@ -285,6 +295,12 @@ public sealed class SteppedResponseRunner(
 
         var points = new List<SteppedPoint>(steps.Length);
 
+        // The previous run's rail goes the moment this one starts, not when its first point lands:
+        // a preview sitting there from a run that is being replaced is a capture of a DUT that may
+        // since have been rewired.
+        lock (_stateLock)
+            _pointPreviews = [];
+
         try
         {
             logger.LogInformation(
@@ -300,7 +316,10 @@ public sealed class SteppedResponseRunner(
                 request.RightChannelIsReference);
 
             pipeline.Options = SteppedCaptureSupport.BuildSteppedOptions(
-                savedOptions, request.FftSize, request.Window, request.AverageCount, request.StartFreqHz, request.EffectiveSampleRateHz);
+                savedOptions, request.FftSize, request.Window, request.AverageCount, request.StartFreqHz, request.EffectiveSampleRateHz,
+                // The rail's two preview charts are this capture, and nothing else can produce it
+                // afterwards: the ring buffer moves on to the next tone as soon as the point is read.
+                capturePreview: true);
 
             if (!session.Acquiring)
             {
@@ -438,6 +457,7 @@ public sealed class SteppedResponseRunner(
                 }
 
                 points.Add(ReadPoint(step, snapshots, generatorAmpDbv, request, unwrapper));
+                PublishPointPreviews(step.FrequencyHz, i, snapshots);
 
                 // The predictor is the measured peak, not the level: it is the same
                 // peak-to-RMS-equivalent "Pk dBV" quantity Qa40xAutoRanger evaluates, so prediction
@@ -662,6 +682,35 @@ public sealed class SteppedResponseRunner(
         }
 
         return new SteppedPoint(step.FrequencyHz, leftDbv, rightDbv, gainDb, phaseDeg);
+    }
+
+    /// <summary>
+    /// Keeps and broadcasts the small FFT/waveform capture behind one point, per input channel.
+    ///
+    /// <para>Its own frame per channel rather than a field on the trace frames, because a preview
+    /// belongs to a <i>point</i> and the traces are rebuilt and resent in full after every point —
+    /// the previews would then be re-encoded fifty times over, growing quadratically with the run,
+    /// for data that cannot change once measured. Sent once, kept by frequency on the client.</para>
+    ///
+    /// <para>A channel whose snapshot carries no preview is skipped rather than sent empty: that is
+    /// a channel the pipeline did not process, and an empty pair on screen is indistinguishable from
+    /// a capture of silence.</para>
+    /// </summary>
+    private void PublishPointPreviews(double freqHz, int pointIndex, SpectrumSnapshot[] snapshots)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (snapshot.PreviewFft is null && snapshot.PreviewScope is null)
+                continue;
+
+            var preview = new ResponsePointPreview(
+                freqHz, (int)snapshot.Channel, snapshot.PreviewFft, snapshot.PreviewScope);
+
+            lock (_stateLock)
+                _pointPreviews.Add(preview);
+
+            hub.Broadcast(StreamFrame.EncodeResponsePreview(preview, (uint)pointIndex, StreamFlags.SteppedResponse));
+        }
     }
 
     /// <summary>

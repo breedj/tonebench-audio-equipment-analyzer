@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -805,6 +805,42 @@ public sealed class MeasurementSaveService(
     }
 
     /// <summary>
+    /// The stepped run's per-point captures as capture rows, one per point, both inputs together.
+    ///
+    /// <para>Grouped by frequency because that is what a point is — the two inputs are measured from
+    /// one record — and because <c>capture_preview</c> is UNIQUE on (capture, channel, kind), so two
+    /// points of one channel landing in one capture would reach SQLite as a raw constraint
+    /// violation. A grid cannot produce the same frequency twice, so a duplicate here would be a
+    /// runner fault; it is dropped rather than failing the save, since the previews are an aid to
+    /// reading the result and the curves are the result.</para>
+    /// </summary>
+    private static List<ResponsePreviewCaptureInput> BuildResponsePointPreviews(
+        IReadOnlyList<ResponsePointPreview>? previews)
+    {
+        var captures = new List<ResponsePreviewCaptureInput>();
+        if (previews is null)
+            return captures;
+
+        int seqIndex = 1; // 0 is the curves' own capture.
+        foreach (var group in previews.GroupBy(p => p.FreqHz).OrderBy(g => g.Key))
+        {
+            var rows = new List<CapturePreviewInput>();
+            foreach (var preview in group.GroupBy(p => p.Channel).Select(g => g.First()))
+            {
+                if (preview.Fft is { } fft)
+                    rows.Add(new CapturePreviewInput(preview.Channel, CapturePreviewKind.Fft, fft.X, fft.Min, fft.Max));
+                if (preview.Scope is { } scope)
+                    rows.Add(new CapturePreviewInput(preview.Channel, CapturePreviewKind.Scope, scope.X, scope.Min, scope.Max));
+            }
+
+            if (rows.Count > 0)
+                captures.Add(new ResponsePreviewCaptureInput(seqIndex++, group.Key, rows));
+        }
+
+        return captures;
+    }
+
+    /// <summary>
     /// Saves the crosstalk traces the runner holds — one <c>response_trace</c> row per direction
     /// measured, with the as-run generator level of each pass in <c>params_json</c>.
     /// </summary>
@@ -945,7 +981,10 @@ public sealed class MeasurementSaveService(
             status.SampleRateHz, status.FftSize,
             Channels: 2,
             session.InputRangeDbv, session.OutputRangeDbv,
-            [.. status.Traces.Select(ToTraceInput)]);
+            [.. status.Traces.Select(ToTraceInput)],
+            // The only measurement that takes these: a chirp has no points, and the two stepped
+            // runners that are not this one (crosstalk, output impedance) do not capture them.
+            BuildResponsePointPreviews(status.PointPreviews));
 
         return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
     }
@@ -1561,7 +1600,9 @@ public sealed class MeasurementSaveService(
             parameters.ScopeResidual,
             parameters.GeneratorLevelUnit,
             parameters.ChartShowFftTrace,
-            parameters.ChartShowHarmonicMarkers);
+            parameters.ChartShowHarmonicMarkers,
+            parameters.ChartHarmonicsSort,
+            parameters.ChartOtherPeaksSort);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -1625,6 +1666,8 @@ public sealed class MeasurementSaveService(
             ChartShowWeightingCurve = staged?.ChartShowWeightingCurve,
             ChartShowFftTrace = staged?.ChartShowFftTrace,
             ChartShowHarmonicMarkers = staged?.ChartShowHarmonicMarkers,
+            ChartHarmonicsSort = staged?.ChartHarmonicsSort,
+            ChartOtherPeaksSort = staged?.ChartOtherPeaksSort,
             GeneratorLevelUnit = staged?.GeneratorLevelUnit,
             // Live pipeline state, like the IMD spec: the oscilloscope's Residual checkbox pushes
             // it through spectrum-config the moment it is toggled.

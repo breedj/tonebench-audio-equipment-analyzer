@@ -201,7 +201,10 @@ public sealed record StagedMeasurementConfig(
     /// <summary>Whether the spectrum chart draws the live trace itself -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartShowFftTrace"/>.</summary>
     bool? ChartShowFftTrace = null,
     /// <summary>Whether the spectrum chart draws the harmonic markers -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartShowHarmonicMarkers"/>.</summary>
-    bool? ChartShowHarmonicMarkers = null);
+    bool? ChartShowHarmonicMarkers = null,
+    /// <summary>How the two peak tables are sorted -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicsSort"/>.</summary>
+    string? ChartHarmonicsSort = null,
+    string? ChartOtherPeaksSort = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -256,4 +259,7 @@ public sealed record MeasurementTypeAppliedResponse(
     /// <summary>Whether the spectrum chart draws the live trace itself — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartShowFftTrace"/>.</summary>
     bool? ChartShowFftTrace = null,
     /// <summary>Whether the spectrum chart draws the harmonic markers — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartShowHarmonicMarkers"/>.</summary>
-    bool? ChartShowHarmonicMarkers = null);
+    bool? ChartShowHarmonicMarkers = null,
+    /// <summary>How the two peak tables are sorted — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicsSort"/>.</summary>
+    string? ChartHarmonicsSort = null,
+    string? ChartOtherPeaksSort = null);

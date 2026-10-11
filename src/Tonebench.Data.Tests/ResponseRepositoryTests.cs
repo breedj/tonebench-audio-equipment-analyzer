@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 
 namespace Tonebench.Data.Tests;
 
@@ -382,5 +382,172 @@ public class ResponseRepositoryTests
             SampleRateHz: 192000.0, FftSize: 131072, Channels: 2,
             InRangeDbv: 0.0, OutRangeDbv: -12.0,
             [Trace(ResponseTraceKind.Left), Trace(ResponseTraceKind.Right), Trace(ResponseTraceKind.Gain)]);
+    }
+    /// <summary>
+    /// A stepped-sine run's per-point captures: the extra capture rows, their frequencies and both
+    /// inputs' decimated series, back exactly as they went in.
+    /// </summary>
+    [Fact]
+    public async Task SaveResponse_WithPointPreviews_ReadsThemBackPerPointAndChannel()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+
+            var request = BuildRequest(typeId) with { PointPreviews = BuildPointPreviews() };
+            long resultId = await new MeasurementRepository(factory).SaveResponseResultAsync(request, CancellationToken.None);
+
+            // A fresh factory and repository, standing in for a full app restart.
+            SqliteConnection.ClearAllPools();
+            var reloaded = new MeasurementRepository(new SqliteConnectionFactory(new TonebenchDatabaseOptions { Path = path }));
+
+            var points = await reloaded.GetResponsePreviewsAsync(resultId, CancellationToken.None);
+
+            Assert.Equal([100.0, 1000.0, 10000.0], points.Select(p => p.FreqHz));
+
+            var middle = points[1];
+            Assert.Equal([0, 1], middle.ByChannel.Keys.Order());
+            Assert.Equal(
+                [CapturePreviewKind.Fft, CapturePreviewKind.Scope],
+                middle.ByChannel[0].Keys.Order());
+
+            // f32 in, f32 out, no quantization anywhere -- exact equality is the right assertion.
+            var storedFft = middle.ByChannel[1][CapturePreviewKind.Fft];
+            Assert.Equal([1000f, 2000f, 3000f], storedFft.X);
+            Assert.Equal([-101f, -102f, -103f], storedFft.Min);
+            Assert.Equal([-1f, -2f, -3f], storedFft.Max);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The previews' own capture rows must stay invisible to every other reader of the result.
+    ///
+    /// <para>They are ordinary <c>capture</c> rows (that is what lets them hold <c>capture_preview</c>
+    /// children with no new table), so the question is whether anything that reads "the capture" of a
+    /// response result now finds four of them. It does not: the curves are joined through
+    /// <c>response_trace</c>, and the history listing pins <c>seq_index = 0</c>.</para>
+    /// </summary>
+    [Fact]
+    public async Task SaveResponse_WithPointPreviews_LeavesTheCurvesAndTheListingUntouched()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+            var repo = new MeasurementRepository(factory);
+
+            long resultId = await repo.SaveResponseResultAsync(
+                BuildRequest(typeId) with { PointPreviews = BuildPointPreviews() }, CancellationToken.None);
+
+            Assert.Equal(3, (await repo.GetResponseTracesAsync(resultId, CancellationToken.None)).Count);
+
+            var listed = await repo.ListResultsAsync(new MeasurementFilter { MeasurementTypeId = typeId }, CancellationToken.None);
+            Assert.Single(listed);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>A chirp stores none, and a stepped run saved before these existed has none — both read back empty rather than throwing.</summary>
+    [Fact]
+    public async Task ResponsePreviews_OfAResultThatStoredNone_IsEmpty()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+            var repo = new MeasurementRepository(factory);
+
+            long resultId = await repo.SaveResponseResultAsync(BuildRequest(typeId), CancellationToken.None);
+
+            Assert.Empty(await repo.GetResponsePreviewsAsync(resultId, CancellationToken.None));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The cascade, for the rows this feature adds: deleting the result must take its preview
+    /// captures and their children with it.
+    ///
+    /// <para>Asserted as "the next save works", not as a row count, for the reason the trace version
+    /// of this test gives: orphaned <c>capture_preview</c> rows are invisible until SQLite hands the
+    /// freed capture rowid to a later insert, whose own preview rows then collide with them on the
+    /// UNIQUE (capture_id, channel, kind) index — which is migration 005's bug exactly.</para>
+    /// </summary>
+    [Fact]
+    public async Task DeleteResponseResult_WithPointPreviews_ThenSaveAnother_DoesNotCollideOnARecycledCaptureRowid()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateResponseTypeAsync(factory);
+            var repo = new MeasurementRepository(factory);
+
+            long first = await repo.SaveResponseResultAsync(
+                BuildRequest(typeId) with { PointPreviews = BuildPointPreviews() }, CancellationToken.None);
+            Assert.True(await repo.DeleteResultAsync(first, CancellationToken.None));
+
+            await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            {
+                Assert.Equal(0L, await TestDb.ScalarAsync(
+                    connection, "SELECT COUNT(*) FROM capture_preview WHERE capture_id NOT IN (SELECT id FROM capture);"));
+                Assert.Equal(0L, await TestDb.ScalarAsync(
+                    connection, "SELECT COUNT(*) FROM metric WHERE capture_id NOT IN (SELECT id FROM capture);"));
+            }
+
+            long second = await repo.SaveResponseResultAsync(
+                BuildRequest(typeId) with { PointPreviews = BuildPointPreviews() }, CancellationToken.None);
+            Assert.Equal(3, (await repo.GetResponsePreviewsAsync(second, CancellationToken.None)).Count);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>Three points, both inputs, each with an FFT and a scope preview — a stepped run in miniature.</summary>
+    private static List<ResponsePreviewCaptureInput> BuildPointPreviews()
+    {
+        var captures = new List<ResponsePreviewCaptureInput>();
+        double[] frequencies = [100.0, 1000.0, 10000.0];
+
+        for (int i = 0; i < frequencies.Length; i++)
+        {
+            double freqHz = frequencies[i];
+            var rows = new List<CapturePreviewInput>();
+            for (int channel = 0; channel < 2; channel++)
+            {
+                rows.Add(new CapturePreviewInput(
+                    channel,
+                    CapturePreviewKind.Fft,
+                    [(float)freqHz, (float)(freqHz * 2), (float)(freqHz * 3)],
+                    [-101f, -102f, -103f],
+                    [-1f, -2f, -3f]));
+                rows.Add(new CapturePreviewInput(
+                    channel,
+                    CapturePreviewKind.Scope,
+                    [0f, 1e-4f, 2e-4f],
+                    [-0.5f, -0.4f, -0.3f],
+                    [0.5f, 0.4f, 0.3f]));
+            }
+
+            captures.Add(new ResponsePreviewCaptureInput(i + 1, freqHz, rows));
+        }
+
+        return captures;
     }
 }

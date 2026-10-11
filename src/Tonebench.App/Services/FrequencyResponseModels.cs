@@ -1,4 +1,5 @@
-﻿using Tonebench.Dsp;
+﻿using Tonebench.App.Streaming;
+using Tonebench.Dsp;
 
 namespace Tonebench.App.Services;
 
@@ -487,7 +488,32 @@ public sealed record FrequencyResponseStatus(
     /// a caveat on reading it. Today that is a chirp start raised to the analyzer's own floor — see
     /// <see cref="StimulusFloor"/>. Null when there is nothing to say.
     /// </summary>
-    string? Warning = null);
+    string? Warning = null,
+    /// <summary>
+    /// The small FFT/oscilloscope capture behind each measured point, for the preview charts beside
+    /// the chart — <see cref="SteppedResponseRunner"/> only; null for every other runner, and for a
+    /// chirp, which has no points to take a preview of.
+    ///
+    /// <para>On the status rather than only on the wire for the reason the sweep's points are: a
+    /// browser that reloads mid-run, or arrives at the screen after one finished, re-attaches
+    /// through this and would otherwise have an empty rail until the next point was measured — or
+    /// for ever, on a finished run.</para>
+    /// </summary>
+    IReadOnlyList<ResponsePointPreview>? PointPreviews = null);
+
+/// <summary>
+/// One measured point's decimated spectrum and waveform, on one input — what the two small preview
+/// charts beside a stepped-sine response draw.
+///
+/// <para>Taken at the only moment the samples exist: the pipeline's ring buffer moves on to the next
+/// tone the instant the point is read, so unlike the live FFT screen there is no second chance to
+/// ask what a given frequency looked like. See <c>SpectrumPipelineOptions.CapturePreview</c>.</para>
+///
+/// <para><paramref name="Channel"/> is the input (0 left, 1 right), not a trace kind — a preview is
+/// a capture, and the Gain curve is derived rather than captured.</para>
+/// </summary>
+public sealed record ResponsePointPreview(
+    double FreqHz, int Channel, SweepPreviewSeries? Fft, SweepPreviewSeries? Scope);
 
 /// <summary>The immediate answer to a start request — what the run will do, before it does it.</summary>
 public sealed record FrequencyResponseStarted(

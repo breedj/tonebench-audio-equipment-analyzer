@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import type { ThdSweepPoint } from '../api/client'
+import type { PreviewPoint } from '../api/client'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import ExpandToggle from './ExpandToggle.vue'
@@ -31,8 +31,8 @@ import {
  * on a 1-2-5 grid; see sweep/previewAxis.ts.
  */
 const props = defineProps<{
-  pointLeft: ThdSweepPoint | null
-  pointRight: ThdSweepPoint | null
+  pointLeft: PreviewPoint | null
+  pointRight: PreviewPoint | null
   label?: string
   fitRange?: ScopeAxisRange | null
 }>()
@@ -191,7 +191,7 @@ onBeforeUnmount(() => {
 const theme = computed(() => currentTheme())
 
 /** "1.99 ms" from a point's own preview span — each channel can differ (independent triggers), so this is per-channel, not shared. */
-function spanMs(point: ThdSweepPoint | null): string | null {
+function spanMs(point: PreviewPoint | null): string | null {
   const x = point?.previewScope?.x
   if (!x || x.length < 2) return null
   return `${((x[x.length - 1] - x[0]) * 1000).toFixed(2)} ms`

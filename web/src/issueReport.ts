@@ -10,6 +10,8 @@
  * the reassuring direction is worse than none.
  */
 
+import { serverSentence } from './api/errorMessage'
+
 export interface IssueQuestion {
   /** The key this answer is filed under in `report.json`. Stable — it is what a later reader greps. */
   id: string
@@ -249,12 +251,15 @@ function errorStatus(error: unknown): number | null {
 }
 
 /**
- * What the server itself said: an ApiError's `body`, and only that. Never its `message`, which is
- * prefixed with the method, the path and the status for the console's benefit — none of which
- * belongs in a sentence on screen, and an answer with an empty body is better described by the
- * caller's own "gave no reason" than by leaking that prefix.
+ * What the server itself said: an ApiError's `body`, unwrapped — most of this app's refusals arrive
+ * as a JSON string, so the raw body still carries the quote marks (see serverSentence).
+ *
+ * <p>The body rather than the Error's `message`, although the two now read the same for an ordinary
+ * refusal: `message` falls back to a sentence of our own when there is no server reason to show,
+ * and that fallback would be quoted here as though the server had said it. An answer with nothing
+ * in it is better described by the caller's own "gave no reason".</p>
  */
 function serverReason(error: unknown): string {
   const body = (error as { body?: unknown } | null)?.body
-  return typeof body === 'string' ? body.trim() : ''
+  return typeof body === 'string' ? serverSentence(body) : ''
 }

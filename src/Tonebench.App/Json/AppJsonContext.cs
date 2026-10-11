@@ -146,6 +146,7 @@ namespace Tonebench.App.Json;
 // rows are reached through the root; the PNG bytes ride as base64.
 [JsonSerializable(typeof(ReportDocument))]
 [JsonSerializable(typeof(StoredResponseTracesResponse))]
+[JsonSerializable(typeof(StoredResponsePreviewsResponse))]
 [JsonSerializable(typeof(FrequencyResponseParameters))]
 // The stepped-sine response's own DTOs. Missing until now, which is exactly the failure this file's
 // remarks describe: reflection-based JSON is still on in a debug build, so the endpoints worked

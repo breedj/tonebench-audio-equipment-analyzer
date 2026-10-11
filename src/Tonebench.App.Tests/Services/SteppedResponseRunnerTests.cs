@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Tonebench.App.Services;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
@@ -896,5 +896,105 @@ public class SteppedResponseRunnerTests
         // must not be rejected -- the bottom of the band is exactly what it was added to look at.
         Request(startFreqHz: 10.0, endFreqHz: 100.0, adaptiveResolution: false, fftSize: 131072, sampleRateHz: 192_000.0)
             .Validate();
+    }
+    /// <summary>
+    /// Every point keeps the capture behind it, per input — what the two preview charts beside the
+    /// chart draw, and the one thing about a point that cannot be recovered afterwards: the ring
+    /// buffer has moved on to the next tone by the time the point is read.
+    /// </summary>
+    [Fact]
+    public async Task EveryPoint_KeepsItsSpectrumAndWaveform_OnBothInputs()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        var previews = status.PointPreviews;
+        Assert.NotNull(previews);
+
+        var gain = Trace(status, FrequencyResponseTraceKind.Gain);
+        Assert.Equal(gain.FreqHz.Length * 2, previews.Count); // both inputs, every point
+
+        foreach (double freqHz in gain.FreqHz)
+        {
+            foreach (int channel in (int[])[0, 1])
+            {
+                var point = Assert.Single(
+                    previews,
+                    p => p.Channel == channel && Math.Abs(p.FreqHz - freqHz) < 0.001);
+                Assert.NotNull(point.Fft);
+                Assert.NotNull(point.Scope);
+                Assert.NotEmpty(point.Fft.X);
+                Assert.NotEmpty(point.Scope.X);
+
+                // The wire and the status are both JSON for the status endpoint, where a NaN or an
+                // infinity truncates the whole document mid-array -- see ImpedanceStatusJsonTests.
+                Assert.All(point.Fft.Min, v => Assert.True(float.IsFinite(v)));
+                Assert.All(point.Fft.Max, v => Assert.True(float.IsFinite(v)));
+                Assert.All(point.Scope.Min, v => Assert.True(float.IsFinite(v)));
+                Assert.All(point.Scope.Max, v => Assert.True(float.IsFinite(v)));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The preview of a point is the tone that was playing at it — not the previous point's, which
+    /// is what a capture read one record late would give. Asserted against the spectrum's own peak,
+    /// since that is the only thing in a preview that names a frequency.
+    /// </summary>
+    [Fact]
+    public async Task APointsPreview_ShowsTheToneThatPointWasMeasuredAt()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        foreach (var point in status.PointPreviews!.Where(p => p.Channel == 0))
+        {
+            var fft = point.Fft!;
+            int peak = 0;
+            for (int i = 1; i < fft.Max.Length; i++)
+            {
+                if (fft.Max[i] > fft.Max[peak])
+                    peak = i;
+            }
+
+            // The preview is decimated to at most 200 log-spaced columns, so its peak column is only
+            // as precise as a column is wide -- a tenth of an octave is generous there and still
+            // nowhere near the next point of a 2-per-octave grid.
+            double ratio = fft.X[peak] / point.FreqHz;
+            Assert.True(ratio is > 0.93 and < 1.07, $"the preview at {point.FreqHz:F1} Hz peaks at {fft.X[peak]:F1} Hz");
+        }
+    }
+
+    /// <summary>
+    /// Clearing takes them with the curves, and a second run starts with none of the first run's.
+    ///
+    /// <para>The rail reads the nearest point to the cursor, so a preview left over from a previous
+    /// run would not look like an error — it would quietly answer for a point this run never
+    /// measured, on a DUT that may have been rewired since.</para>
+    /// </summary>
+    [Fact]
+    public async Task ClearingAndRerunning_BothStartFromNoPreviews()
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        Assert.NotEmpty(harness.Runner.Status.PointPreviews!);
+
+        Assert.Empty(harness.Runner.Clear().PointPreviews!);
+
+        // A narrower second run: every preview must belong to it, so a leftover would show up as a
+        // point outside the new grid rather than as a count.
+        await harness.Runner.StartAsync(Request(startFreqHz: 2000.0, endFreqHz: 4000.0), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        Assert.All(status.PointPreviews!, p => Assert.True(p.FreqHz > 1500.0, $"{p.FreqHz:F1} Hz is from the first run"));
     }
 }

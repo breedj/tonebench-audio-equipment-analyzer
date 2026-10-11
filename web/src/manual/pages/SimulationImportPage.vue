@@ -443,7 +443,10 @@
           <td>
             Points spread evenly in <em>ratio</em>, which is how the chart draws them. Use this
             rather than <code>lin</code>: a linear sweep puts almost every point in its top decade,
-            so the bottom of the band is drawn from a handful of them. The import says so if you do.
+            so the bottom of the band is drawn from a handful of them. The import says so if you do
+            — but it reads it. A <code>lin</code> sweep that starts at
+            <strong>0 Hz</strong> has that one point left out, with a warning: DC has no phase delay
+            and no place on a logarithmic axis. The rest of the sweep is imported unchanged.
           </td>
         </tr>
         <tr>

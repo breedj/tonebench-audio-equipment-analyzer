@@ -229,6 +229,26 @@ public class SimulationImportServiceTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// A stepped run is named as one even when it is <i>also</i> too coarsely sampled, which a
+    /// `.step` over a long `.tran` very often is. Both refusals apply and only one of them is the
+    /// user's actual problem: the coarse-step message talks about `plotwinsize` and a maximum
+    /// timestep, neither of which has anything to do with several sweeps in one file. The order of
+    /// the two checks is the whole of the fix, so this test is about the order and nothing else.
+    /// </summary>
+    [Fact]
+    public void Inspect_OfASteppedRunThatIsAlsoCoarse_SaysItIsSteppedRatherThanCoarse()
+    {
+        string raw = WriteTransient("stepped-coarse.raw", Tone(h2: 0.0), compressed: true, stepped: true);
+
+        WithService(service =>
+        {
+            var ex = Assert.Throws<FormatException>(() => service.Inspect(raw));
+            Assert.Contains(".step", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("plotwinsize", ex.Message, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     [Theory]
     [InlineData("Operating Point", "operating-point")]
     [InlineData("AC Analysis", "AC analysis")]
@@ -739,7 +759,8 @@ public class SimulationImportServiceTests : IDisposable
         string plotname = "Transient Analysis",
         bool compressed = false,
         bool withCurrent = false,
-        bool qspice = false)
+        bool qspice = false,
+        bool stepped = false)
     {
         var columns = new List<(string Name, string Type, double[] Values)>();
         double[] time;
@@ -768,6 +789,15 @@ public class SimulationImportServiceTests : IDisposable
             for (int i = 0; i < time.Length; i++)
                 time[i] = i / NativeRateHz;
             columns.Add(("V(out)", "voltage", left));
+        }
+
+        if (stepped)
+        {
+            // What a `.step`ped run writes: the same sweep twice, end to end, so the time axis
+            // restarts at the seam. Only the abscissa matters to the checks this exercises.
+            time = [.. time, .. time];
+            for (int c = 0; c < columns.Count; c++)
+                columns[c] = (columns[c].Name, columns[c].Type, [.. columns[c].Values, .. columns[c].Values]);
         }
 
         if (right is not null)

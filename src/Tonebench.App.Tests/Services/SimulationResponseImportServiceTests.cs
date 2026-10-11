@@ -574,6 +574,93 @@ public class SimulationResponseImportServiceTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// <c>.ac lin 1001 0 20k</c> is a reasonable thing to type and the simulator runs it, putting
+    /// one DC point in front of an otherwise good sweep. Before this was handled the import got as
+    /// far as <c>GroupDelay.PhaseDelayOnGrid</c>, which refused the whole file with "Phase delay is
+    /// undefined at or below 0 Hz. (Parameter 'freqHz')" -- a DSP parameter name in place of an
+    /// explanation. The point is left out instead, because DC is the one part of the sweep that
+    /// could never be drawn on a logarithmic axis anyway.
+    /// </summary>
+    [Fact]
+    public void Inspect_OfASweepThatStartsAtZeroHz_LeavesTheDcPointOutAndSaysSo()
+    {
+        double[] swept = [.. Enumerable.Range(1, 200).Select(i => i * 100.0)];
+        double[] freqHz = [0.0, .. swept];
+        string raw = WriteAcSweep("from-dc.raw", freqHz, OnePole(freqHz));
+
+        WithService(service =>
+        {
+            var info = service.Inspect(raw);
+
+            Assert.Equal(swept.Length, info.PointCount);
+            Assert.Equal(100.0, info.StartFreqHz, 1e-9);
+            Assert.Contains(info.Warnings, w => w.Contains("0 Hz", StringComparison.Ordinal));
+
+            // And the sweep is still described as what it is -- a linear one. Before the slice,
+            // every figure derived from the axis was poisoned by the zero: IsRatioConstant bails
+            // out on a non-positive first point, so points-per-decade read 0.0.
+            Assert.False(info.IsLogSpaced);
+            Assert.True(info.PointsPerDecade > 0.0);
+        });
+    }
+
+    [Fact]
+    public async Task Import_OfASweepThatStartsAtZeroHz_StoresTheRestUnchanged()
+    {
+        double[] swept = [.. Enumerable.Range(1, 200).Select(i => i * 100.0)];
+        string withDc = WriteAcSweep("dc-in.raw", [0.0, .. swept], OnePole([0.0, .. swept]));
+        string without = WriteAcSweep("dc-out.raw", swept, OnePole(swept));
+
+        await WithHarnessAsync(async h =>
+        {
+            var sliced = await h.GainAsync(await h.ImportAsync(withDc, PeakReferenced()));
+            var plain = await h.GainAsync(await h.ImportAsync(without, PeakReferenced()));
+
+            // Identical to the same sweep simulated without the DC point: the slice removes one
+            // point and changes nothing else, delay curves included.
+            Assert.Equal(swept.Length, sliced.FreqHz.Length);
+            Assert.Equal(plain.FreqHz, sliced.FreqHz);
+            Assert.Equal(plain.MagnitudeMaxDb, sliced.MagnitudeMaxDb);
+            Assert.Equal(plain.PhaseDeg, sliced.PhaseDeg);
+            Assert.NotNull(sliced.PhaseDelayS);
+            Assert.Equal(plain.ThreeDb.UpperHz, sliced.ThreeDb.UpperHz, 1e-9);
+        });
+    }
+
+    /// <summary>A file with nothing above DC is not a sweep, and says that rather than naming a span of zero.</summary>
+    [Fact]
+    public void Inspect_OfASweepThatIsNothingButDc_IsRefused()
+    {
+        double[] freqHz = [0.0, 0.0, 0.0];
+        string raw = WriteAcSweep("all-dc.raw", freqHz, OnePole(freqHz));
+
+        WithService(service =>
+        {
+            var ex = Assert.Throws<FormatException>(() => service.Inspect(raw));
+            Assert.Contains("not a sweep", ex.Message, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    /// <summary>
+    /// The seam is reported in the <i>file's</i> own numbering, which is what the user is looking
+    /// at. The slice shifts every index behind it, so the skipped points have to be added back.
+    /// </summary>
+    [Fact]
+    public void Inspect_OfASteppedSweepBehindADcPoint_NamesThePointInTheFilesOwnNumbering()
+    {
+        double[] sweep = LogSweep(10.0, 1000.0, 20);
+        double[] freqHz = [0.0, .. sweep, .. sweep];
+        string raw = WriteAcSweep("dc-stepped.raw", freqHz, OnePole(freqHz));
+
+        WithService(service =>
+        {
+            var ex = Assert.Throws<FormatException>(() => service.Inspect(raw));
+            Assert.Contains(".step", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains($"point {sweep.Length + 1}.", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
     // ---- helpers ----
 
     private static AcSimulationImportRequest PeakReferenced() => new(

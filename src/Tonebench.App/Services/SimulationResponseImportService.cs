@@ -88,18 +88,45 @@ public sealed class SimulationResponseImportService(
         RequireAc(header, path);
 
         var frequency = LtspiceRawFile.ReadComplexColumns(path, header, [header.FrequencyVariable!.Index], ct)[0];
-        double[] freqHz = [.. frequency.Select(c => c.Real)];
+        double[] whole = [.. frequency.Select(c => c.Real)];
+        int skipped = LeadingDcPoints(whole);
+        var freqHz = whole.AsSpan(skipped);
+
+        if (freqHz.Length < 2)
+        {
+            throw new FormatException(
+                $"{Path.GetFileName(path)} has {freqHz.Length} point above 0 Hz, which is not a sweep. " +
+                "Every point of it is DC.");
+        }
+
+        if (freqHz[0] <= 0.0)
+        {
+            throw new FormatException(
+                $"{Path.GetFileName(path)} has a negative frequency at point {skipped}, so it is not a " +
+                "frequency sweep this import can read.");
+        }
+
         var axis = AcFrequencyAxis.Of(freqHz);
 
         if (!axis.IsMonotonic)
         {
             throw new FormatException(
+                // Named in the file's own numbering, which is why `skipped` is added back.
                 $"{Path.GetFileName(path)} has a frequency axis that goes backwards at point " +
-                $"{axis.FirstNonMonotonicIndex}. A stepped (`.step`) run writes several sweeps into one file, " +
-                "which this import cannot separate; run a single simulation instead.");
+                $"{axis.FirstNonMonotonicIndex + skipped}. A stepped (`.step`) run writes several sweeps into " +
+                "one file, which this import cannot separate; run a single simulation instead.");
         }
 
         var warnings = new List<string>();
+
+        if (skipped > 0)
+        {
+            warnings.Add(
+                $"The first {(skipped == 1 ? "point of this sweep is" : $"{skipped} points of this sweep are")} " +
+                "at 0 Hz, and " + (skipped == 1 ? "it has" : "they have") + " been left out: DC has no phase " +
+                "delay and no place on a logarithmic axis. `.ac lin` from 0 does this. The rest of the sweep " +
+                $"is imported unchanged, from {axis.StartHz:G4} Hz up.");
+        }
 
         if (!axis.IsLogSpaced)
         {
@@ -155,9 +182,13 @@ public sealed class SimulationResponseImportService(
             indices.Add(request.ReferenceTraceIndex!.Value);
 
         var columns = LtspiceRawFile.ReadComplexColumns(request.Path, header, indices, ct);
-        double[] freqHz = [.. columns[0].Select(c => c.Real)];
-        Complex[] output = columns[1];
-        Complex[]? reference = hasReference ? columns[2] : null;
+        // The same leading-DC slice Inspect applied, recomputed from the same column rather than
+        // carried on the wire record: it is a pure function of the data, so the two cannot disagree,
+        // and info's PointCount and StartFreqHz already describe the sliced sweep.
+        int skipped = LeadingDcPoints([.. columns[0].Select(c => c.Real)]);
+        double[] freqHz = [.. columns[0].Skip(skipped).Select(c => c.Real)];
+        Complex[] output = [.. columns[1].Skip(skipped)];
+        Complex[]? reference = hasReference ? [.. columns[2].Skip(skipped)] : null;
 
         var warnings = new List<string>(info.Warnings);
         AddCurveWarnings(warnings, freqHz, reference, request);
@@ -458,6 +489,34 @@ public sealed class SimulationResponseImportService(
     }
 
     /// <summary>
+    /// How many points at the front of the sweep sit at 0 Hz, and are therefore left out of the
+    /// import rather than refused with it.
+    ///
+    /// <para><c>.ac lin 1001 0 20k</c> is a reasonable thing to type and LTspice runs it, putting one
+    /// DC point in front of an otherwise perfectly good sweep. DC is the one part of it that could
+    /// never be drawn here — the chart's frequency axis is logarithmic, phase delay is
+    /// <c>phase / f</c>, and <see cref="BandwidthAnalyzer"/> interpolates crossings in log f — so
+    /// dropping it loses nothing and refusing the file costs the user the whole run. Without this,
+    /// <see cref="GroupDelay.PhaseDelayOnGrid"/> was the thing that spoke for the import, with
+    /// <i>"Phase delay is undefined at or below 0 Hz. (Parameter 'freqHz')"</i>.</para>
+    ///
+    /// <para>This is a <b>slice of the source</b>, applied before any trace is built, and not the
+    /// band window <see cref="SteppedCaptureSupport.BuildPointTrace"/> takes — a window is a search
+    /// range that narrowing and widening must return from unchanged, where this really does remove a
+    /// point. It is applied identically in <c>Inspect</c> and <c>ImportAsync</c>, and re-analysis
+    /// reads the stored rows, which no longer hold the point, so all three agree with no second code
+    /// path.</para>
+    /// </summary>
+    private static int LeadingDcPoints(ReadOnlySpan<double> freqHz)
+    {
+        int skipped = 0;
+        while (skipped < freqHz.Length && freqHz[skipped] == 0.0)
+            skipped++;
+
+        return skipped;
+    }
+
+    /// <summary>
     /// Refuses anything that is not a readable AC sweep, naming what the file is and, where the
     /// mistake is simply the wrong screen, where it does belong.
     /// </summary>
@@ -473,8 +532,8 @@ public sealed class SimulationResponseImportService(
                     "a transient (.tran) run, which is a waveform rather than a frequency response. Open it on " +
                     "an FFT analysis measurement instead",
                 LtspiceAnalysis.OperatingPoint =>
-                    "an operating-point file (the .op.raw that the simulator writes beside every run), which " +
-                    "holds one solution and no sweep",
+                    "an operating-point file (the .op.raw or .qopraw the simulator writes beside every run), " +
+                    "which holds one solution and no sweep",
                 LtspiceAnalysis.Fft =>
                     "an FFT export, which is a spectrum of a transient run. Import the transient run itself on " +
                     "an FFT analysis measurement",

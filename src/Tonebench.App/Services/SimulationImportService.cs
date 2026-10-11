@@ -100,6 +100,19 @@ public sealed class SimulationImportService(
         double[] time = LtspiceRawFile.ReadColumns(path, header, [header.TimeVariable!.Index], ct)[0];
         var axis = TimeAxis.Of(time);
 
+        // First, because this one says what the *file* is rather than how it was sampled, and every
+        // check below describes one sweep. It sat after the coarse-timestep refusal until
+        // 2026-10-11, so a stepped run that was also coarsely sampled -- which `.step` over a long
+        // `.tran` very often is -- was refused with advice about `plotwinsize` that never mentioned
+        // `.step` at all.
+        if (!axis.IsMonotonic)
+        {
+            throw new FormatException(
+                $"{Path.GetFileName(path)} has a time axis that goes backwards at point {axis.FirstNonMonotonicIndex}. " +
+                "A stepped (`.step`) run writes several sweeps into one file, which this import cannot separate; " +
+                "run a single simulation instead.");
+        }
+
         var warnings = new List<string>();
 
         // The hard test, and it is about the data rather than the flags: a gap of `maxStep` cannot
@@ -148,14 +161,6 @@ public sealed class SimulationImportService(
             warnings.Add(
                 "Saved at single precision. That is almost always fine -- measured, it changes harmonic levels by " +
                 "nothing down to -110 dBc -- but `.options numdgt=7` writes full precision if you need it.");
-        }
-
-        if (!axis.IsMonotonic)
-        {
-            throw new FormatException(
-                $"{Path.GetFileName(path)} has a time axis that goes backwards at point {axis.FirstNonMonotonicIndex}. " +
-                "A stepped (`.step`) run writes several sweeps into one file, which this import cannot separate; " +
-                "run a single simulation instead.");
         }
 
         double resampleRateHz = axis.ResampleRateHz(measurementHiFreqHz);
@@ -453,9 +458,12 @@ public sealed class SimulationImportService(
         {
             string what = header.Analysis switch
             {
+                // Simulator-neutral, like RequireAc's arm: LTspice writes a .op.raw and QSpice a
+                // .qopraw, and naming only the one leaves half the users reading about a file they
+                // do not have.
                 LtspiceAnalysis.OperatingPoint =>
-                    "an operating-point file (the .op.raw that LTspice writes beside every run), which holds one " +
-                    "solution and no waveform",
+                    "an operating-point file (the .op.raw or .qopraw the simulator writes beside every run), " +
+                    "which holds one solution and no waveform",
                 LtspiceAnalysis.AcAnalysis =>
                     "an AC analysis, which is a frequency response rather than a waveform. Open it on a " +
                     "Frequency response measurement instead",

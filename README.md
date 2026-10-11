@@ -2,6 +2,27 @@
 Cross platform audio analyzer for qa40x devices with sound card support.
 Developed with the help of Claude.ai
 
+## What it measures
+
+Ten measurement kinds, each with its own settings, charts and stored results:
+
+| | |
+|---|---|
+| **FFT analysis** | Spectrum, THD, harmonics, IMD (SMPTE/DIN/CCIF), multitone TD+N, noise floor and weighted noise figures from a live or single capture, with an oscilloscope and spectrogram beside it. |
+| **THD vs frequency** | A tone stepped across the band: THD, D2–D5 and D6+ against frequency. |
+| **THD vs amplitude** | The drive level stepped at one frequency, against output voltage, output power or input voltage. |
+| **IMD vs amplitude** | A two-tone pair stepped the same way, with its 2nd–5th order products. |
+| **Frequency response** | A periodic chirp deconvolved to gain and phase, with −1 dB / −3 dB bandwidth corners, group and phase delay, and Bode, Nyquist, Nichols, pole–zero and H(s)-surface views. |
+| **Stepped sine response** | The same curves one tone at a time — slower, but nothing else is playing while each point is measured. |
+| **Impulse response** | The chirp deconvolved to an impulse, with a gated magnitude and phase, harmonic distortion against frequency, and cumulative-spectral-decay and burst-decay surfaces. |
+| **Impedance** | Magnitude and phase in ohms through a series reference resistor, with open/short calibration and a Thiele–Small readout for drivers. |
+| **Output impedance** | A two-load load step giving output impedance in ohms and damping factor against frequency. |
+| **Crosstalk** | One channel driven, the other read: dB against frequency, either direction or both. |
+
+A built-in simulator and a set of synthetic DUTs (tube amp, loudspeaker, phono stage, classic
+filters, clipping stages, impedance fixtures) let every screen be used and verified without
+hardware.
+
 ## Running
 
 `dotnet run --project src/Tonebench.App` talks to a real QA403 by default. Pass `--simulate` to use a
@@ -21,6 +42,31 @@ A project is one SQLite file with the `.tbench` extension, created and opened fr
 on Linux) by default. The app's own configuration, including the impedance fixture and loopback
 calibrations and the recent-projects list, lives separately in `%LOCALAPPDATA%\Tonebench\tonebench-config.db`
 (`~/.local/share/Tonebench/` on Linux).
+
+Inside a project you keep a list of *measurements* — each one a kind plus the settings you gave it,
+reorderable in the sidebar — and every run you save becomes a stored result under it, with its
+notes, its full-resolution capture and the parameters that produced it. Results are listed in a
+history panel, can be overlaid on the live chart to compare runs, renamed, annotated, and deleted
+into a trash that keeps them for a while before purging. *Save as* copies a project with or
+without its results, so a project doubles as a template for the next device on the bench.
+
+## Reports and export
+
+Any result exports to CSV (one row per FFT bin, per sweep point or per trace column) and any chart
+to PNG, at a size you choose. Beyond that there is a PDF report, built from a dialog that lets you
+tick which blocks it carries — charts, readings, metric tiles, harmonic levels, the measurement's
+settings, your notes — either for a single result or as a project report covering every measurement
+in the file, optionally in black and white for printing.
+
+## Importing a simulation
+
+LTspice and QSpice runs can be imported and drawn beside a measurement, so a change to a schematic
+can be checked against the bench without leaving the app. A **transient** run (`.raw` or `.qraw`)
+is analysed with the same code the live FFT screen uses, so its THD, THD+N, SNR and harmonic
+figures mean exactly what a measured capture's do; an **AC** run imports as a frequency-response
+result with gain and phase. The traces you pick are stored inside the project file — simulators
+overwrite and often auto-delete their output — and imported runs appear in the history list under
+their own heading, to be overlaid, re-analysed, exported and reported on like any measured result.
 
 ## Installing
 

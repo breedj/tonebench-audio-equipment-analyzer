@@ -541,6 +541,98 @@ public class SweepRepositoryTests
         return await projectRepo.CreateTypeAsync(projectId, "ThdVsFrequency", "sweep", null, "{}", CancellationToken.None);
     }
 
+    /// <summary>
+    /// A sweep saved at a <b>fractional</b> sample rate still lists, and that is a regression rather
+    /// than a curiosity.
+    ///
+    /// <para><c>capture.fs</c> is declared INTEGER, SQLite's affinity is advisory, and
+    /// <c>ResultSummaryRowRaw.SampleRateHz</c> is a <c>long</c> — so a REAL stored there makes
+    /// Dapper refuse to materialise the row, and <c>ListResultsAsync</c> reads every row of a
+    /// measurement in one query. One such row therefore takes down the whole History list, with
+    /// <i>"a parameterless default constructor ... is required"</i>: a message that names nothing
+    /// that is wrong, and arrives long after the save that caused it.</para>
+    ///
+    /// <para>Reported 2026-10-12 from a stepped-simulation sweep, whose analysis rate is nudged off
+    /// an integer to make each record hold whole cycles of its own tone. Every measured sweep
+    /// passes 48000/96000/192000 and had never come near it.</para>
+    /// </summary>
+    [Fact]
+    public async Task SaveSweep_AtAFractionalSampleRate_StillLists()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateSweepTypeAsync(factory);
+            var repo = new MeasurementRepository(factory);
+
+            var request = BuildSweepRequest(typeId) with { SampleRateHz = 500_123.456 };
+            long resultId = await repo.SaveSweepResultAsync(request, CancellationToken.None);
+
+            var listed = await repo.ListResultsAsync(
+                new MeasurementFilter(MeasurementTypeId: typeId), CancellationToken.None);
+
+            var row = Assert.Single(listed);
+            Assert.Equal(resultId, row.ResultId);
+            Assert.Equal(500_123, row.SampleRateHz);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// And the rows already written are repaired, which fixed code cannot do — the same thing
+    /// migrations 005, 007 and 010 exist for.
+    ///
+    /// <para>Writes a REAL into <c>capture.fs</c> behind the repository's back, exactly as the
+    /// unrounded save did, and then runs the migration runner over it: the row rounds, the listing
+    /// comes back, and a project that answered 500 on every History load opens working.</para>
+    /// </summary>
+    [Fact]
+    public async Task Migration015_RoundsACaptureRateAnEarlierSaveStoredAsAReal()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var factory = await TestDb.CreateMigratedFactoryAsync(path);
+            long typeId = await CreateSweepTypeAsync(factory);
+            var repo = new MeasurementRepository(factory);
+            long resultId = await repo.SaveSweepResultAsync(BuildSweepRequest(typeId), CancellationToken.None);
+
+            await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            {
+                await connection.ExecuteAsync(
+                    "UPDATE capture SET fs = 500123.456 WHERE measurement_result_id = @resultId;",
+                    new { resultId });
+
+                Assert.Equal(
+                    "real",
+                    await connection.ExecuteScalarAsync<string>(
+                        "SELECT typeof(fs) FROM capture WHERE measurement_result_id = @resultId LIMIT 1;",
+                        new { resultId }));
+            }
+
+            // Rolled back to before 015 and re-migrated, so the *embedded* migration runs through
+            // the real runner -- a test that only re-ran the SQL by hand would pass with the file
+            // never shipped.
+            await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            {
+                await connection.ExecuteAsync("DELETE FROM schema_version WHERE version >= 15;");
+                await new MigrationRunner().RunAsync(connection, CancellationToken.None);
+            }
+
+            var listed = await repo.ListResultsAsync(
+                new MeasurementFilter(MeasurementTypeId: typeId), CancellationToken.None);
+            Assert.Equal(500_123, Assert.Single(listed).SampleRateHz);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
     private static SweepSaveRequest BuildSweepRequest(long typeId)
     {
         var captures = new List<SweepCaptureInput>(PointCount);

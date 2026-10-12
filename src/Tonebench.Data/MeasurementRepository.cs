@@ -15,6 +15,25 @@ namespace Tonebench.Data;
 /// </summary>
 public sealed class MeasurementRepository(SqliteConnectionFactory connectionFactory)
 {
+    /// <summary>
+    /// <c>capture.fs</c>, as the column is declared: INTEGER.
+    ///
+    /// <para>SQLite's affinity is advisory, so a fractional value is stored as REAL and read back as
+    /// a double — and <c>ResultSummaryRowRaw.SampleRateHz</c> is a <c>long</c>, so Dapper refuses to
+    /// materialise it. <see cref="ListResultsAsync"/> reads every row of a measurement in one query,
+    /// so <b>one</b> such row takes down the whole History list with <i>"a parameterless default
+    /// constructor ... is required"</i> — a message naming nothing that is wrong, long after the
+    /// save that caused it. Seen in the wild 2026-10-12, from a stepped-simulation sweep whose
+    /// analysis rate had been nudged to make the record periodic.</para>
+    ///
+    /// <para>Rounded here rather than at each caller, because any caller that ever passes a
+    /// non-integral rate is a latent version of that bug — and four of the six writers of this
+    /// column did not round. Nothing reads samples back through <c>capture.fs</c>: a spectrum
+    /// import keeps its own <c>pcm_fs</c> (REAL, and deliberately exact), and a sweep stores no
+    /// samples at all.</para>
+    /// </summary>
+    private static long RoundedFs(double sampleRateHz) => (long)Math.Round(sampleRateHz);
+
     public async Task<long> SaveResultAsync(MeasurementSaveRequest request, CancellationToken ct)
     {
         await using var connection = await connectionFactory.OpenAsync(ct);
@@ -52,7 +71,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             {
                 ResultId = resultId,
                 Ts = TonebenchTimestamp.Now(),
-                Fs = request.SampleRateHz,
+                Fs = RoundedFs(request.SampleRateHz),
                 N = request.FftSize,
                 request.InRangeDbv,
                 request.OutRangeDbv,
@@ -139,7 +158,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                 // comes back as REAL, which Dapper then cannot match. See ResultSummaryRowRaw.
                 // Nothing reads this for arithmetic -- spectrum.bin_hz is what frequencies are
                 // computed from, and params_json carries the exact analysed rate.
-                Fs = (long)Math.Round(request.AnalysisRateHz),
+                Fs = RoundedFs(request.AnalysisRateHz),
                 N = request.FftSize,
                 Channels = channels,
                 PcmBytes = pcmBytes,
@@ -238,7 +257,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
 
         await connection.ExecuteAsync(
             "UPDATE capture SET fs = @Fs, n = @N WHERE id = @captureId;",
-            new { Fs = (long)Math.Round(analysisRateHz), N = fftSize, captureId },
+            new { Fs = RoundedFs(analysisRateHz), N = fftSize, captureId },
             transaction);
         await connection.ExecuteAsync(
             "UPDATE measurement_result SET params_json = @paramsJson WHERE id = @resultId;",
@@ -363,7 +382,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                     ResultId = resultId,
                     capture.SeqIndex,
                     Ts = capturedAt,
-                    Fs = request.SampleRateHz,
+                    Fs = RoundedFs(request.SampleRateHz),
                     N = request.FftSize,
                     request.InRangeDbv,
                     request.OutRangeDbv,
@@ -460,7 +479,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                 // fractional row would break the whole History list rather than only itself. Every
                 // chirp caller passes 48000/96000/192000 and has never come near it; a simulated
                 // sweep has no sample rate at all and passes 0.
-                Fs = (long)Math.Round(request.SampleRateHz),
+                Fs = RoundedFs(request.SampleRateHz),
                 N = request.FftSize,
                 request.InRangeDbv,
                 request.OutRangeDbv,
@@ -489,7 +508,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                     ResultId = resultId,
                     point.SeqIndex,
                     Ts = TonebenchTimestamp.Now(),
-                    Fs = request.SampleRateHz,
+                    Fs = RoundedFs(request.SampleRateHz),
                     N = request.FftSize,
                     request.InRangeDbv,
                     request.OutRangeDbv,
@@ -707,7 +726,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             {
                 ResultId = resultId,
                 Ts = TonebenchTimestamp.Now(),
-                Fs = request.SampleRateHz,
+                Fs = RoundedFs(request.SampleRateHz),
                 N = request.FftSize,
                 request.InRangeDbv,
                 request.OutRangeDbv,

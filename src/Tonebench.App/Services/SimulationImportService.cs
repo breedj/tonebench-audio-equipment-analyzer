@@ -464,9 +464,17 @@ public sealed class SimulationImportService(
             ct.ThrowIfCancellationRequested();
 
             var (spec, rendered, samples) = AnalyseRun(request, info, header, indices, wholeColumns, sweep, ct);
-            firstSpec ??= spec;
-            analysisRateHz = rendered.AnalysisRateHz;
-            fftSize = spec.FftSize;
+
+            // The *first* run's, not the last. A periodic record nudges the analysis rate to fit
+            // whole cycles of that point's own tone, so every point has a slightly different one and
+            // no single figure is the sweep's -- taking the first makes the stored figure
+            // deterministic rather than "whichever step happened to be last".
+            if (firstSpec is null)
+            {
+                firstSpec = spec;
+                analysisRateHz = rendered.AnalysisRateHz;
+                fftSize = spec.FftSize;
+            }
 
             for (int channel = 0; channel < samples.Count; channel++)
             {

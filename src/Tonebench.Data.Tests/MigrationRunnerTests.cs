@@ -95,7 +95,8 @@ public class MigrationRunnerTests
                  (7L, "007_response_trace_orphans.sql"), (8L, "008_measurement_type_sort_order.sql"),
                  (9L, "009_impulse_response.sql"), (10L, "010_impulse_orphans.sql"),
                  (11L, "011_response_trace_reference.sql"), (12L, "012_response_trace_delay.sql"),
-                 (13L, "013_trash.sql"), (14L, "014_simulation_source.sql")],
+                 (13L, "013_trash.sql"), (14L, "014_simulation_source.sql"),
+                 (15L, "015_capture_fs_integer.sql")],
                 rows);
         }
         finally

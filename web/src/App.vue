@@ -155,6 +155,7 @@ import {
   isImpedanceKind,
   isCrosstalkKind,
   isOutputImpedanceKind,
+  THD_VS_FREQUENCY_KIND,
 } from './measurements/kinds'
 import {
   claimLive,
@@ -5061,6 +5062,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
         !isImpedanceKind(currentType?.kind)
       "
       :measurement-type-id="currentTypeId"
+      :sweep-target="currentType?.kind === THD_VS_FREQUENCY_KIND"
       @close="closeSimulationImport()"
       @imported="onSimulationImported"
     />

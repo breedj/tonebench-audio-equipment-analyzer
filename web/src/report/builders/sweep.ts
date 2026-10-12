@@ -180,7 +180,60 @@ function imdVsAmplitudeRows(params: Partial<ImdVsAmplitudeParameters>): ReportRo
 }
 
 /** The Settings section's rows for any of the three sweep kinds, labelled the way its config panel labels them. */
+/**
+ * The Settings rows of a sweep that was *imported* from a `.step`ped transient run, or null when it
+ * was measured.
+ *
+ * <p>Tried before everything below, because almost none of those rows exist here: there was no
+ * generator, so no level mode and no drive level; no load, so no power; no averaging and no noise
+ * pass. Printing them would describe a bench run that never happened — the same arm the response
+ * and impedance chapters have.</p>
+ */
+function simulatedSweepRows(paramsJson: string): ReportRow[] | null {
+  const params = parse<Record<string, unknown>>(paramsJson)
+  const simulation = params?.['simulation'] as Record<string, unknown> | null | undefined
+  const source = simulation?.['source'] as Record<string, unknown> | null | undefined
+  if (!params || !simulation || !source) return null
+
+  const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null)
+  const num = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null
+
+  const rows: ReportRow[] = [{ label: 'Source', value: 'Simulated (stepped .tran run)' }]
+  const path = str(source['path'])
+  if (path) rows.push({ label: 'File', value: path })
+
+  const trace = str(source['leftTrace'])
+  if (trace) rows.push({ label: 'Trace', value: trace })
+
+  const steps = num(source['sweepCount'])
+  if (steps !== null) rows.push({ label: 'Steps', value: `${steps} runs, one point each` })
+
+  const lowHz = num(params['startFreqHz'])
+  const highHz = num(params['endFreqHz'])
+  if (lowHz !== null && highHz !== null) {
+    rows.push({ label: 'Sweep', value: `${formatHz(lowHz)} – ${formatHz(highHz)}` })
+  }
+
+  const fftSize = num(params['fftSize'])
+  if (fftSize !== null) rows.push({ label: 'FFT size', value: fftSize.toLocaleString() })
+
+  const window = str(params['window'])
+  if (window) rows.push({ label: 'Window', value: window })
+
+  const rateHz = num(params['sampleRateHz'])
+  if (rateHz !== null) rows.push({ label: 'Analysed at', value: `${(rateHz / 1e3).toFixed(1)} kHz` })
+
+  const startS = num(simulation['startTimeS'])
+  if (startS !== null) rows.push({ label: 'Each run analysed from', value: `${(startS * 1e3).toFixed(3)} ms` })
+
+  return rows
+}
+
 export function sweepSettingsRows(kind: string, paramsJson: string): ReportRow[] {
+  const simulated = simulatedSweepRows(paramsJson)
+  if (simulated) return simulated
+
   if (isImdSweepKind(kind)) {
     const params = parse<ImdVsAmplitudeParameters>(paramsJson)
     return params ? imdVsAmplitudeRows(params) : []

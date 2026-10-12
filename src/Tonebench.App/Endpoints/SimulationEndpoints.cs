@@ -43,7 +43,21 @@ public static class SimulationEndpoints
             CancellationToken ct) =>
             await GuardAsync(async () =>
             {
-                long resultId = await import.ImportAsync(measurementTypeId, request.ToRequest(), ct);
+                var resultIds = await import.ImportAsync(measurementTypeId, request.ToRequest(), ct);
+                return Results.Ok(new ImportedSimulationsResponse(resultIds));
+            }));
+
+        // The same stepped file read as a sweep rather than as a stack of spectra: each run becomes
+        // one point of a THD-vs-frequency result. Its own route for the reason import-impedance has
+        // one -- same file, different measurement, different stored shape.
+        group.MapPost("/{measurementTypeId:long}/import-sweep", async (
+            long measurementTypeId,
+            ImportSimulationRequest request,
+            SimulationImportService import,
+            CancellationToken ct) =>
+            await GuardAsync(async () =>
+            {
+                long resultId = await import.ImportSweepAsync(measurementTypeId, request.ToRequest(), ct);
                 return Results.Ok(new ImportedSimulationResponse(resultId));
             }));
 
@@ -280,7 +294,9 @@ public static class SimulationEndpoints
             // measurement the dialog has to get across -- a larger FFT cannot improve it.
             usableS > 0 ? 1.0 / usableS : 0.0,
             [.. info.Traces.Select(t => new SimulationTraceResponse(t.Index, t.Name, t.Unit))],
-            info.Warnings);
+            info.Warnings,
+            [.. info.Sweeps.Select(sw => new SimulationSweepResponse(
+                sw.Index, sw.PointCount, sw.StartTimeS, sw.EndTimeS, sw.Label))]);
     }
 }
 
@@ -400,7 +416,19 @@ public sealed record SimulationFileResponse(
     int SuggestedFftSize,
     double BinWidthHz,
     IReadOnlyList<SimulationTraceResponse> Traces,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<SimulationSweepResponse> Sweeps);
+
+/// <summary>
+/// One run inside a <c>.raw</c> file, so the dialog can say how many there are and offer them
+/// individually. An ordinary transient carries exactly one.
+/// </summary>
+public sealed record SimulationSweepResponse(
+    int Index,
+    int PointCount,
+    double StartTimeS,
+    double EndTimeS,
+    string? Label);
 
 public sealed record ImportSimulationRequest(
     string Path,
@@ -414,11 +442,12 @@ public sealed record ImportSimulationRequest(
     double MeasurementHiFreqHz = 20_000.0,
     string? Name = null,
     string? Notes = null,
-    bool PeriodicRecord = true)
+    bool PeriodicRecord = true,
+    IReadOnlyList<int>? SweepIndices = null)
 {
     internal SimulationImportRequest ToRequest() => new(
         Path, LeftTraceIndex, RightTraceIndex, StartTimeS, LevelOffsetDb, FftSize, Window,
-        MeasurementLoFreqHz, MeasurementHiFreqHz, Name, Notes, PeriodicRecord);
+        MeasurementLoFreqHz, MeasurementHiFreqHz, Name, Notes, PeriodicRecord, SweepIndices);
 }
 
 public sealed record ReanalyzeSimulationRequest(

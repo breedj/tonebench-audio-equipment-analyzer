@@ -1,4 +1,5 @@
 ﻿using Tonebench.App.Streaming;
+using Tonebench.Dsp;
 
 namespace Tonebench.App.Services;
 
@@ -122,6 +123,71 @@ internal static class SweepCaptureSupport
             sum += Math.Pow(10.0, snapshot.Dbv[k] / 20.0);
 
         return sum / (hiBin - loBin + 1);
+    }
+
+    /// <summary>
+    /// One sweep point from one channel's meters: the harmonic percentages, the D6+ bucket, the
+    /// noise ratio and the power, in the order and the units a stored sweep reads back in.
+    ///
+    /// <para>Shared rather than written twice because the <i>simulated</i> sweep import does
+    /// exactly this to each step of a <c>.step</c>ped transient run, and a second copy of the
+    /// harmonic-to-percent mapping would drift from this one silently — the figures would still
+    /// look like figures. A measured point and an imported one are now the same arithmetic over the
+    /// same metric names, which is what lets the chart, the CSV and the report read them without
+    /// knowing which they have.</para>
+    /// </summary>
+    /// <param name="generatorAmpDbv">
+    /// What the gain is measured against. A simulation has no generator this side of the schematic,
+    /// so the import passes the fundamental itself, making the gain 0 dB rather than a number
+    /// derived from a level that does not exist.
+    /// </param>
+    /// <param name="noiseVrms">The generator-off residual, or 0 where no noise pass was run — which is every imported point.</param>
+    public static ThdSweepPoint PointFromMeters(
+        double freqHz,
+        int channel,
+        SpectrumMeters meters,
+        double generatorAmpDbv,
+        double loadOhms,
+        double noiseVrms,
+        SweepPreviewSeries? previewFft,
+        SweepPreviewSeries? previewScope)
+    {
+        var harmonics = meters.Harmonics;
+        double fundamentalVrms = Math.Pow(10.0, meters.FundamentalDbv / 20.0);
+
+        var harmonicPercent = new List<double>(4);
+        for (int order = 2; order <= 5; order++)
+        {
+            var match = harmonics.FirstOrDefault(h => h.Order == order);
+            if (match.Order != order)
+                break;
+
+            harmonicPercent.Add(100.0 * Math.Pow(10.0, match.Dbc / 20.0));
+        }
+
+        double d6Plus = harmonics.Length > 0 && harmonics[0].Order == 1
+            ? 100.0 * SpectrumMetrics.PartialThd(harmonics, 6)
+            : 0.0;
+
+        double noisePercent = fundamentalVrms > 0.0 ? 100.0 * noiseVrms / fundamentalVrms : 0.0;
+        double powerWatt = loadOhms > 0.0 ? fundamentalVrms * fundamentalVrms / loadOhms : 0.0;
+
+        return new ThdSweepPoint(
+            freqHz,
+            channel,
+            meters.FundamentalFreqHz,
+            meters.FundamentalDbv,
+            meters.FundamentalDbv - generatorAmpDbv,
+            powerWatt,
+            meters.ThdPercent,
+            meters.ThdNPercent,
+            meters.SnrDb,
+            harmonicPercent,
+            d6Plus,
+            noisePercent,
+            generatorAmpDbv,
+            previewFft,
+            previewScope);
     }
 
     public static double DbvToVolt(double dbv) => Math.Pow(10.0, dbv / 20.0);

@@ -193,7 +193,15 @@ public sealed record SimulationSource(
     int PointCount,
     double SourceStartS,
     double SourceEndS,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    /// <summary>
+    /// Which run of a <c>.step</c>ped file this came from, and what the simulator called it.
+    /// <c>SweepCount</c> is 1 and the other two null for an ordinary run — which is also what a row
+    /// written before stepped files were read deserialises to, and the truth about those rows.
+    /// </summary>
+    int SweepCount = 1,
+    int? SweepIndex = null,
+    string? SweepLabel = null);
 
 /// <summary>
 /// The re-appliable half of an imported simulation's settings: the ones that are not already
@@ -338,7 +346,21 @@ public sealed record ThdVsFrequencyParameters(
     /// before they existed -- which is read as off, the behaviour that type was saved with.
     /// </summary>
     bool? ChartFitPreviewSpectrum = null,
-    bool? ChartFitPreviewScope = null);
+    bool? ChartFitPreviewScope = null)
+{
+    /// <summary>
+    /// Present when this sweep was imported from a <c>.step</c>ped transient run rather than
+    /// measured, and null — the default — on every measured one. The same block
+    /// <see cref="FftSpectrumParameters.Simulation"/> carries, since the points came from exactly
+    /// the analysis that import performs, one run at a time.
+    ///
+    /// <para>Its <c>StartTimeS</c> and <c>PcmStartS</c> describe the <i>first</i> step. A sweep
+    /// stores no samples (<c>SweepSaveRequest</c> has nowhere to put them), so unlike a spectrum
+    /// import this one cannot be re-analysed — the block is provenance, not a re-analysis
+    /// handle.</para>
+    /// </summary>
+    public SimulationParameters? Simulation { get; init; }
+}
 
 /// <summary>
 /// One channel's small decimated FFT or oscilloscope trace at one sweep point -- a
@@ -385,7 +407,14 @@ public sealed record SweepSaveRequest(
     int Channels,
     double? InRangeDbv,
     double? OutRangeDbv,
-    IReadOnlyList<SweepCaptureInput> Captures);
+    IReadOnlyList<SweepCaptureInput> Captures,
+    /// <summary>
+    /// <see cref="MeasurementSource.Simulation"/> for a sweep imported from a <c>.step</c>ped
+    /// transient run, null for a measured one — the marker <c>historyGroups</c> files results under
+    /// Simulations by, and the one the SIM badge reads. One optional parameter rather than a
+    /// sibling save method, for the reason <see cref="ResponseSaveRequest.Source"/> is one.
+    /// </summary>
+    string? Source = null);
 
 /// <summary>One channel's decimated trace read back out of a saved sweep point. See <see cref="CapturePreviewInput"/>.</summary>
 public sealed record StoredPreviewSeries(float[] X, float[] Min, float[] Max);

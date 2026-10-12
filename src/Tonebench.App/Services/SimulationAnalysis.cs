@@ -250,7 +250,8 @@ public sealed record SimulationAnalysis(
         double usableS,
         IReadOnlyList<string> traceNames,
         IReadOnlyList<string> traceUnits,
-        IReadOnlyList<double>? removedDcV = null)
+        IReadOnlyList<double>? removedDcV = null,
+        SimulationSweep? sweep = null)
     {
         int fftSize = request.FftSize > 0
             ? request.FftSize
@@ -272,7 +273,10 @@ public sealed record SimulationAnalysis(
             PointCount: info.PointCount,
             SourceStartS: info.StartTimeS,
             SourceEndS: info.EndTimeS,
-            Warnings: info.Warnings);
+            Warnings: info.Warnings,
+            SweepCount: info.Sweeps.Count,
+            SweepIndex: info.Sweeps.Count > 1 ? sweep?.Index : null,
+            SweepLabel: sweep?.Label);
 
         return new SimulationAnalysis(
             source, startTimeS, request.LevelOffsetDb, fftSize, request.Window,

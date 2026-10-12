@@ -4,7 +4,13 @@ import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
 import { useSweep } from '../composables/useSweep'
 import { dashAttr, sweepOverlayDash } from '../measurements/sweepOverlayStyles'
-import { isSweepKind, isFrequencyResponseKind, isImpedanceKind, FFT_SPECTRUM_KIND } from '../measurements/kinds'
+import {
+  isSweepKind,
+  isFrequencyResponseKind,
+  isImpedanceKind,
+  FFT_SPECTRUM_KIND,
+  THD_VS_FREQUENCY_KIND,
+} from '../measurements/kinds'
 import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
 // A module store rather than an emit, because every screen mounts its own checklist and the
 // handler was forgotten twice -- see simulationImport.ts.
@@ -34,11 +40,12 @@ const currentKind = computed(() => types.value.find((t) => t.id === currentTypeI
 const groups = computed(() => groupHistory(items.value))
 const withHeaders = computed(() => showsGroupHeaders(groups.value))
 
-// Three screens can import one, and what each takes of the file is the whole distinction: an FFT
+// Four screens can import one, and what each takes of the file is the whole distinction: an FFT
 // measurement takes a transient (.tran) run, because a spectrum is what a waveform becomes; a
 // frequency response takes an AC (.ac) sweep, because that already is one; an impedance
-// measurement takes the same AC sweep but reads a voltage over a current, which is ohms. A sweep
-// screen takes none of them -- nothing a simulator writes is a distortion-against-level curve.
+// measurement takes the same AC sweep but reads a voltage over a current, which is ohms; and a
+// THD-vs-frequency measurement takes a `.step`ped transient, because a tone stepped across the
+// band *is* a distortion-against-frequency curve written in another form.
 //
 // The dialog that opens follows from this too, and a file of the wrong kind is refused by name,
 // pointing at the screen it does belong on.
@@ -46,13 +53,15 @@ const canImport = computed(
   () =>
     currentKind.value === FFT_SPECTRUM_KIND ||
     isFrequencyResponseKind(currentKind.value) ||
-    isImpedanceKind(currentKind.value),
+    isImpedanceKind(currentKind.value) ||
+    currentKind.value === THD_VS_FREQUENCY_KIND,
 )
 
 /** What the button says it will read, which is the thing most often got wrong. */
 const importsWhat = computed(() => {
   if (isImpedanceKind(currentKind.value)) return 'a voltage and a current from a simulated .ac sweep'
   if (isFrequencyResponseKind(currentKind.value)) return 'a simulated .ac sweep'
+  if (currentKind.value === THD_VS_FREQUENCY_KIND) return 'a stepped (.step) simulated .tran run as a sweep'
   return 'a simulated .tran run'
 })
 

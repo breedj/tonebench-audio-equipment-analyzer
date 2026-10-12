@@ -1240,7 +1240,8 @@ public sealed class MeasurementSaveService(
     /// practice this only happens for a sweep saved before this feature existed... except there is
     /// no such sweep, since it isn't re-run from old state; kept defensive rather than assumed).
     /// </summary>
-    private static List<CapturePreviewInput> BuildSweepPreviews(IEnumerable<ThdSweepPoint> pointsAtOneFrequency)
+    /// <remarks><c>internal</c> for the reason <see cref="BuildSweepMetrics"/> is.</remarks>
+    internal static List<CapturePreviewInput> BuildSweepPreviews(IEnumerable<ThdSweepPoint> pointsAtOneFrequency)
     {
         var previews = new List<CapturePreviewInput>();
         foreach (var point in pointsAtOneFrequency)
@@ -1280,7 +1281,8 @@ public sealed class MeasurementSaveService(
     /// <see cref="SaveAsync"/> uses (<c>thd_percent</c>, <c>h{n}_dbc</c>, ...) so the metric index
     /// and the CSV exporter treat a sweep point exactly like a spectrum capture.
     /// </summary>
-    private static List<MeasurementMetric> BuildSweepMetrics(IEnumerable<ThdSweepPoint> pointsAtOneFrequency)
+    /// <remarks><c>internal</c> so the stepped-simulation import stores its points in exactly this shape — see <c>SweepCaptureSupport.PointFromMeters</c>.</remarks>
+    internal static List<MeasurementMetric> BuildSweepMetrics(IEnumerable<ThdSweepPoint> pointsAtOneFrequency)
     {
         var metrics = new List<MeasurementMetric>();
         foreach (var point in pointsAtOneFrequency)

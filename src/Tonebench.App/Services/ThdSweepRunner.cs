@@ -916,41 +916,14 @@ public sealed class ThdSweepRunner(
                 continue;
 
             int channel = snapshot.Channel == StreamChannel.Left ? 0 : 1;
-            var harmonics = meters.Harmonics;
 
-            double fundamentalVrms = Math.Pow(10.0, meters.FundamentalDbv / 20.0);
-
-            var harmonicPercent = new List<double>(4);
-            for (int order = 2; order <= 5; order++)
-            {
-                var match = harmonics.FirstOrDefault(h => h.Order == order);
-                if (match.Order != order)
-                    break;
-
-                harmonicPercent.Add(100.0 * Math.Pow(10.0, match.Dbc / 20.0));
-            }
-
-            double d6Plus = harmonics.Length > 0 && harmonics[0].Order == 1
-                ? 100.0 * SpectrumMetrics.PartialThd(harmonics, 6)
-                : 0.0;
-
-            double noisePercent = fundamentalVrms > 0.0 ? 100.0 * noiseVrms[channel] / fundamentalVrms : 0.0;
-            double powerWatt = request.LoadOhms > 0.0 ? fundamentalVrms * fundamentalVrms / request.LoadOhms : 0.0;
-
-            yield return new ThdSweepPoint(
+            yield return SweepCaptureSupport.PointFromMeters(
                 freqHz,
                 channel,
-                meters.FundamentalFreqHz,
-                meters.FundamentalDbv,
-                meters.FundamentalDbv - generatorAmpDbv,
-                powerWatt,
-                meters.ThdPercent,
-                meters.ThdNPercent,
-                meters.SnrDb,
-                harmonicPercent,
-                d6Plus,
-                noisePercent,
+                meters,
                 generatorAmpDbv,
+                request.LoadOhms,
+                noiseVrms[channel],
                 snapshot.PreviewFft,
                 snapshot.PreviewScope);
         }

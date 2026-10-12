@@ -161,6 +161,28 @@
       or three of them and they draw over each other, which is the comparison you were after.
     </p>
 
+    <h2>A simulated distortion curve</h2>
+
+    <p>
+      The same <code>.step</code> trick turns a transient run into a whole THD sweep. Step the tone
+      instead of a component:
+    </p>
+
+    <p><code>.step param freq 1k 10k 1k</code></p>
+
+    <p>
+      with your <code>.tran</code> line using <code>{freq}</code> as the source frequency. Then open
+      a <strong>THD vs frequency</strong> measurement and import there: each run becomes one point,
+      at whatever frequency that run actually came out at, and you get a curve to put beside the one
+      you measured. Import the same file on an <strong>FFT analysis</strong> measurement instead and
+      you get each run as its own spectrum.
+    </p>
+
+    <p>
+      It will take a while to simulate — a transient run per point, each long enough for the
+      resolution you need — which is the price of the thing being exact.
+    </p>
+
     <h2>A simulated loudspeaker impedance</h2>
 
     <p>

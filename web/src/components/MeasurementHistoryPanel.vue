@@ -3,7 +3,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api, type MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
-import { isFrequencyResponseKind, isImpedanceKind, isImpulseResponseKind } from '../measurements/kinds'
+import {
+  isFrequencyResponseKind,
+  isImpedanceKind,
+  isImpulseResponseKind,
+  isSweepKind,
+} from '../measurements/kinds'
 import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
 import EditMeasurementDialog from './EditMeasurementDialog.vue'
 import SimulationReanalyzeDialog from './SimulationReanalyzeDialog.vue'
@@ -59,6 +64,17 @@ const reanalyzeImpedanceOpen = ref(false)
 const currentKind = computed(() => types.value.find((t) => t.id === currentTypeId.value)?.kind)
 const isResponseMeasurement = computed(() => isFrequencyResponseKind(currentKind.value))
 const isImpedanceMeasurement = computed(() => isImpedanceKind(currentKind.value))
+
+/**
+ * Whether an imported result on this screen can be re-analysed at all.
+ *
+ * <p>A simulated <b>sweep</b> cannot: its points are metric rows, and the samples they were
+ * measured from are not stored anywhere (a sweep result has nowhere to put them). Re-importing is
+ * the only way to change its analysis. Showing the button anyway would be the "renders and does
+ * nothing" failure this panel has already had twice, so it is hidden rather than left to answer
+ * with a refusal.</p>
+ */
+const canReanalyze = computed(() => !isSweepKind(currentKind.value))
 
 /** What Re-analyse offers, which differs per kind as much as the dialogs do. */
 const reanalyzeHint = computed(() => {
@@ -224,7 +240,7 @@ async function onConfirmDelete(item: MeasurementSummary) {
                     describes a form it will not show.
                   -->
                   <button
-                    v-if="isSimulation(item)"
+                    v-if="isSimulation(item) && canReanalyze"
                     type="button"
                     class="rounded border px-2 py-1 btn-action"
                     :title="reanalyzeHint"

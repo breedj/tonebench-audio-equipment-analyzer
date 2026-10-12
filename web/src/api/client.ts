@@ -2267,6 +2267,22 @@ export interface SimulationFileInfo {
   binWidthHz: number
   traces: SimulationTrace[]
   warnings: string[]
+  /**
+   * The runs the file holds, always at least one. A `.step`ped transient holds one per step; the
+   * figures above describe the *first*, since the steps are the same directive solved at different
+   * parameters.
+   */
+  sweeps: SimulationSweep[]
+}
+
+/** One run inside a `.raw` file. */
+export interface SimulationSweep {
+  index: number
+  pointCount: number
+  startTimeS: number
+  endTimeS: number
+  /** The simulator's own words for this step, from the sibling `.log`; null for a QSpice run, which writes none. */
+  label: string | null
 }
 
 export interface ImportSimulationRequest {
@@ -2282,6 +2298,8 @@ export interface ImportSimulationRequest {
   name?: string | null
   notes?: string | null
   periodicRecord?: boolean
+  /** Which runs of a `.step`ped file to import, or omitted for all of them. */
+  sweepIndices?: number[]
 }
 
 export interface ReanalyzeSimulationRequest {
@@ -3222,7 +3240,17 @@ export const api = {
     }),
 
   importSimulation: (measurementTypeId: number, body: ImportSimulationRequest) =>
-    request<ImportedSimulation>(`/simulations/${measurementTypeId}/import`, {
+    request<ImportedSimulations>(`/simulations/${measurementTypeId}/import`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * The same stepped file read as a sweep rather than as a stack of spectra: each run becomes one
+   * point of a THD-vs-frequency result, at the fundamental that run's own analysis located.
+   */
+  importSimulationSweep: (measurementTypeId: number, body: ImportSimulationRequest) =>
+    request<ImportedSimulation>(`/simulations/${measurementTypeId}/import-sweep`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

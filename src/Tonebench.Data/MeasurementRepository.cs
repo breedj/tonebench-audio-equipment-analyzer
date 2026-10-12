@@ -328,8 +328,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         long resultId = await connection.ExecuteScalarAsync<long>(
             """
             INSERT INTO measurement_result
-                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
-            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated)
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated, source)
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated, @Source)
             RETURNING id;
             """,
             new
@@ -339,6 +339,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
                 request.Notes,
                 Ts = TonebenchTimestamp.Now(),
                 request.ParamsJson,
+                request.Source,
                 request.DeviceName,
                 request.Serial,
                 request.FwVer,

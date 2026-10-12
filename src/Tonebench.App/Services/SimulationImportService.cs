@@ -16,6 +16,25 @@ public sealed record SimulationTrace(int Index, string Name, string Unit);
 /// dialog to offer its trace pickers, show the arithmetic the user's choices imply, and say what is
 /// wrong with the file before anything is committed.
 /// </summary>
+/// <summary>
+/// One run inside a <c>.raw</c> file. An ordinary transient holds exactly one; a <c>.step</c>ped one
+/// holds a run per step, written end to end with the time axis restarting at each.
+/// </summary>
+/// <param name="Label">
+/// What the simulator called this step, e.g. <c>freq=2000</c>, from the sibling <c>.log</c>. Null
+/// when there is nothing to read it from — every QSpice run, which writes no log at all.
+/// </param>
+public sealed record SimulationSweep(
+    int Index,
+    int FirstPoint,
+    int PointCount,
+    double StartTimeS,
+    double EndTimeS,
+    string? Label)
+{
+    public double DurationS => EndTimeS - StartTimeS;
+}
+
 public sealed record SimulationFileInfo(
     string Path,
     string Title,
@@ -31,7 +50,14 @@ public sealed record SimulationFileInfo(
     double MedianStepS,
     double MaxStepS,
     IReadOnlyList<SimulationTrace> Traces,
-    IReadOnlyList<string> Warnings)
+    IReadOnlyList<string> Warnings,
+    /// <summary>
+    /// The runs the file holds, always at least one. The figures above describe the <b>first</b>:
+    /// on a stepped run every step is the same directive solved at a different parameter, so its
+    /// duration and its grid describe them all closely enough for the dialog's arithmetic, and each
+    /// sweep carries its own span regardless.
+    /// </summary>
+    IReadOnlyList<SimulationSweep> Sweeps)
 {
     /// <summary>The largest power-of-two FFT the run's duration can fill at its own native rate.</summary>
     public int LargestUsableFftSize => SimulationAnalysis.LargestFftSize(DurationS, NativeRateHz);
@@ -50,7 +76,13 @@ public sealed record SimulationImportRequest(
     double MeasurementHiFreqHz,
     string? Name,
     string? Notes,
-    bool PeriodicRecord = true);
+    bool PeriodicRecord = true,
+    /// <summary>
+    /// Which runs of a <c>.step</c>ped file to import, or null for all of them. On an FFT
+    /// measurement each becomes a result of its own; on a THD-vs-frequency measurement they become
+    /// the points of one sweep.
+    /// </summary>
+    IReadOnlyList<int>? SweepIndices = null);
 
 /// <summary>
 /// Imports an LTspice transient run as a measurement result, and re-analyses one that is already
@@ -98,22 +130,24 @@ public sealed class SimulationImportService(
         RequireTransient(header, path);
 
         double[] time = LtspiceRawFile.ReadColumns(path, header, [header.TimeVariable!.Index], ct)[0];
-        var axis = TimeAxis.Of(time);
+        var sweeps = SplitSweeps(time, header, path);
 
-        // First, because this one says what the *file* is rather than how it was sampled, and every
-        // check below describes one sweep. It sat after the coarse-timestep refusal until
-        // 2026-10-11, so a stepped run that was also coarsely sampled -- which `.step` over a long
-        // `.tran` very often is -- was refused with advice about `plotwinsize` that never mentioned
-        // `.step` at all.
-        if (!axis.IsMonotonic)
-        {
-            throw new FormatException(
-                $"{Path.GetFileName(path)} has a time axis that goes backwards at point {axis.FirstNonMonotonicIndex}. " +
-                "A stepped (`.step`) run writes several sweeps into one file, which this import cannot separate; " +
-                "run a single simulation instead.");
-        }
+        // Every check below is about one run, so they are applied to the first -- on a stepped file
+        // the others are the same directive solved at a different parameter, so a timestep that can
+        // carry the band in one carries it in all of them.
+        var first = sweeps[0];
+        var axis = TimeAxis.Of(time.AsSpan(first.FirstPoint, first.PointCount));
 
         var warnings = new List<string>();
+
+        if (sweeps.Count > 1)
+        {
+            warnings.Add(
+                $"This is a stepped (`.step`) run: {sweeps.Count} runs in one file." +
+                (sweeps[^1].Label is null
+                    ? " They are numbered, because the simulator records what it stepped only on the console."
+                    : ""));
+        }
 
         // The hard test, and it is about the data rather than the flags: a gap of `maxStep` cannot
         // represent anything above 1/(2*maxStep), so a file whose coarsest step cannot carry the
@@ -187,7 +221,7 @@ public sealed class SimulationImportService(
             Date: header.Date,
             Plotname: header.Plotname,
             Flags: [.. header.Flags],
-            PointCount: header.PointCount,
+            PointCount: first.PointCount,
             StartTimeS: axis.StartS,
             EndTimeS: axis.EndS,
             DurationS: axis.DurationS,
@@ -196,7 +230,60 @@ public sealed class SimulationImportService(
             MedianStepS: axis.MedianStepS,
             MaxStepS: axis.MaxStepS,
             Traces: traces,
-            Warnings: warnings);
+            Warnings: warnings,
+            Sweeps: sweeps);
+    }
+
+    /// <summary>
+    /// Splits a file into the runs it holds and names each one, which is what makes a
+    /// <c>.step</c>ped transient readable instead of refused.
+    ///
+    /// <para><see cref="LtspiceRawFile.SweepStarts"/> cuts wherever the axis fails to increase, so
+    /// every segment is strictly increasing by construction and there is no monotonicity left to
+    /// check. The header's <c>stepped</c> flag is what tells a stepped run from a damaged one: both
+    /// simulators set it, so a time axis that restarts without it is a corrupt or rewritten file,
+    /// and turning that into several plausible-looking results would be worse than refusing it.</para>
+    ///
+    /// <para>The sweeps are <b>not the same length</b> — measured on a generated
+    /// <c>.step param freq 1k 3k 1k</c> run, 5353 / 5682 / 5964 points from LTspice and
+    /// 5311 / 5604 / 5949 from QSpice, because each run takes the timesteps it needs.</para>
+    /// </summary>
+    private static List<SimulationSweep> SplitSweeps(double[] time, LtspiceRawHeader header, string path)
+    {
+        string name = Path.GetFileName(path);
+        var starts = LtspiceRawFile.SweepStarts(time);
+
+        if (starts.Length > 1 && !header.IsStepped)
+        {
+            throw new FormatException(
+                $"{name} has a time axis that goes backwards at point {starts[1]}, and its header does not say " +
+                "it is a stepped (`.step`) run -- a stepped file from either simulator carries a `stepped` flag, " +
+                "and this one does not. Re-run the simulation.");
+        }
+
+        var labels = starts.Length > 1 ? SpiceStepLog.ReadLabels(path) : [];
+        var sweeps = new List<SimulationSweep>(starts.Length);
+
+        for (int s = 0; s < starts.Length; s++)
+        {
+            int from = starts[s];
+            int upTo = s + 1 < starts.Length ? starts[s + 1] : time.Length;
+            int count = upTo - from;
+            string where = starts.Length > 1 ? $" in run {s + 1} of {starts.Length}" : "";
+
+            if (count < 2)
+                throw new FormatException($"{name} has {count} point{where}, which is not a waveform.");
+
+            sweeps.Add(new SimulationSweep(
+                Index: s,
+                FirstPoint: from,
+                PointCount: count,
+                StartTimeS: time[from],
+                EndTimeS: time[upTo - 1],
+                Label: s < labels.Count ? labels[s] : null));
+        }
+
+        return sweeps;
     }
 
     /// <summary>
@@ -233,58 +320,76 @@ public sealed class SimulationImportService(
             "if you need the low end.");
     }
 
-    /// <summary>Imports the selected traces into <paramref name="measurementTypeId"/>.</summary>
-    public async Task<long> ImportAsync(
+    /// <summary>
+    /// Imports the selected traces into <paramref name="measurementTypeId"/>, one result per run.
+    ///
+    /// <para>An ordinary file returns one id; a <c>.step</c>ped one returns an id per step it was
+    /// asked for, each a spectrum of its own. For a stepped run whose steps are a tone moving across
+    /// the band, <see cref="ImportSweepAsync"/> is the other thing to do with the same file.</para>
+    /// </summary>
+    public async Task<IReadOnlyList<long>> ImportAsync(
         long measurementTypeId, SimulationImportRequest request, CancellationToken ct)
     {
         var info = Inspect(
             request.Path, request.MeasurementHiFreqHzOrDefault(), request.MeasurementLoFreqHz, ct);
         var header = LtspiceRawFile.ReadHeader(request.Path);
+        var chosen = ResolveSweeps(info, request.SweepIndices);
 
         var indices = new List<int> { header.TimeVariable!.Index, request.LeftTraceIndex };
         if (request.RightTraceIndex is { } right && right != request.LeftTraceIndex)
             indices.Add(right);
 
+        // One pass over the file whatever the run count: the columns hold every run end to end, and
+        // each SimulationSweep is the window into them.
         double[][] columns = LtspiceRawFile.ReadColumns(request.Path, header, indices, ct);
-        double[] time = columns[0];
 
-        // One uniform grid at the simulator's own rate. Doing this once, here, rather than keeping
-        // the non-uniform axis: the decimation below is a standard, filterable operation on a
-        // uniform series, and what this discards is content above the simulator's own grid, which
-        // its stepping could not represent anyway.
-        double startTimeS = Math.Clamp(request.StartTimeS, info.StartTimeS, info.EndTimeS);
-        double usableS = info.EndTimeS - startTimeS;
-        int nativeCount = Resampler.SampleCount(usableS, info.NativeRateHz);
-        if (nativeCount < 2)
-            throw new ArgumentException(
-                $"Analysing from {startTimeS * 1e3:F3} ms leaves nothing of a run that ends at " +
-                $"{info.EndTimeS * 1e3:F3} ms.", nameof(request));
+        var resultIds = new List<long>(chosen.Count);
+        foreach (var sweep in chosen)
+            resultIds.Add(await ImportRunAsync(measurementTypeId, request, info, header, indices, columns, sweep, ct));
 
-        var samples = new List<double[]>();
-        var removedDcV = new List<double>();
-        for (int c = 1; c < columns.Length; c++)
+        return resultIds;
+    }
+
+    /// <summary>Which runs an import asked for, refusing an index the file does not have.</summary>
+    private static List<SimulationSweep> ResolveSweeps(SimulationFileInfo info, IReadOnlyList<int>? requested)
+    {
+        if (requested is null || requested.Count == 0)
+            return [.. info.Sweeps];
+
+        var chosen = new List<SimulationSweep>(requested.Count);
+        foreach (int index in requested.Distinct().Order())
         {
-            var uniform = new double[nativeCount];
-            Resampler.ToUniform(time, columns[c], startTimeS, info.NativeRateHz, uniform);
+            if (index < 0 || index >= info.Sweeps.Count)
+            {
+                throw new ArgumentException(
+                    $"This file holds {info.Sweeps.Count} run{(info.Sweeps.Count == 1 ? "" : "s")}, so there is " +
+                    $"no run {index + 1} to import.");
+            }
 
-            // The node's operating point comes off first, then the samples are rounded to the
-            // precision they will be stored at. Both orderings matter and both are measured --
-            // see SimulationParameters.RemovedDcV and PcmCodec.QuantizeInPlace.
-            removedDcV.Add(PcmCodec.RemoveMeanInPlace(uniform));
-            PcmCodec.QuantizeInPlace(uniform);
-            samples.Add(uniform);
+            chosen.Add(info.Sweeps[index]);
         }
 
-        var traceNames = indices.Skip(1).Select(i => header.Variables[i].Name).ToList();
-        var traceUnits = indices.Skip(1).Select(i => header.Variables[i].Unit).ToList();
+        return chosen;
+    }
 
-        var spec = SimulationAnalysis.Describe(
-            info, request, startTimeS, usableS, traceNames, traceUnits, removedDcV);
-        var rendered = Render(samples, info.NativeRateHz, spec, ct);
+    private async Task<long> ImportRunAsync(
+        long measurementTypeId,
+        SimulationImportRequest request,
+        SimulationFileInfo info,
+        LtspiceRawHeader header,
+        IReadOnlyList<int> indices,
+        double[][] wholeColumns,
+        SimulationSweep sweep,
+        CancellationToken ct)
+    {
+        var (spec, rendered, samples) = AnalyseRun(request, info, header, indices, wholeColumns, sweep, ct);
 
-        string name = string.IsNullOrWhiteSpace(request.Name)
-            ? $"{Path.GetFileNameWithoutExtension(request.Path)} - {traceNames[0]}"
+        string stem = string.IsNullOrWhiteSpace(request.Name)
+            ? $"{Path.GetFileNameWithoutExtension(request.Path)} - {spec.Source.LeftTrace}"
             : request.Name.Trim();
+        string name = info.Sweeps.Count <= 1
+            ? stem
+            : $"{stem} - {sweep.Label ?? $"step {sweep.Index + 1} of {info.Sweeps.Count}"}";
 
         long resultId = await measurementRepository.SaveSimulationResultAsync(
             new SimulationSaveRequest(
@@ -294,16 +399,189 @@ public sealed class SimulationImportService(
             ct);
 
         logger.LogInformation(
-            "Imported simulation {Name} from {Path}: {Traces}, {Points} points over {Duration:F3} ms, " +
-            "native {NativeKHz:F1} kHz, analysed at {AnalysisKHz:F1} kHz / {FftSize} points ({BinHz:F2} Hz bins), " +
-            "DC removed {RemovedDc}",
-            name, request.Path, string.Join(" + ", traceNames), info.PointCount, usableS * 1e3,
-            info.NativeRateHz / 1e3, rendered.AnalysisRateHz / 1e3, spec.FftSize,
-            rendered.AnalysisRateHz / spec.FftSize,
-            string.Join(" + ", removedDcV.Zip(traceUnits).Select(p => $"{p.First:G6} {p.Second}")));
+            "Imported simulation {Name} from {Path}: {Traces}, run {Run} of {Runs}, {Points} points over " +
+            "{Duration:F3} ms, native {NativeKHz:F1} kHz, analysed at {AnalysisKHz:F1} kHz / {FftSize} points " +
+            "({BinHz:F2} Hz bins)",
+            name, request.Path, spec.Source.LeftTrace, sweep.Index + 1, info.Sweeps.Count,
+            sweep.PointCount, sweep.DurationS * 1e3, info.NativeRateHz / 1e3,
+            rendered.AnalysisRateHz / 1e3, spec.FftSize, rendered.AnalysisRateHz / spec.FftSize);
 
         return resultId;
     }
+
+    /// <summary>
+    /// Imports a <c>.step</c>ped transient run as a <b>THD vs frequency</b> sweep: one point per
+    /// step, measured the way the live screen would measure it.
+    ///
+    /// <para>This is what a stepped <c>.tran</c> is usually <i>for</i>. A tone stepped across the
+    /// band and run through a transient analysis is a distortion-against-frequency measurement
+    /// written in another form, and reading it as a stack of spectra leaves the user to compare
+    /// eight charts by eye when the thing they wanted is one curve.</para>
+    ///
+    /// <para><b>Each point's x value is the fundamental the analysis located</b>, not a frequency
+    /// taken from the step's label — which is why this needs no <c>.log</c> at all, and why a
+    /// QSpice run (which writes none) works identically. It is also the same convention a real
+    /// sweep uses: <c>ThdSweepPoint.MeasuredFreqHz</c> exists precisely because the tone that
+    /// arrives is the one worth believing.</para>
+    ///
+    /// <para>The points are built by <see cref="SweepCaptureSupport.PointFromMeters"/>, the same
+    /// function the real runner uses, so a simulated sweep and a measured one are the same
+    /// arithmetic over the same metric names — and read back, exported and reported by code that
+    /// cannot tell them apart.</para>
+    /// </summary>
+    public async Task<long> ImportSweepAsync(
+        long measurementTypeId, SimulationImportRequest request, CancellationToken ct)
+    {
+        var info = Inspect(
+            request.Path, request.MeasurementHiFreqHzOrDefault(), request.MeasurementLoFreqHz, ct);
+        var header = LtspiceRawFile.ReadHeader(request.Path);
+        var chosen = ResolveSweeps(info, request.SweepIndices);
+
+        if (chosen.Count < 2)
+        {
+            throw new ArgumentException(
+                $"A sweep needs more than one point, and this file holds {chosen.Count} run" +
+                $"{(chosen.Count == 1 ? "" : "s")}. A `.step` over the tone frequency is what makes a transient " +
+                "run into a sweep -- e.g. `.step param freq 1k 10k 1k` beside a `.tran`. Import it on an FFT " +
+                "analysis measurement instead to read it as a spectrum.");
+        }
+
+        var indices = new List<int> { header.TimeVariable!.Index, request.LeftTraceIndex };
+        if (request.RightTraceIndex is { } right && right != request.LeftTraceIndex)
+            indices.Add(right);
+
+        double[][] wholeColumns = LtspiceRawFile.ReadColumns(request.Path, header, indices, ct);
+        var traceNames = indices.Skip(1).Select(i => header.Variables[i].Name).ToList();
+        var traceUnits = indices.Skip(1).Select(i => header.Variables[i].Unit).ToList();
+
+        SimulationAnalysis? firstSpec = null;
+        var points = new List<ThdSweepPoint>();
+        double analysisRateHz = 0.0;
+        int fftSize = 0;
+
+        foreach (var sweep in chosen)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var (spec, rendered, samples) = AnalyseRun(request, info, header, indices, wholeColumns, sweep, ct);
+            firstSpec ??= spec;
+            analysisRateHz = rendered.AnalysisRateHz;
+            fftSize = spec.FftSize;
+
+            for (int channel = 0; channel < samples.Count; channel++)
+            {
+                var meters = rendered.Meters[channel];
+                if (meters is null)
+                {
+                    throw new FormatException(
+                        $"No tone was found in {StepName(sweep, chosen.Count)} of this run, so it cannot be a " +
+                        "sweep point. Check that the step actually drives the circuit, and that the analysed " +
+                        "band covers the tone.");
+                }
+
+                points.Add(SweepCaptureSupport.PointFromMeters(
+                    // The located fundamental is the point's own frequency as well as its reading:
+                    // a simulation has no "frequency that was asked for" to carry separately, since
+                    // the step's label is a parameter value rather than a tone.
+                    freqHz: meters.FundamentalFreqHz,
+                    channel: channel,
+                    meters: meters,
+                    // An AC-coupled simulated source has no generator level this side of the
+                    // schematic, so gain is relative to the fundamental itself -- i.e. 0 dB -- and
+                    // the chart's "input voltage" axis has nothing to show. Said once here rather
+                    // than invented per point.
+                    generatorAmpDbv: meters.FundamentalDbv,
+                    loadOhms: 0.0,
+                    noiseVrms: 0.0,
+                    previewFft: rendered.Previews[channel],
+                    previewScope: null));
+            }
+        }
+
+        var ordered = points.OrderBy(p => p.FreqHz).ToList();
+        var spec0 = firstSpec!;
+        string paramsJson = SweepParamsJson(spec0, ordered, traceNames, analysisRateHz, fftSize);
+
+        var captures = ordered
+            .GroupBy(p => p.FreqHz)
+            .OrderBy(g => g.Key)
+            .Select((group, index) => new SweepCaptureInput(
+                index,
+                group.Key,
+                MeasurementSaveService.BuildSweepMetrics(group),
+                MeasurementSaveService.BuildSweepPreviews(group)))
+            .ToList();
+
+        string name = string.IsNullOrWhiteSpace(request.Name)
+            ? $"{Path.GetFileNameWithoutExtension(request.Path)} - {traceNames[0]}"
+            : request.Name.Trim();
+
+        long resultId = await measurementRepository.SaveSweepResultAsync(
+            new SweepSaveRequest(
+                measurementTypeId, name, request.Notes, paramsJson,
+                DeviceName: null, Serial: null, FwVer: null, IsSimulated: true,
+                analysisRateHz, fftSize,
+                Channels: traceNames.Count,
+                InRangeDbv: null, OutRangeDbv: null,
+                Captures: captures,
+                Source: MeasurementSource.Simulation),
+            ct);
+
+        logger.LogInformation(
+            "Imported stepped simulation {Name} from {Path} as a sweep: {Traces}, {Points} points over " +
+            "{LowHz:F1}-{HighHz:F1} Hz, analysed at {AnalysisKHz:F1} kHz / {FftSize} points",
+            name, request.Path, string.Join(" + ", traceNames), captures.Count,
+            captures[0].FreqHz, captures[^1].FreqHz, analysisRateHz / 1e3, fftSize);
+
+        return resultId;
+    }
+
+    /// <summary>
+    /// A <c>ThdVsFrequency</c> settings document for an imported sweep. The run settings that exist
+    /// are filled from the analysis; the ones that describe a generator do not exist here and say
+    /// so, the same way the AC import writes <c>LevelMode: "NotApplicable"</c> rather than a
+    /// plausible-looking level.
+    /// </summary>
+    private string SweepParamsJson(
+        SimulationAnalysis spec,
+        IReadOnlyList<ThdSweepPoint> points,
+        IReadOnlyList<string> traceNames,
+        double analysisRateHz,
+        int fftSize)
+    {
+        double lowHz = points[0].FreqHz;
+        double highHz = points[^1].FreqHz;
+
+        // The grid the steps happened to land on, reported rather than prescribed: a `.step` is a
+        // parameter list, so its points need not be octave-spaced at all, and this is what they came
+        // out as. Zero when there is no span to measure one over.
+        double octaves = lowHz > 0.0 && highHz > lowHz ? Math.Log2(highHz / lowHz) : 0.0;
+        int stepsPerOctave = octaves > 0.0 ? (int)Math.Round((points.Count - 1) / octaves) : 0;
+
+        return JsonSerializer.Serialize(
+            new ThdVsFrequencyParameters(
+                StartFreqHz: lowHz,
+                EndFreqHz: highHz,
+                StepsPerOctave: Math.Max(stepsPerOctave, 1),
+                LevelMode: "NotApplicable",
+                LevelValue: 0.0,
+                LevelUnit: "",
+                LoadOhms: 0.0,
+                ProcessLeft: true,
+                ProcessRight: traceNames.Count > 1,
+                FftSize: fftSize,
+                Window: spec.Window,
+                AverageCount: 1,
+                SampleRateHz: analysisRateHz,
+                MeasureNoiseFloor: false)
+            {
+                Simulation = spec.ToParameters(analysisRateHz).Simulation,
+            },
+            SerializerOptions);
+    }
+
+    private static string StepName(SimulationSweep sweep, int count) =>
+        sweep.Label is { } label ? $"step {label}" : $"step {sweep.Index + 1} of {count}";
 
     /// <summary>
     /// Re-analyses a stored simulation from its own samples at new settings, rewriting its
@@ -424,6 +702,8 @@ public sealed class SimulationImportService(
 
         var spectra = new List<StoredSpectrumInput>();
         var metrics = new List<MeasurementMetric>();
+        var meters = new List<SpectrumMeters?>();
+        var previews = new List<SweepPreviewSeries?>();
         var record = new double[spec.FftSize];
 
         for (int channel = 0; channel < samples.Count; channel++)
@@ -445,9 +725,103 @@ public sealed class SimulationImportService(
 
             MeasurementSaveService.AppendChannelMetrics(
                 metrics, channel, analysis.Meters, analysis.Noise, analysis.BinSizeHz);
+
+            meters.Add(analysis.Meters);
+            previews.Add(BuildPreview(analysis.Dbv, analysis.BinSizeHz, spec.MeasurementLoFreqHz));
         }
 
-        return new RenderedSimulation(analysisRateHz, spectra, metrics);
+        return new RenderedSimulation(analysisRateHz, spectra, metrics, meters, previews);
+    }
+
+    /// <summary>
+    /// The small decimated spectrum a sweep point carries, in the same log-spaced min/max
+    /// convention the live pipeline's own preview uses.
+    ///
+    /// <para>Built from the finished dBV trace rather than from the power spectrum the pipeline
+    /// decimates, and that is exact rather than approximate: min and max commute with any
+    /// increasing function, and dBV is one of power. What it saves is keeping a second copy of the
+    /// power array alive purely to decimate it.</para>
+    /// </summary>
+    private static SweepPreviewSeries? BuildPreview(double[] dbv, double binSizeHz, double displayLoFreqHz)
+    {
+        if (dbv.Length < 3)
+            return null;
+
+        int loBin = Math.Clamp((int)Math.Round(displayLoFreqHz / binSizeHz), 1, dbv.Length - 2);
+        int hiBin = dbv.Length - 1;
+        int columnCount = Math.Clamp(hiBin - loBin + 1, 1, SpectrumPipeline.PreviewMaxColumns);
+
+        var values = dbv.AsSpan(0, hiBin + 1);
+        var columns = new MinMax[columnCount];
+        var centerBins = new double[columnCount];
+        SpectrumDecimator.DecimateLogWithCenters(values, columns, centerBins, loBin);
+
+        var freqHz = new float[columnCount];
+        var dbvMin = new float[columnCount];
+        var dbvMax = new float[columnCount];
+        for (int i = 0; i < columnCount; i++)
+        {
+            freqHz[i] = (float)(centerBins[i] * binSizeHz);
+            dbvMin[i] = (float)columns[i].Min;
+            dbvMax[i] = (float)columns[i].Max;
+        }
+
+        return new SweepPreviewSeries(freqHz, dbvMin, dbvMax);
+    }
+
+    /// <summary>
+    /// Slices one run out of the file's columns, puts it on a uniform grid and analyses it — the
+    /// work both import targets do per run, differing only in what they then store.
+    /// </summary>
+    private (SimulationAnalysis Spec, RenderedSimulation Rendered, List<double[]> Samples) AnalyseRun(
+        SimulationImportRequest request,
+        SimulationFileInfo info,
+        LtspiceRawHeader header,
+        IReadOnlyList<int> indices,
+        double[][] wholeColumns,
+        SimulationSweep sweep,
+        CancellationToken ct)
+    {
+        var columns = wholeColumns
+            .Select(c => c.AsSpan(sweep.FirstPoint, sweep.PointCount).ToArray())
+            .ToArray();
+        double[] time = columns[0];
+        var runInfo = info with
+        {
+            PointCount = sweep.PointCount,
+            StartTimeS = sweep.StartTimeS,
+            EndTimeS = sweep.EndTimeS,
+            DurationS = sweep.DurationS,
+        };
+
+        double startTimeS = Math.Clamp(request.StartTimeS, runInfo.StartTimeS, runInfo.EndTimeS);
+        double usableS = runInfo.EndTimeS - startTimeS;
+        int nativeCount = Resampler.SampleCount(usableS, runInfo.NativeRateHz);
+        if (nativeCount < 2)
+        {
+            throw new ArgumentException(
+                $"Analysing from {startTimeS * 1e3:F3} ms leaves nothing of a run that ends at " +
+                $"{runInfo.EndTimeS * 1e3:F3} ms.", nameof(request));
+        }
+
+        var samples = new List<double[]>();
+        var removedDcV = new List<double>();
+        for (int c = 1; c < columns.Length; c++)
+        {
+            var uniform = new double[nativeCount];
+            Resampler.ToUniform(time, columns[c], startTimeS, runInfo.NativeRateHz, uniform);
+            removedDcV.Add(PcmCodec.RemoveMeanInPlace(uniform));
+            PcmCodec.QuantizeInPlace(uniform);
+            samples.Add(uniform);
+        }
+
+        var traceNames = indices.Skip(1).Select(i => header.Variables[i].Name).ToList();
+        var traceUnits = indices.Skip(1).Select(i => header.Variables[i].Unit).ToList();
+
+        var spec = SimulationAnalysis.Describe(
+            runInfo, request, startTimeS, usableS, traceNames, traceUnits, removedDcV, sweep);
+
+        return (spec, Render(samples, runInfo.NativeRateHz, spec, ct), samples);
     }
 
     private static void RequireTransient(LtspiceRawHeader header, string path)
@@ -481,10 +855,21 @@ public sealed class SimulationImportService(
             throw new FormatException($"{name} has no time variable, so it is not a waveform.");
     }
 
+    /// <param name="Meters">
+    /// Per channel, in channel order, or null for a channel whose record held no fundamental. The
+    /// spectrum import does not read these — its figures go out as metric rows — but the sweep
+    /// import is built entirely from them.
+    /// </param>
+    /// <param name="Previews">
+    /// Per channel, the small decimated spectrum a sweep point carries. Built here because this is
+    /// where the full-resolution trace exists; null for a channel with no record.
+    /// </param>
     private sealed record RenderedSimulation(
         double AnalysisRateHz,
         IReadOnlyList<StoredSpectrumInput> Spectra,
-        IReadOnlyList<MeasurementMetric> Metrics);
+        IReadOnlyList<MeasurementMetric> Metrics,
+        IReadOnlyList<SpectrumMeters?> Meters,
+        IReadOnlyList<SweepPreviewSeries?> Previews);
 }
 
 /// <summary>What to change about a stored simulation's analysis. Anything left null stays as it was.</summary>

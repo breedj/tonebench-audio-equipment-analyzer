@@ -6,11 +6,22 @@ import {
   SIMULATION_FFT_SIZES,
   SIMULATION_WINDOWS,
 } from '../measurements/simulationAnalysis'
+import { sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 
-const props = defineProps<{ open: boolean; measurementTypeId: number | null }>()
-const emit = defineEmits<{ close: []; imported: [resultId: number] }>()
+/**
+ * `sweepTarget` is set when the open measurement is a THD-vs-frequency one, where a `.step`ped run
+ * becomes a single sweep rather than a result per step. Passed in rather than worked out here,
+ * because which dialog opens is already decided from the kind in App.vue and two places deciding
+ * it is one too many.
+ */
+const props = defineProps<{
+  open: boolean
+  measurementTypeId: number | null
+  sweepTarget?: boolean
+}>()
+const emit = defineEmits<{ close: []; imported: [resultIds: number[]] }>()
 
 // The manual page is the long form of the help block below -- the directives and what each does to
 // the spectrum, the resolution arithmetic, what is refused and why. Its own <dialog> opens into the
@@ -68,6 +79,7 @@ async function inspect(path: string) {
     lastPath.value = path
     const found = await api.inspectSimulation(path, form.measurementHiFreqHz, form.measurementLoFreqHz)
     info.value = found
+    chosenSweeps.value = found.sweeps.map((sw) => sw.index)
 
     // Default to something output-shaped if the circuit names one, then to the first voltage.
     // A current trace is a legitimate thing to look at but it is in amps, and a dBV chart is not
@@ -123,6 +135,27 @@ const fit = computed(() =>
   }),
 )
 
+/**
+ * Which runs of a `.step`ped file to import. Every one by default: on an FFT measurement they
+ * become a result each, and on a THD-vs-frequency one they become the points of a sweep, where
+ * leaving some out simply shortens the curve.
+ */
+const chosenSweeps = ref<number[]>([])
+
+const sweeps = computed(() => info.value?.sweeps ?? [])
+const isStepped = computed(() => sweeps.value.length > 1)
+
+function toggleSweep(index: number, on: boolean) {
+  chosenSweeps.value = on
+    ? [...chosenSweeps.value, index].sort((a, b) => a - b)
+    : chosenSweeps.value.filter((i) => i !== index)
+}
+
+/** A sweep needs points: one run makes a one-point chart, which the server refuses outright. */
+const tooFewForASweep = computed(
+  () => props.sweepTarget === true && chosenSweeps.value.length < 2,
+)
+
 const canImport = computed(
   () =>
     props.measurementTypeId !== null &&
@@ -130,6 +163,8 @@ const canImport = computed(
     form.leftTraceIndex !== null &&
     fit.value.usableS > 0 &&
     !fit.value.fftTooLarge &&
+    (!isStepped.value || chosenSweeps.value.length > 0) &&
+    !tooFewForASweep.value &&
     !busy.value,
 )
 
@@ -148,7 +183,7 @@ async function submit() {
   busy.value = true
   error.value = null
   try {
-    const result = await api.importSimulation(props.measurementTypeId, {
+    const body = {
       path: info.value.path,
       leftTraceIndex: form.leftTraceIndex!,
       rightTraceIndex: form.rightTraceIndex,
@@ -161,8 +196,12 @@ async function submit() {
       name: form.name.trim() || null,
       notes: form.notes.trim() || null,
       periodicRecord: form.periodicRecord,
-    })
-    emit('imported', result.resultId)
+      ...(isStepped.value ? { sweepIndices: chosenSweeps.value } : {}),
+    }
+    const resultIds = props.sweepTarget
+      ? [(await api.importSimulationSweep(props.measurementTypeId, body)).resultId]
+      : (await api.importSimulation(props.measurementTypeId, body)).resultIds
+    emit('imported', resultIds)
     emit('close')
   } catch (e) {
     error.value = (e as Error).message
@@ -210,8 +249,45 @@ async function submit() {
             <div><dt class="inline text-neutral-500">Timestep</dt> <dd class="inline">{{ fmtStep(info.medianStepS) }} median, {{ fmtStep(info.maxStepS) }} worst</dd></div>
             <div><dt class="inline text-neutral-500">Simulator rate</dt> <dd class="inline">{{ fmtRate(info.nativeRateHz) }}</dd></div>
             <div><dt class="inline text-neutral-500">Traces</dt> <dd class="inline">{{ info.traces.length }}</dd></div>
+            <div v-if="isStepped">
+              <dt class="inline text-neutral-500">Runs</dt>
+              <dd class="inline">{{ sweeps.length }} (stepped)</dd>
+            </div>
           </dl>
         </div>
+
+        <!--
+          A stepped run's steps. What they become depends on the measurement this was opened from,
+          which is the whole reason the same file can be imported two ways: on an FFT measurement
+          each is a spectrum of its own, on a THD-vs-frequency one they are the points of a curve.
+        -->
+        <fieldset v-if="isStepped" class="mb-3 rounded border border-neutral-200 p-2 dark:border-neutral-700">
+          <legend class="px-1 text-xs text-neutral-500 dark:text-neutral-400">
+            {{ sweepTarget ? 'Runs to use as points' : 'Runs to import' }}
+          </legend>
+          <div class="flex flex-wrap gap-x-4 gap-y-1">
+            <label v-for="sweep in sweeps" :key="sweep.index" class="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                :checked="chosenSweeps.includes(sweep.index)"
+                @change="toggleSweep(sweep.index, ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="font-mono text-xs">{{ sweepLabel(sweep) }}</span>
+            </label>
+          </div>
+          <p class="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+            <template v-if="sweepTarget">
+              Each becomes one point of a single sweep, at the fundamental its own analysis finds —
+              so the step does not have to say what frequency it was.
+            </template>
+            <template v-else>
+              Each is stored as its own result, named after the step.
+            </template>
+          </p>
+          <p v-if="tooFewForASweep" class="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
+            A sweep needs at least two points.
+          </p>
+        </fieldset>
 
         <p
           v-for="warning in info.warnings"

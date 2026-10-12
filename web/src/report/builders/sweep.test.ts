@@ -240,3 +240,67 @@ describe('sweepSections', () => {
     expect(sections[1].cells![0][sections[1].headers!.indexOf('Power')]).toBe('1.25 mW (4 Ω)')
   })
 })
+
+describe('sweepSettingsRows for an imported sweep', () => {
+  /**
+   * A simulated sweep has no generator, no load, no averaging and no noise pass, so the bench rows
+   * would describe a run that never happened. The simulation arm is tried first and replaces them.
+   */
+  it('describes the stepped run instead of the bench settings it never had', () => {
+    const params = JSON.stringify({
+      startFreqHz: 1000,
+      endFreqHz: 3000,
+      stepsPerOctave: 1,
+      levelMode: 'NotApplicable',
+      levelValue: 0,
+      levelUnit: '',
+      loadOhms: 0,
+      fftSize: 4096,
+      window: 'Hann',
+      averageCount: 1,
+      sampleRateHz: 500000,
+      simulation: {
+        source: { path: 'C:/amp/stepped-tran.raw', leftTrace: 'V(out)', sweepCount: 3 },
+        startTimeS: 0.015,
+      },
+    })
+
+    const rows = sweepSettingsRows('ThdVsFrequency', params)
+    const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.value]))
+
+    expect(byLabel['Source']).toBe('Simulated (stepped .tran run)')
+    expect(byLabel['File']).toBe('C:/amp/stepped-tran.raw')
+    expect(byLabel['Trace']).toBe('V(out)')
+    expect(byLabel['Steps']).toBe('3 runs, one point each')
+    // toLocaleString, so the thousands separator is the machine's -- "4,096" here, "4.096" on a
+    // Dutch one. The report is the user's document and follows their locale like the rest of the
+    // app, which is why this compares against the same call rather than a literal.
+    expect(byLabel['FFT size']).toBe((4096).toLocaleString())
+    expect(byLabel['Each run analysed from']).toBe('15.000 ms')
+
+    // And none of the bench rows, which is the point.
+    expect(byLabel['Drive level']).toBeUndefined()
+    expect(byLabel['Load']).toBeUndefined()
+    expect(byLabel['Averages']).toBeUndefined()
+  })
+
+  it('leaves a measured sweep alone', () => {
+    const params = JSON.stringify({
+      startFreqHz: 20,
+      endFreqHz: 20000,
+      stepsPerOctave: 3,
+      levelMode: 'OutputVoltage',
+      levelValue: 1,
+      levelUnit: 'V',
+      loadOhms: 8,
+      fftSize: 8192,
+      window: 'Hann',
+      averageCount: 2,
+      sampleRateHz: 192000,
+    })
+
+    const rows = sweepSettingsRows('ThdVsFrequency', params)
+    expect(rows.find((r) => r.label === 'Source')).toBeUndefined()
+    expect(rows.length).toBeGreaterThan(3)
+  })
+})

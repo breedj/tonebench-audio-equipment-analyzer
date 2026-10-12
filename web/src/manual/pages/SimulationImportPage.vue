@@ -575,10 +575,57 @@
       </tbody>
     </table>
 
+    <h3>A stepped transient is read two ways</h3>
+
     <p>
-      A stepped <strong>transient</strong> run is still refused. The same splitting would work, but
-      what a stepped <code>.tran</code> is usually for — a tone stepped across the band — is a THD
-      sweep rather than a stack of spectra, and that is a different measurement to land it on.
+      <code>.step param freq 1k 10k 1k</code> beside a <code>.tran</code> runs the whole transient
+      once per tone. What that <em>is</em> depends on what you want from it, so the measurement you
+      import it on decides:
+    </p>
+
+    <table class="manual-wrap">
+      <thead>
+        <tr>
+          <th>Import it on</th>
+          <th>What you get</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>THD vs frequency</strong></td>
+          <td>
+            <strong>One sweep</strong>, each run a point. This is usually the one you want: a tone
+            stepped across the band is a distortion-against-frequency curve written in another form,
+            and reading it as a stack of spectra leaves you comparing eight charts by eye.
+            <strong>Each point sits at the fundamental its own run's analysis located</strong>, so
+            the step does not have to say what frequency it was — which is also why a QSpice run,
+            which records its steps nowhere on disk, works exactly as well.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>FFT analysis</strong></td>
+          <td>
+            <strong>One result per run</strong>, each a full spectrum you can overlay, re-analyse at
+            a different window or FFT size, and report on individually — everything a single
+            imported transient gives you, once per step.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The sweep keeps each point's spectrum as a preview, so clicking a point on the chart shows
+      what it was measured from, exactly as a measured sweep does. What it cannot do is be
+      re-analysed: a sweep stores its points as figures rather than samples, so there is nothing to
+      recompute from — re-import if you want a different window or a different start time. The
+      <strong>Re-analyse</strong> button is hidden there for that reason.
+    </p>
+
+    <p>
+      Everything the sweep cannot know, it leaves out rather than inventing. There is no generator
+      on this side of the schematic, so there is no drive level and no input-voltage axis; no load,
+      so no power; no averaging and no noise pass. The settings a report prints say what produced
+      the curve instead.
     </p>
 
     <h2>What is refused, and why</h2>

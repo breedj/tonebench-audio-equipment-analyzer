@@ -54,7 +54,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var detail = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!;
             double thd = detail.MetricsByChannel[0]["thd_percent"];
@@ -78,8 +78,8 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long plain = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
-            long shifted = await h.Import.ImportAsync(
+            long plain = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
+            long shifted = await ImportOneAsync(h.Import, 
                 typeId, Request(raw, levelOffsetDb: -20.0, name: "shifted"), CancellationToken.None);
 
             var a = (await h.Measurements.GetResultAsync(plain, CancellationToken.None))!.MetricsByChannel[0];
@@ -113,7 +113,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var detail = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!;
             var m = detail.MetricsByChannel[0];
@@ -141,7 +141,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(
+            long resultId = await ImportOneAsync(h.Import, 
                 typeId, Request(raw, rightTraceIndex: 2), CancellationToken.None);
 
             var detail = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!;
@@ -172,7 +172,7 @@ public class SimulationImportServiceTests : IDisposable
             Assert.Equal(["V(out)"], info.Traces.Select(t => t.Name));
 
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var detail = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!;
             Assert.Equal(1.0, detail.MetricsByChannel[0]["thd_percent"], 0.01);
@@ -229,23 +229,176 @@ public class SimulationImportServiceTests : IDisposable
         });
     }
 
+    // ---- stepped runs ----
+
     /// <summary>
-    /// A stepped run is named as one even when it is <i>also</i> too coarsely sampled, which a
-    /// `.step` over a long `.tran` very often is. Both refusals apply and only one of them is the
-    /// user's actual problem: the coarse-step message talks about `plotwinsize` and a maximum
-    /// timestep, neither of which has anything to do with several sweeps in one file. The order of
-    /// the two checks is the whole of the fix, so this test is about the order and nothing else.
+    /// A `.step`ped transient holds one run per step with the time axis restarting at each, and the
+    /// runs need not be the same length — measured, 5353 / 5682 / 5964 points from one
+    /// `.step param freq 1k 3k 1k`. The header's own `stepped` flag is what says it is one.
     /// </summary>
     [Fact]
-    public void Inspect_OfASteppedRunThatIsAlsoCoarse_SaysItIsSteppedRatherThanCoarse()
+    public void Inspect_OfASteppedTransient_ListsEveryRun()
+    {
+        string raw = WriteSteppedTransient("stepped-tones.raw", [1_000.0, 2_000.0, 3_000.0], h2: 0.01);
+
+        WithService(service =>
+        {
+            var info = service.Inspect(raw);
+
+            Assert.Equal(3, info.Sweeps.Count);
+            Assert.All(info.Sweeps, sw => Assert.Equal(30_000, sw.PointCount));
+            Assert.Equal([0, 30_000, 60_000], info.Sweeps.Select(sw => sw.FirstPoint));
+
+            // The file's own figures describe the first run, not the concatenation -- a duration of
+            // three runs would read as three times the resolution this measurement actually has.
+            Assert.Equal(30_000, info.PointCount);
+            // The last sample of 30 000 at 1 us sits at 29.999 ms, not 30 -- the run is one step
+            // shorter than its point count suggests, which is what DurationS has to mean.
+            Assert.Equal(0.029999, info.EndTimeS, 1e-9);
+            Assert.Contains(info.Warnings, w => w.Contains("3 runs", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// On an FFT measurement each run becomes a spectrum of its own, and each one measures its own
+    /// tone — which is the thing that proves the runs were cut apart rather than analysed as one
+    /// long record with three tones in it.
+    /// </summary>
+    [Fact]
+    public async Task Import_OfASteppedTransient_MakesOneResultPerRun()
+    {
+        string raw = WriteSteppedTransient("stepped-each.raw", [1_000.0, 2_000.0, 3_000.0], h2: 0.01);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateFftTypeAsync();
+            var ids = await h.Import.ImportAsync(typeId, Request(raw, name: "amp"), CancellationToken.None);
+
+            Assert.Equal(3, ids.Count);
+
+            var measured = new List<double>();
+            foreach (long id in ids)
+            {
+                var detail = (await h.Measurements.GetResultAsync(id, CancellationToken.None))!;
+                measured.Add(detail.MetricsByChannel[0]["fundamental_hz"]);
+                Assert.Equal(1.0, detail.MetricsByChannel[0]["thd_percent"], 0.02);
+            }
+
+            Assert.Equal([1_000.0, 2_000.0, 3_000.0], measured.Select(f => Math.Round(f / 100.0) * 100.0));
+        });
+    }
+
+    /// <summary>
+    /// The one this exists for: a tone stepped across the band <i>is</i> a THD-vs-frequency
+    /// measurement written in another form, so it becomes one sweep result rather than a stack of
+    /// spectra to compare by eye.
+    ///
+    /// <para>Each point's x is the fundamental the analysis located, which is why no `.log` is
+    /// needed and why a QSpice run (which writes none) works identically. 1 % of second harmonic
+    /// reads 1.000 % THD at every point — the same golden figure the single-run import is held to,
+    /// now asserted through the sweep's own stored shape.</para>
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_OfASteppedTransient_IsOnePointPerRunAtItsOwnTone()
+    {
+        string raw = WriteSteppedTransient("sweep.raw", [1_000.0, 2_000.0, 4_000.0], h2: 0.01);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            long resultId = await h.Import.ImportSweepAsync(
+                typeId, Request(raw, name: "simulated sweep"), CancellationToken.None);
+
+            var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
+
+            Assert.Equal(3, points.Count);
+            Assert.Equal([0, 1, 2], points.Select(p => p.SeqIndex));
+            Assert.Equal(
+                [1_000.0, 2_000.0, 4_000.0],
+                points.Select(p => Math.Round(p.FreqHz / 100.0) * 100.0));
+
+            foreach (var point in points)
+            {
+                var metrics = point.MetricsByChannel[0];
+                Assert.Equal(1.0, metrics["thd_percent"], 0.02);
+                Assert.Equal(100.0 * 0.01, metrics["h2_percent"], 0.02);
+                Assert.Equal(point.FreqHz, metrics["fundamental_hz"], point.FreqHz * 1e-3);
+
+                // A simulation has no generator, so the gain is 0 dB rather than a figure derived
+                // from a level that does not exist.
+                Assert.Equal(0.0, metrics["gain_db"], 1e-9);
+            }
+
+            // The points carry their own spectra, so clicking one on the sweep chart shows what it
+            // was measured from -- the same capture_preview rows a measured sweep writes.
+            Assert.NotNull(points[0].PreviewsByChannel);
+            Assert.True(points[0].PreviewsByChannel![0].ContainsKey("fft"));
+        });
+    }
+
+    /// <summary>
+    /// A sweep needs points. An unstepped file has one run, and the message says what would make it
+    /// a sweep rather than leaving the user with a one-point chart.
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_OfAFileWithOneRun_IsRefusedAndSaysWhatWouldMakeItASweep()
+    {
+        string raw = WriteTransient("single.raw", Tone(h2: 0.01));
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            var ex = await Assert.ThrowsAsync<ArgumentException>(
+                () => h.Import.ImportSweepAsync(typeId, Request(raw), CancellationToken.None));
+
+            Assert.Contains(".step", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("FFT analysis measurement", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// A time axis that restarts in a file that does not claim to be stepped is a damaged or
+    /// rewritten file, and the flag is what tells the two apart. Both simulators write it.
+    /// </summary>
+    [Fact]
+    public void Inspect_OfAnAxisThatRestartsWithoutTheSteppedFlag_IsRefused()
+    {
+        double[] tone = Tone(h2: 0.0, points: 2_000);
+        var time = new double[4_000];
+        for (int n = 0; n < 4_000; n++)
+            time[n] = (n % 2_000) / NativeRateHz;
+
+        // Explicitly *not* flagged, which is the whole case: a restarting axis in a file that does
+        // not say it holds several runs.
+        string raw = WriteTransient("not-stepped.raw", [.. tone, .. tone], timeAxis: time, stepped: false);
+
+        WithService(service =>
+        {
+            var ex = Assert.Throws<FormatException>(() => service.Inspect(raw));
+            Assert.Contains("stepped` flag", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// A stepped run that is <i>also</i> too coarsely sampled is refused for the coarseness, which
+    /// is now the only thing wrong with it — being stepped is no longer a refusal at all.
+    ///
+    /// <para>This test used to assert the opposite, and the change of answer is the feature: when a
+    /// `.step`ped file could not be read, both refusals applied and the ordering decided which one
+    /// the user saw. What survives of that concern is the <i>unflagged</i> restart, which is still
+    /// checked before the timestep — see
+    /// <see cref="Inspect_OfAnAxisThatRestartsWithoutTheSteppedFlag_IsRefused"/>.</para>
+    /// </summary>
+    [Fact]
+    public void Inspect_OfASteppedRunThatIsAlsoCoarse_IsRefusedForTheCoarseness()
     {
         string raw = WriteTransient("stepped-coarse.raw", Tone(h2: 0.0), compressed: true, stepped: true);
 
         WithService(service =>
         {
             var ex = Assert.Throws<FormatException>(() => service.Inspect(raw));
-            Assert.Contains(".step", ex.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("plotwinsize", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("too coarsely sampled", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("plotwinsize", ex.Message, StringComparison.OrdinalIgnoreCase);
         });
     }
 
@@ -340,7 +493,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var detail = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!;
             Assert.Equal(1.0, detail.MetricsByChannel[0]["thd_percent"], 0.01);
@@ -363,7 +516,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(
+            long resultId = await ImportOneAsync(h.Import, 
                 typeId, Request(raw, levelOffsetDb: -6.0), CancellationToken.None);
 
             var before = await ReadSpectrumAsync(h, resultId);
@@ -385,7 +538,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var before = await ReadSpectrumAsync(h, resultId);
             await h.Import.ReanalyzeAsync(
@@ -413,7 +566,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
             long captureId = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!.CaptureId;
 
             var before = await h.Measurements.GetCapturePcmAsync(captureId, CancellationToken.None);
@@ -459,7 +612,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var imported = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!;
             Assert.Equal(FundamentalHz, imported.MetricsByChannel[0]["fundamental_hz"], 25.0);
@@ -485,7 +638,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(
+            long resultId = await ImportOneAsync(h.Import, 
                 typeId, Request(raw, startTimeS: 0.020), CancellationToken.None);
 
             var refused = await Assert.ThrowsAsync<ArgumentException>(() => h.Import.ReanalyzeAsync(
@@ -508,7 +661,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(
+            long resultId = await ImportOneAsync(h.Import, 
                 typeId, Request(raw, startTimeS: 0.020), CancellationToken.None);
 
             Assert.True(await h.Import.ReanalyzeAsync(
@@ -530,7 +683,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             await h.Import.ReanalyzeAsync(
                 resultId, new SimulationReanalyzeRequest(StartTimeS: 0.050), CancellationToken.None);
@@ -562,7 +715,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var refused = await Assert.ThrowsAsync<ArgumentException>(() => h.Import.ReanalyzeAsync(
                 resultId, new SimulationReanalyzeRequest(FftSize: 1 << 20), CancellationToken.None));
@@ -587,7 +740,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var items = await h.Measurements.ListResultsAsync(
                 new MeasurementFilter(MeasurementTypeId: typeId), CancellationToken.None);
@@ -617,7 +770,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw), CancellationToken.None);
 
             var summary = Assert.Single(await h.Measurements.ListResultsAsync(
                 new MeasurementFilter(MeasurementTypeId: typeId), CancellationToken.None));
@@ -659,7 +812,7 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateFftTypeAsync();
-            long resultId = await h.Import.ImportAsync(typeId, Request(raw, name: null), CancellationToken.None);
+            long resultId = await ImportOneAsync(h.Import, typeId, Request(raw, name: null), CancellationToken.None);
 
             var detail = (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!;
             Assert.Equal("EL84 PP - V(out)", detail.Name);
@@ -722,6 +875,29 @@ public class SimulationImportServiceTests : IDisposable
         return x;
     }
 
+    /// <summary>
+    /// A <c>.step</c>ped transient: one run per tone, written end to end with the time axis
+    /// restarting at each — which is what both simulators do, measured. Every run carries the same
+    /// 1 % second harmonic, so each becomes a sweep point whose THD is known in advance.
+    /// </summary>
+    private string WriteSteppedTransient(string name, double[] toneHz, double h2, int pointsPerRun = 30_000)
+    {
+        var time = new List<double>(toneHz.Length * pointsPerRun);
+        var signal = new List<double>(toneHz.Length * pointsPerRun);
+
+        foreach (double f in toneHz)
+        {
+            for (int n = 0; n < pointsPerRun; n++)
+            {
+                double t = n / NativeRateHz;
+                time.Add(t);
+                signal.Add(Math.Sin(2 * Math.PI * f * t) + (h2 * Math.Sin(2 * Math.PI * 2 * f * t)));
+            }
+        }
+
+        return WriteTransient(name, [.. signal], timeAxis: [.. time], stepped: true);
+    }
+
     private static double[] Tone(double h2, int points = Points)
     {
         var x = new double[points];
@@ -752,6 +928,15 @@ public class SimulationImportServiceTests : IDisposable
     /// Writes a transient <c>.raw</c> in the layout measured off real LTspice output: a UTF-16LE
     /// header, then f64 time plus f64 values interleaved (the <c>double</c> flag).
     /// </summary>
+    /// <summary>
+    /// The single result an ordinary file produces — and <see cref="Assert.Single{T}(IEnumerable{T})"/>
+    /// is doing a second job: every fixture here holds one run, so a file that unexpectedly split
+    /// into several fails here rather than quietly having its first run asserted.
+    /// </summary>
+    private static async Task<long> ImportOneAsync(
+        SimulationImportService import, long typeId, SimulationImportRequest request, CancellationToken ct) =>
+        Assert.Single(await import.ImportAsync(typeId, request, ct));
+
     private string WriteTransient(
         string name,
         double[] left,
@@ -760,12 +945,22 @@ public class SimulationImportServiceTests : IDisposable
         bool compressed = false,
         bool withCurrent = false,
         bool qspice = false,
-        bool stepped = false)
+        bool stepped = false,
+        double[]? timeAxis = null)
     {
         var columns = new List<(string Name, string Type, double[] Values)>();
         double[] time;
 
-        if (compressed)
+        if (timeAxis is not null)
+        {
+            // A caller that built its own axis: a stepped run whose steps are *different* tones,
+            // where the shape of the file is the point rather than the shape of one run. Whether
+            // the header carries the `stepped` flag stays the caller's to say, because a restarting
+            // axis without it is its own case and has its own refusal.
+            time = timeAxis;
+            columns.Add(("V(out)", "voltage", left));
+        }
+        else if (compressed)
         {
             // The same 95 ms, but with the step distribution a compressed run has: mostly coarse,
             // with the worst gap far too wide to carry the audio band.
@@ -791,7 +986,9 @@ public class SimulationImportServiceTests : IDisposable
             columns.Add(("V(out)", "voltage", left));
         }
 
-        if (stepped)
+        // Only for the "same run twice" shorthand; a caller that supplied its own axis has already
+        // built whatever shape it wanted.
+        if (stepped && timeAxis is null)
         {
             // What a `.step`ped run writes: the same sweep twice, end to end, so the time axis
             // restarts at the seam. Only the abscissa matters to the checks this exercises.
@@ -812,9 +1009,12 @@ public class SimulationImportServiceTests : IDisposable
         header.Append(CultureInfo.InvariantCulture, $"Title: * {name}\n");
         header.Append("Date: Sun Oct 11 11:34:26 2026\n");
         header.Append(CultureInfo.InvariantCulture, $"Plotname: {plotname}\n");
+        // A stepped fixture has to carry the flag both simulators write, or it exercises the
+        // "restarts but does not say it is stepped" refusal instead of the thing under test.
+        string steppedFlag = stepped ? " stepped" : "";
         header.Append(qspice
-            ? "Flags: real\n"
-            : $"Flags: real double forward{(compressed ? "" : " nocompression")}\n");
+            ? $"Flags: real{steppedFlag}\n"
+            : $"Flags: real double forward{(compressed ? "" : " nocompression")}{steppedFlag}\n");
         header.Append(CultureInfo.InvariantCulture, $"No. Variables: {variables}\n");
         header.Append(CultureInfo.InvariantCulture, $"No. Points: {points,12}\n");
         header.Append("Offset:   0.0000000000000000e+00\n");
@@ -867,6 +1067,13 @@ public class SimulationImportServiceTests : IDisposable
             _projectId ??= await Projects.CreateProjectAsync("sim", null, CancellationToken.None);
             return await Projects.CreateTypeAsync(
                 _projectId.Value, "FFTSpectrum", "fft", null, "{}", CancellationToken.None);
+        }
+
+        public async Task<long> CreateSweepTypeAsync()
+        {
+            _projectId ??= await Projects.CreateProjectAsync("sim", null, CancellationToken.None);
+            return await Projects.CreateTypeAsync(
+                _projectId.Value, "ThdVsFrequency", "sweep", null, "{}", CancellationToken.None);
         }
     }
 

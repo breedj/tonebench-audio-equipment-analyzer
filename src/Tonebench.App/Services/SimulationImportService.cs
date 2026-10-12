@@ -456,6 +456,7 @@ public sealed class SimulationImportService(
 
         SimulationAnalysis? firstSpec = null;
         var points = new List<ThdSweepPoint>();
+        var runs = new List<List<ThdSweepPoint>>(chosen.Count);
         double analysisRateHz = 0.0;
         int fftSize = 0;
 
@@ -476,18 +477,13 @@ public sealed class SimulationImportService(
                 fftSize = spec.FftSize;
             }
 
+            var runPoints = new List<ThdSweepPoint>(samples.Count);
             for (int channel = 0; channel < samples.Count; channel++)
             {
                 var meters = rendered.Meters[channel];
-                if (meters is null)
-                {
-                    throw new FormatException(
-                        $"No tone was found in {StepName(sweep, chosen.Count)} of this run, so it cannot be a " +
-                        "sweep point. Check that the step actually drives the circuit, and that the analysed " +
-                        "band covers the tone.");
-                }
+                RequireLocatedTone(meters, sweep, chosen.Count, request, channel);
 
-                points.Add(SweepCaptureSupport.PointFromMeters(
+                runPoints.Add(SweepCaptureSupport.PointFromMeters(
                     // The located fundamental is the point's own frequency as well as its reading:
                     // a simulation has no "frequency that was asked for" to carry separately, since
                     // the step's label is a parameter value rather than a tone.
@@ -504,20 +500,29 @@ public sealed class SimulationImportService(
                     previewFft: rendered.Previews[channel],
                     previewScope: null));
             }
+
+            runs.Add(runPoints);
+            points.AddRange(runPoints);
         }
 
-        var ordered = points.OrderBy(p => p.FreqHz).ToList();
+        RequireDistinctTones(runs, chosen);
+
+        // One capture per *run*, not per measured frequency. A run is a sweep point by
+        // construction, where the frequency is a reading -- and two runs can read the same one,
+        // which grouping by it turns into a capture holding two points per channel and a
+        // "UNIQUE constraint failed: capture_preview" long after the import. Reported 2026-10-12 as
+        // a 500 naming two 'fft' previews at 250 Hz, from a run whose tone sat below the
+        // fundamental search floor and locked onto the next run's frequency.
+        var ordered = runs.OrderBy(run => run[0].FreqHz).ToList();
         var spec0 = firstSpec!;
-        string paramsJson = SweepParamsJson(spec0, ordered, traceNames, analysisRateHz, fftSize);
+        string paramsJson = SweepParamsJson(spec0, points.OrderBy(p => p.FreqHz).ToList(), traceNames, analysisRateHz, fftSize);
 
         var captures = ordered
-            .GroupBy(p => p.FreqHz)
-            .OrderBy(g => g.Key)
-            .Select((group, index) => new SweepCaptureInput(
+            .Select((run, index) => new SweepCaptureInput(
                 index,
-                group.Key,
-                MeasurementSaveService.BuildSweepMetrics(group),
-                MeasurementSaveService.BuildSweepPreviews(group)))
+                run[0].FreqHz,
+                MeasurementSaveService.BuildSweepMetrics(run),
+                MeasurementSaveService.BuildSweepPreviews(run)))
             .ToList();
 
         string name = string.IsNullOrWhiteSpace(request.Name)
@@ -586,6 +591,57 @@ public sealed class SimulationImportService(
                 Simulation = spec.ToParameters(analysisRateHz).Simulation,
             },
             SerializerOptions);
+    }
+
+    /// <summary>
+    /// Refuses a run whose tone the analysis could not find, rather than storing what it found
+    /// instead.
+    ///
+    /// <para><b>A negative SNR is the whole test</b>, and it is exact rather than a heuristic: SNR
+    /// here is the located fundamental against everything else in the band, so at or below 0 dB the
+    /// thing being called the fundamental is quieter than the rest of the record — which no tone
+    /// is. Measured on the case that prompted this: a 50 Hz step analysed with a 200 Hz search
+    /// floor read <c>-86.07 dBV, SNR -95.4 dB</c> at 250 Hz, against <c>9.36 dBV, SNR +57 dB</c>
+    /// for the steps that were found.</para>
+    /// </summary>
+    private static void RequireLocatedTone(
+        SpectrumMeters? meters, SimulationSweep sweep, int runCount, SimulationImportRequest request, int channel)
+    {
+        if (meters is { SnrDb: > 0.0f })
+            return;
+
+        string where = $"{StepName(sweep, runCount)}{(channel == 0 ? "" : " (right trace)")}";
+        throw new FormatException(
+            $"No tone was found in {where}: either that run produced nothing, or the loudest thing in the " +
+            "analysed band is quieter than the rest of it, which no tone is. The band is " +
+            $"{request.MeasurementLoFreqHz:G4}-{request.MeasurementHiFreqHzOrDefault():G4} Hz, and a tone " +
+            "outside it cannot be measured -- widen the band, or untick that run and import the rest.");
+    }
+
+    /// <summary>
+    /// Refuses a set of runs that do not sweep anything, which is what a <c>.step</c> over something
+    /// other than the tone produces: N runs of the same frequency, i.e. N points stacked on one x.
+    /// Those are a perfectly good set of spectra, so the message says where to take them.
+    /// </summary>
+    private static void RequireDistinctTones(
+        IReadOnlyList<List<ThdSweepPoint>> runs, IReadOnlyList<SimulationSweep> sweeps)
+    {
+        for (int i = 1; i < runs.Count; i++)
+        {
+            for (int j = 0; j < i; j++)
+            {
+                // A bin apart at most: two runs that land on the same frequency to this precision
+                // are the same point, whatever the arithmetic says about the last digit.
+                if (Math.Abs(runs[i][0].FreqHz - runs[j][0].FreqHz) > runs[i][0].FreqHz * 1e-6)
+                    continue;
+
+                throw new FormatException(
+                    $"{StepName(sweeps[j], runs.Count)} and {StepName(sweeps[i], runs.Count)} both measure " +
+                    $"{runs[i][0].FreqHz:G6} Hz, so there is no sweep here -- a point per frequency is what makes " +
+                    "one. If the step changes something other than the tone, import this on an FFT analysis " +
+                    "measurement instead, where each run becomes its own spectrum.");
+            }
+        }
     }
 
     private static string StepName(SimulationSweep sweep, int count) =>

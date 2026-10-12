@@ -216,6 +216,26 @@ public sealed record SimulationAnalysis(
         return FftSize * fundamentalHz / periods;
     }
 
+    /// <summary>
+    /// Where the fundamental search starts, lowered under the analysed band — the way every sweep
+    /// runner lowers it under the tone it is about to play (<c>ThdSweepRunner</c>,
+    /// <c>SteppedCaptureSupport</c> and <c>ImdSweepRunner</c> all take
+    /// <c>Math.Min(current, tone / 2)</c>). This import does not know the tone in advance, but the
+    /// band the user asked for is a statement of the lowest frequency worth finding.
+    ///
+    /// <para>The 200 Hz default guards against mains hum at 50/100 Hz being picked as the
+    /// fundamental; a simulation has none, and the import removes the operating point before
+    /// storing, so it has no DC either. Measured on a <c>.step param freq 50 5050 100</c> run with
+    /// 10 Hz bins: at the 200 Hz floor the 50 and 150 Hz steps locked onto noise at 250 and 450 Hz,
+    /// reading <c>-86.07</c> and <c>-39.39 dBV</c> with SNR <c>-95.4</c> and <c>-48.7 dB</c>,
+    /// against <c>9.36 dBV</c> at their own frequency for every step from 250 Hz up. The 50 Hz step
+    /// then collided with the one that really was 250 Hz.</para>
+    ///
+    /// <para><c>Min</c>, never <c>Max</c>: a band starting above 200 Hz keeps the hum defence, and
+    /// no existing import can start searching higher than it did.</para>
+    /// </summary>
+    public double FundamentalSearchFloorHz => Math.Min(200.0, MeasurementLoFreqHz);
+
     public SpectrumPipelineOptions ToPipelineOptions() => new()
     {
         FftSize = FftSize,
@@ -226,6 +246,7 @@ public sealed record SimulationAnalysis(
         AverageCount = 1,
         MeasurementLoFreqHz = MeasurementLoFreqHz,
         MeasurementHiFreqHz = MeasurementHiFreqHz,
+        FundamentalMinSearchHz = FundamentalSearchFloorHz,
         // Unweighted, like every runner: a weighting changes what "noise" means, and a stored
         // result has to say which one produced it rather than inheriting the live screen's.
         Weighting = WeightingSpec.None,
@@ -305,7 +326,7 @@ public sealed record SimulationAnalysis(
         MeasurementHiFreqHz: MeasurementHiFreqHz,
         NotchOctaves: SpectrumMetrics.DefaultNotchOctaves,
         HarmonicCount: 12,
-        FundamentalMinSearchHz: 200.0,
+        FundamentalMinSearchHz: FundamentalSearchFloorHz,
         OtherPeaksCount: 20,
         ProcessLeft: true,
         ProcessRight: Source.RightTrace is not null,

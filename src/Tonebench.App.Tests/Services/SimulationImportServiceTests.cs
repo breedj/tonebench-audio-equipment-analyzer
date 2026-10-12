@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -333,6 +333,92 @@ public class SimulationImportServiceTests : IDisposable
             // was measured from -- the same capture_preview rows a measured sweep writes.
             Assert.NotNull(points[0].PreviewsByChannel);
             Assert.True(points[0].PreviewsByChannel![0].ContainsKey("fft"));
+        });
+    }
+
+    /// <summary>
+    /// <b>A run is a sweep point by construction; the frequency is a reading.</b> Two runs can read
+    /// the same one, and grouping the points by frequency then builds a capture holding two points
+    /// per channel — which surfaces as "UNIQUE constraint failed: capture_preview" from the save,
+    /// long after the import, naming nothing the user did.
+    ///
+    /// <para>Reported 2026-10-12 as a 500 on a <c>.step param freq 50 5050 100</c> run: the 50 Hz
+    /// step sat below the fundamental search floor, locked onto noise at 250 Hz, and collided with
+    /// the step that really was 250 Hz. Grouping by run is what makes that a shape the import
+    /// cannot produce; the two refusals below are what stop it being stored as nonsense.</para>
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_WhereTwoRunsWouldReadTheSameFrequency_DoesNotCollide()
+    {
+        // Three runs, two of them genuinely at the same tone: the shape that used to crash.
+        string raw = WriteSteppedTransient("collide.raw", [1_000.0, 2_000.0, 1_000.0], h2: 0.01);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            var ex = await Assert.ThrowsAsync<FormatException>(
+                () => h.Import.ImportSweepAsync(typeId, Request(raw), CancellationToken.None));
+
+            // Refused for what is actually wrong -- there is no sweep axis -- rather than reaching
+            // the database and failing on a constraint.
+            Assert.Contains("no sweep here", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("FFT analysis measurement", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("UNIQUE", ex.Message, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    /// <summary>
+    /// A run with no tone in it is not a sweep point, and is refused by name rather than stored as
+    /// whatever the peak search settled on.
+    ///
+    /// <para>A silent run is the unambiguous case — a step where the circuit produced nothing. The
+    /// subtler one the guard also catches is a tone the analysis could not lock onto: SNR is the
+    /// located fundamental against everything else in the band, so at or below 0 dB something
+    /// louder is in there and the wrong thing was picked. Measured on the run that prompted this, a
+    /// 50 Hz step read at a 200 Hz search floor: <c>-86.07 dBV, SNR -95.4 dB</c> at 250 Hz.</para>
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_WithARunThatHasNoTone_IsRefusedAndNamesTheRun()
+    {
+        // The middle step is silent: sin(2*pi*0*t) is zero everywhere.
+        string raw = WriteSteppedTransient("silent.raw", [1_000.0, 0.0, 3_000.0], h2: 0.01);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            var ex = await Assert.ThrowsAsync<FormatException>(
+                () => h.Import.ImportSweepAsync(typeId, Request(raw), CancellationToken.None));
+
+            Assert.Contains("No tone was found", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("step 2 of 3", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// The fundamental search floor follows the analysed band, so a tone below 200 Hz is found
+    /// rather than mistaken for whatever noise sits above it.
+    ///
+    /// <para>The 200 Hz default is a defence against mains hum being picked as the fundamental, and
+    /// a simulation has none. Without this, a <c>.step</c> starting at 50 Hz read −86 dBV at 250 Hz
+    /// with SNR −95 dB — and then collided with the step that really was 250 Hz.</para>
+    /// </summary>
+    [Fact]
+    public async Task Import_OfAToneBelowTwoHundredHertz_FindsItRatherThanTheNoiseAboveIt()
+    {
+        string raw = WriteSteppedTransient("low.raw", [50.0, 150.0, 1_000.0], h2: 0.01, pointsPerRun: 100_000);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            long resultId = await h.Import.ImportSweepAsync(
+                typeId, Request(raw, fftSize: 16384), CancellationToken.None);
+
+            var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
+
+            Assert.Equal(
+                [50.0, 150.0, 1_000.0],
+                points.Select(p => Math.Round(p.FreqHz / 10.0) * 10.0));
+            Assert.All(points, p => Assert.True(p.MetricsByChannel[0]["snr_db"] > 0.0));
         });
     }
 

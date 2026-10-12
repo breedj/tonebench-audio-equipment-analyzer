@@ -628,6 +628,24 @@
       the curve instead.
     </p>
 
+    <p>
+      Two things are refused rather than stored as a curve that looks like a measurement.
+      <strong>A run with no tone in it</strong> — one that produced nothing, or whose tone falls
+      outside the analysed band — is named, because what the peak search settles on instead is
+      noise; widen the band, or untick that run. And <strong>runs that all measure the same
+      frequency</strong>: if the step changes a component rather than the tone, there is no sweep
+      axis at all, and the message points at the FFT screen, where each run becomes its own
+      spectrum.
+    </p>
+
+    <p>
+      One thing worth knowing if you sweep the bottom of the band: the fundamental search normally
+      starts at 200&nbsp;Hz, to stop mains hum at 50 or 100&nbsp;Hz being mistaken for the signal.
+      A simulation has no hum, so an import lowers that to the bottom of the analysed band — which
+      is what lets a step at 50&nbsp;Hz be measured at 50&nbsp;Hz instead of locking onto whatever
+      sits above it.
+    </p>
+
     <h2>What is refused, and why</h2>
 
     <table class="manual-wrap">

@@ -90,7 +90,10 @@ export interface ResponseDisplay {
 
 /** What a fresh measurement type shows before anything is stored — the literals App.vue starts from. */
 export const DEFAULT_RESPONSE_DISPLAY: Readonly<ResponseDisplay> = Object.freeze({
-  view: 'Gain',
+  // FR (dBV) rather than Gain (dB): the absolute level is what a response measurement starts as,
+  // and a gain is only meaningful once a reference channel is in the picture. A type that was
+  // saved showing Gain keeps showing it -- this is what a fresh one opens on.
+  view: 'Dbv',
   showLeft: true,
   showRight: false,
   showPhase: false,

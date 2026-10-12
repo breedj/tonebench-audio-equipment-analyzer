@@ -9,6 +9,7 @@ import {
 import { sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
+import BusyNote from './BusyNote.vue'
 
 /**
  * `sweepTarget` is set when the open measurement is a THD-vs-frequency one, where a `.step`ped run
@@ -178,6 +179,20 @@ function fmtRate(hz: number): string {
   return hz >= 1e6 ? `${(hz / 1e6).toFixed(3)} MHz` : `${(hz / 1e3).toFixed(1)} kHz`
 }
 
+/**
+ * What the dialog is waiting for, said rather than spun at: an import of a stepped run takes about
+ * twenty seconds for fifty of them, and the only thing on screen that moves otherwise is the button
+ * label.
+ */
+const busyLabel = computed(() => {
+  if (info.value === null) return 'Reading the file…'
+  const runs = chosenSweeps.value.length
+  if (!isStepped.value) return 'Importing…'
+  return props.sweepTarget
+    ? `Analysing ${runs} run${runs === 1 ? '' : 's'} into one sweep…`
+    : `Importing ${runs} run${runs === 1 ? '' : 's'}…`
+})
+
 async function submit() {
   if (!canImport.value || props.measurementTypeId === null || !info.value) return
   busy.value = true
@@ -218,6 +233,7 @@ async function submit() {
     extension=".raw,.qraw"
     :start-path="lastPath"
     title="Open a simulation (LTspice .raw or QSpice .qraw)"
+    remember-as="simulation"
     @close="onBrowserClose"
     @select="inspect"
   />
@@ -478,7 +494,9 @@ async function submit() {
         </details>
       </template>
 
-      <p v-else-if="!error" class="text-sm text-neutral-500 dark:text-neutral-400">Reading the file…</p>
+      <BusyNote v-else-if="!error" :label="busyLabel" class="py-1" />
+
+      <BusyNote v-if="busy && info" :label="busyLabel" class="mt-4" />
 
       <div class="mt-5 flex justify-between gap-2">
         <div class="flex gap-2">

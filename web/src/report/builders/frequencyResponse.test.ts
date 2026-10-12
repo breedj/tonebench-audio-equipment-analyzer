@@ -173,7 +173,11 @@ describe('frequencyResponseSections / chapterSections', () => {
       // A trace that recorded its delays, so the measurements element carries no "not recorded"
       // note and the section list below is exactly the chosen elements.
       traces: [makeTrace({ freqHz: [10, 100], magnitudeMaxDb: [0, 0], phaseDeg: [0, 0], groupDelayS: [0, 0], phaseDelayS: [0, 0] })],
-      display: DEFAULT_RESPONSE_DISPLAY,
+      // The view is pinned to Gain because the lone trace above is a Gain trace, and
+      // `primaryResponseTrace` reads the trace the view asks for: on the default view, `Dbv`, this
+      // subject has nothing to measure and the element collapses to one "Nothing measured."
+      // paragraph. That is correct behaviour and not what this test is about.
+      display: { ...DEFAULT_RESPONSE_DISPLAY, view: 'Gain' },
       phaseKind: 'PerTrace',
       rightChannelIsReference: true,
       latencySamples: null,

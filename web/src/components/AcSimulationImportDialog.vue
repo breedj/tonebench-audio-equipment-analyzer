@@ -19,6 +19,7 @@ import {
 } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
+import BusyNote from './BusyNote.vue'
 
 const props = defineProps<{ open: boolean; measurementTypeId: number | null }>()
 const emit = defineEmits<{ close: []; imported: [resultIds: number[]] }>()
@@ -158,6 +159,13 @@ function fmtHz(hz: number): string {
   return `${hz.toPrecision(3)} Hz`
 }
 
+/** See SimulationImportDialog's own: the wait is long enough to be worth naming. */
+const busyLabel = computed(() => {
+  if (info.value === null) return 'Reading the file…'
+  const sweeps = chosenSweeps.value.length
+  return isStepped.value ? `Importing ${sweeps} sweep${sweeps === 1 ? '' : 's'}…` : 'Importing…'
+})
+
 async function submit() {
   if (!canImport.value || props.measurementTypeId === null || !info.value) return
   busy.value = true
@@ -194,6 +202,7 @@ async function submit() {
     extension=".raw,.qraw"
     :start-path="lastPath"
     title="Open a simulated sweep (LTspice .raw or QSpice .qraw)"
+    remember-as="simulation"
     @close="onBrowserClose"
     @select="inspect"
   />
@@ -418,7 +427,9 @@ async function submit() {
         </p>
       </template>
 
-      <p v-else-if="!error" class="text-sm text-neutral-500 dark:text-neutral-400">Reading the file…</p>
+      <BusyNote v-else-if="!error" :label="busyLabel" class="py-1" />
+
+      <BusyNote v-if="busy && info" :label="busyLabel" class="mt-4" />
 
       <div class="mt-5 flex justify-between gap-2">
         <div class="flex gap-2">

@@ -2033,6 +2033,14 @@ export interface FileBrowseResponse {
   separator: string
 }
 
+/**
+ * The folders the file browser was last in, keyed by what it was being used for. Server-side rather
+ * than in browser storage, because it has to survive a relaunch.
+ */
+export interface LastDirectories {
+  directories: Record<string, string>
+}
+
 export interface MeasurementType {
   id: number
   projectId: number
@@ -3178,6 +3186,15 @@ export const api = {
     const query = params.toString()
     return request<FileBrowseResponse>(`/files/browse${query ? `?${query}` : ''}`)
   },
+
+  /** Where the file browser was last pointed, per purpose. See FileBrowserDialog's `rememberAs`. */
+  lastDirectories: () => request<LastDirectories>('/config/last-directories'),
+
+  rememberDirectory: (key: string, path: string) =>
+    request<LastDirectories>(`/config/last-directories/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ path }),
+    }),
 
   listMeasurementTypes: (projectId: number) => request<MeasurementType[]>(`/projects/${projectId}/measurement-types`),
 

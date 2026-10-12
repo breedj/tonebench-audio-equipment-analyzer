@@ -74,6 +74,30 @@ public static class ConfigEndpoints
     }
 
     /// <summary>
+    /// The folders the file browser was last in, or an empty map when nothing has been stored or
+    /// the document cannot be read — the same contract as the capture delay, and for the same
+    /// reason: a browse location is a convenience, and failing to open a dialog over one would be
+    /// worse than starting where the app always did.
+    /// </summary>
+    public static async Task<LastDirectoriesConfig> ReadLastDirectoriesAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? stored = await repo.GetAsync(ConfigRepository.LastDirectoriesKey, ct);
+        if (string.IsNullOrWhiteSpace(stored))
+            return LastDirectoriesConfig.Default;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.LastDirectoriesConfig);
+            return config?.Directories is null ? LastDirectoriesConfig.Default : config;
+        }
+        catch (JsonException)
+        {
+            return LastDirectoriesConfig.Default;
+        }
+    }
+
+    /// <summary>
     /// The stored auto-ranging step-down delay, defaulting to the ranger's own 1000 ms for an
     /// absent, unreadable or out-of-range document — the same contract as the capture delay.
     /// Shared with <see cref="StartupSettingsLoader"/>, which loads it into
@@ -406,6 +430,32 @@ public static class ConfigEndpoints
                 ct);
 
             return Results.Ok(config);
+        });
+
+        // Where the file browser was last pointed, per purpose. In the configuration database rather
+        // than in the browser's own storage because it has to survive a relaunch -- see
+        // ConfigRepository.LastDirectoriesKey. Written by the browser itself whenever it lists a
+        // folder, so a new browse site gets the behaviour by passing a key and nothing else.
+        group.MapGet("/last-directories", async (
+            ConfigRepository repo, CancellationToken ct) =>
+            Results.Ok(await ReadLastDirectoriesAsync(repo, ct)));
+
+        group.MapPut("/last-directories/{key}", async (
+            string key, LastDirectoryRequest request, ConfigRepository repo, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                return Results.BadRequest("A purpose is required.");
+            if (string.IsNullOrWhiteSpace(request.Path))
+                return Results.BadRequest("A folder is required.");
+
+            var stored = await ReadLastDirectoriesAsync(repo, ct);
+            var next = stored.With(key, request.Path);
+            await repo.SetAsync(
+                ConfigRepository.LastDirectoriesKey,
+                JsonSerializer.Serialize(next, AppJsonContext.Default.LastDirectoriesConfig),
+                ct);
+
+            return Results.Ok(next);
         });
 
         // The experimental 384 kHz opt-in. No validation branch — a bool is always valid — and,
@@ -811,3 +861,6 @@ public sealed record UserWeightingResponse(UserWeightingSummary? User1, UserWeig
 
 /// <summary>The file to import into a user weighting slot -- a path on the server's machine, from the in-app file listing.</summary>
 public sealed record ImportWeightingRequest(string Path);
+
+/// <summary>The folder to remember for one browse purpose.</summary>
+public sealed record LastDirectoryRequest(string Path);

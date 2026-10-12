@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 using Tonebench.App.Streaming;
@@ -605,7 +606,9 @@ public sealed class SimulationImportService(
     /// for the steps that were found.</para>
     /// </summary>
     private static void RequireLocatedTone(
-        SpectrumMeters? meters, SimulationSweep sweep, int runCount, SimulationImportRequest request, int channel)
+        // [NotNull] so the caller may read the meters straight afterwards: this method either
+        // returns with them non-null or throws, which the compiler cannot see through the pattern.
+        [NotNull] SpectrumMeters? meters, SimulationSweep sweep, int runCount, SimulationImportRequest request, int channel)
     {
         if (meters is { SnrDb: > 0.0f })
             return;

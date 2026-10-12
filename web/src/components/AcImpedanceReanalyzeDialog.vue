@@ -19,6 +19,7 @@ import {
   type StoredAcImpedance,
 } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
+import BusyNote from './BusyNote.vue'
 
 const props = defineProps<{ open: boolean; resultId: number | null }>()
 const emit = defineEmits<{ close: []; reanalyzed: [resultId: number] }>()
@@ -145,6 +146,8 @@ async function apply() {
           import — the other columns of the file were never read. Re-import to pick different ones.
         </p>
       </template>
+
+      <BusyNote v-if="busy" label="Re-analysing…" class="mt-4" />
 
       <div class="mt-5 flex justify-between gap-2">
         <button type="button" class="rounded border px-3 py-1.5 text-sm btn-action" @click="openManual('simulation-import')">

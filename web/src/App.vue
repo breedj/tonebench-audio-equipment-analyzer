@@ -1129,7 +1129,7 @@ const activeResponsePanel = computed(() =>
 // Frequency-response chart display preferences. Local view state, persisted into the measurement
 // type's params_json alongside the run settings — the same arrangement as the sweep screen's, and
 // for the same reason: none of it is server state the host could snapshot on its own.
-const responseView = ref<import('./api/client').ResponseView>('Gain')
+const responseView = ref<import('./api/client').ResponseView>(DEFAULT_RESPONSE_DISPLAY.view)
 const responseShowLeft = ref(true)
 const responseShowRight = ref(false)
 const responseShowPhase = ref(false)
@@ -1363,7 +1363,10 @@ function applyStoredResponseDisplay(paramsJson: string) {
   responseInvertLoopSign.value = display.invertLoopSign
   responseRestoreDelay.value = display.restoreDelay
   if (typeof stored.chartAutofitOnDone === 'boolean') responseAutofitOnDone.value = stored.chartAutofitOnDone
-  if (stored.chartProjection) responseProjection.value = stored.chartProjection
+  // Unconditional, with Bode as the fallback: assigning only when the type stores one leaves the
+  // previous measurement's projection on screen for a type that has never been saved, so a fresh
+  // Frequency response could open on Nyquist because the last one was looked at that way.
+  responseProjection.value = stored.chartProjection ?? 'Bode'
   // Absent on a type written before the orders were stored: Auto, which is what those builds did.
   responseFitAutoOrder.value = typeof stored.chartFitAutoOrder === 'boolean' ? stored.chartFitAutoOrder : true
   if (typeof stored.chartFitPoles === 'number') responseFitOrder.value = stored.chartFitPoles
@@ -5083,6 +5086,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
     <FileBrowserDialog
       :open="openProjectDialogOpen"
       mode="open"
+      remember-as="project"
       @close="openProjectDialogOpen = false"
       @select="openProjectFile"
     />

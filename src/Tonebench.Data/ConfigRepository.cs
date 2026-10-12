@@ -75,6 +75,33 @@ public sealed record UiLayoutConfig(
 }
 
 /// <summary>
+/// Where the file browser was last pointed, keyed by what it was being used for — <c>project</c>,
+/// <c>simulation</c>, and so on.
+///
+/// <para>Per purpose rather than one folder for everything: a bench's projects and its LTspice runs
+/// live nowhere near each other, and a single remembered folder would send each dialog to the other
+/// one's. The keys are the callers' own strings, so a new browse site needs no change here.</para>
+///
+/// <para>A missing or unreadable document is an empty map, which is the same as never having
+/// browsed: the dialog then starts where it always did.</para>
+/// </summary>
+public sealed record LastDirectoriesConfig(IReadOnlyDictionary<string, string> Directories)
+{
+    public static LastDirectoriesConfig Default { get; } = new(new Dictionary<string, string>());
+
+    /// <summary>The folder remembered for <paramref name="key"/>, or null.</summary>
+    public string? For(string key) =>
+        Directories.TryGetValue(key, out string? path) && !string.IsNullOrWhiteSpace(path) ? path : null;
+
+    /// <summary>This document with one purpose's folder replaced.</summary>
+    public LastDirectoriesConfig With(string key, string path)
+    {
+        var next = new Dictionary<string, string>(Directories, StringComparer.Ordinal) { [key] = path };
+        return new LastDirectoriesConfig(next);
+    }
+}
+
+/// <summary>
 /// One project file the user opened, for the welcome screen's recent list. <paramref name="Name"/>
 /// is a copy of the project's name at the time, so the list can be drawn without opening ten
 /// databases — and so a file that has since gone missing can still be listed by name.
@@ -505,6 +532,17 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The trash retention's key. One document, see <see cref="TrashRetentionConfig"/>.</summary>
     public const string TrashRetentionKey = "trash.retention";
+
+    /// <summary>
+    /// The folders the file browser was last in, one per purpose — see
+    /// <see cref="LastDirectoriesConfig"/>.
+    ///
+    /// <para>In the configuration database rather than in browser storage, because "the folder my
+    /// simulations are in" has to survive a relaunch, a second browser window and a cleared cache:
+    /// per-viewer storage is for a remembered tab or an unsent draft, not for something the bench
+    /// knows about itself.</para>
+    /// </summary>
+    public const string LastDirectoriesKey = "files.lastDirectories";
 
     /// <summary>The experimental 384 kHz opt-in. One document, see <see cref="Experimental384kConfig"/>.</summary>
     public const string Experimental384kKey = "acquisition.experimental384k";

@@ -162,6 +162,7 @@ function onConfirm() {
     <FileBrowserDialog
       :open="browserOpen"
       mode="save"
+      remember-as="project"
       :start-path="form.location || null"
       :suggested-name="form.name"
       @close="browserOpen = false"

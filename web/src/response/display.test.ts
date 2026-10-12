@@ -8,6 +8,22 @@ import {
 } from './display'
 
 describe('responseDisplayFromParams', () => {
+  /**
+   * A fresh measurement opens on FR (dBV) and the Bode projection. The view is pinned here because
+   * it is a deliberate choice rather than an accident of which literal was typed first: the
+   * absolute level is what a response measurement *is* until a reference channel makes a gain
+   * meaningful.
+   */
+  it('opens a type that stores nothing on FR (dBV)', () => {
+    expect(DEFAULT_RESPONSE_DISPLAY.view).toBe('Dbv')
+    expect(responseDisplayFromParams('{}').view).toBe('Dbv')
+    expect(responseDisplayFromParams(null).view).toBe('Dbv')
+  })
+
+  it('still restores a type that chose Gain (dB)', () => {
+    expect(responseDisplayFromParams(JSON.stringify({ chartView: 'Gain' })).view).toBe('Gain')
+  })
+
   it('restores every chart field a type stores', () => {
     const json = JSON.stringify({
       chartView: 'Dbv',

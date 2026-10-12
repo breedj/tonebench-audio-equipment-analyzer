@@ -96,6 +96,8 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(UiLayoutConfig))]
 [JsonSerializable(typeof(CaptureDelayConfig))]
 [JsonSerializable(typeof(TrashRetentionConfig))]
+[JsonSerializable(typeof(LastDirectoriesConfig))]
+[JsonSerializable(typeof(LastDirectoryRequest))]
 [JsonSerializable(typeof(ExternalGainConfig))]
 [JsonSerializable(typeof(SoundCardConfig))]
 [JsonSerializable(typeof(AnalyzerKindConfig))]

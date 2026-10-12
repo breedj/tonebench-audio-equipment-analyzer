@@ -33,6 +33,18 @@ const props = defineProps<{
   extension?: string
   /** The dialog's title; a default per mode when omitted. */
   title?: string
+  /**
+   * What this browser is *for* — `project`, `simulation`, and so on. Given one, the dialog
+   * remembers the folder it was last in under that key and starts there next time, including after
+   * the app is restarted: the folder lives in the configuration database, not in this browser's
+   * storage.
+   *
+   * <p>Per purpose rather than one folder for everything, because a bench's projects and its
+   * LTspice runs live nowhere near each other. And remembered by the dialog itself rather than by
+   * each caller, so a new browse site gets the behaviour by passing a string — the lesson of the
+   * Import button, which rendered on seven screens and worked on two.</p>
+   */
+  rememberAs?: string
 }>()
 const emit = defineEmits<{ close: []; select: [path: string] }>()
 
@@ -70,6 +82,10 @@ async function browse(path: string | null) {
     listing.value = await api.browseFiles(path, props.extension)
     pathInput.value = listing.value.path
     selectedFile.value = null
+    // The folder the server actually listed, which is not always the one asked for -- a missing
+    // directory lists its nearest existing ancestor, and that is the one worth coming back to.
+    // Fire and forget: a browse that worked must not fail because remembering it did not.
+    if (props.rememberAs) void api.rememberDirectory(props.rememberAs, listing.value.path).catch(() => {})
   } catch (e) {
     // No prefix to strip any more -- see api/client.ts's apiErrorMessage.
     error.value = (e as Error).message
@@ -78,11 +94,25 @@ async function browse(path: string | null) {
   }
 }
 
+/**
+ * The folder remembered for this purpose, or null. Read when the dialog opens rather than cached,
+ * so a second window that browsed elsewhere is picked up — and never throws: a browser that could
+ * not read it simply starts where it always did.
+ */
+async function rememberedStart(): Promise<string | null> {
+  try {
+    const stored = await api.lastDirectories()
+    return stored.directories[props.rememberAs!] ?? null
+  } catch {
+    return null
+  }
+}
+
 watch(
   () => props.open,
-  (open) => {
+  async (open) => {
     if (!open) return
-    const start = props.startPath ?? null
+    const start = props.startPath ?? (props.rememberAs ? await rememberedStart() : null)
     // A full file path starts in its folder, with its name in the box; anything else is a folder.
     const looksLikeFile = start !== null && endsWithListed(start)
     fileName.value = looksLikeFile ? fileNameOf(start) : (props.suggestedName ?? '')

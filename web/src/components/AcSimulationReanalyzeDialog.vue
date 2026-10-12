@@ -24,6 +24,7 @@ import {
   type StoredAcSimulation,
 } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
+import BusyNote from './BusyNote.vue'
 
 const props = defineProps<{ open: boolean; resultId: number | null }>()
 const emit = defineEmits<{ close: []; reanalyzed: [resultId: number] }>()
@@ -300,6 +301,8 @@ async function submit() {
       </template>
 
       <p v-else-if="!error" class="text-sm text-neutral-500 dark:text-neutral-400">Reading the stored settings…</p>
+
+      <BusyNote v-if="busy" label="Re-analysing…" class="mt-4" />
 
       <div class="mt-5 flex justify-between gap-2">
         <div class="flex gap-2">

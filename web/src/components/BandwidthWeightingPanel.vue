@@ -184,6 +184,7 @@ onMounted(() => {
       mode="open"
       extension=".txt"
       :title="`Load weighting table into User ${weightingFileSlot ?? 1}`"
+      remember-as="weighting"
       @close="weightingFileSlot = null"
       @select="importWeighting"
     />

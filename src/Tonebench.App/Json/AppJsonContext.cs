@@ -127,6 +127,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(AcSimulationSweepResponse))]
 [JsonSerializable(typeof(ImportAcSimulationRequest))]
 [JsonSerializable(typeof(ImportAcImpedanceRequest))]
+[JsonSerializable(typeof(ReanalyzeAcImpedanceRequest))]
 [JsonSerializable(typeof(ReanalyzeAcSimulationRequest))]
 [JsonSerializable(typeof(AcSimulationParameters))]
 [JsonSerializable(typeof(AcSimulationSource))]

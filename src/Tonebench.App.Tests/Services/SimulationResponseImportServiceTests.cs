@@ -880,6 +880,95 @@ public class SimulationResponseImportServiceTests : IDisposable
     }
 
     /// <summary>
+    /// The direction is the one thing an imported impedance <i>can</i> be asked to change, and it
+    /// needs no file: negating an impedance leaves the magnitude untouched and moves the phase half
+    /// a turn, so the stored row carries everything needed to turn it back over. This import
+    /// shipped claiming there was nothing to re-apply, which left the Re-analyse button answering
+    /// every press with "this result carries no stored simulation settings".
+    /// </summary>
+    [Fact]
+    public async Task ReanalyzeImpedance_TurnsTheStoredCurveOver_AndBack()
+    {
+        double[] freqHz = LogSweep(20.0, 20_000.0, 20);
+        Complex[] backwards = [.. freqHz.Select(_ => -Complex.One)];
+        Complex[] voltage = [.. freqHz.Select(f => new Complex(6.8, 2.0 * Math.PI * f * 0.5e-3))];
+
+        string raw = WriteAcSweep("flip.raw", freqHz, voltage, current: backwards);
+
+        await WithHarnessAsync(async h =>
+        {
+            long id = Assert.Single(await h.ImportImpedanceAsync(raw, 1, 2, name: "driver"));
+            var imported = await h.ImpedanceAsync(id);
+
+            // Auto flipped it at import, so it reads as the passive load it is.
+            Assert.Equal(20.0 * Math.Log10(6.8), imported.MagnitudeMaxDb[0], 1e-3);
+            Assert.True(imported.PhaseDeg[0] > 0.0);
+            Assert.Equal("Inverted", (await h.StoredImpedanceSimulationAsync("driver")).CurrentDirection);
+
+            // Asked for the other way round, the magnitude is untouched and the phase moves exactly
+            // half a turn -- which is the whole reason this is re-appliable from the row.
+            Assert.True(await h.ReanalyzeImpedanceAsync(id, AcImpedanceCurrentDirection.AsStored));
+            var turned = await h.ImpedanceAsync(id);
+            Assert.Equal(imported.MagnitudeMaxDb[0], turned.MagnitudeMaxDb[0], 1e-6);
+            Assert.Equal(180.0, Math.Abs(turned.PhaseDeg[0] - imported.PhaseDeg[0]), 1e-3);
+            Assert.Equal("AsStored", (await h.StoredImpedanceSimulationAsync("driver")).CurrentDirection);
+
+            // And back: a round trip returns the curve it started with. The magnitude is returned
+            // *exactly* -- negation does not touch it, and the dB column survives the trip through
+            // linear and back -- while the phase goes through an atan2 and comes back about 1e-5
+            // degrees out, which is the trig in f32 and not a drift worth carrying.
+            Assert.True(await h.ReanalyzeImpedanceAsync(id, AcImpedanceCurrentDirection.Inverted));
+            var back = await h.ImpedanceAsync(id);
+            Assert.Equal(imported.MagnitudeMaxDb, back.MagnitudeMaxDb);
+            Assert.Equal(imported.PeakHz, back.PeakHz);
+            for (int k = 0; k < imported.PhaseDeg.Length; k++)
+                Assert.Equal(imported.PhaseDeg[k], back.PhaseDeg[k], 1e-4);
+        });
+    }
+
+    /// <summary>
+    /// <c>Auto</c> judges the curve as it stands, which is the corrected one — so asking for it on
+    /// a result that is already the right way up has to be a no-op. Remembering the import's own
+    /// Auto decision instead would flip a correct curve every time it was re-analysed.
+    /// </summary>
+    [Fact]
+    public async Task ReanalyzeImpedance_AskedForAutomaticAgain_LeavesACorrectCurveAlone()
+    {
+        double[] freqHz = LogSweep(20.0, 20_000.0, 20);
+        Complex[] backwards = [.. freqHz.Select(_ => -Complex.One)];
+        Complex[] voltage = [.. freqHz.Select(_ => new Complex(6.8, 0.0))];
+        string raw = WriteAcSweep("auto-again.raw", freqHz, voltage, current: backwards);
+
+        await WithHarnessAsync(async h =>
+        {
+            long id = Assert.Single(await h.ImportImpedanceAsync(raw, 1, 2, name: "driver"));
+            var imported = await h.ImpedanceAsync(id);
+
+            Assert.True(await h.ReanalyzeImpedanceAsync(id, AcImpedanceCurrentDirection.Auto));
+            var again = await h.ImpedanceAsync(id);
+
+            Assert.Equal(imported.PhaseDeg, again.PhaseDeg);
+            Assert.Equal(imported.MagnitudeMaxDb, again.MagnitudeMaxDb);
+        });
+    }
+
+    /// <summary>A measured impedance has no direction to change, and says so rather than throwing.</summary>
+    [Fact]
+    public async Task ReanalyzeImpedance_OfSomethingThatWasNotImported_IsRefused()
+    {
+        double[] freqHz = LogSweep(20.0, 20_000.0, 20);
+        string raw = WriteAcSweep("response.raw", freqHz, OnePole(freqHz));
+
+        await WithHarnessAsync(async h =>
+        {
+            // A response import, which carries an AC block but no impedance row.
+            long id = await h.ImportAsync(raw, PeakReferenced());
+            Assert.False(await h.ReanalyzeImpedanceAsync(id, AcImpedanceCurrentDirection.Inverted));
+            Assert.False(await h.ReanalyzeImpedanceAsync(id + 9999, AcImpedanceCurrentDirection.Inverted));
+        });
+    }
+
+    /// <summary>
     /// An impedance is volts over amps, so a second voltage trace is refused by name rather than
     /// divided into a dimensionless number that would be stored and drawn as ohms.
     /// </summary>
@@ -1098,6 +1187,10 @@ public class SimulationResponseImportServiceTests : IDisposable
                 TypeId,
                 new AcImpedanceImportRequest(path, voltageIndex, currentIndex, direction, name, Notes: null),
                 CancellationToken.None);
+
+        public Task<bool> ReanalyzeImpedanceAsync(long resultId, AcImpedanceCurrentDirection direction) =>
+            Service.ReanalyzeImpedanceAsync(
+                resultId, new AcImpedanceReanalyzeRequest(direction), CancellationToken.None);
 
         public async Task<StoredResponseTrace> ImpedanceAsync(long resultId) =>
             (await RowsAsync(resultId)).Single(r => r.Kind == ResponseTraceKind.Impedance);

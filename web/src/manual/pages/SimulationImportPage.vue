@@ -695,9 +695,16 @@
     </p>
 
     <p>
-      Nothing here is re-appliable afterwards: there is no band and no reference level to change,
-      and the sign is settled at import. Re-import if one of the two traces was the wrong pick. And
-      the usual caveat applies with force — an AC analysis is a linearisation, so a driver's
+      <strong>Re-analyse</strong> on the row changes the current direction afterwards, and that is
+      the whole list of what it can change — negating an impedance leaves the magnitude untouched
+      and moves the phase half a turn, so the stored curve can be turned back over without the file,
+      where a band or a reference level is not something an impedance curve has at all. Which two
+      traces were divided is settled at import, because the other columns are not read; re-import if
+      one of them was the wrong pick.
+    </p>
+
+    <p>
+      And the usual caveat applies with force — an AC analysis is a linearisation, so a driver's
       impedance rise with excursion, a core's saturation and an inductor going non-linear at power
       are all absent from it.
     </p>

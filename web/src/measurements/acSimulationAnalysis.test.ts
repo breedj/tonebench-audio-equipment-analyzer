@@ -3,6 +3,7 @@ import {
   acSimulationFit,
   hasReferenceCurve,
   MAX_REFERENCE_HZ,
+  parseStoredAcImpedance,
   parseStoredAcSimulation,
   referenceBandError,
   sweepLabel,
@@ -166,5 +167,39 @@ describe('sweepLabel', () => {
     expect(sweepLabel({ index: 0, label: null })).toBe('Step 1')
     expect(sweepLabel({ index: 2, label: null })).toBe('Step 3')
     expect(sweepLabel({ index: 1, label: '   ' })).toBe('Step 2')
+  })
+})
+
+describe('parseStoredAcImpedance', () => {
+  const params = (simulation: unknown) =>
+    JSON.stringify({ referenceOhms: 0, stimulus: 'SteppedSine', acSimulation: simulation })
+
+  it('reads the source and the way the curve faces', () => {
+    const stored = parseStoredAcImpedance(
+      params({
+        source: { path: 'C:/amp/woofer.raw', outputTrace: 'V(spk)', referenceTrace: 'I(V1)', pointCount: 301 },
+        currentDirection: 'Inverted',
+      }),
+    )
+
+    expect(stored?.source.outputTrace).toBe('V(spk)')
+    expect(stored?.source.referenceTrace).toBe('I(V1)')
+    expect(stored?.source.pointCount).toBe(301)
+    expect(stored?.currentDirection).toBe('Inverted')
+  })
+
+  // A row written before the direction was recorded, and one that somehow stored the question
+  // rather than the answer: both read as the curve not having been turned over.
+  it('reads anything that is not Inverted as AsStored', () => {
+    expect(parseStoredAcImpedance(params({ source: {} }))?.currentDirection).toBe('AsStored')
+    expect(
+      parseStoredAcImpedance(params({ source: {}, currentDirection: 'Auto' }))?.currentDirection,
+    ).toBe('AsStored')
+  })
+
+  it('is null for a measured result, and never throws on a document it cannot read', () => {
+    expect(parseStoredAcImpedance(JSON.stringify({ referenceOhms: 100 }))).toBeNull()
+    expect(parseStoredAcImpedance('{not json')).toBeNull()
+    expect(parseStoredAcImpedance(null)).toBeNull()
   })
 })

@@ -132,6 +132,31 @@ export interface StoredAcSimulation {
  * i.e. when the result is a measured sweep, or the document is something this build cannot read.
  * Never throws: a result the user has merely clicked on must not fail on its own parameters.
  */
+/** The `source` half of an AC block, which the response and impedance readers share verbatim. */
+function parseSource(source: Record<string, unknown>): StoredAcSimulationSource {
+  const num = (value: unknown, fallback: number): number =>
+    typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  const str = (value: unknown, fallback: string): string =>
+    typeof value === 'string' ? value : fallback
+
+  return {
+    path: str(source['path'], ''),
+    title: str(source['title'], ''),
+    plotname: str(source['plotname'], ''),
+    outputTrace: str(source['outputTrace'], ''),
+    outputUnit: str(source['outputUnit'], 'V'),
+    referenceTrace: typeof source['referenceTrace'] === 'string' ? source['referenceTrace'] : null,
+    referenceUnit: typeof source['referenceUnit'] === 'string' ? source['referenceUnit'] : null,
+    pointCount: num(source['pointCount'], 0),
+    startFreqHz: num(source['startFreqHz'], 0),
+    endFreqHz: num(source['endFreqHz'], 0),
+    pointsPerDecade: num(source['pointsPerDecade'], 0),
+    warnings: Array.isArray(source['warnings'])
+      ? (source['warnings'] as unknown[]).filter((w): w is string => typeof w === 'string')
+      : [],
+  }
+}
+
 export function parseStoredAcSimulation(
   paramsJson: string | null | undefined,
 ): StoredAcSimulation | null {
@@ -155,22 +180,7 @@ export function parseStoredAcSimulation(
     typeof value === 'string' ? value : fallback
 
   return {
-    source: {
-      path: str(source['path'], ''),
-      title: str(source['title'], ''),
-      plotname: str(source['plotname'], ''),
-      outputTrace: str(source['outputTrace'], ''),
-      outputUnit: str(source['outputUnit'], 'V'),
-      referenceTrace: typeof source['referenceTrace'] === 'string' ? source['referenceTrace'] : null,
-      referenceUnit: typeof source['referenceUnit'] === 'string' ? source['referenceUnit'] : null,
-      pointCount: num(source['pointCount'], 0),
-      startFreqHz: num(source['startFreqHz'], 0),
-      endFreqHz: num(source['endFreqHz'], 0),
-      pointsPerDecade: num(source['pointsPerDecade'], 0),
-      warnings: Array.isArray(source['warnings'])
-        ? (source['warnings'] as unknown[]).filter((w): w is string => typeof w === 'string')
-        : [],
-    },
+    source: parseSource(source),
     levelOffsetDb: num(simulation['levelOffsetDb'], 0),
     analysisLowHz: num(simulation['analysisLowHz'], 20),
     analysisHighHz: num(simulation['analysisHighHz'], 20000),
@@ -200,4 +210,47 @@ export function sweepLabel(sweep: { index: number; label: string | null }): stri
   return sweep.label === null || sweep.label.trim() === ''
     ? `Step ${sweep.index + 1}`
     : sweep.label
+}
+
+/** What an imported impedance carries, which is its source and the way its curve faces. */
+export interface StoredAcImpedance {
+  source: StoredAcSimulationSource
+  /** `AsStored` or `Inverted` — never `Auto`, which is a question rather than an answer. */
+  currentDirection: string
+}
+
+/**
+ * Reads the AC block out of a stored *impedance* result's `params_json`, or null when the result is
+ * a bench measurement.
+ *
+ * <p>Its own function rather than `parseStoredAcSimulation`, although the block is the same record:
+ * the surrounding document is `ImpedanceParameters`, which carries none of the band or
+ * bandwidth-reference fields that one reads, and returning an object full of defaults for settings
+ * an impedance has no concept of would invite a dialog to offer them.</p>
+ *
+ * <p>A row written before the direction was recorded reads as `AsStored`, which is what the curve
+ * would have been called had the field existed.</p>
+ */
+export function parseStoredAcImpedance(
+  paramsJson: string | null | undefined,
+): StoredAcImpedance | null {
+  if (!paramsJson) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(paramsJson)
+  } catch {
+    return null
+  }
+
+  const params = parsed as Record<string, unknown> | null
+  const simulation = params?.['acSimulation'] as Record<string, unknown> | null | undefined
+  const source = simulation?.['source'] as Record<string, unknown> | null | undefined
+  if (!params || !simulation || !source) return null
+
+  const direction = simulation['currentDirection']
+  return {
+    source: parseSource(source),
+    currentDirection: direction === 'Inverted' ? 'Inverted' : 'AsStored',
+  }
 }

@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -502,7 +502,7 @@ public sealed class SimulationResponseImportService(
         Complex[] i = [.. columns[2].Skip(sweep.FirstPoint).Take(sweep.PointCount)];
 
         var warnings = new List<string>(info.Warnings);
-        var z = DivideToImpedance(v, i, request.CurrentDirection, warnings);
+        var z = DivideToImpedance(v, i, request.CurrentDirection, warnings, out var resolvedDirection);
 
         var trace = ImpedanceTraceBuilder.BuildPoints(
             ImpedanceTraceKind.Impedance,
@@ -541,7 +541,7 @@ public sealed class SimulationResponseImportService(
         long resultId = await measurementRepository.SaveResponseResultAsync(
             new ResponseSaveRequest(
                 measurementTypeId, name, request.Notes,
-                ImpedanceParamsJson(source, sweep),
+                ImpedanceParamsJson(source, sweep, resolvedDirection),
                 DeviceName: null, Serial: null, FwVer: null, IsSimulated: true,
                 SampleRateHz: 0.0, FftSize: sweep.PointCount,
                 Channels: 2,
@@ -568,8 +568,17 @@ public sealed class SimulationResponseImportService(
     /// way back out — the <c>ImpedanceStatusJsonTests</c> rule — and a node the source cannot drive
     /// has no impedance worth reporting anyway.</para>
     /// </summary>
+    /// <param name="resolved">
+    /// What <see cref="AcImpedanceCurrentDirection.Auto"/> decided, so the result can record which
+    /// way round its stored curve faces — which is what makes the direction changeable afterwards.
+    /// Never <c>Auto</c>.
+    /// </param>
     private static Complex[] DivideToImpedance(
-        Complex[] voltage, Complex[] current, AcImpedanceCurrentDirection direction, List<string> warnings)
+        Complex[] voltage,
+        Complex[] current,
+        AcImpedanceCurrentDirection direction,
+        List<string> warnings,
+        out AcImpedanceCurrentDirection resolved)
     {
         var z = new Complex[voltage.Length];
         for (int k = 0; k < z.Length; k++)
@@ -586,7 +595,7 @@ public sealed class SimulationResponseImportService(
                     $"{negative * 100.0:F0} % of this curve had a negative real part, which a passive one-port " +
                     "cannot present, so the current's sign has been flipped. That is the usual case rather than " +
                     "a fault: a simulator's source current flows into its own + terminal, which puts V/I half a " +
-                    "turn round. Set the current direction explicitly if that is not what you meant.");
+                    "turn round. Re-analyse the result to set the direction by hand if that is not what you meant.");
             }
         }
 
@@ -596,8 +605,113 @@ public sealed class SimulationResponseImportService(
                 z[k] = -z[k];
         }
 
+        resolved = invert ? AcImpedanceCurrentDirection.Inverted : AcImpedanceCurrentDirection.AsStored;
         return z;
     }
+
+    /// <summary>
+    /// Turns a stored imported impedance over, or leaves it alone, without the file.
+    ///
+    /// <para><b>The direction is the one thing here that <i>is</i> re-appliable</b>, which an
+    /// earlier version of this import got wrong by saying there was nothing. Negating an impedance
+    /// leaves the magnitude untouched and moves the phase half a turn, so the stored row carries
+    /// everything needed to turn it back over — and the stored direction says which way it is
+    /// facing now. Nothing else about an impedance import can change: there is no band, no corner
+    /// search and no reference level, and which two traces were divided is settled at import
+    /// because the other columns were never read.</para>
+    ///
+    /// <para><c>Auto</c> is re-decided against the <i>stored</i> curve rather than remembered, so
+    /// asking for it on a result that is already the right way up is a no-op — which is what it
+    /// should be, since the curve it is judging is the corrected one.</para>
+    /// </summary>
+    /// <returns>False when the result is not an imported AC impedance.</returns>
+    public async Task<bool> ReanalyzeImpedanceAsync(
+        long resultId, AcImpedanceReanalyzeRequest request, CancellationToken ct)
+    {
+        var detail = await measurementRepository.GetResultAsync(resultId, ct);
+        if (detail is null)
+            return false;
+
+        // Guarded, because this is reached from a button on a row and the row cannot know what shape
+        // its own params_json is. Another kind's document does not merely lack the AC block -- it
+        // fails to deserialize at all, with "expected number" out of a field that happens to share a
+        // name, which would reach the user as a 500 instead of the sentence below.
+        ImpedanceParameters? parameters;
+        try
+        {
+            parameters = JsonSerializer.Deserialize<ImpedanceParameters>(detail.ParamsJson, SerializerOptions);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or NotSupportedException)
+        {
+            return false;
+        }
+
+        if (parameters?.AcSimulation is not { } simulation)
+            return false;
+
+        var rows = await measurementRepository.GetResponseTracesAsync(resultId, ct);
+        var stored = rows.FirstOrDefault(r => r.Kind == ResponseTraceKind.Impedance);
+        if (stored is null)
+            return false;
+
+        double[] freqHz = [.. stored.FreqHz.Select(f => (double)f)];
+        var z = new Complex[freqHz.Length];
+        for (int k = 0; k < z.Length; k++)
+        {
+            z[k] = Complex.FromPolarCoordinates(
+                ImpedanceMath.FromDbOhms(stored.MagnitudeMaxDb[k]),
+                stored.PhaseDeg[k] * Math.PI / 180.0);
+        }
+
+        var facing = EnumParsingOrDefault(simulation.CurrentDirection);
+        var wanted = request.CurrentDirection ?? facing;
+        if (wanted == AcImpedanceCurrentDirection.Auto)
+        {
+            wanted = ImpedanceMath.NegativeRealFraction(z, 0, z.Length - 1) > 0.5
+                ? Opposite(facing)
+                : facing;
+        }
+
+        if (wanted != facing)
+        {
+            for (int k = 0; k < z.Length; k++)
+                z[k] = -z[k];
+        }
+
+        var trace = ImpedanceTraceBuilder.BuildPoints(
+            ImpedanceTraceKind.Impedance, freqHz, z, [.. Enumerable.Repeat(1.0, freqHz.Length)]);
+
+        string paramsJson = JsonSerializer.Serialize(
+            parameters with { AcSimulation = simulation with { CurrentDirection = wanted.ToString() } },
+            SerializerOptions);
+
+        await measurementRepository.ReplaceResponseTracesAsync(
+            resultId,
+            paramsJson,
+            [MeasurementSaveService.ToImpedanceTraceInput(trace, ResponseTraceKind.Impedance)],
+            ct);
+
+        logger.LogInformation(
+            "Re-analysed imported impedance {ResultId}: current {From} -> {To}, peak {PeakDb:F2} dB-ohm at {PeakHz:F1} Hz",
+            resultId, facing, wanted, trace.PeakDbOhms, trace.PeakFreqHz);
+
+        return true;
+    }
+
+    /// <summary>
+    /// A row written before the direction was recorded says nothing about which way it faces, and
+    /// <c>AsStored</c> is the honest reading: it is what the curve would have been called had the
+    /// field existed, since flipping it is what the stored warning would have said.
+    /// </summary>
+    private static AcImpedanceCurrentDirection EnumParsingOrDefault(string? stored) =>
+        Enum.TryParse(stored, out AcImpedanceCurrentDirection parsed) && parsed != AcImpedanceCurrentDirection.Auto
+            ? parsed
+            : AcImpedanceCurrentDirection.AsStored;
+
+    private static AcImpedanceCurrentDirection Opposite(AcImpedanceCurrentDirection direction) =>
+        direction == AcImpedanceCurrentDirection.Inverted
+            ? AcImpedanceCurrentDirection.AsStored
+            : AcImpedanceCurrentDirection.Inverted;
 
     /// <summary>
     /// The settings document an imported impedance carries. Most of <see cref="ImpedanceParameters"/>
@@ -606,7 +720,8 @@ public sealed class SimulationResponseImportService(
     /// where plausible-looking figures would claim a fixture that never existed — the reasoning
     /// behind the response import's <c>LevelMode: "NotApplicable"</c>.
     /// </summary>
-    private string ImpedanceParamsJson(AcSimulationSource source, AcSimulationSweep sweep) =>
+    private string ImpedanceParamsJson(
+        AcSimulationSource source, AcSimulationSweep sweep, AcImpedanceCurrentDirection direction) =>
         JsonSerializer.Serialize(
             new ImpedanceParameters(
                 Method: ImpedanceMethod.ReferenceResistor.ToString(),
@@ -626,7 +741,8 @@ public sealed class SimulationResponseImportService(
                 StartFreqHz: sweep.StartFreqHz,
                 EndFreqHz: sweep.EndFreqHz)
             {
-                AcSimulation = new AcSimulationParameters(source, 0.0, sweep.StartFreqHz, sweep.EndFreqHz),
+                AcSimulation = new AcSimulationParameters(
+                    source, 0.0, sweep.StartFreqHz, sweep.EndFreqHz, direction.ToString()),
             },
             SerializerOptions);
 

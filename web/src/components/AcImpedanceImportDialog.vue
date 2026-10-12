@@ -282,9 +282,12 @@ async function submit() {
               inductor going non-linear at power — none of that is in here.
             </p>
             <p>
-              Nothing about this is re-appliable afterwards: there is no band and no reference level
-              to change, and the sign is settled at import. Re-import if one of the two traces was
-              the wrong pick.
+              The <strong>current direction</strong> can be changed afterwards with
+              <strong>Re-analyse</strong> in History details — negating an impedance leaves the
+              magnitude alone and moves the phase half a turn, so the stored curve can be turned
+              back over without the file. Nothing else can: there is no band and no reference level
+              on an impedance curve, and which two traces were divided is settled here, because the
+              other columns are not read. Re-import if one of them was the wrong pick.
             </p>
           </div>
         </details>

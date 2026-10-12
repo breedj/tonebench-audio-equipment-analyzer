@@ -36,3 +36,11 @@ public sealed record AcImpedanceImportRequest(
     string? Name,
     string? Notes,
     IReadOnlyList<int>? SweepIndices = null);
+
+/// <summary>
+/// What a re-analysis of an imported impedance may change, which is the current's direction and
+/// nothing else — there is no band, no corner search and no reference level on an impedance curve,
+/// and which two traces were divided is settled at import because the other columns were never
+/// read. Null leaves the direction as it is.
+/// </summary>
+public sealed record AcImpedanceReanalyzeRequest(AcImpedanceCurrentDirection? CurrentDirection = null);

@@ -99,6 +99,40 @@ public static class SimulationEndpoints
                 return Results.Ok(new ImportedSimulationsResponse(resultIds));
             }));
 
+        // The only thing an imported impedance can be asked to change. Its own route rather than an
+        // arm of reanalyze-response, because the two rebuild different rows from different stored
+        // settings -- and because a request shape carrying a band, a reference and a direction would
+        // let a caller ask for three things of which two are refused.
+        app.MapPost("/api/measurements/{resultId:long}/reanalyze-impedance", async (
+            long resultId,
+            ReanalyzeAcImpedanceRequest request,
+            SimulationResponseImportService import,
+            CancellationToken ct) =>
+            await GuardAsync(async () =>
+            {
+                AcImpedanceCurrentDirection? direction = null;
+                if (request.CurrentDirection is not null)
+                {
+                    if (!EnumParsing.TryParse(
+                            request.CurrentDirection, AcImpedanceCurrentDirection.Auto,
+                            out AcImpedanceCurrentDirection parsed, out var directionError))
+                    {
+                        return Results.BadRequest(directionError);
+                    }
+
+                    direction = parsed;
+                }
+
+                bool applied = await import.ReanalyzeImpedanceAsync(
+                    resultId, new AcImpedanceReanalyzeRequest(direction), ct);
+
+                return applied
+                    ? Results.Ok(new ImportedSimulationResponse(resultId))
+                    : Results.BadRequest(
+                        "This result is not an imported simulated impedance, so there is no current direction " +
+                        "to change.");
+            }));
+
         app.MapPost("/api/measurements/{resultId:long}/reanalyze-response", async (
             long resultId,
             ReanalyzeAcSimulationRequest request,
@@ -320,6 +354,13 @@ public sealed record ImportAcImpedanceRequest(
     internal AcImpedanceImportRequest ToRequest(AcImpedanceCurrentDirection direction) => new(
         Path, VoltageTraceIndex, CurrentTraceIndex, direction, Name, Notes, SweepIndices);
 }
+
+/// <param name="CurrentDirection">
+/// Auto, AsStored or Inverted, or omitted to leave the curve as it is. Auto is re-decided against
+/// the stored curve rather than remembered, so asking for it on a result that is already the right
+/// way up does nothing — which is what it should do.
+/// </param>
+public sealed record ReanalyzeAcImpedanceRequest(string? CurrentDirection = null);
 
 public sealed record ReanalyzeAcSimulationRequest(
     double? LevelOffsetDb = null,

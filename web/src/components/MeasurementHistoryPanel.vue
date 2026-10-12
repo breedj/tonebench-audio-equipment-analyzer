@@ -3,11 +3,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api, type MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
-import { isFrequencyResponseKind, isImpulseResponseKind } from '../measurements/kinds'
+import { isFrequencyResponseKind, isImpedanceKind, isImpulseResponseKind } from '../measurements/kinds'
 import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
 import EditMeasurementDialog from './EditMeasurementDialog.vue'
 import SimulationReanalyzeDialog from './SimulationReanalyzeDialog.vue'
 import AcSimulationReanalyzeDialog from './AcSimulationReanalyzeDialog.vue'
+import AcImpedanceReanalyzeDialog from './AcImpedanceReanalyzeDialog.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const emit = defineEmits<{ error: [message: string]; report: [resultId: number] }>()
@@ -43,21 +44,46 @@ function onEdit(item: MeasurementSummary) {
 // stored with them that makes it possible and only a simulation has it.
 //
 // Which dialog opens is decided by the measurement's *kind*, not by the row: a .tran import is a
-// spectrum rebuilt from stored samples, an .ac import is a curve rebuilt from stored rows, and the
-// two offer different settings and POST to different routes. Keying on isSimulation alone -- which
-// is all the row itself knows -- would open the transient form over an AC result, read an FFT size
-// and a window that are not in its params_json, silently fall back to 8192/Hann, and then 409.
+// spectrum rebuilt from stored samples, an .ac response import is a curve rebuilt from stored rows,
+// and an .ac impedance import is a curve that can only be turned over. The three offer different
+// settings and POST to different routes. Keying on isSimulation alone -- which is all the row itself
+// knows -- would open the transient form over an AC result, read an FFT size and a window that are
+// not in its params_json, silently fall back to 8192/Hann, and then 409. That is not hypothetical:
+// the impedance import shipped with exactly that gap, and the button answered every press with
+// "This result carries no stored simulation settings".
 const reanalyzeId = ref<number | null>(null)
 const reanalyzeOpen = ref(false)
 const reanalyzeAcOpen = ref(false)
+const reanalyzeImpedanceOpen = ref(false)
 
-const isResponseMeasurement = computed(() =>
-  isFrequencyResponseKind(types.value.find((t) => t.id === currentTypeId.value)?.kind),
-)
+const currentKind = computed(() => types.value.find((t) => t.id === currentTypeId.value)?.kind)
+const isResponseMeasurement = computed(() => isFrequencyResponseKind(currentKind.value))
+const isImpedanceMeasurement = computed(() => isImpedanceKind(currentKind.value))
+
+/** What Re-analyse offers, which differs per kind as much as the dialogs do. */
+const reanalyzeHint = computed(() => {
+  if (isImpedanceMeasurement.value) {
+    return (
+      'Turn this simulated impedance over — the only thing an impedance curve can be asked to ' +
+      'change. Rebuilt from the curve stored with it; the file is not needed.'
+    )
+  }
+  if (isResponseMeasurement.value) {
+    return (
+      'Change the analysed band, the bandwidth reference or the level offset and rebuild the ' +
+      'curves of this simulation from the ones stored with it. The file is not needed.'
+    )
+  }
+  return (
+    'Change the window, FFT size, level offset, start time or band and recompute the spectrum of ' +
+    'this simulation from the samples stored with it. The file is not needed.'
+  )
+})
 
 function onReanalyze(item: MeasurementSummary) {
   reanalyzeId.value = item.resultId
-  if (isResponseMeasurement.value) reanalyzeAcOpen.value = true
+  if (isImpedanceMeasurement.value) reanalyzeImpedanceOpen.value = true
+  else if (isResponseMeasurement.value) reanalyzeAcOpen.value = true
   else reanalyzeOpen.value = true
 }
 
@@ -201,11 +227,7 @@ async function onConfirmDelete(item: MeasurementSummary) {
                     v-if="isSimulation(item)"
                     type="button"
                     class="rounded border px-2 py-1 btn-action"
-                    :title="
-                      isResponseMeasurement
-                        ? 'Change the analysed band, the bandwidth reference or the level offset and rebuild the curves of this simulation from the ones stored with it. The file is not needed.'
-                        : 'Change the window, FFT size, level offset, start time or band and recompute the spectrum of this simulation from the samples stored with it. The file is not needed.'
-                    "
+                    :title="reanalyzeHint"
                     @click="onReanalyze(item)"
                   >
                     Re-analyse
@@ -299,6 +321,13 @@ async function onConfirmDelete(item: MeasurementSummary) {
       :open="reanalyzeAcOpen"
       :result-id="reanalyzeId"
       @close="reanalyzeAcOpen = false"
+      @reanalyzed="onReanalyzed"
+    />
+
+    <AcImpedanceReanalyzeDialog
+      :open="reanalyzeImpedanceOpen"
+      :result-id="reanalyzeId"
+      @close="reanalyzeImpedanceOpen = false"
       @reanalyzed="onReanalyzed"
     />
   </CollapsibleSection>

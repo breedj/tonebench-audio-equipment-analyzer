@@ -1364,7 +1364,18 @@ public sealed record AcSimulationParameters(
     AcSimulationSource Source,
     double LevelOffsetDb,
     double AnalysisLowHz,
-    double AnalysisHighHz);
+    double AnalysisHighHz,
+    /// <summary>
+    /// Which way round the current was taken when an <c>.ac</c> run was imported as an
+    /// <b>impedance</b> — <c>AsStored</c> or <c>Inverted</c>, never <c>Auto</c>, because this is the
+    /// answer rather than the question. Null on a response import, which divides no current, and on
+    /// a row written before the direction was recorded.
+    ///
+    /// <para>Stored because it is what makes the direction re-appliable: negating an impedance
+    /// leaves the magnitude alone and moves the phase half a turn, so the stored curve can be
+    /// turned back over without the file — but only if it says which way it is facing.</para>
+    /// </summary>
+    string? CurrentDirection = null);
 
 /// <summary>
 /// A stepped-sine response measurement type's <c>params_json</c>: the run settings, then the chart's

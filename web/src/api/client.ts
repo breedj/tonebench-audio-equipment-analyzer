@@ -2385,6 +2385,12 @@ export interface ImportAcImpedanceRequest {
   sweepIndices?: number[]
 }
 
+/** Omitting the direction leaves the curve facing the way it is. */
+export interface ReanalyzeAcImpedanceRequest {
+  /** `Auto`, `AsStored` or `Inverted`. */
+  currentDirection?: string | null
+}
+
 /** Everything optional: null leaves that setting as it was stored. */
 export interface ReanalyzeAcSimulationRequest {
   levelOffsetDb?: number
@@ -3244,6 +3250,18 @@ export const api = {
   /** The same file as an impedance curve, onto an Impedance measurement. */
   importAcImpedance: (measurementTypeId: number, body: ImportAcImpedanceRequest) =>
     request<ImportedSimulations>(`/simulations/${measurementTypeId}/import-impedance`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * Turns a stored imported impedance over, or leaves it alone. The direction is the only thing an
+   * impedance import can be asked to change — there is no band, no corner search and no reference
+   * level on an impedance curve — and it needs no file, because negating one leaves the magnitude
+   * alone and moves the phase half a turn.
+   */
+  reanalyzeAcImpedance: (resultId: number, body: ReanalyzeAcImpedanceRequest) =>
+    request<ImportedSimulation>(`/measurements/${resultId}/reanalyze-impedance`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

@@ -4,33 +4,101 @@
 
     <p>
       A simulated result can be drawn beside a measured one, so a change in the circuit can be
-      checked against the bench without leaving the app. There are two imports, and which one you
-      get follows from the measurement you are looking at:
+      checked against the bench without leaving the app. There are two imports — a transient run
+      and an AC sweep — and <strong>the measurement you have open decides which one you get and
+      what is made of it</strong>. Five screens take one:
     </p>
 
-    <table class="manual-wrap">
+    <!-- Not `manual-wrap`: that rule gives the first column 40 % for tables whose first cell is a
+         phrase, and here it is a measurement's name — short, and better left on one line. -->
+    <table>
       <thead>
         <tr>
           <th>On this measurement</th>
-          <th>Import this run</th>
-          <th>And you get</th>
+          <th>Import this run, and you get</th>
+          <th>Directives to use</th>
+          <th>What to <code>.step</code></th>
         </tr>
       </thead>
       <tbody>
         <tr>
           <td><strong>FFT analysis</strong></td>
-          <td>a transient run — <code>.tran</code></td>
           <td>
-            a spectrum, with THD, THD+N, SNR and harmonic markers that mean exactly what a measured
-            capture's do
+            A transient run — <code>.tran</code>. One <strong>spectrum</strong>, with THD, THD+N,
+            SNR and harmonic markers that mean exactly what a measured capture's do.
+          </td>
+          <td>
+            <code>.options plotwinsize=0</code> — <strong>required</strong> on LTspice.<br />
+            <code>.tran 0 100m 5m 1u</code> — the saved length
+            (<em>stop&nbsp;−&nbsp;start</em>) fixes the bin width, the maximum step the highest
+            frequency the run can carry. QSpice needs the maximum step spelled out too.<br />
+            <code>.four 1k V(out)</code> is not read, but is the best cross-check there is.
+          </td>
+          <td>
+            Anything. <strong>One result per run</strong>, each a full spectrum you can overlay,
+            re-analyse and report on: the tone (<code>.step param freq …</code>), a drive level, a
+            component value, a supply rail.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>THD vs frequency</strong></td>
+          <td>
+            A <strong>stepped</strong> transient run — <code>.tran</code> + <code>.step</code>. One
+            <strong>sweep</strong>, each run a point, with every point's spectrum kept as its
+            preview.
+          </td>
+          <td>
+            As above, plus the <code>.step</code>. Keep the run short: it is simulated once per
+            point, and the resolution only has to resolve the tone and its harmonics.
+          </td>
+          <td>
+            <strong>The tone frequency</strong> —
+            <code>.step param freq 50 5050 100</code>, with the source's frequency written as
+            <code>{freq}</code>. That is the sweep axis, and it is the one import where what you
+            step decides the shape of the result: runs that all measure the
+            <em>same</em> frequency are refused and pointed at the FFT screen instead.
           </td>
         </tr>
         <tr>
           <td><strong>Frequency response</strong></td>
-          <td>an AC sweep — <code>.ac</code></td>
           <td>
-            a Bode curve, with phase, group and phase delay, and ±1 dB and −3 dB corners found the
-            same way a chirp's are
+            An AC sweep — <code>.ac</code>. A <strong>Bode curve</strong> with phase, group and
+            phase delay, ±1&nbsp;dB and −3&nbsp;dB corners, and the Nyquist, Nichols, pole-zero and
+            |H(s)| projections all working off it as they do off a chirp.
+          </td>
+          <td>
+            <code>.ac dec 100 1 1Meg</code> — logarithmic, 100 points per decade, well past the
+            band in both directions. <code>plotwinsize</code> and <code>numdgt</code> do nothing
+            here; an AC run has no waveform.
+          </td>
+          <td>
+            Anything <em>except</em> the frequency, which the sweep already is: a component
+            (<code>.step param ra 22k 35k 1k</code>), a load, a supply rail, a temperature.
+            <strong>One result per step</strong>, each with its own corners and delays.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Stepped sine response</strong></td>
+          <td>The same AC sweep, read the same way — it is one import on both response screens.</td>
+          <td>As above.</td>
+          <td>As above.</td>
+        </tr>
+        <tr>
+          <td><strong>Impedance</strong></td>
+          <td>
+            An AC sweep — <code>.ac</code> — read as <strong>ohms</strong>: one node voltage over
+            the current through the source driving it, with the resonance readout and the component
+            fit working off it as they do off a bench curve.
+          </td>
+          <td>
+            <code>.ac dec 100 1 1Meg</code>, and the current has to be <em>saved</em>: LTspice
+            saves everything unless you have a <code>.save</code>, in which case add the source —
+            <code>.save V(spk) I(V1)</code>. Drive the one-port with an AC current source of
+            1&nbsp;A and the voltage already <em>is</em> the impedance.
+          </td>
+          <td>
+            A component or a condition — a box volume, a driver parameter, a crossover part.
+            <strong>One impedance result per step.</strong>
           </td>
         </tr>
       </tbody>
@@ -40,7 +108,16 @@
       Both read the same container — LTspice's <code>.raw</code> or QSpice's <code>.qraw</code> —
       and a file of the wrong kind is refused by name, pointing at the screen it does belong on. The
       first half of this page is the transient import; <a href="#ac">the AC sweep</a> is further
-      down.
+      down, and <a href="#stepped">stepped runs</a> have a section of their own.
+    </p>
+
+    <p>
+      Two things the table says by omission. <strong>There is no import on THD vs amplitude</strong>
+      — a level axis needs a drive level the simulation knows nothing about on this side of the
+      schematic, so step the source's amplitude and read the results as a stack of spectra on the
+      FFT screen instead. And <strong>an AC sweep says nothing about distortion</strong>: it is a
+      small-signal linearisation about the operating point, so a circuit that sounds dreadful at
+      real levels still draws a clean response. The transient import is what answers that.
     </p>
 
     <p>

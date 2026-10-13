@@ -2659,6 +2659,7 @@ export type ThdMethodName = 'Conventional' | 'FrequencyNormalized'
 export type SweepPhaseName =
   | 'Idle'
   | 'DeterminingLevel'
+  | 'DeterminingRange'
   | 'NoiseFloor'
   | 'Sweeping'
   | 'Finished'

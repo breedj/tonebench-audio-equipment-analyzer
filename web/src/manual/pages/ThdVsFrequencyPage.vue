@@ -260,7 +260,9 @@ const { showPage } = useManual()
             <strong>DUT output voltage</strong> and <strong>DUT output power</strong> are
             output-referred: the analyzer probes at 1 kHz first, works out the gain, and sets the
             generator so the DUT delivers what you asked for. That is what makes "THD at 1 W into
-            8 Ω" expressible at all.
+            8 Ω" expressible at all. The probe starts at &minus;40 dBV and corrects upward from
+            there, so a DUT of unknown gain is never hit with the full output while its gain is
+            being found.
           </td>
         </tr>
         <tr>
@@ -488,6 +490,16 @@ const { showPage } = useManual()
         In the two output-referred level modes the generator is raised until the DUT reaches your
         target. Set the target for the DUT you actually have connected, and check the
         <em>gen</em> figure in the progress line once the probe has settled.
+      </p>
+      <p>
+        The status line passes through <strong>Determining input range</strong> after it: the range
+        the sweep runs on is <em>measured</em>, from the least sensitive setting, where the probe
+        cannot clip and so cannot read a peak that is really the range's own clipping level. If that
+        measurement asks for a wider range than your target implied, the level search is repeated on
+        it, since its first captures were clipped — so a run takes one or two captures longer than
+        the point count suggests. Both probes need to program a range of their own, which is why a
+        sweep will not start at all while <strong>Ranging</strong> is set to Manual in the status
+        bar &mdash; set it back to Auto and the sweep does the ranging for you.
       </p>
     </div>
 

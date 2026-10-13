@@ -379,52 +379,50 @@ function swatch(key: SweepTraceColorKey): string {
     :title="unit === 'db' ? 'dB range' : 'Distortion range'"
     :suffix="unit === 'db' ? undefined : '(%)'"
   >
-    <div class="grid grid-cols-2 gap-2.5">
-      <template v-if="unit === 'db'">
-        <div class="grid grid-cols-2 gap-2.5">
-          <label class="tb-field">
-            Top
-            <input
-              :value="yTopDb"
-              type="number"
-              :min="yBottomDb + DB_MIN_SPAN"
-              :max="DB_MAX"
-              :step="DB_STEP"
-              class="tb-input"
-              @change="onTopDbChange"
-            />
-          </label>
-          <label class="tb-field">
-            Bottom
-            <input
-              :value="yBottomDb"
-              type="number"
-              :min="DB_MIN"
-              :max="yTopDb - DB_MIN_SPAN"
-              :step="DB_STEP"
-              class="tb-input"
-              @change="onBottomDbChange"
-            />
-          </label>
-        </div>
-      </template>
-      <template v-else>
-        <div class="grid grid-cols-2 gap-2.5">
-          <label class="tb-field">
-            Top
-            <select v-model.number="yMaxPercent" class="tb-input">
-              <option v-for="v in Y_MAX_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
-            </select>
-          </label>
-          <label class="tb-field">
-            Bottom
-            <select v-model.number="yMinPercent" class="tb-input">
-              <option v-for="v in Y_MIN_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
-            </select>
-          </label>
-        </div>
-      </template>
-    </div>
+    <template v-if="unit === 'db'">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          Top
+          <input
+            :value="yTopDb"
+            type="number"
+            :min="yBottomDb + DB_MIN_SPAN"
+            :max="DB_MAX"
+            :step="DB_STEP"
+            class="tb-input"
+            @change="onTopDbChange"
+          />
+        </label>
+        <label class="tb-field">
+          Bottom
+          <input
+            :value="yBottomDb"
+            type="number"
+            :min="DB_MIN"
+            :max="yTopDb - DB_MIN_SPAN"
+            :step="DB_STEP"
+            class="tb-input"
+            @change="onBottomDbChange"
+          />
+        </label>
+      </div>
+    </template>
+    <template v-else>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          Top
+          <select v-model.number="yMaxPercent" class="tb-input">
+            <option v-for="v in Y_MAX_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
+          </select>
+        </label>
+        <label class="tb-field">
+          Bottom
+          <select v-model.number="yMinPercent" class="tb-input">
+            <option v-for="v in Y_MIN_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
+          </select>
+        </label>
+      </div>
+    </template>
     <!-- The chart's one Autofit, in the first section rather than a scroll below the fields it
          overwrites. -->
     <button
@@ -446,36 +444,34 @@ function swatch(key: SweepTraceColorKey): string {
         <option v-for="a in AMPLITUDE_X_AXES" :key="a.value" :value="a.value">{{ a.label }}</option>
       </select>
     </label>
-    <div class="grid grid-cols-2 gap-2.5">
-      <template v-if="isFrequencyAxis">
-        <div class="grid grid-cols-2 gap-2.5">
-          <label class="tb-field">
-            From
-            <select v-model.number="xFrom" class="tb-input">
-              <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
-            </select>
-          </label>
-          <label class="tb-field">
-            To
-            <select v-model.number="xTo" class="tb-input">
-              <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
-            </select>
-          </label>
-        </div>
-      </template>
-      <template v-else>
-        <div class="grid grid-cols-2 gap-2.5">
-          <label class="tb-field">
-            From
-            <input :value="xFrom" type="number" step="any" :min="X_MIN_VALUE" class="tb-input" @change="onXFromChange" />
-          </label>
-          <label class="tb-field">
-            To
-            <input :value="xTo" type="number" step="any" :min="X_MIN_VALUE" class="tb-input" @change="onXToChange" />
-          </label>
-        </div>
-      </template>
-    </div>
+    <template v-if="isFrequencyAxis">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          From
+          <select v-model.number="xFrom" class="tb-input">
+            <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
+          </select>
+        </label>
+        <label class="tb-field">
+          To
+          <select v-model.number="xTo" class="tb-input">
+            <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
+          </select>
+        </label>
+      </div>
+    </template>
+    <template v-else>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          From
+          <input :value="xFrom" type="number" step="any" :min="X_MIN_VALUE" class="tb-input" @change="onXFromChange" />
+        </label>
+        <label class="tb-field">
+          To
+          <input :value="xTo" type="number" step="any" :min="X_MIN_VALUE" class="tb-input" @change="onXToChange" />
+        </label>
+      </div>
+    </template>
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">

@@ -31,6 +31,7 @@ const points = computed(() => measured.value)
 const phaseLabel: Record<SweepPhase, string> = {
   [SweepPhase.Idle]: 'Idle',
   [SweepPhase.DeterminingLevel]: 'Starting',
+  [SweepPhase.DeterminingRange]: 'Determining input range',
   [SweepPhase.NoiseFloor]: 'Measuring noise floor',
   [SweepPhase.Sweeping]: 'Sweeping',
   [SweepPhase.Finished]: 'Finished',
@@ -41,6 +42,7 @@ const phaseLabel: Record<SweepPhase, string> = {
 const PHASE_BY_NAME: Record<string, SweepPhase> = {
   Idle: SweepPhase.Idle,
   DeterminingLevel: SweepPhase.DeterminingLevel,
+  DeterminingRange: SweepPhase.DeterminingRange,
   NoiseFloor: SweepPhase.NoiseFloor,
   Sweeping: SweepPhase.Sweeping,
   Finished: SweepPhase.Finished,

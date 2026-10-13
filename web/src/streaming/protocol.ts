@@ -669,6 +669,8 @@ export const SweepPhase = {
   Finished: 4,
   Cancelled: 5,
   Failed: 6,
+  /** Appended with an explicit ordinal server-side; see ThdSweepPhase.DeterminingRange. */
+  DeterminingRange: 7,
 } as const
 export type SweepPhase = (typeof SweepPhase)[keyof typeof SweepPhase]
 

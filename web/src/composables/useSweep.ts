@@ -75,6 +75,7 @@ const points = computed(() => (axis.value === viewAxis.value ? measured.value : 
 const phaseLabel: Record<SweepPhase, string> = {
   [SweepPhase.Idle]: 'Idle',
   [SweepPhase.DeterminingLevel]: 'Determining level',
+  [SweepPhase.DeterminingRange]: 'Determining input range',
   [SweepPhase.NoiseFloor]: 'Measuring noise floor',
   [SweepPhase.Sweeping]: 'Sweeping',
   [SweepPhase.Finished]: 'Finished',
@@ -85,6 +86,7 @@ const phaseLabel: Record<SweepPhase, string> = {
 const PHASE_BY_NAME: Record<string, SweepPhase> = {
   Idle: SweepPhase.Idle,
   DeterminingLevel: SweepPhase.DeterminingLevel,
+  DeterminingRange: SweepPhase.DeterminingRange,
   NoiseFloor: SweepPhase.NoiseFloor,
   Sweeping: SweepPhase.Sweeping,
   Finished: SweepPhase.Finished,
@@ -151,6 +153,7 @@ function ingestProgress(frame: SweepProgressFrame) {
   if (frame.total > 0) total.value = frame.total
   running.value =
     frame.phase === SweepPhase.DeterminingLevel ||
+    frame.phase === SweepPhase.DeterminingRange ||
     frame.phase === SweepPhase.NoiseFloor ||
     frame.phase === SweepPhase.Sweeping
 

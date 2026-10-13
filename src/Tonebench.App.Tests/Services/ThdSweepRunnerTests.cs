@@ -1026,6 +1026,112 @@ public class ThdSweepRunnerTests
         Assert.Equal(plainDevice.InputRangeWrites[0], dividedDevice.InputRangeWrites[0]);
         Assert.InRange(plain.Session.InputRangeDbv, 6.0, 6.0);
         Assert.InRange(divided.Session.InputRangeDbv, 0.0, 0.0);
-        Assert.All(dividedDevice.InputRangeWrites, dbv => Assert.True(dbv <= 6.0, $"the divided run ranged to {dbv} dBV"));
+        // The range probe's own visits to the least sensitive rung are excluded: that is where it
+        // measures from, by design. What it *selects* is what has to be analyzer-referred.
+        double widestRungDbv = divided.Session.Capabilities.InputRangesDbv.Max();
+        Assert.All(
+            dividedDevice.InputRangeWrites.Where(dbv => dbv != widestRungDbv),
+            dbv => Assert.True(dbv <= 6.0, $"the divided run ranged to {dbv} dBV"));
+    }
+    /// <summary>
+    /// The range an output-referred sweep runs on is <em>measured</em>, and measured from the least
+    /// sensitive rung. The target-derived prediction still goes in first — the level probe needs a
+    /// range that can hold the target, or it reads its own clipping as missing gain — but a peak read
+    /// at that range is only as trustworthy as the prediction was, so the probe starts at the top
+    /// where it cannot clip. Three things are asserted in one test because it is their *order* that
+    /// is the rule: prediction, then the widest rung, then the measured answer.
+    /// </summary>
+    [Fact]
+    public async Task OutputVoltageMode_ProbesTheRangeFromTheLeastSensitiveOne_AndRunsOnWhatItMeasured()
+    {
+        var device = new RangeRecordingDevice();
+        var harness = await CreateAsync(device);
+
+        // Somewhere other than where any of this is going to land, so every write below is one this
+        // sweep decided on rather than one the connect happened to leave in place.
+        await harness.Session.SetInputRangeAsync(18.0, CancellationToken.None);
+        device.InputRangeWrites.Clear();
+
+        var request = Request(startHz: 1000.0, endHz: 2000.0, stepsPerOctave: 1, levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: 0.0);
+        await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.InRange(status.GeneratorAmpDbv, -0.5, 0.5);
+
+        // 6 dBV is the prediction for a 0 dBV target (the lowest rung with 5 dB over it); 42 is the
+        // probe measuring from where it cannot clip; 6 again is what it measured. A sweep left on
+        // the least sensitive rung would read every point against that range's residual, which on a
+        // QA403 is 35 dB above the 0 dBV range's.
+        Assert.Equal([6.0, 42.0, 6.0], device.InputRangeWrites);
+        Assert.Equal(6.0, harness.Session.InputRangeDbv);
+    }
+
+    /// <summary>
+    /// A peak above the target's own prediction means the level probe's captures were clipped, so
+    /// its answer is suspect and the level is settled again on the range the DUT actually needs.
+    /// Driven by hum rather than by frequency response, because this sweep probes the level at the
+    /// same 1 kHz the target names — so what puts a DUT's peak above its tone level here is
+    /// everything that is not the tone. A −8 dBV hum fundamental plus its two harmonics peaks at
+    /// about −2.8 dBV, which asks for the 6 dBV rung, while a −30 dBV target predicts the most
+    /// sensitive one.
+    /// </summary>
+    [Fact]
+    public async Task OutputVoltageMode_WhenThePeakNeedsMoreRangeThanTheTargetPredicted_SettlesTheLevelAgainOnIt()
+    {
+        var device = new RangeRecordingDevice();
+        device.SignalProfile = device.SignalProfile with
+        {
+            NoiseEnabled = false,
+            HumEnabled = true,
+            HumLevelDbv = -8.0,
+            HumHarmonicCount = 3,
+        };
+
+        var harness = await CreateAsync(device);
+        await harness.Session.SetInputRangeAsync(18.0, CancellationToken.None);
+        device.InputRangeWrites.Clear();
+
+        var request = Request(startHz: 1000.0, endHz: 2000.0, stepsPerOctave: 1, levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -30.0);
+        await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+
+        // Predicted the bottom rung from the target, measured the 6 dBV one from the top, and so
+        // settled the level a second time and probed a second time — which is what the second visit
+        // to the top rung is. The whole sequence, because it is the sequence that is the rule.
+        Assert.Equal([0.0, 42.0, 6.0, 42.0, 6.0], device.InputRangeWrites);
+        Assert.Equal(6.0, harness.Session.InputRangeDbv);
+
+        // The point of re-settling: the level is still the one that was asked for.
+        Assert.InRange(status.GeneratorAmpDbv, -30.6, -29.4);
+        Assert.All(status.Points, p => Assert.InRange(p.FundamentalDbv, -30.6, -29.4));
+    }
+
+    /// <summary>
+    /// The output-referred modes are the ones that reprogram the range twice over — once from the
+    /// target and once from the probe — so they are also the ones that have to stand down when the
+    /// user has pinned it. This failed before the probe was added: the prediction was written
+    /// unconditionally, so Manual ranging still lost the range it had been given, once, silently.
+    /// </summary>
+    [Fact]
+    public async Task OutputVoltageMode_WithAutorangeOff_LeavesTheUsersInputRangeAlone()
+    {
+        var device = new RangeRecordingDevice();
+        var harness = await CreateAsync(device);
+        harness.Session.SetAutoRangeEnabled(false);
+        device.InputRangeWrites.Clear();
+
+        var request = Request(startHz: 1000.0, endHz: 2000.0, stepsPerOctave: 1, levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: 0.0);
+        await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Empty(device.InputRangeWrites);
+
+        // Standing down from ranging does not mean standing down from the level: the generator is
+        // still settled on the target, at whatever range the user chose.
+        Assert.InRange(status.GeneratorAmpDbv, -0.5, 0.5);
     }
 }

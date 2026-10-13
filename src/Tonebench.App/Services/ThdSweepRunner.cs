@@ -59,6 +59,13 @@ public sealed class ThdSweepRunner(
     /// <summary>Headroom left above the expected level when picking an input range, in dB — see <see cref="InputRangeSelector.HeadroomDb"/>, which owns the ladder this and the device's own ranger share.</summary>
     private const double InputRangeHeadroomDb = InputRangeSelector.HeadroomDb;
 
+    /// <summary>
+    /// How close two input ranges have to be to count as the same one. The ladder's rungs are 6 dB
+    /// apart, so this is only guarding against a float comparison — but it has to be a real
+    /// tolerance rather than equality, because a write that changes nothing still quiesces the pump.
+    /// </summary>
+    private const double RangeEpsilonDb = 0.01;
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateLock = new();
 
@@ -94,7 +101,8 @@ public sealed class ThdSweepRunner(
     /// </summary>
     public ThdSweepRequest? LastRequest => _lastRequest;
 
-    public bool Running => _phase is ThdSweepPhase.DeterminingLevel or ThdSweepPhase.NoiseFloor or ThdSweepPhase.Sweeping;
+    public bool Running => _phase is ThdSweepPhase.DeterminingLevel or ThdSweepPhase.DeterminingRange
+        or ThdSweepPhase.NoiseFloor or ThdSweepPhase.Sweeping;
 
     public ThdSweepStatus Status
     {
@@ -291,22 +299,6 @@ public sealed class ThdSweepRunner(
             // the predictor is. Its generator level comes back with it rather than being assumed to
             // be the returned one -- a probe that runs out of iterations returns a level it has not
             // measured at, and pairing that with the earlier peak would offset every prediction.
-            double generatorAmpDbv;
-            double predictorPeakDbv = double.NegativeInfinity;
-            double predictorGenDbv;
-
-            if (request.Axis == SweepAxis.Amplitude)
-            {
-                generatorAmpDbv = VoltToDbv(request.StartAmplitudeVolt);
-                predictorGenDbv = generatorAmpDbv;
-            }
-            else
-            {
-                (generatorAmpDbv, predictorPeakDbv, predictorGenDbv) = await ResolveGeneratorAmplitudeAsync(request, ct);
-            }
-
-            SetGeneratorAmpDbv(generatorAmpDbv);
-
             // Manual range control means manual: with the Auto checkbox off the user has picked a
             // range deliberately, and a sweep quietly reprogramming it would be the same class of
             // surprise autoranging used to be before that checkbox existed.
@@ -319,7 +311,8 @@ public sealed class ThdSweepRunner(
             // Suppressing step-down is what makes a programmed range stay programmed; it is deferred
             // until there is something to predict *from*, so a sweep with no probe still gets a
             // freely-ranging first point to seed itself off instead of being pinned to whatever
-            // range happened to be left over from the last measurement.
+            // range happened to be left over from the last measurement. An output-referred run has
+            // a probe, so there it is taken over up front instead -- see the call below.
             void TakeOverRangingFromStepDown()
             {
                 if (stepDownSuppressed || !predictionOwnsRange || session.AutoRangeStepDownEnabled is not true)
@@ -331,6 +324,30 @@ public sealed class ThdSweepRunner(
                     "Input range is now predicted per point from the measured level; autorange step-down "
                         + "suppressed for the rest of the sweep (step-up stays live as the clip backstop)");
             }
+
+            double generatorAmpDbv;
+            double predictorPeakDbv = double.NegativeInfinity;
+            double predictorGenDbv;
+
+            if (request.Axis == SweepAxis.Amplitude)
+            {
+                generatorAmpDbv = VoltToDbv(request.StartAmplitudeVolt);
+                predictorGenDbv = generatorAmpDbv;
+            }
+            else
+            {
+                // Step-down is handed over before the first probe rather than after, because both
+                // probes program a range of their own and the ranger would walk straight back off
+                // it. Measured on a QA403 in loopback, 0 dBV target: with step-down live the level
+                // probe's climb from -40 dBV dragged the range 0 -> 6 -> 12 -> 18 while the
+                // prediction said 6, and the range probe's own 42 dBV would be walked down a rung
+                // per second -- which is inside the probe's record at any FFT size past 65536
+                // points, so its capture would be flushed and retaken for no gain in the answer.
+                (generatorAmpDbv, predictorPeakDbv, predictorGenDbv) =
+                    await ResolveGeneratorAmplitudeAsync(request, TakeOverRangingFromStepDown, ct);
+            }
+
+            SetGeneratorAmpDbv(generatorAmpDbv);
 
             if (!double.IsNegativeInfinity(predictorPeakDbv))
                 TakeOverRangingFromStepDown();
@@ -630,18 +647,109 @@ public sealed class ThdSweepRunner(
         };
 
     /// <summary>
-    /// The generator amplitude to sweep with. Direct for <see cref="ThdSweepLevelMode.GeneratorVoltage"/>;
-    /// for the output-referred modes it is solved by probing at 1 kHz, exactly as the previous app
-    /// did: measure what comes back, correct the generator by the shortfall, repeat.
+    /// The generator amplitude to sweep with, and the peak/level pair that seeds the per-point range
+    /// predictor. Direct for <see cref="ThdSweepLevelMode.GeneratorVoltage"/>; for the
+    /// output-referred modes the level is solved by probing at 1 kHz, exactly as the previous app
+    /// did — measure what comes back, correct the generator by the shortfall, repeat.
+    ///
+    /// <para>The two halves sit in this order for the reason
+    /// <see cref="FrequencyResponseRunner"/>'s do, and the ordering is load-bearing rather than
+    /// tidy. An output-referred target <i>is</i> the level the input stage must accommodate, so the
+    /// range can be predicted from it and applied before the first tone is voiced; without that the
+    /// level probe fights its own clipping, reading a compressed tone as missing gain. But the
+    /// prediction is only where the probe <em>starts</em>: the range the sweep runs on is
+    /// <see cref="ProbeInputRangeAsync"/>'s, measured from the least sensitive range, because a
+    /// prediction assumes the DUT's peak sits at its 1 kHz level and that is true of a flat DUT and
+    /// of nothing else. A probe that measures wider than the prediction is saying the level probe's
+    /// own captures were clipped, so the level is settled again on the range the DUT actually needs
+    /// and ranged once more — a flat DUT never enters that branch and pays nothing for it.</para>
     /// </summary>
+    /// <param name="takeOverRanging">
+    /// Hands step-down over to this runner — called before the first range is programmed, since
+    /// both probes program one and a live step-down walks the range off it again.
+    /// </param>
     private async Task<(double GenDbv, double PeakDbv, double PeakAtGenDbv)> ResolveGeneratorAmplitudeAsync(
-        ThdSweepRequest request, CancellationToken ct)
+        ThdSweepRequest request, Action takeOverRanging, CancellationToken ct)
     {
         // Nothing was measured, so there is nothing to seed the range predictor with — the first
         // sweep point measures at whatever range is set and seeds it itself.
         if (request.LevelMode == ThdSweepLevelMode.GeneratorVoltage)
             return (request.LevelDbv, double.NegativeInfinity, request.LevelDbv);
 
+        // The probe is its own capture at its own frequency, so under adaptive resolution it gets
+        // the size 1 kHz would be swept at -- and must be snapped against that same size, or the
+        // probe tone leaks and the level it solves for is read off a smeared fundamental.
+        int probeFftSize = request.FftSizeAt(ProbeFrequencyHz);
+        double probeToneHz = CoherentFrequency.Nearest(ProbeFrequencyHz, request.EffectiveSampleRateHz, probeFftSize).FrequencyHz;
+
+        // Manual range control means manual: with the Auto checkbox off the user has picked a range
+        // deliberately, and neither the prediction nor the probe may reprogram it -- the same gate
+        // the per-point prediction in RunAsync is behind, and the same one the frequency-response
+        // runner puts its own probe behind.
+        bool ownsInputRange = session.RunnerOwnsInputRange;
+
+        // The target is the DUT's level; the range ladder is the analyzer's, so an external input
+        // gain is put back first. No single measured channel here, so the wider of the two decides.
+        double predictedRangeDbv = InputRangeSelector.For(
+            session.Capabilities.InputRangesDbv, session.ToAnalyzerDbv(request.LevelDbv));
+
+        if (ownsInputRange)
+        {
+            takeOverRanging();
+            await ApplyInputRangeAsync(predictedRangeDbv, ct);
+        }
+
+        var settled = await SettleGeneratorLevelAsync(request, probeToneHz, probeFftSize, ProbeStartDbv, ct);
+
+        if (!ownsInputRange)
+            return settled;
+
+        var probe = await ProbeInputRangeAsync(request, probeToneHz, probeFftSize, settled.GenDbv, ct);
+
+        // Nothing readable at the least sensitive range, so there is no measured peak to range from.
+        // The prediction is then the honest answer — it is the range the level the probe just
+        // settled on was measured at — and InputRangeSelector would otherwise read an infinitely
+        // quiet peak as "the most sensitive rung will do".
+        if (double.IsNegativeInfinity(probe.PeakDbv))
+        {
+            logger.LogWarning(
+                "The input-range probe measured no signal at the {WidestDbv:0.#} dBV range; keeping the {Predicted:0.#} dBV "
+                    + "range predicted from the target level",
+                session.Capabilities.InputRangesDbv.Max(), predictedRangeDbv);
+
+            await ApplyInputRangeAsync(predictedRangeDbv, ct);
+            return settled;
+        }
+
+        if (probe.RangeDbv > predictedRangeDbv + RangeEpsilonDb)
+        {
+            logger.LogInformation(
+                "The DUT's peak needs a {Measured:0.#} dBV input range where its target level predicted {Predicted:0.#} dBV; "
+                    + "settling the generator level again on the wider range",
+                probe.RangeDbv, predictedRangeDbv);
+
+            await ApplyInputRangeAsync(probe.RangeDbv, ct);
+            settled = await SettleGeneratorLevelAsync(request, probeToneHz, probeFftSize, settled.GenDbv, ct);
+            probe = await ProbeInputRangeAsync(request, probeToneHz, probeFftSize, settled.GenDbv, ct);
+        }
+
+        await ApplyInputRangeAsync(probe.RangeDbv, ct);
+
+        // The seed is the *probe's* peak, not the level probe's last one: it was measured on the
+        // least sensitive range, so it is a property of the signal rather than of whatever range
+        // happened to be in force, and the generator level it was measured at is known exactly
+        // rather than being the level a loop that ran out of iterations returned.
+        return (settled.GenDbv, probe.PeakDbv, settled.GenDbv);
+    }
+
+    /// <summary>
+    /// Corrects the generator level toward the output-referred target, from
+    /// <paramref name="startDbv"/>, and returns the level it settled on together with the peak that
+    /// level was measured at.
+    /// </summary>
+    private async Task<(double GenDbv, double PeakDbv, double PeakAtGenDbv)> SettleGeneratorLevelAsync(
+        ThdSweepRequest request, double probeToneHz, int probeFftSize, double startDbv, CancellationToken ct)
+    {
         SetPhase(ThdSweepPhase.DeterminingLevel);
         BroadcastProgress(0, 0, ProbeFrequencyHz, ThdSweepPhase.DeterminingLevel);
 
@@ -650,23 +758,7 @@ public sealed class ThdSweepRunner(
             ? session.Capabilities.OutputRangesDbv.Max()
             : 18.0;
 
-        // The target output level is known before the first probe, so the input range can be set for
-        // it up front. Without this the probe fights its own clipping: at a range below the target,
-        // the ADC compresses the tone, the measured fundamental comes back low, and the correction
-        // pushes the generator *higher* — straight to full scale, driving a real DUT far harder than
-        // asked. Only the output-referred modes can do this; with a fixed generator amplitude the
-        // DUT's output is unknown until something has been measured, so the user's own range (or the
-        // device's autoranging) stands.
-        // The target is the DUT's level; the range ladder is the analyzer's, so an external input
-        // gain is put back first. No single measured channel here, so the wider of the two decides.
-        await SetInputRangeForAsync(session.ToAnalyzerDbv(wantedOutDbv), ct);
-
-        // The probe is its own capture at its own frequency, so under adaptive resolution it gets
-        // the size 1 kHz would be swept at -- and must be snapped against that same size, or the
-        // probe tone leaks and the level it solves for is read off a smeared fundamental.
-        int probeFftSize = request.FftSizeAt(ProbeFrequencyHz);
-        var probeTone = CoherentFrequency.Nearest(ProbeFrequencyHz, request.EffectiveSampleRateHz, probeFftSize);
-        double genDbv = ProbeStartDbv;
+        double genDbv = startDbv;
 
         // Tracked as a pair: the peak, and the generator level it was measured at. The loop can exit
         // having just applied an unmeasured correction, and a peak paired with the wrong generator
@@ -679,7 +771,7 @@ public sealed class ThdSweepRunner(
             ct.ThrowIfCancellationRequested();
 
             var snapshots = await CaptureWithStimulusAsync(
-                ToneConfig(probeTone.FrequencyHz, genDbv, request), request, probeFftSize, ct);
+                ToneConfig(probeToneHz, genDbv, request), request, probeFftSize, ct);
 
             peakDbv = MeasuredPeakDbv(snapshots);
             peakAtGenDbv = genDbv;
@@ -707,7 +799,8 @@ public sealed class ThdSweepRunner(
             if (genDbv <= ProbeStartDbv)
             {
                 throw new InvalidOperationException(
-                    $"Could not reach the requested output level — the generator would need to go below {ProbeStartDbv:0} dBV. Check that the DUT is connected and powered.");
+                    $"Could not hold the requested output level — this DUT needs less than {ProbeStartDbv:0} dBV of drive to reach it, "
+                        + "which is below the generator level this probe will go to. Lower the target level, or insert attenuation ahead of the DUT.");
             }
 
             genDbv = Math.Min(genDbv, maxGenDbv);
@@ -718,28 +811,60 @@ public sealed class ThdSweepRunner(
     }
 
     /// <summary>
-    /// Programs the smallest input range that still leaves <see cref="InputRangeHeadroomDb"/> above
-    /// <paramref name="expectedLevelDbv"/>, out of whatever this device actually offers.
+    /// Measures the input range this DUT's output needs, at a generator level already settled on,
+    /// and returns it with the peak it was measured from.
     ///
-    /// Deliberately built from <see cref="DeviceCapabilities.InputRangesDbv"/> rather than porting
-    /// the previous app's hard-coded 0/6/12/18/24/30/36/42 ladder — that list is a QA402-era
-    /// constant, and <see cref="InputRangeSelector"/> is the one place it is spelled; a second copy
-    /// here would be the one that goes stale. The 5 dB of headroom is from that same
-    /// reference: enough that the tone's own peaks stay off the clip point, which matters far more
-    /// for a distortion measurement than for a level one.
+    /// <para><b>Least sensitive range first</b>, which is the whole reason this exists rather than
+    /// trusting the prediction: a probe that clips reads a peak that is a property of the range
+    /// rather than of the signal, and would then choose that same range again and stay wrong — one
+    /// rung per pass, which is how the frequency-response runner's RIAA case took four passes to
+    /// draw a curve. Starting at the top cannot clip, so one capture lands on the answer.</para>
     ///
-    /// Goes through <see cref="DeviceSessionService.SetInputRangeAsync"/> so a mid-stream change is
-    /// applied on the transfer pump rather than written to EP1 with EP2 transfers in flight.
+    /// <para>Reuses the level probe's own record length and snapped tone rather than taking a short
+    /// record of its own: a peak needs no resolution, but this way the capture is the same one more
+    /// iteration of the probe loop would have cost and the ring buffers are not resized twice for
+    /// it.</para>
     /// </summary>
-    private async Task SetInputRangeForAsync(double expectedLevelDbv, CancellationToken ct)
+    private async Task<(double RangeDbv, double PeakDbv)> ProbeInputRangeAsync(
+        ThdSweepRequest request, double probeToneHz, int probeFftSize, double generatorAmpDbv, CancellationToken ct)
     {
         var ranges = session.Capabilities.InputRangesDbv;
-        if (ranges.Count == 0)
+
+        SetPhase(ThdSweepPhase.DeterminingRange);
+        BroadcastProgress(0, 0, ProbeFrequencyHz, ThdSweepPhase.DeterminingRange);
+
+        await ApplyInputRangeAsync(ranges.Max(), ct);
+
+        var snapshots = await CaptureWithStimulusAsync(
+            ToneConfig(probeToneHz, generatorAmpDbv, request), request, probeFftSize, ct);
+
+        double peakDbv = MeasuredPeakDbv(snapshots);
+        double selected = double.IsNegativeInfinity(peakDbv) ? ranges.Max() : SelectInputRange(ranges, peakDbv);
+
+        logger.LogInformation(
+            "Input-range probe measured a peak of {PeakDbv:0.##} dBV at {GenDbv:0.##} dBV generator; input range {RangeDbv:0.#} dBV",
+            peakDbv, generatorAmpDbv, selected);
+
+        return (selected, peakDbv);
+    }
+
+    /// <summary>
+    /// Programs <paramref name="rangeDbv"/>, which is one of the rungs
+    /// <see cref="DeviceCapabilities.InputRangesDbv"/> offers — see <see cref="SelectInputRange"/>
+    /// for how one is chosen, and why the ladder is read off the device rather than ported from the
+    /// previous app's hard-coded 0/6/12/18/24/30/36/42.
+    ///
+    /// Goes through <see cref="DeviceSessionService.SetInputRangeAsync"/> so a mid-stream change is
+    /// applied on the transfer pump rather than written to EP1 with EP2 transfers in flight. A
+    /// no-op when the range is already there, because a write that changes nothing still quiesces
+    /// the pump and punches a ~110 ms hole in the stream.
+    /// </summary>
+    private async Task ApplyInputRangeAsync(double rangeDbv, CancellationToken ct)
+    {
+        if (Math.Abs(rangeDbv - session.InputRangeDbv) <= RangeEpsilonDb)
             return;
 
-        double selected = SelectInputRange(ranges, expectedLevelDbv);
-        if (Math.Abs(selected - session.InputRangeDbv) > 0.01)
-            await session.SetInputRangeAsync(selected, ct);
+        await session.SetInputRangeAsync(rangeDbv, ct);
     }
 
     /// <summary>
@@ -774,7 +899,7 @@ public sealed class ThdSweepRunner(
             ratchetFloorDbv = selected;
         }
 
-        if (Math.Abs(selected - session.InputRangeDbv) > 0.01)
+        if (Math.Abs(selected - session.InputRangeDbv) > RangeEpsilonDb)
         {
             logger.LogDebug(
                 "Predicted peak {PredictedDbv:0.##} dBV for the next point — input range {FromDbv:0.#} -> {ToDbv:0.#} dBV",

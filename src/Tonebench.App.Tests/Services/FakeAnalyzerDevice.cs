@@ -61,6 +61,17 @@ internal class FakeAnalyzerDevice : IAnalyzerDevice
     public Task ConfigureGeneratorAsync(GeneratorConfig config, CancellationToken ct) =>
         Unplugged ? FailAsLost("generator config") : _inner.ConfigureGeneratorAsync(config, ct);
 
+    /// <summary>
+    /// The simulator's own knobs, so a test can give the signal a loud hum or turn the noise off and
+    /// still have a device with a <i>ranger</i> — which the simulator on its own does not have, and
+    /// which is the whole reason the ranging tests go through this wrapper.
+    /// </summary>
+    public SimulatedSignalProfile SignalProfile
+    {
+        get => _inner.SignalProfile;
+        set => _inner.SignalProfile = value;
+    }
+
     public DeviceCapabilities Capabilities => _inner.Capabilities;
 
     public double InputRangeDbv => _inner.InputRangeDbv;

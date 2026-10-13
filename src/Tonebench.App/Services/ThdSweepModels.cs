@@ -73,6 +73,16 @@ public enum ThdSweepPhase
     Finished,
     Cancelled,
     Failed,
+
+    /// <summary>
+    /// Probing for the input range the DUT's output needs, from the least sensitive one — output-referred
+    /// modes only, and only while the runner owns the range. Appended with an explicit ordinal rather
+    /// than slotted in next to <see cref="DeterminingLevel"/>, exactly as
+    /// <see cref="FrequencyResponsePhase.DeterminingRange"/> is and for the same reason: the ordinal
+    /// rides in the progress frame's <c>seq</c> field, so renumbering the existing members would make
+    /// an older browser mislabel every phase.
+    /// </summary>
+    DeterminingRange = 7,
 }
 
 /// <summary>

@@ -265,7 +265,7 @@ const { showPage } = useManual()
       and every setting and calibration of your bench. Send that one file. There is nothing to
       collect by hand and nothing to switch on first, and it is worth pressing <em>before</em> you
       stop the measurement: half of what it collects is what the analyzer is doing at that moment,
-      and that is gone as soon as you press STOP.
+      and that is gone as soon as you press Stop.
     </p>
     <p>
       If the problem is one that has to be seen to be believed — a trace that jumps, a tone that is

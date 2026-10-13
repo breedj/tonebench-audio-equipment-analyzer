@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { formatBandwidth, formatCorner, formatDb, formatDelay, formatHz, formatRatio } from './format'
+import {
+  formatBandwidth,
+  formatCorner,
+  formatDb,
+  formatDelay,
+  formatHz,
+  formatRatio,
+  splitUnit,
+} from './format'
 
 const reading = (over: Partial<Parameters<typeof formatBandwidth>[0]> = {}) => ({
   dropDb: 3,
@@ -97,5 +105,26 @@ describe('formatDelay', () => {
     expect(formatDelay(undefined)).toBe('—')
     expect(formatDelay(Number.NaN)).toBe('—')
     expect(formatDelay(0)).toBe('0 ns')
+  })
+})
+
+describe('splitUnit', () => {
+  it('splits a reading at its unit', () => {
+    expect(splitUnit('52.55 Hz')).toEqual({ value: '52.55', unit: 'Hz' })
+    expect(splitUnit('27.2 kHz')).toEqual({ value: '27.2', unit: 'kHz' })
+    expect(splitUnit('4.41 dB')).toEqual({ value: '4.41', unit: 'dB' })
+    expect(splitUnit('22.780 ms')).toEqual({ value: '22.780', unit: 'ms' })
+  })
+
+  it('keeps a clamped corner marker with the number', () => {
+    expect(splitUnit('> 52.2 kHz')).toEqual({ value: '> 52.2', unit: 'kHz' })
+    expect(splitUnit('< 11.38 Hz')).toEqual({ value: '< 11.38', unit: 'Hz' })
+  })
+
+  it('leaves a value with no unit alone rather than making one up', () => {
+    expect(splitUnit('—')).toEqual({ value: '—', unit: '' })
+    expect(splitUnit('')).toEqual({ value: '', unit: '' })
+    // A bare pair of numbers must not read its second as a unit.
+    expect(splitUnit('1 2')).toEqual({ value: '1 2', unit: '' })
   })
 })

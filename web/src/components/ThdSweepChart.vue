@@ -17,6 +17,7 @@ import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
 import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
+import { SWEEP_TRACE_COLORS } from '../sweep/traceColors'
 import { sweepMetricColumns, sweepMetricRow } from '../sweep/readings'
 import {
   decadeOrFallbackSplits,
@@ -196,18 +197,16 @@ const TRACES = [
   // frequency response riding along with the sweep. It is already a dB quantity, so it has no
   // meaning on the percent axis and `dbOnly` keeps it off it -- the previous app greys its
   // checkbox out on the D% graph for the same reason.
-  { key: 'magnitude', label: 'Magn', width: 1, color: ['#be185d', '#f472b6'], show: 'showMagnitude', dbOnly: true },
-  { key: 'thd', label: 'THD', width: 1, color: ['#111827', '#e5e7eb'], show: 'showThd' },
-  { key: 'd2', label: 'D2', width: 0.8, color: ['#1d6fd0', '#60a5fa'], show: 'showD2' },
-  { key: 'd3', label: 'D3', width: 0.8, color: ['#e07b16', '#fbbf24'], show: 'showD3' },
-  { key: 'd4', label: 'D4', width: 0.8, color: ['#1a7a3c', '#4ade80'], show: 'showD4' },
-  { key: 'd5', label: 'D5', width: 0.8, color: ['#c62828', '#f87171'], show: 'showD5' },
-  { key: 'd6plus', label: 'D6+', width: 0.8, color: ['#6b3fa0', '#c084fc'], show: 'showD6Plus' },
-  // Not in the previous app's legend, so it gets a hue that stays clear of the six above. Teal
-  // rather than the neutral grey it used to be: the right channel is drawn as its hue blended
-  // toward the background (see sweepLineStyle), and blending near-black THD lands on a mid grey
-  // that a neutral Noise trace is very hard to tell from. Grey now belongs to the THD family alone.
-  { key: 'noise', label: 'Noise', width: 0.8, color: ['#0d7d84', '#2dd4bf'], show: 'showNoiseFloor' },
+  // The hues live in sweep/traceColors.ts, because the display rail draws a swatch beside each of
+  // these checkboxes and the two must not drift.
+  { key: 'magnitude', label: 'Magn', width: 1, color: SWEEP_TRACE_COLORS.magnitude, show: 'showMagnitude', dbOnly: true },
+  { key: 'thd', label: 'THD', width: 1, color: SWEEP_TRACE_COLORS.thd, show: 'showThd' },
+  { key: 'd2', label: 'D2', width: 0.8, color: SWEEP_TRACE_COLORS.d2, show: 'showD2' },
+  { key: 'd3', label: 'D3', width: 0.8, color: SWEEP_TRACE_COLORS.d3, show: 'showD3' },
+  { key: 'd4', label: 'D4', width: 0.8, color: SWEEP_TRACE_COLORS.d4, show: 'showD4' },
+  { key: 'd5', label: 'D5', width: 0.8, color: SWEEP_TRACE_COLORS.d5, show: 'showD5' },
+  { key: 'd6plus', label: 'D6+', width: 0.8, color: SWEEP_TRACE_COLORS.d6plus, show: 'showD6Plus' },
+  { key: 'noise', label: 'Noise', width: 0.8, color: SWEEP_TRACE_COLORS.noise, show: 'showNoiseFloor' },
 ] as const
 
 type TraceKey = (typeof TRACES)[number]['key'] & SweepTraceKey
@@ -1120,7 +1119,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
     <div class="min-h-6 pr-9 flex items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
       <span class="flex items-center gap-2">

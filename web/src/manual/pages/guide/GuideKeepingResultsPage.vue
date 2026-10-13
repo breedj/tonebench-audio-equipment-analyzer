@@ -53,7 +53,7 @@ const { showPage } = useManual()
     <h2>Saving a result</h2>
     <ol>
       <li>
-        Press <strong>SINGLE</strong>, or let a sweep run to the end. The save button is deliberately
+        Press <strong>Single</strong>, or let a sweep run to the end. The save button is deliberately
         disabled while something is running, because what gets stored is what is on screen.
       </li>
       <li>

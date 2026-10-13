@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import Modal from './Modal.vue'
+import PanelIcon from './PanelIcon.vue'
+import type { PanelIconName } from '../panels/panelIcons'
+import type { MeasurementKindTone } from '../measurements/kinds'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
 import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
@@ -88,6 +91,19 @@ const lastRecordingSummary = computed(() => {
  */
 type ConfigTab = 'General' | 'Acquisition' | 'Measurement' | 'Impedance' | 'Diagnostics'
 const TABS: ConfigTab[] = ['General', 'Acquisition', 'Measurement', 'Impedance', 'Diagnostics']
+
+/**
+ * The glyph and hue the *selected* tab wears (2026-10-13 mockup). Only the selected one carries it:
+ * five tinted circles in a row would be a palette rather than a position, and what the colour is
+ * for is saying which section you are in.
+ */
+const TAB_LOOKS: Record<ConfigTab, { icon: PanelIconName; tone: MeasurementKindTone }> = {
+  General: { icon: 'sliders', tone: 'violet' },
+  Acquisition: { icon: 'signalIn', tone: 'blue' },
+  Measurement: { icon: 'ruler', tone: 'indigo' },
+  Impedance: { icon: 'resistor', tone: 'teal' },
+  Diagnostics: { icon: 'checklist', tone: 'red' },
+}
 const activeTab = ref<ConfigTab>('General')
 
 // Fetched when the dialog opens rather than on mount: it is a round trip for something most
@@ -222,30 +238,234 @@ async function clearStoredCalibration() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Configuration" @close="emit('close')">
-    <div class="flex flex-col gap-4 text-sm">
-      <!-- Tabs rather than one long scroll: the settings here have nothing to do with each other,
-           and a page that mixes a theme picker with a fixture calibration makes both harder to find. -->
-      <div class="flex gap-1 border-b border-neutral-200 dark:border-neutral-800" role="tablist">
+  <Modal :open="props.open" title="Configuration" icon="cog" tone="violet" size="lg" ground flush @close="emit('close')">
+    <!-- Tabs rather than one long scroll: the settings here have nothing to do with each other,
+         and a page that mixes a theme picker with a fixture calibration makes both harder to find.
+         Between the header and the body, so the strip runs the full width of the dialog. -->
+    <template #under-header>
+      <div
+        class="flex gap-0.5 overflow-x-auto border-b border-neutral-200 px-3 dark:border-neutral-800"
+        role="tablist"
+        aria-label="Configuration sections"
+      >
         <button
           v-for="tab in TABS"
           :key="tab"
           type="button"
           role="tab"
           :aria-selected="activeTab === tab"
-          class="-mb-px border-b-2 px-3 py-1.5 text-xs font-medium transition"
-          :class="
-            activeTab === tab
-              ? 'border-neutral-900 text-neutral-900 dark:border-neutral-100 dark:text-neutral-100'
-              : 'border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
-          "
+          class="tb-tab"
+          :class="activeTab === tab ? 'tb-tab-on' : ''"
+          :style="activeTab === tab ? { borderBottomColor: `var(--kind-${TAB_LOOKS[tab].tone}-chip-fg)` } : undefined"
           @click="activeTab = tab"
         >
+          <PanelIcon v-if="activeTab === tab" :icon="TAB_LOOKS[tab].icon" :tone="TAB_LOOKS[tab].tone" :size="18" />
           {{ tab }}
         </button>
       </div>
+    </template>
 
-      <div class="flex min-h-48 flex-col gap-5">
+    <div class="flex min-h-56 flex-col gap-3.5 p-4 text-[13px]">
+        <!-- The Impedance tab is the one the 2026-10-13 mockup draws, and it is two cards: the
+             fixture's own two numbers, and whatever calibration is stored against them. -->
+        <template v-if="activeTab === 'Impedance'">
+          <p class="px-0.5 text-[12.5px] leading-[1.5] text-neutral-600 dark:text-neutral-300">
+            The bench fixture, shared by every impedance measurement. Stored in its own configuration
+            database rather than with your measurements — it describes this QA403 and these test
+            leads, so it must not travel inside a measurement file copied to another machine.
+          </p>
+
+          <section class="dialog-card">
+            <div class="flex items-center gap-2.5 px-3 py-2.5">
+              <PanelIcon icon="resistor" tone="teal" :size="28" />
+              <h3 class="flex-1 text-[14px] font-semibold">Fixture</h3>
+            </div>
+
+            <div class="px-3.5 pb-2.5">
+              <div
+                class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-neutral-100 py-2 dark:border-neutral-800"
+              >
+                <label
+                  for="cfg-reference-ohms"
+                  class="text-neutral-600 dark:text-neutral-300"
+                  :title="
+                    resistorLocked
+                      ? 'Fixed by the stored calibration: the standards are only valid at the resistance they were captured through. Clear the calibration to change it.'
+                      : 'The series resistor a new impedance measurement starts from. Enter its measured value — the answer is directly proportional to it.'
+                  "
+                >
+                  Reference resistor
+                </label>
+                <span class="flex items-center gap-2">
+                  <input
+                    id="cfg-reference-ohms"
+                    v-model.number="impedance.referenceOhms"
+                    type="number"
+                    min="0.1"
+                    step="any"
+                    :disabled="resistorLocked"
+                    class="tb-input w-[110px] text-right font-mono disabled:bg-neutral-100 disabled:text-neutral-500 dark:disabled:bg-neutral-900 dark:disabled:text-neutral-400"
+                    @change="applyFixtureField"
+                  />
+                  <span class="w-7 text-neutral-500 dark:text-neutral-400">Ω</span>
+                </span>
+              </div>
+
+              <div
+                class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-neutral-100 py-2 dark:border-neutral-800"
+              >
+                <label
+                  for="cfg-calibration-level"
+                  class="text-neutral-600 dark:text-neutral-300"
+                  title="The level calibration runs drive at, louder than a measurement's on purpose: a shorted fixture puts the measured channel about 60 dB below the reference one, and both share a single input range set from the loud one."
+                >
+                  Calibration drive level
+                </label>
+                <span class="flex items-center gap-2">
+                  <input
+                    id="cfg-calibration-level"
+                    v-model.number="impedance.calibrationLevelValue"
+                    type="number"
+                    step="any"
+                    class="tb-input w-[110px] text-right font-mono"
+                    @change="applyFixtureField"
+                  />
+                  <span class="w-7 text-neutral-500 dark:text-neutral-400">dBV</span>
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section class="dialog-card">
+            <div class="flex items-center gap-2.5 px-3 py-2.5">
+              <PanelIcon :icon="hasCalibration ? 'checklist' : 'target'" tone="green" :size="28" />
+              <h3 class="flex-1 text-[14px] font-semibold">Stored calibration</h3>
+              <!-- The pill is the whole of what "is there one" needs to say, and it is the first
+                   thing looked for on this tab. -->
+              <span
+                v-if="hasCalibration"
+                class="rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-[0.04em] uppercase"
+                :style="{ backgroundColor: 'var(--kind-green-chip-bg)', color: 'var(--kind-green-chip-fg)' }"
+              >
+                Active
+              </span>
+              <span
+                v-else
+                class="rounded-full border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-[11px] font-semibold tracking-[0.04em] text-neutral-500 uppercase dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400"
+              >
+                None
+              </span>
+            </div>
+
+            <p
+              v-if="!hasCalibration"
+              class="border-t border-neutral-100 px-3.5 py-3 text-[12.5px] leading-[1.5] text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+            >
+              Nothing stored yet. Capture an open — and ideally a short — on an impedance
+              measurement, then press <strong>Store as global calibration</strong> there. It is
+              captured from a measurement rather than here, because that is where the run controls
+              and the live trace are.
+            </p>
+
+            <template v-else-if="fixture">
+              <dl class="px-3.5 pb-1.5 text-[13px]">
+                <div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-t border-neutral-100 py-[7px] dark:border-neutral-800">
+                  <dt class="text-neutral-500 dark:text-neutral-400">Reference</dt>
+                  <dd class="font-mono">{{ formatOhms(fixture.referenceOhms) }}</dd>
+                </div>
+                <div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-t border-neutral-100 py-[7px] dark:border-neutral-800">
+                  <dt class="text-neutral-500 dark:text-neutral-400">Standards</dt>
+                  <dd class="flex gap-1.5">
+                    <span
+                      class="rounded-full border border-neutral-200 bg-neutral-100 px-2 py-px text-[12px] dark:border-neutral-700 dark:bg-neutral-800"
+                    >
+                      open
+                    </span>
+                    <span
+                      v-if="fixture.shortCal"
+                      class="rounded-full border border-neutral-200 bg-neutral-100 px-2 py-px text-[12px] dark:border-neutral-700 dark:bg-neutral-800"
+                    >
+                      short
+                    </span>
+                  </dd>
+                </div>
+                <div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-t border-neutral-100 py-[7px] dark:border-neutral-800">
+                  <dt class="text-neutral-500 dark:text-neutral-400">Band</dt>
+                  <dd class="font-mono">
+                    {{ formatHz(fixture.capturedLowHz) }} – {{ formatHz(fixture.capturedHighHz) }}
+                  </dd>
+                </div>
+                <div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-t border-neutral-100 py-[7px] dark:border-neutral-800">
+                  <dt class="text-neutral-500 dark:text-neutral-400">Captured</dt>
+                  <dd class="font-mono">
+                    {{ fixture.capturedUtc ? new Date(fixture.capturedUtc).toLocaleString() : '—' }}
+                  </dd>
+                </div>
+              </dl>
+
+              <div
+                role="note"
+                class="mx-3.5 mt-1 mb-3 flex items-start gap-2.5 rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-500/40 dark:bg-amber-500/10"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="mt-px shrink-0 text-amber-600 dark:text-amber-500"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 11v5M12 8h.01" />
+                </svg>
+                <p class="text-[12.5px] leading-[1.5] text-amber-900 dark:text-amber-200">
+                  Outside the band above, a calibration curve is held flat rather than measured, so a
+                  sweep that runs past it is extrapolating. The measurement panel says so when it
+                  does.
+                </p>
+              </div>
+
+              <div class="flex justify-end border-t border-neutral-200 px-3.5 py-2.5 dark:border-neutral-800">
+                <button
+                  type="button"
+                  class="btn-chip h-[34px] px-3"
+                  :style="{ backgroundColor: 'var(--kind-red-chip-bg)', color: 'var(--kind-red-chip-fg)' }"
+                  title="Removes the stored standards and unlocks the reference resistor. Measurements using their own calibration are unaffected."
+                  @click="clearStoredCalibration"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+                  </svg>
+                  Clear calibration
+                </button>
+              </div>
+            </template>
+
+            <p
+              v-if="fixtureError"
+              class="border-t border-neutral-100 px-3.5 py-2.5 text-[12px] text-red-600 dark:border-neutral-800 dark:text-red-400"
+            >
+              {{ fixtureError }}
+            </p>
+          </section>
+        </template>
+      <!-- The four tabs the mockup does not draw keep every field they had, on one card so they sit
+           on the ground the way the Impedance tab's two cards do. -->
+      <div v-else class="dialog-card flex flex-col gap-5 p-3.5">
         <template v-if="activeTab === 'General'">
           <label class="flex flex-col gap-1">
             Style
@@ -499,102 +719,13 @@ async function clearStoredCalibration() {
           <p v-if="diagnosticsError" class="text-xs text-red-600 dark:text-red-400">{{ diagnosticsError }}</p>
         </template>
 
-        <template v-else-if="activeTab === 'Impedance'">
-          <p class="text-xs text-neutral-500 dark:text-neutral-400">
-            The bench fixture, shared by every impedance measurement. Stored in its own configuration
-            database rather than with your measurements — it describes this QA403 and these test
-            leads, so it must not travel inside a measurement file copied to another machine.
-          </p>
-
-          <label
-            class="flex flex-col gap-1"
-            :title="
-              resistorLocked
-                ? 'Fixed by the stored calibration: the standards are only valid at the resistance they were captured through. Clear the calibration to change it.'
-                : 'The series resistor a new impedance measurement starts from. Enter its measured value — the answer is directly proportional to it.'
-            "
-          >
-            Reference resistor (Ω)
-            <input
-              type="number"
-              min="0.1"
-              step="any"
-              :disabled="resistorLocked"
-              v-model.number="impedance.referenceOhms"
-              class="w-32 rounded border border-neutral-300 px-2 py-1 disabled:bg-neutral-100 disabled:text-neutral-500 dark:border-neutral-700 dark:disabled:bg-neutral-900 dark:disabled:text-neutral-400"
-              @change="applyFixtureField"
-            />
-          </label>
-
-          <label
-            class="flex flex-col gap-1"
-            title="The level calibration runs drive at, louder than a measurement's on purpose: a shorted fixture puts the measured channel about 60 dB below the reference one, and both share a single input range set from the loud one."
-          >
-            Calibration drive level (dBV)
-            <input
-              type="number"
-              step="any"
-              v-model.number="impedance.calibrationLevelValue"
-              class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-              @change="applyFixtureField"
-            />
-          </label>
-
-          <section class="flex flex-col gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
-            <h3 class="text-xs font-semibold text-neutral-900 dark:text-neutral-100">Stored calibration</h3>
-
-            <p v-if="!hasCalibration" class="text-xs text-neutral-500 dark:text-neutral-400">
-              Nothing stored yet. Capture an open — and ideally a short — on an impedance
-              measurement, then press <strong>Store as global calibration</strong> there. It is
-              captured from a measurement rather than here, because that is where the run controls
-              and the live trace are.
-            </p>
-
-            <template v-else-if="fixture">
-              <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-                <dt class="text-neutral-500 dark:text-neutral-400">Reference</dt>
-                <dd class="font-mono">{{ formatOhms(fixture.referenceOhms) }}</dd>
-                <dt class="text-neutral-500 dark:text-neutral-400">Standards</dt>
-                <dd class="font-mono">{{ fixture.shortCal ? 'open + short' : 'open only' }}</dd>
-                <dt class="text-neutral-500 dark:text-neutral-400">Band</dt>
-                <dd class="font-mono">
-                  {{ formatHz(fixture.capturedLowHz) }} – {{ formatHz(fixture.capturedHighHz) }}
-                </dd>
-                <dt class="text-neutral-500 dark:text-neutral-400">Captured</dt>
-                <dd class="font-mono">
-                  {{ fixture.capturedUtc ? new Date(fixture.capturedUtc).toLocaleString() : '—' }}
-                </dd>
-              </dl>
-
-              <p class="text-xs text-neutral-500 dark:text-neutral-400">
-                Outside the band above a calibration curve is held flat rather than measured, so a
-                sweep that runs past it is extrapolating. The measurement panel says so when it does.
-              </p>
-
-              <button
-                type="button"
-                class="w-fit rounded bg-neutral-900 px-2 py-1 text-xs text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
-                title="Removes the stored standards and unlocks the reference resistor. Measurements using their own calibration are unaffected."
-                @click="clearStoredCalibration"
-              >
-                Clear calibration
-              </button>
-            </template>
-
-            <p v-if="fixtureError" class="text-xs text-red-600 dark:text-red-400">{{ fixtureError }}</p>
-          </section>
-        </template>
       </div>
 
-      <div class="flex justify-end border-t border-neutral-200 pt-3 dark:border-neutral-800">
-        <button
-          type="button"
-          class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
-          @click="emit('close')"
-        >
-          Close
-        </button>
-      </div>
     </div>
+
+    <template #footer>
+      <span class="flex-1"></span>
+      <button type="button" class="btn-primary" @click="emit('close')">Close</button>
+    </template>
   </Modal>
 </template>

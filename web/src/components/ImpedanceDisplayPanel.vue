@@ -283,11 +283,11 @@ watch(
 
 <template>
   <CollapsibleSection title="Display" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
+    <label class="tb-field">
       Chart
       <select
         v-model="view"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option value="Bode">|Z| and phase</option>
         <option value="Nyquist">Complex plane (R vs X)</option>
@@ -295,68 +295,68 @@ watch(
     </label>
 
     <template v-if="view === 'Bode'">
-      <label class="flex items-center gap-2 text-xs">
-        <input v-model="showPhase" type="checkbox" />
+      <label class="tb-check-row">
+        <input v-model="showPhase" type="checkbox" class="tb-check" />
         Phase
       </label>
       <label
-        class="flex items-center gap-2 text-xs"
+        class="tb-check-row"
         title="How much of the measurement was explained by the stimulus. Below about 0.99 the impedance there is not to be trusted — usually the divider output has got too small."
       >
-        <input v-model="showCoherence" type="checkbox" />
+        <input v-model="showCoherence" type="checkbox" class="tb-check" />
         Coherence
       </label>
       <label
-        class="flex items-center gap-2 text-xs"
+        class="tb-check-row"
         title="The stored short standard as impedance — the lead and connector impedance every reading sits on top of, and the floor below which this fixture cannot see."
       >
-        <input v-model="showShortCal" type="checkbox" />
+        <input v-model="showShortCal" type="checkbox" class="tb-check" />
         Short calibration
       </label>
     </template>
 
-    <label class="flex items-center gap-2 text-xs">
-      <input v-model="thickLines" type="checkbox" />
+    <label class="tb-check-row">
+      <input v-model="thickLines" type="checkbox" class="tb-check" />
       Thick lines
     </label>
-    <label v-if="view === 'Bode'" class="flex items-center gap-2 text-xs">
-      <input v-model="showDataPoints" type="checkbox" />
+    <label v-if="view === 'Bode'" class="tb-check-row">
+      <input v-model="showDataPoints" type="checkbox" class="tb-check" />
       Data points
     </label>
   </CollapsibleSection>
 
   <CollapsibleSection v-if="view === 'Bode'" title="Impedance axis" size="xs">
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Linear ohms is how an impedance curve is usually drawn and reads a flat load as flat. Logarithmic is the one scale that fits a fixture's milliohms and a driver's resonance peak in one window."
     >
       Scale
       <select
         v-model="zScale"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option value="Linear">Linear</option>
         <option value="Log">Logarithmic</option>
       </select>
     </label>
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         Top (Ω)
         <input
           :value="zTopOhms"
           type="number"
           step="any"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
           @change="onTopZChange"
         />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         Bottom (Ω)
         <input
           :value="zBottomOhms"
           type="number"
           step="any"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
           @change="onBottomZChange"
         />
       </label>
@@ -374,24 +374,24 @@ watch(
   </CollapsibleSection>
 
   <CollapsibleSection v-if="view === 'Bode' && showPhase" title="Phase axis" size="xs">
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         Top (°)
         <input
           :value="phaseTopDeg"
           type="number"
           step="15"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
           @change="onTopPhaseChange"
         />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         Bottom (°)
         <input
           :value="phaseBottomDeg"
           type="number"
           step="15"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
           @change="onBottomPhaseChange"
         />
       </label>
@@ -399,34 +399,34 @@ watch(
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency axis" size="xs">
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         From (Hz)
         <select
           v-model.number="xFromHz"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
         </select>
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         To (Hz)
         <select
           v-model.number="xToHz"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
         </select>
       </label>
     </div>
 
-    <label class="flex items-center gap-2 text-xs">
+    <label class="tb-check-row">
       <!--
         The model is still named autofitOnDone, and stored as chartAutofitOnDone, because renaming it
         would orphan the setting on every measurement type already saved. It now fits twice: once
         when a run first produces a curve, once when it ends.
       -->
-      <input v-model="autofitOnDone" type="checkbox" />
+      <input v-model="autofitOnDone" type="checkbox" class="tb-check" />
       Autofit each measurement
     </label>
   </CollapsibleSection>

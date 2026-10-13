@@ -7,9 +7,11 @@ import {
   type ReportDocument,
   type ReportRow,
   type ReportSection,
+  type ReportStatusTone,
 } from '../api/client'
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
 import { formatWithPreference } from '../composables/useDateTimeFormat'
+import { splitVersion } from '../about/version'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { toImpedanceTraces, toResponseTraces, toSweepPoints } from '../composables/useMeasurements'
 import { toImdSweepPoints } from '../imd/points'
@@ -34,6 +36,7 @@ import { responseDisplayFromParams, responsePhaseKindFromParams, responseRightCh
 import { sweepDisplayFromParams } from '../sweep/display'
 import { sweepMethodFromParams } from '../sweep/points'
 import { chapterSections } from './builders'
+import { reportAccent } from './palette'
 import { blobToBase64 } from './download'
 import type { ReportElementId } from './elements'
 import { renderExtraCharts, renderView, viewIsCombinable, type RenderedChart } from './render'
@@ -60,6 +63,23 @@ function formatTimestamp(subject: ReportSubject): string {
   // Configuration ▸ General ▸ Date and time format — the same choice the Screenshot's date line follows.
   const date = new Date(subject.timestampUtc)
   return Number.isNaN(date.getTime()) ? subject.timestampUtc : formatWithPreference(date)
+}
+
+/**
+ * What the contents page says about a chapter, and which pill it wears. Three states, and they are
+ * the three a reader has to tell apart: a stored result (when), the measurement on screen (not
+ * saved), and a measurement that has never run (settings only).
+ */
+function chapterStatus(subject: ReportSubject): { status: string; statusTone: ReportStatusTone } {
+  if (subject.timestampUtc) return { status: formatTimestamp(subject), statusTone: 'stored' }
+  if (subject.data.kind === 'none') return { status: 'Settings only', statusTone: 'none' }
+  return { status: 'On screen, not saved', statusTone: 'live' }
+}
+
+/** The chapter's own heading: what this chapter is *of*, under the measurement's name. */
+function chapterTitle(subject: ReportSubject): string {
+  if (subject.resultName) return subject.resultName
+  return subject.data.kind === 'none' ? 'Settings and notes' : 'Current measurement'
 }
 
 export function formatRangeDbv(dbv: number | null | undefined): string | null {
@@ -391,6 +411,24 @@ function subjectMeta(subject: ReportSubject): ReportRow[] {
   return [{ label: 'Taken', value: formatTimestamp(subject) }, ...subject.facts]
 }
 
+/**
+ * The headline figures go under the chapter's head, above its chart — where the design puts them and
+ * where a reader looks first. Done here rather than in the builders, so a builder stays free to emit
+ * its figures beside the readings they summarise.
+ *
+ * **Only when there is one of them.** Several are a per-channel series (the sweeps emit one row of
+ * cards per channel, each above its own table), and hoisting those would separate every one of them
+ * from the table it belongs to.
+ */
+function hoistFigures(sections: ReportSection[]) {
+  const figures = sections.filter((s) => s.kind === 'figures')
+  if (figures.length !== 1) return
+  sections.splice(sections.indexOf(figures[0]), 1)
+  // After a callout, which says whether anything was measured at all.
+  const callouts = sections.filter((s) => s.kind === 'callout').length
+  sections.splice(callouts, 0, figures[0])
+}
+
 /** One chapter for one subject: its charts first (when chosen and available), then the builder's sections. */
 export async function buildChapter(
   subject: ReportSubject,
@@ -399,12 +437,22 @@ export async function buildChapter(
   monochrome = false,
 ): Promise<ReportChapter> {
   const sections: ReportSection[] = []
+  // Said once, at the top, rather than left to be worked out from a chapter with no chart in it.
+  if (subject.data.kind === 'none') {
+    sections.push({ kind: 'callout', title: 'Not measured.', text: 'This chapter carries the settings and notes only.' })
+  }
   if (elements.includes('chart')) sections.push(...(await ownChartSections(subject, views, monochrome)))
   sections.push(...(await extraChartSections(subject, elements, monochrome)))
   sections.push(...chapterSections(subject, elements))
+  hoistFigures(sections)
 
   return {
-    title: subject.resultName ? `${subject.typeName} — ${subject.resultName}` : subject.typeName,
+    title: chapterTitle(subject),
+    // The measurement's own name is the eyebrow over it; the *kind* stays in the meta grid, where a
+    // reader looking for "what measurement is this" finds it beside the rest of the facts.
+    eyebrow: subject.typeName,
+    accent: reportAccent(subject.kind),
+    ...chapterStatus(subject),
     meta: [{ label: 'Measurement', value: kindLabel(subject.kind) }, { label: 'Project', value: subject.projectName }, ...subjectMeta(subject)],
     notes: null,
     sections,
@@ -452,7 +500,13 @@ async function buildCombinedChapter(plan: ReportPlan, onProgress?: (message: str
   }
 
   return {
-    title: primary.typeName,
+    // One chapter of several measurements, so its heading names them rather than one of them; the
+    // contents page says how many, which is the only status true of the set.
+    title: plan.subjects.map(subjectLabel).join(', '),
+    eyebrow: primary.typeName,
+    accent: reportAccent(primary.kind),
+    status: `${plan.subjects.length} measurements`,
+    statusTone: 'stored',
     meta: [
       { label: 'Measurement', value: kindLabel(primary.kind) },
       { label: 'Project', value: primary.projectName },
@@ -480,9 +534,12 @@ export async function buildMeasurementReport(plan: ReportPlan, onProgress?: (mes
   }
 
   return {
-    title: plan.subjects.length === 1 ? chapters[0].title : first.typeName,
+    title: first.typeName,
     subtitle: first.projectName,
+    eyebrow: 'Measurement report',
     generated: formatWithPreference(new Date()),
+    version: await appVersion(),
+    monochrome: plan.monochrome,
     notes: null,
     chapters,
   }
@@ -512,9 +569,31 @@ export async function buildProjectReport(
 
   return {
     title: project.name,
-    subtitle: 'Project report',
+    subtitle: null,
+    eyebrow: 'Project report',
     generated: formatWithPreference(new Date()),
+    version: await appVersion(),
+    monochrome,
+    // Chapters and how many of them carry a measurement; the renderer adds the page count, which is
+    // the one figure of the three that cannot be known before the document is laid out.
+    stats: [
+      { label: chapters.length === 1 ? 'Chapter' : 'Chapters', value: String(chapters.length) },
+      { label: 'With stored results', value: String(items.filter((i) => i.subject.resultId !== null).length) },
+    ],
     notes: includeProjectNotes ? project.notes : null,
     chapters,
+  }
+}
+
+/**
+ * "Tonebench v0.2.0" for the cover's footer. A report is a document that outlives the app that wrote
+ * it, so which build produced it belongs on it; a failure is not worth taking the report down for,
+ * and the renderer prints the bare name instead.
+ */
+async function appVersion(): Promise<string | null> {
+  try {
+    return `Tonebench ${splitVersion((await api.getAppInfo()).version).release}`
+  } catch {
+    return null
   }
 }

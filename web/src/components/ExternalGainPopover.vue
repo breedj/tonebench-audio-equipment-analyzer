@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { displayPrecision, fromDisplay, toDisplay, type GainUnit } from '../soundcard/gainUnits'
+import PanelIcon from './PanelIcon.vue'
 
 /**
  * The two external-gain boxes and their unit selector, as a small panel above the status bar.
@@ -19,12 +20,11 @@ import { displayPrecision, fromDisplay, toDisplay, type GainUnit } from '../soun
  * <p>Positioned by the caller (absolute, bottom-anchored over the bar) rather than here, because
  * only the bar knows where its own badge is.</p>
  *
- * <p>It is painted in <b>ground</b> rather than panel — the one place in the app where something
- * sitting on top of a surface is darker than it, in the light theme, instead of lighter. That is
- * deliberate: the status bar it rises out of is itself a panel, so a panel-coloured popover would
- * read as the bar having grown rather than as something opening over it. Spelled as the token and
- * not as the literal #f5f5f4 it resolves to, because a hard-coded light grey would stay light grey
- * in the dark theme.</p>
+ * <p>Since the 2026-10-12 redesign it is an ordinary panel — the tinted round icon, the 14 px title
+ * and the 12 px radius every other panel carries — lifted off the bar by its shadow rather than by
+ * being a different colour. It used to be painted in <b>ground</b> for that job, which was the one
+ * place in the app where something on top of a surface was darker than it; the shadow says the same
+ * thing without the exception, and the footer strip is the ground tone instead.</p>
  */
 const props = defineProps<{
   leftDb: number
@@ -103,36 +103,49 @@ function changeUnit(event: Event) {
 </script>
 
 <template>
+  <!-- Laid out as Joost's "External gain popover" mockup of 2026-10-12: the panel chrome every other
+       panel carries (tinted round icon, 14 px title, 12 px radius), the sentence under it, the two
+       boxes and the unit on one row, and which bench they belong to on a footer strip. -->
   <div
-    class="flex w-72 flex-col gap-2 rounded border border-neutral-300 bg-[var(--surface-ground)] p-3 text-xs shadow-lg dark:border-neutral-700"
+    class="flex w-[340px] flex-col rounded-xl border border-neutral-200 shadow-xl dark:border-neutral-800"
+    :style="{ backgroundColor: 'var(--surface-panel)' }"
     role="dialog"
     aria-label="External gain"
     @keydown.esc.stop="emit('close')"
   >
-    <div class="flex items-center justify-between">
-      <span class="font-medium text-neutral-700 dark:text-neutral-200">External gain</span>
+    <div class="flex items-center gap-2.5 py-3 pl-3.5 pr-1.5">
+      <PanelIcon icon="sine" tone="teal" />
+      <h2 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">External gain</h2>
       <button
         type="button"
-        class="flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+        class="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
         aria-label="Close"
         @click="emit('close')"
       >
-        ×
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
       </button>
     </div>
 
-    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      What sits between the DUT and each input — a 10:1 divider is −20 dB, or ×0.1. Every level
-      shown is then the DUT's, with this undone.
+    <p class="m-0 px-3.5 pb-3 text-[12.5px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+      What sits between the DUT and each input — a 10:1 divider is
+      <span class="font-mono text-neutral-900 dark:text-neutral-100">−20 dB</span>, or
+      <span class="font-mono text-neutral-900 dark:text-neutral-100">×0.1</span>. Every level shown is
+      then the DUT's, with this undone.
     </p>
 
-    <div class="flex items-center gap-2">
-      <label class="flex items-center gap-1.5">
-        <span class="w-3 uppercase tracking-wide text-neutral-500">L</span>
+    <!-- The two boxes carry the channel's own colour on their caption, the way every other pair of
+         channel readings in the app does, so "which one is left" is answered without reading. -->
+    <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_84px] items-end gap-2.5 px-3.5 pb-3.5">
+      <label class="tb-field">
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-0.5 w-3 shrink-0 rounded-full bg-blue-600 dark:bg-blue-400"></span>Left
+        </span>
         <input
           ref="leftInput"
           type="number"
-          class="w-20 rounded border border-neutral-300 px-1.5 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
+          class="tb-input h-[34px] text-right font-mono"
           :step="unit === 'Times' ? 0.01 : 0.1"
           :disabled="disabled"
           v-model="leftDraft"
@@ -140,11 +153,13 @@ function changeUnit(event: Event) {
           @keyup.enter="commit"
         />
       </label>
-      <label class="flex items-center gap-1.5">
-        <span class="w-3 uppercase tracking-wide text-neutral-500">R</span>
+      <label class="tb-field">
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-0.5 w-3 shrink-0 rounded-full bg-red-600 dark:bg-red-400"></span>Right
+        </span>
         <input
           type="number"
-          class="w-20 rounded border border-neutral-300 px-1.5 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
+          class="tb-input h-[34px] text-right font-mono"
           :step="unit === 'Times' ? 0.01 : 0.1"
           :disabled="disabled"
           v-model="rightDraft"
@@ -152,25 +167,42 @@ function changeUnit(event: Event) {
           @keyup.enter="commit"
         />
       </label>
-      <select
-        class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
-        :value="unit"
-        :disabled="disabled"
-        title="How the two boxes are read. The stored value is dB either way."
-        @change="changeUnit"
-      >
-        <option value="Db">dB</option>
-        <option value="Times">×</option>
-      </select>
+      <label class="tb-field">
+        Unit
+        <select
+          class="tb-input h-[34px]"
+          :value="unit"
+          :disabled="disabled"
+          title="How the two boxes are read. The stored value is dB either way."
+          @change="changeUnit"
+        >
+          <option value="Db">dB</option>
+          <option value="Times">×</option>
+        </select>
+      </label>
     </div>
+
+    <p v-if="disabled" class="m-0 px-3.5 pb-3 text-[12px] text-amber-700 dark:text-amber-400">
+      Not while a measurement is running.
+    </p>
 
     <!-- Which bench this is, because the figures are per analyzer and switching swaps them: a
          number edited here does not follow you to the other one. -->
-    <p class="text-[11px] text-neutral-400 dark:text-neutral-500">
-      Stored with <strong>{{ benchLabel }}</strong>.
-    </p>
-    <p v-if="disabled" class="text-[11px] text-amber-700 dark:text-amber-400">
-      Not while a measurement is running.
-    </p>
+    <div
+      class="flex items-center gap-2 rounded-b-xl border-t border-neutral-200 px-3.5 py-2.5 text-[12px] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
+      :style="{ backgroundColor: 'var(--surface-ground)' }"
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="6" width="18" height="12" rx="2" />
+        <path d="M7 10h.01M11 10h.01M7 14h10" />
+      </svg>
+      <span>Stored with</span>
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 px-2 py-0.5 font-semibold text-neutral-900 dark:border-neutral-700 dark:text-neutral-100"
+        :style="{ backgroundColor: 'var(--surface-panel)' }"
+      >
+        <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>{{ benchLabel }}
+      </span>
+    </div>
   </div>
 </template>

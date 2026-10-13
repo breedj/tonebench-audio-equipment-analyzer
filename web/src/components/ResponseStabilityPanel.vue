@@ -68,8 +68,8 @@ const rows = computed(() => [
       crossings; the worst of each is reported.
     </p>
 
-    <label class="flex items-center gap-1.5 text-xs">
-      <input v-model="invertSign" type="checkbox" />
+    <label class="tb-check-row">
+      <input v-model="invertSign" type="checkbox" class="tb-check" />
       Invert loop sign (180°)
     </label>
 

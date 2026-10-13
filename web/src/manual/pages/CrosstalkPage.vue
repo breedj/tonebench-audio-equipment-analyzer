@@ -52,8 +52,8 @@ const { showPage } = useManual()
 
     <h2>Running it</h2>
     <p>
-      One button: <strong>RUN SWEEP</strong>, which walks the points once for each direction chosen
-      and stops. <strong>STOP</strong> ends it early and keeps what was measured — every completed
+      One button: <strong>Run sweep</strong>, which walks the points once for each direction chosen
+      and stops. <strong>Stop</strong> ends it early and keeps what was measured — every completed
       direction and the part of the current one. There is no repeat mode: a run of minutes is not
       something anyone wants looping.
     </p>

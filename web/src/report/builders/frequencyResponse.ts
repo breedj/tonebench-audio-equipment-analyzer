@@ -2,6 +2,7 @@ import {
   RESPONSE_RESOLUTIONS,
   RESPONSE_SMOOTHING,
   type FrequencyResponseParameters,
+  type ReportFigure,
   type ReportRow,
   type ReportSection,
   type ResponsePhaseKindName,
@@ -279,17 +280,25 @@ export function frequencyResponseMeasurementSections(
     },
   ]
 
-  const rows: ReportRow[] = [
-    { label: peakLabel(view), value: `${formatDb(trace.peakDb)} (${formatRatio(trace.peakDb)})` },
-    { label: 'Peak at', value: formatHz(trace.peakFreqHz) },
-  ]
+  // The three readings the curve is quoted by go on cards above the table, where the design puts
+  // them; the delay readings stay rows, because they are a set that is read together.
   const reference = referenceLabel(trace)
+  const clamped = trace.threeDb.lowerClamped || trace.threeDb.upperClamped
+  const figures: ReportFigure[] = [
+    { label: peakLabel(view), value: formatDb(trace.peakDb), sub: formatRatio(trace.peakDb) },
+    { label: 'Peak at', value: formatHz(trace.peakFreqHz) },
+    { label: '−3 dB bandwidth', value: formatBandwidth(trace.threeDb), sub: clamped ? 'partial — an edge was not reached' : null },
+  ]
   if (reference) {
-    rows.push({
+    figures.push({
       label: 'Reference',
-      value: trace.referenceDb === null ? reference : `${formatDb(trace.referenceDb)} — ${reference}`,
+      value: trace.referenceDb === null ? '—' : formatDb(trace.referenceDb),
+      sub: reference,
     })
   }
+  sections.unshift({ kind: 'figures', figures })
+
+  const rows: ReportRow[] = []
   const delayTrace = delayResponseTrace(traces, view, showLeft, phaseKind)
   const delays = delayTrace ? delayReadings(delayTrace, band) : null
   if (delays) {

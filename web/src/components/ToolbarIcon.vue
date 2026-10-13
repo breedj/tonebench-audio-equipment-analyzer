@@ -57,13 +57,35 @@ const PATHS: Record<ToolbarIconName, string[]> = {
   ],
 }
 
-const props = defineProps<{ name: ToolbarIconName }>()
+/**
+ * The accent the glyph is drawn in. From the 2026-10-12 mockups, where the measurement bar's
+ * buttons keep black labels and colour only the icon — so the row reads as a row of words with a
+ * key down its left, rather than as six coloured buttons competing with the chart.
+ *
+ * `none` is the default and inherits the button's own colour, which is what the disabled Save and
+ * the chart toolbars' icons want: a coloured glyph on a 40 %-opacity button looks like a rendering
+ * fault rather than a disabled control.
+ */
+export type ToolbarIconTone = 'none' | 'blue' | 'green' | 'red' | 'violet' | 'amber'
+
+const TONES: Record<ToolbarIconTone, string> = {
+  none: '',
+  blue: 'text-blue-700 dark:text-blue-400',
+  green: 'text-green-700 dark:text-green-400',
+  red: 'text-red-700 dark:text-red-400',
+  violet: 'text-violet-700 dark:text-violet-400',
+  amber: 'text-amber-700 dark:text-amber-400',
+}
+
+const props = withDefaults(defineProps<{ name: ToolbarIconName; tone?: ToolbarIconTone }>(), {
+  tone: 'none',
+})
 </script>
 
 <template>
   <svg
-    width="13"
-    height="13"
+    width="15"
+    height="15"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -71,6 +93,7 @@ const props = defineProps<{ name: ToolbarIconName }>()
     stroke-linecap="round"
     stroke-linejoin="round"
     class="shrink-0"
+    :class="TONES[props.tone]"
     aria-hidden="true"
   >
     <path v-for="(d, i) in PATHS[props.name]" :key="i" :d="d" />

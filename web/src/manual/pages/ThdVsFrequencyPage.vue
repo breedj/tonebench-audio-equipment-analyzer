@@ -217,8 +217,8 @@ const { showPage } = useManual()
 
     <h2>Running it</h2>
     <p>
-      <strong>RUN SWEEP</strong> walks the points once and stops on its own.
-      <strong>CANCEL</strong> stops it early and keeps whatever was measured — a cancelled sweep can
+      <strong>Run sweep</strong> walks the points once and stops on its own.
+      <strong>Cancel</strong> stops it early and keeps whatever was measured — a cancelled sweep can
       still be saved. <strong>Clear</strong> discards the points on screen, and is deliberately
       disabled while a sweep runs so a two-minute measurement cannot be thrown away by a stray
       click.

@@ -1,33 +1,29 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-// THE APP'S MARK: a fundamental with its peak marker and five falling harmonics — the app's
-// signature measurement. Chosen from five proposals on 2026-09-30 because it is the one that still
-// reads at 16 px, which is the only size a taskbar or a favicon ever gets.
+// THE APP'S MARK: four rounded bars — a level meter, or four tones at four levels. Joost's own
+// drawing, supplied as docs/design/tonebench-icon.svg on 2026-10-12, replacing the harmonic comb
+// that had stood since 2026-09-30. It is simpler at 16 px than the comb was, which is the only size
+// a taskbar or a favicon ever gets, and it is what the 2026-10-12 mockups put in the header.
 //
-// The dashed noise floor just above the baseline was removed on 2026-10-05: at 16 px a 4 px dash on
-// a 10/12 pattern is under half a pixel of coverage, so it rendered as a grey smear across the
-// harmonics rather than as a line, and at 256 px it read as a second baseline.
+// **The bars carry their own colours — this mark is not `currentColor`.** That is the one thing
+// that changed with it: the comb's structure followed the theme, and four hues that spell the mark
+// cannot. So both variants are literal, and they differ only in which pair of weights reads against
+// the ground they sit on:
 //
-// One geometry, two variants, and the difference between them is not cosmetic:
+//   glyph  the bars alone, in the 500 weights of the supplied SVG. Use it against a panel that has
+//          a background of its own — the app header, the welcome page, an empty state.
+//   tile   the same bars on the dark rounded tile, in the 400 weights, which is what reads against
+//          it. This is literally packaging/icons/tonebench.svg — the shipped app icon — so it is
+//          what an about box or a splash screen should show.
 //
-//   tile   the comb on its own dark ground, in the brighter #38bdf8/#4ade80 pair. This is what
-//          packaging/icons/tonebench.svg draws, i.e. literally the app icon, which is what an about
-//          box is meant to show. Use it wherever the mark stands alone — the about dialog, and a
-//          splash screen when one is built.
-//   glyph  the bare comb, structure in `currentColor` and accents in #0ea5e9/#22c55e, so it
-//          follows the theme. Use it inline against a panel that already has a background of its
-//          own — a header, a heading, an empty state.
-//
-// The comb is drawn ONCE, at its own coordinates, and the tile variant places it with a single
-// transform. Its real bounds are x 20..236 and y 18.5..207 — strokes and round caps included, not
-// the nominal rects, so x is the baseline's and y runs from the top of the peak marker's stroke to
-// the bottom of the baseline — fitted to x 36..220 and centred vertically, hence scale
-// 184/216 = 0.8519. Both numbers moved when the noise floor went, because its round caps at
-// x 18..238 were what set the width.
-// packaging/icons/tonebench.svg carries the same numbers because sharp cannot rasterise a .vue; that
-// duplication is the one thing here that can rot, so its comment says so too. Change the geometry
-// in both files or in neither, then run `npm run icons` in web/.
+// The bars are drawn ONCE at the supplied 24-unit coordinates and the tile variant places them with
+// a single transform, so the two cannot drift. Their bounds are x 3..21 and y 5..21 (the nominal
+// rects; the corners are radii, not strokes, so nothing sticks out), fitted to x 36..220 — the same
+// 184-wide window the comb used — and centred vertically: scale 184/18 = 10.2222, hence the
+// translate. packaging/icons/tonebench.svg repeats those numbers because sharp cannot rasterise a
+// `.vue`; that duplication is the one thing here that can rot, so its comment says so too. Change
+// the geometry in both files or in neither, then run `npm run icons` in web/.
 
 const props = withDefaults(defineProps<{ size?: number; variant?: 'tile' | 'glyph' }>(), {
   size: 64,
@@ -35,10 +31,21 @@ const props = withDefaults(defineProps<{ size?: number; variant?: 'tile' | 'glyp
 })
 
 const tiled = computed(() => props.variant === 'tile')
-/** The baseline. White over the tile's own dark ground; the theme's ink otherwise. */
-const structure = computed(() => (tiled.value ? '#ffffff' : 'currentColor'))
-const bar = computed(() => (tiled.value ? '#38bdf8' : '#0ea5e9'))
-const marker = computed(() => (tiled.value ? '#4ade80' : '#22c55e'))
+
+/** Blue, violet, pink, orange — the 500 weights bare, the 400s against the tile's dark ground. */
+const bars = computed(() =>
+  tiled.value
+    ? ['#60a5fa', '#a78bfa', '#f472b6', '#fb923c']
+    : ['#3b82f6', '#8b5cf6', '#ec4899', '#f97316'],
+)
+
+/** x, y, height — the width and the 1.5 radius are the same for all four. */
+const GEOMETRY = [
+  { x: 3, y: 12, height: 9 },
+  { x: 8, y: 5, height: 16 },
+  { x: 13, y: 9, height: 12 },
+  { x: 18, y: 15, height: 6 },
+] as const
 
 // A gradient id has to be unique per document, not per component: two logos on one page with the
 // same id both resolve to whichever was defined first. Harmless while they are identical, but it
@@ -64,22 +71,17 @@ const gradientId = `tonebench-logo-tile-${Math.random().toString(36).slice(2, 9)
       <rect x="8" y="8" width="240" height="240" rx="52" :fill="`url(#${gradientId})`" />
     </template>
 
-    <g :transform="tiled ? 'translate(18.96 31.95) scale(0.8519)' : undefined">
-      <!-- baseline -->
-      <rect x="20" y="202" width="216" height="5" rx="2.5" :fill="structure" opacity="0.22" />
-
-      <!-- fundamental, then five falling harmonics -->
-      <rect x="27" y="54" width="22" height="148" rx="6" :fill="bar" />
-      <g :fill="bar" opacity="0.55">
-        <rect x="63" y="114" width="22" height="88" rx="6" />
-        <rect x="99" y="142" width="22" height="60" rx="6" />
-        <rect x="135" y="160" width="22" height="42" rx="6" />
-        <rect x="171" y="172" width="22" height="30" rx="6" />
-        <rect x="207" y="180" width="22" height="22" rx="6" />
-      </g>
-
-      <!-- peak marker on the fundamental -->
-      <circle cx="38" cy="34" r="12" fill="none" :stroke="marker" stroke-width="7" />
+    <g :transform="tiled ? 'translate(5.333 -4.91) scale(10.2222)' : 'scale(10.6667)'">
+      <rect
+        v-for="(bar, i) in GEOMETRY"
+        :key="i"
+        :x="bar.x"
+        :y="bar.y"
+        width="3"
+        :height="bar.height"
+        rx="1.5"
+        :fill="bars[i]"
+      />
     </g>
   </svg>
 </template>

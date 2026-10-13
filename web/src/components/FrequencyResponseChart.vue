@@ -16,6 +16,9 @@ import {
   type ExportLegendEntry,
 } from '../charts/exportChart'
 import { makeChartPalette, type ChartPalette } from '../charts/palette'
+// The dashed verticals and the double-headed arrow the ±1 dB / −3 dB readings are drawn with —
+// shared with the display rail's swatches (charts/bandwidthColors.ts).
+import { BANDWIDTH_COLORS } from '../charts/bandwidthColors'
 import { axisLabel } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
@@ -160,12 +163,6 @@ const DELAY_COLOR = ['#db2777', '#f472b6'] as const
  * eighth curve.</p>
  */
 const PINNED_CURSOR_COLOR = ['#404040', '#e5e5e5'] as const
-
-/** The dashed verticals and the double-headed arrow the ±1 dB / −3 dB readings are drawn with. */
-const BANDWIDTH_COLORS = {
-  oneDb: ['#d97706', '#fbbf24'],
-  threeDb: ['#2563eb', '#60a5fa'],
-} as const
 
 // See charts/palette.ts for why the palette is an argument and not a module-level flag.
 type Palette = ChartPalette
@@ -399,8 +396,11 @@ function bandwidthPlugin(p: Palette): uPlot.Plugin {
           ctx.clip()
 
           const readings: { label: string; reading: ResponseTrace['oneDb']; palette: readonly string[]; row: number }[] = []
-          if (props.showOneDb) readings.push({ label: 'B1', reading: trace.oneDb, palette: BANDWIDTH_COLORS.oneDb, row: 0 })
-          if (props.showThreeDb) readings.push({ label: 'B3', reading: trace.threeDb, palette: BANDWIDTH_COLORS.threeDb, row: 1 })
+          // The labels are the Measurements panel's own, not "B1"/"B3": the reader has that panel
+          // beside the chart, and two names for one reading is one too many. "±" on the 1 dB row
+          // because that search is symmetric and the 3 dB one is not — see the bandwidth rules.
+          if (props.showOneDb) readings.push({ label: '±1 dB', reading: trace.oneDb, palette: BANDWIDTH_COLORS.oneDb, row: 0 })
+          if (props.showThreeDb) readings.push({ label: '−3 dB', reading: trace.threeDb, palette: BANDWIDTH_COLORS.threeDb, row: 1 })
 
           // Only the corners and the arrow are drawn. The reference level and the thresholds the
           // corners were found against used to be drawn as horizontals too (a grey `ref` line and a
@@ -427,11 +427,14 @@ function bandwidthPlugin(p: Palette): uPlot.Plugin {
               ctx.stroke()
             }
 
-            ctx.setLineDash([])
+            // Dashed, like the drops it joins: the span is a *reading off* the curve, and a solid
+            // rule across the plot reads as one more trace (Joost, 2026-10-12). The dash is left
+            // set from the drops above.
             ctx.beginPath()
             ctx.moveTo(xLow, y)
             ctx.lineTo(xHigh, y)
             ctx.stroke()
+            ctx.setLineDash([])
 
             const head = 5
             for (const [x, dir] of [
@@ -446,18 +449,26 @@ function bandwidthPlugin(p: Palette): uPlot.Plugin {
               ctx.fill()
             }
 
-            const text = `${label}: ${formatHz(reading.bandwidthHz)}${
+            const text = `${label} · ${formatHz(reading.bandwidthHz)}${
               reading.lowerClamped || reading.upperClamped ? ' (partial)' : ''
             }`
             ctx.font = '11px ui-sans-serif, system-ui, sans-serif'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
 
+            // A rounded chip on the line rather than a square patch — the same 6 px corner every
+            // badge in the app carries, so the reading reads as a label and not as a hole in the
+            // plot. `roundRect` is Chromium 99+; the app ships a WebView of its own, and the
+            // fallback is there for a browser old enough not to have it rather than as a real case.
             const midX = (xLow + xHigh) / 2
-            const width = ctx.measureText(text).width + 8
+            const width = ctx.measureText(text).width + 14
+            const box = [midX - width / 2, y - 9, width, 18] as const
+            ctx.beginPath()
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(box[0], box[1], box[2], box[3], 6)
+            else ctx.rect(box[0], box[1], box[2], box[3])
             ctx.fillStyle = p.labelBackground
-            ctx.fillRect(midX - width / 2, y - 8, width, 16)
-            ctx.strokeRect(midX - width / 2, y - 8, width, 16)
+            ctx.fill()
+            ctx.stroke()
             ctx.fillStyle = stroke
             ctx.fillText(text, midX, y)
           }
@@ -1290,8 +1301,11 @@ watch(delayRange, () => refresh())
 </script>
 
 <template>
-  <div ref="root" class="relative flex flex-col gap-2">
-    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+  <!-- The chart is a card like every settings and display panel beside it (the 2026-10-12
+       mockups): one surface, one 12 px radius, with the cursor readout and the plot inside it
+       rather than the readout floating on the page ground above a bare plot. -->
+  <div ref="root" class="relative flex flex-col gap-2 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
+    <ExpandToggle class="absolute right-3 top-3" :target="root" />
     <!-- Cursor readout on the left, zoom state on the right. Both are about the plot below rather
          than about the measurement, so they sit with it and not in the display panel. -->
     <div class="min-h-6 pr-9 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
@@ -1353,7 +1367,7 @@ watch(delayRange, () => refresh())
       </div>
     </div>
     <p v-if="traces.length === 0 && overlays.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">
-      No {{ props.view === 'Crosstalk' ? 'crosstalk' : 'frequency response' }} measured yet. Press {{ props.runLabel ?? 'RUN' }}.
+      No {{ props.view === 'Crosstalk' ? 'crosstalk' : 'frequency response' }} measured yet. Press {{ props.runLabel ?? 'Run' }}.
     </p>
   </div>
 </template>

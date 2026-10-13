@@ -156,8 +156,8 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
       <!-- Capped: this panel moved into the chart column on 2026-09-27, and a `justify-between` row
            in a 600 px box puts "Poles" and its spinner at opposite ends of the screen. -->
       <div class="flex max-w-[14rem] flex-col gap-1 text-xs">
-        <label class="flex items-center gap-1.5">
-          <input v-model="autoOrder" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="autoOrder" type="checkbox" class="tb-check" />
           <span title="Takes the lowest order that fits about as well as the best one tried, rather than the lowest error — which is almost always the highest order.">
             Choose order automatically
           </span>
@@ -170,7 +170,7 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
               type="number"
               min="1"
               max="10"
-              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input w-24"
             />
           </label>
           <label class="flex items-center justify-between gap-2" title="The numerator order: how many zeros the model may have, never more than poles. 0 for an all-pole DUT — a low-pass filter, an amplifier without an output transformer — which is otherwise fitted with as many zeros as poles and spends them on noise.">
@@ -180,7 +180,7 @@ const zeroRows = computed(() => (fit.value ? rowsOf(fit.value.zeros) : []))
               type="number"
               min="0"
               :max="activeOrder"
-              class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input w-24"
             />
           </label>
         </template>

@@ -12,6 +12,8 @@ import {
   splitKey,
 } from '../soundcard/cardList'
 import Modal from './Modal.vue'
+import PanelIcon from './PanelIcon.vue'
+import HeaderIcon from './HeaderIcon.vue'
 
 /**
  * Picks the card and calibrates it.
@@ -427,8 +429,11 @@ function mv(value: number | null | undefined) {
 </script>
 
 <template>
-  <Modal :open="open" title="Sound card" size="lg" @close="close">
-    <div class="flex flex-col gap-5 text-xs">
+  <!-- Laid out as Joost's "Sound card dialog" mockup of 2026-10-12: the three steps as panels on
+       the page's own ground, each with the tinted round glyph its header carries everywhere else,
+       and the actions on a strip of their own at the foot. -->
+  <Modal :open="open" title="Sound card" size="lg" icon="soundcard" tone="blue" ground flush @close="close">
+    <div class="flex flex-col gap-3.5 p-4 text-xs">
       <p
         v-if="inventory && !inventory.available"
         class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
@@ -437,9 +442,10 @@ function mv(value: number | null | undefined) {
       </p>
 
       <!-- 1. Which card ------------------------------------------------------------------ -->
-      <section class="flex flex-col gap-2">
-        <div class="flex items-center justify-between">
-          <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Device</h3>
+      <section class="sc-section">
+        <div class="sc-head">
+          <PanelIcon icon="soundcard" tone="blue" />
+          <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Device</h3>
           <span class="flex items-center gap-3">
             <!-- TEMPORARY, removed once the filtered list has been checked against real cards. -->
             <label
@@ -454,7 +460,7 @@ function mv(value: number | null | undefined) {
             </label>
             <button
               type="button"
-              class="rounded bg-sky-600 px-2 py-0.5 text-[11px] text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
+              class="inline-flex h-[30px] items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
               :disabled="devicesLoading"
               title="Re-read the device list. A newly plugged ASIO interface needs the app restarted — PortAudio reads its list once at startup."
               @click="loadDevices(true)"
@@ -464,15 +470,16 @@ function mv(value: number | null | undefined) {
           </span>
         </div>
 
+        <div class="sc-body">
         <!-- The card first, the channels second. Picking the interface is what guarantees both
              directions are one piece of hardware, and therefore one clock: two cards run on two,
              and the drift between them is reported as DUT response rather than as a fault. -->
-<div class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Sound card</span>
-          <span class="flex w-96 items-center gap-2">
+        <div class="sc-row">
+          <span class="sc-label">Sound card</span>
+          <span class="flex items-center gap-2">
             <select
               v-model="form.cardKey"
-              class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input min-w-0 flex-1"
             >
               <option value="">—</option>
               <option v-for="c in cards" :key="c.key" :value="c.key">
@@ -492,7 +499,7 @@ function mv(value: number | null | undefined) {
                   ? 'The panel is open — close it to carry on here.'
                   : 'Opens the driver settings: buffer size, clock source and often the sample rate, none of which this app can set.'
               "
-              class="shrink-0 rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400 px-2"
+              class="inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-3 text-[13px] hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
               @click="openControlPanel"
             >
               {{ controlPanelOpen ? 'Panel open…' : 'Control panel' }}
@@ -500,11 +507,11 @@ function mv(value: number | null | undefined) {
           </span>
         </div>
 
-        <label v-if="cardInputs.length > 1" class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Input</span>
+        <label v-if="cardInputs.length > 1" class="sc-row">
+          <span class="sc-label">Input</span>
           <select
             v-model="form.inputKey"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           >
             <option
               v-for="o in cardInputs"
@@ -516,21 +523,21 @@ function mv(value: number | null | undefined) {
           </select>
         </label>
 
-        <label v-if="inputPairs.length > 1" class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Input channels</span>
+        <label v-if="inputPairs.length > 1" class="sc-row">
+          <span class="sc-label">Input channels</span>
           <select
             v-model.number="form.inputChannelOffset"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           >
             <option v-for="pair in inputPairs" :key="pair.offset" :value="pair.offset">{{ pair.label }}</option>
           </select>
         </label>
 
-        <label v-if="cardOutputs.length > 1" class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Output</span>
+        <label v-if="cardOutputs.length > 1" class="sc-row">
+          <span class="sc-label">Output</span>
           <select
             v-model="form.outputKey"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           >
             <option
               v-for="o in cardOutputs"
@@ -542,11 +549,11 @@ function mv(value: number | null | undefined) {
           </select>
         </label>
 
-        <label v-if="outputPairs.length > 1" class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Output channels</span>
+        <label v-if="outputPairs.length > 1" class="sc-row">
+          <span class="sc-label">Output channels</span>
           <select
             v-model.number="form.outputChannelOffset"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           >
             <option v-for="pair in outputPairs" :key="pair.offset" :value="pair.offset">{{ pair.label }}</option>
           </select>
@@ -560,36 +567,36 @@ function mv(value: number | null | undefined) {
              its standing readout. -->
 
         <label
-          class="flex items-center justify-between gap-3"
+          class="sc-row"
           title="Sound cards are AC-coupled at both ends. Below this a sweep measures the card's own high-pass and reports it as the DUT's."
         >
-          <span class="text-neutral-600 dark:text-neutral-300">Lowest usable frequency</span>
-          <span class="flex w-96 items-center gap-2">
+          <span class="sc-label">Lowest usable frequency</span>
+          <span class="flex items-center gap-2">
             <input
               v-model.number="form.minStimulusFrequencyHz"
               type="number"
               min="0"
               max="1000"
               step="1"
-              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input w-28"
             />
             <span class="text-neutral-500">Hz</span>
           </span>
         </label>
 
         <label
-          class="flex items-center justify-between gap-3"
+          class="sc-row"
           title="A card re-clocks its hardware when a stream asks for a rate it is not already running at, and it is unsettled for a moment afterwards. This is thrown away before anything is measured. Only paid when a stream is actually opened — changing the sample rate — never on an ordinary RUN."
         >
-          <span class="text-neutral-600 dark:text-neutral-300">Settle after opening</span>
-          <span class="flex w-96 items-center gap-2">
+          <span class="sc-label">Settle after opening</span>
+          <span class="flex items-center gap-2">
             <input
               v-model.number="form.streamStartSettleMs"
               type="number"
               min="0"
               max="10000"
               step="100"
-              class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input w-28"
             />
             <span class="text-neutral-500">ms</span>
           </span>
@@ -626,15 +633,19 @@ function mv(value: number | null | undefined) {
         <p v-if="saved" class="text-[11px] text-emerald-700 dark:text-emerald-400">
           Selected — the card is open and ready to calibrate.
         </p>
+        </div>
       </section>
 
       <!-- 2. Output full scale ---------------------------------------------------------- -->
-      <section class="flex flex-col gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
-        <div class="flex items-center gap-2">
-          <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Full scale output (mV)</h3>
+      <section class="sc-section">
+        <div class="sc-head">
+          <PanelIcon icon="signalOut" tone="orange" />
+          <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            Full scale output <span class="font-normal text-neutral-500 dark:text-neutral-400">(mV)</span>
+          </h3>
           <button
             type="button"
-            class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             :aria-expanded="outputHelpOpen"
             aria-label="What this step asks you to do"
             title="What this step asks you to do."
@@ -651,48 +662,55 @@ function mv(value: number | null | undefined) {
           and enter what it says. That fixes what the card's digital full scale is worth in volts.
         </p>
 
-        <label class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Output level</span>
-          <select
-            v-model.number="outputStep.dbFs"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-            :disabled="playingDbFs !== null"
-          >
-            <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dB</option>
-          </select>
+        <div class="sc-body">
+        <label class="sc-row">
+          <span class="sc-label">Output level</span>
+          <span class="flex min-w-0 items-center gap-2">
+            <select
+              v-model.number="outputStep.dbFs"
+              class="tb-input min-w-0 flex-1"
+              :disabled="playingDbFs !== null"
+            >
+              <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dB</option>
+            </select>
+            <button
+              type="button"
+              class="btn-chip"
+              :style="
+                playingDbFs !== null
+                  ? { backgroundColor: 'var(--kind-red-chip-bg)', color: 'var(--kind-red-chip-fg)' }
+                  : { backgroundColor: 'var(--kind-orange-chip-bg)', color: 'var(--kind-orange-chip-fg)' }
+              "
+              :disabled="busy"
+              @click="toggleTone"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect v-if="playingDbFs !== null" x="6" y="6" width="12" height="12" rx="2" />
+                <path v-else d="M7 4l13 8-13 8z" />
+              </svg>
+              {{ playingDbFs !== null ? 'Stop tone' : `Generate sine · ${calibrationToneHz} Hz` }}
+            </button>
+          </span>
         </label>
 
-        <div class="flex items-center gap-3">
-          <button
-            type="button"
-            :class="
-              playingDbFs !== null
-                ? 'rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-500 disabled:opacity-50'
-                : 'rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400'
-            "
-            :disabled="busy"
-            @click="toggleTone"
-          >
-            {{ playingDbFs !== null ? 'Stop tone' : `Generate sine (${calibrationToneHz} Hz)` }}
-          </button>
-          <span v-if="playingDbFs !== null" class="text-emerald-700 dark:text-emerald-400">
-            Playing at {{ playingDbFs }} dBFS
-          </span>
-        </div>
+        <p v-if="playingDbFs !== null" class="sc-row text-emerald-700 dark:text-emerald-400">
+          <span></span>
+          <span>Playing at {{ playingDbFs }} dBFS</span>
+        </p>
 
-        <label class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Voltmeter reads</span>
-          <span class="flex w-96 items-center gap-2">
+        <label class="sc-row">
+          <span class="sc-label">Voltmeter reads</span>
+          <span class="flex items-center gap-2">
             <input
               v-model.number="outputStep.reading"
               type="number"
               min="0"
               step="1"
-              class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input w-28"
             />
             <select
               v-model="outputStep.unit"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input"
             >
               <option value="Rms">mV rms</option>
               <option value="Peak">mV peak</option>
@@ -700,28 +718,36 @@ function mv(value: number | null | undefined) {
           </span>
         </label>
 
-        <div class="flex items-center gap-3">
+        <div class="sc-row">
+          <span class="sc-label">Peak output</span>
+          <span class="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            class="rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
+            class="btn-chip"
+            :style="{ backgroundColor: 'var(--kind-orange-chip-bg)', color: 'var(--kind-orange-chip-fg)' }"
             :disabled="busy || playingDbFs === null"
             @click="acceptOutput"
           >
-            Estimate peak output mV
+            Estimate peak output
           </button>
           <span class="font-mono text-neutral-600 dark:text-neutral-300">
             current {{ mv(config?.outputFullScalePeakMv) }} mV
           </span>
+          </span>
+        </div>
         </div>
       </section>
 
       <!-- 3. Input full scale ----------------------------------------------------------- -->
-      <section class="flex flex-col gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
-        <div class="flex items-center gap-2">
-          <h3 class="font-medium text-neutral-700 dark:text-neutral-200">Full scale input (mV)</h3>
+      <section class="sc-section">
+        <div class="sc-head">
+          <PanelIcon icon="signalIn" tone="green" />
+          <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            Full scale input <span class="font-normal text-neutral-500 dark:text-neutral-400">(mV)</span>
+          </h3>
           <button
             type="button"
-            class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             :aria-expanded="inputHelpOpen"
             aria-label="What this step asks you to do"
             title="What this step asks you to do."
@@ -730,11 +756,12 @@ function mv(value: number | null | undefined) {
             ?
           </button>
         </div>
-        <label class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Known source</span>
+        <div class="sc-body">
+        <label class="sc-row">
+          <span class="sc-label">Known source</span>
           <select
             v-model="inputStep.source"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           >
             <option value="External">A generator of known voltage</option>
             <option value="Loopback">This card's output, through a patch cable</option>
@@ -772,30 +799,30 @@ function mv(value: number | null | undefined) {
           and the result would look measured without being it.
         </p>
 
-        <label v-if="inputStep.source === 'External'" class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Input channel</span>
+        <label v-if="inputStep.source === 'External'" class="sc-row">
+          <span class="sc-label">Input channel</span>
           <select
             v-model="inputStep.channel"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           >
             <option value="Left">Left</option>
             <option value="Right">Right</option>
           </select>
         </label>
 
-        <label v-if="inputStep.source === 'External'" class="flex items-center justify-between gap-3">
-          <span class="text-neutral-600 dark:text-neutral-300">Source voltage</span>
-          <span class="flex w-96 items-center gap-2">
+        <label v-if="inputStep.source === 'External'" class="sc-row">
+          <span class="sc-label">Source voltage</span>
+          <span class="flex items-center gap-2">
             <input
               v-model.number="inputStep.known"
               type="number"
               min="0"
               step="1"
-              class="w-28 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input w-28"
             />
             <select
               v-model="inputStep.unit"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input"
             >
               <option value="Rms">mV rms</option>
               <option value="Peak">mV peak</option>
@@ -803,43 +830,56 @@ function mv(value: number | null | undefined) {
           </span>
         </label>
 
-        <label v-else class="flex items-center justify-between gap-3">
+        <label v-else class="sc-row">
           <span
             class="text-neutral-600 dark:text-neutral-300"
             title="Quiet enough that the input cannot clip, loud enough to sit well clear of the card's noise floor."
           >
             Play at
           </span>
-          <select
-            v-model.number="inputStep.dbFs"
-            class="w-96 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          >
-            <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dB</option>
-          </select>
+          <span class="flex min-w-0 items-center gap-2">
+            <select v-model.number="inputStep.dbFs" class="tb-input min-w-0 flex-1">
+              <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dB</option>
+            </select>
+            <button
+              type="button"
+              class="btn-chip"
+              :style="{ backgroundColor: 'var(--kind-green-chip-bg)', color: 'var(--kind-green-chip-fg)' }"
+              :disabled="!canMeasureInput"
+              @click="acceptInput"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" />
+              </svg>
+              Estimate peak input
+            </button>
+          </span>
         </label>
 
-        <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="rounded bg-sky-600 px-3 py-1 text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
-            :disabled="!canMeasureInput"
-            @click="acceptInput"
-          >
-            Estimate peak input mV
-          </button>
-          <span v-if="calibrationResult?.measuredDbFs != null" class="text-neutral-500">
-            measured {{ calibrationResult.measuredDbFs.toFixed(2) }} dBFS
-          </span>
-        </div>
+        <p v-if="calibrationResult?.measuredDbFs != null" class="sc-row text-neutral-500">
+          <span></span>
+          <span>measured {{ calibrationResult.measuredDbFs.toFixed(2) }} dBFS</span>
+        </p>
 
         <!-- What each input is hearing, live. The scale is −90…0 dBFS, which is the range a
              calibration cares about: the clip point at the top, the card's noise floor off the
              bottom. Red past −0.5 dBFS, because a reading taken at the clip point is not the
              source's level and the step refuses it. -->
-        <div class="mt-2 flex flex-col gap-1">
-          <div v-for="side in (['Left', 'Right'] as const)" :key="side" class="flex items-center gap-2">
-            <span class="w-10 text-[11px] uppercase tracking-wide text-neutral-500">{{ side }}</span>
-            <div class="relative h-3 flex-1 overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+        <!-- In a well of its own, as the mockup draws it: the bars are a live reading rather than a
+             setting, and a tinted box is what tells them apart from the rows above. -->
+        <div
+          class="mt-2 flex flex-col gap-2 rounded-[10px] border border-neutral-200 p-3 dark:border-neutral-800"
+          :style="{ backgroundColor: 'var(--surface-ground)' }"
+        >
+          <div v-for="side in (['Left', 'Right'] as const)" :key="side" class="flex items-center gap-2.5">
+            <span class="inline-flex w-12 shrink-0 items-center gap-1.5 text-[12px] text-neutral-600 dark:text-neutral-300">
+              <span
+                class="h-0.5 w-2.5 shrink-0 rounded-full"
+                :class="side === 'Left' ? 'bg-blue-600 dark:bg-blue-400' : 'bg-red-600 dark:bg-red-400'"
+              ></span>
+              {{ side }}
+            </span>
+            <div class="relative h-2 flex-1 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
               <div
                 class="h-full transition-[width] duration-75"
                 :class="
@@ -857,41 +897,52 @@ function mv(value: number | null | undefined) {
               {{ barLabel(side === 'Left' ? levels?.leftDbFs : levels?.rightDbFs) }}
             </span>
           </div>
-          <div class="flex justify-between pl-12 pr-20 text-[10px] text-neutral-400">
+          <div class="flex justify-between pl-14 pr-20 font-mono text-[11px] text-neutral-400">
             <span>−90</span><span>−60</span><span>−30</span><span>0 dBFS</span>
           </div>
-          <p v-if="levels && !levels.acquiring" class="pl-12 text-[10px] text-neutral-400">
+          <p v-if="levels && !levels.acquiring" class="text-[11px] text-neutral-500 dark:text-neutral-400">
             Idle — the bars move while a tone is playing or a measurement is running.
           </p>
         </div>
 
-        <table class="mt-1 w-full max-w-md text-left font-mono">
-          <thead class="text-neutral-500">
-            <tr>
-              <th class="font-normal"></th>
-              <th class="font-normal">Full scale</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td class="pr-4 text-neutral-600 dark:text-neutral-300">Left</td>
-              <td>{{ mv(config?.inputFullScalePeakMvLeft) }} mV</td>
-            </tr>
-            <tr>
-              <td class="pr-4 text-neutral-600 dark:text-neutral-300">Right</td>
-              <td>{{ mv(config?.inputFullScalePeakMvRight) }} mV</td>
-            </tr>
-            <tr v-if="calibrationResult?.channelDifferenceDb != null">
-              <td
-                class="pr-4 text-neutral-600 dark:text-neutral-300"
-                title="How far apart the two inputs are. A few tenths is two ordinary channels; several dB is a wiring or channel-pair mistake."
-              >
-                Diff
-              </td>
-              <td>{{ calibrationResult.channelDifferenceDb.toFixed(4) }} dB</td>
-            </tr>
-          </tbody>
-        </table>
+        <!-- The two figures this whole step exists to produce, as a card each (the mockup): what
+             the step answers deserves to be read at a glance rather than off a two-column table
+             whose header said "Full scale" once for both. The caption carries the channel's own
+             colour, as every pair of channel readings in the app does. -->
+        <div class="mt-3 grid grid-cols-2 gap-2.5">
+          <div
+            v-for="side in (['Left', 'Right'] as const)"
+            :key="side"
+            class="flex flex-col gap-1 rounded-[10px] border border-neutral-200 px-3 py-2.5 dark:border-neutral-800"
+          >
+            <span class="inline-flex items-center gap-1.5 text-[12px] text-neutral-500 dark:text-neutral-400">
+              <span
+                class="h-0.5 w-2.5 shrink-0 rounded-full"
+                :class="side === 'Left' ? 'bg-blue-600 dark:bg-blue-400' : 'bg-red-600 dark:bg-red-400'"
+              ></span>
+              {{ side }} · full scale
+            </span>
+            <span class="font-mono text-[17px] font-medium text-neutral-900 dark:text-neutral-100">
+              {{ mv(side === 'Left' ? config?.inputFullScalePeakMvLeft : config?.inputFullScalePeakMvRight) }}
+              <span class="text-[12px] text-neutral-500 dark:text-neutral-400">mV</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Not in the mockup, and kept: it only appears once a calibration has just run, and it is
+             the one line that says whether the two inputs are the pair they are supposed to be. -->
+        <p
+          v-if="calibrationResult?.channelDifferenceDb != null"
+          class="mt-2 text-[12px] text-neutral-500 dark:text-neutral-400"
+          title="How far apart the two inputs are. A few tenths is two ordinary channels; several dB is a wiring or channel-pair mistake."
+        >
+          Channel difference
+          <span class="font-mono text-neutral-900 dark:text-neutral-100">
+            {{ calibrationResult.channelDifferenceDb.toFixed(4) }}
+            <span class="text-neutral-500 dark:text-neutral-400">dB</span>
+          </span>
+        </p>
+        </div>
       </section>
 
       <p
@@ -905,32 +956,30 @@ function mv(value: number | null | undefined) {
 
       <p v-if="error" class="text-red-600 dark:text-red-400">{{ error }}</p>
 
-      <div class="flex items-center justify-end gap-2">
-        <!-- The manual rather than more prose in here: this dialog is already the longest in the
-             app, and the host API table and the two calibration procedures are reference material
-             that is read once. Its own <dialog> opens into the top layer, so it lands over this one
-             and leaves the settings behind it untouched — which is the point, since most of what
-             the page explains is what to pick here. -->
-        <button
-          type="button"
-          class="mr-auto flex items-center gap-1.5 rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          title="Using a sound card: host APIs, both calibration steps, and what the figures mean."
-          @click="openManual('sound-card')"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
-          </svg>
-          Manual
-        </button>
-        <button
-          type="button"
-          class="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-100 dark:border-neutral-700"
-          @click="close"
-        >
-          Close
-        </button>
-      </div>
     </div>
+
+    <!-- The manual rather than more prose in here: this dialog is already the longest in the app,
+         and the host API table and the two calibration procedures are reference material that is
+         read once. Its own <dialog> opens into the top layer, so it lands over this one and leaves
+         the settings behind it untouched — which is the point, since most of what the page explains
+         is what to pick here. -->
+    <template #footer>
+      <button
+        type="button"
+        class="mr-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-neutral-200 px-3 text-[13px] font-semibold hover:bg-neutral-100 dark:border-neutral-800 dark:hover:bg-neutral-800"
+        title="Using a sound card: host APIs, both calibration steps, and what the figures mean."
+        @click="openManual('sound-card')"
+      >
+        <HeaderIcon name="manual" :size="16" />
+        Manual
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-9 items-center rounded-lg bg-neutral-900 px-5 text-[13px] font-semibold text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+        @click="close"
+      >
+        Close
+      </button>
+    </template>
   </Modal>
 </template>

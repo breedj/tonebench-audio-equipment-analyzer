@@ -149,7 +149,7 @@ const dividerDb = 20 * Math.log10(shortOhms / (R + shortOhms))
     <ol>
       <li>Select <strong>Fixture: open</strong> in the status bar. In the Calibration section press <strong>Measure</strong> beside <em>Open</em>; it captures at the calibration drive level and reports <em>captured</em>.</li>
       <li>Select <strong>Fixture: short (leads)</strong>. Press <strong>Measure</strong> beside <em>Short</em>.</li>
-      <li>Select <strong>Fixture: 8 Ω</strong>, set <em>Subtract for the leads</em> to <em>Measured short</em>, and press SINGLE. It reads <strong>7.88 Ω</strong>.</li>
+      <li>Select <strong>Fixture: 8 Ω</strong>, set <em>Subtract for the leads</em> to <em>Measured short</em>, and press Single. It reads <strong>7.88 Ω</strong>.</li>
     </ol>
     <p>
       That last figure is right and looks wrong, which is the point of doing it once on the

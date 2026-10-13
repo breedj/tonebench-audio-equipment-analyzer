@@ -83,7 +83,7 @@ const markers: ManualMarker[] = [{ y: load, label: `${load} Ω`, color: 'grey', 
         ['Calibration', 'Open and Short both not captured'],
       ]"
     />
-    <p>These are the screen's defaults; press <strong>SINGLE</strong>.</p>
+    <p>These are the screen's defaults; press <strong>Single</strong>.</p>
     <ManualChart
       :series="magnitudeSeries"
       :markers="markers"
@@ -133,7 +133,7 @@ const markers: ManualMarker[] = [{ y: load, label: `${load} Ω`, color: 'grey', 
         8.00 Ω only <em>after</em> that step.
       </li>
       <li>
-        <strong>Switch Stimulus to Stepped sine</strong> and RUN SWEEP. Fifty points, all at
+        <strong>Switch Stimulus to Stepped sine</strong> and Run sweep. Fifty points, all at
         8.000 Ω, in about a minute. Chirp and stepped sine reading the same fixture the same way is
         the second opinion the impedance page describes; on a real fixture their disagreeing is the
         tell for a calibration fault.

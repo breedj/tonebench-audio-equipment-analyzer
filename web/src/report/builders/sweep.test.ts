@@ -163,16 +163,19 @@ describe('sweepMeasurementSections', () => {
   it('summarises each channel, then tabulates its points in x order with the chart columns', () => {
     const sections = sweepMeasurementSections(data, THD_VS_FREQUENCY_KIND, 8)
     expect(sections.map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual([
-      'keyValues:Measurements — left channel',
+      'figures:Measurements — left channel',
       'table:',
-      'keyValues:Measurements — right channel',
+      'figures:Measurements — right channel',
       'table:',
     ])
-    expect(rowsToObject(sections[0].rows!)).toEqual({
-      Points: '3',
-      'Worst THD': '0.90% at 10.0 kHz',
-      'Best THD': '0.050% at 1.00 kHz',
-    })
+    // The value and its "at 10.0 kHz" are separate fields: a card sets the number large and the
+    // qualifier under it, which is the whole reason these are figures and not rows.
+    expect(sections[0].figures).toEqual([
+      { label: 'Points', value: '3' },
+      { label: 'Worst THD', value: '0.90%', sub: 'at 10.0 kHz' },
+      { label: 'Best THD', value: '0.050%', sub: 'at 1.00 kHz' },
+      { label: 'Swept', value: '100 Hz – 10.0 kHz' },
+    ])
     expect(sections[1].headers).toEqual([
       'Frequency', 'Generator', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
     ])
@@ -181,7 +184,7 @@ describe('sweepMeasurementSections', () => {
       '1.00 kHz', '100 mV (-20.00 dBV)', '0.050%', '-0.30 dB', '0.30%', '0.10%', '0.020%', '0.0010%', '0.0050%',
       '1.25 mW (8 Ω)', '0.0010%',
     ])
-    expect(rowsToObject(sections[2].rows!).Points).toBe('1')
+    expect(sections[2].figures![0]).toEqual({ label: 'Points', value: '1' })
   })
 
   it('writes the figures in dB when the display says so, and names the IMD family', () => {
@@ -189,7 +192,11 @@ describe('sweepMeasurementSections', () => {
     const sections = sweepMeasurementSections(imd, IMD_VS_AMPLITUDE_KIND, 8)
     // -40.92 dBc plus that point's own -0.3 dB of gain: the dB figures on paper are compensated
     // the way the chart's dB axis is, so the summary cannot disagree with the trace it summarises.
-    expect(rowsToObject(sections[0].rows!)['Worst IMD']).toBe('-41.22 dB at 100 mV')
+    expect(sections[0].figures!.find((f) => f.label === 'Worst IMD')).toEqual({
+      label: 'Worst IMD',
+      value: '-41.22 dB',
+      sub: 'at 100 mV',
+    })
     expect(sections[1].headers![0]).toBe('Output voltage')
     expect(sections[1].headers![1]).toBe('Generator')
     expect(sections[1].headers![2]).toBe('IMD')
@@ -228,7 +235,7 @@ describe('sweepSections', () => {
     }
     expect(chapterSections(subject, ['chart', 'settings', 'measurements']).map((s) => `${s.kind}:${s.title ?? ''}`)).toEqual([
       'keyValues:Settings',
-      'keyValues:Measurements — left channel',
+      'figures:Measurements — left channel',
       'table:',
     ])
   })

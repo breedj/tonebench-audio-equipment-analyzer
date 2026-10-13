@@ -5,6 +5,7 @@ import { useLoadOhms } from '../composables/useLoadOhms'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
+import EstimateBadge from './EstimateBadge.vue'
 import { estimateDurationSeconds, formatDuration, logPerOctave } from '../sweep/points'
 
 /**
@@ -220,7 +221,7 @@ function run() {
 <template>
   <CollapsibleSection title="Sweep">
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="The one frequency every point is measured at. The generator level is what steps."
     >
       Frequency (Hz)
@@ -230,12 +231,12 @@ function run() {
         min="1"
         step="any"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="Lowest generator voltage measured. The sweep steps upward from here.">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field" title="Lowest generator voltage measured. The sweep steps upward from here.">
         Start (V)
         <input
           v-model.number="form.startAmplitudeVolt"
@@ -244,10 +245,10 @@ function run() {
           :max="MAX_AMPLITUDE_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1" title="Highest generator voltage measured. 7.9 V is the most the output stage can produce.">
+      <label class="tb-field" title="Highest generator voltage measured. 7.9 V is the most the output stage can produce.">
         End (V)
         <input
           v-model.number="form.endAmplitudeVolt"
@@ -256,30 +257,43 @@ function run() {
           :max="MAX_AMPLITUDE_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
     </div>
 
-    <label
-      class="flex flex-col gap-1 text-xs"
-      title="How many measurement points per doubling of voltage. More points resolve the clipping knee more finely but take proportionally longer."
-    >
-      Steps per octave
-      <input
-        v-model.number="form.stepsPerOctave"
-        type="number"
-        min="1"
-        max="48"
-        :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      />
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label
+        class="tb-field"
+        title="How many measurement points per doubling of voltage. More points resolve the clipping knee more finely but take proportionally longer."
+      >
+        Steps per octave
+        <input
+          v-model.number="form.stepsPerOctave"
+          type="number"
+          min="1"
+          max="48"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+      <label class="tb-field" title="Averages per point. More averages lower the noise floor of every reading.">
+        Averages per point
+        <input
+          v-model.number="form.averageCount"
+          type="number"
+          min="1"
+          max="64"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+    </div>
 
     <!-- Shared with the FFT view's power readouts (useLoadOhms) rather than a second field that
          could disagree with it. Always shown here: the chart's output-power x axis needs it. -->
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Amplifier load. Used to report output power per point, and for the output-power x axis."
     >
       Load (Ω)
@@ -289,37 +303,26 @@ function run() {
         step="any"
         min="0.1"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <div class="flex gap-3 text-xs">
-      <label class="flex items-center gap-1.5">
+    <div class="flex gap-5">
+      <label class="tb-check-row">
         <input v-model="form.processLeft" type="checkbox" :disabled="running" />
         Left
       </label>
-      <label class="flex items-center gap-1.5">
+      <label class="tb-check-row">
         <input v-model="form.processRight" type="checkbox" :disabled="running" />
         Right
       </label>
     </div>
 
     <div class="text-xs">
-      <label class="flex flex-col gap-1" title="Averages per point. More averages lower the noise floor of every reading.">
-        Averages per point
-        <input
-          v-model.number="form.averageCount"
-          type="number"
-          min="1"
-          max="64"
-          :disabled="running"
-          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        />
-      </label>
     </div>
 
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Captures one generator-off record before the sweep, so the chart can show the residual the distortion traces sit above. Taken once, at the input range autoranging settles on with no signal — if the range steps up during the sweep, the analyzer's own floor rises with it and this trace will read low at the top end."
     >
       <input v-model="form.measureNoiseFloor" type="checkbox" :disabled="running" />
@@ -327,7 +330,7 @@ function run() {
     </label>
 
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Ends the sweep as soon as a measured channel's THD exceeds this figure. The point that crossed it is kept — it is the one that says where the DUT gave up — so the DUT is driven one step past the threshold. Off: the sweep runs to its end voltage."
     >
       <input v-model="form.stopOnThd" type="checkbox" :disabled="running" />
@@ -338,21 +341,27 @@ function run() {
         min="0.001"
         step="0.1"
         :disabled="running || !form.stopOnThd"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
       %
     </label>
 
-    <p
-      class="text-xs text-neutral-500 dark:text-neutral-400"
-      title="Fixed for a sweep: the harmonic analysis needs the fundamental several bins up, and this resolution keeps that true down to a few tens of hertz."
-    >
-      Analysis: {{ SWEEP_SAMPLE_RATE_HZ / 1000 }} kHz · {{ SWEEP_FFT_SIZE }} points ·
-      {{ SWEEP_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
-    </p>
 
-    <p class="text-xs text-neutral-500 dark:text-neutral-400">≈{{ pointCount }} points · ≈{{ durationLabel }}</p>
 
     <p v-if="invalid" class="text-xs text-red-600 dark:text-red-400">{{ invalid }}</p>
+
+    <template #footer>
+      <p
+        class="leading-snug"
+        title="Fixed for a sweep: the harmonic analysis needs the fundamental several bins up, and this resolution keeps that true down to a few tens of hertz."
+      >
+        Analysis: {{ SWEEP_SAMPLE_RATE_HZ / 1000 }} kHz · {{ SWEEP_FFT_SIZE }} points ·
+        {{ SWEEP_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
+      </p>
+      <div class="flex flex-wrap items-center gap-2">
+        <EstimateBadge kind="points" title="How many levels the sweep will measure.">≈ {{ pointCount }} points</EstimateBadge>
+        <EstimateBadge kind="time" title="Roughly how long the whole sweep will take.">≈ {{ durationLabel }}</EstimateBadge>
+      </div>
+    </template>
   </CollapsibleSection>
 </template>

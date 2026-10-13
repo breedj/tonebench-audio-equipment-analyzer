@@ -229,10 +229,36 @@ export function useImpulseResponse() {
    */
   const gateResolutionHz = computed(() => status.value?.gateResolutionHz ?? 0)
 
+  /**
+   * The one line the measurement status bar shows — "Measuring · pass 2 · record 1 of 4" — in the
+   * shape every other runner's `progressLabel` has, so `statusHeadline`/`statusDetail` split it the
+   * same way. This runner had none until the bar arrived, because its screen printed nothing about
+   * its progress at all: a chirp pass is seconds long and the phase word alone never changed.
+   */
+  const progressLabel = computed<string>(() => {
+    const s = status.value
+    if (!s || s.phase === 'Idle') return ''
+    if (s.phase === 'Measuring') {
+      const record = s.averageCount > 1 ? ` · record ${s.averagesTaken} of ${s.averageCount}` : ''
+      const pass = s.continuous ? ` · pass ${s.passesCompleted + 1}` : ''
+      return `Measuring${pass}${record}`
+    }
+    if (s.phase === 'DeterminingLevel') return 'Determining generator level'
+    if (s.phase === 'DeterminingRange') return 'Determining input range'
+    if (s.phase === 'Analyzing') return 'Analyzing'
+    if (s.phase === 'Finished' && s.passesCompleted > 1) return `Finished · ${s.passesCompleted} passes`
+    return s.phase
+  })
+
   return {
     status,
     running,
     phase,
+    progressLabel,
+    averagesTaken: computed(() => status.value?.averagesTaken ?? 0),
+    averageCount: computed(() => status.value?.averageCount ?? 0),
+    generatorAmpDbv: computed(() => status.value?.generatorAmpDbv ?? Number.NaN),
+    binHz: computed(() => status.value?.binHz ?? 0),
     csdSurface,
     burstSurface,
     decayError,

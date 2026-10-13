@@ -138,6 +138,12 @@ const STRIP =
     </div>
 
     <div class="flex min-w-0 flex-col gap-3">
+      <!-- The measurement status bar, and it is deliberately the FIRST thing in this column: it is
+           `h-11` like the run row across the gutter, so the settings panel under the one and the
+           chart card under the other start at the same height (Joost, 2026-10-12). Anything slotted
+           in ahead of it — the simulator hint below, which is the height of whatever it has to say —
+           would break that alignment on exactly the screens that have something to say. -->
+      <slot name="status" />
       <!-- Simulated mode only: what the status-bar knobs have to say for this measurement to show
            anything, when they do not. Here rather than in each screen so no screen can forget it. -->
       <SimulatorHint />

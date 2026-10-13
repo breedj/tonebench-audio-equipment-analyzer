@@ -30,22 +30,41 @@ public class ReportPdfRendererTests
             Chapters:
             [
                 new ReportChapter(
-                    "Frequency response",
+                    "stepped-ac - V(out)",
                     Meta: [new ReportRow("Measurement", "Frequency response"), new ReportRow("Taken", "18-09-2026 09:58")],
                     Notes: "Measured at the 8 Ω tap.",
                     Sections:
                     [
+                        new ReportSection(ReportSectionKind.Figures, Figures:
+                        [
+                            new ReportFigure("Max. gain", "18.14 dB", "8.073 x"),
+                            new ReportFigure("Peak at", "1000.0 Hz"),
+                        ]),
                         new ReportSection(ReportSectionKind.Image, Title: "Chart", Png: OnePixelPng, Caption: "Gain vs frequency"),
                         new ReportSection(ReportSectionKind.KeyValues, Title: "Settings",
                             Rows: [new ReportRow("Span", "20 Hz – 20 kHz"), new ReportRow("Level", "−18 dBV")]),
+                        new ReportSection(ReportSectionKind.Groups, Title: "Settings", Groups:
+                        [
+                            new ReportGroup("Acquisition", [new ReportRow("Sample rate", "192 000 Hz")]),
+                            new ReportGroup("Analysis", [new ReportRow("Band", "20 Hz – 20 kHz")]),
+                        ]),
                         new ReportSection(ReportSectionKind.Table, Title: "Measurements",
                             Headers: ["", "f(low)", "f(high)", "BW"],
                             Cells: [["±1 dB", "23.1 Hz", "18.4 kHz", "18.4 kHz"], ["−3 dB", "11.4 Hz", "44.0 kHz", "44.0 kHz"]]),
                         new ReportSection(ReportSectionKind.Paragraph, Text: "The lower −3 dB corner is clamped to the sweep's start."),
                         .. extra,
-                    ]),
-                new ReportChapter("Impedance", Meta: [], Notes: null, Sections: []),
-            ]);
+                    ],
+                    Eyebrow: "Frequency response",
+                    Accent: "#0e7490",
+                    Status: "18-09-2026 09:58",
+                    StatusTone: "stored"),
+                new ReportChapter("Settings and notes", Meta: [], Notes: null,
+                    Sections: [new ReportSection(ReportSectionKind.Callout, Title: "Not measured.", Text: "This chapter carries the settings and notes only.")],
+                    Eyebrow: "Impedance", Accent: "#0f766e", Status: "Settings only", StatusTone: "none"),
+            ],
+            Eyebrow: "Project report",
+            Stats: [new ReportRow("Chapters", "2"), new ReportRow("With stored results", "1")],
+            Version: "Tonebench 0.2.0");
 
     [Fact]
     public void RendersEverySectionKind_AndTheBytesAreAPdf()
@@ -61,6 +80,41 @@ public class ReportPdfRendererTests
     {
         byte[] pdf = ReportPdfRenderer.Render(new ReportDocument("smoke", null, "now", null, []));
         Assert.Equal("%PDF-", Encoding.ASCII.GetString(pdf, 0, 5));
+    }
+
+    /// <summary>
+    /// Black and white is the whole document, not only the charts — see the renderer's Palette. A
+    /// monochrome document must lay out the same (the greys are substituted where the hues go, and
+    /// nothing moves), so the two differ by colour alone and a reader of one is reading the other.
+    /// </summary>
+    [Fact]
+    public void InBlackAndWhite_TheSameDocumentStillRenders_AndKeepsItsShape()
+    {
+        byte[] colour = ReportPdfRenderer.Render(SampleDocument());
+        byte[] mono = ReportPdfRenderer.Render(SampleDocument() with { Monochrome = true });
+
+        Assert.Equal("%PDF-", Encoding.ASCII.GetString(mono, 0, 5));
+        // Within a few per cent: the same text, images and boxes, drawn in different colours.
+        Assert.InRange(mono.Length, colour.Length * 0.9, colour.Length * 1.1);
+    }
+
+    /// <summary>
+    /// A chapter's accent arrives as a hex string from the client, which is the one place a typo can
+    /// reach the colour parser. An unusable one falls back to the document's own accent rather than
+    /// taking the report down.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("teal")]
+    [InlineData("#12345")]
+    [InlineData("#nothex")]
+    public void AnAccentTheRendererCannotParse_FallsBackInsteadOfThrowing(string? accent)
+    {
+        var doc = new ReportDocument("smoke", null, "now", null,
+            [new ReportChapter("c", [], null, [], Eyebrow: "e", Accent: accent)]);
+
+        Assert.Equal("%PDF-", Encoding.ASCII.GetString(ReportPdfRenderer.Render(doc), 0, 5));
     }
 
     /// <summary>

@@ -89,7 +89,7 @@
 
     <ol>
       <li>Open the FFT measurement you want to compare against.</li>
-      <li>In the <strong>History</strong> panel, press <strong>Import simulation…</strong>.</li>
+      <li>In the <strong>History</strong> panel, press <strong>Import sim…</strong>.</li>
       <li>Find the <code>.raw</code> (or <code>.qraw</code>) file the simulator wrote next to your schematic.</li>
       <li>
         Choose which trace is the one you care about — usually the output node. A simulation carries

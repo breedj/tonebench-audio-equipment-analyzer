@@ -180,7 +180,7 @@ function db(v: number, digits = 1): string {
         <tr><td>Display</td><td>Projection Bode, view Gain (dB), phase and bandwidth markers on</td></tr>
       </tbody>
     </table>
-    <p>These are the screen's defaults; press <strong>SINGLE</strong>. One record of 0.68 s is measured after one is discarded.</p>
+    <p>These are the screen's defaults; press <strong>Single</strong>. One record of 0.68 s is measured after one is discarded.</p>
 
     <ManualChart
       :series="frSeries"
@@ -303,7 +303,7 @@ function db(v: number, digits = 1): string {
       </tbody>
     </table>
     <p>
-      Again the defaults. <strong>RUN SWEEP</strong> takes about a minute for 50 points, and the
+      Again the defaults. <strong>Run sweep</strong> takes about a minute for 50 points, and the
       line under the settings says adaptive resolution chose <strong>48 kHz</strong> — a 20 kHz
       end needs nothing higher — which puts the model's clamped 21.6 kHz sections just above the
       sweep, as on the 24 kHz-span chirp above.

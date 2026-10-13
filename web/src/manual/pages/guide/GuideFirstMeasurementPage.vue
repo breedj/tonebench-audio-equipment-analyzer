@@ -93,10 +93,10 @@ const { showPage } = useManual()
     </table>
     <p>
       Do not worry about what "window" or "FFT size" mean yet — those are the sensible defaults and
-      you can leave them alone for months. Nothing you type reaches the hardware until you press RUN.
+      you can leave them alone for months. Nothing you type reaches the hardware until you press Run.
     </p>
 
-    <h2>5. Press RUN</h2>
+    <h2>5. Press Run</h2>
     <p>The green button at the top of the settings column. Straight away you should see:</p>
     <ul>
       <li>
@@ -151,7 +151,7 @@ const { showPage } = useManual()
 
     <h2>7. Keep it</h2>
     <p>
-      Press <strong>SINGLE</strong>. That measures once, properly settled, and stops on its own —
+      Press <strong>Single</strong>. That measures once, properly settled, and stops on its own —
       which is what you want before saving, because what gets saved is what is on screen. Then press
       <strong>Save measurement result</strong>, give it a name such as <em>loopback, day one</em>, and
       it is stored in your project file for good.
@@ -163,7 +163,7 @@ const { showPage } = useManual()
 
     <h2>Then have a play</h2>
     <p>
-      Press RUN again and, while it is running, change things. Everything applies live:
+      Press Run again and, while it is running, change things. Everything applies live:
     </p>
     <ul>
       <li>Walk the <strong>Level</strong> up to 0 dBV and watch the distortion spikes grow.</li>

@@ -192,7 +192,7 @@ const theme = computed(() => currentTheme())
 <template>
   <section
     ref="rootRef"
-    class="relative flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800"
+    class="relative flex flex-col gap-1 panel-surface rounded-xl border border-neutral-200 p-2 dark:border-neutral-800"
   >
     <ExpandToggle class="absolute right-1 top-1" :target="rootRef" />
     <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. -->
@@ -206,12 +206,8 @@ const theme = computed(() => currentTheme())
              preview are drawn against one window. -->
         <button
           type="button"
-          class="shrink-0 rounded border px-1.5 py-0 leading-5"
-          :class="
-            fitAllSpectra
-              ? 'btn-action'
-              : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
-          "
+          class="shrink-0 rounded-md border px-1.5 py-0 leading-5"
+          :class="fitAllSpectra ? 'btn-action' : 'btn-toggle-off'"
           :title="
             fitAllSpectra
               ? `Fixed axis: one ${PREVIEW_GRID_STEP_DB} dB grid fitting every spectrum the sweep chart is showing. Click to scale each point on its own again.`

@@ -161,7 +161,7 @@ const { showPage } = useManual()
 
     <h2>Save everything as you go</h2>
     <p>
-      Press <strong>SINGLE</strong> (or let a sweep finish), then the save button, and give each result
+      Press <strong>Single</strong> (or let a sweep finish), then the save button, and give each result
       a name that says the conditions: <em>THD 1 kHz 1 W left</em>. In six months, when you have
       changed the coupling capacitors, you can tick the old result in the History list and draw it
       straight under the new one. That comparison is the whole reason for owning an analyzer, and it

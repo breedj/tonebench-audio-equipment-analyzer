@@ -450,8 +450,9 @@ watch(
 </script>
 
 <template>
-  <section ref="root" class="relative flex flex-col gap-1">
-    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+  <!-- A card like every panel beside it — the 2026-10-12 mockups. -->
+  <section ref="root" class="relative flex flex-col gap-1 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
+    <ExpandToggle class="absolute right-3 top-3" :target="root" />
     <div class="min-h-6 pr-9 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
       <span>Impulse response</span>
       <span v-if="impulse">

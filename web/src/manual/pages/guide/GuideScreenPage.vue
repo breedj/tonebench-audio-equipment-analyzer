@@ -61,21 +61,27 @@ const { showPage } = useManual()
     <h2>The green button</h2>
     <ul>
       <li>
-        <strong>RUN</strong> — keeps measuring, about twenty times a second, until you press
-        <strong>STOP</strong>. This is the one to use while you are adjusting something, because you
+        <strong>Run</strong> — keeps measuring, about twenty times a second, until you press
+        <strong>Stop</strong>. This is the one to use while you are adjusting something, because you
         see the effect immediately.
       </li>
       <li>
-        <strong>SINGLE</strong> — measures once and stops itself. Use this before saving.
+        <strong>Single</strong> — measures once and stops itself. Use this before saving.
       </li>
       <li>
-        <strong>RUN SWEEP</strong> — on the screens that step through a list of frequencies or levels.
-        It walks the list once and stops. <strong>CANCEL</strong> stops it early, and whatever it
+        <strong>Run sweep</strong> — on the screens that step through a list of frequencies or levels.
+        It walks the list once and stops. <strong>Cancel</strong> stops it early, and whatever it
         measured so far stays on screen.
       </li>
     </ul>
     <p>
-      <strong>STOP</strong> always silences the generator as well as stopping the measurement.
+      <strong>Stop</strong> always silences the generator as well as stopping the measurement.
+    </p>
+    <p>
+      Next to the green button, above the chart, a small bar tells you what is happening: a coloured
+      dot and a word — <em>Idle</em> before you start, then what it is doing, then <em>Finished</em>
+      — with a progress line underneath and a figure or two about the run. Green means it got to the
+      end; red means you stopped it or something went wrong.
     </p>
 
     <h2>The chart</h2>

@@ -17,6 +17,7 @@ import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
+import EstimateBadge from './EstimateBadge.vue'
 
 defineProps<{ running: boolean }>()
 const emit = defineEmits<{ (e: 'capture-reference'): void }>()
@@ -284,43 +285,43 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
 <template>
   <CollapsibleSection title="Measurement settings">
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Input voltage drives the generator at the level you enter. Output voltage and output power probe the DUT first and set the generator so this much comes back out."
     >
       Set generator by
       <select
         v-model="form.levelMode"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
     </label>
 
-    <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div class="grid grid-cols-[2fr_1fr] gap-2.5">
+      <label class="tb-field">
         {{ isPowerMode ? 'Power (W)' : 'Amplitude' }}
         <input
           v-model.number="form.levelValue"
           type="number"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label v-if="!isPowerMode" class="flex flex-col gap-1">
+      <label v-if="!isPowerMode" class="tb-field">
         <span class="invisible">Unit</span>
         <select
           v-model="form.levelUnit"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
       </label>
     </div>
 
-    <label v-if="isPowerMode" class="flex flex-col gap-1 text-xs" title="Amplifier load: V = sqrt(P x R).">
+    <label v-if="isPowerMode" class="tb-field" title="Amplifier load: V = sqrt(P x R).">
       Load (Ω)
       <input
         v-model.number="loadOhms"
@@ -328,33 +329,33 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         step="any"
         min="0.1"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="The highest frequency measured. The sample rate is twice this, so a wider span costs no extra time — only resolution does."
     >
       Frequency span (Hz)
       <select
         v-model.number="form.frequencySpanHz"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span }}</option>
       </select>
     </label>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Sweep length, and so how far apart the harmonic distortion packets land in the impulse response. A longer sweep allows a wider gate."
     >
       Resolution (Hz)
       <select
         v-model.number="form.resolutionMultiplier"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in RESPONSE_RESOLUTIONS" :key="option.multiplier" :value="option.multiplier">
           {{ option.label }}
@@ -362,7 +363,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       </select>
     </label>
 
-    <label class="flex flex-col gap-1 text-xs" title="Where the sweep starts. The reported band starts 25% above this value.">
+    <label class="tb-field" title="Where the sweep starts. The reported band starts 25% above this value.">
       Chirp start (Hz)
       <input
         v-model.number="form.chirpStartHz"
@@ -371,11 +372,11 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         max="1000"
         step="0.5"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <label class="flex flex-col gap-1 text-xs" title="How many sweeps to average. Coherence is only meaningful from two upward.">
+    <label class="tb-field" title="How many sweeps to average. Coherence is only meaningful from two upward.">
       Averages
       <input
         v-model.number="form.averageCount"
@@ -383,18 +384,22 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         min="1"
         max="10"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
-      Analysis: {{ (sampleRateHz / 1000).toFixed(0) }} kHz · {{ fftSize }} points ·
-      {{ binHz.toFixed(2) }} Hz per bin · {{ recordSeconds.toFixed(2) }} s per record
-    </p>
-    <p v-if="isPowerMode && targetVolt > 0" class="text-[11px] text-neutral-500 dark:text-neutral-400">
-      Target: {{ targetVolt.toFixed(3) }} V rms into {{ loadOhms }} Ω ({{ targetDbv.toFixed(2) }} dBV)
-    </p>
-    <p class="text-[11px] text-neutral-500 dark:text-neutral-400">≈{{ estimatedSeconds.toFixed(1) }} s</p>
+    <template #footer>
+      <span class="leading-snug">
+        Analysis {{ (sampleRateHz / 1000).toFixed(0) }} kHz · {{ fftSize }} pts · {{ binHz.toFixed(2) }} Hz/bin ·
+        {{ recordSeconds.toFixed(2) }} s/record
+      </span>
+      <span v-if="isPowerMode && targetVolt > 0">
+        Target {{ targetVolt.toFixed(3) }} V rms into {{ loadOhms }} Ω ({{ targetDbv.toFixed(2) }} dBV)
+      </span>
+      <div class="flex flex-wrap items-center gap-2">
+        <EstimateBadge kind="time" title="Roughly how long one pass will take.">≈ {{ estimatedSeconds.toFixed(1) }} s</EstimateBadge>
+      </div>
+    </template>
   </CollapsibleSection>
 
   <CollapsibleSection title="Gate">
@@ -404,8 +409,8 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       remaining window is too short to resolve.
     </p>
 
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="Kept before the impulse. A band-limited impulse rings before itself, so this is not zero.">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field" title="Kept before the impulse. A band-limited impulse rings before itself, so this is not zero.">
         Before (ms)
         <input
           v-model.number="form.gatePreMs"
@@ -413,10 +418,10 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
           min="0.05"
           step="0.05"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1" title="Kept after the impulse. This is what decides the lowest frequency the gated response can describe.">
+      <label class="tb-field" title="Kept after the impulse. This is what decides the lowest frequency the gated response can describe.">
         After (ms)
         <input
           v-model.number="form.gatePostMs"
@@ -424,20 +429,20 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
           min="0.1"
           step="0.5"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
     </div>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="How the gate's edges are tapered. Rectangular is a bare cut, which is what you want when isolating a reflection exactly; the tapered windows trade a little time resolution for less ringing across the spectrum."
     >
       Gate window
       <select
         v-model="form.gateWindow"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in IMPULSE_GATE_WINDOWS" :key="option.value" :value="option.value">
           {{ option.label }}
@@ -445,12 +450,12 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       </select>
     </label>
 
-    <label class="flex flex-col gap-1 text-xs" title="Smoothing applied to the gated magnitude curve.">
+    <label class="tb-field" title="Smoothing applied to the gated magnitude curve.">
       Smoothing
       <select
         v-model.number="form.smoothingDenominator"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in RESPONSE_SMOOTHING" :key="option.denominator" :value="option.denominator">
           {{ option.label }}
@@ -458,36 +463,38 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       </select>
     </label>
 
-    <!-- The number this whole panel exists to make visible. A gated response drawn below its own
-         resolution limit looks perfectly convincing and means nothing. -->
-    <p class="text-[11px] font-medium text-amber-700 dark:text-amber-500">
-      Nothing below ≈{{ gateResolutionHz.toFixed(0) }} Hz is real at this gate length.
-    </p>
-    <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
-      Reflections out to {{ gateReachMetres.toFixed(2) }} m of extra path are inside the gate ·
-      widest here: {{ maxGatePreMs.toFixed(2) }} / {{ maxGatePostMs.toFixed(0) }} ms
-    </p>
+    <template #footer>
+      <span class="leading-snug">
+        Reflections out to {{ gateReachMetres.toFixed(2) }} m of extra path are inside the gate ·
+        widest here: {{ maxGatePreMs.toFixed(2) }} / {{ maxGatePostMs.toFixed(0) }} ms
+      </span>
+      <!-- The number this whole panel exists to make visible. A gated response drawn below its own
+           resolution limit looks perfectly convincing and means nothing. -->
+      <span class="font-medium text-amber-700 dark:text-amber-500">
+        Nothing below ≈{{ gateResolutionHz.toFixed(0) }} Hz is real at this gate length.
+      </span>
+    </template>
   </CollapsibleSection>
 
   <CollapsibleSection title="Reference">
-    <label class="flex flex-col gap-1 text-xs" title="What the captured response is divided by, which decides what the result is a response OF.">
+    <label class="tb-field" title="What the captured response is divided by, which decides what the result is a response OF.">
       Divide by
       <select
         v-model="form.referenceMode"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="mode in IMPULSE_REFERENCE_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
     </label>
 
     <template v-if="usesStoredLoopback">
-      <label class="flex flex-col gap-1 text-xs">
+      <label class="tb-field">
         Calibration
         <select
           v-model.number="form.referenceCalibrationId"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option :value="null">— none —</option>
           <option v-for="reference in references" :key="reference.id" :value="reference.id">
@@ -522,19 +529,19 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
 
   <CollapsibleSection title="Harmonics">
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Deconvolving a sweep recovers the DUT's harmonic distortion as separate packets ahead of the impulse. Reading them costs nothing extra — the measurement is already made."
     >
       <input v-model="form.extractHarmonics" type="checkbox" :disabled="running" />
       Extract harmonic distortion
     </label>
 
-    <label v-if="form.extractHarmonics" class="flex flex-col gap-1 text-xs" title="Highest order to read.">
+    <label v-if="form.extractHarmonics" class="tb-field" title="Highest order to read.">
       Up to
       <select
         v-model.number="form.maxHarmonicOrder"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="order in [2, 3, 4, 5]" :key="order" :value="order">H{{ order }}</option>
       </select>
@@ -547,5 +554,6 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
     </p>
 
     <p v-if="invalid" class="text-[11px] text-red-600 dark:text-red-400">{{ invalid }}</p>
+
   </CollapsibleSection>
 </template>

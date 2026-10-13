@@ -6,6 +6,7 @@ import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useProjects } from '../composables/useProjects'
 import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, type ImdPresetId } from '../imd/presets'
 import CollapsibleSection from './CollapsibleSection.vue'
+import EstimateBadge from './EstimateBadge.vue'
 import { estimateDurationSeconds, formatDuration, logPerOctave } from '../sweep/points'
 
 /**
@@ -220,22 +221,22 @@ function run() {
 <template>
   <CollapsibleSection title="Sweep">
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="A standard two-tone test. SMPTE and DIN modulate a small HF carrier with a large LF tone (4:1); CCIF plays two equal tones a kilohertz apart at the top of the band. Custom frees the pair."
     >
       IMD preset
       <select
         v-model="form.preset"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
         @change="onPresetChange"
       >
         <option v-for="p in IMD_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
       </select>
     </label>
 
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="The lower tone — SMPTE's modulating tone, CCIF's f1.">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field" title="The lower tone — SMPTE's modulating tone, CCIF's f1.">
         Tone 1 (Hz)
         <input
           v-model.number="form.toneLowHz"
@@ -246,7 +247,7 @@ function run() {
           class="rounded border border-neutral-300 px-2 py-1 disabled:opacity-60 dark:border-neutral-700"
         />
       </label>
-      <label class="flex flex-col gap-1" title="The upper tone — SMPTE's carrier, CCIF's f2.">
+      <label class="tb-field" title="The upper tone — SMPTE's carrier, CCIF's f2.">
         Tone 2 (Hz)
         <input
           v-model.number="form.toneHighHz"
@@ -260,7 +261,7 @@ function run() {
     </div>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Amplitude of tone 1 over tone 2. 4 (12 dB) for SMPTE/DIN, 1 for CCIF."
     >
       Ratio (low:high)
@@ -275,14 +276,14 @@ function run() {
     </label>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="SMPTE/DIN: sidebands f2 ± n·f1, relative to the HF carrier. CCIF: difference products |m·f1 − n·f2|, relative to the RMS sum of both tones."
     >
       Method
       <select
         v-model="form.method"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
         @change="onMethodChange"
       >
         <option v-for="m in METHODS" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -290,7 +291,7 @@ function run() {
     </label>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Highest product order counted. SMPTE 5 = four sideband pairs; CCIF 3 = the 2nd-order difference tone plus both 3rd-order products."
     >
       Max order
@@ -300,13 +301,13 @@ function run() {
         min="2"
         max="12"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <div class="grid grid-cols-2 gap-2 text-xs">
+    <div class="grid grid-cols-2 gap-2.5">
       <label
-        class="flex flex-col gap-1"
+        class="tb-field"
         title="Lowest generator level, as the single sine whose peak equals the pair's peak. The sweep steps upward from here."
       >
         Start (V sine-eq.)
@@ -317,10 +318,10 @@ function run() {
           :max="MAX_LEVEL_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1" title="Highest generator level. 7.9 V is the most the output stage can produce at the pair's peak.">
+      <label class="tb-field" title="Highest generator level. 7.9 V is the most the output stage can produce at the pair's peak.">
         End (V sine-eq.)
         <input
           v-model.number="form.endLevelVolt"
@@ -329,28 +330,41 @@ function run() {
           :max="MAX_LEVEL_VOLT"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
+        />
+      </label>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2.5">
+      <label
+        class="tb-field"
+        title="How many measurement points per doubling of level."
+      >
+        Steps per octave
+        <input
+          v-model.number="form.stepsPerOctave"
+          type="number"
+          min="1"
+          max="48"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+      <label class="tb-field" title="Averages per point. More averages lower the noise floor of every reading.">
+        Averages per point
+        <input
+          v-model.number="form.averageCount"
+          type="number"
+          min="1"
+          max="64"
+          :disabled="running"
+          class="tb-input"
         />
       </label>
     </div>
 
     <label
-      class="flex flex-col gap-1 text-xs"
-      title="How many measurement points per doubling of level."
-    >
-      Steps per octave
-      <input
-        v-model.number="form.stepsPerOctave"
-        type="number"
-        min="1"
-        max="48"
-        :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      />
-    </label>
-
-    <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Amplifier load. Used to report output power per point, and for the output-power x axis."
     >
       Load (Ω)
@@ -360,37 +374,26 @@ function run() {
         step="any"
         min="0.1"
         :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <div class="flex gap-3 text-xs">
-      <label class="flex items-center gap-1.5">
+    <div class="flex gap-5">
+      <label class="tb-check-row">
         <input v-model="form.processLeft" type="checkbox" :disabled="running" />
         Left
       </label>
-      <label class="flex items-center gap-1.5">
+      <label class="tb-check-row">
         <input v-model="form.processRight" type="checkbox" :disabled="running" />
         Right
       </label>
     </div>
 
     <div class="text-xs">
-      <label class="flex flex-col gap-1" title="Averages per point. More averages lower the noise floor of every reading.">
-        Averages per point
-        <input
-          v-model.number="form.averageCount"
-          type="number"
-          min="1"
-          max="64"
-          :disabled="running"
-          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        />
-      </label>
     </div>
 
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Captures one generator-off record before the sweep, so the chart can show the residual the distortion traces sit above."
     >
       <input v-model="form.measureNoiseFloor" type="checkbox" :disabled="running" />
@@ -398,7 +401,7 @@ function run() {
     </label>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Highest product frequency counted — the tutorial's 'in-band products only'. At 20 kHz the CCIF 19 + 20 kHz test counts 18 kHz and omits 21 kHz; widen it to count the products above the band too."
     >
       Product band limit (Hz)
@@ -408,20 +411,26 @@ function run() {
         min="1"
         step="any"
         :disabled="running"
-        class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input w-28"
       />
     </label>
 
-    <p
-      class="text-xs text-neutral-500 dark:text-neutral-400"
-      title="Fixed for a sweep: this resolution keeps the SMPTE tones dozens of bins apart."
-    >
-      Analysis: {{ SWEEP_SAMPLE_RATE_HZ / 1000 }} kHz · {{ SWEEP_FFT_SIZE }} points ·
-      {{ SWEEP_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
-    </p>
 
-    <p class="text-xs text-neutral-500 dark:text-neutral-400">≈{{ pointCount }} points · ≈{{ durationLabel }}</p>
 
     <p v-if="invalid" class="text-xs text-red-600 dark:text-red-400">{{ invalid }}</p>
+
+    <template #footer>
+      <p
+        class="leading-snug"
+        title="Fixed for a sweep: this resolution keeps the SMPTE tones dozens of bins apart."
+      >
+        Analysis: {{ SWEEP_SAMPLE_RATE_HZ / 1000 }} kHz · {{ SWEEP_FFT_SIZE }} points ·
+        {{ SWEEP_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
+      </p>
+      <div class="flex flex-wrap items-center gap-2">
+        <EstimateBadge kind="points" title="How many levels the sweep will measure.">≈ {{ pointCount }} points</EstimateBadge>
+        <EstimateBadge kind="time" title="Roughly how long the whole sweep will take.">≈ {{ durationLabel }}</EstimateBadge>
+      </div>
+    </template>
   </CollapsibleSection>
 </template>

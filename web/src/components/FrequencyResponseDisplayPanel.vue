@@ -25,6 +25,9 @@ import {
 } from '../response/delayAxis'
 import { seedNicholsGain, seedPoleZeroWindow, type ResponseAutoWindow } from '../response/autoWindow'
 import CollapsibleSection from './CollapsibleSection.vue'
+import SegmentedToggle from './SegmentedToggle.vue'
+import { bandwidthColor, type BandwidthMarker } from '../charts/bandwidthColors'
+import { useAppTheme } from '../composables/useAppTheme'
 
 /**
  * Whether coherence is a meaningful thing to offer. A chirp measures it from the cross-spectra of
@@ -131,10 +134,36 @@ const surfaceShowing = computed(() => projection.value === 'SPlane')
 const nicholsShowing = computed(() => !bodeShowing.value && projection.value === 'Nichols')
 const poleZeroShowing = computed(() => !bodeShowing.value && projection.value === 'PoleZero')
 
-const S_PLANE_SCALES: { value: SPlaneScaleName; label: string }[] = [
-  { value: 'Linear', label: 'Linear' },
-  { value: 'LogModulus', label: 'Log' },
+/**
+ * Projection and s-plane radius as the toggle wants them: the span the Projection grid needs per
+ * option, and whether the complex views are reachable at all. Built here rather than inline in the
+ * template because the span rule ("three over two") is the thing a later reader has to understand,
+ * and it is easier to read beside the table it applies to.
+ */
+const projectionOptions = computed(() =>
+  PROJECTIONS.map((option, index) => ({
+    value: option.value,
+    label: option.label,
+    span: index < 3 ? 2 : 3,
+    disabled: option.value !== 'Bode' && !complexAvailable.value,
+  })),
+)
+
+const S_PLANE_SCALES: { value: SPlaneScaleName; label: string; title: string }[] = [
+  {
+    value: 'Linear',
+    label: 'Linear',
+    title:
+      'The plane as a textbook draws it. A DUT whose roots span decades puts its lowest one inside the origin marker.',
+  },
+  {
+    value: 'LogModulus',
+    label: 'Log',
+    title:
+      'Scales |s| logarithmically and leaves the angle alone, so every decade of roots is visible and ζ still reads as an angle. The plane is distorted; nothing about a root changes.',
+  },
 ]
+const sPlaneScaleOptions = S_PLANE_SCALES
 
 const SURFACE_MODES: { value: SurfaceModeName; label: string; title: string }[] = [
   {
@@ -540,94 +569,55 @@ watch(running, (isRunning, wasRunning) => {
   // window the user cannot see.
   if (wasRunning && !isRunning && autofitOnDone.value) autofitAll()
 })
+
+// The colour each bandwidth row shows beside its checkbox — the chart's own markers.
+const { isDark } = useAppTheme()
+function bandwidthSwatch(marker: BandwidthMarker): string {
+  return bandwidthColor(marker, isDark.value)
+}
 </script>
 
 <template>
   <!-- Display first: it is the section a reader reaches for on every visit, and the axis
        ranges below it are set once and then left alone. Joost's request, 2026-09-27. -->
   <CollapsibleSection title="Display">
-    <!-- The toggle groups here (Projection, Radius, View) highlight the selected option the way the
-         sweep screens' Units toggle does, black on white: one look for "which of these is on" across
-         every display rail. -->
-    <div class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Projection</span>
-      <!-- Two rows of a six-column grid, not one flex row: five labels need 278 px and the rail is
-           256, so a single row put |H(s)| behind `overflow-hidden` and the view looked as though it
-           had never shipped. Three spanning two columns over two spanning three fills both rows
-           exactly, with no empty cell to explain. -->
-      <div
-        class="grid grid-cols-6 overflow-hidden rounded border border-neutral-300 dark:border-neutral-700"
-        :title="projectionHint"
-      >
-        <button
-          v-for="(option, index) in PROJECTIONS"
-          :key="option.value"
-          type="button"
-          class="border-neutral-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700"
-          :class="[
-            index < 3 ? 'col-span-2' : 'col-span-3',
-            index === 0 || index === 3 ? '' : 'border-l',
-            index >= 3 ? 'border-t' : '',
-            projection === option.value
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800',
-          ]"
-          :disabled="option.value !== 'Bode' && !complexAvailable"
-          @click="projection = option.value"
-        >
-          {{ option.label }}
-        </button>
-      </div>
-    </div>
+    <!-- Every "which one of these is on" control in this rail is a SegmentedToggle, so one look
+         answers it on every display rail in the app. -->
+    <span class="tb-group">Projection</span>
+    <!-- Two rows of a six-column grid, not one flex row: five labels need 278 px and the rail is
+         256, so a single row put |H(s)| behind `overflow-hidden` and the view looked as though it
+         had never shipped. Three spanning two columns over two spanning three fills both rows
+         exactly, with no empty cell to explain. -->
+    <SegmentedToggle
+      v-model="projection"
+      group-label="Projection"
+      :columns="6"
+      :title="projectionHint"
+      :options="projectionOptions"
+    />
 
     <!-- Only meaningful under a polar projection, so it is not shown under Bode at all rather than
          sitting there inert. -->
-    <div v-if="!bodeShowing && projection === 'Nyquist'" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Radius</span>
-      <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
-        <button
-          type="button"
-          class="flex-1 px-2 py-1"
-          :class="
-            nyquistRadius === 'Linear'
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          title="The textbook plot: distances mean what they look like."
-          @click="nyquistRadius = 'Linear'"
-        >
-          Linear
-        </button>
-        <button
-          type="button"
-          class="flex-1 border-l border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          :class="
-            nyquistRadius === 'Db'
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          title="Keeps a wide range on screen, but distance to −1 is no longer metric."
-          @click="nyquistRadius = 'Db'"
-        >
-          dB
-        </button>
-      </div>
-      <label v-if="nyquistRadius === 'Db'" class="flex items-center justify-between gap-2">
+    <template v-if="!bodeShowing && projection === 'Nyquist'">
+      <span class="tb-group">Radius</span>
+      <SegmentedToggle
+        v-model="nyquistRadius"
+        group-label="Radius"
+        :options="[
+          { value: 'Linear', label: 'Linear', title: 'The textbook plot: distances mean what they look like.' },
+          { value: 'Db', label: 'dB', title: 'Keeps a wide range on screen, but distance to −1 is no longer metric.' },
+        ]"
+      />
+      <label v-if="nyquistRadius === 'Db'" class="tb-check-row justify-between">
         Floor (dB)
-        <input
-          v-model.number="nyquistRadiusFloorDb"
-          type="number"
-          max="-6"
-          step="10"
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        />
+        <input v-model.number="nyquistRadiusFloorDb" type="number" max="-6" step="10" class="tb-input w-24" />
       </label>
-    </div>
+    </template>
 
     <!-- The contour views only: on both s-plane views the fit *is* the content rather than an overlay
          on a measured curve, so there is nothing for this to turn off. -->
-    <label v-if="!bodeShowing && !sPlaneShowing" class="flex items-center gap-1.5 text-xs">
-      <input v-model="showFittedModel" type="checkbox" />
+    <label v-if="!bodeShowing && !sPlaneShowing" class="tb-check-row">
+      <input v-model="showFittedModel" type="checkbox" class="tb-check" />
       <span title="Draws the Poles and zeros panel's rational model over the measurement, dashed. It is the check on that panel — a root list whose model does not follow the measured contour describes nothing — and it is worth hiding once you have looked, since a poor fit can wander far across the plot.">
         Show fitted model
       </span>
@@ -635,8 +625,8 @@ watch(running, (isRunning, wasRunning) => {
 
     <!-- Both s-plane views: a root outside the measured band is the fit's extrapolation, and since the
          window is fitted to the roots, one of them squeezes every real one into the origin. -->
-    <label v-if="!bodeShowing && sPlaneShowing" class="flex items-center gap-1.5 text-xs">
-      <input v-model="hideOutOfBandRoots" type="checkbox" />
+    <label v-if="!bodeShowing && sPlaneShowing" class="tb-check-row">
+      <input v-model="hideOutOfBandRoots" type="checkbox" class="tb-check" />
       <!-- "from the plot" is in the label and not only in the tooltip, and that is the fix for a
            real misreading: "Remove out of band" reads as removing those roots from the *fit*, so the
            Poles and zeros table and H(s) going on listing them looks like the checkbox failing.
@@ -650,51 +640,15 @@ watch(running, (isRunning, wasRunning) => {
     </label>
 
     <!-- Both s-plane views share the radius scale, so a root is in the same place on each. -->
-    <div v-if="!bodeShowing && sPlaneShowing" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">s-plane radius</span>
-      <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
-        <button
-          v-for="option in S_PLANE_SCALES"
-          :key="option.value"
-          type="button"
-          class="flex-1 border-l border-neutral-300 px-2 py-1 first:border-l-0 dark:border-neutral-700"
-          :class="
-            surfaceScale === option.value
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          :title="
-            option.value === 'Linear'
-              ? 'The plane as a textbook draws it. A DUT whose roots span decades puts its lowest one inside the origin marker.'
-              : 'Scales |s| logarithmically and leaves the angle alone, so every decade of roots is visible and ζ still reads as an angle. The plane is distorted; nothing about a root changes.'
-          "
-          @click="surfaceScale = option.value"
-        >
-          {{ option.label }}
-        </button>
-      </div>
-    </div>
+    <template v-if="!bodeShowing && sPlaneShowing">
+      <span class="tb-group">s-plane radius</span>
+      <SegmentedToggle v-model="surfaceScale" group-label="s-plane radius" :options="sPlaneScaleOptions" />
+    </template>
 
     <!-- The |H(s)| surface's own controls. -->
-    <div v-if="!bodeShowing && surfaceShowing" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Surface</span>
-      <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
-        <button
-          v-for="option in SURFACE_MODES"
-          :key="option.value"
-          type="button"
-          class="flex-1 border-l border-neutral-300 px-2 py-1 first:border-l-0 dark:border-neutral-700"
-          :class="
-            surfaceMode === option.value
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          :title="option.title"
-          @click="surfaceMode = option.value"
-        >
-          {{ option.label }}
-        </button>
-      </div>
+    <div v-if="!bodeShowing && surfaceShowing" class="flex flex-col gap-2 text-xs">
+      <span class="tb-group">Surface</span>
+      <SegmentedToggle v-model="surfaceMode" group-label="Surface" :options="SURFACE_MODES" />
       <!-- The colour window, the palette and the contours describe a field over the plane. The slice
            is a line plot on its own axes and has none of them, so they are hidden rather than left
            sitting there doing nothing. -->
@@ -706,7 +660,7 @@ watch(running, (isRunning, wasRunning) => {
           type="number"
           step="10"
           title="How far above the passband level the colour ramp reaches. A pole runs to infinity, so this is where it saturates rather than a level anything reaches."
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input w-24"
         />
       </label>
       <label class="flex items-center justify-between gap-2">
@@ -716,20 +670,20 @@ watch(running, (isRunning, wasRunning) => {
           type="number"
           step="10"
           title="How far below the passband level the colour ramp reaches. Both are offsets from the passband, so the window means the same thing on a 0 dB filter and a +26 dB amplifier."
-          class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input w-24"
         />
       </label>
       <label class="flex items-center justify-between gap-2">
         Palette
         <select
           v-model="surfacePalette"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input w-28"
         >
           <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
         </select>
       </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="surfaceContours" type="checkbox" />
+      <label class="tb-check-row">
+        <input v-model="surfaceContours" type="checkbox" class="tb-check" />
         <span title="Iso-dB lines from the passband level, labelled on the colour key. They are what makes the surface quantitative rather than decorative, and what keeps it readable once a report has desaturated the colours.">
           Contours
         </span>
@@ -738,90 +692,79 @@ watch(running, (isRunning, wasRunning) => {
     </div>
 
     <!-- Only the chirp removes a delay, so only the chirp can put one back. -->
-    <label v-if="!bodeShowing && latencySamples !== null" class="flex items-center gap-1.5 text-xs">
-      <input v-model="restoreDelay" type="checkbox" />
+    <label v-if="!bodeShowing && latencySamples !== null" class="tb-check-row">
+      <input v-model="restoreDelay" type="checkbox" class="tb-check" />
       <span title="The chirp estimator removes a bulk delay per record; this puts it back, so the contour is the physical one. Overlays are always drawn uncorrected.">
         Restore removed delay
       </span>
     </label>
 
-    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">View</span>
-      <div class="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
-        <button
-          type="button"
-          class="flex-1 px-2 py-1"
-          :class="
-            view === 'Dbv'
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          @click="view = 'Dbv'"
-        >
-          FR (dBV)
-        </button>
-        <button
-          type="button"
-          class="flex-1 border-l border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          :class="
-            view === 'Gain'
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          @click="view = 'Gain'"
-        >
-          Gain (dB)
-        </button>
-      </div>
-    </div>
+    <template v-if="bodeShowing">
+      <span class="tb-group">View</span>
+      <SegmentedToggle
+        v-model="view"
+        group-label="View"
+        :options="[
+          { value: 'Dbv', label: 'FR (dBV)' },
+          { value: 'Gain', label: 'Gain (dB)' },
+        ]"
+      />
+    </template>
 
-    <label class="flex items-center gap-1.5 text-xs">
-      <input v-model="autofitOnDone" type="checkbox" /> Autofit when measurement done
+    <label class="tb-check-row">
+      <input v-model="autofitOnDone" type="checkbox" class="tb-check" /> Autofit when measurement done
     </label>
 
-    <div v-if="bodeShowing && view === 'Dbv'" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Channels</span>
-      <label class="flex items-center gap-1.5"><input v-model="showLeft" type="checkbox" /> Left</label>
+    <div v-if="bodeShowing && view === 'Dbv'" class="tb-field">
+      <span class="tb-group">Channels</span>
+      <label class="tb-check-row"><input v-model="showLeft" type="checkbox" class="tb-check" /> Left</label>
       <!-- Not offered when the right input is the reference: what its dBV trace shows then is the
            generator, not a measurement of anything. -->
-      <label v-if="!rightChannelIsReference" class="flex items-center gap-1.5">
-        <input v-model="showRight" type="checkbox" /> Right
+      <label v-if="!rightChannelIsReference" class="tb-check-row">
+        <input v-model="showRight" type="checkbox" class="tb-check" /> Right
       </label>
     </div>
 
-    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Bandwidth</span>
-      <label class="flex items-center gap-1.5" title="Dashed markers and a labelled arrow at the -1 dB corners.">
-        <input v-model="showOneDb" type="checkbox" /> −1 dB
+    <div v-if="bodeShowing" class="tb-field">
+      <span class="tb-group">Bandwidth</span>
+      <!-- Each row carries the colour its markers are drawn in, from charts/bandwidthColors.ts —
+           the mockup's own treatment, and the one thing two identically-shaped checkboxes could
+           not say before. -->
+      <label class="tb-check-row" title="Dashed markers and a labelled arrow at the -1 dB corners.">
+        <input v-model="showOneDb" type="checkbox" class="tb-check" />
+        <span class="flex-1">−1 dB</span>
+        <span class="w-4 shrink-0 border-t-2 border-dashed" :style="{ borderColor: bandwidthSwatch('oneDb') }"></span>
       </label>
-      <label class="flex items-center gap-1.5" title="Dashed markers and a labelled arrow at the -3 dB corners.">
-        <input v-model="showThreeDb" type="checkbox" /> −3 dB
+      <label class="tb-check-row" title="Dashed markers and a labelled arrow at the -3 dB corners.">
+        <input v-model="showThreeDb" type="checkbox" class="tb-check" />
+        <span class="flex-1">−3 dB</span>
+        <span class="w-4 shrink-0 border-t-2 border-dashed" :style="{ borderColor: bandwidthSwatch('threeDb') }"></span>
       </label>
     </div>
 
-    <div v-if="bodeShowing" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Extra traces</span>
+    <div v-if="bodeShowing" class="tb-field">
+      <span class="tb-group">Extra traces</span>
       <!-- Hidden outright when the measurement on screen has no phase: with no stimulus on the right
            input there is nothing to compare the left against, and a single channel's own angle is
            meaningless without a capture trigger. See the store's phaseAvailable. -->
       <label
         v-if="phaseAvailable"
-        class="flex items-center gap-1.5"
+        class="tb-check-row"
         :title="
           phaseKind === 'ChannelDifference'
             ? 'Unwrapped phase of the left input relative to the right, on its own axis at the right in degrees. Both inputs are measuring signals of their own here, so this is the difference between two paths rather than the DUT\'s phase response. Range set below, independently of the dB one.'
             : 'Unwrapped phase, with the bulk propagation delay removed, on its own axis at the right in degrees. Range set below, independently of the dB one.'
         "
       >
-        <input v-model="showPhase" type="checkbox" />
+        <input v-model="showPhase" type="checkbox" class="tb-check" />
         {{ phaseKind === 'ChannelDifference' ? 'Phase difference' : 'Phase' }}
       </label>
       <!-- Gated exactly like phase: the delay curves are derived from it and mean nothing without it. -->
-      <label v-if="phaseAvailable" class="flex flex-col gap-1" :title="delayHint">
+      <label v-if="phaseAvailable" class="tb-field" :title="delayHint">
         <span>{{ delayLabel('None') }}</span>
         <select
           v-model="delayView"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="option in DELAY_VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
@@ -834,14 +777,14 @@ watch(running, (isRunning, wasRunning) => {
       </p>
       <label
         v-if="props.allowCoherence"
-        class="flex items-center gap-1.5"
+        class="tb-check-row"
         :title="
           averageCount > 1
             ? 'How repeatable the response was, per bin, across the averaged records: 1 means every record agreed, and it falls where noise or too little stimulus energy makes that bin untrustworthy. Own axis at the right, 0 to 1.'
             : 'Needs two or more averages — a single record always reads 1.'
         "
       >
-        <input v-model="showCoherence" type="checkbox" /> Coherence
+        <input v-model="showCoherence" type="checkbox" class="tb-check" /> Coherence
       </label>
       <p
         v-if="props.allowCoherence && showCoherence && averageCount <= 1"
@@ -855,11 +798,11 @@ watch(running, (isRunning, wasRunning) => {
          singularities and its own legend, and ResponsePolarChart.renderScene returns before it ever
          reaches the curve the two style props are passed to. A control that cannot change what is on
          screen is worse than a missing one. -->
-    <div v-if="bodeShowing || projection !== 'PoleZero'" class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Style</span>
-      <label class="flex items-center gap-1.5"><input v-model="thickLines" type="checkbox" /> Thick lines</label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showDataPoints" type="checkbox" /> Show data points
+    <div v-if="bodeShowing || projection !== 'PoleZero'" class="tb-field">
+      <span class="tb-group">Style</span>
+      <label class="tb-check-row"><input v-model="thickLines" type="checkbox" class="tb-check" /> Thick lines</label>
+      <label class="tb-check-row">
+        <input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points
       </label>
     </div>
   </CollapsibleSection>
@@ -869,32 +812,34 @@ watch(running, (isRunning, wasRunning) => {
        Autofit under. Multi-root, so they flow into MeasurementLayout's aside grid one by one like
        SweepDisplayPanel's. -->
   <CollapsibleSection v-if="bodeShowing" :title="view === 'Dbv' ? 'dBV range' : 'Gain range'" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      Top
-      <input
-        :value="yTopDb"
-        type="number"
-        :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onTopDbChange"
-      />
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      Bottom
-      <input
-        :value="yBottomDb"
-        type="number"
-        :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onBottomDbChange"
-      />
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Top
+        <input
+          :value="yTopDb"
+          type="number"
+          :step="DB_STEP"
+          class="tb-input"
+          @change="onTopDbChange"
+        />
+      </label>
+      <label class="tb-field">
+        Bottom
+        <input
+          :value="yBottomDb"
+          type="number"
+          :step="DB_STEP"
+          class="tb-input"
+          @change="onBottomDbChange"
+        />
+      </label>
+    </div>
     <!-- The chart's one Autofit, in the first axis section rather than a scroll below the fields
          it overwrites. Under a projection that has no dB window this section is hidden, and the
          same button appears in Frequency range below instead. -->
     <button
       type="button"
-      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      class="btn-panel-accent"
       title="Fits every axis the chart is showing to what is drawn: the frequency window to the measured band, then the level window, and the phase and delay windows when those curves are on."
       @click="autofitAll"
     >
@@ -907,33 +852,35 @@ watch(running, (isRunning, wasRunning) => {
        response/projection.ts), and the frequency window below is what narrows it. -->
   <CollapsibleSection v-if="nicholsShowing" title="Gain range (dB)" size="xs">
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Fits the gain axis to the curve on every pass, and always keeps 0 dB and the −180° marker in view. Untick to set the window yourself — the boxes start from the window that was on screen, so unticking changes nothing until you edit them."
     >
       <input type="checkbox" :checked="nicholsAutoGain" @change="onNicholsAutoChange" />
       Auto
     </label>
     <template v-if="!nicholsAutoGain">
-      <label class="flex flex-col gap-1 text-xs">
-        Top
-        <input
-          :value="nicholsTopDb"
-          type="number"
-          :step="DB_STEP"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onNicholsTopChange"
-        />
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        Bottom
-        <input
-          :value="nicholsBottomDb"
-          type="number"
-          :step="DB_STEP"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onNicholsBottomChange"
-        />
-      </label>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          Top
+          <input
+            :value="nicholsTopDb"
+            type="number"
+            :step="DB_STEP"
+            class="tb-input"
+            @change="onNicholsTopChange"
+          />
+        </label>
+        <label class="tb-field">
+          Bottom
+          <input
+            :value="nicholsBottomDb"
+            type="number"
+            :step="DB_STEP"
+            class="tb-input"
+            @change="onNicholsBottomChange"
+          />
+        </label>
+      </div>
       <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
         A window that leaves 0 dB out is drawn as asked — the gain crossover and the −180° markers
         then sit off the plot.
@@ -941,7 +888,7 @@ watch(running, (isRunning, wasRunning) => {
     </template>
     <button
       type="button"
-      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      class="btn-panel-accent"
       title="Fits the frequency window to the measured band, and the gain window to the curve inside it."
       @click="autofitAll"
     >
@@ -952,49 +899,53 @@ watch(running, (isRunning, wasRunning) => {
   <!-- The map's own window, in hertz on both axes like the chart's labels: σ/2π across, jω/2π up. -->
   <CollapsibleSection v-if="poleZeroShowing" title="Pole/zero range (Hz)" size="xs">
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Fits the window to the fitted roots, square, so damping still reads as an angle from the origin. Untick to set the four bounds yourself — the boxes start from the window that was on screen."
     >
       <input type="checkbox" :checked="poleZeroAutoWindow" @change="onPoleZeroAutoChange" />
       Auto
     </label>
     <template v-if="!poleZeroAutoWindow">
-      <label class="flex flex-col gap-1 text-xs">
-        σ/2π from
-        <input
-          :value="poleZeroXMinHz"
-          type="number"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onPoleZeroBoundChange($event, 'xMin')"
-        />
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        σ/2π to
-        <input
-          :value="poleZeroXMaxHz"
-          type="number"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onPoleZeroBoundChange($event, 'xMax')"
-        />
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        jω/2π from
-        <input
-          :value="poleZeroYMinHz"
-          type="number"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onPoleZeroBoundChange($event, 'yMin')"
-        />
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        jω/2π to
-        <input
-          :value="poleZeroYMaxHz"
-          type="number"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onPoleZeroBoundChange($event, 'yMax')"
-        />
-      </label>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          σ/2π from
+          <input
+            :value="poleZeroXMinHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'xMin')"
+          />
+        </label>
+        <label class="tb-field">
+          σ/2π to
+          <input
+            :value="poleZeroXMaxHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'xMax')"
+          />
+        </label>
+      </div>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          jω/2π from
+          <input
+            :value="poleZeroYMinHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'yMin')"
+          />
+        </label>
+        <label class="tb-field">
+          jω/2π to
+          <input
+            :value="poleZeroYMaxHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'yMax')"
+          />
+        </label>
+      </div>
       <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
         A hand-set window is drawn exactly as given, so two axes of different spans tilt the angles
         damping is read from. Keep them equal, or use Auto, when reading ζ off the picture.
@@ -1002,7 +953,7 @@ watch(running, (isRunning, wasRunning) => {
     </template>
     <button
       type="button"
-      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      class="btn-panel-accent"
       title="Fits the frequency window to the measured band, and the plane's window to the fitted roots."
       @click="autofitAll"
     >
@@ -1011,31 +962,33 @@ watch(running, (isRunning, wasRunning) => {
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      From
-      <select
-        v-model.number="xFromHz"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      >
-        <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      To
-      <select
-        v-model.number="xToHz"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      >
-        <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        From
+        <select
+          v-model.number="xFromHz"
+          class="tb-input"
+        >
+          <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+      <label class="tb-field">
+        To
+        <select
+          v-model.number="xToHz"
+          class="tb-input"
+        >
+          <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+    </div>
     <!-- The chart's one Autofit lives in its first axis section; under Bode, Nichols and the
          pole-zero map that is a section above this one, and this is where the projections with no
          value axis of their own (Nyquist, |H(s)|) get it. -->
     <button
       v-if="!bodeShowing && !nicholsShowing && !poleZeroShowing"
       type="button"
-      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      class="btn-panel-accent"
       title="Fits the frequency window to the measured band. This projection has no other axis to fit."
       @click="autofitAll"
     >
@@ -1046,50 +999,54 @@ watch(running, (isRunning, wasRunning) => {
   <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
        shown-but-inert, since the axis it configures is not drawn otherwise. -->
   <CollapsibleSection v-if="bodeShowing && showPhase && phaseAvailable" title="Phase range (°)" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      Top
-      <input
-        :value="phaseTopDeg"
-        type="number"
-        :step="PHASE_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onTopPhaseChange"
-      />
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      Bottom
-      <input
-        :value="phaseBottomDeg"
-        type="number"
-        :step="PHASE_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onBottomPhaseChange"
-      />
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Top
+        <input
+          :value="phaseTopDeg"
+          type="number"
+          :step="PHASE_STEP"
+          class="tb-input"
+          @change="onTopPhaseChange"
+        />
+      </label>
+      <label class="tb-field">
+        Bottom
+        <input
+          :value="phaseBottomDeg"
+          type="number"
+          :step="PHASE_STEP"
+          class="tb-input"
+          @change="onBottomPhaseChange"
+        />
+      </label>
+    </div>
   </CollapsibleSection>
 
   <!-- Same shape as the phase range, in the unit the axis is reading in. -->
   <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      Top
-      <input
-        :value="usToUnit(delayTopUs, delayUnit)"
-        type="number"
-        :step="usToUnit(delayStepUs, delayUnit)"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onTopDelayChange"
-      />
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      Bottom
-      <input
-        :value="usToUnit(delayBottomUs, delayUnit)"
-        type="number"
-        :step="usToUnit(delayStepUs, delayUnit)"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onBottomDelayChange"
-      />
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Top
+        <input
+          :value="usToUnit(delayTopUs, delayUnit)"
+          type="number"
+          :step="usToUnit(delayStepUs, delayUnit)"
+          class="tb-input"
+          @change="onTopDelayChange"
+        />
+      </label>
+      <label class="tb-field">
+        Bottom
+        <input
+          :value="usToUnit(delayBottomUs, delayUnit)"
+          type="number"
+          :step="usToUnit(delayStepUs, delayUnit)"
+          class="tb-input"
+          @change="onBottomDelayChange"
+        />
+      </label>
+    </div>
   </CollapsibleSection>
 
 </template>

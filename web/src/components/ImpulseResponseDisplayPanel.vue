@@ -299,47 +299,47 @@ const referenceLabel = computed(() => {
 
 <template>
   <CollapsibleSection title="Display">
-    <label class="flex flex-col gap-1 text-xs">
+    <label class="tb-field">
       View
       <select
         v-model="view"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
     </label>
 
-    <label class="flex items-center gap-1.5 text-xs">
-      <input v-model="thickLines" type="checkbox" />
+    <label class="tb-check-row">
+      <input v-model="thickLines" type="checkbox" class="tb-check" />
       Thick lines
     </label>
 
     <template v-if="view === 'Impulse'">
       <label
-        class="flex items-center gap-1.5 text-xs"
+        class="tb-check-row"
         title="Show the impulse as dB below its own peak instead of volts. Easier to read a decay off; harder to see polarity, which only the volts view carries."
       >
-        <input v-model="normalisedImpulse" type="checkbox" />
+        <input v-model="normalisedImpulse" type="checkbox" class="tb-check" />
         Normalised (dB re peak)
       </label>
 
-      <div class="grid grid-cols-2 gap-2 text-xs">
-        <label class="flex flex-col gap-1">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
           From (ms)
           <input
             v-model.number="timeFromMs"
             type="number"
             step="0.5"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           To (ms)
           <input
             v-model.number="timeToMs"
             type="number"
             step="0.5"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
       </div>
@@ -347,32 +347,32 @@ const referenceLabel = computed(() => {
     </template>
 
     <template v-else-if="view === 'Response'">
-      <label class="flex items-center gap-1.5 text-xs">
-        <input v-model="showPhase" type="checkbox" />
+      <label class="tb-check-row">
+        <input v-model="showPhase" type="checkbox" class="tb-check" />
         Phase
       </label>
-      <label class="flex items-center gap-1.5 text-xs" title="Only meaningful from two averages upward — a single record always reads 1.">
-        <input v-model="showCoherence" type="checkbox" />
+      <label class="tb-check-row" title="Only meaningful from two averages upward — a single record always reads 1.">
+        <input v-model="showCoherence" type="checkbox" class="tb-check" />
         Coherence
       </label>
 
-      <div v-if="showPhase" class="grid grid-cols-2 gap-2 text-xs">
-        <label class="flex flex-col gap-1">
+      <div v-if="showPhase" class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
           Phase top (°)
           <input
             v-model.number="phaseTopDeg"
             type="number"
             step="45"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           Phase bottom (°)
           <input
             v-model.number="phaseBottomDeg"
             type="number"
             step="45"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
       </div>
@@ -380,63 +380,63 @@ const referenceLabel = computed(() => {
       <!-- The gated response's delay curves, on their own axis: physical delay only with the right
            input as the reference, excess delay against the generated sweep otherwise. -->
       <label
-        class="flex flex-col gap-1 text-xs"
+        class="tb-field"
         title="Group delay is −dφ/df, phase delay −φ/(360·f), of the gated response on their own axis at the right. With the right input as reference these are the DUT's physical delay; against the generated sweep the bulk delay went out with the record's arbitrary start point and only the excess remains."
       >
         Delay
         <select
           v-model="delayView"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="option in DELAY_VIEWS" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </label>
 
-      <div v-if="delayView !== 'None'" class="grid grid-cols-2 gap-2 text-xs">
-        <label class="flex flex-col gap-1">
+      <div v-if="delayView !== 'None'" class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
           Delay top ({{ delayUnit }})
           <input
             v-model.number="delayTopInUnit"
             type="number"
             :step="delayUnit === 'ms' ? 0.1 : 10"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           Delay bottom ({{ delayUnit }})
           <input
             v-model.number="delayBottomInUnit"
             type="number"
             :step="delayUnit === 'ms' ? 0.1 : 10"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
       </div>
     </template>
 
     <template v-else-if="view === 'Harmonics'">
-      <label class="flex items-center gap-1.5 text-xs">
-        <input v-model="showDataPoints" type="checkbox" />
+      <label class="tb-check-row">
+        <input v-model="showDataPoints" type="checkbox" class="tb-check" />
         Data points
       </label>
 
-      <div class="grid grid-cols-2 gap-2 text-xs">
-        <label class="flex flex-col gap-1">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
           From (Hz)
           <input
             v-model.number="freqFromHz"
             type="number"
             step="1"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           To (Hz)
           <input
             v-model.number="freqToHz"
             type="number"
             step="100"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
       </div>
@@ -447,22 +447,22 @@ const referenceLabel = computed(() => {
          measured, so changing any of it redraws rather than re-measures — which is why it lives on
          the display panel and not beside the sweep settings. -->
     <template v-else>
-      <label class="flex flex-col gap-1 text-xs">
+      <label class="tb-field">
         Chart
         <select
           v-model="decayMode"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
           title="Stacked curves in oblique projection, or the same surface as a flat colour map. Waterfall (f) puts frequency across the curves and recedes in time, which shows where in the band something rings; Waterfall (p) puts time across and recedes in frequency, so each curve is one frequency's decay envelope. The sonogram shows exactly where in frequency it is, flat."
         >
           <option v-for="option in CHART_MODES" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </label>
 
-      <label class="flex flex-col gap-1 text-xs">
+      <label class="tb-field">
         Palette
         <select
           v-model="decayPalette"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
         </select>
@@ -470,14 +470,14 @@ const referenceLabel = computed(() => {
 
       <label
         v-if="decayMode !== 'Sonogram'"
-        class="flex items-center gap-1.5 text-xs"
+        class="tb-check-row"
         title="Colour each curve by level. Off draws them all in one colour, which reads the shape rather than the level."
       >
-        <input v-model="decayColoredCurves" type="checkbox" />
+        <input v-model="decayColoredCurves" type="checkbox" class="tb-check" />
         Coloured curves
       </label>
 
-      <label class="flex flex-col gap-1 text-xs">
+      <label class="tb-field">
         Range (dB)
         <input
           v-model.number="decayRangeDb"
@@ -485,38 +485,38 @@ const referenceLabel = computed(() => {
           min="10"
           max="70"
           step="5"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
           title="How far below 0 dB the chart reaches. 0 dB is whatever this surface normalised to — the loudest point of the whole surface for a cumulative spectral decay, each frequency's own maximum for a burst decay."
         />
       </label>
 
-      <div class="grid grid-cols-2 gap-2 text-xs">
-        <label class="flex flex-col gap-1">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
           From (Hz)
           <input
             v-model.number="freqFromHz"
             type="number"
             step="1"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           To (Hz)
           <input
             v-model.number="freqToHz"
             type="number"
             step="100"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           />
         </label>
       </div>
 
       <template v-if="view === 'Csd'">
-        <label class="flex flex-col gap-1 text-xs">
+        <label class="tb-field">
           Analysis
           <select
             v-model="csdWindowMode"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             title="The classical cumulative-spectral-decay window has a short rise and a long fall, so the front slice reads the impulse at full weight. A Hann window is an ordinary short-time transform, centred on its own slice time — it reads a resonance building up as well as dying away, and smears the impulse across half a window."
           >
             <option v-for="option in CSD_WINDOW_MODES" :key="option.value" :value="option.value">
@@ -525,30 +525,30 @@ const referenceLabel = computed(() => {
           </select>
         </label>
 
-        <label class="flex flex-col gap-1 text-xs">
+        <label class="tb-field">
           FFT length (samples)
           <select
             v-model.number="csdFftLength"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
           >
             <option v-for="length in CSD_FFT_LENGTHS" :key="length" :value="length">{{ length }}</option>
           </select>
           <span class="text-[10px] text-neutral-500 dark:text-neutral-400">{{ csdWindowLabel }}</span>
         </label>
 
-        <div class="grid grid-cols-2 gap-2 text-xs">
-          <label class="flex flex-col gap-1">
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
             Block shift
             <input
               v-model.number="csdBlockShiftSamples"
               type="number"
               min="1"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input"
               title="Samples between one slice and the next — the surface's time step."
             />
           </label>
-          <label class="flex flex-col gap-1">
+          <label class="tb-field">
             Max blocks
             <input
               v-model.number="csdBlockCount"
@@ -556,13 +556,13 @@ const referenceLabel = computed(() => {
               min="2"
               max="200"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input"
             />
           </label>
         </div>
         <span class="text-[10px] text-neutral-500 dark:text-neutral-400">{{ csdSpanLabel }}</span>
 
-        <label v-if="csdWindowMode === 'Apodizing'" class="flex flex-col gap-1 text-xs">
+        <label v-if="csdWindowMode === 'Apodizing'" class="tb-field">
           Rise time (ms)
           <input
             v-model.number="csdRiseTimeMs"
@@ -570,15 +570,15 @@ const referenceLabel = computed(() => {
             min="0.02"
             max="1"
             step="0.02"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             title="How long the window takes to open. Short keeps the leading edge sharp; too short and the edge itself is a step, whose leakage buries the decay being looked for."
           />
         </label>
       </template>
 
       <template v-else>
-        <div class="grid grid-cols-2 gap-2 text-xs">
-          <label class="flex flex-col gap-1">
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
             Max periods
             <input
               v-model.number="burstMaxPeriods"
@@ -586,10 +586,10 @@ const referenceLabel = computed(() => {
               min="2"
               max="100"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input"
             />
           </label>
-          <label class="flex flex-col gap-1">
+          <label class="tb-field">
             Points per period
             <input
               v-model.number="burstPointsPerPeriod"
@@ -597,16 +597,16 @@ const referenceLabel = computed(() => {
               min="1"
               max="8"
               step="1"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input"
             />
           </label>
         </div>
 
-        <label class="flex flex-col gap-1 text-xs">
+        <label class="tb-field">
           Time-frequency resolution
           <select
             v-model="burstResolution"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             title="How wide the analysis wavelet is. Preferring frequency separates resonances that sit close together, at the cost of taking twice as many periods to open up — so the first cycles of every decay are the analysis rather than the DUT."
           >
             <option v-for="option in BURST_RESOLUTIONS" :key="option.value" :value="option.value">
@@ -628,23 +628,23 @@ const referenceLabel = computed(() => {
       Autofit
     </button>
 
-    <div v-if="!isDecayView && (view !== 'Impulse' || normalisedImpulse)" class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div v-if="!isDecayView && (view !== 'Impulse' || normalisedImpulse)" class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         Top (dB)
         <input
           v-model.number="yTopDb"
           type="number"
           step="1"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         Bottom (dB)
         <input
           v-model.number="yBottomDb"
           type="number"
           step="1"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
     </div>

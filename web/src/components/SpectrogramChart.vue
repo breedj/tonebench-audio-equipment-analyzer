@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
 <template>
   <section
     ref="rootRef"
-    class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+    class="relative flex flex-col gap-2 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800"
   >
     <ExpandToggle class="absolute right-2 top-2" :target="rootRef" />
     <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. -->

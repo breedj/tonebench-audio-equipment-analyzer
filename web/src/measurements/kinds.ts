@@ -271,3 +271,13 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
     tone: 'amber',
   },
 ]
+
+/**
+ * The accent a kind is drawn in, wherever it is drawn: the "new measurement" picker's card, the
+ * sidebar row's round icon, and a kind badge anywhere else. One lookup rather than each caller
+ * reaching into `MEASUREMENT_KINDS` — and a kind the table does not list (an older project file
+ * carrying a kind this build has dropped) still gets a circle rather than a transparent hole.
+ */
+export function measurementKindTone(kind: string | null | undefined): MeasurementKindTone {
+  return MEASUREMENT_KINDS.find((k) => k.kind === kind)?.tone ?? 'blue'
+}

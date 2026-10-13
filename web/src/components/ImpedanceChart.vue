@@ -896,8 +896,11 @@ const outOfRange = computed(() => {
 </script>
 
 <template>
-  <div ref="root" class="relative flex flex-col gap-2">
-    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+  <!-- The chart is a card like every settings and display panel beside it (the 2026-10-12
+       mockups): one surface, one 12 px radius, with the cursor readout and the plot inside it
+       rather than the readout floating on the page ground above a bare plot. -->
+  <div ref="root" class="relative flex flex-col gap-2 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
+    <ExpandToggle class="absolute right-3 top-3" :target="root" />
     <div class="min-h-6 pr-9 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <!-- One row that is the legend at rest and gains values on hover, rather than a legend and a
            separate readout saying the same names twice. Each swatch is drawn with the series' own
@@ -965,7 +968,7 @@ const outOfRange = computed(() => {
       v-if="traces.length === 0 && overlays.length === 0 && !shortCalOhms"
       class="text-xs text-neutral-500 dark:text-neutral-400"
     >
-      No {{ dampingFactorOn ? 'output impedance' : 'impedance' }} measured yet. Press {{ dampingFactorOn ? 'RUN SWEEP' : 'RUN' }}.
+      No {{ dampingFactorOn ? 'output impedance' : 'impedance' }} measured yet. Press {{ dampingFactorOn ? 'Run sweep' : 'Run' }}.
     </p>
   </div>
 </template>

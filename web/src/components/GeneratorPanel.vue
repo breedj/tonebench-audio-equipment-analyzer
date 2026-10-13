@@ -140,18 +140,18 @@ defineExpose({ buildRequest, resyncTones })
     <div v-show="generatorUsable" class="contents">
       <fieldset class="mb-3 flex items-center gap-4 text-sm" title="Which channel(s) play this stimulus once Run is pressed — the ADC always samples both.">
         <legend class="sr-only">Enabled channels</legend>
-        <label class="flex items-center gap-1.5">
+        <label class="tb-check-row">
           <input type="checkbox" v-model="leftEnabled" @change="emit('change')" />
           Left
         </label>
-        <label class="flex items-center gap-1.5">
+        <label class="tb-check-row">
           <input type="checkbox" v-model="rightEnabled" @change="emit('change')" />
           Right
         </label>
       </fieldset>
 
       <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-        <label class="flex items-center gap-1.5" title="Amplifier load, used for both channels' power figures.">
+        <label class="tb-check-row" title="Amplifier load, used for both channels' power figures.">
           Load
           <input
             type="number"

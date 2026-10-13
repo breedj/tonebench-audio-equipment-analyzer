@@ -166,41 +166,41 @@ watch(running, (isRunning, wasRunning) => {
 <template>
   <CollapsibleSection title="Impedance axis" size="xs">
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Logarithmic is the one scale that fits a solid-state amplifier's milliohms and a tube amplifier's ohms in one window, and puts the damping-factor curve on a mirrored axis. Linear reads a flat Zout as flat."
     >
       Scale
-      <select v-model="zScale" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
+      <select v-model="zScale" class="tb-input">
         <option value="Linear">Linear</option>
         <option value="Log">Logarithmic</option>
       </select>
     </label>
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         Top (Ω)
-        <input :value="zTopOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onTopZChange" />
+        <input :value="zTopOhms" type="number" step="any" class="tb-input" @change="onTopZChange" />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         Bottom (Ω)
-        <input :value="zBottomOhms" type="number" step="any" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onBottomZChange" />
+        <input :value="zBottomOhms" type="number" step="any" class="tb-input" @change="onBottomZChange" />
       </label>
     </div>
     <!-- The chart's one Autofit, in the first axis section rather than a scroll below the fields
          it overwrites. -->
     <button
       type="button"
-      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      class="btn-panel-accent"
       title="Fits every axis to what is drawn, live and history: the frequency window to the measured band, then the ohms and phase axes to the curves inside it. The damping-factor axis follows the ohms one — it is that window inverted."
       @click="autofitAll"
     >
       Autofit
     </button>
-    <label class="flex items-center gap-1.5 text-xs" title="The damping factor — nominal over |Zout| — on a right-hand axis that mirrors the ohms axis.">
-      <input v-model="showDampingFactor" type="checkbox" />
+    <label class="tb-check-row" title="The damping factor — nominal over |Zout| — on a right-hand axis that mirrors the ohms axis.">
+      <input v-model="showDampingFactor" type="checkbox" class="tb-check" />
       Show damping factor
     </label>
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       :class="{ 'opacity-50': !phaseAvailable }"
       :title="phaseAvailable ? 'The phase of Zout: positive is inductive (an output coil), near zero resistive.' : 'Only a run with the right channel as reference measures a phase.'"
     >
@@ -210,41 +210,43 @@ watch(running, (isRunning, wasRunning) => {
   </CollapsibleSection>
 
   <CollapsibleSection v-if="showPhase && phaseAvailable" title="Phase axis" size="xs">
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         Top (°)
-        <input :value="phaseTopDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onTopPhaseChange" />
+        <input :value="phaseTopDeg" type="number" step="15" class="tb-input" @change="onTopPhaseChange" />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         Bottom (°)
-        <input :value="phaseBottomDeg" type="number" step="15" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700" @change="onBottomPhaseChange" />
+        <input :value="phaseBottomDeg" type="number" step="15" class="tb-input" @change="onBottomPhaseChange" />
       </label>
     </div>
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      From
-      <select v-model.number="xFromHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
-        <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      To
-      <select v-model.number="xToHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
-        <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        From
+        <select v-model.number="xFromHz" class="tb-input">
+          <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+      <label class="tb-field">
+        To
+        <select v-model.number="xToHz" class="tb-input">
+          <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+    </div>
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">
-    <label class="flex items-center gap-1.5 text-xs">
-      <input v-model="autofitOnDone" type="checkbox" /> Autofit when measurement done
+    <label class="tb-check-row">
+      <input v-model="autofitOnDone" type="checkbox" class="tb-check" /> Autofit when measurement done
     </label>
-    <div class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Style</span>
-      <label class="flex items-center gap-1.5"><input v-model="thickLines" type="checkbox" /> Thick lines</label>
-      <label class="flex items-center gap-1.5"><input v-model="showDataPoints" type="checkbox" /> Show data points</label>
+    <div class="tb-field">
+      <span class="tb-group">Style</span>
+      <label class="tb-check-row"><input v-model="thickLines" type="checkbox" class="tb-check" /> Thick lines</label>
+      <label class="tb-check-row"><input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points</label>
     </div>
   </CollapsibleSection>
 </template>

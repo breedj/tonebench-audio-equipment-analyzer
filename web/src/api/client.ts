@@ -539,21 +539,40 @@ export interface ReportDocument {
   /** Project notes, on the title page. */
   notes: string | null
   chapters: ReportChapter[]
+  /** Over the title on the cover: "Project report", "Measurement report". */
+  eyebrow?: string | null
+  /** The figures beside the contents; the renderer adds the page count itself. */
+  stats?: ReportRow[] | null
+  /** "Tonebench v0.2.0", in the cover's footer. */
+  version?: string | null
+  /** Black and white — the document's own accents as well as its charts. */
+  monochrome?: boolean
 }
 
 export interface ReportChapter {
+  /** What the chapter is of: a stored result's name, or "Settings and notes". */
   title: string
   meta: ReportRow[]
   notes: string | null
   sections: ReportSection[]
+  /** The measurement the chapter belongs to, over the title in its band. */
+  eyebrow?: string | null
+  /** The kind's colour as `#rrggbb` (report/palette.ts); the renderer mixes the band's tint from it. */
+  accent?: string | null
+  /** What the contents page says about this chapter. */
+  status?: string | null
+  statusTone?: ReportStatusTone | null
 }
+
+/** Which pill the contents page gives a chapter's status. */
+export type ReportStatusTone = 'stored' | 'live' | 'none'
 
 export interface ReportRow {
   label: string
   value: string
 }
 
-export type ReportSectionKind = 'keyValues' | 'table' | 'paragraph' | 'image'
+export type ReportSectionKind = 'keyValues' | 'table' | 'paragraph' | 'image' | 'figures' | 'groups' | 'callout'
 
 /** One flat shape with a discriminator; only the fields for `kind` are set. */
 export interface ReportSection {
@@ -562,10 +581,27 @@ export interface ReportSection {
   rows?: ReportRow[] | null
   headers?: string[] | null
   cells?: string[][] | null
+  /** For `paragraph`, and the body of a `callout` whose `title` is its bold lead-in. */
   text?: string | null
   /** Base64 PNG. */
   png?: string | null
+  /** For `image`; the renderer prefixes its own figure number. */
   caption?: string | null
+  figures?: ReportFigure[] | null
+  groups?: ReportGroup[] | null
+}
+
+/** A headline number on a card: what it is, what it reads, and what qualifies it. */
+export interface ReportFigure {
+  label: string
+  value: string
+  sub?: string | null
+}
+
+/** A named box of rows inside a `groups` section. */
+export interface ReportGroup {
+  name: string
+  rows: ReportRow[]
 }
 
 /**

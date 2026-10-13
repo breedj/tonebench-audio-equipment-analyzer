@@ -144,7 +144,7 @@ function when(iso: string): string {
       <article
         v-for="group in groups"
         :key="group.measurementTypeId"
-        class="panel-surface rounded-lg p-3"
+        class="panel-surface rounded-xl p-3"
       >
         <div class="flex flex-wrap items-center gap-2">
           <MeasurementKindIcon :kind="group.kind" class="shrink-0" />

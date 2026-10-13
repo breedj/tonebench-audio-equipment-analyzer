@@ -1,5 +1,6 @@
 import type {
   ImdVsAmplitudeParameters,
+  ReportFigure,
   ReportRow,
   ReportSection,
   SweepLevelMode,
@@ -270,7 +271,7 @@ export function sweepMeasurementSections(data: SweepReportData, kind: string, lo
     if (points.length === 0) continue
     const label = CHANNEL_LABELS[channel]
     sections.push(
-      { kind: 'keyValues', title: `Measurements — ${label.toLowerCase()} channel`, rows: summaryRows(points, data.method, data.family, xAxis, unit) },
+      { kind: 'figures', title: `Measurements — ${label.toLowerCase()} channel`, figures: summaryFigures(points, data.method, data.family, xAxis, unit) },
       {
         kind: 'table',
         headers: sweepMetricColumns(data.method, data.family, xAxis),
@@ -282,16 +283,30 @@ export function sweepMeasurementSections(data: SweepReportData, kind: string, lo
   return sections.length > 0 ? sections : [{ kind: 'paragraph', title: 'Measurements', text: 'Nothing measured.' }]
 }
 
-function summaryRows(points: ThdSweepPoint[], method: SweepReportData['method'], family: SweepTraceFamily, xAxis: SweepXAxis, unit: SweepUnit): ReportRow[] {
+/**
+ * The four cards over a channel's table: how many points, the worst and best reading with where each
+ * fell, and what was swept. The same figures `sweepSummary` already produced as rows — the value and
+ * the "at 50.0 Hz" are split here because a card sets the number large and its qualifier under it.
+ */
+function summaryFigures(points: ThdSweepPoint[], method: SweepReportData['method'], family: SweepTraceFamily, xAxis: SweepXAxis, unit: SweepUnit): ReportFigure[] {
+  const figures: ReportFigure[] = [{ label: 'Points', value: String(points.length) }]
   const summary = sweepSummary(points, method, xAxis)
-  const rows: ReportRow[] = [{ label: 'Points', value: String(points.length) }]
-  if (!summary) return rows
-  const total = sweepTraceLabel('thd', method, family)
-  rows.push(
-    { label: `Worst ${total}`, value: `${formatDistortion(summary.worst.percent, unit, summary.worst.gainDb)} at ${formatSweepX(summary.worst.x, xAxis)}` },
-    { label: `Best ${total}`, value: `${formatDistortion(summary.best.percent, unit, summary.best.gainDb)} at ${formatSweepX(summary.best.x, xAxis)}` },
-  )
-  return rows
+  if (summary) {
+    const total = sweepTraceLabel('thd', method, family)
+    figures.push(
+      { label: `Worst ${total}`, value: formatDistortion(summary.worst.percent, unit, summary.worst.gainDb), sub: `at ${formatSweepX(summary.worst.x, xAxis)}` },
+      { label: `Best ${total}`, value: formatDistortion(summary.best.percent, unit, summary.best.gainDb), sub: `at ${formatSweepX(summary.best.x, xAxis)}` },
+    )
+  }
+  const first = points[0]
+  const last = points[points.length - 1]
+  if (first && last) {
+    figures.push({
+      label: 'Swept',
+      value: `${formatSweepX(sweepXValue(first, xAxis), xAxis)} – ${formatSweepX(sweepXValue(last, xAxis), xAxis)}`,
+    })
+  }
+  return figures
 }
 
 /** Every section of a sweep chapter except the chart, in report order, for the chosen elements. */

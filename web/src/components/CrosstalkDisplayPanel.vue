@@ -101,31 +101,33 @@ watch(running, (isRunning, wasRunning) => {
 
 <template>
   <CollapsibleSection title="Crosstalk range (dB)" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      Top
-      <input
-        :value="yTopDb"
-        type="number"
-        :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onTopChange"
-      />
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      Bottom
-      <input
-        :value="yBottomDb"
-        type="number"
-        :step="DB_STEP"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onBottomChange"
-      />
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Top
+        <input
+          :value="yTopDb"
+          type="number"
+          :step="DB_STEP"
+          class="tb-input"
+          @change="onTopChange"
+        />
+      </label>
+      <label class="tb-field">
+        Bottom
+        <input
+          :value="yBottomDb"
+          type="number"
+          :step="DB_STEP"
+          class="tb-input"
+          @change="onBottomChange"
+        />
+      </label>
+    </div>
     <!-- The chart's one Autofit, in the first section rather than a scroll below the fields it
          overwrites. -->
     <button
       type="button"
-      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      class="btn-panel-accent"
       title="Fits both axes to every crosstalk curve on the chart, live and history: the frequency range to the measured span, the dB window to the curves inside it."
       @click="autofitAll"
     >
@@ -134,28 +136,30 @@ watch(running, (isRunning, wasRunning) => {
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
-      From
-      <select v-model.number="xFromHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
-        <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
-    <label class="flex flex-col gap-1 text-xs">
-      To
-      <select v-model.number="xToHz" class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
-        <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-      </select>
-    </label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        From
+        <select v-model.number="xFromHz" class="tb-input">
+          <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+      <label class="tb-field">
+        To
+        <select v-model.number="xToHz" class="tb-input">
+          <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+    </div>
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">
-    <label class="flex items-center gap-1.5 text-xs">
-      <input v-model="autofitOnDone" type="checkbox" /> Autofit when measurement done
+    <label class="tb-check-row">
+      <input v-model="autofitOnDone" type="checkbox" class="tb-check" /> Autofit when measurement done
     </label>
-    <div class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Style</span>
-      <label class="flex items-center gap-1.5"><input v-model="thickLines" type="checkbox" /> Thick lines</label>
-      <label class="flex items-center gap-1.5"><input v-model="showDataPoints" type="checkbox" /> Show data points</label>
+    <div class="tb-field">
+      <span class="tb-group">Style</span>
+      <label class="tb-check-row"><input v-model="thickLines" type="checkbox" class="tb-check" /> Thick lines</label>
+      <label class="tb-check-row"><input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points</label>
     </div>
   </CollapsibleSection>
 </template>

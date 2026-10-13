@@ -55,3 +55,22 @@ export function formatDelay(seconds: number | null | undefined): string {
   if (magnitude >= 1e-6) return `${(seconds * 1e6).toFixed(1)} µs`
   return `${(seconds * 1e9 + 0).toFixed(0).replace(/^-0$/, '0')} ns`
 }
+
+/**
+ * A formatted reading split into its number and its unit, so the readout can set the unit in grey
+ * beside the figure — the 2026-10-12 mockup's treatment, and the thing that lets a column of
+ * readings be scanned for its numbers rather than read.
+ *
+ * The split is the *last* space, which is where every formatter above puts the unit, and it keeps a
+ * clamped corner's marker with the number ("< 52.55" / "Hz") rather than treating "<" as the value.
+ * A dash, or anything with no unit at all, comes back as the whole string and no unit — never as an
+ * empty value with the text as its unit.
+ */
+export function splitUnit(text: string): { value: string; unit: string } {
+  const at = text.lastIndexOf(' ')
+  if (at <= 0) return { value: text, unit: '' }
+  const unit = text.slice(at + 1)
+  // "< 52.55 Hz" splits at the last space; "< 52.55" must not split at the first.
+  if (/[0-9]/.test(unit)) return { value: text, unit: '' }
+  return { value: text.slice(0, at), unit }
+}

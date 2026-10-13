@@ -83,49 +83,40 @@ defineExpose({ invalid })
 </script>
 
 <template>
-  <!-- Capped rather than full width: the Measurements panel lives in the chart column since
-       2026-09-27, where a dropdown and two number boxes stretched to 600 px read as a form that has
-       lost its layout. Still fluid below that, so the narrow (two-column) shell is unaffected. -->
-  <div class="mb-2 flex max-w-sm flex-col gap-2">
-    <label
-      class="flex flex-col gap-1 text-xs"
-      title="What the bandwidth corners are measured down from. Passband median is right for an amplifier: its output transformer's HF resonance is often taller than the passband, and referencing the peak then measures the resonance instead. Pick Peak for a DUT whose response is itself a peak. A change is applied to the curves on screen at once."
-    >
-      Bandwidth reference
-      <select
-        v-model="reference"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+  <!-- One row of three, as the 2026-10-12 mockup lays it out: the reference and the band it is
+       taken over are read together. `auto-fit` is what makes that safe in both places this panel
+       lands — side by side in the chart column, stacked in the two-wide flow under it — and the cap
+       keeps the row from stretching to 600 px in the wide case, where three short fields spread
+       that far read as a form that has lost its layout. -->
+  <div class="mb-2 flex max-w-[620px] flex-col gap-2">
+    <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
+      <label
+        class="tb-field"
+        title="What the bandwidth corners are measured down from. Passband median is right for an amplifier: its output transformer's HF resonance is often taller than the passband, and referencing the peak then measures the resonance instead. Pick Peak for a DUT whose response is itself a peak. A change is applied to the curves on screen at once."
       >
-        <option v-for="option in BANDWIDTH_REFERENCES" :key="option.value" :value="option.value">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
+        Bandwidth reference
+        <select v-model="reference" class="tb-input">
+          <option v-for="option in BANDWIDTH_REFERENCES" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
 
-    <div v-if="usesReferenceBand" class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="Bottom of the band the reference level is the median of.">
-        Reference from (Hz)
-        <input
-          v-model.number="lowHz"
-          type="number"
-          min="1"
-          max="96000"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        />
-      </label>
-      <label class="flex flex-col gap-1" title="Top of the band the reference level is the median of.">
-        Reference to (Hz)
-        <input
-          v-model.number="highHz"
-          type="number"
-          min="1"
-          max="96000"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        />
-      </label>
+      <!-- Three cells of the row above, not a nested pair: all three are read together, and the
+           auto-fit columns are what let them stack where the panel is narrow. -->
+      <template v-if="usesReferenceBand">
+        <label class="tb-field" title="Bottom of the band the reference level is the median of.">
+          Reference from (Hz)
+          <input v-model.number="lowHz" type="number" min="1" max="96000" class="tb-input" />
+        </label>
+        <label class="tb-field" title="Top of the band the reference level is the median of.">
+          Reference to (Hz)
+          <input v-model.number="highHz" type="number" min="1" max="96000" class="tb-input" />
+        </label>
+      </template>
     </div>
 
-    <p v-if="invalid" class="text-[11px] text-red-600 dark:text-red-400">{{ invalid }}</p>
-    <p v-else-if="error" class="text-[11px] text-red-600 dark:text-red-400">{{ error }}</p>
+    <p v-if="invalid" class="text-[12px] text-red-600 dark:text-red-400">{{ invalid }}</p>
+    <p v-else-if="error" class="text-[12px] text-red-600 dark:text-red-400">{{ error }}</p>
   </div>
 </template>

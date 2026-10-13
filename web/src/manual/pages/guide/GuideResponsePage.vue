@@ -88,7 +88,7 @@ const { showPage } = useManual()
       </tbody>
     </table>
     <p>
-      Press <strong>SINGLE</strong> for one measurement, or <strong>RUN</strong> to keep sweeping
+      Press <strong>Single</strong> for one measurement, or <strong>Run</strong> to keep sweeping
       while you adjust something and watch the curve move.
     </p>
 

@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { useExperimental384k } from '../composables/useExperimental384k'
 import { useManual } from '../manual/useManual'
 import Modal from './Modal.vue'
+import HeaderIcon from './HeaderIcon.vue'
 
 /**
  * The QA403's own settings, reached from the gear beside the status bar's Analyzer picker — the same
@@ -19,11 +20,12 @@ import Modal from './Modal.vue'
  *
  * <p><b>Shown for the simulator too</b>, deliberately. The simulator models a QA403 and mirrors its
  * generator rate ceiling (<c>MaxGeneratorSampleRateHz</c>), so the 384 kHz opt-in is read by both —
- * the status bar already calls that bench "the QA403 bench" where the external gain is concerned.
+ * the status bar already calls that bench "QA403" where the external gain is concerned.
  * It has no hardware ranger, so the delay field is absent there and says why.</p>
  */
 const props = defineProps<{ open: boolean; status: DeviceStatus | null }>()
-const emit = defineEmits<{ close: [] }>()
+/** `configuration` carries the one cross-reference in the prose: the global settings live there. */
+const emit = defineEmits<{ close: []; configuration: [] }>()
 
 const { experimental384kEnabled, load: loadExperimental384k, setExperimental384kEnabled } = useExperimental384k()
 void loadExperimental384k()
@@ -62,79 +64,97 @@ async function applyStepDownDelay() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="QA403 settings" @close="emit('close')">
-    <div class="flex flex-col gap-5 text-sm">
-      <p class="text-xs text-neutral-500 dark:text-neutral-400">
+  <!-- The 2026-10-13 dialog chrome. The two settings are one card: both belong to the analyzer
+       rather than to the bench, which is the whole of what this dialog is for. -->
+  <Modal
+    :open="props.open"
+    title="QA403 settings"
+    icon="soundcard"
+    tone="green"
+    ground
+    flush
+    @close="emit('close')"
+  >
+    <div class="flex flex-col gap-3.5 p-4">
+      <p class="m-0 text-[12.5px] leading-relaxed text-neutral-600 dark:text-neutral-400">
         Settings that belong to this analyzer rather than to the bench. Everything global — the
-        capture delay, the metrics bandwidth, the diagnostics — is in Configuration.
+        capture delay, the metrics bandwidth, the diagnostics — is in
+        <button type="button" class="font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300" @click="emit('configuration')">
+          Configuration</button>.
       </p>
 
-      <label
-        class="flex items-start gap-2"
-        title="Offers 384 kHz in the FFT screen's Sample rate list, and a 200 kHz entry in its frequency To list. Measured on a QA403 rather than assumed, since QuantAsylum does not document this rate: the ADC really does run at it, and with an external generator driving the input the analyzer is flat to within about 1.2 dB out to 180 kHz. The DAC does not — a tone comes back 12 dB low with about 44 % distortion, and its near-DC content cycles the output protection relay, which a software stop does not clear. So the app refuses to play a stimulus above 192 kHz, and this rate is for capturing a signal something else is driving."
-      >
-        <input
-          type="checkbox"
-          class="mt-0.5"
-          :checked="experimental384kEnabled"
-          @change="setExperimental384kEnabled(($event.target as HTMLInputElement).checked)"
-        />
-        <span>
-          Allow 384 kHz sample rate (experimental)
-          <span class="block text-xs text-neutral-500">
-            Capture only — the generator is refused above 192 kHz. Buys real input bandwidth, to
-            about 180 kHz.
+      <section class="dialog-card">
+        <label
+          class="flex cursor-pointer items-start gap-3 p-3.5"
+          title="Offers 384 kHz in the FFT screen's Sample rate list, and a 200 kHz entry in its frequency To list. Measured on a QA403 rather than assumed, since QuantAsylum does not document this rate: the ADC really does run at it, and with an external generator driving the input the analyzer is flat to within about 1.2 dB out to 180 kHz. The DAC does not — a tone comes back 12 dB low with about 44 % distortion, and its near-DC content cycles the output protection relay, which a software stop does not clear. So the app refuses to play a stimulus above 192 kHz, and this rate is for capturing a signal something else is driving."
+        >
+          <input
+            type="checkbox"
+            class="tb-check mt-0.5 h-4 w-4"
+            :checked="experimental384kEnabled"
+            @change="setExperimental384kEnabled(($event.target as HTMLInputElement).checked)"
+          />
+          <span class="flex flex-1 flex-col gap-1">
+            <span class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-semibold">Allow 384 kHz sample rate</span>
+              <span
+                class="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.04em]"
+                :style="{ backgroundColor: 'var(--kind-amber-chip-bg)', color: 'var(--kind-amber-chip-fg)' }"
+                >Experimental</span
+              >
+            </span>
+            <span class="text-[12.5px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+              Capture only — the generator is refused above 192 kHz. Buys real input bandwidth, to
+              about 180 kHz.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
 
-      <label
-        v-if="hasHardwareRanger"
-        class="flex flex-col gap-1"
-        title="How long a peak must stay under-range before the input range steps down to a more sensitive setting. Higher values ride out amplitude-modulated signals (e.g. two close tones beating) without chasing every dip; lower values react faster to a genuinely quieter signal."
-      >
-        Auto-range step-down delay (ms)
-        <span class="text-xs text-neutral-500">
-          Written into the analyzer's own ranger, and kept — it is applied again to whichever
-          analyzer this bench opens next.
-        </span>
-        <input
-          type="number"
-          min="0"
-          step="100"
-          v-model.number="stepDownDelayMs.value"
-          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="applyStepDownDelay"
-        />
-      </label>
-      <p v-else class="text-xs text-neutral-500 dark:text-neutral-400">
-        The auto-range step-down delay belongs to the analyzer's own ranger, which this one does not
-        have — connect a QA403 to set it.
-      </p>
-
-      <p v-if="error" class="text-red-600 dark:text-red-400">{{ error }}</p>
-
-      <div class="flex items-center justify-end gap-2">
-        <button
-          type="button"
-          class="mr-auto flex items-center gap-1.5 rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          title="What both of these do, in full — including the measurements behind the 384 kHz warning."
-          @click="openManual('settings')"
+        <div
+          v-if="hasHardwareRanger"
+          class="flex items-start gap-3 border-t border-neutral-100 p-3.5 dark:border-neutral-800"
+          title="How long a peak must stay under-range before the input range steps down to a more sensitive setting. Higher values ride out amplitude-modulated signals (e.g. two close tones beating) without chasing every dip; lower values react faster to a genuinely quieter signal."
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
-          </svg>
-          Manual
-        </button>
-        <button
-          type="button"
-          class="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-100 dark:border-neutral-700"
-          @click="emit('close')"
-        >
-          Close
-        </button>
-      </div>
+          <label class="flex flex-1 flex-col gap-1" for="qa403-step-down">
+            <span class="text-sm font-semibold">Auto-range step-down delay</span>
+            <span class="text-[12.5px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+              Written into the analyzer's own ranger, and kept — it is applied again to whichever
+              analyzer this bench opens next.
+            </span>
+          </label>
+          <span class="flex shrink-0 items-center gap-2">
+            <input
+              id="qa403-step-down"
+              type="number"
+              min="0"
+              step="100"
+              v-model.number="stepDownDelayMs.value"
+              class="tb-input h-9 w-24 text-right font-mono"
+              @change="applyStepDownDelay"
+            />
+            <span class="text-[12.5px] text-neutral-500 dark:text-neutral-400">ms</span>
+          </span>
+        </div>
+        <p v-else class="border-t border-neutral-100 p-3.5 text-[12.5px] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+          The auto-range step-down delay belongs to the analyzer's own ranger, which this one does
+          not have — connect a QA403 to set it.
+        </p>
+      </section>
+
+      <p v-if="error" class="text-[12.5px] text-red-600 dark:text-red-400">{{ error }}</p>
     </div>
+
+    <template #footer>
+      <button
+        type="button"
+        class="btn-secondary mr-auto"
+        title="What both of these do, in full — including the measurements behind the 384 kHz warning."
+        @click="openManual('settings')"
+      >
+        <HeaderIcon name="manual" :size="16" />
+        Manual
+      </button>
+      <button type="button" class="btn-primary" @click="emit('close')">Close</button>
+    </template>
   </Modal>
 </template>

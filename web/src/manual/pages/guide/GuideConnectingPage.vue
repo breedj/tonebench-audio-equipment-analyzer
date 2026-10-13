@@ -158,7 +158,7 @@ const { showPage } = useManual()
     <p>
       Before connecting anything at all: fit all four plugs, open an
       <strong>FFT analysis</strong> measurement, leave the generator off and press
-      <strong>RUN</strong>. You should see a flat, featureless floor around
+      <strong>Run</strong>. You should see a flat, featureless floor around
       <strong>−117 dBV</strong> and no spikes at 50 Hz. That is your bench at its best. If there are
       hum spikes now, they are coming from the room and not from anything you are about to measure —
       much easier to learn that now than halfway through an amplifier.

@@ -1227,8 +1227,11 @@ defineExpose({ curve: readCurve, exportPng })
 </script>
 
 <template>
-  <div ref="root" class="relative flex flex-col gap-2">
-    <ExpandToggle class="absolute right-0 top-0" :target="root" />
+  <!-- The chart is a card like every settings and display panel beside it (the 2026-10-12
+       mockups): one surface, one 12 px radius, with the cursor readout and the plot inside it
+       rather than the readout floating on the page ground above a bare plot. -->
+  <div ref="root" class="relative flex flex-col gap-2 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
+    <ExpandToggle class="absolute right-3 top-3" :target="root" />
     <div class="min-h-6 pr-9 flex items-start justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span v-if="hoverRoot" class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono">
         <span class="text-neutral-800 dark:text-neutral-100">
@@ -1276,7 +1279,7 @@ defineExpose({ curve: readCurve, exportPng })
 
     <p v-if="readCurve.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">
       <template v-if="traces.length === 0 && overlays.length === 0">
-        No response measured yet. Press {{ props.runLabel ?? 'RUN' }}.
+        No response measured yet. Press {{ props.runLabel ?? 'Run' }}.
       </template>
       <template v-else-if="phaseKind === 'None'">
         This run measured no phase, so it has no complex response to model. Turn the right-channel

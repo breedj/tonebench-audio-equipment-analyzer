@@ -248,19 +248,27 @@ const { showPage } = useManual()
     </p>
     <ul>
       <li>
-        <strong>RUN</strong> starts the generator and measures continuously until you press
-        <strong>STOP</strong>. On the two sweep screens the same slot is <strong>RUN SWEEP</strong>,
+        <strong>Run</strong> starts the generator and measures continuously until you press
+        <strong>Stop</strong>. On the two sweep screens the same slot is <strong>Run sweep</strong>,
         which walks its list of points once and stops on its own.
       </li>
       <li>
-        <strong>SINGLE</strong> measures once and stops itself — one settled spectrum on the FFT
+        <strong>Single</strong> measures once and stops itself — one settled spectrum on the FFT
         screen, one complete pass on the chirp screen.
       </li>
       <li>
-        <strong>STOP</strong> (or <strong>CANCEL</strong> on the sweeps) ends the measurement and
+        <strong>Stop</strong> (or <strong>Cancel</strong> on the sweeps) ends the measurement and
         silences the generator. Whatever was already measured stays on screen.
       </li>
     </ul>
+    <p>
+      Beside that button, at the top of the chart column, is the <strong>status bar</strong>: a
+      coloured dot and a word for what the measurement is doing — <em>Idle</em>, what it is working
+      on, <em>Finished</em>, <em>Cancelled</em> or <em>Failed</em> — a progress track, and the two or
+      three figures that run has to report, such as the point it has reached, the generator level and
+      the resolution it is measuring at. It is the same bar on every screen, and it is the height of
+      the button beside it, so the settings panel and the chart start on the same line.
+    </p>
     <p>
       Nothing you type reaches the hardware until you press one of those. Selecting a measurement in
       the sidebar loads its settings; it does not start playing anything.
@@ -268,7 +276,7 @@ const { showPage } = useManual()
 
     <div class="manual-note">
       <p>
-        The generator drives real equipment. Check the level before pressing RUN, especially in the
+        The generator drives real equipment. Check the level before pressing Run, especially in the
         output-referred level modes, which raise the generator until the <em>device under test</em>
         reaches the target you asked for.
       </p>

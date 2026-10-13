@@ -23,7 +23,7 @@ const { showPage } = useManual()
       :terminate="['in-l-', 'in-r-']"
       :height="430"
       alt="Output L plus drives the amplifier; its plus terminal goes to Input L plus and its minus terminal is the cable's shell; Output R plus loops to Input R plus as a reference; the load is fitted at the output terminals and swapped part way through."
-      caption="Load 1 first. When the run pauses, swap it for Load 2 and press CONTINUE."
+      caption="Load 1 first. When the run pauses, swap it for Load 2 and press Continue."
     >
       <template #default="{ cable, link, path }">
         <rect x="190" y="270" width="210" height="70" rx="4" class="w-block-fill" />
@@ -121,7 +121,7 @@ const { showPage } = useManual()
     <p>
       The run measures every point into Load 1, then goes silent and waits with a banner on screen.
       <strong>Swap the load — leave the amplifier on and everything else exactly as it is — and
-      press CONTINUE.</strong> The second pass reuses the input range and the drive level from the
+      press Continue.</strong> The second pass reuses the input range and the drive level from the
       first, which is deliberate: a range step between the passes would put about 0.1 dB of gain
       error into a measurement whose whole signal is 0.03 dB, and read as three times the real
       answer.

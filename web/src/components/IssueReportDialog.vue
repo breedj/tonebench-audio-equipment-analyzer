@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import Modal from './Modal.vue'
+import PanelIcon from './PanelIcon.vue'
 import { api, issueReportDownloadUrl, type IssueReportResult } from '../api/client'
 import {
   ISSUE_QUESTIONS,
@@ -53,6 +54,33 @@ const screenshotBytes = ref(0)
 const building = ref(false)
 const problem = ref<string | null>(null)
 const result = ref<IssueReportResult | null>(null)
+
+/**
+ * The glyph on each attachment row — a page, a camera, a trace, a level meter, a cog. Here rather
+ * than in `panelIcons.ts` because these five are not panel headers: they are a file-type hint
+ * inside one list, drawn in the neutral `.tb-row-glyph` circle rather than in a kind accent.
+ */
+const ROW_GLYPHS = {
+  log: 'M6 2h9l5 5v15H6zM9 13h8M9 17h6',
+  screenshot: 'M3 8h4l2-3h6l2 3h4v12H3z',
+  diagnostics: 'M2 12h4l2-6 4 12 3-9 2 3h5',
+  audio: 'M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2',
+  settings:
+    'M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1',
+} as const
+
+/** The five row glyphs are all drawn the same way, so the attributes are bound rather than repeated. */
+const ROW_SVG = {
+  width: 13,
+  height: 13,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  'stroke-width': 2,
+  'stroke-linecap': 'round',
+  'stroke-linejoin': 'round',
+  'aria-hidden': 'true',
+} as const
 
 // The window the Log dropdown offers. 14 is the retention, so there is never a point offering more.
 const LOG_DAY_OPTIONS = [0, 1, 2, 3, 7, 14]
@@ -146,201 +174,266 @@ async function openFolder() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Report an issue" size="lg" @close="emit('close')">
-    <div class="flex max-h-[70vh] flex-col gap-4 overflow-y-auto text-sm">
-      <p class="text-xs text-neutral-500 dark:text-neutral-400">
+  <!-- The 2026-10-13 chrome. Two cards: the questions, numbered, each with its answer indented
+       under its own number; and what else goes in the zip, one row per attachment with its size at
+       the right. The hint that used to sit above the buttons is on the footer strip beside them. -->
+  <Modal :open="props.open" title="Report an issue" icon="bug" tone="red" size="lg" ground flush @close="emit('close')">
+    <div class="flex max-h-[68vh] flex-col gap-3.5 overflow-y-auto p-4 text-[13px]">
+      <p class="shrink-0 px-0.5 text-[12.5px] leading-[1.5] text-neutral-600 dark:text-neutral-300">
         Answer what you can — anything is better than nothing — and press <strong>Build report</strong>. It
         writes one zip holding your answers, the chart on screen, the log, and every setting and
         calibration of this bench. Nothing is sent anywhere: the zip stays on this machine until you
         attach it to a mail yourself.
       </p>
 
-      <div v-for="question in ISSUE_QUESTIONS" :key="question.id" class="flex flex-col gap-1">
-        <label :for="`issue-${question.id}`" class="flex items-baseline gap-2">
-          <span>{{ question.question }}</span>
-          <span v-if="question.wanted" class="text-[10px] uppercase tracking-wide text-neutral-400">
-            most useful
-          </span>
-        </label>
-        <textarea
-          :id="`issue-${question.id}`"
-          v-model="answers[question.id]"
-          :rows="question.rows"
-          :placeholder="question.placeholder"
-          class="w-full rounded border border-neutral-300 px-2 py-1 font-sans text-sm dark:border-neutral-700"
-        ></textarea>
-      </div>
-
-      <fieldset class="flex flex-col gap-2 rounded border border-neutral-200 p-3 dark:border-neutral-800">
-        <legend class="px-1 text-xs uppercase tracking-wide text-neutral-500">What else goes in</legend>
-
-        <label class="flex items-center justify-between gap-3">
-          <span
-            class="text-neutral-600 dark:text-neutral-300"
-            title="The application log, one file per day. Today's is the one that covers what you just saw; a fault that was noticed the day after needs two."
-          >
-            Log
-          </span>
-          <span class="flex w-64 items-center gap-2">
-            <select
-              v-model.number="selection.logDays"
-              class="flex-1 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+      <section class="dialog-card shrink-0 px-3.5 pt-1 pb-3.5">
+        <div
+          v-for="(question, i) in ISSUE_QUESTIONS"
+          :key="question.id"
+          class="flex flex-col gap-1.5 py-3"
+          :class="i < ISSUE_QUESTIONS.length - 1 ? 'border-b border-neutral-100 dark:border-neutral-800' : ''"
+        >
+          <label :for="`issue-${question.id}`" class="flex items-center gap-2.5 text-[13.5px] font-semibold">
+            <!-- The number carries the accent only while the answer is one of the useful ones; on
+                 the rest it is grey, which is the whole of what `wanted` used to say in words. -->
+            <span
+              class="flex size-[22px] shrink-0 items-center justify-center rounded-full text-[12px] font-semibold"
+              :style="
+                question.wanted
+                  ? { backgroundColor: 'var(--kind-red-chip-bg)', color: 'var(--kind-red-chip-fg)' }
+                  : { backgroundColor: 'var(--surface-control)' }
+              "
+              :class="question.wanted ? '' : 'text-neutral-600 dark:text-neutral-300'"
             >
-              <option v-for="days in LOG_DAY_OPTIONS" :key="days" :value="days">
-                {{ days === 0 ? 'none' : days === 1 ? 'today only' : `last ${days} days` }}
-              </option>
-            </select>
-            <span class="w-24 text-right text-xs text-neutral-500">
-              {{ logsChosen.length }} file{{ logsChosen.length === 1 ? '' : 's' }}
+              {{ i + 1 }}
             </span>
-          </span>
-        </label>
+            <span class="min-w-0">{{ question.question }}</span>
+          </label>
+          <!-- Indented by a wrapper rather than by a margin on the box itself: `tb-input` is
+               `w-full`, so `ml-8` on it put 32 px of the textarea outside the card (Joost, 2026-10-13). -->
+          <div class="pl-8">
+            <textarea
+              :id="`issue-${question.id}`"
+              v-model="answers[question.id]"
+              :rows="question.rows"
+              :placeholder="question.placeholder"
+              class="tb-input h-auto resize-y py-2 leading-[1.45]"
+            ></textarea>
+          </div>
+        </div>
+      </section>
 
-        <label class="flex items-center justify-between gap-3">
-          <span
-            class="text-neutral-600 dark:text-neutral-300"
-            :title="
-              hasChart
-                ? 'The chart on screen, exactly as the Screenshot button would export it.'
-                : 'This screen has no chart to export, so there is nothing to include.'
-            "
-          >
-            Screenshot of the chart
-          </span>
-          <span class="flex w-64 items-center gap-2">
-            <input v-model="selection.includeScreenshot" type="checkbox" :disabled="!hasChart" />
-            <span class="text-xs text-neutral-500">
-              {{ hasChart ? describeBytes(screenshotBytes) : 'no chart on this screen' }}
+      <section class="dialog-card shrink-0">
+        <div class="flex items-center gap-2.5 px-3 py-2.5">
+          <PanelIcon icon="paperclip" tone="indigo" :size="28" />
+          <h3 class="flex-1 text-[14px] font-semibold">What else goes in</h3>
+          <span class="font-mono text-[12px] text-neutral-500 dark:text-neutral-400">≈ {{ describeBytes(estimate) }}</span>
+        </div>
+
+        <div class="px-3.5 pb-1">
+          <div class="tb-file-row border-t border-neutral-100 dark:border-neutral-800">
+            <span class="tb-row-glyph">
+              <svg v-bind="ROW_SVG"><path :d="ROW_GLYPHS.log" /></svg>
             </span>
-          </span>
-        </label>
-
-        <label class="flex items-center justify-between gap-3">
-          <span
-            class="text-neutral-600 dark:text-neutral-300"
-            title="Per-record diagnostic captures, written only while Configuration ▸ Diagnostics has them armed. They are what distinguishes a gap in the samples from a noisy amplifier."
-          >
-            Diagnostic captures
-          </span>
-          <span class="flex w-64 items-center gap-2">
-            <input v-model="selection.includeDiagnostics" type="checkbox" />
-            <span class="text-xs text-neutral-500">
-              {{
-                contents && contents.diagnostics.length > 0
-                  ? `${contents.diagnostics.length} file${contents.diagnostics.length === 1 ? '' : 's'}`
-                  : 'none recorded'
-              }}
+            <label
+              for="issue-log-days"
+              title="The application log, one file per day. Today's is the one that covers what you just saw; a fault that was noticed the day after needs two."
+            >
+              Log
+            </label>
+            <span class="flex items-center gap-2.5">
+              <select id="issue-log-days" v-model.number="selection.logDays" class="tb-input-sm w-[124px]">
+                <option v-for="days in LOG_DAY_OPTIONS" :key="days" :value="days">
+                  {{ days === 0 ? 'none' : days === 1 ? 'today only' : `last ${days} days` }}
+                </option>
+              </select>
+              <span class="w-[120px] text-right font-mono text-[12px] text-neutral-500 dark:text-neutral-400">
+                {{ logsChosen.length }} file{{ logsChosen.length === 1 ? '' : 's' }}
+              </span>
             </span>
-          </span>
-        </label>
+          </div>
 
-        <label class="flex items-center justify-between gap-3">
-          <span
-            class="text-neutral-600 dark:text-neutral-300"
-            title="The newest acquisition's WAV pair — what went to the output and what came back in. The only thing that can show the wrong stimulus having been played. Large."
-          >
-            Recorded audio (newest acquisition)
-          </span>
-          <span class="flex w-64 items-center gap-2">
-            <input
-              v-model="selection.includeRecordings"
-              type="checkbox"
-              :disabled="recordingSet.length === 0"
-            />
-            <span class="text-xs" :class="recordingSet.length > 0 ? 'text-amber-600 dark:text-amber-500' : 'text-neutral-500'">
-              {{
-                recordingSet.length > 0
-                  ? describeBytes(recordingSet.reduce((t, f) => t + f.bytes, 0))
-                  : contents?.streamRecordingEnabled
-                    ? 'armed, but nothing recorded yet'
-                    : 'not armed'
-              }}
+          <label class="tb-file-row cursor-pointer border-t border-neutral-100 dark:border-neutral-800">
+            <span class="tb-row-glyph">
+              <svg v-bind="ROW_SVG"><path :d="ROW_GLYPHS.screenshot" /><circle cx="12" cy="13" r="3.5" /></svg>
             </span>
-          </span>
-        </label>
+            <span
+              :title="
+                hasChart
+                  ? 'The chart on screen, exactly as the Screenshot button would export it.'
+                  : 'This screen has no chart to export, so there is nothing to include.'
+              "
+            >
+              Screenshot of the chart
+            </span>
+            <span class="flex items-center gap-2.5">
+              <span class="w-[120px] text-right text-[12px] text-neutral-500 dark:text-neutral-400">
+                <span :class="hasChart ? 'font-mono' : ''">
+                  {{ hasChart ? describeBytes(screenshotBytes) : 'no chart on this screen' }}
+                </span>
+              </span>
+              <input v-model="selection.includeScreenshot" type="checkbox" class="tb-check" :disabled="!hasChart" />
+            </span>
+          </label>
 
-        <label class="flex items-center justify-between gap-3">
-          <span
-            class="text-neutral-600 dark:text-neutral-300"
-            title="Every stored setting, including this bench's sound-card, loopback and impedance-fixture calibrations. Almost always the thing that explains a reading."
-          >
-            Settings and calibrations
-          </span>
-          <span class="flex w-64 items-center gap-2">
-            <input v-model="selection.includeSettings" type="checkbox" />
-            <span class="text-xs text-neutral-500">your bench's own figures</span>
-          </span>
-        </label>
+          <label class="tb-file-row cursor-pointer border-t border-neutral-100 dark:border-neutral-800">
+            <span class="tb-row-glyph">
+              <svg v-bind="ROW_SVG"><path :d="ROW_GLYPHS.diagnostics" /></svg>
+            </span>
+            <span
+              title="Per-record diagnostic captures, written only while Configuration ▸ Diagnostics has them armed. They are what distinguishes a gap in the samples from a noisy amplifier."
+            >
+              Diagnostic captures
+            </span>
+            <span class="flex items-center gap-2.5">
+              <span class="w-[120px] text-right text-[12px] text-neutral-500 dark:text-neutral-400">
+                {{
+                  contents && contents.diagnostics.length > 0
+                    ? `${contents.diagnostics.length} file${contents.diagnostics.length === 1 ? '' : 's'}`
+                    : 'none recorded'
+                }}
+              </span>
+              <input v-model="selection.includeDiagnostics" type="checkbox" class="tb-check" />
+            </span>
+          </label>
 
-        <p class="text-xs text-neutral-500 dark:text-neutral-400">
-          About {{ describeBytes(estimate) }} before compression.
+          <label class="tb-file-row cursor-pointer border-t border-neutral-100 dark:border-neutral-800">
+            <span class="tb-row-glyph">
+              <svg v-bind="ROW_SVG"><path :d="ROW_GLYPHS.audio" /></svg>
+            </span>
+            <span
+              title="The newest acquisition's WAV pair — what went to the output and what came back in. The only thing that can show the wrong stimulus having been played. Large."
+            >
+              Recorded audio <span class="text-neutral-500 dark:text-neutral-400">(newest acquisition)</span>
+            </span>
+            <span class="flex items-center gap-2.5">
+              <!-- The size is amber when there is one, because this is the row that turns a 500 kB
+                   report into a 300 MB one. -->
+              <span
+                class="w-[120px] text-right text-[12px]"
+                :class="recordingSet.length > 0 ? 'font-mono text-amber-600 dark:text-amber-500' : 'text-neutral-500 dark:text-neutral-400'"
+              >
+                {{
+                  recordingSet.length > 0
+                    ? describeBytes(recordingSet.reduce((t, f) => t + f.bytes, 0))
+                    : contents?.streamRecordingEnabled
+                      ? 'armed, nothing yet'
+                      : 'not armed'
+                }}
+              </span>
+              <input
+                v-model="selection.includeRecordings"
+                type="checkbox"
+                class="tb-check"
+                :disabled="recordingSet.length === 0"
+              />
+            </span>
+          </label>
+
+          <label class="tb-file-row cursor-pointer border-t border-neutral-100 dark:border-neutral-800">
+            <span class="tb-row-glyph">
+              <svg v-bind="ROW_SVG"><path :d="ROW_GLYPHS.settings" /><circle cx="12" cy="12" r="3" /></svg>
+            </span>
+            <span
+              title="Every stored setting, including this bench's sound-card, loopback and impedance-fixture calibrations. Almost always the thing that explains a reading."
+            >
+              Settings and calibrations
+            </span>
+            <span class="flex items-center gap-2.5">
+              <span class="w-[120px] text-right text-[12px] text-neutral-500 dark:text-neutral-400">
+                your bench's own figures
+              </span>
+              <input v-model="selection.includeSettings" type="checkbox" class="tb-check" />
+            </span>
+          </label>
+        </div>
+
+        <p
+          class="border-t border-neutral-200 px-3.5 py-2.5 text-[12px] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
+          :style="{ backgroundColor: 'var(--surface-ground)' }"
+        >
+          About <span class="font-mono text-neutral-900 dark:text-neutral-100">{{ describeBytes(estimate) }}</span> before
+          compression.
           <span v-if="contents && !contents.diagnosticLoggingEnabled" class="text-amber-600 dark:text-amber-500">
             Detailed logging is off, so the log holds less than it could — Configuration ▸ Diagnostics
             turns it on, and most faults here are intermittent enough to be worth reproducing once
             with it on.
           </span>
         </p>
-      </fieldset>
+      </section>
 
-      <p v-if="problem" class="rounded border border-red-300 px-3 py-2 text-xs text-red-800 dark:border-red-700/60 dark:text-red-300">
+      <p
+        v-if="problem"
+        class="dialog-card shrink-0 border-red-300 px-3 py-2 text-[12px] text-red-800 dark:border-red-700/60 dark:text-red-300"
+      >
         {{ problem }}
       </p>
 
-      <div
-        v-if="result"
-        class="flex flex-col gap-2 rounded border border-emerald-300 px-3 py-2 text-xs dark:border-emerald-700/60"
-      >
+      <section v-if="result" class="dialog-card flex shrink-0 flex-col gap-2 border-emerald-300 p-3 text-[12px] dark:border-emerald-700/60">
         <p>
           <strong>{{ result.fileName }}</strong> — {{ describeBytes(result.bytes) }}
         </p>
-        <p class="break-all font-mono text-[11px] text-neutral-500 dark:text-neutral-400">{{ result.path }}</p>
+        <p class="font-mono text-[11px] break-all text-neutral-500 dark:text-neutral-400">{{ result.path }}</p>
         <ul class="list-inside list-disc text-neutral-600 dark:text-neutral-300">
           <li v-for="line in result.included" :key="line">{{ line }}</li>
         </ul>
         <ul v-if="result.warnings.length" class="list-inside list-disc text-amber-700 dark:text-amber-500">
           <li v-for="line in result.warnings" :key="line">{{ line }}</li>
         </ul>
-      </div>
-
-      <div class="flex items-center justify-end gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
-        <span v-if="!canBuild && !building" class="mr-auto text-xs text-neutral-500">
-          Answer at least one question first.
-        </span>
-        <button
-          type="button"
-          class="rounded border border-neutral-300 px-3 py-1 text-xs dark:border-neutral-700"
-          @click="emit('close')"
-        >
-          Close
-        </button>
-        <button
-          v-if="result"
-          type="button"
-          class="rounded border border-neutral-300 px-3 py-1 text-xs dark:border-neutral-700"
-          @click="openFolder"
-        >
-          Open folder
-        </button>
-        <!-- A plain link, so the browser's own download does the saving: a Blob built in JS would
-             have to hold a report with a 256 MB WAV in it in memory first. -->
-        <a
-          v-if="result"
-          :href="issueReportDownloadUrl(result.fileName)"
-          :download="result.fileName"
-          class="rounded bg-sky-600 px-3 py-1 text-xs text-white hover:bg-sky-500"
-        >
-          Download
-        </a>
-        <button
-          v-else
-          type="button"
-          class="rounded bg-sky-600 px-3 py-1 text-xs text-white hover:bg-sky-500 disabled:bg-neutral-300 disabled:text-neutral-500 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-400"
-          :disabled="!canBuild"
-          @click="build"
-        >
-          {{ building ? 'Building…' : 'Build report' }}
-        </button>
-      </div>
+      </section>
     </div>
+
+    <template #footer>
+      <span
+        v-if="!canBuild && !building"
+        class="flex flex-1 items-center gap-1.5 text-[12px] text-neutral-500 dark:text-neutral-400"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#b45309"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5M12 8h.01" />
+        </svg>
+        Answer at least one question first.
+      </span>
+      <span v-else class="flex-1"></span>
+
+      <button type="button" class="btn-secondary" @click="emit('close')">Close</button>
+      <button v-if="result" type="button" class="btn-secondary" @click="openFolder">Open folder</button>
+      <!-- A plain link, so the browser's own download does the saving: a Blob built in JS would
+           have to hold a report with a 256 MB WAV in it in memory first. -->
+      <a
+        v-if="result"
+        :href="issueReportDownloadUrl(result.fileName)"
+        :download="result.fileName"
+        class="btn-primary"
+      >
+        Download
+      </a>
+      <button v-else type="button" class="btn-primary" :disabled="!canBuild" @click="build">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
+        </svg>
+        {{ building ? 'Building…' : 'Build report' }}
+      </button>
+    </template>
   </Modal>
 </template>

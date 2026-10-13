@@ -13,6 +13,7 @@
 // Page bodies are plain-markup Vue components under ./pages, loaded lazily by ManualDialog so the
 // manual costs nothing until it is opened.
 import type { Component } from 'vue'
+import type { MeasurementKindTone } from '../measurements/kinds'
 import { defineAsyncComponent, h } from 'vue'
 import {
   CROSSTALK_KIND,
@@ -634,6 +635,37 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/GlossaryPage.vue')),
   },
 ]
+
+/**
+ * The hue each group of chapters wears in the contents and in the index beside it (the 2026-10-13
+ * mockup's coloured bullets). Here rather than in the dialog because it is a table that has to cover
+ * every group — a group with no entry would be a colourless bullet in an otherwise coloured list,
+ * which reads as a broken link — and `pages.test.ts` is what makes that true.
+ *
+ * The reference manual's five follow the app: a measurement's chapter is the same violet the
+ * measurement picker's cards are, wiring is the teal of a fixture, the simulator is amber. The
+ * guide's four are its own reading order rather than anything in the app, so they simply run
+ * through four distinguishable hues.
+ */
+export const MANUAL_GROUP_TONES: Record<ManualGroup, MeasurementKindTone> = {
+  // Full manual
+  Basics: 'blue',
+  Wiring: 'teal',
+  Measurements: 'violet',
+  Simulator: 'amber',
+  Reference: 'indigo',
+  // Simple guide
+  'Start here': 'green',
+  'What the numbers mean': 'blue',
+  'Things to measure': 'violet',
+  Afterwards: 'indigo',
+}
+
+/** And the hue of each edition itself — its pill on the contents page, its tab in the header. */
+export const MANUAL_EDITION_TONES: Record<ManualEdition, MeasurementKindTone> = {
+  guide: 'green',
+  reference: 'amber',
+}
 
 export const MANUAL_EDITIONS: readonly ManualEditionInfo[] = [
   {

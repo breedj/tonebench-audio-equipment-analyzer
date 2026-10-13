@@ -1257,7 +1257,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+  <section ref="rootRef" class="relative flex flex-col gap-2 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
     <ExpandToggle class="absolute right-3 top-3" :target="rootRef" />
     <!-- Three slots — title, cursor readout, zoom state — that never take each other's place, and a
          min-height the Reset zoom button fits inside: the readout used to *replace* the button while

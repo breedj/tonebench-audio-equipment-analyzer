@@ -25,6 +25,9 @@ import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFam
 import { AMPLITUDE_X_AXES, sweepXLabel, sweepXUnit, sweepXValue, type SweepXAxis } from '../sweep/xAxis'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
 import CollapsibleSection from './CollapsibleSection.vue'
+import SegmentedToggle from './SegmentedToggle.vue'
+import { useAppTheme } from '../composables/useAppTheme'
+import { sweepTraceColor, type SweepTraceColorKey } from '../sweep/traceColors'
 
 const props = defineProps<{
   /** Which sweep this panel serves — decides the trace checkbox names (THD/D2.. or IMD/IM2..) and which store Autofit reads. Defaults to the THD family. */
@@ -362,61 +365,71 @@ function onXFromChange(event: Event) {
 function onXToChange(event: Event) {
   xTo.value = commitX(event, xTo.value, xFrom.value * 1.5, Number.MAX_VALUE)
 }
+
+// The colour each Graph data row shows beside its checkbox — the chart's own, so the rail names the
+// line it is switching rather than leaving the reader to match them by eye.
+const { isDark } = useAppTheme()
+function swatch(key: SweepTraceColorKey): string {
+  return sweepTraceColor(key, isDark.value)
+}
 </script>
 
 <template>
-  <CollapsibleSection :title="unit === 'db' ? 'dB range' : 'Distortion range (%)'" size="xs">
-    <template v-if="unit === 'db'">
-      <label class="flex flex-col gap-1 text-xs">
-        Top
-        <input
-          :value="yTopDb"
-          type="number"
-          :min="yBottomDb + DB_MIN_SPAN"
-          :max="DB_MAX"
-          :step="DB_STEP"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onTopDbChange"
-        />
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        Bottom
-        <input
-          :value="yBottomDb"
-          type="number"
-          :min="DB_MIN"
-          :max="yTopDb - DB_MIN_SPAN"
-          :step="DB_STEP"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onBottomDbChange"
-        />
-      </label>
-    </template>
-    <template v-else>
-      <label class="flex flex-col gap-1 text-xs">
-        Top
-        <select
-          v-model.number="yMaxPercent"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        >
-          <option v-for="v in Y_MAX_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
-        </select>
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        Bottom
-        <select
-          v-model.number="yMinPercent"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        >
-          <option v-for="v in Y_MIN_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
-        </select>
-      </label>
-    </template>
+  <CollapsibleSection
+    :title="unit === 'db' ? 'dB range' : 'Distortion range'"
+    :suffix="unit === 'db' ? undefined : '(%)'"
+  >
+    <div class="grid grid-cols-2 gap-2.5">
+      <template v-if="unit === 'db'">
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
+            Top
+            <input
+              :value="yTopDb"
+              type="number"
+              :min="yBottomDb + DB_MIN_SPAN"
+              :max="DB_MAX"
+              :step="DB_STEP"
+              class="tb-input"
+              @change="onTopDbChange"
+            />
+          </label>
+          <label class="tb-field">
+            Bottom
+            <input
+              :value="yBottomDb"
+              type="number"
+              :min="DB_MIN"
+              :max="yTopDb - DB_MIN_SPAN"
+              :step="DB_STEP"
+              class="tb-input"
+              @change="onBottomDbChange"
+            />
+          </label>
+        </div>
+      </template>
+      <template v-else>
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
+            Top
+            <select v-model.number="yMaxPercent" class="tb-input">
+              <option v-for="v in Y_MAX_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
+            </select>
+          </label>
+          <label class="tb-field">
+            Bottom
+            <select v-model.number="yMinPercent" class="tb-input">
+              <option v-for="v in Y_MIN_OPTIONS" :key="v" :value="v">{{ percentLabel(v) }}</option>
+            </select>
+          </label>
+        </div>
+      </template>
+    </div>
     <!-- The chart's one Autofit, in the first section rather than a scroll below the fields it
          overwrites. -->
     <button
       type="button"
-      class="w-full rounded border px-2 py-1 text-xs btn-action"
+      class="btn-panel-accent"
       title="Fits both axes to every currently-checked trace: the sweep axis to the measured span, and the distortion axis to the highest and lowest value in it. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
       @click="autofitAll"
     >
@@ -424,167 +437,135 @@ function onXToChange(event: Event) {
     </button>
   </CollapsibleSection>
 
-  <CollapsibleSection :title="`${sweepXLabel(xAxis)} range (${sweepXUnit(xAxis)})`" size="xs">
+  <CollapsibleSection :title="`${sweepXLabel(xAxis)} range`" :suffix="`(${sweepXUnit(xAxis)})`">
     <!-- Only the amplitude screen has a choice to make: output voltage and output power are what
          the DUT delivered, input voltage is what it was driven with. -->
-    <label v-if="!isFrequencyAxis" class="flex flex-col gap-1 text-xs">
+    <label v-if="!isFrequencyAxis" class="tb-field">
       X axis
-      <select
-        v-model="xAxis"
-        class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      >
+      <select v-model="xAxis" class="tb-input">
         <option v-for="a in AMPLITUDE_X_AXES" :key="a.value" :value="a.value">{{ a.label }}</option>
       </select>
     </label>
-    <template v-if="isFrequencyAxis">
-      <label class="flex flex-col gap-1 text-xs">
-        From
-        <select
-          v-model.number="xFrom"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        >
-          <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
-        </select>
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        To
-        <select
-          v-model.number="xTo"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        >
-          <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
-        </select>
-      </label>
-    </template>
-    <template v-else>
-      <label class="flex flex-col gap-1 text-xs">
-        From
-        <input
-          :value="xFrom"
-          type="number"
-          step="any"
-          :min="X_MIN_VALUE"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onXFromChange"
-        />
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        To
-        <input
-          :value="xTo"
-          type="number"
-          step="any"
-          :min="X_MIN_VALUE"
-          class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-          @change="onXToChange"
-        />
-      </label>
-    </template>
+    <div class="grid grid-cols-2 gap-2.5">
+      <template v-if="isFrequencyAxis">
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
+            From
+            <select v-model.number="xFrom" class="tb-input">
+              <option v-for="v in X_FROM_OPTIONS" :key="v" :value="v">{{ v }}</option>
+            </select>
+          </label>
+          <label class="tb-field">
+            To
+            <select v-model.number="xTo" class="tb-input">
+              <option v-for="v in X_TO_OPTIONS" :key="v" :value="v">{{ v }}</option>
+            </select>
+          </label>
+        </div>
+      </template>
+      <template v-else>
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
+            From
+            <input :value="xFrom" type="number" step="any" :min="X_MIN_VALUE" class="tb-input" @change="onXFromChange" />
+          </label>
+          <label class="tb-field">
+            To
+            <input :value="xTo" type="number" step="any" :min="X_MIN_VALUE" class="tb-input" @change="onXToChange" />
+          </label>
+        </div>
+      </template>
+    </div>
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">
-    <div class="flex flex-col gap-1 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Units</span>
-      <!-- Toggle group rather than a select: two mutually exclusive options that people flip
-           between constantly while reading a trace. -->
-      <div class="inline-flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
-        <button
-          type="button"
-          class="flex-1 px-3 py-1"
-          :class="
-            unit === 'percent'
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          @click="unit = 'percent'"
-        >
-          %
-        </button>
-        <button
-          type="button"
-          class="flex-1 border-l border-neutral-300 px-3 py-1 dark:border-neutral-700"
-          :class="
-            unit === 'db'
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
-          "
-          @click="unit = 'db'"
-        >
-          dB
-        </button>
-      </div>
-    </div>
+    <span class="tb-group">Units</span>
+    <!-- A toggle rather than a select: two mutually exclusive options that people flip between
+         constantly while reading a trace. -->
+    <SegmentedToggle
+      v-model="unit"
+      group-label="Units"
+      :options="[
+        { value: 'percent', label: '%' },
+        { value: 'db', label: 'dB' },
+      ]"
+    />
 
-    <label class="flex items-center gap-1.5 text-xs">
-      <input v-model="autofitOnDone" type="checkbox" /> Autofit when measurement done
+    <label class="tb-check-row">
+      <input v-model="autofitOnDone" type="checkbox" class="tb-check" /> Autofit when measurement done
     </label>
 
-    <div class="flex flex-col gap-1.5 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Channels</span>
-      <div class="flex gap-3">
-        <label class="flex items-center gap-1.5">
-          <input v-model="showLeft" type="checkbox" />
-          Left
-        </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="showRight" type="checkbox" />
-          Right
-        </label>
-      </div>
-    </div>
-
-    <div class="flex flex-col gap-1.5 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Graph data</span>
-      <!-- Only on the dB axis: magnitude is a gain in dB, which has no position on a percent
-           scale. The previous app greys the same checkbox out on its D% graph. -->
-      <label
-        v-if="unit === 'db'"
-        class="flex items-center gap-1.5"
-        title="The measured fundamental relative to the generator setpoint — the DUT's frequency response, riding along with the sweep."
-      >
-        <input v-model="showMagnitude" type="checkbox" />
-        Magnitude
+    <span class="tb-group pt-1">Channels</span>
+    <div class="flex gap-5">
+      <label class="tb-check-row">
+        <input v-model="showLeft" type="checkbox" class="tb-check" />
+        Left
       </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showThd" type="checkbox" />
-        {{ t('thd') }}
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showD2" type="checkbox" />
-        {{ t('d2') }}
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showD3" type="checkbox" />
-        {{ t('d3') }}
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showD4" type="checkbox" />
-        {{ t('d4') }}
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showD5" type="checkbox" />
-        {{ t('d5') }}
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showD6Plus" type="checkbox" />
-        {{ t('d6plus') }}
-      </label>
-      <label class="flex items-center gap-1.5" title="The generator-off residual, as a share of each point's fundamental.">
-        <input v-model="showNoiseFloor" type="checkbox" />
-        Noise floor
+      <label class="tb-check-row">
+        <input v-model="showRight" type="checkbox" class="tb-check" />
+        Right
       </label>
     </div>
 
-    <div class="flex flex-col gap-1.5 text-xs">
-      <span class="text-neutral-500 dark:text-neutral-400">Style</span>
-      <label class="flex items-center gap-1.5">
-        <input v-model="thickLines" type="checkbox" />
-        Thick lines
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input v-model="showDataPoints" type="checkbox" />
-        Show data points
-      </label>
-    </div>
+    <span class="tb-group pt-1">Graph data</span>
+    <!-- Each row carries the colour its line is drawn in, from sweep/traceColors.ts — the one thing
+         a list of seven checkboxes could not say before, and the thing a reader of the chart most
+         needs from it. -->
+    <!-- Only on the dB axis: magnitude is a gain in dB, which has no position on a percent
+         scale. The previous app greys the same checkbox out on its D% graph. -->
+    <label
+      v-if="unit === 'db'"
+      class="tb-check-row"
+      title="The measured fundamental relative to the generator setpoint — the DUT's frequency response, riding along with the sweep."
+    >
+      <input v-model="showMagnitude" type="checkbox" class="tb-check" />
+      <span class="flex-1">Magnitude</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('magnitude') }"></span>
+    </label>
+    <label class="tb-check-row">
+      <input v-model="showThd" type="checkbox" class="tb-check" />
+      <span class="flex-1">{{ t('thd') }}</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('thd') }"></span>
+    </label>
+    <label class="tb-check-row">
+      <input v-model="showD2" type="checkbox" class="tb-check" />
+      <span class="flex-1">{{ t('d2') }}</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('d2') }"></span>
+    </label>
+    <label class="tb-check-row">
+      <input v-model="showD3" type="checkbox" class="tb-check" />
+      <span class="flex-1">{{ t('d3') }}</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('d3') }"></span>
+    </label>
+    <label class="tb-check-row">
+      <input v-model="showD4" type="checkbox" class="tb-check" />
+      <span class="flex-1">{{ t('d4') }}</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('d4') }"></span>
+    </label>
+    <label class="tb-check-row">
+      <input v-model="showD5" type="checkbox" class="tb-check" />
+      <span class="flex-1">{{ t('d5') }}</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('d5') }"></span>
+    </label>
+    <label class="tb-check-row">
+      <input v-model="showD6Plus" type="checkbox" class="tb-check" />
+      <span class="flex-1">{{ t('d6plus') }}</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('d6plus') }"></span>
+    </label>
+    <label class="tb-check-row" title="The generator-off residual, as a share of each point's fundamental.">
+      <input v-model="showNoiseFloor" type="checkbox" class="tb-check" />
+      <span class="flex-1">Noise floor</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('noise') }"></span>
+    </label>
+
+    <span class="tb-group pt-1">Style</span>
+    <label class="tb-check-row">
+      <input v-model="thickLines" type="checkbox" class="tb-check" />
+      Thick lines
+    </label>
+    <label class="tb-check-row">
+      <input v-model="showDataPoints" type="checkbox" class="tb-check" />
+      Show data points
+    </label>
   </CollapsibleSection>
 </template>

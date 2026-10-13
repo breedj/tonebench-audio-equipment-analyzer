@@ -66,8 +66,17 @@ import SoundCardDialog from './components/SoundCardDialog.vue'
 import { useSoundCard } from './composables/useSoundCard'
 import AboutDialog from './components/AboutDialog.vue'
 import TonebenchLogo from './components/TonebenchLogo.vue'
+import HeaderIcon from './components/HeaderIcon.vue'
 import ManualDialog from './manual/ManualDialog.vue'
 import { useManual } from './manual/useManual'
+import {
+  responseRunTone,
+  responseRunToneByName,
+  statusDetail,
+  statusHeadline,
+  sweepRunTone,
+  type RunTone,
+} from './measurements/runStatus'
 import UpdateBanner from './components/UpdateBanner.vue'
 import SweepConfigPanel from './components/SweepConfigPanel.vue'
 import AmplitudeSweepConfigPanel from './components/AmplitudeSweepConfigPanel.vue'
@@ -107,6 +116,7 @@ import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vu
 import ReportDialog from './components/ReportDialog.vue'
 import ProjectReportDialog from './components/ProjectReportDialog.vue'
 import ToolbarIcon from './components/ToolbarIcon.vue'
+import MeasurementStatusBar from './components/MeasurementStatusBar.vue'
 import ScreenshotDialog from './components/ScreenshotDialog.vue'
 import IssueReportDialog from './components/IssueReportDialog.vue'
 import SplashScreen from './components/SplashScreen.vue'
@@ -307,6 +317,26 @@ const averagesLabel = computed(() => {
     (meters.value[0] ?? meters.value[1])?.averagesTaken,
   )
 })
+/**
+ * The FFT screen's status bar. It has no runner — the pipeline is simply on or off — so the three
+ * readings come from the device status and the averager: busy while acquiring, "stopped" once there
+ * is a spectrum on screen to look at, idle before that. The bar fills with the averages taken, which
+ * is the only thing on that screen that progresses.
+ */
+const fftTone = computed<RunTone>(() => {
+  if (status.value?.acquiring) return 'busy'
+  return Object.keys(spectrum.value).length > 0 ? 'ok' : 'idle'
+})
+const fftHeadline = computed(() => {
+  if (status.value?.acquiring) return singleShotArmed.value ? 'Single capture' : 'Acquiring'
+  return fftTone.value === 'ok' ? 'Stopped' : 'Idle'
+})
+/** Averaging off is one record, so the bar is full the moment one has been analysed. */
+const fftAveragesTaken = computed(() => (meters.value[0] ?? meters.value[1])?.averagesTaken ?? 0)
+const fftAverageCount = computed(() =>
+  spectrumConfig.value && spectrumConfig.value.averaging !== 'Off' ? spectrumConfig.value.averageCount : 0,
+)
+
 const {
   currentProject,
   sessionLoaded,
@@ -445,6 +475,9 @@ const currentType = computed(() => types.value.find((t) => t.id === currentTypeI
 // ---------------------------------------------------------------------------
 const {
   running: thdSweepRunning,
+  phase: thdSweepPhase,
+  index: thdSweepIndex,
+  total: thdSweepTotal,
   progressLabel: thdSweepProgressLabel,
   generatorAmpDbv: sweepGeneratorAmpDbv,
   error: thdSweepError,
@@ -472,6 +505,16 @@ const sweepPoints = computed(() => (isImdSweep.value ? imdSweep.points.value : t
 const sweepThdMethod = computed<import('./api/client').ThdMethodName>(() => (isImdSweep.value ? 'Conventional' : thdSweepMethod.value))
 /** THD/D2.. or IMD/IM2.. on the chart, the display panel and the report — see sweep/points.ts. */
 const sweepTraceFamily = computed<import('./sweep/points').SweepTraceFamily>(() => (isImdSweep.value ? 'imd' : 'thd'))
+
+// What the sweep screen's status bar shows. The phase, the counts and the progress string all come
+// from whichever of the two runners the open kind belongs to — the same switch every other sweep
+// computed above makes — so the bar can never show the THD runner's leftovers on an IMD screen.
+const sweepPhase = computed(() => (isImdSweep.value ? imdSweep.phase.value : thdSweepPhase.value))
+const sweepIndex = computed(() => (isImdSweep.value ? imdSweep.index.value : thdSweepIndex.value))
+const sweepTotal = computed(() => (isImdSweep.value ? imdSweep.total.value : thdSweepTotal.value))
+const sweepTone = computed(() => sweepRunTone(sweepPhase.value))
+const sweepStatusHeadline = computed(() => statusHeadline(sweepTone.value, sweepProgressLabel.value))
+const sweepStatusDetail = computed(() => statusDetail(sweepTone.value, sweepProgressLabel.value))
 // ThdSweepChart falls back to useSweep() without this; providing the switched source is what
 // puts the IMD runner's points on the chart. A report's headless render provides its own.
 provide(SWEEP_POINTS_KEY, { points: sweepPoints, thdMethod: sweepThdMethod })
@@ -480,6 +523,11 @@ provide(DEVICE_STATUS_KEY, status)
 
 const {
   running: responseRunning,
+  phase: responsePhase,
+  averagesTaken: responseAveragesTaken,
+  averageCount: responseAverageCount,
+  pointsMeasured: responsePointsMeasured,
+  pointCount: responsePointCount,
   traces: responseTraces,
   previews: responsePreviews,
   error: responseError,
@@ -501,8 +549,54 @@ const {
   phaseAvailable: responsePhaseAvailable,
 } = useFrequencyResponse()
 
+// What the frequency-response screen's status bar shows. One runner serves the chirp, the stepped
+// sweep and crosstalk, and the counts it reports mean different things on each: a chirp counts the
+// records it has averaged, the other two count points. `responseCaption` is what reads them in the
+// units the open measurement is actually in — "Record 1 of 1" against "Point 12 of 50" — which is
+// the caption row of the mockup's bar.
+const responseTone = computed(() => responseRunTone(responsePhase.value))
+const responseStatusHeadline = computed(() => statusHeadline(responseTone.value, responseProgressLabel.value))
+const responseStatusDetail = computed(() => statusDetail(responseTone.value, responseProgressLabel.value))
+const responseCountsPoints = computed(() => isSteppedResponse.value || isCrosstalk.value)
+const responseDone = computed(() => (responseCountsPoints.value ? responsePointsMeasured.value : responseAveragesTaken.value))
+const responseTotal = computed(() => (responseCountsPoints.value ? responsePointCount.value : responseAverageCount.value))
+const responseCaption = computed(() => {
+  const noun = responseCountsPoints.value ? 'Point' : 'Record'
+  if (responseTotal.value <= 0) return responseStatusDetail.value
+  return `${noun} ${Math.min(Math.max(responseDone.value, responseTone.value === 'ok' ? responseTotal.value : 1), responseTotal.value)} of ${responseTotal.value}`
+})
+/** The right-hand caption: the resolution the curve was measured at, which is the one figure the bar can
+ *  always produce — the band and the record length live in the settings panel's own form. */
+const responseCaptionRight = computed(() => {
+  if (!responseBinHz.value) return responseStatusDetail.value
+  return `${responseBinHz.value.toFixed(2)} Hz/bin · ${(1 / responseBinHz.value).toFixed(2)} s/record`
+})
+
+// The other four screens' bars. Each is the same three readings — which of five states, how far
+// through, and what the runner has to say — off whichever store owns that screen; they are computed
+// here rather than inside MeasurementStatusBar because every runner counts something different.
+const impedanceTone = computed(() => responseRunTone(impedancePhase.value))
+const impedanceStatusHeadline = computed(() => statusHeadline(impedanceTone.value, impedanceProgressLabel.value))
+const impedanceStatusDetail = computed(() => statusDetail(impedanceTone.value, impedanceProgressLabel.value))
+
+const outputImpedanceTone = computed(() => responseRunTone(outputImpedancePhase.value))
+const outputImpedanceStatusHeadline = computed(() =>
+  statusHeadline(outputImpedanceTone.value, outputImpedanceProgressLabel.value),
+)
+const outputImpedanceStatusDetail = computed(() =>
+  statusDetail(outputImpedanceTone.value, outputImpedanceProgressLabel.value),
+)
+
+// The impulse runner is polled over REST rather than streamed, so its phase arrives as a name.
+const impulseTone = computed(() => responseRunToneByName(impulsePhase.value))
+const impulseStatusHeadline = computed(() => statusHeadline(impulseTone.value, impulseProgressLabel.value))
+const impulseStatusDetail = computed(() => statusDetail(impulseTone.value, impulseProgressLabel.value))
+
 const {
   running: impedanceRunning,
+  phase: impedancePhase,
+  pointsMeasured: impedancePointsMeasured,
+  pointCount: impedancePointCount,
   traces: impedanceTraces,
   error: impedanceError,
   warning: impedanceWarning,
@@ -521,6 +615,12 @@ const {
 
 const {
   status: impulseStatus,
+  phase: impulsePhase,
+  progressLabel: impulseProgressLabel,
+  averagesTaken: impulseAveragesTaken,
+  averageCount: impulseAverageCount,
+  generatorAmpDbv: impulseGeneratorAmpDbv,
+  binHz: impulseBinHz,
   running: impulseRunning,
   traces: impulseTraces,
   impulse: impulseTrace,
@@ -666,6 +766,9 @@ const isOutputImpedance = computed(() => isOutputImpedanceKind(currentType.value
 
 const {
   running: outputImpedanceRunning,
+  phase: outputImpedancePhase,
+  pointsMeasured: outputImpedancePointsMeasured,
+  pointCount: outputImpedancePointCount,
   waiting: outputImpedanceWaiting,
   trace: outputImpedanceTrace,
   traces: outputImpedanceTraces,
@@ -1969,6 +2072,16 @@ function closeSoundCardDialog() {
 function closeQa403Dialog() {
   qa403DialogOpen.value = false
   void refreshRanges()
+}
+
+/**
+ * The QA403 dialog's footer link to the full Configuration — the two overlap (ranging, the capture
+ * delay), and the dialog's own three settings are a shortcut rather than a separate place. One
+ * dialog at a time, so it closes on the way, which also means the ranges are re-read.
+ */
+function openConfigurationFromQa403() {
+  closeQa403Dialog()
+  configDialogOpen.value = true
 }
 
 function closeConfigDialog() {
@@ -3442,29 +3555,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
            that jumps straight to that measurement's chapter. -->
       <button
         type="button"
-        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        class="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
         aria-label="Manual"
         title="Manual"
         @click="openManual()"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
-        </svg>
+        <HeaderIcon name="manual" />
       </button>
       <!-- About: the version, the credits and the open-source libraries. Beside the manual rather
            than inside Configuration — it answers questions rather than changing anything. -->
       <button
         type="button"
-        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        class="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
         aria-label="About"
         title="About"
         @click="aboutDialogOpen = true"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 16v-4M12 8h.01" stroke-linecap="round" />
-        </svg>
+        <HeaderIcon name="about" />
       </button>
       <!-- Report an issue: six questions and a zip holding the answers, the chart on screen, the
            log and every calibration of this bench. Here rather than inside Configuration, and
@@ -3472,33 +3579,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
            not a moment to go looking through settings pages. -->
       <button
         type="button"
-        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        class="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
         aria-label="Report an issue"
         title="Report an issue — builds one zip to send, holding your description, this screen, the log and your settings"
         @click="issueReportDialogOpen = true"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <!-- A bug: body, head, six legs and two antennae. The one icon nobody mistakes for -->
-          <!-- something else, which matters for a button pressed when something has gone wrong. -->
-          <path d="M8 2l1.5 1.5M16 2l-1.5 1.5" />
-          <path d="M9 7.5A3 3 0 0 1 15 7.5" />
-          <rect x="7" y="8" width="10" height="12" rx="5" />
-          <path d="M7 11H3M7 14H2M7 17H3M17 11h4M17 14h5M17 17h4" />
-        </svg>
+        <HeaderIcon name="bug" />
       </button>
       <button
         type="button"
-        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        class="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
         aria-label="Configuration"
         title="Configuration"
         @click="configDialogOpen = true"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" />
-          <path
-            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-          />
-        </svg>
+        <HeaderIcon name="config" />
       </button>
     </header>
 
@@ -3536,9 +3631,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                outlined boxes inside another box read as a fence. z-10 sits under the sidebar's
                floating menu (z-30), an expanded chart (z-40) and the dialogs (z-50). -->
           <div
-            class="panel-surface sticky -top-4 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-1 border-b border-neutral-200 px-4 py-2 text-sm dark:border-neutral-800"
+            class="panel-surface sticky -top-4 z-10 -mx-4 -mt-4 flex min-h-[52px] flex-wrap items-center gap-0.5 border-b border-neutral-200 px-4 py-1.5 text-sm dark:border-neutral-800"
           >
-            <span class="min-w-0 max-w-xs truncate font-medium" :title="currentType?.name">{{ currentType?.name }}</span>
+            <span class="mr-2 min-w-0 max-w-xs truncate text-base font-semibold" :title="currentType?.name">{{ currentType?.name }}</span>
             <span
               v-if="isCurrentTypeDirty"
               class="h-2 w-2 shrink-0 rounded-full bg-red-500"
@@ -3549,7 +3644,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <span class="mx-2 h-5 w-px shrink-0 bg-neutral-200 dark:bg-neutral-800" aria-hidden="true"></span>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="!isCurrentTypeDirty"
               title="Save the current settings into this measurement."
               @click="saveCurrentType"
@@ -3559,132 +3654,132 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             </button>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
               title="Save the current settings as a new measurement in this project; this one reverts to its own last-saved settings."
               @click="saveTypeAsOpen = true"
             >
-              <ToolbarIcon name="save-as" />
+              <ToolbarIcon name="save-as" tone="blue" />
               Save as…
             </button>
             <button
               v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
               title="Saves the currently displayed (stopped) spectrum as a new measurement result — stop acquisition first."
               @click="openSaveDialog"
             >
-              <ToolbarIcon name="save-result" />
+              <ToolbarIcon name="save-result" tone="green" />
               Save measurement result
             </button>
             <button
               v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
               title="Clears the currently displayed spectrum, oscilloscope trace and meters — stop acquisition first. Does not delete anything saved to History."
               @click="clearMeasurement"
             >
-              <ToolbarIcon name="clear" />
+              <ToolbarIcon name="clear" tone="red" />
               Clear
             </button>
             <button
               v-if="isSweepKind"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="sweepRunning || sweepPoints.length === 0"
               title="Saves the sweep on screen as a new measurement result — one stored point per frequency. A cancelled sweep can be saved too."
               @click="openSaveDialog"
             >
-              <ToolbarIcon name="save-result" />
+              <ToolbarIcon name="save-result" tone="green" />
               Save sweep result
             </button>
             <button
               v-if="isFrequencyResponse || isCrosstalk"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
               :title="isCrosstalk ? 'Saves the crosstalk curves on screen as a new measurement result.' : 'Saves the curves on screen as a new measurement result, with their bandwidth readings.'"
               @click="openSaveDialog"
             >
-              <ToolbarIcon name="save-result" />
+              <ToolbarIcon name="save-result" tone="green" />
               {{ isCrosstalk ? 'Save crosstalk result' : 'Save response result' }}
             </button>
             <button
               v-if="isImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="impedanceRunning || impedanceTraces.length === 0"
               title="Saves the impedance curve on screen as a new measurement result, together with the fixture calibration that produced it."
               @click="openSaveDialog"
             >
-              <ToolbarIcon name="save-result" />
+              <ToolbarIcon name="save-result" tone="green" />
               Save impedance result
             </button>
             <button
               v-if="isImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="impedanceRunning || impedanceTraces.length === 0"
               title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings and the calibration alone."
               @click="clearImpedance"
             >
-              <ToolbarIcon name="clear" />
+              <ToolbarIcon name="clear" tone="red" />
               Clear
             </button>
             <button
               v-if="isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="outputImpedanceRunning || !outputImpedanceTrace"
               title="Saves the output-impedance curve on screen as a new measurement result, with the two gain passes it was derived from."
               @click="openSaveDialog"
             >
-              <ToolbarIcon name="save-result" />
+              <ToolbarIcon name="save-result" tone="green" />
               Save output impedance result
             </button>
             <button
               v-if="isOutputImpedance"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="outputImpedanceRunning || !outputImpedanceTrace"
               title="Clears the curve on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearOutputImpedance"
             >
-              <ToolbarIcon name="clear" />
+              <ToolbarIcon name="clear" tone="red" />
               Clear
             </button>
             <button
               v-if="isImpulseResponse"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="impulseRunning || impulseTraces.length === 0"
               title="Saves the impulse response on screen as a new measurement result, with its gated curves and harmonic distortion."
               @click="openSaveDialog"
             >
-              <ToolbarIcon name="save-result" />
+              <ToolbarIcon name="save-result" tone="green" />
               Save impulse result
             </button>
             <button
               v-if="isImpulseResponse"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="impulseRunning || impulseTraces.length === 0"
               title="Clears what is on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearImpulseResponse"
             >
-              <ToolbarIcon name="clear" />
+              <ToolbarIcon name="clear" tone="red" />
               Clear
             </button>
             <button
               v-if="isFrequencyResponse || isCrosstalk"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="responseRunning || responseTraces.length === 0"
               title="Clears the curves on screen — cancel a running measurement first. Does not delete anything saved to History, and leaves the settings alone."
               @click="clearFrequencyResponse"
             >
-              <ToolbarIcon name="clear" />
+              <ToolbarIcon name="clear" tone="red" />
               Clear
             </button>
             <!-- The sweep screen's Clear, in the same slot and the same shape as the FFT screen's
@@ -3694,12 +3789,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="isSweepKind"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="sweepRunning || sweepPoints.length === 0"
               title="Clears the sweep on screen and its preview traces — cancel a running sweep first. Does not delete anything saved to History, and leaves the sweep settings alone."
               @click="clearSweep"
             >
-              <ToolbarIcon name="clear" />
+              <ToolbarIcon name="clear" tone="red" />
               Clear
             </button>
             <!-- The two exports, on every screen whose chart can produce them (the Screenshot) or
@@ -3709,22 +3804,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
             <button
               v-if="reportHasChart(currentType?.kind)"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="!screenshotAvailable"
               title="The chart on screen — whichever view or projection is showing — as a PNG in the light colour scheme, at the zoom shown: to the clipboard or a file, at a chosen size, with a title and the date if wanted."
               @click="screenshotDialogOpen = true"
             >
-              <ToolbarIcon name="screenshot" />
+              <ToolbarIcon name="screenshot" tone="violet" />
               Screenshot
             </button>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="!currentType || responseRunning || sweepRunning || impedanceRunning || impulseRunning || outputImpedanceRunning"
               title="A PDF report of what is on screen: chart, notes, settings and readings, as chosen. Stored results have their own Report button in History details."
               @click="openReport(null)"
             >
-              <ToolbarIcon name="report" />
+              <ToolbarIcon name="report" tone="amber" />
               Report…
             </button>
             <!-- Shortcut into the manual chapter for whichever kind is selected. It sits in this
@@ -3733,7 +3828,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                  of the row, clear of the save buttons. -->
             <button
               type="button"
-              class="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-xs font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              class="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-[13px] font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               :aria-label="`Help for ${currentType?.kind ? currentType.name : 'this measurement'}`"
               title="Open this measurement's chapter of the manual."
               @click="openManualForKind(currentType?.kind)"
@@ -3763,33 +3858,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 <div class="flex gap-3">
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-go"
                     :disabled="impulseRunning || !!impulseConfigPanel?.invalid"
                     :title="impulseConfigPanel?.invalid ?? 'Sweeps a chirp and re-measures the impulse response until you press Stop.'"
                     @click="runImpulseResponse(true)"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    RUN
+                    Run
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-blue-400 ring-offset-2 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-single"
                     :disabled="impulseRunning || !!impulseConfigPanel?.invalid"
                     :title="impulseConfigPanel?.invalid ?? 'Measures the impulse response once and stops.'"
                     @click="runImpulseResponse(false)"
                   >
-                    SINGLE
+                    Single
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
-                    :class="impulseRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    class="btn-run-stop"
                     :disabled="!impulseRunning"
                     title="Stops the measurement and silences the generator. The last completed pass stays on screen."
                     @click="cancelImpulseResponse"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
-                    STOP
+                    Stop
                   </button>
                 </div>
 
@@ -3798,6 +3892,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :running="impulseRunning"
                   @capture-reference="loopbackDialogOpen = true"
                 />
+              </template>
+
+              <template #status>
+                <MeasurementStatusBar
+                  :tone="impulseTone"
+                  :label="impulseStatusHeadline"
+                  :done="impulseAveragesTaken"
+                  :total="impulseAverageCount"
+                  :caption="impulseAverageCount > 0 ? `Record ${Math.min(Math.max(impulseAveragesTaken, 1), impulseAverageCount)} of ${impulseAverageCount}` : impulseStatusDetail"
+                  :caption-right="impulseBinHz ? `${impulseBinHz.toFixed(2)} Hz/bin` : ''"
+                >
+                  <span v-if="Number.isFinite(impulseGeneratorAmpDbv) && impulseTraces.length">
+                    gen <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ impulseGeneratorAmpDbv.toFixed(2) }} dBV</span>
+                  </span>
+                </MeasurementStatusBar>
               </template>
 
               <template #default>
@@ -3826,7 +3935,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 <FrequencyResponseChart
                   v-else-if="impulseView === 'Response'"
                   ref="impulseResponseChart"
-                  run-label="RUN"
+                  run-label="Run"
                   :traces="impulseTraces"
                   :overlays="visibleImpulseResponseOverlays"
                   view="Gain"
@@ -3978,7 +4087,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   <button
                     v-if="isChirpResponse"
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-go"
                     :disabled="responseRunning || !!responseConfigPanel?.invalid"
                     :title="
                       responseConfigPanel?.invalid ??
@@ -3987,12 +4096,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     @click="runFrequencyResponse(true)"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    RUN
+                    Run
                   </button>
                   <button
                     v-if="isChirpResponse"
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-blue-400 ring-offset-2 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-single"
                     :disabled="responseRunning || !!responseConfigPanel?.invalid"
                     :title="
                       responseConfigPanel?.invalid ??
@@ -4000,7 +4109,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     "
                     @click="runFrequencyResponse(false)"
                   >
-                    SINGLE
+                    Single
                   </button>
                   <!-- One button rather than the chirp's RUN/SINGLE pair: a stepped run is minutes
                        long, so repeating it until stopped is not a mode anyone wants. Same shape and
@@ -4008,7 +4117,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   <button
                     v-if="isSteppedResponse"
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-go"
                     :disabled="responseRunning || !!steppedResponseConfigPanel?.invalid"
                     :title="
                       steppedResponseConfigPanel?.invalid ??
@@ -4017,18 +4126,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     @click="steppedResponseConfigPanel?.run()"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    RUN SWEEP
+                    Run sweep
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
-                    :class="responseRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    class="btn-run-stop"
                     :disabled="!responseRunning"
                     title="Stops the measurement and silences the generator. The curves from the last completed pass stay on screen."
                     @click="cancelFrequencyResponse"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
-                    STOP
+                    Stop
                   </button>
                 </div>
 
@@ -4093,22 +4201,36 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
               </template>
 
-              <template #default>
-                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <span>{{ responseProgressLabel || 'Idle' }}</span>
+              <template #status>
+                <!-- The status bar, `h-11` like the RUN row across the gutter so the settings panel under
+                     the one and the chart card under the other start at the same height. It carries the
+                     caption row of the mockup: what is being counted on the left, what it is being
+                     measured at on the right, and the track under both. -->
+                <MeasurementStatusBar
+                  :tone="responseTone"
+                  :label="responseStatusHeadline"
+                  :done="responseDone"
+                  :total="responseTotal"
+                  :caption="responseCaption"
+                  :caption-right="responseCaptionRight"
+                >
                   <!-- Number.isFinite, not truthiness: 0 dBV is a perfectly ordinary drive level
                        and a plain v-if hides it, which is exactly what a loopback measurement shows. -->
                   <span v-if="Number.isFinite(responseGeneratorAmpDbv) && responseTraces.length">
-                    · gen {{ responseGeneratorAmpDbv.toFixed(2) }} dBV
+                    gen <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ responseGeneratorAmpDbv.toFixed(2) }} dBV</span>
                   </span>
-                  <span v-if="responseBinHz">· {{ responseBinHz.toFixed(2) }} Hz/bin</span>
                   <!-- Only shown when the right input was the reference: that is the one case
                        where the recovered rotation is the DUT's delay rather than the record's
                        arbitrary start point in a periodic stimulus. -->
                   <span v-if="responseLatencySamples !== null">
-                    · DUT delay {{ responseLatencySamples.toFixed(1) }} samples
+                    DUT delay
+                    <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ responseLatencySamples.toFixed(1) }}</span>
+                    samples
                   </span>
-                </div>
+                </MeasurementStatusBar>
+              </template>
+
+              <template #default>
                 <p v-if="responseError" class="text-xs text-red-600 dark:text-red-400">{{ responseError }}</p>
 
                 <!-- show-coherence is forced off for a stepped run whatever the stored preference
@@ -4117,7 +4239,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 <FrequencyResponseChart
                   v-if="activeResponseProjection === 'Bode'"
                   ref="responseChart"
-                  :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
+                  :run-label="isSteppedResponse ? 'Run sweep' : 'Run'"
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
                   :view="responseView"
@@ -4148,7 +4270,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 <ResponseSPlaneChart
                   v-else-if="activeResponseProjection === 'SPlane'"
                   ref="responseSPlaneChart"
-                  :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
+                  :run-label="isSteppedResponse ? 'Run sweep' : 'Run'"
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
                   :fit="responsePoleZeroPanel?.fit ?? null"
@@ -4171,7 +4293,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 <ResponsePolarChart
                   v-else
                   ref="responsePolarChart"
-                  :run-label="isSteppedResponse ? 'RUN SWEEP' : 'RUN'"
+                  :run-label="isSteppedResponse ? 'Run sweep' : 'Run'"
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
                   :projection="activeResponseProjection"
@@ -4297,7 +4419,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 <div class="flex gap-3">
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-go"
                     :disabled="responseRunning || !!crosstalkConfigPanel?.invalid"
                     :title="
                       crosstalkConfigPanel?.invalid ??
@@ -4306,18 +4428,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     @click="crosstalkConfigPanel?.run()"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    RUN SWEEP
+                    Run sweep
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
-                    :class="responseRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    class="btn-run-stop"
                     :disabled="!responseRunning"
                     title="Stops the measurement and silences the generator. Every point measured so far stays on screen."
                     @click="cancelFrequencyResponse"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
-                    STOP
+                    Stop
                   </button>
                 </div>
 
@@ -4333,13 +4454,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 />
               </template>
 
-              <template #default>
-                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <span>{{ responseProgressLabel || 'Idle' }}</span>
+              <template #status>
+                <MeasurementStatusBar
+                  :tone="responseTone"
+                  :label="responseStatusHeadline"
+                  :done="responseDone"
+                  :total="responseTotal"
+                  :caption="responseCaption"
+                  :caption-right="responseCaptionRight"
+                >
                   <span v-if="Number.isFinite(responseGeneratorAmpDbv) && responseTraces.length">
-                    · gen {{ responseGeneratorAmpDbv.toFixed(2) }} dBV
+                    gen <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ responseGeneratorAmpDbv.toFixed(2) }} dBV</span>
                   </span>
-                </div>
+                </MeasurementStatusBar>
+              </template>
+
+              <template #default>
                 <p v-if="responseError" class="text-xs text-red-600 dark:text-red-400">{{ responseError }}</p>
 
                 <!-- The response chart in its Crosstalk view: only the crosstalk traces, no phase,
@@ -4347,7 +4477,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                      handed constants because that view never reads them. -->
                 <FrequencyResponseChart
                   ref="responseChart"
-                  run-label="RUN SWEEP"
+                  run-label="Run sweep"
                   :traces="responseTraces"
                   :overlays="visibleCrosstalkOverlays"
                   view="Crosstalk"
@@ -4402,7 +4532,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   <button
                     v-if="!outputImpedanceWaiting"
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-go"
                     :disabled="outputImpedanceRunning || !!outputImpedanceConfigPanel?.invalid"
                     :title="
                       outputImpedanceConfigPanel?.invalid ??
@@ -4411,28 +4541,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     @click="outputImpedanceConfigPanel?.run()"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    RUN SWEEP
+                    Run sweep
                   </button>
                   <button
                     v-else
                     type="button"
-                    class="flex flex-1 animate-pulse items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 dark:ring-offset-neutral-950"
+                    class="btn-run-go animate-pulse"
                     title="The first pass is done and the generator is silent. Change the load — leave the amplifier on — then press to measure the second pass."
                     @click="continueOutputImpedance"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 4l10 8-10 8V4zM17 4h2v16h-2z" /></svg>
-                    CONTINUE
+                    Continue
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
-                    :class="outputImpedanceRunning && !outputImpedanceWaiting ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    class="btn-run-stop"
                     :disabled="!outputImpedanceRunning"
                     title="Stops the measurement and silences the generator. A run stopped before the second pass has no Zout to keep; one stopped during it keeps the pairs measured so far."
                     @click="cancelOutputImpedance"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
-                    STOP
+                    Stop
                   </button>
                 </div>
 
@@ -4456,13 +4585,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 />
               </template>
 
-              <template #default>
-                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <span>{{ outputImpedanceProgressLabel || 'Idle' }}</span>
-                  <span v-if="Number.isFinite(outputImpedanceGeneratorAmpDbv) && outputImpedanceTrace">
-                    · gen {{ outputImpedanceGeneratorAmpDbv.toFixed(2) }} dBV
+              <template #status>
+                <MeasurementStatusBar
+                  :tone="outputImpedanceTone"
+                  :label="outputImpedanceStatusHeadline"
+                  :done="outputImpedancePointsMeasured"
+                  :total="outputImpedancePointCount"
+                >
+                  <span v-if="outputImpedancePointCount > 0" class="font-mono text-neutral-700 dark:text-neutral-200">
+                    {{ Math.min(outputImpedancePointsMeasured, outputImpedancePointCount) }} /
+                    {{ outputImpedancePointCount }}
                   </span>
-                </div>
+                  <span v-if="outputImpedanceStatusDetail">{{ outputImpedanceStatusDetail }}</span>
+                  <span v-if="Number.isFinite(outputImpedanceGeneratorAmpDbv) && outputImpedanceTrace">
+                    gen
+                    <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ outputImpedanceGeneratorAmpDbv.toFixed(2) }} dBV</span>
+                  </span>
+                </MeasurementStatusBar>
+              </template>
+
+              <template #default>
                 <p v-if="outputImpedanceError" class="text-xs text-red-600 dark:text-red-400">{{ outputImpedanceError }}</p>
 
                 <!-- The pause, made impossible to miss: the run is holding the bench and nothing
@@ -4480,7 +4622,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     Replace the {{ formatOhms(outputImpedanceLoadOhms) }} load on the amplifier's output with the
                     {{ formatOhms(outputImpedanceSecondLoadOhms) }} one
                   </template>
-                  — leave the amplifier on and everything else as it is — then press <strong>CONTINUE</strong> for the second pass.
+                  — leave the amplifier on and everything else as it is — then press <strong>Continue</strong> for the second pass.
                 </div>
 
                 <!-- The impedance chart with its damping-factor axis: Zout is an impedance curve in
@@ -4540,7 +4682,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   <button
                     v-if="!impedanceIsStepped"
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-go"
                     :disabled="impedanceRunning || !!impedanceConfigPanel?.invalid"
                     :title="
                       impedanceConfigPanel?.invalid ??
@@ -4549,16 +4691,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     @click="runImpedance(true)"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    RUN
+                    Run
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-base font-bold tracking-wide text-white transition disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0"
-                    :class="
-                      impedanceIsStepped
-                        ? 'bg-green-600 ring-2 ring-green-400 ring-offset-2 hover:bg-green-500 dark:ring-offset-neutral-950'
-                        : 'bg-blue-600 ring-2 ring-blue-400 ring-offset-2 hover:bg-blue-500 dark:ring-offset-neutral-950'
-                    "
+                    :class="impedanceIsStepped ? 'btn-run-go' : 'btn-run-single'"
                     :disabled="impedanceRunning || !!impedanceConfigPanel?.invalid"
                     :title="impedanceConfigPanel?.invalid ?? 'Measures the impedance once and stops.'"
                     @click="runImpedance(false)"
@@ -4573,18 +4710,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     >
                       <path d="M7 4l14 8-14 8V4z" />
                     </svg>
-                    {{ impedanceIsStepped ? 'RUN SWEEP' : 'SINGLE' }}
+                    {{ impedanceIsStepped ? 'Run sweep' : 'Single' }}
                   </button>
                   <button
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50"
-                    :class="impedanceRunning ? 'animate-pulse ring-2 ring-red-400 ring-offset-2 dark:ring-offset-neutral-950' : ''"
+                    class="btn-run-stop"
                     :disabled="!impedanceRunning"
                     title="Stops the measurement and silences the generator. The curve from the last completed pass stays on screen."
                     @click="cancelImpedance"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
-                    STOP
+                    Stop
                   </button>
                 </div>
 
@@ -4604,15 +4740,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 />
               </template>
 
-              <template #default>
-                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <span>{{ impedanceProgressLabel || 'Idle' }}</span>
+              <template #status>
+                <MeasurementStatusBar
+                  :tone="impedanceTone"
+                  :label="impedanceStatusHeadline"
+                  :done="impedancePointsMeasured ?? 0"
+                  :total="impedancePointCount ?? 0"
+                >
+                  <span v-if="(impedancePointCount ?? 0) > 0" class="font-mono text-neutral-700 dark:text-neutral-200">
+                    {{ Math.min(impedancePointsMeasured ?? 0, impedancePointCount ?? 0) }} / {{ impedancePointCount }}
+                  </span>
+                  <span v-if="impedanceStatusDetail">{{ impedanceStatusDetail }}</span>
                   <!-- Number.isFinite, not truthiness: 0 dBV is an ordinary drive level. -->
                   <span v-if="Number.isFinite(impedanceGeneratorAmpDbv) && impedanceTraces.length">
-                    · gen {{ impedanceGeneratorAmpDbv.toFixed(2) }} dBV
+                    gen <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ impedanceGeneratorAmpDbv.toFixed(2) }} dBV</span>
                   </span>
-                  <span v-if="impedanceBinHz">· {{ impedanceBinHz.toFixed(2) }} Hz/bin</span>
-                </div>
+                  <span v-if="impedanceBinHz">
+                    <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ impedanceBinHz.toFixed(2) }}</span> Hz/bin
+                  </span>
+                </MeasurementStatusBar>
+              </template>
+
+              <template #default>
                 <p v-if="impedanceError" class="text-xs text-red-600 dark:text-red-400">{{ impedanceError }}</p>
                 <!-- Amber, not red: the run succeeded, the curve is drawn — it is the setup that is wrong. -->
                 <p v-if="impedanceWarning" class="text-xs text-amber-700 dark:text-amber-400">{{ impedanceWarning }}</p>
@@ -4689,7 +4838,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   <button
                     v-if="!sweepRunning"
                     type="button"
-                    class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-green-400 ring-offset-2 transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0 dark:ring-offset-neutral-950"
+                    class="btn-run-go"
                     :disabled="!!activeSweepPanel?.invalid"
                     :title="
                       activeSweepPanel?.invalid ??
@@ -4702,17 +4851,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                     @click="activeSweepPanel?.run()"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    RUN SWEEP
+                    Run sweep
                   </button>
                   <button
                     v-else
                     type="button"
-                    class="flex flex-1 animate-pulse items-center justify-center gap-2 rounded-lg bg-red-600 py-4 text-base font-bold tracking-wide text-white ring-2 ring-red-400 ring-offset-2 transition hover:bg-red-500 dark:ring-offset-neutral-950"
+                    class="btn-run-stop"
                     title="Stops the sweep and silences the generator. The points already measured are kept."
                     @click="cancelSweep"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
-                    CANCEL
+                    Cancel
                   </button>
                 </div>
 
@@ -4761,17 +4910,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 </template>
               </template>
 
-              <template #default>
-                <div class="flex items-center gap-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <span>{{ sweepProgressLabel || 'Idle' }}</span>
+              <template #status>
+                <!-- The status bar, `h-11` like the RUN row across the gutter so the Sweep panel under the one
+                     and the chart card under the other start at the same height. -->
+                <MeasurementStatusBar
+                  :tone="sweepTone"
+                  :label="sweepStatusHeadline"
+                  :done="sweepIndex"
+                  :total="sweepTotal"
+                >
+                  <span v-if="sweepTotal > 0" class="font-mono text-neutral-700 dark:text-neutral-200">
+                    {{ Math.min(sweepIndex, sweepTotal) }} / {{ sweepTotal }}
+                  </span>
+                  <span v-else-if="sweepPoints.length" class="font-mono text-neutral-700 dark:text-neutral-200">
+                    {{ sweepPoints.length }} readings
+                  </span>
+                  <span v-if="sweepStatusDetail">{{ sweepStatusDetail }}</span>
                   <!-- `v-if` on the value itself hid the readout at exactly 0.00 dBV, which is a level
                        anyone sweeps at; and the IMD runner has no level of its own (its x axis IS the
                        level), so without the kind test this showed the THD runner's leftover figure. -->
                   <span v-if="!isImdSweep && (sweepRunning || sweepPoints.length) && Number.isFinite(sweepGeneratorAmpDbv)">
-                    · gen {{ sweepGeneratorAmpDbv.toFixed(2) }} dBV
+                    gen <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ sweepGeneratorAmpDbv.toFixed(2) }} dBV</span>
                   </span>
-                  <span v-if="sweepPoints.length">· {{ sweepPoints.length }} readings</span>
-                </div>
+                </MeasurementStatusBar>
+              </template>
+
+              <template #default>
                 <p v-if="sweepError" class="text-xs text-red-600 dark:text-red-400">{{ sweepError }}</p>
                 <p v-else-if="!isImdSweep && thdSweepStopReason" class="text-xs text-amber-600 dark:text-amber-400">
                   {{ thdSweepStopReason }}
@@ -4852,41 +5016,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
               <div class="flex gap-3">
                 <button
                   type="button"
-                  class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-base font-bold tracking-wide text-white transition disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0"
-                  :class="status?.acquiring
-                    ? 'bg-green-800'
-                    : 'bg-green-600 hover:bg-green-500 ring-2 ring-green-400 ring-offset-2 dark:ring-offset-neutral-950'"
+                  class="btn-run-go"
                   :disabled="status?.acquiring"
                   title="Starts the generator(s) and acquisition using whatever is currently configured in the Generator and FFT settings panels."
                   @click="runFromCurrentSettings"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                  RUN
+                  Run
                 </button>
                 <button
                   type="button"
-                  class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-base font-bold tracking-wide text-white transition disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0"
-                  :class="status?.acquiring
-                    ? 'bg-blue-800'
-                    : 'bg-blue-600 hover:bg-blue-500 ring-2 ring-blue-400 ring-offset-2 dark:ring-offset-neutral-950'"
+                  class="btn-run-single"
                   :disabled="status?.acquiring"
                   title="Same as Run, but captures one settled spectrum (the configured average count, or one FFT if averaging is off) and stops automatically — no need to press Stop."
                   @click="singleShotCapture"
                 >
-                  SINGLE
+                  Single
                 </button>
                 <button
                   type="button"
-                  class="flex flex-1 items-center justify-center gap-2 rounded-lg py-4 text-base font-bold tracking-wide text-white transition disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:opacity-50 disabled:ring-0"
-                  :class="status?.acquiring
-                    ? 'bg-red-600 hover:bg-red-500 ring-2 ring-red-400 ring-offset-2 animate-pulse dark:ring-offset-neutral-950'
-                    : 'bg-red-800'"
+                  class="btn-run-stop"
                   :disabled="!status?.acquiring && !status?.generatorLeft.enabled && !status?.generatorRight.enabled"
                   title="Stops acquisition and silences both generator channels."
                   @click="stopMeasurement"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
-                  STOP
+                  Stop
                 </button>
               </div>
 
@@ -4898,6 +5053,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 @sample-rate-change="onSampleRateChange"
               />
               <BandwidthWeightingPanel @error="reportError" />
+            </template>
+
+            <template #status>
+              <MeasurementStatusBar :tone="fftTone" :label="fftHeadline" :done="fftAveragesTaken" :total="fftAverageCount">
+                <span v-if="averagesLabel">
+                  Averages <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ averagesLabel }}</span>
+                </span>
+                <span v-if="spectrumConfig">
+                  <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ spectrumConfig.fftSize }}</span> pts
+                </span>
+              </MeasurementStatusBar>
             </template>
 
             <div class="min-w-0 flex-1">
@@ -4940,9 +5106,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                 </button>
               </div>
 
-              <div v-if="averagesLabel" class="mb-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                Averages: {{ averagesLabel }}
-              </div>
               </div>
 
               <SpectrumChart
@@ -5120,7 +5283,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
     <SoundCardDialog :open="soundCardDialogOpen" @close="closeSoundCardDialog" />
     <!-- The status's own poll feeds this rather than a second one of its own: the step-down delay is
          read back off the device, and ConfigDialog's draft-string bug was a dialog that polled. -->
-    <Qa403Dialog :open="qa403DialogOpen" :status="status" @close="closeQa403Dialog" />
+    <Qa403Dialog
+      :open="qa403DialogOpen"
+      :status="status"
+      @close="closeQa403Dialog"
+      @configuration="openConfigurationFromQa403"
+    />
     <AboutDialog :open="aboutDialogOpen" @close="aboutDialogOpen = false" />
     <ManualDialog />
   </div>

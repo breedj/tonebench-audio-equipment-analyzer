@@ -13,6 +13,9 @@ import {
 } from '../response/measurements'
 import BandwidthReferenceControls from './BandwidthReferenceControls.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
+import ReadingValue from './ReadingValue.vue'
+import { useAppTheme } from '../composables/useAppTheme'
+import { bandwidthColor, type BandwidthMarker } from '../charts/bandwidthColors'
 
 const props = defineProps<{
   traces: ResponseTrace[]
@@ -45,6 +48,13 @@ const delays = computed(() =>
     : null,
 )
 const delaySuffix = computed(() => (props.phaseKind === 'ChannelDifference' ? ' diff.' : ''))
+
+// The colour each band's row shows beside its name — the chart's own dashed markers, and the same
+// swatch the display rail puts beside the matching checkbox.
+const { isDark } = useAppTheme()
+function bandwidthSwatch(marker: BandwidthMarker): string {
+  return bandwidthColor(marker, isDark.value)
+}
 </script>
 
 <template>
@@ -53,123 +63,164 @@ const delaySuffix = computed(() => (props.phaseKind === 'ChannelDifference' ? ' 
          the corners on the curves already on screen (see BandwidthReferenceControls). -->
     <BandwidthReferenceControls :stepped="stepped" />
 
-    <!-- Half a panel wide, not the whole panel and not its own content: this moved into the chart
-         column on 2026-09-27, and a full-width table there spread five short columns across 700 px,
-         with the ±1 dB label and its figures a hand's width apart. Content-sized was the answer to
-         that and read as cramped (Joost, 2026-09-30), so both blocks here are now `w-full` under a
-         24rem cap — about half again the width they were, with the slack shared out between the
-         columns rather than dumped into one. The cap is what keeps that safe at every width: under
-         it the block simply takes the panel, so a narrow column (the two-wide flow under the chart
-         at lg) shrinks it back to content instead of overflowing, which `whitespace-nowrap` would
-         otherwise turn into a horizontal scrollbar. -->
-    <table v-if="trace" class="w-full max-w-96 text-left text-[11px] whitespace-nowrap">
-      <thead class="text-neutral-500 dark:text-neutral-400">
-        <tr>
-          <th class="font-normal"></th>
-          <th class="font-normal">f(low)</th>
-          <th class="font-normal">f(high)</th>
-          <th class="font-normal">BW</th>
-          <th class="font-normal">Show</th>
-        </tr>
-      </thead>
-      <tbody class="font-mono">
-        <tr>
-          <td class="pr-2 font-sans whitespace-nowrap" title="Where the response stays within 1 dB of the reference, above it as well as below — a flatness figure. A downward-only search would walk straight up through a resonance without stopping.">
-            ±1 dB
-          </td>
-          <td class="pr-2">{{ formatCorner(trace.oneDb.lowerHz, trace.oneDb.lowerClamped, 'lower') }}</td>
-          <td class="pr-2">{{ formatCorner(trace.oneDb.upperHz, trace.oneDb.upperClamped, 'upper') }}</td>
-          <td class="pr-2">{{ formatBandwidth(trace.oneDb) }}</td>
-          <td><input v-model="showOneDb" type="checkbox" /></td>
-        </tr>
-        <tr>
-          <td class="pr-2 font-sans whitespace-nowrap" title="Where the response has fallen 3 dB below the reference — a roll-off figure, so it is one-sided by convention and can lie beyond a resonance in the band.">
-            −3 dB
-          </td>
-          <td class="pr-2">{{ formatCorner(trace.threeDb.lowerHz, trace.threeDb.lowerClamped, 'lower') }}</td>
-          <td class="pr-2">{{ formatCorner(trace.threeDb.upperHz, trace.threeDb.upperClamped, 'upper') }}</td>
-          <td class="pr-2">{{ formatBandwidth(trace.threeDb) }}</td>
-          <td><input v-model="showThreeDb" type="checkbox" /></td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- Both blocks run the panel's full width, stacked, at 12.5 px over 11 px uppercase headers —
+         Joost's 2026-10-12 layout. They were capped at 24rem and set side by side, which read as
+         two half-width tables rather than one readout, and at `text-xs` the figures were smaller
+         than the labels beside them. `tabular-nums` is what makes a column of numbers line up on
+         the decimal point; without it the proportional digits wander. -->
+    <div v-if="trace" class="text-[12.5px] tabular-nums">
+      <div
+        class="grid grid-cols-[1fr_1fr_1fr_1fr_44px] gap-2 border-b border-neutral-200 py-1.5 text-right text-[11px] font-semibold uppercase tracking-[0.04em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
+      >
+        <span class="text-left">Band</span>
+        <span>f low</span>
+        <span>f high</span>
+        <span>Width</span>
+        <span class="text-center">Plot</span>
+      </div>
+      <!-- Each row opens with the dashed swatch its markers are drawn in (charts/bandwidthColors.ts),
+           so the table, the chart and the display rail name the same curve the same way. -->
+      <div
+        class="grid grid-cols-[1fr_1fr_1fr_1fr_44px] items-center gap-2 border-b border-neutral-100 py-1.5 text-right dark:border-neutral-800"
+      >
+        <span
+          class="inline-flex items-center gap-2 text-left"
+          title="Where the response stays within 1 dB of the reference, above it as well as below — a flatness figure. A downward-only search would walk straight up through a resonance without stopping."
+        >
+          <span class="w-3.5 shrink-0 border-t-2 border-dashed" :style="{ borderColor: bandwidthSwatch('oneDb') }"></span>
+          ±1 dB
+        </span>
+        <ReadingValue :text="formatCorner(trace.oneDb.lowerHz, trace.oneDb.lowerClamped, 'lower')" />
+        <ReadingValue :text="formatCorner(trace.oneDb.upperHz, trace.oneDb.upperClamped, 'upper')" />
+        <ReadingValue class="font-medium" :text="formatBandwidth(trace.oneDb)" />
+        <span class="flex justify-center">
+          <input v-model="showOneDb" type="checkbox" class="tb-check" aria-label="Plot the ±1 dB markers" />
+        </span>
+      </div>
+      <div class="grid grid-cols-[1fr_1fr_1fr_1fr_44px] items-center gap-2 py-1.5 text-right">
+        <span
+          class="inline-flex items-center gap-2 text-left"
+          title="Where the response has fallen 3 dB below the reference — a roll-off figure, so it is one-sided by convention and can lie beyond a resonance in the band."
+        >
+          <span class="w-3.5 shrink-0 border-t-2 border-dashed" :style="{ borderColor: bandwidthSwatch('threeDb') }"></span>
+          −3 dB
+        </span>
+        <ReadingValue :text="formatCorner(trace.threeDb.lowerHz, trace.threeDb.lowerClamped, 'lower')" />
+        <ReadingValue :text="formatCorner(trace.threeDb.upperHz, trace.threeDb.upperClamped, 'upper')" />
+        <ReadingValue class="font-medium" :text="formatBandwidth(trace.threeDb)" />
+        <span class="flex justify-center">
+          <input v-model="showThreeDb" type="checkbox" class="tb-check" aria-label="Plot the −3 dB markers" />
+        </span>
+      </div>
+    </div>
 
-    <!-- The same 24rem as the table above, so the two blocks line up on both edges. The slack goes
-         into the *label* column (`1fr`, the value columns `auto`), which puts every figure on the
-         block's right-hand side under the one above it — spread across three `auto` tracks instead,
-         the columns would land wherever the widest row put them. The label column is also the one
-         that gives when the panel is narrow: a value split over two lines ("4.41" / "dB") reads as
-         two numbers, a label split over two does not. -->
-    <dl v-if="trace" class="mt-2 grid w-full max-w-96 grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1 text-xs">
-      <dt class="text-neutral-500 dark:text-neutral-400">{{ peakLabel }}</dt>
-      <dd class="whitespace-nowrap font-mono">{{ formatDb(trace.peakDb) }}</dd>
-      <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ formatRatio(trace.peakDb) }}</dd>
-
-      <dt class="text-neutral-500 dark:text-neutral-400">{{ peakFreqLabel }}</dt>
-      <dd class="whitespace-nowrap font-mono">{{ formatHz(trace.peakFreqHz) }}</dd>
-      <dd></dd>
-
-      <!-- One cell across both value columns: a mode name in the third column would set that
-           column's width for every row and squeeze the labels above into wrapping. -->
-      <template v-if="referenceLabel">
-        <dt class="text-neutral-500 dark:text-neutral-400">Reference</dt>
-        <dd class="col-span-2">
-          <span class="whitespace-nowrap font-mono">{{ trace.referenceDb === null ? '—' : formatDb(trace.referenceDb) }}</span>
-          <span class="ml-3 text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</span>
+    <!-- The readings. Three columns — what it is, what it reads, and the note that qualifies it (a
+         linear ratio, the reference's own name, the frequency an extreme sits at) — each row on its
+         own hairline, so a long label and a long note cannot run into each other. -->
+    <dl v-if="trace" class="mt-1 text-[12.5px] tabular-nums">
+      <div
+        class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+      >
+        <dt class="text-neutral-500 dark:text-neutral-400">{{ peakLabel }}</dt>
+        <dd class="m-0 text-right"><ReadingValue :text="formatDb(trace.peakDb)" /></dd>
+        <dd class="m-0 text-right whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+          {{ formatRatio(trace.peakDb) }}
         </dd>
-      </template>
+      </div>
+
+      <div
+        class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+      >
+        <dt class="text-neutral-500 dark:text-neutral-400">{{ peakFreqLabel }}</dt>
+        <dd class="m-0 text-right"><ReadingValue :text="formatHz(trace.peakFreqHz)" /></dd>
+        <dd class="m-0"></dd>
+      </div>
+
+      <div
+        v-if="referenceLabel"
+        class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+      >
+        <dt class="text-neutral-500 dark:text-neutral-400">Reference</dt>
+        <dd class="m-0 text-right">
+          <ReadingValue :text="trace.referenceDb === null ? '—' : formatDb(trace.referenceDb)" />
+        </dd>
+        <dd class="m-0 text-right text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</dd>
+      </div>
 
       <!-- Delay, from the curve the chart's delay series is drawn from: at the reference band (or
            the peak, under a peak reference), then the extremes over the whole measured band with
            the frequency each sits at. Dashes for a stored result from before the delays existed. -->
       <template v-if="delays">
-        <dt class="text-neutral-500 dark:text-neutral-400" title="Group delay, −dφ/df, as the median over the reference band — the same band the corners are measured from. Under a peak reference, at the peak.">
-          Group delay{{ delaySuffix }} @ ref
-        </dt>
-        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.groupDelayAtReferenceS) }}</dd>
-        <dd></dd>
+        <div
+          class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+        >
+          <dt
+            class="text-neutral-500 dark:text-neutral-400"
+            title="Group delay, −dφ/df, as the median over the reference band — the same band the corners are measured from. Under a peak reference, at the peak."
+          >
+            Group delay{{ delaySuffix }} @ ref
+          </dt>
+          <dd class="m-0 text-right"><ReadingValue :text="formatDelay(delays.groupDelayAtReferenceS)" /></dd>
+          <dd class="m-0"></dd>
+        </div>
 
-        <dt class="text-neutral-500 dark:text-neutral-400" title="Phase delay, −φ/(360·f), over the same band. Referenced so that the phase at the band sits inside ±180°, so an inverting DUT reads half a period.">
-          Phase delay{{ delaySuffix }} @ ref
-        </dt>
-        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.phaseDelayAtReferenceS) }}</dd>
-        <dd></dd>
+        <div
+          class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+        >
+          <dt
+            class="text-neutral-500 dark:text-neutral-400"
+            title="Phase delay, −φ/(360·f), over the same band. Referenced so that the phase at the band sits inside ±180°, so an inverting DUT reads half a period."
+          >
+            Phase delay{{ delaySuffix }} @ ref
+          </dt>
+          <dd class="m-0 text-right"><ReadingValue :text="formatDelay(delays.phaseDelayAtReferenceS)" /></dd>
+          <dd class="m-0"></dd>
+        </div>
 
-        <dt class="text-neutral-500 dark:text-neutral-400" title="The smallest group delay anywhere in the measured band, and where.">Group delay min</dt>
-        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.groupDelayMin?.s) }}</dd>
-        <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ delays.groupDelayMin ? formatHz(delays.groupDelayMin.freqHz) : '' }}</dd>
+        <div
+          class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+        >
+          <dt class="text-neutral-500 dark:text-neutral-400" title="The smallest group delay anywhere in the measured band, and where.">
+            Group delay min
+          </dt>
+          <dd class="m-0 text-right"><ReadingValue :text="formatDelay(delays.groupDelayMin?.s)" /></dd>
+          <dd class="m-0 text-right whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+            {{ delays.groupDelayMin ? `@ ${formatHz(delays.groupDelayMin.freqHz)}` : '' }}
+          </dd>
+        </div>
 
-        <dt class="text-neutral-500 dark:text-neutral-400" title="The largest group delay anywhere in the measured band, and where — on an amplifier, usually at the low-frequency corner.">Group delay max</dt>
-        <dd class="whitespace-nowrap font-mono">{{ formatDelay(delays.groupDelayMax?.s) }}</dd>
-        <dd class="whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400">{{ delays.groupDelayMax ? formatHz(delays.groupDelayMax.freqHz) : '' }}</dd>
+        <div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 py-1.5">
+          <dt
+            class="text-neutral-500 dark:text-neutral-400"
+            title="The largest group delay anywhere in the measured band, and where — on an amplifier, usually at the low-frequency corner."
+          >
+            Group delay max
+          </dt>
+          <dd class="m-0 text-right"><ReadingValue :text="formatDelay(delays.groupDelayMax?.s)" /></dd>
+          <dd class="m-0 text-right whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+            {{ delays.groupDelayMax ? `@ ${formatHz(delays.groupDelayMax.freqHz)}` : '' }}
+          </dd>
+        </div>
       </template>
     </dl>
 
-    <p
-      v-if="delays && !delays.recorded"
-      class="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400"
-    >
+    <p v-if="delays && !delays.recorded" class="text-[12px] text-neutral-500 dark:text-neutral-400">
       Delay was not recorded for this stored result; measure it again to get the delay curves.
     </p>
 
-    <p
-      v-if="trace && trace.referenceFellBackToPeak"
-      class="mt-2 text-[11px] text-amber-600 dark:text-amber-500"
-    >
+    <p v-if="trace && trace.referenceFellBackToPeak" class="text-[12px] text-amber-600 dark:text-amber-500">
       The reference band lies outside the measured range, so these corners are referenced to the
       peak instead. Move the band inside the sweep, or set the reference to Peak deliberately.
     </p>
 
     <p
       v-if="trace && (trace.threeDb.lowerClamped || trace.threeDb.upperClamped)"
-      class="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400"
+      class="text-[12px] text-neutral-500 dark:text-neutral-400"
     >
       A corner marked &lt; or &gt; was never reached inside the measured band — that is where the
       search stopped, not where the response rolls off.
     </p>
 
-    <p v-if="!trace" class="text-xs text-neutral-500 dark:text-neutral-400">
-      Nothing measured yet.
-    </p>
+    <p v-if="!trace" class="text-[12px] text-neutral-500 dark:text-neutral-400">Nothing measured yet.</p>
   </CollapsibleSection>
 </template>

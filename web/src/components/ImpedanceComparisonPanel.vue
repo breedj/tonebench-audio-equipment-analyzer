@@ -98,7 +98,7 @@ const tables = computed<ComparisonTable[]>(() => {
 <template>
   <CollapsibleSection v-if="tables.length > 0" title="Readings" size="sm">
     <div class="flex flex-col gap-4">
-      <div v-for="table in tables" :key="table.title" class="flex flex-col gap-1">
+      <div v-for="table in tables" :key="table.title" class="tb-field">
         <span class="text-xs text-neutral-500 dark:text-neutral-400">{{ table.title }}</span>
         <div class="overflow-x-auto">
           <table class="w-full text-xs">

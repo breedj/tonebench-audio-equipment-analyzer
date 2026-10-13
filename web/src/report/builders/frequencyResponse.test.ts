@@ -104,7 +104,18 @@ describe('frequencyResponseMeasurementSections', () => {
   it('writes the panel table and readings, with the clamped-corner note', () => {
     const sections = frequencyResponseMeasurementSections([gain], 'Gain', true)
 
+    // The three readings the curve is quoted by lead as cards; the corner table follows, and the
+    // delay readings stay rows because they are read as a set.
     expect(sections[0]).toEqual({
+      kind: 'figures',
+      figures: [
+        { label: 'Max. gain', value: '4.41 dB', sub: '1.661 x' },
+        { label: 'Peak at', value: '38.0 kHz' },
+        { label: '−3 dB bandwidth', value: '> 44.0 kHz', sub: 'partial — an edge was not reached' },
+        { label: 'Reference', value: '0.12 dB', sub: 'Passband median' },
+      ],
+    })
+    expect(sections[1]).toEqual({
       kind: 'table',
       title: 'Measurements',
       headers: ['', 'f(low)', 'f(high)', 'Bandwidth'],
@@ -113,20 +124,17 @@ describe('frequencyResponseMeasurementSections', () => {
         ['−3 dB', '< 10.00 Hz', '44.0 kHz', '> 44.0 kHz'],
       ],
     })
-    expect(sections[1].kind).toBe('keyValues')
-    expect(rowsToObject(sections[1].rows!)).toEqual({
-      'Max. gain': '4.41 dB (1.661 x)',
-      'Peak at': '38.0 kHz',
-      Reference: '0.12 dB — Passband median',
+    expect(sections[2].kind).toBe('keyValues')
+    expect(rowsToObject(sections[2].rows!)).toEqual({
       'Group delay at reference': '—',
       'Phase delay at reference': '—',
       'Group delay min': '—',
       'Group delay max': '—',
       Curve: 'Gain (left relative to the reference)',
     })
-    expect(sections[2].kind).toBe('paragraph')
-    expect(sections[2].text).toContain('Delay was not recorded')
-    expect(sections[2].text).toContain('never reached')
+    expect(sections[3].kind).toBe('paragraph')
+    expect(sections[3].text).toContain('Delay was not recorded')
+    expect(sections[3].text).toContain('never reached')
   })
 
   it('writes the delay rows from the curve the chart draws them on, at the reference band', () => {
@@ -136,13 +144,13 @@ describe('frequencyResponseMeasurementSections', () => {
       phaseDelayS: [2.6e-3, 13e-6, 5e-6],
     }
     const sections = frequencyResponseMeasurementSections([withDelays], 'Gain', true, 'DutResponse', { lowHz: 50, highHz: 500 })
-    expect(rowsToObject(sections[1].rows!)).toMatchObject({
+    expect(rowsToObject(sections[2].rows!)).toMatchObject({
       'Group delay at reference': '12.0 µs',
       'Phase delay at reference': '13.0 µs',
       'Group delay min': '4.0 µs at 1.00 kHz',
       'Group delay max': '2.500 ms at 10.00 Hz',
     })
-    expect(sections[2].text).not.toContain('Delay was not recorded')
+    expect(sections[3].text).not.toContain('Delay was not recorded')
   })
 
   it('says so when there is no curve to read', () => {
@@ -186,7 +194,7 @@ describe('frequencyResponseSections / chapterSections', () => {
 
   it('includes only the chosen elements, in report order, and never the chart', () => {
     const titles = frequencyResponseSections(subject, ['measurements', 'settings', 'description']).map((s) => s.title ?? s.kind)
-    expect(titles).toEqual(['Notes on the measurement', 'Settings', 'Measurements', 'keyValues'])
+    expect(titles).toEqual(['Notes on the measurement', 'Settings', 'figures', 'Measurements', 'keyValues'])
     expect(frequencyResponseSections(subject, ['chart'])).toEqual([])
   })
 

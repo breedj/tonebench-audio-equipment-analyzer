@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import PanelIcon from './PanelIcon.vue'
+import type { PanelIconName } from '../panels/panelIcons'
+import type { MeasurementKindTone } from '../measurements/kinds'
+import { computed, ref, watch } from 'vue'
 
 // This codebase's first modal primitive — native <dialog> rather than a hand-rolled overlay div,
 // since showModal() already gives Escape-to-close, a backdrop, and focus containment for free in
@@ -21,7 +24,18 @@ const props = withDefaults(
      * subtitle, in a deeper bar — rather than the 13px one that suits a form; that is the one place
      * size drives type here, and it is why the picker is a size of its own rather than a wider `lg`.
      */
-    size?: 'md' | 'lg' | 'xl'
+    size?: 'md' | 'lg' | 'xl' | 'full'
+    /**
+     * An optional tinted round glyph before the title — the panel header's own chrome, for the
+     * dialogs that are a stack of panels rather than one form (the sound card's, above all).
+     */
+    icon?: PanelIconName
+    tone?: MeasurementKindTone
+    /**
+     * Paints the body in the page's ground rather than the panel, so the sections inside it read as
+     * cards on a surface. Goes with `flush`, which is what lets the body carry its own padding.
+     */
+    ground?: boolean
     /**
      * Drop the body's own padding and let the slot run to the dialog's edges, so it can paint its
      * own background. The picker does: its cards are the panel tone and the sheet behind them is the
@@ -29,13 +43,20 @@ const props = withDefaults(
      */
     flush?: boolean
   }>(),
-  { subtitle: undefined, size: 'md', flush: false },
+  { subtitle: undefined, size: 'md', flush: false, icon: undefined, tone: 'blue', ground: false },
 )
 const emit = defineEmits<{ close: [] }>()
 
 const dialogRef = ref<HTMLDialogElement | null>(null)
 
-const WIDTHS = { md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-[800px]' } as const
+/**
+ * The 2026-10-13 header — 17 px title, 40 px close — is used by every dialog that carries a glyph,
+ * and the glyph is what says the dialog was drawn to those mockups. The `xl` picker predates them
+ * and had the same header already, so it opts in by size.
+ */
+const titled = computed(() => props.icon !== undefined || props.size === 'xl')
+
+const WIDTHS = { md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-[800px]', full: 'max-w-[1040px]' } as const
 
 watch(
   () => props.open,
@@ -67,29 +88,38 @@ function onCancel(e: Event) {
 <template>
   <dialog
     ref="dialogRef"
-    class="m-auto w-full rounded-lg border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 dark:border-neutral-800 dark:text-neutral-100"
+    class="m-auto w-full rounded-2xl border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 dark:border-neutral-800 dark:text-neutral-100"
     :class="WIDTHS[props.size]"
     @cancel="onCancel"
   >
     <div
       class="flex items-center justify-between border-b border-neutral-200 bg-[var(--surface-panel)] dark:border-neutral-800"
-      :class="props.size === 'xl' ? 'px-6 py-[18px]' : 'px-4 py-3'"
+      :class="titled ? 'py-2.5 pl-5 pr-3' : 'px-4 py-3'"
     >
-      <div class="flex min-w-0 flex-col gap-0.5">
-        <h2 :class="props.size === 'xl' ? 'text-[18px] font-semibold' : 'text-sm font-semibold'">{{ props.title }}</h2>
-        <span v-if="props.subtitle" class="text-[13px] text-neutral-500 dark:text-neutral-400">{{ props.subtitle }}</span>
+      <PanelIcon v-if="props.icon" :icon="props.icon" :tone="props.tone" :size="32" class="mr-3" />
+      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <!-- `title-after` is for what sits *beside* the name — the project a report is of, the file
+             a dialog is about. `subtitle` is what sits under it. -->
+        <div class="flex min-w-0 items-center gap-2.5">
+          <h2 :class="titled ? 'text-[17px] font-semibold' : 'text-sm font-semibold'">{{ props.title }}</h2>
+          <slot name="title-after" />
+        </div>
+        <slot name="subtitle">
+          <span v-if="props.subtitle" class="text-[13px] text-neutral-500 dark:text-neutral-400">{{ props.subtitle }}</span>
+        </slot>
       </div>
+      <slot name="header-right" />
       <button
         type="button"
-        class="shrink-0 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
-        :class="props.size === 'xl' ? 'flex size-11 items-center justify-center' : ''"
+        class="shrink-0 rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+        :class="titled ? 'flex size-10 items-center justify-center' : ''"
         aria-label="Close"
         @click="emit('close')"
       >
         <svg
-          v-if="props.size === 'xl'"
-          width="20"
-          height="20"
+          v-if="titled"
+          width="18"
+          height="18"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -102,8 +132,20 @@ function onCancel(e: Event) {
         <template v-else>✕</template>
       </button>
     </div>
-    <div :class="props.flush ? '' : 'p-4'">
+    <!-- Between the header and the body: the Configuration dialog's tab strip, which belongs to
+         neither. -->
+    <slot name="under-header" />
+    <div :class="props.flush ? '' : 'p-4'" :style="props.ground ? { backgroundColor: 'var(--surface-ground)' } : undefined">
       <slot />
+    </div>
+    <!-- The actions, on their own strip under a rule: in a dialog this long they would otherwise be
+         wherever the scroll happened to leave them. -->
+    <div
+      v-if="$slots.footer"
+      class="flex items-center gap-2 border-t border-neutral-200 px-4 py-3 dark:border-neutral-800"
+      :style="{ backgroundColor: 'var(--surface-panel)' }"
+    >
+      <slot name="footer" />
     </div>
   </dialog>
 </template>

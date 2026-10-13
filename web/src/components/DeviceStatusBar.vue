@@ -460,10 +460,16 @@ const gainRightDb = computed(() => props.status?.externalGainRightDb ?? 0)
  */
 const gainDeclared = computed(() => gainLeftDb.value !== 0 || gainRightDb.value !== 0)
 
-/** Which document the popover writes to, named so a bench can tell where its figure went. */
-const gainBenchLabel = computed(() =>
-  isSoundCard.value ? 'the sound card' : props.status?.deviceKind === 'Simulated' ? 'the QA403 bench' : 'the QA403',
-)
+/**
+ * Which document the popover writes to, named so a bench can tell where its figure went. A bare
+ * name, no article: since the 2026-10-12 redesign the popover sets it in a badge ("Stored with
+ * [QA403]"), and "the QA403 bench" inside a pill read as "the QA403 bench bench".
+ *
+ * The simulator and the real analyzer share one name because they share one document — the
+ * simulator models a QA403 — so naming it separately would promise a second figure that does not
+ * exist.
+ */
+const gainBenchLabel = computed(() => (isSoundCard.value ? 'Sound card' : 'QA403'))
 
 const gainOpen = ref(false)
 
@@ -824,10 +830,18 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
           @click="gainOpen = !gainOpen"
         >
           Ext. gain
+          <!-- A dot when a gain is declared, as the mockup draws it: a divider the bench has
+               forgotten about makes every level wrong by its whole size, so the badge has to say
+               "something is set here" before it is read. -->
           <span
-            class="rounded border px-2 py-0.5 font-mono"
-            :class="gainDeclared ? 'border-amber-300 dark:border-amber-700' : 'border-neutral-300 dark:border-neutral-700'"
+            class="inline-flex h-[26px] items-center gap-2 rounded-lg border px-2.5 font-mono"
+            :class="
+              gainDeclared
+                ? 'border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
+                : 'border-neutral-200 dark:border-neutral-700'
+            "
           >
+            <span v-if="gainDeclared" class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"></span>
             L {{ formatGain(gainLeftDb, gainUnit) }} · R {{ formatGain(gainRightDb, gainUnit) }}
           </span>
         </button>

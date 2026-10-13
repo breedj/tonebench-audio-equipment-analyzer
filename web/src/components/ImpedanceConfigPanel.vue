@@ -28,6 +28,7 @@ import { formatHz } from '../response/format'
 import { formatOhms } from '../impedance/equivalent'
 import { matchesStoredFixture } from '../impedance/fixture'
 import CollapsibleSection from './CollapsibleSection.vue'
+import EstimateBadge from './EstimateBadge.vue'
 
 defineProps<{ running: boolean }>()
 
@@ -636,7 +637,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 <template>
   <CollapsibleSection title="Fixture">
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="The resistor in series between the generator and the DUT. The measurement is only as accurate as this number, so use a 1% part and enter its measured value."
     >
       Reference resistor (Ω)
@@ -647,7 +648,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         min="0.1"
         step="any"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
       <input
         v-else
@@ -666,14 +667,14 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
     </p>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Which input taps the generator side of the reference resistor. A bench fixture is normally wired left-as-reference, and the simulator's fixture models are wired the same way. Get it wrong and the run warns: the impedance comes out negative."
     >
       Reference channel
       <select
         v-model="form.rightChannelIsReference"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option :value="false">Left (generator side)</option>
         <option :value="true">Right (generator side)</option>
@@ -684,21 +685,21 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
   <CollapsibleSection title="Calibration">
     <label
       v-if="!usingFixture"
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="What the two Measure buttons play. A standard is a curve in frequency and a fixture is linear, so a chirp-captured open or short corrects a stepped measurement unchanged — in seconds rather than minutes."
     >
       Calibration stimulus
       <select
         v-model="form.calibrationStimulus"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in STIMULI" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
     </label>
 
     <label
-      class="flex items-center gap-2 text-xs"
+      class="tb-check-row"
       :title="
         fixtureHasCalibration
           ? 'Use the calibration stored in Configuration instead of this measurement\'s own. Its reference resistor comes with it, because the standards are only valid at the resistance they were captured through.'
@@ -741,7 +742,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       trace believable.
     </p>
 
-    <div v-if="!usingFixture" class="flex items-center justify-between gap-2 text-xs">
+    <div v-if="!usingFixture" class="tb-check-row justify-between">
       <span :class="hasOpenCal ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500 dark:text-neutral-400'">
         Open: {{ hasOpenCal ? 'captured' : 'not captured' }}
       </span>
@@ -766,7 +767,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       </span>
     </div>
 
-    <div v-if="!usingFixture" class="flex items-center justify-between gap-2 text-xs">
+    <div v-if="!usingFixture" class="tb-check-row justify-between">
       <span :class="hasShortCal ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500 dark:text-neutral-400'">
         Short: {{ hasShortCal ? 'captured' : 'not captured' }}
       </span>
@@ -820,7 +821,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 
     <label
       v-if="!usingFixture"
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Calibration runs drive harder than measurements on purpose. A shorted fixture puts the measured channel about 60 dB below the reference one, and both share a single input range set from the loud one — so the short is the hardest thing this measurement has to see. The fixture is linear, so measuring it loudly costs nothing."
     >
       Calibration drive level
@@ -829,7 +830,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         type="number"
         step="any"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
@@ -840,21 +841,21 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
     </p>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="The leads and connectors between the fixture and the DUT have a resistance of their own, and it is in series with everything you measure."
     >
       Subtract for the leads
       <select
         v-model="form.cableMode"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="mode in CABLE_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
     </label>
 
-    <div v-if="form.cableMode === 'Fixed'" class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div v-if="form.cableMode === 'Fixed'" class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         Resistance (Ω)
         <input
           v-model.number="form.fixedCableOhms"
@@ -862,10 +863,10 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
           min="0"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         Inductance (mH)
         <input
           v-model.number="form.fixedCableMillihenry"
@@ -873,7 +874,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
           min="0"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
     </div>
@@ -881,36 +882,36 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 
   <CollapsibleSection title="Measurement settings">
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="A chirp excites the whole band at once and takes seconds. A stepped sine plays one tone at a time: minutes, but it puts the whole drive on the frequency being read, which is what a high-impedance DUT and the bottom of the band need. Pink noise is as quick as the chirp and keeps improving with every average, and it carries no harmonic packets to gate."
     >
       Stimulus
       <select
         v-model="form.stimulus"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in STIMULI" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
     </label>
 
-    <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="The generator level. Lower is gentler on a driver; higher buys signal-to-noise.">
+    <div class="grid grid-cols-[2fr_1fr] gap-2.5">
+      <label class="tb-field" title="The generator level. Lower is gentler on a driver; higher buys signal-to-noise.">
         Drive level
         <input
           v-model.number="form.levelValue"
           type="number"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         Unit
         <select
           v-model="form.levelUnit"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
@@ -919,23 +920,23 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 
     <!-- Shown whenever *either* selector asks for a whole-spectrum stimulus, so a stepped
          measurement calibrated by chirp can still say what that chirp does. -->
-    <label v-if="usesBroadband" class="flex flex-col gap-1 text-xs">
+    <label v-if="usesBroadband" class="tb-field">
       <span>Frequency span<span v-if="!measuresBroadband" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
       <select
         v-model.number="form.frequencySpanHz"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span / 1000 }} kHz</option>
       </select>
     </label>
 
-    <label v-if="usesBroadband" class="flex flex-col gap-1 text-xs">
+    <label v-if="usesBroadband" class="tb-field">
       Resolution
       <select
         v-model.number="form.resolutionMultiplier"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in RESPONSE_RESOLUTIONS" :key="option.multiplier" :value="option.multiplier">
           {{ option.label }}
@@ -945,7 +946,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 
     <label
       v-if="usesChirp"
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Where the chirp starts. 10 Hz is below any driver resonance; going lower costs signal-to-noise for nothing unless you are measuring a transformer."
     >
       <span>Chirp start (Hz)<span v-if="form.stimulus !== 'Chirp'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
@@ -956,7 +957,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         max="1000"
         step="any"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
@@ -971,14 +972,14 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
     -->
     <label
       v-if="measuresBroadband"
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Light smoothing keeps a high-Q resonance peak its real height."
     >
       Smoothing
       <select
         v-model.number="form.smoothingDenominator"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in RESPONSE_SMOOTHING" :key="option.denominator" :value="option.denominator">
           {{ option.label }}
@@ -986,30 +987,30 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       </select>
     </label>
 
-    <div v-if="usesStepped" class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div v-if="usesStepped" class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
         <span>Sweep from (Hz)<span v-if="form.stimulus !== 'SteppedSine'" class="text-neutral-500 dark:text-neutral-400"> (cal)</span></span>
         <input
           v-model.number="form.startFreqHz"
           type="number"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1">
+      <label class="tb-field">
         To (Hz)
         <input
           v-model.number="form.endFreqHz"
           type="number"
           step="any"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
     </div>
 
-    <label v-if="usesStepped" class="flex flex-col gap-1 text-xs" title="How densely the band is sampled. Every point is a separate capture, so this is what a run's length is made of.">
+    <label v-if="usesStepped" class="tb-field" title="How densely the band is sampled. Every point is a separate capture, so this is what a run's length is made of.">
       Steps per octave
       <input
         v-model.number="form.stepsPerOctave"
@@ -1017,20 +1018,20 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         min="1"
         max="48"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
     <label
       v-if="usesStepped"
-      class="flex items-center gap-2 text-xs"
+      class="tb-check-row"
       title="Sizes each point's record for its own frequency rather than for the bottom of the band, which is most of what makes the top of a sweep fast."
     >
       <input v-model="form.adaptiveResolution" type="checkbox" :disabled="running" />
       Adaptive resolution
     </label>
 
-    <label class="flex flex-col gap-1 text-xs">
+    <label class="tb-field">
       Averages
       <input
         v-model.number="form.averageCount"
@@ -1038,24 +1039,34 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         min="1"
         max="10"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <p v-if="measuresBroadband" class="text-xs text-neutral-500 dark:text-neutral-400">
-      {{ binHz.toFixed(2) }} Hz per bin · {{ recordSeconds.toFixed(2) }} s per record · about
-      {{ estimatedSeconds.toFixed(1) }} s per run
-    </p>
-    <p v-else class="text-xs text-neutral-500 dark:text-neutral-400">
-      ≈{{ steppedPointCount }} points · {{ steppedSampleRateHz / 1000 }} kHz ·
-      <span v-if="steppedFftRange">
-        {{ steppedFftRange.max }}–{{ steppedFftRange.min }} point records ·
-      </span>
-      about {{ steppedDurationLabel }}
-    </p>
-    <p v-if="form.stimulus === 'SteppedSine' && steppedNyquistWarning" class="text-xs text-amber-600 dark:text-amber-400">
-      {{ steppedNyquistWarning }}
-    </p>
+    <template #footer>
+      <template v-if="measuresBroadband">
+        <span class="leading-snug">
+          Analysis {{ binHz.toFixed(2) }} Hz/bin · {{ recordSeconds.toFixed(2) }} s/record
+        </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <EstimateBadge kind="time" title="Roughly how long one run will take.">≈ {{ estimatedSeconds.toFixed(1) }} s</EstimateBadge>
+        </div>
+      </template>
+      <template v-else>
+        <span class="leading-snug">
+          Analysis {{ steppedSampleRateHz / 1000 }} kHz<template v-if="steppedFftRange">
+            · {{ steppedFftRange.max }}–{{ steppedFftRange.min }} point records</template
+          >
+        </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <EstimateBadge kind="points" title="How many frequencies the sweep will measure.">≈ {{ steppedPointCount }} points</EstimateBadge>
+          <EstimateBadge kind="time" title="Roughly how long the whole sweep will take.">≈ {{ steppedDurationLabel }}</EstimateBadge>
+        </div>
+      </template>
+      <p v-if="form.stimulus === 'SteppedSine' && steppedNyquistWarning" class="text-amber-600 dark:text-amber-500">
+        {{ steppedNyquistWarning }}
+      </p>
+    </template>
   </CollapsibleSection>
 
   <CollapsibleSection title="Advanced" :default-open="false">
@@ -1064,7 +1075,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
          Hidden rather than disabled, since a control that cannot apply is not a setting. -->
     <label
       v-if="form.stimulus === 'Chirp'"
-      class="flex items-center gap-2 text-xs"
+      class="tb-check-row"
       title="Deconvolving a chirp turns each harmonic the DUT produces into its own small impulse, sitting a fixed time ahead of the main one. Those add a fine ripple to |Z| and phase over whatever band the DUT distorts in, and no amount of averaging or smoothing removes them. This cuts them out of the impulse response before the spectrum is taken, at the cost of halving the frequency resolution. A passive load distorts far too little to need it; turn it on for an amplifier input or anything nonlinear whose trace shows fine ripple."
     >
       <input v-model="form.applySweepGate" type="checkbox" :disabled="running" />
@@ -1072,7 +1083,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
     </label>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="The analyzer's own input (about 100 kΩ, from the QA403 datasheet) hangs off the measurement node in parallel with the DUT, so the divider reads DUT ∥ input rather than the DUT alone. The error is roughly Z_dut / Z_in: nothing for an 8 Ω driver or a 1 kΩ load, a factor of two for a 100 kΩ valve grid. Enter the figure and it is taken back out of both the measurement and the open calibration. Blank means infinite — right for every passive load — and there is deliberately no default, since a guessed one would silently bias every high-impedance reading."
     >
       Analyzer input impedance (Ω, blank = ignore)
@@ -1083,9 +1094,10 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         step="any"
         placeholder="from the QA403 datasheet"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
+
   </CollapsibleSection>
 
   <p v-if="invalid" class="text-xs text-amber-600 dark:text-amber-400">{{ invalid }}</p>

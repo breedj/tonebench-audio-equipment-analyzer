@@ -1,33 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- Tonebench - Audio Equipment Analyzer app icon: the harmonic comb — a fundamental with its peak marker and
-       five falling harmonics — on a dark tile. Chosen from five proposals on
-       2026-09-30; it is the one that still reads at 16 px, which is the only size the taskbar and
-       the favicon ever get.
-
-       The dashed noise floor that sat just above the baseline was removed on 2026-10-05: at 16 px
-       a 4 px dash on a 10/12 pattern is under half a pixel of coverage, so it rendered as a grey
-       smear across the harmonics rather than as a line, and at 256 px it read as a second baseline.
+  <!-- Tonebench - Audio Equipment Analyzer app icon: four rounded bars — a level meter, or four
+       tones at four levels — on a dark tile. Joost's own drawing, supplied as
+       docs/design/tonebench-icon.svg on 2026-10-12, replacing the harmonic comb that had stood
+       since 2026-09-30; it is simpler at 16 px, which is the only size the taskbar and the favicon
+       ever get.
 
        Source of packaging/windows/tonebench.ico, packaging/linux/tonebench.png and
        web/public/favicon.svg; regenerate all three with `npm run icons` in web/.
 
        TWO THINGS HERE ARE LOAD-BEARING.
 
-       (1) The tile is not decoration. `web/src/components/TonebenchLogo.vue` draws the same comb as a
-       bare glyph whose structure is `currentColor`, which is right inside the app where there is a
-       theme to follow; an icon has no theme and no known background, and `currentColor` rasterises
-       to black. So the shipped icon carries its own ground and its own literal colours — the
-       brighter #38bdf8/#4ade80 pair, which is what reads against a dark tile, rather than the
-       #0ea5e9/#22c55e the in-app glyph uses against a light or dark panel.
+       (1) The tile is not decoration. `web/src/components/TonebenchLogo.vue` draws the same four
+       bars as a bare glyph for use inside the app, where there is a panel behind them; an icon has
+       no known background. So the shipped icon carries its own ground, and its own lighter weights
+       — #60a5fa/#a78bfa/#f472b6/#fb923c, which read against a dark tile, rather than the
+       #3b82f6/#8b5cf6/#ec4899/#f97316 the in-app glyph uses against a panel.
 
-       (2) The comb geometry below is the glyph's own coordinates, placed by one transform rather
-       than re-drawn at tile scale. The glyph's real bounds are x 20..236 and y 18.5..207 (strokes
-       and round caps included, not just the nominal rects — x is the baseline's, y runs from the
-       top of the peak marker's stroke to the bottom of the baseline), fitted to x 36..220 and
-       centred vertically: scale 184/216 = 0.8519, hence the translate. Both numbers moved when the
-       noise floor went, because its round caps at x 18..238 were what set the width.
-       TonebenchLogo.vue applies the same transform for its own tile variant, so the two cannot
-       drift apart — edit the numbers in both, or in neither. -->
+       (2) The geometry below is the supplied SVG's own 24-unit coordinates, placed by one transform
+       rather than re-drawn at tile scale. Their bounds are x 3..21 and y 5..21 (the nominal rects —
+       the corners are radii, not strokes, so nothing sticks out), fitted to x 36..220, the same
+       184-wide window the comb used, and centred vertically: scale 184/18 = 10.2222, hence the
+       translate. TonebenchLogo.vue applies the same transform for its own tile variant, so the two
+       cannot drift apart — edit the numbers in both, or in neither. -->
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#1f2937"/>
@@ -37,21 +31,10 @@
 
   <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tile)"/>
 
-  <g transform="translate(18.96 31.95) scale(0.8519)">
-    <!-- baseline -->
-    <rect x="20" y="202" width="216" height="5" rx="2.5" fill="#ffffff" opacity="0.22"/>
-
-    <!-- fundamental, then five falling harmonics -->
-    <rect x="27" y="54" width="22" height="148" rx="6" fill="#38bdf8"/>
-    <g fill="#38bdf8" opacity="0.55">
-      <rect x="63"  y="114" width="22" height="88" rx="6"/>
-      <rect x="99"  y="142" width="22" height="60" rx="6"/>
-      <rect x="135" y="160" width="22" height="42" rx="6"/>
-      <rect x="171" y="172" width="22" height="30" rx="6"/>
-      <rect x="207" y="180" width="22" height="22" rx="6"/>
-    </g>
-
-    <!-- peak marker on the fundamental -->
-    <circle cx="38" cy="34" r="12" fill="none" stroke="#4ade80" stroke-width="7"/>
+  <g transform="translate(5.333 -4.91) scale(10.2222)">
+    <rect x="3" y="12" width="3" height="9" rx="1.5" fill="#60a5fa"/>
+    <rect x="8" y="5" width="3" height="16" rx="1.5" fill="#a78bfa"/>
+    <rect x="13" y="9" width="3" height="12" rx="1.5" fill="#f472b6"/>
+    <rect x="18" y="15" width="3" height="6" rx="1.5" fill="#fb923c"/>
   </g>
 </svg>

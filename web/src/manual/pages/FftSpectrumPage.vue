@@ -59,14 +59,14 @@ const { showPage } = useManual()
     <table>
       <tbody>
         <tr>
-          <td>RUN</td>
+          <td>Run</td>
           <td>
             Starts the generator and measures continuously, updating about twenty times a second,
             until STOP.
           </td>
         </tr>
         <tr>
-          <td>SINGLE</td>
+          <td>Single</td>
           <td>
             Captures one settled spectrum — the configured number of averages, or one record if
             averaging is off or the count is 1 — and stops by itself. This is what you want before
@@ -74,7 +74,7 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>STOP</td>
+          <td>Stop</td>
           <td>Ends acquisition and silences both generator channels.</td>
         </tr>
       </tbody>

@@ -166,25 +166,18 @@ async function onConfirmDelete(item: MeasurementSummary) {
        filter) — not part of the new design, kept here for now until it's repositioned. -->
   <CollapsibleSection title="History details" padding="p-4">
     <template #header-right>
-      <div class="flex items-end gap-3 text-sm">
-        <label class="flex flex-col gap-1">
+      <!-- The caption sits *beside* its box, not above it: in a panel header there is no room for a
+           two-line field, so the stacked form put "From" and "To" floating over the title's
+           baseline, reading as labels for nothing (Joost, 2026-10-12). `items-center` is what lines
+           the word up with the middle of the box; the mockup's own treatment. -->
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="flex items-center gap-2 text-[12px] text-neutral-500 dark:text-neutral-400">
           From
-          <input
-            v-model="form.fromDate"
-            type="date"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-            @change="applyFilter"
-          />
+          <input v-model="form.fromDate" type="date" class="tb-input w-[9.5rem]" @change="applyFilter" />
         </label>
-
-        <label class="flex flex-col gap-1">
+        <label class="flex items-center gap-2 text-[12px] text-neutral-500 dark:text-neutral-400">
           To
-          <input
-            v-model="form.toDate"
-            type="date"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-            @change="applyFilter"
-          />
+          <input v-model="form.toDate" type="date" class="tb-input w-[9.5rem]" @change="applyFilter" />
         </label>
       </div>
     </template>

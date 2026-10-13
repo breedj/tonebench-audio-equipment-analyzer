@@ -414,7 +414,7 @@ watch([isDark, () => props.thickLines], () => draw())
     </div>
 
     <p v-if="points.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">
-      No impedance measured yet. Press RUN.
+      No impedance measured yet. Press Run.
     </p>
   </div>
 </template>

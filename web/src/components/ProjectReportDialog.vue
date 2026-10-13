@@ -7,6 +7,7 @@ import { downloadBlob, safeFileName } from '../report/download'
 import { subjectHasChartData } from '../report/render'
 import type { ReportSubject } from '../report/types'
 import Modal from './Modal.vue'
+import MeasurementKindChip from './MeasurementKindChip.vue'
 
 /**
  * "Project report…": every measurement in the project, grouped in the sidebar's order, each
@@ -127,6 +128,21 @@ function groupState(group: Group): 'all' | 'none' | 'some' {
   return count === 0 ? 'none' : count === total ? 'all' : 'some'
 }
 
+/**
+ * Select all / None over the whole list, from the 2026-10-13 mockup's chapter header. A project with
+ * twenty measurements is the case it exists for: everything is ticked when the dialog opens, so the
+ * one thing anyone wants is to clear it and tick two.
+ */
+function setEverything(on: boolean) {
+  for (const group of groups.value) setGroup(group, on)
+}
+
+/** How many chapters a group contributes, which is what its row's count says. */
+function groupChapterCount(group: Group): number {
+  if (isTypeOnly(group)) return 1
+  return group.items.length + (group.type.id === liveTypeId.value ? 1 : 0)
+}
+
 async function generate() {
   const project = props.project
   if (!project || !canGenerate.value) return
@@ -179,101 +195,181 @@ async function generate() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Project report" @close="emit('close')">
-    <div v-if="props.project" class="flex flex-col gap-3 text-sm">
-      <p class="text-xs text-neutral-500 dark:text-neutral-400">
-        <span class="font-medium text-neutral-800 dark:text-neutral-100">{{ props.project.name }}</span>
-        — every measurement in the sidebar's order: one chapter per stored result, the measurement
-        on screen, and the notes and settings of a measurement that has no result yet. What each
-        chapter includes is the choice remembered by that measurement's own Report dialog, or the
-        defaults where none has been made.
+  <!-- The 2026-10-13 chrome: the project's name as a chip beside the title rather than as the first
+       words of the paragraph, the chapter list as a card that takes the height the dialog has left,
+       and the two options as a card of their own. -->
+  <Modal
+    :open="props.open"
+    title="Project report"
+    icon="document"
+    tone="amber"
+    size="lg"
+    ground
+    flush
+    @close="emit('close')"
+  >
+    <template v-if="props.project" #title-after>
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-100 px-2.5 py-0.5 text-[12px] text-neutral-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        </svg>
+        {{ props.project.name }}
+      </span>
+    </template>
+
+    <div v-if="props.project" class="flex flex-col gap-3 p-4 text-[13px]">
+      <p class="px-0.5 text-[12.5px] leading-[1.5] text-neutral-600 dark:text-neutral-300">
+        Every measurement in the sidebar's order: one chapter per stored result, the measurement on
+        screen, and the notes and settings of a measurement that has no result yet. What each chapter
+        includes is the choice remembered by that measurement's own Report dialog, or the defaults
+        where none has been made.
       </p>
 
-      <p v-if="loading" class="text-xs text-neutral-500 dark:text-neutral-400">Loading the stored results…</p>
+      <p v-if="loading" class="px-0.5 text-[12px] text-neutral-500 dark:text-neutral-400">
+        Loading the stored results…
+      </p>
 
-      <p v-else-if="groups.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">
+      <p v-else-if="groups.length === 0" class="px-0.5 text-[12px] text-neutral-500 dark:text-neutral-400">
         This project has no measurements yet.
       </p>
 
-      <div v-else class="flex max-h-80 flex-col gap-3 overflow-y-auto pr-1">
-        <div v-for="group in groups" :key="group.type.id" class="flex flex-col gap-1">
-          <label class="flex items-center gap-2 font-medium">
-            <input
-              type="checkbox"
-              :checked="groupState(group) === 'all'"
-              :indeterminate="groupState(group) === 'some'"
-              :disabled="busy"
-              @change="setGroup(group, ($event.target as HTMLInputElement).checked)"
-            />
-            <span>{{ group.type.name }}</span>
-            <span class="text-xs font-normal text-neutral-500 dark:text-neutral-400">{{ kindLabel(group.type.kind) }}</span>
-          </label>
-          <label
-            v-for="item in group.items"
-            :key="item.resultId"
-            class="ml-6 flex items-center gap-2"
-          >
-            <input
-              type="checkbox"
-              :checked="isSelected(item.resultId)"
-              :disabled="busy"
-              @change="setSelected(item.resultId, ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="truncate">{{ item.name }}</span>
-            <span class="ml-auto shrink-0 text-xs text-neutral-500 dark:text-neutral-400">
-              {{ new Date(item.timestampUtc).toLocaleString() }}
-            </span>
-          </label>
-          <label v-if="group.type.id === liveTypeId" class="ml-6 flex items-center gap-2">
-            <input v-model="includeLive" type="checkbox" :disabled="busy" />
-            <span>Current measurement</span>
-            <span class="ml-auto shrink-0 text-xs text-neutral-500 dark:text-neutral-400">on screen, not saved</span>
-          </label>
-          <label v-if="isTypeOnly(group)" class="ml-6 flex items-center gap-2">
-            <input
-              type="checkbox"
-              :checked="selectedTypeOnly.has(group.type.id)"
-              :disabled="busy"
-              @change="setTypeOnly(group.type.id, ($event.target as HTMLInputElement).checked)"
-            />
-            <span>Notes and settings</span>
-            <span class="ml-auto shrink-0 text-xs text-neutral-500 dark:text-neutral-400">no stored result</span>
-          </label>
+      <section v-else class="dialog-card flex min-h-0 flex-col">
+        <div class="flex items-center gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
+          <span class="flex-1 text-[11px] font-semibold tracking-[0.06em] text-neutral-500 uppercase dark:text-neutral-400">
+            Chapters
+          </span>
+          <button type="button" class="btn-chip-link" :disabled="busy" @click="setEverything(true)">Select all</button>
+          <button type="button" class="btn-chip-link" :disabled="busy" @click="setEverything(false)">None</button>
         </div>
-      </div>
 
-      <label class="flex items-center gap-2">
-        <input v-model="monochrome" type="checkbox" :disabled="busy" />
-        <span>Charts in black and white</span>
-        <span class="text-xs text-neutral-500 dark:text-neutral-400">for a monochrome printer; one setting for every kind</span>
-      </label>
+        <div class="max-h-[46vh] overflow-y-auto px-3.5">
+          <div
+            v-for="group in groups"
+            :key="group.type.id"
+            class="border-b border-neutral-100 pt-2.5 pb-1.5 last:border-b-0 dark:border-neutral-800"
+          >
+            <label class="flex cursor-pointer items-center gap-2.5">
+              <input
+                type="checkbox"
+                class="tb-check"
+                :checked="groupState(group) === 'all'"
+                :indeterminate="groupState(group) === 'some'"
+                :disabled="busy"
+                @change="setGroup(group, ($event.target as HTMLInputElement).checked)"
+              />
+              <MeasurementKindChip :kind="group.type.kind" :size="24" />
+              <span class="truncate text-[13.5px] font-semibold">{{ group.type.name }}</span>
+              <span class="shrink-0 text-[12px] text-neutral-500 dark:text-neutral-400">
+                {{ kindLabel(group.type.kind) }}
+              </span>
+              <span class="flex-1"></span>
+              <span class="shrink-0 font-mono text-[11.5px] text-neutral-500 dark:text-neutral-400">
+                {{ groupChapterCount(group) }}
+              </span>
+            </label>
 
-      <label class="flex items-center gap-2">
-        <input v-model="includeNotes" type="checkbox" :disabled="busy" />
-        Project notes on the title page
-      </label>
+            <!-- Indented past the group's own checkbox *and* its kind chip, so a chapter reads as
+                 belonging to the measurement above it. -->
+            <div class="flex flex-col pt-1 pl-[59px]">
+              <label
+                v-for="item in group.items"
+                :key="item.resultId"
+                class="flex cursor-pointer items-center gap-2.5 py-[5px]"
+              >
+                <input
+                  type="checkbox"
+                  class="tb-check"
+                  :checked="isSelected(item.resultId)"
+                  :disabled="busy"
+                  @change="setSelected(item.resultId, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="min-w-0 flex-1 truncate">{{ item.name }}</span>
+                <span class="shrink-0 font-mono text-[11.5px] whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+                  {{ new Date(item.timestampUtc).toLocaleString() }}
+                </span>
+              </label>
 
-      <p v-if="error" class="text-xs text-red-600 dark:text-red-400">{{ error }}</p>
+              <label v-if="group.type.id === liveTypeId" class="flex cursor-pointer items-center gap-2.5 py-[5px]">
+                <input v-model="includeLive" type="checkbox" class="tb-check" :disabled="busy" />
+                <span class="min-w-0 flex-1 truncate">Current measurement</span>
+                <span class="shrink-0 text-[11.5px] whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+                  on screen, not saved
+                </span>
+              </label>
 
-      <div class="flex items-center justify-end gap-2 pt-2">
-        <span v-if="progress" class="mr-auto truncate text-xs text-neutral-500 dark:text-neutral-400">{{ progress }}</span>
-        <button
-          type="button"
-          class="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          :disabled="busy"
-          @click="emit('close')"
+              <label v-if="isTypeOnly(group)" class="flex cursor-pointer items-center gap-2.5 py-[5px]">
+                <input
+                  type="checkbox"
+                  class="tb-check"
+                  :checked="selectedTypeOnly.has(group.type.id)"
+                  :disabled="busy"
+                  @change="setTypeOnly(group.type.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="min-w-0 flex-1 truncate">Notes and settings</span>
+                <span class="shrink-0 text-[11.5px] whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+                  no stored result
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dialog-card">
+        <label class="flex cursor-pointer items-start gap-2.5 px-3.5 py-3">
+          <input v-model="monochrome" type="checkbox" class="tb-check mt-0.5" :disabled="busy" />
+          <span class="flex flex-col gap-0.5">
+            <span class="font-semibold">Charts in black and white</span>
+            <span class="text-[12px] text-neutral-500 dark:text-neutral-400">
+              For a monochrome printer; one setting for every kind.
+            </span>
+          </span>
+        </label>
+        <label
+          class="flex cursor-pointer items-start gap-2.5 border-t border-neutral-100 px-3.5 py-3 dark:border-neutral-800"
         >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="rounded bg-neutral-900 px-3 py-1 text-white hover:bg-neutral-700 disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
-          :disabled="!canGenerate"
-          @click="generate"
-        >
-          Generate PDF
-        </button>
-      </div>
+          <input v-model="includeNotes" type="checkbox" class="tb-check mt-0.5" :disabled="busy" />
+          <span class="font-semibold">Project notes on the title page</span>
+        </label>
+      </section>
+
+      <p v-if="error" class="px-0.5 text-[12px] text-red-600 dark:text-red-400">{{ error }}</p>
     </div>
+
+    <template v-if="props.project" #footer>
+      <span v-if="progress" class="flex-1 truncate text-[12px] text-neutral-500 dark:text-neutral-400">
+        {{ progress }}
+      </span>
+      <span v-else class="flex-1"></span>
+      <button type="button" class="btn-secondary" :disabled="busy" @click="emit('close')">Cancel</button>
+      <button type="button" class="btn-primary" :disabled="!canGenerate" @click="generate">
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M6 2h9l5 5v15H6zM14 2v6h6M12 11v6M9 14l3 3 3-3" />
+        </svg>
+        Generate PDF
+      </button>
+    </template>
   </Modal>
 </template>

@@ -107,13 +107,13 @@ onMounted(() => {
     <div v-if="loaded" class="flex flex-col gap-3 text-sm">
       <div class="flex flex-wrap items-end gap-3">
         <label
-          class="flex flex-col gap-1"
+          class="tb-field"
           title="The measurement band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated over; its upper edge also bounds which harmonics count toward THD. Custom is the band set in Configuration ▸ Measurement."
         >
           Bandwidth
           <select
             v-model="form.bandwidth"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             @change="applyBandwidth"
           >
             <option v-for="p in BANDWIDTH_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
@@ -122,13 +122,13 @@ onMounted(() => {
         </label>
 
         <label
-          class="flex flex-col gap-1"
+          class="tb-field"
           title="Weights the noise figures (THD+N, SNR, N-D, band RMS, noise density) and the displayed spectrum. The fundamental, harmonics, THD, gain and peak are never weighted."
         >
           Weighting
           <select
             v-model="form.weighting"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             @change="applyWeighting"
           >
             <option v-for="w in WEIGHTING_OPTIONS" :key="w.value" :value="w.value">{{ w.label }}</option>
@@ -139,8 +139,8 @@ onMounted(() => {
       <!-- The two user tables, each a "frequency, dB" file (positive = attenuation, the QA40x
            format) the server reads. A checked slot combines with the standard curve; a checked
            empty slot weighs nothing, which the label says. -->
-      <div class="flex flex-col gap-1 text-xs" data-user-weighting>
-        <div v-for="slot in ([1, 2] as const)" :key="slot" class="flex items-center gap-1.5">
+      <div class="tb-field" data-user-weighting>
+        <div v-for="slot in ([1, 2] as const)" :key="slot" class="tb-check-row">
           <label class="flex items-center gap-1" :title="`Apply user weighting table ${slot} on top of the standard curve.`">
             <input
               type="checkbox"

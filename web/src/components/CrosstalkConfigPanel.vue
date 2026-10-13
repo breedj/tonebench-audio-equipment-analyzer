@@ -12,6 +12,7 @@ import { useLoadOhms } from '../composables/useLoadOhms'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
+import EstimateBadge from './EstimateBadge.vue'
 import {
   adaptiveFftBounds,
   adaptiveFftSize,
@@ -326,67 +327,80 @@ function run() {
 
 <template>
   <CollapsibleSection title="Crosstalk sweep">
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="Lowest frequency measured. The sweep steps upward from here.">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field" title="Lowest frequency measured. The sweep steps upward from here.">
         Start (Hz)
         <input
           v-model.number="form.startFreqHz"
           type="number"
           min="1"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label class="flex flex-col gap-1" title="Highest frequency measured. Anything above 98% of Nyquist is dropped.">
+      <label class="tb-field" title="Highest frequency measured. Anything above 98% of Nyquist is dropped.">
         End (Hz)
         <input
           v-model.number="form.endFreqHz"
           type="number"
           min="2"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
+        />
+      </label>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2.5">
+      <label
+        class="tb-field"
+        title="How many measurement points per octave. More points resolve narrow features but take proportionally longer — every point is its own capture."
+      >
+        Steps per octave
+        <input
+          v-model.number="form.stepsPerOctave"
+          type="number"
+          min="1"
+          max="48"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+      <label class="tb-field" title="Averages per point. More averages lower the noise floor of every reading, at a proportional cost in time.">
+        Averages per point
+        <input
+          v-model.number="form.averageCount"
+          type="number"
+          min="1"
+          max="10"
+          :disabled="running"
+          class="tb-input"
         />
       </label>
     </div>
 
     <label
-      class="flex flex-col gap-1 text-xs"
-      title="How many measurement points per octave. More points resolve narrow features but take proportionally longer — every point is its own capture."
-    >
-      Steps per octave
-      <input
-        v-model.number="form.stepsPerOctave"
-        type="number"
-        min="1"
-        max="48"
-        :disabled="running"
-        class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      />
-    </label>
-
-    <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Which amplifier channel is driven (the aggressor). The other channel's input should be shorted; its output is the victim. Both outputs must be loaded."
     >
       Direction
       <select
         v-model="form.direction"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="d in DIRECTIONS" :key="d.value" :value="d.value" :title="d.title">{{ d.label }}</option>
       </select>
     </label>
 
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Generator voltage holds the drive constant. The two output modes probe at 1 kHz first and solve for the generator level that reaches the target at the aggressor's output — per direction, since the two channels need not have the same gain."
     >
       Level mode
       <select
         v-model="form.levelMode"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
@@ -394,23 +408,23 @@ function run() {
 
     <!-- Level is as narrow as Steps per octave, the THD sweep's width for a short number: a level
          is a few digits, and a field the width of the rail reads as if it expected more. -->
-    <div class="flex items-end gap-2 text-xs">
-      <label class="flex flex-col gap-1">
+    <div class="grid grid-cols-[2fr_1fr] items-end gap-2.5">
+      <label class="tb-field">
         {{ isPowerMode ? 'Power (W)' : 'Level' }}
         <input
           v-model.number="form.levelValue"
           type="number"
           step="any"
           :disabled="running"
-          class="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         />
       </label>
-      <label v-if="!isPowerMode" class="flex flex-col gap-1">
+      <label v-if="!isPowerMode" class="tb-field">
         Unit
         <select
           v-model="form.levelUnit"
           :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          class="tb-input"
         >
           <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
@@ -421,7 +435,7 @@ function run() {
          could disagree with it. -->
     <label
       v-if="form.levelMode !== 'GeneratorVoltage'"
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Amplifier load. Used to turn watts into a target voltage."
     >
       Load (Ω)
@@ -431,56 +445,51 @@ function run() {
         step="any"
         min="0.1"
         :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <label class="flex flex-col gap-1" title="Averages per point. More averages lower the noise floor of every reading, at a proportional cost in time.">
-        Averages per point
-        <input
-          v-model.number="form.averageCount"
-          type="number"
-          min="1"
-          max="10"
-          :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        />
-      </label>
+    <div class="grid grid-cols-2 gap-2.5">
     </div>
 
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Sizes the FFT per point instead of holding one size across the whole run, and picks the sample rate from the top of the frequency range. This measurement reads only the tone — no harmonics — so a 20 kHz run needs 48 kHz rather than 192 kHz, a quarter of the work. Turn it off for a fixed 192 kHz / 131072-point reference comparable with a THD sweep: slower, but the same resolution at every frequency."
     >
       <input v-model="form.adaptiveResolution" type="checkbox" :disabled="running" />
       Adaptive resolution
     </label>
 
-    <p
-      v-if="form.adaptiveResolution && adaptiveFftRange"
-      class="text-xs text-neutral-500 dark:text-neutral-400"
-      title="The FFT size varies per point so each record holds a similar number of cycles of the tone. The largest size is used at the bottom of the sweep, the smallest at the top."
-    >
-      Analysis: {{ effectiveSampleRateHz / 1000 }} kHz ·
-      {{ adaptiveFftRange.max }}–{{ adaptiveFftRange.min }} points ·
-      {{ (effectiveSampleRateHz / adaptiveFftRange.max).toFixed(3) }}–{{
-        (effectiveSampleRateHz / adaptiveFftRange.min).toFixed(2)
-      }}
-      Hz per bin
-    </p>
-    <p v-else class="text-xs text-neutral-500 dark:text-neutral-400">
-      Analysis: {{ FIXED_SAMPLE_RATE_HZ / 1000 }} kHz · {{ FIXED_FFT_SIZE }} points ·
-      {{ FIXED_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
-    </p>
 
-    <p class="text-xs text-neutral-500 dark:text-neutral-400">
-      ≈{{ pointCount }} points<span v-if="passCount > 1"> × {{ passCount }} passes</span> · ≈{{ durationLabel }}
-      <span v-if="truncated" class="block text-amber-600 dark:text-amber-500">
-        Above {{ maxFreqHz }} Hz is beyond Nyquist — the sweep will stop there.
-      </span>
-    </p>
 
     <p v-if="invalid" class="text-xs text-red-600 dark:text-red-400">{{ invalid }}</p>
+
+    <template #footer>
+      <p
+        v-if="form.adaptiveResolution && adaptiveFftRange"
+        class="leading-snug"
+        title="The FFT size varies per point so each record holds a similar number of cycles of the tone. The largest size is used at the bottom of the sweep, the smallest at the top."
+      >
+        Analysis: {{ effectiveSampleRateHz / 1000 }} kHz ·
+        {{ adaptiveFftRange.max }}–{{ adaptiveFftRange.min }} points ·
+        {{ (effectiveSampleRateHz / adaptiveFftRange.max).toFixed(3) }}–{{
+          (effectiveSampleRateHz / adaptiveFftRange.min).toFixed(2)
+        }}
+        Hz per bin
+      </p>
+      <p v-else class="leading-snug">
+        Analysis: {{ FIXED_SAMPLE_RATE_HZ / 1000 }} kHz · {{ FIXED_FFT_SIZE }} points ·
+        {{ FIXED_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
+      </p>
+      <div class="flex flex-wrap items-center gap-2">
+        <EstimateBadge kind="points" title="How many frequencies the sweep will measure, per pass.">
+          ≈ {{ pointCount }} points<template v-if="passCount > 1"> × {{ passCount }}</template>
+        </EstimateBadge>
+        <EstimateBadge kind="time" title="Roughly how long the whole sweep will take.">≈ {{ durationLabel }}</EstimateBadge>
+      </div>
+      <span v-if="truncated" class="text-amber-600 dark:text-amber-500">
+        Above {{ maxFreqHz }} Hz is beyond Nyquist — the sweep will stop there.
+      </span>
+    </template>
   </CollapsibleSection>
 </template>

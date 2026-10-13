@@ -2,6 +2,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import {
   MANUAL_EDITIONS,
+  MANUAL_EDITION_TONES,
+  MANUAL_GROUP_TONES,
   manualCounterpart,
   manualEdition,
   manualPageById,
@@ -10,6 +12,7 @@ import {
   type ManualGroup,
 } from './pages'
 import { useManual } from './useManual'
+import PanelIcon from '../components/PanelIcon.vue'
 
 // Its own <dialog> rather than Modal.vue: the manual needs a two-column layout and far more width
 // than that component's max-w-lg card, and it scrolls its content column independently of the
@@ -79,17 +82,20 @@ function onCancel(e: Event) {
 <template>
   <dialog
     ref="dialogRef"
-    class="m-auto h-[85vh] w-[min(64rem,92vw)] max-w-none rounded-lg border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+    class="m-auto h-[85vh] w-[min(65rem,92vw)] max-w-none rounded-2xl border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 dark:border-neutral-800 dark:text-neutral-100"
     @cancel="onCancel"
   >
     <div class="flex h-full flex-col">
+      <!-- The 2026-10-13 chrome, hand-written here rather than taken from Modal: this dialog is a
+           book, so the header carries the edition switch and the breadcrumb back to the contents. -->
       <div
-        class="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800"
+        class="flex shrink-0 items-center gap-3 border-b border-neutral-200 py-3 pr-3 pl-5 dark:border-neutral-800"
       >
-        <h2 class="flex min-w-0 items-center gap-2 text-sm font-semibold">
+        <PanelIcon icon="book" tone="amber" :size="32" />
+        <h2 class="flex min-w-0 flex-1 items-center gap-2 text-[17px] font-semibold">
           <button
             type="button"
-            class="rounded text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            class="rounded hover:text-neutral-500 dark:hover:text-neutral-400"
             :class="{ 'pointer-events-none': page === null }"
             @click="showPage(null)"
           >
@@ -97,121 +103,236 @@ function onCancel(e: Event) {
           </button>
           <template v-if="page">
             <span class="text-neutral-300 dark:text-neutral-700">/</span>
-            <span class="truncate">{{ page.title }}</span>
+            <span class="truncate text-[15px] font-normal text-neutral-600 dark:text-neutral-300">
+              {{ page.title }}
+            </span>
           </template>
         </h2>
+
+        <!-- Which manual. Always both, always visible: the simple guide is only useful if it is
+             found, and the reader who has outgrown it needs the way back to be just as obvious. In
+             the header rather than at the top of the index, where it was easy to miss. -->
+        <div class="tb-segment-track hidden grid-cols-2 sm:grid" role="group" aria-label="Manual edition">
+          <button
+            v-for="e in MANUAL_EDITIONS"
+            :key="e.id"
+            type="button"
+            class="tb-segment px-3.5"
+            :class="e.id === edition ? 'tb-segment-on' : ''"
+            :style="e.id === edition ? { color: `var(--kind-${MANUAL_EDITION_TONES[e.id]}-chip-fg)` } : undefined"
+            :aria-pressed="e.id === edition"
+            :title="e.blurb"
+            @click="showEdition(e.id)"
+          >
+            {{ e.title }}
+          </button>
+        </div>
+
         <button
           type="button"
-          class="shrink-0 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+          class="flex size-10 shrink-0 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           aria-label="Close"
           @click="closeManual"
         >
-          ✕
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
         </button>
       </div>
 
       <div class="flex min-h-0 flex-1">
         <!-- Index. Always present, so a page is never a dead end and the whole manual stays one
-             click away from wherever a measurement's own help button dropped you. -->
-        <nav class="hidden w-56 shrink-0 overflow-y-auto border-r border-neutral-200 p-3 md:block dark:border-neutral-800">
-          <!-- Which manual. Always both, always visible: the simple guide is only useful if it is
-               found, and the reader who has outgrown it needs the way back to be just as obvious. -->
-          <div class="mb-3 flex rounded border border-neutral-200 p-0.5 text-xs dark:border-neutral-700">
-            <button
-              v-for="e in MANUAL_EDITIONS"
-              :key="e.id"
-              type="button"
-              class="flex-1 rounded px-1.5 py-1 text-center"
-              :class="
-                e.id === edition
-                  ? 'bg-blue-600 font-medium text-white'
-                  : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-              "
-              :title="e.blurb"
-              @click="showEdition(e.id)"
-            >
-              {{ e.title }}
-            </button>
-          </div>
+             click away from wherever a measurement's own help button dropped you. On the ground
+             tone, so the page beside it reads as the paper. -->
+        <nav
+          class="hidden w-[250px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-neutral-200 p-2.5 md:flex dark:border-neutral-800"
+          :style="{ backgroundColor: 'var(--surface-ground)' }"
+          aria-label="Manual contents"
+        >
           <button
             type="button"
-            class="mb-2 w-full rounded px-2 py-1 text-left text-xs font-medium"
+            class="flex items-center gap-2 rounded-lg px-2.5 py-[7px] text-left text-[12.5px] font-semibold"
             :class="
               page === null
-                ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+                ? 'border border-neutral-200 bg-[var(--surface-panel)] dark:border-neutral-700'
+                : 'border border-transparent text-neutral-600 hover:bg-neutral-200/60 dark:text-neutral-300 dark:hover:bg-neutral-800'
             "
             @click="showPage(null)"
           >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="shrink-0"
+              :style="{ color: `var(--kind-${MANUAL_EDITION_TONES[edition]}-chip-fg)` }"
+              aria-hidden="true"
+            >
+              <path d="M4 6h16M4 12h16M4 18h10" />
+            </svg>
             Contents
           </button>
+
           <template v-for="group in editionInfo.groups" :key="group">
-            <p
-              class="mt-3 mb-1 px-2 text-[10px] font-semibold tracking-wide text-neutral-400 uppercase dark:text-neutral-600"
+            <div
+              class="flex items-center gap-2 px-2.5 pt-3.5 pb-1 text-[11px] font-semibold tracking-[0.06em] uppercase"
+              :style="{ color: `var(--kind-${MANUAL_GROUP_TONES[group]}-chip-fg)` }"
             >
+              <span
+                class="size-1.5 rounded-full"
+                :style="{ backgroundColor: `var(--kind-${MANUAL_GROUP_TONES[group]}-chip-fg)` }"
+              ></span>
               {{ group }}
-            </p>
+            </div>
             <button
               v-for="p in pagesIn(group)"
               :key="p.id"
               type="button"
-              class="block w-full rounded px-2 py-1 text-left text-xs"
+              class="flex items-center gap-2 rounded-lg px-2.5 py-[5px] text-left text-[12.5px] leading-[1.35]"
               :class="
                 p.id === pageId
-                  ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                  : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+                  ? 'bg-[var(--surface-panel)] font-semibold'
+                  : 'text-neutral-600 hover:bg-neutral-200/60 dark:text-neutral-300 dark:hover:bg-neutral-800'
               "
               @click="showPage(p.id)"
             >
+              <span
+                class="size-2 shrink-0 rounded-full"
+                :style="{ backgroundColor: `var(--kind-${MANUAL_GROUP_TONES[group]}-chip-bg)` }"
+              ></span>
               {{ p.title }}
             </button>
           </template>
         </nav>
 
-        <div ref="contentRef" class="manual-prose min-w-0 flex-1 overflow-y-auto px-6 py-5">
-          <!-- The index page. The sidebar carries the same links, but it is hidden on a narrow
-               window and it has no room for the one-line summaries. -->
-          <template v-if="page === null">
-            <h1>Tonebench — {{ editionInfo.title.toLowerCase() }}</h1>
-            <p>{{ editionInfo.blurb }}</p>
-            <p v-if="edition === 'reference'">
-              One chapter per measurement, plus the parts every measurement shares. Each measurement
-              screen also carries its own <strong>?</strong> button, which opens that measurement's
-              chapter directly.
-            </p>
-            <p v-else>
-              Thirteen short pages, in the order it is worth reading them. Nothing here needs any
-              maths, and nothing here is a different app — every page names the chapter in the full
-              manual that goes further on the same subject.
-            </p>
-            <p class="manual-edition-invite">
-              <template v-if="edition === 'reference'">
-                New to audio measurement? The
-                <button type="button" class="manual-link" @click="showEdition('guide')">
-                  simple guide
-                </button>
-                covers the same bench in plain language, without the conventions and the measured
-                figures.
-              </template>
-              <template v-else>
-                Everything in more detail — every control, every setting, every convention — is in the
-                <button type="button" class="manual-link" @click="showEdition('reference')">
-                  full manual</button
-                >.
-              </template>
-            </p>
-            <template v-for="group in editionInfo.groups" :key="group">
-              <h2>{{ group }}</h2>
-              <ul class="manual-index">
-                <li v-for="p in pagesIn(group)" :key="p.id">
-                  <button type="button" class="manual-link" @click="showPage(p.id)">{{ p.title }}</button>
-                  <span class="manual-index-summary">{{ p.summary }}</span>
-                </li>
-              </ul>
-            </template>
-          </template>
+        <div ref="contentRef" class="min-w-0 flex-1 overflow-y-auto">
+          <!-- The contents page. Outside `.manual-prose` on purpose: its rules set the type for a
+               chapter, and this page is a set of cards rather than prose. The index beside it
+               carries the same links but has no room for the one-line summaries, and is hidden on a
+               narrow window. -->
+          <div v-if="page === null" class="flex flex-col gap-4 px-9 py-7">
+            <div class="flex flex-col gap-2">
+              <span
+                class="self-start rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.06em] uppercase"
+                :style="{
+                  backgroundColor: `var(--kind-${MANUAL_EDITION_TONES[edition]}-chip-bg)`,
+                  color: `var(--kind-${MANUAL_EDITION_TONES[edition]}-chip-fg)`,
+                }"
+              >
+                {{ editionInfo.title }}
+              </span>
+              <h1 class="text-[26px] leading-tight font-semibold tracking-tight">
+                Tonebench — {{ editionInfo.title.toLowerCase() }}
+              </h1>
+              <p class="text-[14px] leading-[1.55] text-neutral-600 dark:text-neutral-300">
+                {{ editionInfo.blurb }}
+              </p>
+              <p v-if="edition === 'reference'" class="text-[14px] leading-[1.55] text-neutral-600 dark:text-neutral-300">
+                One chapter per measurement, plus the parts every measurement shares. Each measurement
+                screen also carries its own
+                <span
+                  class="inline-flex size-[18px] items-center justify-center rounded-full border border-neutral-300 align-[1px] text-[11px] text-neutral-600 dark:border-neutral-600 dark:text-neutral-300"
+                  >?</span
+                >
+                button, which opens that measurement's chapter directly.
+              </p>
+              <p v-else class="text-[14px] leading-[1.55] text-neutral-600 dark:text-neutral-300">
+                A short page per job, in the order it is worth reading them. Nothing here needs any
+                maths, and nothing here is a different app — every page names the chapter in the full
+                manual that goes further on the same subject.
+              </p>
+            </div>
 
-          <template v-else>
+            <!-- The invitation to the other edition. A card rather than a quoted aside: it is the
+                 one thing on this page that is about a different book. -->
+            <div class="dialog-card flex items-center gap-3 px-3.5 py-3">
+              <PanelIcon icon="book" :tone="MANUAL_EDITION_TONES[edition === 'reference' ? 'guide' : 'reference']" :size="34" />
+              <p class="flex-1 text-[13px] leading-[1.5] text-neutral-600 dark:text-neutral-300">
+                <template v-if="edition === 'reference'">
+                  <strong class="font-semibold text-neutral-900 dark:text-neutral-100">
+                    New to audio measurement?
+                  </strong>
+                  The
+                  <button type="button" class="manual-link" @click="showEdition('guide')">simple guide</button>
+                  covers the same bench in plain language, without the conventions and the measured
+                  figures.
+                </template>
+                <template v-else>
+                  <strong class="font-semibold text-neutral-900 dark:text-neutral-100">
+                    Want the whole of it?
+                  </strong>
+                  Every control, every setting and every convention is in the
+                  <button type="button" class="manual-link" @click="showEdition('reference')">
+                    full manual</button
+                  >.
+                </template>
+              </p>
+            </div>
+
+            <section v-for="group in editionInfo.groups" :key="group" class="mt-1.5 flex flex-col gap-2.5">
+              <div class="flex items-center gap-2">
+                <h2
+                  class="rounded-full px-2.5 py-[3px] text-[11px] font-semibold tracking-[0.06em] uppercase"
+                  :style="{
+                    backgroundColor: `var(--kind-${MANUAL_GROUP_TONES[group]}-chip-bg)`,
+                    color: `var(--kind-${MANUAL_GROUP_TONES[group]}-chip-fg)`,
+                  }"
+                >
+                  {{ group }}
+                </h2>
+                <span class="text-[12px] text-neutral-500 dark:text-neutral-400">
+                  {{ pagesIn(group).length }} page{{ pagesIn(group).length === 1 ? '' : 's' }}
+                </span>
+                <span class="h-px flex-1 bg-neutral-200 dark:bg-neutral-800"></span>
+              </div>
+
+              <div class="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+                <button
+                  v-for="p in pagesIn(group)"
+                  :key="p.id"
+                  type="button"
+                  class="dialog-card flex flex-col gap-1 rounded-[10px] px-3.5 py-3 text-left hover:border-neutral-300 dark:hover:border-neutral-700"
+                  @click="showPage(p.id)"
+                >
+                  <span class="flex items-center justify-between gap-2 text-[13.5px] font-semibold">
+                    {{ p.title }}
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="shrink-0 text-neutral-400"
+                      aria-hidden="true"
+                    >
+                      <path d="M9 6l6 6-6 6" />
+                    </svg>
+                  </span>
+                  <span class="text-[12.5px] leading-[1.45] text-neutral-500 dark:text-neutral-400">
+                    {{ p.summary }}
+                  </span>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <div v-else class="manual-prose px-9 py-6">
             <!-- The cross-edition link. Rendered by the shell rather than written into each page, so
                  both directions exist wherever a counterpart is declared and neither can rot: the
                  page bodies never mention the other manual's page titles. -->
@@ -245,13 +366,12 @@ function onCancel(e: Event) {
                 {{ nextPage.title }} →
               </button>
             </div>
-          </template>
+          </div>
         </div>
       </div>
     </div>
   </dialog>
 </template>
-
 <style>
 /* Unscoped on purpose: the page bodies are separate components, so a scoped rule would not reach
    their markup and every page would have to carry its own typography classes. Plain CSS rather
@@ -419,12 +539,13 @@ function onCancel(e: Event) {
 .dark .manual-prose .manual-figure figcaption {
   color: rgb(163 163 163);
 }
-.manual-prose .manual-link {
+/* Not scoped to `.manual-prose`: the contents page is cards rather than prose and still links. */
+.manual-link {
   color: rgb(29 78 216);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.dark .manual-prose .manual-link {
+.dark .manual-link {
   color: rgb(147 197 253);
 }
 .manual-prose .manual-wiring-links {

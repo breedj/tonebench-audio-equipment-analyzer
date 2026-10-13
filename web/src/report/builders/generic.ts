@@ -58,9 +58,46 @@ export function genericSettingsRows(paramsJson: string): ReportRow[] {
   return rows
 }
 
+/**
+ * The groups the as-run settings are shown in, and the one word that puts a row in each.
+ *
+ * A measurement's `params_json` runs to thirty-odd keys, and thirty rows in one column is a list
+ * nobody reads (the 2026-10-13 design draws four boxes instead). The grouping is by keyword rather
+ * than by an exhaustive table of key names, because the keys differ per kind and a table would have
+ * to be written again for every one of them — and a keyword nobody matched is not a lost row:
+ * everything left over goes in the last group, which is what `groupSettingsRows` is tested on.
+ */
+const SETTING_GROUPS: { name: string; match: RegExp }[] = [
+  { name: 'Acquisition', match: /sample rate|fft|window|averag|block|channel|resolution|span|sweep|steps|points|duration/i },
+  { name: 'Analysis', match: /band|harmonic|fundamental|notch|peak|weight|smooth|method|reference|gate|limit/i },
+  { name: 'Levels & generator', match: /level|range|gain|amplitude|volt|dbv|generator|load|impedance|stimulus|tone|freq/i },
+]
+
+/** The last group, which is what makes the grouping lossless. */
+const OTHER_GROUP = 'Other settings'
+
+/**
+ * Every row in exactly one named group, in the groups' own order. Exported for the test: the
+ * property that matters is not which box a row lands in but that every row lands in one, since a
+ * settings list that quietly drops a row is a report that lies about what ran.
+ */
+export function groupSettingsRows(rows: readonly ReportRow[]): { name: string; rows: ReportRow[] }[] {
+  const named = new Map<string, ReportRow[]>()
+  for (const row of rows) {
+    const group = SETTING_GROUPS.find((g) => g.match.test(row.label))?.name ?? OTHER_GROUP
+    const bucket = named.get(group)
+    if (bucket) bucket.push(row)
+    else named.set(group, [row])
+  }
+
+  const order = [...SETTING_GROUPS.map((g) => g.name), OTHER_GROUP]
+  return order.filter((name) => named.has(name)).map((name) => ({ name, rows: named.get(name)! }))
+}
+
 export function genericSettingsSection(paramsJson: string): ReportSection {
   const rows = genericSettingsRows(paramsJson)
-  return rows.length > 0
-    ? { kind: 'keyValues', title: 'Settings', rows }
-    : { kind: 'paragraph', title: 'Settings', text: 'No settings were recorded.' }
+  if (rows.length === 0) return { kind: 'paragraph', title: 'Settings', text: 'No settings were recorded.' }
+  // Short enough to read down a column stays one; past that the boxes earn their keep.
+  if (rows.length <= 6) return { kind: 'keyValues', title: 'Settings', rows }
+  return { kind: 'groups', title: 'Settings', groups: groupSettingsRows(rows) }
 }

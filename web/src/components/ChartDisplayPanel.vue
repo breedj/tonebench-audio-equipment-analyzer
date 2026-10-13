@@ -114,7 +114,7 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
        screen's display panel. The width is the shell's xl column, the same 16rem as every other screen. -->
   <div class="contents">
     <CollapsibleSection title="Level range" size="xs">
-      <label class="flex flex-col gap-1 text-xs" title="dBV per bin, or a noise density in dBV/√Hz (the bin's power spread over the window's noise bandwidth), optionally referred to the DUT's input by its gain. Picking the input-referred unit reveals the DUT gain field below, which also divides the Noise in nV/√Hz tile. See the manual's FFT analysis page.">
+      <label class="tb-field" title="dBV per bin, or a noise density in dBV/√Hz (the bin's power spread over the window's noise bandwidth), optionally referred to the DUT's input by its gain. Picking the input-referred unit reveals the DUT gain field below, which also divides the Noise in nV/√Hz tile. See the manual's FFT analysis page.">
         Units
         <select
           v-model="spectrumUnit"
@@ -126,7 +126,7 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
       </label>
       <label
         v-if="showDutGain"
-        class="flex flex-col gap-1 text-xs"
+        class="tb-field"
         title="The DUT's gain from its input to the analyzer's input, in dB. The input-referred unit and the Noise in nV/√Hz tile divide the measured noise density by it, so a preamp's output floor reads as the noise at its input. 0 for a loopback. Saved with the measurement."
       >
         DUT gain (dB)
@@ -137,29 +137,31 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
           class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
         />
       </label>
-      <label class="flex flex-col gap-1 text-xs">
-        Top
-        <input
-          v-model.number="yTop"
-          type="number"
-          step="10"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
-        />
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        Bottom
-        <input
-          v-model.number="yBottom"
-          type="number"
-          step="10"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
-        />
-      </label>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          Top
+          <input
+            v-model.number="yTop"
+            type="number"
+            step="10"
+            class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+          />
+        </label>
+        <label class="tb-field">
+          Bottom
+          <input
+            v-model.number="yBottom"
+            type="number"
+            step="10"
+            class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+          />
+        </label>
+      </div>
       <!-- The chart's one Autofit. It sits in the first section rather than in Display below,
            where it would be a scroll away from the fields it overwrites. -->
       <button
         type="button"
-        class="w-full rounded border px-2 py-1 text-xs btn-action"
+        class="btn-panel-accent"
         title="Fits both axes to everything currently plotted: the level range to the highest and lowest point with 10 dB of headroom, and the frequency range to the full measured span."
         @click="autofitAll"
       >
@@ -168,95 +170,97 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
     </CollapsibleSection>
 
     <CollapsibleSection title="Frequency range" size="xs">
-      <label class="flex flex-col gap-1 text-xs">
-        From
-        <select
-          v-model.number="xFrom"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
-        >
-          <option v-for="f in fromOptions" :key="f" :value="f">{{ f }}</option>
-        </select>
-      </label>
-      <label class="flex flex-col gap-1 text-xs">
-        To
-        <select
-          v-model.number="xTo"
-          class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
-        >
-          <option v-for="f in toOptions" :key="f" :value="f">{{ f }}</option>
-        </select>
-      </label>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          From
+          <select
+            v-model.number="xFrom"
+            class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+          >
+            <option v-for="f in fromOptions" :key="f" :value="f">{{ f }}</option>
+          </select>
+        </label>
+        <label class="tb-field">
+          To
+          <select
+            v-model.number="xTo"
+            class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+          >
+            <option v-for="f in toOptions" :key="f" :value="f">{{ f }}</option>
+          </select>
+        </label>
+      </div>
     </CollapsibleSection>
 
     <!-- text-xs throughout, the same size SweepDisplayPanel uses, so the two screens' display
          rails read alike; the Channels row is that panel's too (caption, then Left/Right side by side). -->
     <CollapsibleSection title="Display">
-      <section class="flex flex-col gap-1.5 text-xs">
-        <label class="flex items-center gap-1.5">
-          <input v-model="thickLines" type="checkbox" />
+      <section class="flex flex-col gap-2">
+        <label class="tb-check-row">
+          <input v-model="thickLines" type="checkbox" class="tb-check" />
           Thick lines
         </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="showDataPoints" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="showDataPoints" type="checkbox" class="tb-check" />
           Show data points
         </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="autofitOnDone" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="autofitOnDone" type="checkbox" class="tb-check" />
           Autofit when measurement done
         </label>
       </section>
 
-      <div class="flex flex-col gap-1.5 text-xs">
-        <span class="text-neutral-500 dark:text-neutral-400">Channels</span>
+      <div class="flex flex-col gap-2">
+        <span class="tb-group">Channels</span>
         <div class="flex gap-3">
-          <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processLeft }">
+          <label class="tb-check-row" :class="{ 'opacity-40': !processLeft }">
             <input v-model="visibleL" type="checkbox" :disabled="!processLeft" />
             Left
           </label>
-          <label class="flex items-center gap-1.5" :class="{ 'opacity-40': !processRight }">
+          <label class="tb-check-row" :class="{ 'opacity-40': !processRight }">
             <input v-model="visibleR" type="checkbox" :disabled="!processRight" />
             Right
           </label>
         </div>
       </div>
 
-      <section class="flex flex-col gap-1.5 text-xs">
+      <section class="flex flex-col gap-2">
         <label
-          class="flex items-center gap-1.5"
+          class="tb-check-row"
           title="The live capture: the spectrum line and the min/max band under it, which is the same data. Unchecking it clears Min/max too and leaves the peak-hold trace on its own — a still picture of the worst case so far, with nothing redrawn over the top of it. Ticking it back on restores the band."
         >
-          <input v-model="showFftTrace" type="checkbox" />
+          <input v-model="showFftTrace" type="checkbox" class="tb-check" />
           FFT data
         </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="showMinMax" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="showMinMax" type="checkbox" class="tb-check" />
           Min/max
         </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="showPeakHold" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="showPeakHold" type="checkbox" class="tb-check" />
           Peak-hold
         </label>
         <button
           v-if="showPeakHold"
           type="button"
-          class="w-full rounded border px-2 py-1 text-xs btn-action"
+          class="btn-panel-accent"
           title="Clears the peak-hold trace and starts capturing fresh maximums."
           @click="requestResetPeakHold"
         >
           Reset peak-hold
         </button>
         <label
-          class="flex items-center gap-1.5"
+          class="tb-check-row"
           title="The vertical lines at H2, H3 … over the spectrum, each labelled with its level in dBc. The harmonics table below the chart reads the same figures either way."
         >
-          <input v-model="showHarmonicMarkers" type="checkbox" />
+          <input v-model="showHarmonicMarkers" type="checkbox" class="tb-check" />
           Harmonic markers
         </label>
         <label
-          class="flex items-center gap-1.5"
+          class="tb-check-row"
           title="Draws the weighting in effect as a dashed amber curve — shape only, hung 20 dB below the top of the level range. Nothing is drawn while the weighting is None."
         >
-          <input v-model="showWeightingCurve" type="checkbox" />
+          <input v-model="showWeightingCurve" type="checkbox" class="tb-check" />
           Weighting curve
         </label>
       </section>
@@ -268,20 +272,20 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
            peaks off -- see useChartDisplay.ts. Spectrogram and Oscilloscope are hidden rather than
            unmounted (App.vue), so what they showed comes back. -->
       <section class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 text-xs dark:border-neutral-800">
-        <label class="flex items-center gap-1.5">
-          <input v-model="showSpectrogram" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="showSpectrogram" type="checkbox" class="tb-check" />
           Spectrogram
         </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="showOscilloscope" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="showOscilloscope" type="checkbox" class="tb-check" />
           Oscilloscope
         </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="showHarmonics" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="showHarmonics" type="checkbox" class="tb-check" />
           Harmonics
         </label>
-        <label class="flex items-center gap-1.5">
-          <input v-model="showOtherPeaks" type="checkbox" />
+        <label class="tb-check-row">
+          <input v-model="showOtherPeaks" type="checkbox" class="tb-check" />
           Other peaks
         </label>
       </section>

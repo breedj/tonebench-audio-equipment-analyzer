@@ -49,8 +49,8 @@ const { showPage } = useManual()
 
     <h2>Running it</h2>
     <p>
-      One button: <strong>RUN SWEEP</strong>, which walks the points once and stops.
-      <strong>STOP</strong> ends it early and keeps what was measured. There is no repeat-until-stopped
+      One button: <strong>Run sweep</strong>, which walks the points once and stops.
+      <strong>Stop</strong> ends it early and keeps what was measured. There is no repeat-until-stopped
       mode, because a run of minutes is not something anyone wants looping.
     </p>
 
@@ -74,7 +74,7 @@ const { showPage } = useManual()
           <td>Steps per octave</td>
           <td>
             Point density. Every point is its own capture, so this is the dominant cost of the
-            measurement — the estimate underneath is worth reading before pressing RUN SWEEP.
+            measurement — the estimate underneath is worth reading before pressing Run sweep.
           </td>
         </tr>
         <tr>

@@ -226,9 +226,318 @@
       border-color 0.12s ease,
       box-shadow 0.12s ease;
   }
+  /* THE WELCOME PAGE'S PRIMARY CARD (New project). In the light theme it is the mockup's ink card —
+     one filled block against two outlined ones, which is what makes it the obvious way in.
+     Inverting it for the dark theme the way every primary *button* here inverts turned the one card
+     that is not a measurement into the brightest surface on the screen (Joost, 2026-10-12), so in
+     dark it is a card raised a step above the panel instead, and what marks it as primary is the
+     accent chip and the lift — which is how "this one" is marked everywhere else in the app.
+
+     Written as `:where(.dark) …` rather than `dark:` utilities because the chip's two grounds are a
+     literal and a variable, and the pair has to stay together in one place. */
+  .welcome-card-primary {
+    @apply flex items-start gap-3.5 rounded-xl border border-neutral-900 bg-neutral-900 p-4 text-left text-white;
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease,
+      box-shadow 0.12s ease;
+  }
+  .welcome-card-primary:hover {
+    @apply bg-neutral-800;
+  }
+  .welcome-card-primary-chip {
+    background-color: rgb(255 255 255 / 0.15);
+    color: #ffffff;
+  }
+  .welcome-card-primary-note {
+    @apply text-neutral-300;
+  }
+
+  :where(.dark) .welcome-card-primary {
+    @apply border-neutral-700 text-neutral-100;
+    background-color: var(--kind-card-hover-bg);
+  }
+  :where(.dark) .welcome-card-primary:hover {
+    @apply border-neutral-600;
+    background-color: #262b36;
+  }
+  :where(.dark) .welcome-card-primary-chip {
+    background-color: var(--kind-blue-chip-bg);
+    color: var(--kind-blue-chip-fg);
+  }
+  :where(.dark) .welcome-card-primary-note {
+    @apply text-neutral-400;
+  }
+
+  /* The welcome page's two outlined action cards (Open project, Manual). A class rather than the
+     same eight utilities twice, because what makes them a pair is that they are identical — the
+     filled New project card above them differs on purpose. They lift on hover the way the
+     measurement picker's cards do, and share its variables. */
+  .welcome-card {
+    @apply flex items-start gap-3.5 rounded-xl border border-neutral-200 p-4 text-left dark:border-neutral-800;
+    background-color: var(--surface-panel);
+    transition:
+      border-color 0.12s ease,
+      box-shadow 0.12s ease;
+  }
+  .welcome-card:hover {
+    border-color: var(--kind-card-hover-border);
+    box-shadow: var(--kind-card-hover-shadow);
+  }
+
   .kind-card:hover:not(:disabled) {
     background-color: var(--kind-card-hover-bg);
     border-color: var(--kind-card-hover-border);
     box-shadow: var(--kind-card-hover-shadow);
+  }
+}
+
+/* ---------------------------------------------------------------------------------------------
+   THE 2026-10-12 PANEL LANGUAGE (Joost's two mockups: "Freq. response · P4 Tabbed" and
+   "THD · P6 Readout + Results", in docs/design/).
+
+   Everything below is geometry and two new tints; the four surface tones above still decide every
+   background, so a panel, a field and a plot keep reading the same way they did. What the mockups
+   change is the *shape* of a panel — a round tinted icon beside its title, a 12 px radius, 32 px
+   fields on an 8 px radius with their label above in 12 px grey, and uppercase 11 px rules between
+   groups of them — plus two controls that had no single spelling before: the segmented toggle
+   (Projection, View, Units) and the measurement status bar with its progress track.
+
+   Classes rather than copies in forty templates, for the reason `.panel-surface` and `.btn-action`
+   are classes: a field that drifts from the rest is invisible in review and obvious on screen. They
+   live in `@layer components` so a template's own utility still wins — a few fields are deliberately
+   narrower (`w-20`) or read-only (`bg-neutral-100`), and those have to keep overriding. */
+
+:root {
+  /* The track a segmented toggle's buttons sit in, and the selected button's lift. A fifth tone,
+     and the only one that is not a surface in the sense above: it is a *recess* inside a panel,
+     the way a text box is, but it has to be a step darker than `--surface-control` or the selected
+     white button on top of it has nothing to stand out from. */
+  --surface-track: #f1f5f9;
+  --segment-selected-bg: #ffffff;
+  --segment-selected-shadow: 0 1px 2px rgb(15 23 42 / 0.12);
+  /* The bar behind a progress fill — same idea, and deliberately the same value, so a toggle track
+     and a progress track read as one material. */
+  --surface-progress: #f1f5f9;
+}
+.dark {
+  --surface-track: #15181d;
+  --segment-selected-bg: #2b3038;
+  --segment-selected-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+  --surface-progress: #15181d;
+}
+
+@layer components {
+  /* A form field: the 12 px grey caption above its control. `tb-field` is the label element,
+     `tb-input` the control inside it. Two classes rather than one descendant rule, because a good
+     many controls sit outside a label (a grid cell of their own, a row with a unit beside them). */
+  .tb-field {
+    @apply flex min-w-0 flex-col gap-1 text-[12px] text-neutral-500 dark:text-neutral-400;
+  }
+  .tb-input {
+    @apply h-8 w-full min-w-0 rounded-lg border border-neutral-300 px-2 text-[13px] text-neutral-900;
+    @apply disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-100;
+  }
+  /* The same control one step smaller, for a row that has to carry a label beside it as well — the
+     chart toolbars and the status bar's own dropdowns. */
+  .tb-input-sm {
+    @apply h-7 w-full min-w-0 rounded-md border border-neutral-300 px-1.5 text-[12px] text-neutral-900;
+    @apply disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-100;
+  }
+  /* A checkbox or radio and its text. The 15 px box is the mockup's; the browser default is 13.
+     `tb-check-row` is the label around it, so a column of them lines up on the box rather than on
+     the text. */
+  .tb-check {
+    @apply h-[15px] w-[15px] shrink-0 accent-blue-600;
+  }
+  .tb-check-row {
+    @apply flex items-center gap-2 text-[13px] text-neutral-800 dark:text-neutral-200;
+  }
+  /* The uppercase rule between groups of fields inside one panel — PROJECTION, VIEW, BANDWIDTH,
+     GENERATOR, CHIRP, PROCESSING. `tb-group` is the bare caption (the display rail's form, where
+     the panel is narrow); `tb-rule` adds the hairline that runs out to the panel's edge, which is
+     what the settings rail's longer forms use. */
+  .tb-group {
+    @apply text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 dark:text-neutral-400;
+  }
+  .tb-rule {
+    @apply flex items-center gap-2;
+  }
+  .tb-rule::after {
+    content: '';
+    @apply h-px flex-1 bg-neutral-200 dark:bg-neutral-800;
+  }
+
+  /* The segmented toggle (SegmentedToggle.vue). The track, then the selected button lifted out of
+     it in the panel's own accent. Colour only — the component owns the grid, because how many
+     columns five projections need is the caller's problem. */
+  .tb-segment-track {
+    @apply gap-0.5 rounded-[10px] border border-neutral-200 p-[3px] dark:border-neutral-800;
+    background-color: var(--surface-track);
+  }
+  .tb-segment {
+    @apply h-[30px] rounded-lg px-1 text-[12px] text-neutral-600 transition dark:text-neutral-300;
+    @apply hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-neutral-100;
+  }
+  .tb-segment-on {
+    @apply font-semibold text-pink-700 dark:text-pink-300;
+    background-color: var(--segment-selected-bg);
+    box-shadow: var(--segment-selected-shadow);
+  }
+
+  /* THE RUN ROW. The trio (or the single wide button) at the top of every settings rail, which the
+     mockups draw as 44 px flat blocks on a 10 px radius — no ring, no pulse, no bold tracking. The
+     ring was there to make RUN unmissable; what makes it unmissable now is that it is the only
+     saturated block on the screen, and the status bar beside it says what it is doing.
+
+     All three carry their own colour as well as their geometry, including the disabled one, because
+     a `bg-*` utility at the call site would win over anything `@apply`ed here: Tailwind's utilities
+     layer is ordered after components, and layer order beats specificity. So the call site names a
+     variant and nothing else. */
+  .btn-run-go,
+  .btn-run-single,
+  .btn-run-stop {
+    @apply flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-[10px] text-[14px] font-semibold transition;
+    @apply text-white disabled:cursor-not-allowed;
+    @apply disabled:bg-neutral-100 disabled:text-neutral-400 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500;
+  }
+  .btn-run-go {
+    @apply bg-green-700 hover:bg-green-600;
+  }
+  .btn-run-single {
+    @apply bg-blue-700 hover:bg-blue-600;
+  }
+  .btn-run-stop {
+    @apply bg-red-600 hover:bg-red-500;
+  }
+
+  /* THE PANEL'S OWN ACTION BUTTON — Autofit, Fit to gate, Reset peak-hold. The mockups draw it as a
+     tinted block in the panel's accent rather than the outlined blue `.btn-action` that preceded it;
+     violet, because every panel that carries one is an axis-range panel and violet is that family's
+     hue. `.btn-action` stays for the buttons on a chart's own toolbar, which sit on the plot rather
+     than in a panel and are a row of several. */
+  .btn-panel-accent {
+    @apply h-[34px] w-full rounded-lg text-[13px] font-semibold;
+    background-color: var(--kind-violet-chip-bg);
+    color: var(--kind-violet-chip-fg);
+  }
+  .btn-panel-accent:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+  .btn-panel-accent:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  /* THE ESTIMATE BADGES at the foot of a settings panel: how many points the run will take and how
+     long it will take, as two pills rather than a sentence (Joost, 2026-10-12). A figure anyone
+     checks before pressing RUN is worth being able to find without reading — the sentence it
+     replaced said the same thing and had to be parsed.
+
+     Amber, which is this app's "a number to note" tint (the simulated badge on the status bar, the
+     History clock): the pills are information, not a warning and not an action. Geometry only here
+     — EstimateBadge.vue owns the icon, since what the figure *is* decides which one. */
+  .tb-badge {
+    @apply inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium;
+    background-color: var(--kind-amber-chip-bg);
+    color: var(--kind-amber-chip-fg);
+  }
+
+  /* A small two-state toggle on a chart's own toolbar — the preview charts' "Fit all". It used to
+     be a bare outline when off, which on a card already full of thin rules did not read as a
+     button at all (Joost, 2026-10-12); it now carries the segmented toggle's track, so "off" is a
+     recess and "on" is the accent. */
+  .btn-toggle-off {
+    @apply border-neutral-200 text-neutral-600 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-300 dark:hover:text-neutral-100;
+    background-color: var(--surface-track);
+  }
+
+  /* THE SOUND-CARD DIALOG'S form language (SoundCardDialog.vue, the 2026-10-12 mockup): a stack of
+     panels, each a label column against a control column with a hairline between rows. Classes
+     rather than the utilities repeated down the file, because that dialog has thirty-odd of these
+     rows and they were already drifting — some `justify-between`, some not, half the controls at
+     `w-96` and half fluid. The label column is capped rather than fixed so the dialog still works
+     when it is narrower than the mockup's 720 px. */
+  .sc-section {
+    @apply overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800;
+    background-color: var(--surface-panel);
+  }
+  .sc-head {
+    @apply flex flex-wrap items-center gap-2.5 px-3 py-2.5;
+  }
+  .sc-body {
+    @apply px-3.5 pb-3 text-[13px];
+  }
+  .sc-row {
+    @apply grid grid-cols-[minmax(0,190px)_minmax(0,1fr)] items-center gap-3 border-t border-neutral-100 py-1.5 dark:border-neutral-800;
+  }
+  .sc-label {
+    @apply text-neutral-600 dark:text-neutral-300;
+  }
+
+  /* An action button in its section's own accent — "Generate sine" in the output step's orange,
+     "Estimate peak input" in the input step's green. The tone is set at the call site from the
+     `--kind-*` pair, because which section it belongs to is what decides it. */
+  .btn-chip {
+    @apply inline-flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* THE DIALOG FOOTER'S two buttons, from the seven dialog mockups of 2026-10-13: a dark filled
+     primary at the right and an outlined secondary beside it. One pair rather than the eight
+     hand-rolled variants that were there, which had each drifted a little in height and radius.
+     `.btn-primary` inverts in the dark theme the way every primary *button* in this app does —
+     unlike the welcome page's primary *card*, which is a surface and is handled separately. */
+  .btn-primary {
+    @apply inline-flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-lg px-4 text-[13px] font-semibold;
+    @apply bg-neutral-900 text-white hover:bg-neutral-700;
+    @apply disabled:cursor-not-allowed disabled:opacity-40;
+    @apply dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white;
+  }
+  .btn-secondary {
+    @apply inline-flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-lg border border-neutral-200 px-4 text-[13px];
+    @apply hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply dark:border-neutral-700 dark:hover:bg-neutral-800;
+  }
+
+  /* A card inside a dialog body — the sections the mockups stack on the ground tone. */
+  .dialog-card {
+    @apply overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800;
+    background-color: var(--surface-panel);
+  }
+
+  /*
+   * The small circle that opens a row in a list of files or attachments. Deliberately neutral
+   * rather than one of the ten kind accents: the glyph is saying which *kind of file* a row is, and
+   * the rows are all one category, so a tint per row would be colour spent on nothing.
+   */
+  .tb-row-glyph {
+    @apply flex size-6 shrink-0 items-center justify-center rounded-full text-neutral-600 dark:text-neutral-300;
+    background-color: var(--surface-control);
+  }
+
+  .btn-chip-link {
+    @apply flex h-[26px] shrink-0 items-center rounded-md px-2 text-[12px] font-semibold;
+    @apply text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-500/10;
+    @apply disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent;
+  }
+
+  .tb-file-row {
+    @apply grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2.5 py-2 text-[13px];
+    @apply text-neutral-800 dark:text-neutral-200;
+  }
+
+  /* A tab in a dialog's own tab strip (Configuration). The selected one carries its section's hue. */
+  .tb-tab {
+    @apply flex h-11 shrink-0 items-center gap-2 border-b-2 border-transparent px-2.5 text-[13px] whitespace-nowrap;
+    @apply text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100;
+  }
+  .tb-tab-on {
+    @apply font-semibold text-neutral-900 dark:text-neutral-100;
+  }
+
+  /* The progress track on the measurement status bar. */
+  .tb-progress {
+    @apply h-1.5 overflow-hidden rounded-full;
+    background-color: var(--surface-progress);
   }
 }

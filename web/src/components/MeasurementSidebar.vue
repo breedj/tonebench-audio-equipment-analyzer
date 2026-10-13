@@ -5,7 +5,7 @@ import { SIDEBAR_PIN_MIN_WIDTH_PX, useMediaQuery } from '../composables/useMedia
 import { useUiLayout } from '../composables/useUiLayout'
 import { useTrash } from '../composables/useTrash'
 import { dropIndex, moveItem } from '../measurements/reorder'
-import MeasurementKindIcon from './MeasurementKindIcon.vue'
+import MeasurementKindChip from './MeasurementKindChip.vue'
 import NewMeasurementDialog from './NewMeasurementDialog.vue'
 
 const { types, currentTypeId, currentProjectId, dirtyTypeIds, selectType, deleteMeasurementType, reorderTypes, error } =
@@ -153,29 +153,31 @@ async function onDelete(id: number) {
     <div v-if="!pinned" class="flex flex-col items-center gap-2 p-1.5">
       <button
         type="button"
-        class="flex h-7 w-7 items-center justify-center rounded bg-neutral-900 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+        class="flex h-8 w-8 items-center justify-center rounded-[10px] bg-neutral-900 text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
         title="New measurement"
         aria-label="New measurement"
         @click="dialogOpen = true"
       >
-        +
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
       </button>
       <nav class="flex flex-col gap-0.5">
         <button
           v-for="t in types"
           :key="t.id"
           type="button"
-          class="relative flex h-8 w-8 items-center justify-center rounded"
+          class="relative flex h-9 w-9 items-center justify-center rounded-[10px]"
           :class="
             t.id === currentTypeId
-              ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-              : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              ? 'bg-blue-50 dark:bg-blue-900/30'
+              : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
           "
           :title="t.name"
           :aria-label="t.name"
           @click="onSelect(t.id)"
         >
-          <MeasurementKindIcon :kind="t.kind" />
+          <MeasurementKindChip :kind="t.kind" :size="26" />
           <span
             v-if="dirtyTypeIds.has(t.id)"
             class="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-red-500"
@@ -188,17 +190,19 @@ async function onDelete(id: number) {
            because a number does not fit in 2rem and the tooltip carries it. -->
       <button
         type="button"
-        class="relative flex h-8 w-8 items-center justify-center rounded"
+        class="relative flex h-9 w-9 items-center justify-center rounded-[10px]"
         :class="
           trashOpen
             ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-            : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+            : 'text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800'
         "
         :title="trashCount === 0 ? 'Trash (empty)' : `Trash (${trashCount})`"
         :aria-label="trashCount === 0 ? 'Trash, empty' : `Trash, ${trashCount} items`"
         @click="openTrash()"
       >
-        <span aria-hidden="true">🗑</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+        </svg>
         <span
           v-if="trashCount > 0"
           class="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500"
@@ -222,14 +226,17 @@ async function onDelete(id: number) {
       <div class="flex items-center gap-1">
         <button
           type="button"
-          class="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded bg-neutral-900 px-2 py-1.5 text-xs font-medium text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+          class="flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[10px] bg-neutral-900 px-2 text-[13px] font-semibold text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
           @click="dialogOpen = true"
         >
-          <span aria-hidden="true">+</span> New measurement
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          New measurement
         </button>
         <button
           type="button"
-          class="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-neutral-200 dark:hover:bg-neutral-800"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] hover:bg-neutral-200 dark:hover:bg-neutral-800"
           :class="sidebarPinned ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-400 dark:text-neutral-500'"
           :title="sidebarPinned ? 'Unpin: collapse the menu to icons and open it on hover' : 'Pin the menu open'"
           :aria-label="sidebarPinned ? 'Unpin menu' : 'Pin menu'"
@@ -261,11 +268,11 @@ async function onDelete(id: number) {
         <div
           v-for="(t, index) in types"
           :key="t.id"
-          class="group relative flex items-center rounded border-y border-transparent"
+          class="group relative flex items-center rounded-[10px] border-y border-transparent"
           :class="[
             t.id === currentTypeId
-              ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-              : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800',
+              ? 'bg-blue-50 font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+              : 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800',
             dragFromIndex === index ? 'opacity-40' : '',
             showsLine(index, false) ? '!border-t-blue-500' : '',
             showsLine(index, true) ? '!border-b-blue-500' : '',
@@ -283,8 +290,8 @@ async function onDelete(id: number) {
             @mousedown="gripHeldIndex = index"
             >⠿</span
           >
-          <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left text-sm" @click="onSelect(t.id)">
-            <MeasurementKindIcon :kind="t.kind" class="shrink-0" />
+          <button type="button" class="flex min-w-0 flex-1 items-center gap-2.5 py-1 pr-2 text-left text-[13px]" @click="onSelect(t.id)">
+            <MeasurementKindChip :kind="t.kind" />
             <span class="min-w-0 flex-1 truncate" :title="t.name">{{ t.name }}</span>
             <span
               v-if="dirtyTypeIds.has(t.id)"
@@ -307,21 +314,27 @@ async function onDelete(id: number) {
         </p>
       </nav>
 
-      <!-- The footer. `mt-auto` is what puts it at the bottom of the pinned column, which is
+      <div class="mt-auto h-px shrink-0 bg-neutral-200 dark:bg-neutral-800"></div>
+      <!-- The footer. The rule above it is the mockup's separator between what is open and what has
+           been thrown away; `mt-auto` on *it* is what puts the pair at the bottom of the pinned column, which is
            `h-full flex flex-col`; in the floating menu the container is `inset-y-0` and already
            scrolls, so the same rule applies there. -->
       <button
         type="button"
-        class="mt-auto flex shrink-0 items-center gap-2 rounded px-2 py-1.5 text-left text-sm"
+        class="flex shrink-0 items-center gap-2.5 rounded-[10px] px-2 py-2 text-left text-[13px]"
         :class="
           trashOpen
             ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-            : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+            : 'text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800'
         "
         title="Measurements and results you have deleted, and how long they are kept."
         @click="openTrash()"
       >
-        <span aria-hidden="true">🗑</span>
+        <span class="flex h-[30px] w-[30px] items-center justify-center" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+          </svg>
+        </span>
         <span class="min-w-0 flex-1 truncate">Trash</span>
         <span
           v-if="trashCount > 0"

@@ -46,19 +46,40 @@ public static class ReportsEndpoints
 /// <param name="Subtitle">The project's name under a measurement report; "Project report" under a project's.</param>
 /// <param name="Generated">When the client built it, already formatted in the user's locale.</param>
 /// <param name="Notes">Project notes, on the title page.</param>
+/// <param name="Eyebrow">Over the title on the cover: "Project report", "Measurement report".</param>
+/// <param name="Stats">The figures beside the contents — chapters, how many carry a stored result.
+/// The renderer adds the page count itself, since only it can know one.</param>
+/// <param name="Version">"Tonebench v0.2.0", in the cover's footer.</param>
+/// <param name="Monochrome">Black and white: the document's own accents as well as its charts. A
+/// mono printer gets grey charts under violet headings otherwise.</param>
 public sealed record ReportDocument(
     string Title,
     string? Subtitle,
     string Generated,
     string? Notes,
-    ReportChapter[] Chapters);
+    ReportChapter[] Chapters,
+    string? Eyebrow = null,
+    ReportRow[]? Stats = null,
+    string? Version = null,
+    bool Monochrome = false);
 
 /// <summary>One measurement: a title, a few key facts, its notes and then its sections in order.</summary>
+/// <param name="Title">What this chapter is of — a stored result's name, or "Settings and notes".</param>
+/// <param name="Eyebrow">The measurement it belongs to, over the title in the chapter's band.</param>
+/// <param name="Accent">The kind's colour as <c>#rrggbb</c>, which is what makes a chapter findable
+/// by its edge; the band's tint is mixed from it rather than sent, so the two cannot disagree.</param>
+/// <param name="Status">What the contents page says about this chapter: when it was measured, or
+/// that it carries settings only.</param>
+/// <param name="StatusTone">Which pill the status wears: <c>stored</c>, <c>live</c> or <c>none</c>.</param>
 public sealed record ReportChapter(
     string Title,
     ReportRow[] Meta,
     string? Notes,
-    ReportSection[] Sections);
+    ReportSection[] Sections,
+    string? Eyebrow = null,
+    string? Accent = null,
+    string? Status = null,
+    string? StatusTone = null);
 
 public sealed record ReportRow(string Label, string Value);
 
@@ -74,7 +95,10 @@ public sealed record ReportRow(string Label, string Value);
 /// <param name="Cells">For <c>table</c>: the body rows.</param>
 /// <param name="Text">For <c>paragraph</c>; newlines are kept.</param>
 /// <param name="Png">For <c>image</c>: the PNG bytes, base64 on the wire.</param>
-/// <param name="Caption">For <c>image</c>.</param>
+/// <param name="Caption">For <c>image</c>. The renderer prefixes its own figure number.</param>
+/// <param name="Figures">For <c>figures</c>: the few numbers a reader of this kind looks for first.</param>
+/// <param name="Groups">For <c>groups</c>: named boxes of rows, for a settings list long enough that
+/// one column of it is unreadable.</param>
 public sealed record ReportSection(
     string Kind,
     string? Title = null,
@@ -83,7 +107,15 @@ public sealed record ReportSection(
     string[][]? Cells = null,
     string? Text = null,
     byte[]? Png = null,
-    string? Caption = null);
+    string? Caption = null,
+    ReportFigure[]? Figures = null,
+    ReportGroup[]? Groups = null);
+
+/// <summary>A headline number on a card: what it is, what it reads, and what qualifies it.</summary>
+public sealed record ReportFigure(string Label, string Value, string? Sub = null);
+
+/// <summary>A named box of rows inside a <c>groups</c> section.</summary>
+public sealed record ReportGroup(string Name, ReportRow[] Rows);
 
 public static class ReportSectionKind
 {
@@ -91,4 +123,7 @@ public static class ReportSectionKind
     public const string Table = "table";
     public const string Paragraph = "paragraph";
     public const string Image = "image";
+    public const string Figures = "figures";
+    public const string Groups = "groups";
+    public const string Callout = "callout";
 }

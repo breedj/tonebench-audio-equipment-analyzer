@@ -135,33 +135,33 @@ defineExpose({ getSampleRateHz })
       </fieldset>
 
       <div class="flex flex-wrap items-end gap-3">
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           Sample rate
           <select
             v-model.number="sampleRateHz"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             @change="onSampleRateChange"
           >
             <option v-for="fs in props.ranges?.sampleRatesHz" :key="fs" :value="fs">{{ fs }} Hz</option>
           </select>
         </label>
 
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           FFT size
           <select
             v-model.number="form.fftSize"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             @change="apply"
           >
             <option v-for="n in FFT_SIZES" :key="n" :value="n">{{ n }}</option>
           </select>
         </label>
 
-        <label class="flex flex-col gap-1">
+        <label class="tb-field">
           Window
           <select
             v-model="form.window"
-            class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            class="tb-input"
             @change="apply"
           >
             <option v-for="w in WINDOWS" :key="w.value" :value="w.value">{{ w.label }}</option>
@@ -170,12 +170,12 @@ defineExpose({ getSampleRateHz })
 
         <!-- One non-wrapping row, so the count always sits beside the mode it belongs to rather
              than wrapping under it when the rail is narrow. -->
-        <div class="flex items-end gap-2">
-          <label class="flex flex-col gap-1">
+        <div class="grid grid-cols-[2fr_1fr] items-end gap-2.5">
+          <label class="tb-field">
             Averaging
             <select
               v-model="form.averaging"
-              class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              class="tb-input"
               @change="apply"
             >
               <option v-for="m in AVERAGING_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -184,7 +184,7 @@ defineExpose({ getSampleRateHz })
 
           <label
             v-if="form.averaging !== 'Off'"
-            class="flex flex-col gap-1"
+            class="tb-field"
             :title="form.averaging === 'Linear' ? 'How many records are averaged before the display holds.' : 'Time constant of the exponential average, in records.'"
           >
             Averages

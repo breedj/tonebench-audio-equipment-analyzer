@@ -204,7 +204,7 @@ const rightSpan = computed(() => spanMs(props.pointRight))
 <template>
   <section
     ref="rootRef"
-    class="relative flex flex-col gap-1 panel-surface rounded-lg border border-neutral-200 p-2 dark:border-neutral-800"
+    class="relative flex flex-col gap-1 panel-surface rounded-xl border border-neutral-200 p-2 dark:border-neutral-800"
   >
     <ExpandToggle class="absolute right-1 top-1" :target="rootRef" />
     <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. -->
@@ -216,12 +216,8 @@ const rightSpan = computed(() => spanMs(props.pointRight))
         <!-- Shared by every oscilloscope preview on the screen, and separate from the spectrum's. -->
         <button
           type="button"
-          class="shrink-0 rounded border px-1.5 py-0 leading-5"
-          :class="
-            fitAllScopes
-              ? 'btn-action'
-              : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
-          "
+          class="shrink-0 rounded-md border px-1.5 py-0 leading-5"
+          :class="fitAllScopes ? 'btn-action' : 'btn-toggle-off'"
           :title="
             fitAllScopes
               ? 'Fixed axis: one volts window fitting every waveform the sweep chart is showing. Click to scale each point on its own again.'

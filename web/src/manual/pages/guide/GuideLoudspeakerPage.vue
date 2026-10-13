@@ -93,7 +93,7 @@ const { showPage } = useManual()
     <h2>Then measure</h2>
     <p>
       Connect the loudspeaker, set the level to something gentle such as <strong>−20 dBV</strong>, and
-      press <strong>RUN</strong>. A chirp sweep takes a couple of seconds.
+      press <strong>Run</strong>. A chirp sweep takes a couple of seconds.
     </p>
 
     <h2>Reading the curve</h2>

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   MANUAL_EDITIONS,
+  MANUAL_EDITION_TONES,
+  MANUAL_GROUP_TONES,
   MANUAL_PAGES,
   manualCounterpart,
   manualPageById,
@@ -90,5 +92,27 @@ describe("a measurement screen's own help button", () => {
       if (page.kind) expect(page.edition, page.id).toBe('reference')
     }
     expect(manualPageForKind(FFT_SPECTRUM_KIND)?.edition).toBe('reference')
+  })
+})
+
+describe("the contents page's colours", () => {
+  it('gives every group of every edition a tone', () => {
+    // A group with no tone draws a colourless bullet in a coloured list, which reads as a page that
+    // failed to load rather than as a heading.
+    for (const edition of MANUAL_EDITIONS) {
+      for (const group of edition.groups) {
+        expect(MANUAL_GROUP_TONES[group], group).toBeDefined()
+      }
+      expect(MANUAL_EDITION_TONES[edition.id], edition.id).toBeDefined()
+    }
+  })
+
+  it('has no tone for a group no edition lists', () => {
+    // The other direction: a group renamed in MANUAL_EDITIONS leaves its old tone behind, and the
+    // stale entry is the thing that makes the table look complete when it is not.
+    const listed = new Set(MANUAL_EDITIONS.flatMap((e) => [...e.groups]))
+    for (const group of Object.keys(MANUAL_GROUP_TONES)) {
+      expect(listed.has(group as never), group).toBe(true)
+    }
   })
 })

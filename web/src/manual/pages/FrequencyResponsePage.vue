@@ -62,15 +62,15 @@ const { showPage } = useManual()
     <table>
       <tbody>
         <tr>
-          <td>RUN</td>
-          <td>Sweeps and re-measures until you press STOP — useful while adjusting something.</td>
+          <td>Run</td>
+          <td>Sweeps and re-measures until you press Stop — useful while adjusting something.</td>
         </tr>
         <tr>
-          <td>SINGLE</td>
+          <td>Single</td>
           <td>Measures once and stops itself.</td>
         </tr>
         <tr>
-          <td>STOP</td>
+          <td>Stop</td>
           <td>Ends the run and silences the generator; the last completed pass stays on screen.</td>
         </tr>
       </tbody>

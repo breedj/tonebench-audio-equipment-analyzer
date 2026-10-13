@@ -61,12 +61,12 @@ const { showPage } = useManual()
 
     <h2>Running it</h2>
     <p>
-      <strong>RUN SWEEP</strong> starts the first pass, into Load 1: the level is probed at 1 kHz if
+      <strong>Run sweep</strong> starts the first pass, into Load 1: the level is probed at 1 kHz if
       it is output-referred, the input range is chosen, and the grid is walked once. Then the
       generator goes silent, a banner appears and the run waits. <strong>Swap the load for Load 2 —
-      leave the amplifier on and everything else as it is — and press CONTINUE.</strong> The second
+      leave the amplifier on and everything else as it is — and press Continue.</strong> The second
       pass walks the same grid at the same generator level, and the curve appears point by point as
-      the pairs complete. <strong>STOP</strong> at any time ends the run; stopped during the wait it
+      the pairs complete. <strong>Stop</strong> at any time ends the run; stopped during the wait it
       keeps nothing, since one pass has no Zout in it, and stopped during the second pass it keeps the
       pairs measured so far.
     </p>
@@ -213,7 +213,7 @@ const { showPage } = useManual()
       a DUT model is the amplifier's open-circuit response and has no output impedance of its own, so
       the two compose — pick the DUT for the frequency response you want to see and Zout for the
       damping factor. The <strong>Load</strong> dropdown is the resistor: set it to 8 Ω, run, and when
-      the banner appears set it to 4 Ω (or Open, for the open method) and press CONTINUE — the same
+      the banner appears set it to 4 Ω (or Open, for the open method) and press Continue — the same
       swap a bench needs. With Zout at <em>None</em> the amplifier has no output impedance at all, and
       the run reads exactly that: nothing on the chart and dashes in the panel, which is correct rather
       than broken. Run 0.03 Ω + 1.5 µH both

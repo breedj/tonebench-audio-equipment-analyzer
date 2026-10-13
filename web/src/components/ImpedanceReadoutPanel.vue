@@ -210,7 +210,7 @@ const equivalentBlock = computed(() => equivalentRows(atCursor.value))
   </CollapsibleSection>
 
   <CollapsibleSection title="Component" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
+    <label class="tb-field">
       <span
         title="What is on the fixture. Nothing in an impedance curve can tell a choke's self-resonance from a driver's motional resonance -- they are the same shape -- so the readout asks rather than guesses."
       >
@@ -218,7 +218,7 @@ const equivalentBlock = computed(() => equivalentRows(atCursor.value))
       </span>
       <select
         v-model="dutType"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       >
         <option v-for="option in DUT_TYPES" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
@@ -361,14 +361,14 @@ const equivalentBlock = computed(() => equivalentRows(atCursor.value))
   </CollapsibleSection>
 
   <CollapsibleSection title="Equivalent circuit" size="xs">
-    <label class="flex flex-col gap-1 text-xs">
+    <label class="tb-field">
       At frequency (Hz)
       <input
         v-model.number="cursorHz"
         type="number"
         min="1"
         step="any"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+        class="tb-input"
       />
     </label>
 

@@ -131,7 +131,9 @@ async function onToggle(resultId: number, event: Event) {
           :title="`Import ${importsWhat} (.raw or .qraw) as a trace on this chart.`"
           @click="openSimulationImport()"
         >
-          Import simulation…
+          <!-- Abbreviated: at the display rail's width the full label pushed the panel's own title
+               down to "Hi…" (Joost, 2026-10-12). The tooltip carries what it imports. -->
+          Import sim…
         </button>
         <span
           v-if="currentKind !== null && items.length > 0"

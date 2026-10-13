@@ -85,7 +85,7 @@ const { showPage } = useManual()
 
     <h2>Running it</h2>
     <p>
-      <strong>RUN SWEEP</strong> walks the levels once and stops. <strong>CANCEL</strong> stops
+      <strong>Run sweep</strong> walks the levels once and stops. <strong>Cancel</strong> stops
       early and keeps the points measured so far. <strong>Clear</strong> discards them, and is
       disabled while a sweep runs. The IMD sweep has its own runner: a THD sweep's result stays on
       its own screen while this one runs, and vice versa.

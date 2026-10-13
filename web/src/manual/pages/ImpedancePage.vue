@@ -69,7 +69,7 @@ const { showPage } = useManual()
     </p>
     <p>
       A stepped sweep is measured <strong>once</strong>. The RUN button is replaced by a single
-      <strong>RUN SWEEP</strong>, because repeating a run that is minutes long until you press Stop
+      <strong>Run sweep</strong>, because repeating a run that is minutes long until you press Stop
       is not useful.
     </p>
     <p>
@@ -79,7 +79,7 @@ const { showPage } = useManual()
       buys. A chirp's records are repeats of one deterministic sweep, so averaging confirms a reading
       rather than improving it; every noise record is a fresh draw, so the estimate keeps getting
       quieter for as long as you let it run, and the curve is redrawn after each one rather than only
-      at the end. Under <strong>RUN</strong> that average is a sliding window: once the first
+      at the end. Under <strong>Run</strong> that average is a sliding window: once the first
       <em>Averages</em> records are in, each new record replaces the oldest, so the curve never drops
       back to a single-record estimate and the status keeps reading the full count. It also carries
       no harmonic packets, so the gate below is not offered for it: what

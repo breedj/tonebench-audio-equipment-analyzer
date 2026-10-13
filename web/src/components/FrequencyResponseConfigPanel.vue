@@ -15,6 +15,7 @@ import { useProjects } from '../composables/useProjects'
 import { stimulusFloorNotice } from '../stimulusFloor'
 import { spanFallback, supportedSpans } from '../supportedSpans'
 import CollapsibleSection from './CollapsibleSection.vue'
+import EstimateBadge from './EstimateBadge.vue'
 
 const props = defineProps<{
   running: boolean
@@ -304,45 +305,40 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 </script>
 
 <template>
+  <!-- Grouped as Joost's "Freq. response · P4" mockup groups it: what is played (GENERATOR, CHIRP)
+       above how it is read (PROCESSING), each under its own uppercase rule, with the pairs that are
+       chosen together — the chirp's span and where it starts, the smoothing and the averages — on
+       one row. The analysis the settings add up to is the footer strip rather than three grey
+       paragraphs trailing the form. -->
   <CollapsibleSection title="Measurement settings">
+    <div class="tb-rule"><span class="tb-group">Generator</span></div>
+
     <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Input voltage drives the generator at the level you enter. Output voltage and output power probe the DUT first and set the generator so this much comes back out — the power through the load below, V = sqrt(P x R). The target applies at the bandwidth reference in the Measurements panel: the median over its band, or the peak."
     >
       Set generator by
-      <select
-        v-model="form.levelMode"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      >
+      <select v-model="form.levelMode" :disabled="running" class="tb-input">
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
-      <span v-if="levelReferenceHint" class="text-[11px] text-neutral-500 dark:text-neutral-400">{{ levelReferenceHint }}</span>
     </label>
+    <span v-if="levelReferenceHint" class="-mt-1.5 text-[12px] text-neutral-500 dark:text-neutral-400">
+      {{ levelReferenceHint }}
+    </span>
 
-    <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
+    <div class="grid gap-2.5" :class="isPowerMode ? 'grid-cols-1' : 'grid-cols-[2fr_1fr]'">
       <label
-        class="flex flex-col gap-1"
+        class="tb-field"
         :title="isPowerMode ? 'The power the DUT should deliver into the load below.' : 'The drive level, in the unit beside it.'"
       >
         {{ isPowerMode ? 'Power (W)' : 'Amplitude' }}
-        <input
-          v-model.number="form.levelValue"
-          type="number"
-          step="any"
-          :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        />
+        <input v-model.number="form.levelValue" type="number" step="any" :disabled="running" class="tb-input" />
       </label>
       <!-- Hidden rather than disabled in power mode: watts is the only unit that mode accepts, so a
            unit picker there could only ever offer the wrong answers. -->
-      <label v-if="!isPowerMode" class="flex flex-col gap-1">
-        <span class="invisible">Unit</span>
-        <select
-          v-model="form.levelUnit"
-          :disabled="running"
-          class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        >
+      <label v-if="!isPowerMode" class="tb-field">
+        Unit
+        <select v-model="form.levelUnit" :disabled="running" class="tb-input">
           <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
       </label>
@@ -352,122 +348,108 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
          second field that could disagree with them. -->
     <label
       v-if="isPowerMode"
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Amplifier load. Used to turn the target watts into the voltage the probe solves for: V = sqrt(P x R)."
     >
       Load (Ω)
-      <input
-        v-model.number="loadOhms"
-        type="number"
-        step="any"
-        min="0.1"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      />
+      <input v-model.number="loadOhms" type="number" step="any" min="0.1" :disabled="running" class="tb-input" />
     </label>
+
     <!-- Said before the run rather than only after it: the server clamps and reports, but a sweep
          that quietly starts somewhere else is a surprise worth heading off. A notice, not a
          problem — the measurement is good over the band the card can drive. -->
     <p
       v-if="floorNotice"
-      class="rounded border border-amber-300 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+      class="rounded-lg border border-amber-300 px-2 py-1.5 text-[12px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
     >
       {{ floorNotice }}
     </p>
 
-    <label
-      class="flex flex-col gap-1 text-xs"
-      title="The highest frequency measured. The sample rate is twice this, so a wider span costs no extra time — only resolution does."
-    >
-      Frequency span (Hz)
-      <select
-        v-model.number="form.frequencySpanHz"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+    <div class="tb-rule"><span class="tb-group">Chirp</span></div>
+
+    <div class="grid grid-cols-2 gap-2.5">
+      <label
+        class="tb-field"
+        title="The highest frequency measured. The sample rate is twice this, so a wider span costs no extra time — only resolution does."
       >
-        <option v-for="span in availableSpans" :key="span" :value="span">{{ span }}</option>
-      </select>
-    </label>
+        Span (Hz)
+        <select v-model.number="form.frequencySpanHz" :disabled="running" class="tb-input">
+          <option v-for="span in availableSpans" :key="span" :value="span">{{ span }}</option>
+        </select>
+      </label>
+      <label
+        class="tb-field"
+        title="Where the sweep starts. Below about 10 Hz a transformer-coupled DUT sees several times the core flux it does in the band you read, because flux goes as V/f — so the bottom of the sweep can disturb the measurement above it. Raising this is how you find out. The reported band starts 25% above this value."
+      >
+        Start (Hz)
+        <input
+          v-model.number="form.chirpStartHz"
+          type="number"
+          min="0.5"
+          max="1000"
+          step="0.5"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+    </div>
 
     <label
-      class="flex flex-col gap-1 text-xs"
-      title="Where the sweep starts. Below about 10 Hz a transformer-coupled DUT sees several times the core flux it does in the band you read, because flux goes as V/f — so the bottom of the sweep can disturb the measurement above it. Raising this is how you find out. The reported band starts 25% above this value."
-    >
-      Chirp start (Hz)
-      <input
-        v-model.number="form.chirpStartHz"
-        type="number"
-        min="0.5"
-        max="1000"
-        step="0.5"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      />
-    </label>
-
-    <label
-      class="flex flex-col gap-1 text-xs"
+      class="tb-field"
       title="Bin width. Finer resolution reaches lower in frequency, and costs proportionally more time per record."
     >
       Resolution (Hz)
-      <select
-        v-model.number="form.resolutionMultiplier"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      >
+      <select v-model.number="form.resolutionMultiplier" :disabled="running" class="tb-input">
         <option v-for="option in RESPONSE_RESOLUTIONS" :key="option.multiplier" :value="option.multiplier">
           {{ option.label }}
         </option>
       </select>
     </label>
 
+    <div class="tb-rule"><span class="tb-group">Processing</span></div>
+
+    <div class="grid grid-cols-2 gap-2.5">
+      <label
+        class="tb-field"
+        title="Fractional-octave smoothing of the curve. Wider settings remove ripple; the bandwidth numbers are measured on the smoothed curve."
+      >
+        Smoothing
+        <select v-model.number="form.smoothingDenominator" :disabled="running" class="tb-input">
+          <option v-for="option in RESPONSE_SMOOTHING" :key="option.denominator" :value="option.denominator">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <label
+        class="tb-field"
+        title="How many sweeps to average. Coherence is only meaningful from two upward — a single record always reads 1."
+      >
+        Averages
+        <input v-model.number="form.averageCount" type="number" min="1" max="10" :disabled="running" class="tb-input" />
+      </label>
+    </div>
+
     <label
-      class="flex items-center gap-1.5 text-xs"
+      class="tb-check-row"
       title="Feed the same signal to the right input and measure left relative to it, so the source and the cabling divide out. Without it, the response is measured against the generated sweep instead."
     >
-      <input v-model="form.rightChannelIsReference" type="checkbox" :disabled="running" />
+      <input v-model="form.rightChannelIsReference" type="checkbox" :disabled="running" class="tb-check" />
       Right channel is reference
     </label>
 
-    <label
-      class="flex flex-col gap-1 text-xs"
-      title="Fractional-octave smoothing of the curve. Wider settings remove ripple; the bandwidth numbers are measured on the smoothed curve."
-    >
-      Smoothing
-      <select
-        v-model.number="form.smoothingDenominator"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      >
-        <option v-for="option in RESPONSE_SMOOTHING" :key="option.denominator" :value="option.denominator">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
+    <p v-if="invalid" class="text-[12px] text-red-600 dark:text-red-400">{{ invalid }}</p>
 
-    <label
-      class="flex flex-col gap-1 text-xs"
-      title="How many sweeps to average. Coherence is only meaningful from two upward — a single record always reads 1."
-    >
-      Averages
-      <input
-        v-model.number="form.averageCount"
-        type="number"
-        min="1"
-        max="10"
-        :disabled="running"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-      />
-    </label>
-
-    <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
-      Analysis: {{ (sampleRateHz / 1000).toFixed(0) }} kHz · {{ fftSize }} points ·
-      {{ binHz.toFixed(2) }} Hz per bin · {{ recordSeconds.toFixed(2) }} s per record
-    </p>
-    <p v-if="isPowerMode && targetVolt > 0" class="text-[11px] text-neutral-500 dark:text-neutral-400">
-      Target: {{ targetVolt.toFixed(3) }} V rms into {{ loadOhms }} Ω ({{ targetDbv.toFixed(2) }} dBV)
-    </p>
-    <p class="text-[11px] text-neutral-500 dark:text-neutral-400">≈{{ estimatedSeconds.toFixed(1) }} s</p>
-    <p v-if="invalid" class="text-[11px] text-red-600 dark:text-red-400">{{ invalid }}</p>
+    <template #footer>
+      <span class="leading-snug">
+        Analysis {{ (sampleRateHz / 1000).toFixed(0) }} kHz · {{ fftSize }} pts · {{ binHz.toFixed(2) }} Hz/bin ·
+        {{ recordSeconds.toFixed(2) }} s/record
+      </span>
+      <span v-if="isPowerMode && targetVolt > 0">
+        Target {{ targetVolt.toFixed(3) }} V rms into {{ loadOhms }} Ω ({{ targetDbv.toFixed(2) }} dBV)
+      </span>
+      <div class="flex flex-wrap items-center gap-2">
+        <EstimateBadge kind="time" title="Roughly how long one pass will take.">≈ {{ estimatedSeconds.toFixed(1) }} s</EstimateBadge>
+      </div>
+    </template>
   </CollapsibleSection>
 </template>

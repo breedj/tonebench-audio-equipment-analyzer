@@ -449,9 +449,6 @@ function run() {
       />
     </label>
 
-    <div class="grid grid-cols-2 gap-2.5">
-    </div>
-
     <label
       class="tb-check-row"
       title="Sizes the FFT per point instead of holding one size across the whole run, and picks the sample rate from the top of the frequency range. This measurement reads only the tone — no harmonics — so a 20 kHz run needs 48 kHz rather than 192 kHz, a quarter of the work. Turn it off for a fixed 192 kHz / 131072-point reference comparable with a THD sweep: slower, but the same resolution at every frequency."

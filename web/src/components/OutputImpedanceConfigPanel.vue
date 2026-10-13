@@ -488,22 +488,13 @@ function run() {
       Second pass open (no load) — not for tube amplifiers
     </label>
 
-    <div class="grid grid-cols-2 gap-2.5">
-      <label
-        class="tb-field"
-        title="What the damping factor is quoted against: DF = nominal / |Zout|. Specification sheets always use 8 Ω; set it to the tap you measured on if you want the DF for that tap."
-      >
-        Nominal (Ω)
-        <input
-          v-model.number="form.nominalOhms"
-          type="number"
-          step="any"
-          min="0.1"
-          :disabled="running"
-          class="tb-input"
-        />
-      </label>
-    </div>
+    <label
+      class="tb-field"
+      title="What the damping factor is quoted against: DF = nominal / |Zout|. Specification sheets always use 8 Ω; set it to the tap you measured on if you want the DF for that tap."
+    >
+      Nominal (Ω)
+      <input v-model.number="form.nominalOhms" type="number" step="any" min="0.1" :disabled="running" class="tb-input" />
+    </label>
 
     <label
       class="tb-check-row"
@@ -512,9 +503,6 @@ function run() {
       <input v-model="form.rightChannelIsReference" type="checkbox" :disabled="running" />
       Right channel is reference
     </label>
-
-    <div class="grid grid-cols-2 gap-2.5">
-    </div>
 
     <label
       class="tb-check-row"

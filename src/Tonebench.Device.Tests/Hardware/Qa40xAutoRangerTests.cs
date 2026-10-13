@@ -1,4 +1,4 @@
-using Tonebench.Device.Hardware;
+﻿using Tonebench.Device.Hardware;
 
 namespace Tonebench.Device.Tests.Hardware;
 
@@ -17,8 +17,8 @@ public class Qa40xAutoRangerTests
     {
         var ranger = new Qa40xAutoRanger(InputRangesDbv);
 
-        // Range 12's headroom boundary is 12 - 5 = 7 dBV; 8 dBV is just over it.
-        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 8.0, BlockDurationMs);
+        // Range 12's trip point is 12 - 5 + 2 = 9 dBV; 10 dBV is over it.
+        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 10.0, BlockDurationMs);
 
         Assert.Equal(RangeStepDecision.StepUp, decision);
         Assert.Equal(18.0, ranger.NextRangeDbv(12.0, decision));
@@ -173,6 +173,30 @@ public class Qa40xAutoRangerTests
     }
 
     /// <summary>
+    /// A signal sitting exactly where the range selectors aim to park it must not trip the clip
+    /// backstop. That equality — selector headroom and trip point being the same number — is what
+    /// made a steady 0 dBV tone step itself up off the 6 dBV rung, so it is stated against the
+    /// constants rather than against a figure.
+    /// </summary>
+    [Fact]
+    public void Evaluate_AtTheHeadroomTheSelectorsAimFor_Holds()
+    {
+        var ranger = new Qa40xAutoRanger(InputRangesDbv);
+        const double rangeDbv = 6.0;
+
+        // What a ~0 dBV signal on the 6 dBV rung reads: the selector leaves exactly HeadroomDb.
+        double parked = rangeDbv - Qa40xAutoRanger.HeadroomDb;
+
+        Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(rangeDbv, parked, BlockDurationMs));
+        Assert.Equal(
+            RangeStepDecision.Hold,
+            ranger.Evaluate(rangeDbv, parked + Qa40xAutoRanger.StepUpMarginDb, BlockDurationMs));
+        Assert.Equal(
+            RangeStepDecision.StepUp,
+            ranger.Evaluate(rangeDbv, parked + Qa40xAutoRanger.StepUpMarginDb + 0.01, BlockDurationMs));
+    }
+
+    /// <summary>
     /// The two thresholds either side of one ladder step must not be the same number — that
     /// equality, not the timer, was the hunt. Stated against the constants so it survives a change
     /// to either.
@@ -209,7 +233,7 @@ public class Qa40xAutoRangerTests
             Assert.Equal(RangeStepDecision.Hold, ranger.Evaluate(12.0, lowPeakDbv, BlockDurationMs));
 
         // Same ranger, same instant: the clip backstop is untouched.
-        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 8.0, BlockDurationMs);
+        var decision = ranger.Evaluate(currentRangeDbv: 12.0, peakDbv: 10.0, BlockDurationMs);
 
         Assert.Equal(RangeStepDecision.StepUp, decision);
         Assert.Equal(18.0, ranger.NextRangeDbv(12.0, decision));

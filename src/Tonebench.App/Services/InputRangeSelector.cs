@@ -25,6 +25,22 @@ public static class InputRangeSelector
     public const double HeadroomDb = 5.0;
 
     /// <summary>
+    /// Margin, in dB, by which a ranger's step-up trip point sits above the headroom this selector
+    /// leaves. Mirrors <c>Qa40xAutoRanger.StepUpMarginDb</c>, which documents why it exists and what
+    /// it costs; the two must not drift apart. Applied through <see cref="NeedsStepUp"/>, so the one
+    /// place that owns the ladder also owns when a range counts as too sensitive for a peak.
+    /// </summary>
+    public const double StepUpMarginDb = 2.0;
+
+    /// <summary>
+    /// Whether <paramref name="peakDbv"/> has eaten far enough into <paramref name="rangeDbv"/>'s
+    /// headroom that a ranger must step up — <see cref="StepUpMarginDb"/> past it, not level with
+    /// it, or a range this selector itself chose is already on the boundary.
+    /// </summary>
+    public static bool NeedsStepUp(IReadOnlyList<double> rangesDbv, double rangeDbv, double peakDbv) =>
+        For(rangesDbv, peakDbv - StepUpMarginDb) > rangeDbv;
+
+    /// <summary>
     /// The lowest (most sensitive) range that still leaves <see cref="HeadroomDb"/> above
     /// <paramref name="expectedPeakDbv"/>, or the largest range offered when nothing fits — a level
     /// past the top of the ladder is better measured clipped on the widest range than on the most

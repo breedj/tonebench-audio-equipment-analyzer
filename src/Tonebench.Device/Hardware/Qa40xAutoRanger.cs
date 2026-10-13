@@ -35,7 +35,9 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
 {
     /// <summary>
     /// Headroom, in dB, to keep a signal below a range's nominal full scale: step up once the peak
-    /// exceeds <c>currentRangeDbv - HeadroomDb</c>, and step down once it would still sit at least
+    /// exceeds <c>currentRangeDbv - HeadroomDb + StepUpMarginDb</c> (see
+    /// <see cref="StepUpMarginDb"/> for why the trip point is not level with the headroom itself),
+    /// and step down once it would still sit at least
     /// this far below the next lower range's full scale — plus
     /// <see cref="StepDownHysteresisDb"/>, without which the two comparisons are the same boundary.
     /// Same 5 dB figure as
@@ -65,6 +67,29 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     /// unavoidable ones off the display.</para>
     /// </summary>
     public const double StepDownHysteresisDb = 2.0;
+
+    /// <summary>
+    /// Margin, in dB, by which the step-up trip point sits *above* the headroom the range selectors
+    /// leave: step up once the peak exceeds <c>currentRangeDbv - HeadroomDb + StepUpMarginDb</c>.
+    /// Mirrored by <c>InputRangeSelector.StepUpMarginDb</c>, which the app's own rangers apply; the
+    /// two must not drift apart, for the same reason <see cref="HeadroomDb"/> is shared.
+    ///
+    /// <para>Without it the selectors and this ranger use the *same* boundary, so a range chosen by
+    /// <c>InputRangeSelector</c> parks the signal exactly on the trip point. The ladder's 6 dB rungs
+    /// leave anything from 6 dB of margin down to almost none, and a 0 dBV signal is the worst case:
+    /// it takes the 6 dBV rung, whose trip point is then 1 dBV. Every real DUT output has a crest
+    /// above its own sine-equivalent level — hum, noise, its own distortion, the settling after a
+    /// tone change — so 1 dB does not hold. Measured on serial 1077527945 (fw 60) with a 20 dB
+    /// amplifier driving the left input at a steady −0.05 dBV: the peak read 1.03 and 1.30 dBV at 2
+    /// of 20 sweep points, tripping the backstop and costing those points a re-measure on a range
+    /// 6 dB too wide.</para>
+    ///
+    /// <para>What it costs is bounded, and is why it is 2 dB and not more: the trip point moves from
+    /// 5 dB below the range's nominal full scale to 3 dB below it, so a signal that jumps by more
+    /// than 3 dB inside one block still clips that block before the step. Same 2 dB as
+    /// <see cref="StepDownHysteresisDb"/>, which is this argument one rung down the ladder.</para>
+    /// </summary>
+    public const double StepUpMarginDb = 2.0;
 
     /// <summary>
     /// Default for <see cref="StepDownDelayMs"/> — how long a peak must stay under-range before
@@ -176,7 +201,7 @@ internal sealed class Qa40xAutoRanger(IReadOnlyList<double> inputRangesDbv)
     {
         int currentIndex = IndexOf(currentRangeDbv);
 
-        if (peakDbv > currentRangeDbv - HeadroomDb)
+        if (peakDbv > currentRangeDbv - HeadroomDb + StepUpMarginDb)
         {
             _underRangeElapsedMs = 0;
             return currentIndex < inputRangesDbv.Count - 1 ? RangeStepDecision.StepUp : RangeStepDecision.Hold;

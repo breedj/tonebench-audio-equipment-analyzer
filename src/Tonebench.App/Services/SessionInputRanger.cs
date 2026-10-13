@@ -1,4 +1,4 @@
-using Tonebench.Data;
+﻿using Tonebench.Data;
 
 namespace Tonebench.App.Services;
 
@@ -98,7 +98,12 @@ public sealed class SessionInputRanger(IReadOnlyList<double> inputRangesDbv)
         // Clipping, or close enough to be eating the headroom: immediately, with no hysteresis and
         // no delay. A record measured on too sensitive a range is wrong in a way no amount of
         // waiting improves.
-        if (wanted > currentRangeDbv)
+        //
+        // The trip point is InputRangeSelector.NeedsStepUp's, which sits StepUpMarginDb above the
+        // headroom the selector leaves — level with it, a range the selector itself parked this
+        // signal on is already on the boundary and every real signal's crest crosses it. The jump is
+        // still to the rung the *actual* peak wants, which is at least as wide.
+        if (InputRangeSelector.NeedsStepUp(inputRangesDbv, currentRangeDbv, peakDbv))
         {
             _underRangeElapsedMs = 0.0;
             return wanted;

@@ -1409,6 +1409,28 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         private int _pendingSettleFrames = initialSettleFrames;
 
         /// <summary>
+        /// Frames left in the settle window on *this* side of the hand-off: how much longer
+        /// <see cref="StepRangeIfNeeded"/> must not look at the samples going past.
+        ///
+        /// <para>Separate from <see cref="_pendingSettleFrames"/>, which is handed to one chunk and
+        /// zeroed, because the consumer's discard and the ranger's blindness are different spans of
+        /// the same window — the consumer is told once how many frames to drop and drops them across
+        /// however many chunks that takes, while this has to count down over those same chunks.</para>
+        ///
+        /// <para><b>Why the ranger must not see them at all:</b> a range change's own gain step puts a
+        /// transient on the first chunks after it, and the ranger reading that steps *again* on the
+        /// consequences of its own step. Measured on serial 1077527945 (fw 60) with a 20 dB amplifier
+        /// driving the left input at 0 dBV — a steady tone, nothing moving — one legitimate step from
+        /// the 0 dBV range turned into three: <c>0 -&gt; 6</c> on a peak of 0.61 dBV (real), then
+        /// <c>6 -&gt; 12</c> on 2.17 dBV and <c>12 -&gt; 18</c> on <b>10.53 dBV</b>, which is 10.6 dB
+        /// above a signal that had not changed. On an attenuator *release* it is worse than a
+        /// transient: for about a second the samples read exactly 24 dB low (see
+        /// <see cref="Qa40xAutoRanger.AttenuatorReleaseSettleMs"/>), which a ranger with step-down
+        /// live reads as badly under-range and walks down from.</para>
+        /// </summary>
+        private int _settleScanFrames = initialSettleFrames;
+
+        /// <summary>
         /// Register writes requested from outside while this pump owns the bus. They are applied on
         /// the pump thread between transfers, with EP2 quiesced first — never from the caller's
         /// thread. See <see cref="Qa40xUsbDevice.SetInputRangeAsync"/>.
@@ -1526,11 +1548,18 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             // A settle already owed is extended, never replaced: two writes in a row (an external
             // range request immediately followed by an autorange step, say) must not let the second
             // one's short gain-step window cancel the first one's attenuator release.
-            _pendingSettleFrames = Math.Max(
-                _pendingSettleFrames,
-                settleFrames >= 0
-                    ? settleFrames
-                    : Qa40xAutoRanger.SettleFrameCountFor(sampleRateHz, Qa40xAutoRanger.GainStepSettleMs));
+            int owedFrames = settleFrames >= 0
+                ? settleFrames
+                : Qa40xAutoRanger.SettleFrameCountFor(sampleRateHz, Qa40xAutoRanger.GainStepSettleMs);
+
+            _pendingSettleFrames = Math.Max(_pendingSettleFrames, owedFrames);
+            _settleScanFrames = Math.Max(_settleScanFrames, owedFrames);
+
+            // The range (or the output range, which scales TX) has just changed, so whatever
+            // under-range time had accumulated was measured against a level that no longer exists.
+            // Without this the step-down timer carries across the change and can fire on the first
+            // chunk the ranger is allowed to look at again.
+            autoRanger.Reset();
         }
 
         public void Start(CancellationToken ct)
@@ -1631,13 +1660,22 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                     int settleFrames = _pendingSettleFrames;
                     _pendingSettleFrames = 0;
 
+                    // Inside a settle window this chunk's samples are the previous change's
+                    // transient — or, on an attenuator release, 24 dB wrong — so the ranger does not
+                    // get to see them. Latched before the writes below, which may open a new window:
+                    // the chunk in hand was captured before any of that and is judged on its own
+                    // window, and the decrement is this chunk's own frames.
+                    bool insideSettleWindow = _settleScanFrames > 0;
+                    if (insideSettleWindow)
+                        _settleScanFrames = Math.Max(0, _settleScanFrames - (transferLength / BytesPerFrame));
+
                     // Externally requested register writes first, then autorange — both quiesce EP2,
                     // and both must land after rangeForThisChunk is latched above so this chunk keeps
                     // the range its samples were captured at.
                     double quiesceMsBefore = _quiesceMs;
                     ApplyPendingRegisterWrites();
 
-                    if (isAutoRangeEnabled())
+                    if (isAutoRangeEnabled() && !insideSettleWindow)
                         StepRangeIfNeeded(readBuffer, transferLength, rangeForThisChunk);
 
                     long tIterationEnd = Stopwatch.GetTimestamp();
@@ -1721,7 +1759,8 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         /// </summary>
         private void StepRangeIfNeeded(byte[] buffer, int transferLength, double currentRangeDbv)
         {
-            var decision = autoRanger.Evaluate(currentRangeDbv, ScanPeakDbv(buffer, transferLength, currentRangeDbv), _blockDurationMs);
+            double peakDbv = ScanPeakDbv(buffer, transferLength, currentRangeDbv);
+            var decision = autoRanger.Evaluate(currentRangeDbv, peakDbv, _blockDurationMs);
             if (decision == RangeStepDecision.Hold)
                 return;
 
@@ -1736,9 +1775,15 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 },
                 Qa40xAutoRanger.SettleFrameCount(sampleRateHz, currentRangeDbv, nextRangeDbv));
 
+            // The peak is the whole of the reason this stepped, and without it the line says only
+            // that something did. Step-up fires on peak > range - HeadroomDb, so printing both the
+            // peak and that threshold is what makes a trip attributable afterwards — to a real
+            // signal, or to a transient inside a settle window.
             logger.LogDebug(
-                "Input range {Decision} to {RangeDbv} dBV, discarding {Frames} settle frames",
-                decision, nextRangeDbv, _pendingSettleFrames);
+                "Input range {Decision} {FromDbv:0.#} -> {RangeDbv:0.#} dBV: peak {PeakDbv:0.##} dBV against a "
+                    + "step-up threshold of {ThresholdDbv:0.#} dBV, discarding {Frames} settle frames",
+                decision, currentRangeDbv, nextRangeDbv, peakDbv,
+                currentRangeDbv - Qa40xAutoRanger.HeadroomDb, _pendingSettleFrames);
         }
 
         /// <summary>

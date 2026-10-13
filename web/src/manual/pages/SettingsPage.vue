@@ -525,6 +525,9 @@ const { showPage } = useManual()
             for that tone chooses 18 dBV; QuantAsylum's own software keeps about 3 and chooses 12.
             Neither is wrong, but they do not read the same — so pin the range when you are
             comparing this app against another analyzer, or against your own earlier measurement.
+            The clip backstop that can override a chosen range sits 2 dB above that headroom, so a
+            steady signal Auto has parked is never sitting on the boundary: an Attenuation readout
+            that steps up during a measurement means the signal genuinely got louder.
           </td>
         </tr>
         <tr>

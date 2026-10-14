@@ -226,39 +226,70 @@
       border-color 0.12s ease,
       box-shadow 0.12s ease;
   }
-  /* THE WELCOME PAGE'S PRIMARY CARD (New project). In the light theme it is the mockup's ink card —
-     one filled block against two outlined ones, which is what makes it the obvious way in.
+  /* THE WELCOME PAGE'S PRIMARY CARD (New project). One filled block against two outlined ones,
+     which is what makes it the obvious way in. It was the mockup's ink card until 2026-10-14, when
+     Joost asked for a colour instead: a black panel is the heaviest thing the light theme has, and
+     on a page whose other two cards are outlined it reads as a modal overlay rather than as the
+     first of three choices.
+
+     The values are the "Welcome page" mockup's own (docs/design/Welcome page-html.zip, Joost,
+     2026-10-14): a 135° blue-to-indigo gradient, #2563eb to #4f46e5, over a blue-700 border, lifted
+     off the page by a tinted shadow rather than a neutral one. Both stops are the mark's: #3b82f6
+     is the logo's first bar and #8b5cf6 its second, and the card runs between their darker steps,
+     which is why it reads as this app's blue and not as a generic primary. Contrast across the
+     sweep is 5.17:1 for white at the blue end and 7.19:1 at the indigo end; the note's #dbeafe is
+     4.24:1 and 5.22:1 (measured, not estimated) — a hair under AA at the left edge, which is the
+     mockup's own choice and worth keeping over second-guessing the design by a hundredth.
+
+     The hover is ours: the mockup draws one state, and a card that answers nothing to the pointer
+     reads as a picture. Both stops go one step down and the shadow deepens. The gradient swaps
+     without animating, two gradients not being interpolable — the shadow and the border carry the
+     transition, which is enough for it to feel like a response.
+
      Inverting it for the dark theme the way every primary *button* here inverts turned the one card
      that is not a measurement into the brightest surface on the screen (Joost, 2026-10-12), so in
      dark it is a card raised a step above the panel instead, and what marks it as primary is the
-     accent chip and the lift — which is how "this one" is marked everywhere else in the app.
+     accent chip and the lift — which is how "this one" is marked everywhere else in the app. That
+     chip is blue, so the light theme's card is now the same accent filled in rather than a second
+     idea.
 
      Written as `:where(.dark) …` rather than `dark:` utilities because the chip's two grounds are a
      literal and a variable, and the pair has to stay together in one place. */
   .welcome-card-primary {
-    @apply flex items-start gap-3.5 rounded-xl border border-neutral-900 bg-neutral-900 p-4 text-left text-white;
+    @apply flex items-start gap-3.5 rounded-xl border p-4 text-left text-white;
+    background-image: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+    border-color: #1d4ed8;
+    box-shadow: 0 6px 16px rgb(37 99 235 / 0.25);
     transition:
-      background-color 0.12s ease,
       border-color 0.12s ease,
       box-shadow 0.12s ease;
   }
   .welcome-card-primary:hover {
-    @apply bg-neutral-800;
+    background-image: linear-gradient(135deg, #1d4ed8 0%, #4338ca 100%);
+    border-color: #1e40af;
+    box-shadow: 0 8px 20px rgb(37 99 235 / 0.32);
   }
   .welcome-card-primary-chip {
-    background-color: rgb(255 255 255 / 0.15);
+    /* #ffffff2e in the mockup. */
+    background-color: rgb(255 255 255 / 0.18);
     color: #ffffff;
   }
   .welcome-card-primary-note {
-    @apply text-neutral-300;
+    color: #dbeafe;
   }
 
+  /* The gradient and its blue shadow are the light theme's; the dark card is a raised neutral one,
+     and a blue glow under it would claim an accent it does not carry. `background-image: none`
+     rather than leaving the gradient to be covered, since `background-color` paints *under* it. */
   :where(.dark) .welcome-card-primary {
     @apply border-neutral-700 text-neutral-100;
+    background-image: none;
     background-color: var(--kind-card-hover-bg);
+    box-shadow: none;
   }
   :where(.dark) .welcome-card-primary:hover {
     @apply border-neutral-600;
+    background-image: none;
     background-color: #262b36;
   }
   :where(.dark) .welcome-card-primary-chip {

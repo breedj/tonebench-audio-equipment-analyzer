@@ -435,7 +435,7 @@ const { showPage } = useManual()
         millivolt range is what this measures.
       </li>
       <li>
-        Choose an <strong>Output level</strong>: how far below full scale to play. −6 dB is a good
+        Choose an <strong>Output level</strong>: how far below full scale to play. −6 dBFS is a good
         default. Quieter is safer for whatever is connected; louder reads more accurately on a
         meter.
       </li>
@@ -461,7 +461,7 @@ const { showPage } = useManual()
     </ol>
     <p>
       The <strong>current</strong> figure beside the button is what is stored now. The arithmetic is
-      just the reading scaled back up by the level played: 1000 mV rms at −6 dB is 2821.7 mV peak at
+      just the reading scaled back up by the level played: 1000 mV rms at −6 dBFS is 2821.7 mV peak at
       full scale.
     </p>
 
@@ -484,7 +484,7 @@ const { showPage } = useManual()
       </li>
       <li>Choose <strong>This card's output, through a patch cable</strong>.</li>
       <li>
-        Pick a <strong>Play at</strong> level. −20 dB is a good default: quiet enough that the input
+        Pick a <strong>Play at</strong> level. −20 dBFS is a good default: quiet enough that the input
         cannot clip, loud enough to sit well clear of the card's noise floor.
       </li>
       <li>
@@ -522,6 +522,15 @@ const { showPage } = useManual()
       The app silences its own generator while it measures — anything it were playing would be
       measured along with your source. Move the generator to the other channel, switch
       <strong>Input channel</strong>, and repeat.
+    </p>
+
+    <h3>Reading the two figures</h3>
+    <p>
+      Every full scale this dialog stores is a <strong>peak</strong> voltage, and each card shows it
+      both ways: the large figure is peak, the grey line under it the same voltage in rms, which is
+      what a voltmeter across that jack would read. The two differ by √2 — a 9232 mV peak input full
+      scale is 6528 mV rms — so reading the wrong one puts every later measurement 3 dB out. The
+      <strong>current</strong> line in the output step prints both for the same reason.
     </p>
 
     <h3>The level bars</h3>

@@ -426,6 +426,21 @@ async function close() {
 function mv(value: number | null | undefined) {
   return value == null ? '—' : value.toFixed(1)
 }
+
+/**
+ * The same figure in rms, which is what a voltmeter across that jack would read.
+ *
+ * <p>Every full scale this dialog stores is <b>peak</b> volts (SoundCardCalibration), and the
+ * readouts said only "mV" — so a card whose input full scale is 9232 mV peak was read as 9.2 V rms
+ * when it is 6.5 (Joost, 2026-10-14, after measuring 1194 mV rms at −6 dBFS and finding the badges
+ * a factor of √2 away from what he expected). The entry field has an rms/peak dropdown precisely
+ * because the distinction matters here; the answers were the one place it was left unsaid. Both
+ * units are shown rather than one being picked, because the peak figure is the one the app
+ * computes with and the rms figure is the one the bench can check.</p>
+ */
+function mvRms(value: number | null | undefined) {
+  return value == null ? '—' : (value / Math.SQRT2).toFixed(1)
+}
 </script>
 
 <template>
@@ -671,7 +686,7 @@ function mv(value: number | null | undefined) {
               class="tb-input min-w-0 flex-1"
               :disabled="playingDbFs !== null"
             >
-              <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dB</option>
+              <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dBFS</option>
             </select>
             <button
               type="button"
@@ -731,7 +746,10 @@ function mv(value: number | null | undefined) {
             Estimate peak output
           </button>
           <span class="font-mono text-neutral-600 dark:text-neutral-300">
-            current {{ mv(config?.outputFullScalePeakMv) }} mV
+            current {{ mv(config?.outputFullScalePeakMv) }} mV peak
+            <span class="text-neutral-500 dark:text-neutral-400">
+              · {{ mvRms(config?.outputFullScalePeakMv) }} mV rms
+            </span>
           </span>
           </span>
         </div>
@@ -839,7 +857,7 @@ function mv(value: number | null | undefined) {
           </span>
           <span class="flex min-w-0 items-center gap-2">
             <select v-model.number="inputStep.dbFs" class="tb-input min-w-0 flex-1">
-              <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dB</option>
+              <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dBFS</option>
             </select>
             <button
               type="button"
@@ -924,7 +942,11 @@ function mv(value: number | null | undefined) {
             </span>
             <span class="font-mono text-[17px] font-medium text-neutral-900 dark:text-neutral-100">
               {{ mv(side === 'Left' ? config?.inputFullScalePeakMvLeft : config?.inputFullScalePeakMvRight) }}
-              <span class="text-[12px] text-neutral-500 dark:text-neutral-400">mV</span>
+              <span class="text-[12px] text-neutral-500 dark:text-neutral-400">mV peak</span>
+            </span>
+            <!-- What a voltmeter across that jack would read — see mvRms. -->
+            <span class="font-mono text-[12px] text-neutral-500 dark:text-neutral-400">
+              {{ mvRms(side === 'Left' ? config?.inputFullScalePeakMvLeft : config?.inputFullScalePeakMvRight) }} mV rms
             </span>
           </div>
         </div>

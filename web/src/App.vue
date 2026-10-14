@@ -3649,7 +3649,17 @@ onBeforeUnmount(() => stopLoadPolling?.())
     <div v-else-if="currentProject !== null" class="flex flex-1 overflow-hidden">
       <MeasurementSidebar />
 
-      <main class="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+      <!-- `[&>*]:shrink-0` is load-bearing: this is a flex column that scrolls, and in a flex
+           column the children shrink before the container scrolls. A child whose own automatic
+           minimum size is its content survives that, but `CollapsibleSection`'s root carries
+           `overflow-hidden` (its header has to clip), which resolves that minimum to *zero* — so
+           History details, the last child on the FFT screen, was crushed to a 2px sliver at the
+           bottom of the page instead of its 86px. It read as the panel having gone missing
+           (Joost, 2026-10-14), and it appeared the moment the Notes box moved into the chart
+           column and made that column a hundred pixels taller. On the element rather than on each
+           child, so a sibling added later cannot forget it — the same rule the scrolling dialog
+           bodies already carry one `shrink-0` at a time. -->
+      <main class="flex flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
         <!-- The trash takes over <main> and leaves the sidebar alone, unlike WelcomeScreen, which
              replaces both. It deliberately does *not* change the selection: no selectType, so none
              of the live-state machinery below runs, and Close lands back on the same measurement

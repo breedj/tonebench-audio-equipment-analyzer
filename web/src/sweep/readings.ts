@@ -82,11 +82,21 @@ export function sweepMetricColumns(method: ThdMethodName, family: SweepTraceFami
     sweepXLabel(xAxis),
     ...(showsGeneratorColumn(xAxis) ? ['Generator'] : []),
     t('thd'), 'Magnitude', t('d2'), t('d3'), t('d4'), t('d5'), t('d6plus'), 'Power', 'Noise floor',
+    // The two band-integrated figures, printed for every sweep that has them -- an IMD run carries
+    // NaN for both and formatDistortion renders that as the table's own dash.
+    ...(family === 'imd' ? [] : ['THD+N', 'SNR']),
   ]
 }
 
 /** One point's row of values for the metrics table, in sweepMetricColumns order, under its run's method. */
-export function sweepMetricRow(point: ThdSweepPoint, method: ThdMethodName, xAxis: SweepXAxis, unit: SweepUnit, loadOhms: number): string[] {
+export function sweepMetricRow(
+  point: ThdSweepPoint,
+  method: ThdMethodName,
+  xAxis: SweepXAxis,
+  unit: SweepUnit,
+  loadOhms: number,
+  family: SweepTraceFamily = 'thd',
+): string[] {
   const v = (key: SweepTraceKey) => sweepTraceValue(point, key, method)
   const d = (key: SweepTraceKey) => formatDistortion(v(key), unit, point.gainDb)
   return [
@@ -101,7 +111,17 @@ export function sweepMetricRow(point: ThdSweepPoint, method: ThdMethodName, xAxi
     d('d6plus'),
     formatPower(point.powerWatt, loadOhms),
     d('noise'),
+    // SNR prints as the plain figure it is stored as, not through formatDistortion: a table has
+    // room to be unambiguous, where the chart has to share one axis with the distortion traces and
+    // draws the noise instead (sweepTraceValue). THD+N follows the unit toggle like every other
+    // distortion column.
+    ...(family === 'imd' ? [] : [d('thdn'), formatSnr(point.snrDb)]),
   ]
+}
+
+/** An SNR as it is quoted: counting upward, in dB, whatever unit the distortion columns are in. */
+function formatSnr(snrDb: number): string {
+  return Number.isFinite(snrDb) ? `${snrDb.toFixed(2)} dB` : '—'
 }
 
 /** Where the total distortion (THD or IMD) of one channel's sweep is largest and smallest. */

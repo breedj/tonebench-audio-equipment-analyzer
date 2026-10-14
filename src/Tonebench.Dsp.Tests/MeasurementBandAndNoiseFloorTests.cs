@@ -85,6 +85,73 @@ public class MeasurementBandAndNoiseFloorTests
         Assert.InRange(withDcFullBand, -48.0, -45.0);
     }
 
+    /// <summary>
+    /// The same defect at a short record, which is how it came back. The band's lower edge is a
+    /// rounded bin, so "20 Hz" lands on bin 2 at 11.72 Hz bins but on bin <b>1</b> -- right beside
+    /// DC, inside the window's own main lobe -- at 23.44 Hz bins and coarser. An adaptive sweep
+    /// shortens its record as it climbs, crosses that at 1500 Hz, and every point above it read a
+    /// DC offset as noise: measured on a QA403, THD+N 0.0022 % -> 2.56 % and SNR 93.4 -> 31.8 dB
+    /// with nothing changing but the FFT size.
+    ///
+    /// <para>Parameterised over the sizes an adaptive sweep actually uses at 192 kHz. The guard is
+    /// <see cref="WindowSums.DcGuardBins"/>; before it, the 4096 and 8192 cases failed by ~60 dB.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(131072)]
+    [InlineData(16384)]
+    [InlineData(8192)]
+    [InlineData(4096)]
+    public void ThdPlusN_AtEveryAdaptiveRecordLength_IsUnaffectedByADcOffset(int fftSize)
+    {
+        double clean = ThdPlusNAt(fftSize, dcOffsetV: 0.0);
+        double withDc = ThdPlusNAt(fftSize, dcOffsetV: BenchDcOffsetV);
+
+        Assert.True(
+            Math.Abs(withDc - clean) < 0.5,
+            $"a {BenchDcOffsetV * 1000:F2} mV offset moved THD+N at {fftSize} points: "
+                + $"{clean:F2} dB clean, {withDc:F2} dB with DC");
+    }
+
+    /// <summary>THD+N over 20 Hz - 20 kHz of one coherent tone at a given record length, in dB.</summary>
+    private static double ThdPlusNAt(int fftSize, double dcOffsetV)
+    {
+        // A tone on a bin that exists at every size under test, so the fundamental is coherent and
+        // the comparison is of the band alone.
+        int fundBin = fftSize / 64;
+        var samples = TestSignals.CoherentTone(fftSize, [(Math.Sqrt(2.0), fundBin)]);
+        var noise = TestSignals.GaussianWhiteNoise(fftSize, NoiseSigma, seed: 99);
+        for (int i = 0; i < fftSize; i++) samples[i] += noise[i] + dcOffsetV;
+
+        var w = Window.Get(WindowType.Hann, fftSize);
+        var windowed = new double[fftSize];
+        Window.Apply(samples, w, windowed);
+
+        var spectrum = new Complex[(fftSize / 2) + 1];
+        new FftSharpBackend().Forward(windowed, spectrum);
+
+        var psdBuf = new double[spectrum.Length];
+        var psd = PsdSpectrum.Compute(spectrum, Fs, w.Sums, psdBuf);
+
+        var harmonics = new Harmonic[12];
+        int written = HarmonicAnalyzer.Analyze(psd, fundBin, 12, harmonics);
+        return SpectrumMetrics.ThdPlusNDb(psd, harmonics[0], psd.BandOf(20.0, 20000.0));
+    }
+
+    /// <summary>
+    /// The guard is the window's, not a constant: Flat Top spreads DC over five bins where Hann
+    /// spreads it over two, and a band that cleared Hann's lobe would sit inside Flat Top's.
+    /// </summary>
+    [Theory]
+    [InlineData(WindowType.Rectangular, 4)]
+    [InlineData(WindowType.Hann, 5)]
+    [InlineData(WindowType.BlackmanHarris, 6)]
+    [InlineData(WindowType.Kaiser7, 7)]
+    [InlineData(WindowType.FlatTop, 10)]
+    public void DcGuard_WidensWithTheWindowsOwnLobe(WindowType window, int expectedBins)
+    {
+        Assert.Equal(expectedBins, Window.Get(window, 8192).Sums.DcGuardBins);
+    }
+
     [Fact]
     public void Thd_WithNoHarmonicContent_ReadsWellBelowTheIntegratedNoiseFloor()
     {

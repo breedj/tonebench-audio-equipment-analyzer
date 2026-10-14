@@ -40,8 +40,8 @@ const { showPage } = useManual()
       The analyzer plays a stimulus of your choosing, captures both inputs continuously, and
       transforms one record at a time. Distortion figures are referred to the fundamental you asked
       the generator for. Noise-based figures — THD+N, SNR, the noise floor, the band RMS and the
-      noise density — are integrated over the <strong>Bandwidth</strong> chosen in the Bandwidth
-      &amp; weighting panel, which also keeps DC out of the sum, and optionally through a
+      noise density — are integrated over the <strong>Bandwidth</strong> chosen behind the
+      <strong>Metrics</strong> button above the chart, which also keeps DC out of the sum, and optionally through a
       <strong>Weighting</strong> curve (A, C, ITU-R 468, CCIR/ARM, RIAA, or your own table). A weighting changes what "noise"
       means and nothing else: the fundamental, the harmonics, THD, gain and peak are always measured
       flat, and THD+N and SNR keep the unweighted fundamental as their reference.
@@ -393,11 +393,13 @@ const { showPage } = useManual()
       the reason to reach for Kaiser 7 for <em>separation</em> rather than for absolute level.
     </p>
 
-    <h2>Bandwidth &amp; weighting panel</h2>
+    <h2>Weighting panel</h2>
     <p>
       Below FFT settings, and separate from it on purpose: the FFT size, window and averaging decide
-      how a record is <em>transformed</em>, while these two decide what the numbers read from it
-      <em>mean</em>. Both apply live, like the FFT settings, and both are saved with the measurement.
+      how a record is <em>transformed</em>, while this decides what the numbers read from it
+      <em>mean</em>. It applies live, like the FFT settings, and is saved with the measurement. The
+      measurement band is the other half of that and lives behind the <strong>Metrics</strong>
+      button above the chart, with the tiles it governs — see Metric tiles below.
     </p>
     <table>
       <thead>
@@ -407,17 +409,6 @@ const { showPage } = useManual()
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td>Bandwidth</td>
-          <td>
-            The measurement band every noise figure is integrated over: <strong>20 Hz – 20 kHz</strong>,
-            <strong>20 Hz – 80 kHz</strong> (only meaningful at 192 kHz, where Nyquist is 96 kHz), or
-            <strong>Custom</strong>, which is whatever the Configuration dialog's Metrics bandwidth
-            fields hold — choosing Custom changes nothing by itself. Note that the upper edge also
-            bounds which harmonics count toward THD and which intermodulation products are "in
-            band", so 80 kHz counts more of both.
-          </td>
-        </tr>
         <tr>
           <td>Weighting</td>
           <td>
@@ -455,7 +446,8 @@ const { showPage } = useManual()
     <p>
       Above the chart, one violet <strong>Gen</strong> tile summarising what the generator is
       playing, then the selected readings for each processed channel.
-      <strong>Metrics</strong> chooses which appear; the ✕ on a tile removes it. The choices
+      <strong>Metrics</strong> chooses which appear and carries the measurement
+      <strong>Bandwidth</strong> with them; the ✕ on a tile removes it. The choices
       include level in several conventions (<code>dBV</code>, <code>dBu</code>, <code>Vrms</code>,
       watts), distortion as a percentage or in dB, THD+N, SNR, peak and RMS, the measured
       fundamental frequency and its nearest musical note, and gain relative to the generator.
@@ -477,6 +469,21 @@ const { showPage } = useManual()
       weighting is selected, the tiles it applies to — THD+N, N+D, N-D, SNR and these three — carry
       an amber tag naming it (<code>A</code>, <code>468</code>, <code>A+U1</code>); the fundamental,
       THD, gain, peak and RMS tiles never do, because nothing weights them.
+    </p>
+    <p>
+      <strong>Bandwidth</strong>, in the same dialog, is the band all of those figures are
+      integrated over, and what keeps DC out of the sum: <strong>20 Hz – 20 kHz</strong>,
+      <strong>20 Hz – 80 kHz</strong> (only meaningful at 192 kHz, where Nyquist is 96 kHz), or
+      <strong>Custom</strong>, which shows two boxes for the edges — 20 Hz and 20 kHz until you
+      change them. The upper edge also bounds which harmonics count toward THD and which
+      intermodulation products are "in band", so 80 kHz counts more of both. It is the open
+      measurement's own setting, saved and restored with it rather than with the bench, and it
+      applies when you press <strong>Apply</strong>. Its lower edge is held a few bins clear of DC,
+      because a window spreads the input's DC offset across its own main lobe and a band that
+      reached into it would report that offset as noise; at 4096 points and 192 kHz that floor is
+      about 235 Hz, so a short record cannot give you a band starting at 20 Hz however you set it. Every tile it governs prints it in small grey
+      type under the number — the band that figure was actually read with, which is not
+      necessarily the one the dialog shows now — and a report states it once per channel.
     </p>
     <p>
       Those same tiles read <code>n/a</code> whenever the stimulus is more than one tone — an IMD

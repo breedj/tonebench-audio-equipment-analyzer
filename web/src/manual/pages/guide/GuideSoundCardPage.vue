@@ -154,8 +154,8 @@ const { showPage } = useManual()
       reports will be wrong by exactly that much.
     </p>
     <p>
-      At the bottom right of the window is a badge marked <strong>Ext. gain</strong>. Click it — or
-      the little pencil beside it — and a small panel opens with a box per channel and a unit next
+      At the bottom right of the window is a badge marked <strong>Ext. gain</strong>, with a little
+      pencil on it. Click it and a small panel opens with a box per channel and a unit next
       to them. A 10-to-1 divider is <strong>0.1</strong> with the unit on <strong>×</strong>, or
       <strong>−20</strong> with it on <strong>dB</strong>. Both mean the same thing; use whichever you
       think in. Leave them at 0 dB if the card is connected directly — the badge is grey when

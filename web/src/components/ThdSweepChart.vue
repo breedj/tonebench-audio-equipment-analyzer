@@ -71,6 +71,8 @@ const props = defineProps<{
   showD5: boolean
   showD6Plus: boolean
   showNoiseFloor: boolean
+  showThdN: boolean
+  showSnr: boolean
   showLeft: boolean
   showRight: boolean
   unit: 'percent' | 'db'
@@ -207,6 +209,10 @@ const TRACES = [
   { key: 'd5', label: 'D5', width: 0.8, color: SWEEP_TRACE_COLORS.d5, show: 'showD5' },
   { key: 'd6plus', label: 'D6+', width: 0.8, color: SWEEP_TRACE_COLORS.d6plus, show: 'showD6Plus' },
   { key: 'noise', label: 'Noise', width: 0.8, color: SWEEP_TRACE_COLORS.noise, show: 'showNoiseFloor' },
+  // THD+N at THD's weight, being the same quantity with the noise left in. SNR is drawn as the
+  // noise it measures -- see sweepTraceValue, which is the one place that convention lives.
+  { key: 'thdn', label: 'THD+N', width: 1, color: SWEEP_TRACE_COLORS.thdn, show: 'showThdN' },
+  { key: 'snr', label: 'SNR', width: 0.8, color: SWEEP_TRACE_COLORS.snr, show: 'showSnr' },
 ] as const
 
 type TraceKey = (typeof TRACES)[number]['key'] & SweepTraceKey

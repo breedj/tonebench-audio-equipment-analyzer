@@ -148,7 +148,24 @@ public sealed record ThdSweepRequest(
     /// saying why. Null means sweep to the end. A DUT is driven one step past the threshold by
     /// construction; the check needs the point to exist.
     /// </summary>
-    double? StopThdPercent = null)
+    double? StopThdPercent = null,
+    /// <summary>
+    /// The band this sweep's noise figures are read over: the noise-floor pass
+    /// (<see cref="SweepCaptureSupport.MeanBandBinVrms"/>, which is the figure the chart draws)
+    /// and the THD+N and SNR recorded on every point.
+    ///
+    /// <para>It deliberately does <b>not</b> bound the harmonics. <c>BuildSweepOptions</c> sets
+    /// <see cref="Streaming.SpectrumPipelineOptions.HarmonicMaxFreqHz"/> to Nyquist instead:
+    /// bounded at a 20 kHz band, every harmonic of a point above ~7 kHz is out of band and THD
+    /// reads exactly 0, so the top third of a sweep would plot as a cliff into the floor. That
+    /// property's own remarks carry the reasoning.</para>
+    ///
+    /// <para>The sweep's own setting: until 2026-10-14 a sweep simply inherited whatever band the
+    /// live pipeline held, i.e. whichever FFT measurement happened to be open last, which no
+    /// stored result could say afterwards.</para>
+    /// </summary>
+    double MeasurementLoFreqHz = 20.0,
+    double MeasurementHiFreqHz = 20000.0)
 {
     /// <summary>The level expressed in dBV. Watts are converted through the load: V = sqrt(P·R).</summary>
     public double LevelDbv => LevelUnit switch
@@ -273,6 +290,9 @@ public sealed record ThdSweepRequest(
             throw new ArgumentOutOfRangeException(nameof(SampleRateHz), SampleRateHz, "Sample rate must be positive.");
         if (!ProcessLeft && !ProcessRight)
             throw new ArgumentOutOfRangeException(nameof(ProcessLeft), "At least one channel must be measured.");
+        if (MeasurementLoFreqHz < 0.0 || MeasurementHiFreqHz <= MeasurementLoFreqHz)
+            throw new ArgumentOutOfRangeException(nameof(MeasurementHiFreqHz), MeasurementHiFreqHz,
+                "The measurement band's upper edge must be above its lower one, and neither may be negative.");
     }
 
     private void ValidateFrequencySweep()

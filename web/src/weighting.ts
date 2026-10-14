@@ -1,8 +1,9 @@
 import type { WeightingSpec, WeightingStandardName } from './streaming/protocol'
 
 /**
- * The noise weighting as the Bandwidth & weighting panel, the metric tiles and the chart's annunciator name
- * it. Pure so it can be tested; the server owns the curves themselves (Tonebench.Dsp.Weighting).
+ * The noise weighting and the measurement band as the Weighting panel, the metrics picker, the
+ * metric tiles and the chart's annunciator name them. Pure so it can be tested; the server owns
+ * the curves themselves (Tonebench.Dsp.Weighting).
  */
 
 export const NO_WEIGHTING: WeightingSpec = { standard: 'None', user1: false, user2: false }
@@ -83,7 +84,7 @@ export function weightingFromStored(
   return { standard: known?.value ?? 'None', user1: user1 ?? false, user2: user2 ?? false }
 }
 
-/** The measurement-band presets the Bandwidth & weighting panel offers. `Custom` is whatever the Configuration dialog holds. */
+/** The measurement-band presets the metrics picker offers. `Custom` is the two edges typed beside it. */
 export const BANDWIDTH_PRESETS = [
   { value: 'audio', label: '20 Hz – 20 kHz', loHz: 20, hiHz: 20000 },
   { value: 'wide', label: '20 Hz – 80 kHz', loHz: 20, hiHz: 80000 },
@@ -99,4 +100,46 @@ export function bandwidthPreset(loHz: number, hiHz: number): BandwidthPreset {
 export function bandwidthPresetValues(preset: BandwidthPreset): { loHz: number; hiHz: number } | null {
   const found = BANDWIDTH_PRESETS.find((p) => p.value === preset)
   return found ? { loHz: found.loHz, hiHz: found.hiHz } : null
+}
+
+/**
+ * The band a measurement starts with, and what the metrics picker's Custom boxes show until
+ * something else has been set. It is also SpectrumPipelineOptions' own default server-side, so a
+ * bench that has never touched the band reads these two numbers rather than a blank pair.
+ */
+export const DEFAULT_BANDWIDTH = { loHz: 20, hiHz: 20000 } as const
+
+/**
+ * One end of a band, written the way the presets write theirs: whole hertz below a kilohertz,
+ * kHz above it with no trailing zeros. Deliberately not response/format.ts's formatHz, whose two
+ * decimals are there for a measured corner -- a band edge is a number the user typed, and
+ * "20.00 Hz - 20.00 kHz" reads as a precision it does not have.
+ */
+function formatBandEdge(hz: number): string {
+  if (!Number.isFinite(hz)) return '?'
+  if (hz >= 1000) return `${Number((hz / 1000).toFixed(3))} kHz`
+  return `${Number(hz.toFixed(2))} Hz`
+}
+
+/**
+ * The band as the picker's dropdown and the tiles that are integrated over it both name it. A
+ * preset gets that preset's own label, so the footer under a THD+N tile and the dropdown above it
+ * cannot read differently for the same two numbers.
+ */
+export function bandwidthLabel(loHz: number, hiHz: number): string {
+  const preset = BANDWIDTH_PRESETS.find((p) => p.loHz === loHz && p.hiHz === hiHz)
+  return preset ? preset.label : `${formatBandEdge(loHz)} – ${formatBandEdge(hiHz)}`
+}
+
+/**
+ * Why these two edges are not a band, or null when they are. Mirrors the server's own check on
+ * `PUT /api/spectrum-config` (AcquisitionEndpoints) so the picker can refuse before it asks: a
+ * dialog that sends an impossible band gets a 400 whose message names the wire field rather than
+ * the control. A blank box is NaN through `v-model.number`, which is not a band either.
+ */
+export function bandwidthRangeError(loHz: number, hiHz: number): string | null {
+  if (!Number.isFinite(loHz) || !Number.isFinite(hiHz)) return 'Both band edges have to be numbers.'
+  if (loHz < 0) return 'The lower band edge cannot be negative.'
+  if (hiHz <= loHz) return 'The upper band edge has to be above the lower one.'
+  return null
 }

@@ -103,9 +103,10 @@ const IMD_METHODS: { value: ImdMethodName; label: string }[] = [
 const presetActive = computed(() => kind.value === 'Tones' && imd.preset !== 'Custom')
 
 // Spinner arrows eat the last digit of "19000" or "-12.02" in a 4rem box while stepping by an
-// amount that means nothing on either field -- 1 Hz on a frequency, 1 dB on a level. Dropped
-// throughout: on the frequency boxes always, and on the level boxes while a preset holds them
-// read-only.
+// amount that means nothing on either field -- 1 Hz on a frequency, and on a level either 0.5 dB
+// or, in volts, a whole volt from a box that reads 0.562. Dropped from every frequency box and
+// every level box (Joost, 2026-10-14); `levelStep` stays, because it is also what keeps a typed
+// 0.562 from being an out-of-step value the browser marks invalid.
 const NO_SPINNER = '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
 const twoTones = computed(() => kind.value === 'Tones' && tones.length === 2)
 const presetLevelDbv = computed(() => {
@@ -300,6 +301,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :step="levelStep"
             :value="displayLevel(presetLevelDbv)"
             class="w-20 rounded border border-neutral-300 px-1.5 py-1 dark:border-neutral-700"
+            :class="NO_SPINNER"
             @change="onPresetLevelChange"
           />
           <GeneratorLevelUnitSelect @change="emit('change')" />
@@ -335,7 +337,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :value="displayLevel(tone.ampDbv)"
             :disabled="presetActive"
             class="w-16 rounded border border-neutral-300 px-1.5 py-1 disabled:opacity-60 dark:border-neutral-700"
-            :class="{ [NO_SPINNER]: presetActive }"
+            :class="NO_SPINNER"
             placeholder="Level"
             @change="onLevelEdit($event, tone.ampDbv, (v) => (tone.ampDbv = v))"
           />
@@ -404,6 +406,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :step="levelStep"
             :value="displayLevel(multitone.totalRmsDbv)"
             class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            :class="NO_SPINNER"
             @change="onLevelEdit($event, multitone.totalRmsDbv, (v) => (multitone.totalRmsDbv = v))"
           />
           <GeneratorLevelUnitSelect @change="emit('change')" />
@@ -432,6 +435,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :step="levelStep"
             :value="displayLevel(noise.levelDbv)"
             class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            :class="NO_SPINNER"
             @change="onLevelEdit($event, noise.levelDbv, (v) => (noise.levelDbv = v))"
           />
           <GeneratorLevelUnitSelect @change="emit('change')" />
@@ -461,6 +465,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :step="levelStep"
             :value="displayLevel(wave.levelDbv)"
             class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            :class="NO_SPINNER"
             @change="onLevelEdit($event, wave.levelDbv, (v) => (wave.levelDbv = v))"
           />
           <GeneratorLevelUnitSelect @change="emit('change')" />
@@ -496,6 +501,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :step="levelStep"
             :value="displayLevel(chirp.amplitudeDbv)"
             class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            :class="NO_SPINNER"
             @change="onLevelEdit($event, chirp.amplitudeDbv, (v) => (chirp.amplitudeDbv = v))"
           />
           <GeneratorLevelUnitSelect @change="emit('change')" />

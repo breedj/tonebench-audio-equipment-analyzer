@@ -389,6 +389,20 @@ public sealed record AnalyzerKindConfig(string Kind = "Hardware")
 }
 
 /// <summary>
+/// Which programmable load the app should look for, so a bench that has one comes up with it
+/// connected and a bench that has not is never told about a device it does not own.
+/// </summary>
+/// <param name="Kind">
+/// The <c>ProgrammableLoadKind</c> name — "None", "Qa451" or "Simulated". A string for the same
+/// reason <see cref="AnalyzerKindConfig"/> stores one: an enum's numbers are an implementation
+/// detail that a reordering would silently reinterpret.
+/// </param>
+public sealed record ProgrammableLoadConfig(string Kind = "None")
+{
+    public static ProgrammableLoadConfig Default { get; } = new();
+}
+
+/// <summary>
 /// Which sound card the analyzer is, how it is wired, and where its full scale sits in volts.
 ///
 /// <para><b>One document, not several.</b> A calibration only means anything against the device,
@@ -558,6 +572,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>Which analyzer was last selected. One document, see <see cref="AnalyzerKindConfig"/>.</summary>
     public const string AnalyzerKindKey = "device.analyzer";
+
+    /// <summary>Which programmable load to look for. One document, see <see cref="ProgrammableLoadConfig"/>.</summary>
+    public const string ProgrammableLoadKey = "device.load";
 
     /// <summary>A user weighting table's key, one document per slot (1 or 2) — see <see cref="UserWeightingTable"/>.</summary>
     public static string UserWeightingKey(int slot)

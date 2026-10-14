@@ -15,7 +15,9 @@ const { showPage } = useManual()
       saved settings. The settings that belong to one <em>analyzer</em> are not here: each has its own
       gear on the status bar, beside the Analyzer picker — <strong>QA403 settings</strong> below, and
       <button type="button" class="manual-link" @click="showPage('sound-card')">Using a sound card</button>
-      for a card.
+      for a card. The measurement band is not here either: it belongs to one measurement, so it sits
+      behind the FFT screen's <strong>Metrics</strong> button with the tiles it governs — see
+      <button type="button" class="manual-link" @click="showPage('fft-spectrum')">FFT spectrum</button>.
     </p>
     <table>
       <thead>
@@ -49,14 +51,15 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Metrics bandwidth (Hz)</td>
+          <td>Programmable load</td>
           <td>
-            The band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated
-            over, and what keeps DC out of that integration. This is the <strong>Custom</strong>
-            choice of the FFT screen's Bandwidth dropdown (in the Bandwidth &amp; weighting panel), whose two presets (20 Hz–20 kHz
-            and 20 Hz–80 kHz) write these same fields. 20 Hz–20 kHz gives audio-band figures;
-            widening it includes noise the ear cannot hear and makes every noise-based number look
-            worse. It is saved with the FFT measurement.
+            Whether this bench has a <strong>QA451</strong>, and the switch for the whole feature:
+            at <strong>None</strong> — the default, because most benches have no such device —
+            nothing about a load appears anywhere, and the app never asks the hardware anything.
+            Choose <strong>QA451 / QA451B</strong> for a real one or <strong>Simulated</strong> to
+            try the screens with nothing attached, and a box appears at the right-hand end of the
+            status bar with the controls behind it. See
+            <button type="button" @click="showPage('programmable-load')">The programmable load</button>.
           </td>
         </tr>
         <tr>
@@ -282,19 +285,22 @@ const { showPage } = useManual()
               Reading them needs the same control channel the samples do not use, so they are
               refreshed about once a second while the analyzer is idle and <strong>left alone for
               the length of an acquisition</strong> — during a measurement the row dims and holds
-              the last reading. The simulator has no sensors, so it shows no row at all.
+              the last reading. A QA403 that is offline keeps the row and shows a dash in each
+              place, so nothing on the bar moves while a cable is out; an analyzer that has no
+              sensors at all — the simulator, a sound card — shows no sensors, only its name and
+              firmware.
             </p>
           </td>
         </tr>
         <tr>
-          <td>Disconnected</td>
+          <td>offline</td>
           <td>
             No device found. The app starts fine without one, so this is a normal state; press
             <strong>Connect</strong> after plugging one in.
           </td>
         </tr>
         <tr>
-          <td>Device removed</td>
+          <td>removed</td>
           <td>
             The QA403 stopped responding — unplugged or powered off mid-session. Plug it back in and
             press Connect; no restart is needed.
@@ -499,6 +505,25 @@ const { showPage } = useManual()
             stream, which splices the record being analysed — it smears tones into skirts and lifts
             the broadband floor. These appear only when it happens, because it should not: treat any
             non-zero count as "the numbers on screen are wrong" and re-run the measurement.
+          </td>
+        </tr>
+        <tr>
+          <td>Load</td>
+          <td>
+            <p>
+              The programmable load, and the only item on this bar that is not about the analyzer.
+              <strong>It is not there at all</strong> unless a load has been chosen in
+              Configuration ▸ Acquisition. The pill reads the model, the engaged load, the DUT
+              supply, both heatsink temperatures and the DUT current, and clicking it opens the
+              controls.
+            </p>
+            <p>
+              Its border says how things stand: grey with nothing engaged, green with a load across
+              the amplifier, amber for a hot heatsink or firmware behind what the vendor's own
+              application expects, and red when it is not connected or an over-current has latched —
+              which no command can clear, only unplugging its USB. Full details in
+              <button type="button" @click="showPage('programmable-load')">The programmable load</button>.
+            </p>
           </td>
         </tr>
         <tr>

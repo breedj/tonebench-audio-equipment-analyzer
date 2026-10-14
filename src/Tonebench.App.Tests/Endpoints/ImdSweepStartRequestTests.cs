@@ -32,7 +32,9 @@ public class ImdSweepStartRequestTests
             ProcessRight: true,
             AverageCount: 6,
             MeasureNoiseFloor: false,
-            MaxProductFreqHz: 30_000.0);
+            MaxProductFreqHz: 30_000.0,
+            MeasurementLoFreqHz: 10.0,
+            MeasurementHiFreqHz: 25_000.0);
 
         var measurement = wire.ToMeasurement(IntermodulationPreset.Din, IntermodulationMethod.Ccif);
 
@@ -51,6 +53,9 @@ public class ImdSweepStartRequestTests
         Assert.Equal(6, measurement.AverageCount);
         Assert.False(measurement.MeasureNoiseFloor);
         Assert.Equal(30_000.0, measurement.MaxProductFreqHz);
+        // The band is this sweep's own, and is not the product limit above it.
+        Assert.Equal(10.0, measurement.MeasurementLoFreqHz);
+        Assert.Equal(25_000.0, measurement.MeasurementHiFreqHz);
 
         // The endpoint never sets the analysis preset; it stays fixed.
         Assert.Equal(ThdSweepRequest.AmplitudeSweepFftSize, measurement.FftSize);
@@ -61,8 +66,8 @@ public class ImdSweepStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(15, ConstructorParameterCount(typeof(ImdSweepStartRequest)));
-        Assert.Equal(17, ConstructorParameterCount(typeof(ImdSweepRequest)));
+        Assert.Equal(17, ConstructorParameterCount(typeof(ImdSweepStartRequest)));
+        Assert.Equal(19, ConstructorParameterCount(typeof(ImdSweepRequest)));
     }
 
     /// <summary>A field the run used but params_json never recorded leaves a stored result that cannot say what produced it.</summary>

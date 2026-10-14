@@ -1090,21 +1090,46 @@ function computeFrame(): FrameData | null {
   return { fullLoFreqHz: lo, fullHiFreqHz: hi, data: [xs, left, right, leftPeak, rightPeak, ...overlayData] }
 }
 
+/**
+ * The chart with nothing in it: axes on the panel's own frequency and level windows, and no trace
+ * between them. This is the state before the very first frame of a session and after the Clear
+ * button, and it used to *destroy* the plot — which left the panel collapsed to its title row, so
+ * an FFT screen that had not been run yet was three header strips rather than three charts and
+ * pressing RUN made the whole column jump. Destroying was right about one thing, and that half is
+ * kept: whatever the last setData painted must not stay on the canvas, so every series is emptied
+ * rather than simply left alone.
+ *
+ * The span is the panel's From/To, because there is no data to have a span of its own — which is
+ * also what the x scale's `range` callback falls back to, so the two agree and `zoomed` reads
+ * false on an untouched chart. Any zoom saved across a rebuild is dropped for the same reason:
+ * there is nothing left to be zoomed into.
+ */
+/** Whether what is on the canvas is the empty state — see the [xFrom, xTo] watcher, its one reader. */
+let showingEmpty = false
+
+function drawEmpty() {
+  showingEmpty = true
+  fullLoFreqHz = xFrom.value
+  fullHiFreqHz = xTo.value
+  ensurePlot(fullHiFreqHz, props.overlays)
+  if (!plot) return
+  // Same AlignedData-typing wrinkle as ensurePlot's own empty construction — see its comment.
+  const dataSlots = 5 + props.overlays.length * 2
+  plot.setData(Array.from({ length: dataSlots }, () => [] as number[]) as unknown as uPlot.AlignedData)
+  pendingZoomRestore = null
+}
+
 function update() {
   const frame = computeFrame()
 
   // Nothing to draw — no live frame and no overlay to fall back to (the Clear button, or before
-  // the very first frame ever arrives). Destroying rather than merely returning matters here: a
-  // bare return leaves whatever the last setData() call painted sitting on the canvas, so the
-  // chart would keep showing a stale trace under the "Waiting for data…" label in the header. This
-  // also clears the stale fullHiFreqHz that return would otherwise leave behind.
+  // the very first frame ever arrives).
   if (!frame) {
-    plot?.destroy()
-    plot = null
-    fullHiFreqHz = -1
+    drawEmpty()
     return
   }
 
+  showingEmpty = false
   fullLoFreqHz = frame.fullLoFreqHz
   fullHiFreqHz = frame.fullHiFreqHz
 
@@ -1212,6 +1237,10 @@ watch([yTop, yBottom], ([top, bottom]) => {
 // mouse drag on the chart.
 watch([xFrom, xTo], ([from, to]) => {
   plot?.setScale('x', { min: from, max: to })
+  // An empty chart's full span *is* the panel's window (see drawEmpty), so moving the window moves
+  // the span with it. Without this the chart would read as zoomed the moment the dropdowns were
+  // touched before a run, and offer a Reset that changed nothing.
+  if (showingEmpty) drawEmpty()
 })
 
 // Observes the container rather than the window: the column this chart sits in also changes width

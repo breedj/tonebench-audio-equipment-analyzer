@@ -61,8 +61,10 @@ import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
+import ProgrammableLoadDialog from './components/ProgrammableLoadDialog.vue'
 import Qa403Dialog from './components/Qa403Dialog.vue'
 import SoundCardDialog from './components/SoundCardDialog.vue'
+import { useProgrammableLoad } from './composables/useProgrammableLoad'
 import { useSoundCard } from './composables/useSoundCard'
 import AboutDialog from './components/AboutDialog.vue'
 import TonebenchLogo from './components/TonebenchLogo.vue'
@@ -180,6 +182,12 @@ import {
 
 const { status, ranges, error, refreshStatus, refreshRanges } = useDevice()
 const soundCard = useSoundCard()
+/**
+ * The programmable load. Its poll's lifetime is owned here and nowhere else: the dialog uses the
+ * same composable, and starting the poll from inside it would give a second one per open. Nothing
+ * is polled at all until a load has been chosen in Configuration — see useProgrammableLoad.
+ */
+const { status: loadStatus, startPolling: startLoadPolling } = useProgrammableLoad()
 const { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, setViewport, clearScope } = useSpectrumStream()
 const { overlays, load: loadMeasurements, setOverlayWindow } = useMeasurements()
 const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig()
@@ -460,11 +468,13 @@ const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
 const soundCardDialogOpen = ref(false)
 const qa403DialogOpen = ref(false)
+const loadDialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
 const issueReportDialogOpen = ref(false)
-// The splash screen, up from the first frame and gone four seconds later (SplashScreen.vue). An
-// overlay rather than a gate: everything below mounts, opens the last project and connects the
-// analyzer behind it, so the four seconds cover that work instead of being spent before it starts.
+// The splash screen, up from the first frame and gone three seconds later (SplashScreen.vue, and
+// splash.ts for the durations). An overlay rather than a gate: everything below mounts, opens the
+// last project and connects the analyzer behind it, so those seconds cover that work instead of
+// being spent before it starts.
 const splashShowing = ref(true)
 // The manual's own state is a module-level singleton (see useManual.ts) rather than a ref here,
 // because the header's button and the per-measurement help button have to drive one dialog.
@@ -1007,6 +1017,8 @@ const sweepShowD3 = ref(true)
 const sweepShowD4 = ref(false)
 const sweepShowD5 = ref(false)
 const sweepShowD6Plus = ref(false)
+const sweepShowThdN = ref(false)
+const sweepShowSnr = ref(false)
 const sweepShowLeft = ref(true)
 const sweepShowRight = ref(false)
 const sweepThickLines = ref(true)
@@ -1096,7 +1108,8 @@ let sweepDisplayRestoring = false
 watch(
   [
     sweepUnit, sweepShowNoiseFloor, sweepShowMagnitude, sweepShowThd, sweepShowD2, sweepShowD3,
-    sweepShowD4, sweepShowD5, sweepShowD6Plus, sweepShowLeft, sweepShowRight, sweepThickLines,
+    sweepShowD4, sweepShowD5, sweepShowD6Plus, sweepShowThdN, sweepShowSnr,
+    sweepShowLeft, sweepShowRight, sweepThickLines,
     sweepShowDataPoints, sweepYMaxPercent, sweepYMinPercent, sweepXFromHz, sweepXToHz, sweepYTopDb,
     sweepYBottomDb, sweepAutofitOnDone, sweepAmplitudeXAxis, sweepAmplitudeBounds,
     sweepFitPreviewSpectrum, sweepFitPreviewScope,
@@ -1127,6 +1140,8 @@ function currentSweepDisplay(): SweepDisplay {
     showD4: sweepShowD4.value,
     showD5: sweepShowD5.value,
     showD6Plus: sweepShowD6Plus.value,
+    showThdN: sweepShowThdN.value,
+    showSnr: sweepShowSnr.value,
     showLeft: sweepShowLeft.value,
     showRight: sweepShowRight.value,
     thickLines: sweepThickLines.value,
@@ -1171,6 +1186,8 @@ function applyStoredSweepDisplay(paramsJson: string) {
   sweepShowD4.value = display.showD4
   sweepShowD5.value = display.showD5
   sweepShowD6Plus.value = display.showD6Plus
+  sweepShowThdN.value = display.showThdN
+  sweepShowSnr.value = display.showSnr
   sweepShowLeft.value = display.showLeft
   sweepShowRight.value = display.showRight
   sweepThickLines.value = display.thickLines
@@ -2081,6 +2098,16 @@ function closeQa403Dialog() {
  */
 function openConfigurationFromQa403() {
   closeQa403Dialog()
+  configDialogOpen.value = true
+}
+
+/**
+ * The load dialog's link to Configuration, where which load this bench has is chosen — and turned
+ * off again. One dialog at a time, like the QA403's. No ranges to re-read: nothing about the load
+ * moves the analyzer's ladders.
+ */
+function openConfigurationFromLoad() {
+  loadDialogOpen.value = false
   configDialogOpen.value = true
 }
 
@@ -3406,6 +3433,8 @@ function buildTypeParamsJson(): string | undefined {
     chartShowD4: sweepShowD4.value,
     chartShowD5: sweepShowD5.value,
     chartShowD6Plus: sweepShowD6Plus.value,
+    chartShowThdN: sweepShowThdN.value,
+    chartShowSnr: sweepShowSnr.value,
     chartShowLeft: sweepShowLeft.value,
     chartShowRight: sweepShowRight.value,
     chartThickLines: sweepThickLines.value,
@@ -3517,6 +3546,15 @@ function onWindowKeydown(event: KeyboardEvent) {
 }
 onMounted(() => window.addEventListener('keydown', onWindowKeydown))
 onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
+
+// The programmable load's poll, started once from here and stopped with the app. It reads the status
+// once and then only keeps polling if a load is actually selected, so a bench without one pays a
+// single request for the whole session.
+let stopLoadPolling: (() => void) | undefined
+onMounted(() => {
+  stopLoadPolling = startLoadPolling()
+})
+onBeforeUnmount(() => stopLoadPolling?.())
 </script>
 
 <template>
@@ -4952,6 +4990,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   :show-d4="sweepShowD4"
                   :show-d5="sweepShowD5"
                   :show-d6-plus="sweepShowD6Plus"
+                  :show-thd-n="sweepShowThdN"
+                  :show-snr="sweepShowSnr"
                   :show-left="sweepShowLeft"
                   :show-right="sweepShowRight"
                   :thick-lines="sweepThickLines"
@@ -4989,6 +5029,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
                   v-model:show-d4="sweepShowD4"
                   v-model:show-d5="sweepShowD5"
                   v-model:show-d6-plus="sweepShowD6Plus"
+                  v-model:show-thd-n="sweepShowThdN"
+                  v-model:show-snr="sweepShowSnr"
                   v-model:show-left="sweepShowLeft"
                   v-model:show-right="sweepShowRight"
                   v-model:thick-lines="sweepThickLines"
@@ -5189,12 +5231,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       :connecting="connecting"
       :ranges="ranges"
       :runner-active="runnerActive"
+      :load="loadStatus"
       @set-device-kind="setDeviceKind"
       @set-simulated-profile="setSimulatedProfile"
       @set-ranging-mode="setRangingMode"
       @set-input-range="setInputRangeManually"
       @open-sound-card="soundCardDialogOpen = true"
       @open-qa403="qa403DialogOpen = true"
+      @open-load="loadDialogOpen = true"
       @set-external-gain="setExternalGain"
       @set-output-range="setOutputRangeManually"
       @connect="connectDevice"
@@ -5288,6 +5332,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
       :status="status"
       @close="closeQa403Dialog"
       @configuration="openConfigurationFromQa403"
+    />
+    <!-- Always mounted, like the others, and fed by the app's own load poll — never one of its own.
+         Harmless on a bench with no load: the box that opens it does not exist there. -->
+    <ProgrammableLoadDialog
+      :open="loadDialogOpen"
+      :runner-active="runnerActive"
+      @close="loadDialogOpen = false"
+      @configuration="openConfigurationFromLoad"
     />
     <AboutDialog :open="aboutDialogOpen" @close="aboutDialogOpen = false" />
     <ManualDialog />

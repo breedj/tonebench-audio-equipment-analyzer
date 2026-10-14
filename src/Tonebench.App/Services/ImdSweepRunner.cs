@@ -356,6 +356,10 @@ public sealed class ImdSweepRunner(
             ProcessRight = request.ProcessRight,
             SingleShot = true,
             CapturePreview = true,
+            // The band this sweep's own noise figures are read over, rather than whatever the
+            // live FFT screen left behind -- see ThdSweepRequest.MeasurementLoFreqHz.
+            MeasurementLoFreqHz = request.MeasurementLoFreqHz,
+            MeasurementHiFreqHz = request.MeasurementHiFreqHz,
             // A runner measures unweighted whatever the FFT screen has selected: a sweep's noise
             // and THD+N figures are defined over the plain band, and the weighting is restored
             // with the rest of the saved options afterwards.

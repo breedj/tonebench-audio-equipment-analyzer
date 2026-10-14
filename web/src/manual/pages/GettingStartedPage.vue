@@ -16,7 +16,7 @@ const { showPage } = useManual()
     </p>
 
     <p>
-      Opening it shows the name, the version and the build for four seconds while the rest of the
+      Opening it shows the name, the version and the build for three seconds while the rest of the
       application starts behind it. Click anywhere on it, or press any key, to go straight through —
       it is a greeting rather than a wait, and the project and the analyzer are being opened the
       whole time it is up. The same figures are in <strong>About</strong> afterwards, which is where
@@ -25,12 +25,15 @@ const { showPage } = useManual()
 
     <h2>The device</h2>
     <p>
-      The status bar along the bottom is the whole device story. A green dot and the product name
-      mean a QA403 is open and ready. <strong>Disconnected</strong> with a <strong>Connect</strong>
-      button means none was found — plug one in and press it; the app starts fine without a device,
-      so this is a normal state to arrive in rather than a failure.
-      <strong>Device removed</strong> means one was unplugged or powered off mid-session: plug it
-      back in and press Connect again.
+      The status bar along the bottom is the whole device story, and it opens with one pill: a dot,
+      the product name, and a word. A green dot and <strong>connected</strong> mean a QA403 is open
+      and ready. A grey dot and <strong>offline</strong>, with a <strong>Connect</strong> button
+      beside it, mean none was found — plug one in and press it; the app starts fine without a
+      device, so this is a normal state to arrive in rather than a failure. A red dot and
+      <strong>removed</strong> mean one was unplugged or powered off mid-session: plug it back in
+      and press Connect again. When a request to the analyzer fails, the message appears on the bar
+      next to the pill, with its own <strong>Retry</strong> where retrying means reopening the
+      device.
     </p>
     <p>
       <strong>Simulated</strong> means there is no real hardware in the loop at all — the app was
@@ -312,7 +315,7 @@ const { showPage } = useManual()
       <strong>Grey means nothing is declared</strong> and every level is exactly as measured.
       <strong>Amber means a correction is being applied</strong> — which is the state worth
       noticing, because a divider the bench has forgotten about reads a DUT 20 dB louder than it is.
-      Click the badge, or the pencil beside it, and a small panel opens above the bar with a box per
+      Click the badge — the pencil on it says it is one — and a small panel opens above the bar with a box per
       input and a <strong>dB</strong> / <strong>×</strong> selector. The unit is only how the figures
       are <em>read</em>; what is stored and recorded with every measurement is dB either way.
     </p>

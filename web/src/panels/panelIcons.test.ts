@@ -83,7 +83,7 @@ describe('panelIconFor', () => {
       'Copy as…',
       'Component',
       'Calibration',
-      'Bandwidth & weighting',
+      'Weighting',
       'Advanced',
     ]
     const missed = titles.filter((t) => panelIconFor(t) === PANEL_ICON_FALLBACK)

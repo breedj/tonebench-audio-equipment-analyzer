@@ -3,18 +3,20 @@ import { onMounted, reactive, ref, watch } from 'vue'
 import type { WeightingStandardName } from '../api/client'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import { useUserWeighting } from '../composables/useUserWeighting'
-import { BANDWIDTH_PRESETS, bandwidthPreset, bandwidthPresetValues, WEIGHTING_OPTIONS, type BandwidthPreset } from '../weighting'
+import { WEIGHTING_OPTIONS } from '../weighting'
 import CollapsibleSection from './CollapsibleSection.vue'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 
 /**
- * The FFT screen's measurement band and noise weighting, in a panel of their own (moved out of
- * FFT settings on 2026-09-21). Neither is an FFT setting: the size, window and averaging decide
- * how a record is *transformed*, while these two decide what the *numbers* read from it mean —
- * the band THD+N, SNR, the noise floor, band RMS and density are integrated over (and whose upper
- * edge bounds which harmonics and IMD products count), and the curve the noise is weighed through.
- * Both still apply live through the same useSpectrumConfig() as the FFT panel, and both are saved
- * with the FFT measurement type as before; only the place on screen changed.
+ * The FFT screen's noise weighting, in a panel of its own (moved out of FFT settings on
+ * 2026-09-21). It is not an FFT setting: the size, window and averaging decide how a record is
+ * *transformed*, while this decides what the *numbers* read from it mean — the curve the noise is
+ * weighed through. Applies live through the same useSpectrumConfig() as the FFT panel, and is
+ * saved with the FFT measurement type.
+ *
+ * The measurement band left this panel on 2026-10-14 for the metrics picker (the Metrics button
+ * above the chart), where it sits with the tiles it qualifies; the two are one setting either way
+ * — see MetricPickerDialog.vue.
  */
 
 const emit = defineEmits<{
@@ -25,9 +27,6 @@ const { config, apply: applyConfig } = useSpectrumConfig()
 
 const loaded = ref(false)
 const form = reactive({
-  // The measurement band as a preset; Custom is whatever Configuration ▸ Measurement holds, and
-  // choosing it changes nothing -- the values are edited there.
-  bandwidth: 'audio' as BandwidthPreset,
   weighting: 'None' as WeightingStandardName,
   weightingUser1: false,
   weightingUser2: false,
@@ -74,22 +73,11 @@ async function applyWeighting() {
   }
 }
 
-async function applyBandwidth() {
-  const values = bandwidthPresetValues(form.bandwidth)
-  if (!values) return
-  try {
-    await applyConfig({ measurementLoFreqHz: values.loHz, measurementHiFreqHz: values.hiHz })
-  } catch (e) {
-    emit('error', (e as Error).message)
-  }
-}
-
 function syncFormFromConfig() {
   if (!config.value) return
   form.weighting = config.value.weighting?.standard ?? 'None'
   form.weightingUser1 = config.value.weighting?.user1 ?? false
   form.weightingUser2 = config.value.weighting?.user2 ?? false
-  form.bandwidth = bandwidthPreset(config.value.measurementLoFreqHz, config.value.measurementHiFreqHz)
   loaded.value = true
 }
 
@@ -103,24 +91,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <CollapsibleSection title="Bandwidth & weighting" padding="p-4">
+  <CollapsibleSection title="Weighting" padding="p-4">
     <div v-if="loaded" class="flex flex-col gap-3 text-sm">
       <div class="flex flex-wrap items-end gap-3">
-        <label
-          class="tb-field"
-          title="The measurement band THD+N, SNR, the noise floor, the band RMS and the noise density are integrated over; its upper edge also bounds which harmonics count toward THD. Custom is the band set in Configuration ▸ Measurement."
-        >
-          Bandwidth
-          <select
-            v-model="form.bandwidth"
-            class="tb-input"
-            @change="applyBandwidth"
-          >
-            <option v-for="p in BANDWIDTH_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
-            <option value="custom">Custom</option>
-          </select>
-        </label>
-
         <label
           class="tb-field"
           title="Weights the noise figures (THD+N, SNR, N-D, band RMS, noise density) and the displayed spectrum. The fundamental, harmonics, THD, gain and peak are never weighted."

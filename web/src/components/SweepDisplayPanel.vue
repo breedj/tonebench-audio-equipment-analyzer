@@ -36,6 +36,13 @@ const props = defineProps<{
 
 const family = computed(() => props.traceFamily ?? 'thd')
 
+/**
+ * Whether this kind measures the two band-integrated figures. The IMD sweep does not -- an IMD
+ * point carries NaN for both (imd/points.ts) -- so offering the checkboxes there would be two
+ * switches that can only ever draw a gap.
+ */
+const bandFigures = computed(() => family.value !== 'imd')
+
 /** The checkbox names: THD/D2… or IMD/IM2…, never the normalized "n" prefix — the checkbox is the trace, whichever way the run is read. */
 const t = (key: SweepTraceKey) => sweepTraceLabel(key, 'Conventional', family.value)
 
@@ -48,6 +55,8 @@ const showD4 = defineModel<boolean>('showD4', { required: true })
 const showD5 = defineModel<boolean>('showD5', { required: true })
 const showD6Plus = defineModel<boolean>('showD6Plus', { required: true })
 const showNoiseFloor = defineModel<boolean>('showNoiseFloor', { required: true })
+const showThdN = defineModel<boolean>('showThdN', { required: true })
+const showSnr = defineModel<boolean>('showSnr', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
 const thickLines = defineModel<boolean>('thickLines', { required: true })
@@ -214,6 +223,8 @@ function computeDistortionExtent(): { min: number; max: number } | null {
   if (showD5.value) keys.push('d5')
   if (showD6Plus.value) keys.push('d6plus')
   if (showNoiseFloor.value) keys.push('noise')
+  if (bandFigures.value && showThdN.value) keys.push('thdn')
+  if (bandFigures.value && showSnr.value) keys.push('snr')
 
   const channels = activeChannels()
   if (keys.length === 0 || channels.length === 0) return null
@@ -552,6 +563,24 @@ function swatch(key: SweepTraceColorKey): string {
       <input v-model="showNoiseFloor" type="checkbox" class="tb-check" />
       <span class="flex-1">Noise floor</span>
       <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('noise') }"></span>
+    </label>
+    <label
+      v-if="bandFigures"
+      class="tb-check-row"
+      title="Distortion and noise together, over the measurement band set in the Sweep panel, as a share of each point's fundamental."
+    >
+      <input v-model="showThdN" type="checkbox" class="tb-check" />
+      <span class="flex-1">THD+N</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('thdn') }"></span>
+    </label>
+    <label
+      v-if="bandFigures"
+      class="tb-check-row"
+      title="Signal-to-noise over the measurement band, drawn as the noise it measures: a 95 dB SNR reads −95 dB (0.0018 %) here, so it lines up with THD and the noise floor instead of needing its own axis."
+    >
+      <input v-model="showSnr" type="checkbox" class="tb-check" />
+      <span class="flex-1">SNR</span>
+      <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: swatch('snr') }"></span>
     </label>
 
     <span class="tb-group pt-1">Style</span>

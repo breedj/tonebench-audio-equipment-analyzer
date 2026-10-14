@@ -113,7 +113,10 @@ internal static class SweepCaptureSupport
     /// </summary>
     public static double MeanBandBinVrms(SpectrumSnapshot snapshot, double loHz, double hiHz)
     {
-        int loBin = Math.Max(1, (int)Math.Round(loHz / snapshot.BinSizeHz));
+        // Same DC guard as PsdSpectrum.BandOf, from the same window sums -- this is a mean per bin
+        // rather than an integral, so one contaminated bin is diluted by the band's length instead
+        // of swamping it, but it still lifts the trace and for the same reason.
+        int loBin = Math.Max(snapshot.Sums.DcGuardBins, (int)Math.Round(loHz / snapshot.BinSizeHz));
         int hiBin = Math.Min(snapshot.Dbv.Length - 1, (int)Math.Round(hiHz / snapshot.BinSizeHz));
         if (hiBin < loBin)
             return 0.0;

@@ -45,7 +45,7 @@ public static class CsvExporter
     }
 
     /// <summary>
-    /// The seven quantities <c>ThdSweepChart</c> plots, in its own trace order. Each is stored as a
+    /// The quantities <c>ThdSweepChart</c> plots, in its own trace order. Each is stored as a
     /// <c>metric</c> row per channel per frequency (see <c>MeasurementSaveService.BuildSweepMetrics</c>),
     /// so a saved sweep exports as exactly what was on screen -- not a re-derivation of it.
     /// </summary>
@@ -59,6 +59,12 @@ public static class CsvExporter
         ("h5_percent", "d5_percent"),
         ("d6plus_percent", "d6plus_percent"),
         ("noise_percent", "noise_percent"),
+        // The two band-integrated figures. Both were measured and stored from the start; they
+        // became exportable when they became traces (2026-10-14). snr_db is the figure as it is
+        // quoted, counting upward -- the chart draws its noise term instead, because it has to
+        // share one axis with the distortion traces.
+        ("thd_n_percent", "thd_n_percent"),
+        ("snr_db", "snr_db"),
     ];
 
     /// <summary>
@@ -97,6 +103,8 @@ public static class CsvExporter
         ("h5_percent", "d5_percent"),
         ("d6plus_percent", "d6plus_percent"),
         ("noise_percent", "noise_percent"),
+        ("thd_n_percent", "thd_n_percent"),
+        ("snr_db", "snr_db"),
     ];
 
     /// <summary>

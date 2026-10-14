@@ -42,7 +42,24 @@ public sealed record ImdSweepRequest(
     double? MaxProductFreqHz = null,
     /// <summary>Not offered on the wire (the endpoint fixes them); parameters so a test can run the fast preset.</summary>
     int FftSize = ThdSweepRequest.AmplitudeSweepFftSize,
-    double SampleRateHz = ThdSweepRequest.AmplitudeSweepSampleRateHz)
+    double SampleRateHz = ThdSweepRequest.AmplitudeSweepSampleRateHz,
+    /// <summary>
+    /// The band this sweep's noise figures are read over: the noise-floor pass
+    /// (<see cref="SweepCaptureSupport.MeanBandBinVrms"/>, which is the figure the chart draws)
+    /// and the THD+N and SNR recorded on every point.
+    ///
+    /// <para>It deliberately does <b>not</b> bound the harmonics. <c>BuildSweepOptions</c> sets
+    /// <see cref="Streaming.SpectrumPipelineOptions.HarmonicMaxFreqHz"/> to Nyquist instead:
+    /// bounded at a 20 kHz band, every harmonic of a point above ~7 kHz is out of band and THD
+    /// reads exactly 0, so the top third of a sweep would plot as a cliff into the floor. That
+    /// property's own remarks carry the reasoning.</para>
+    ///
+    /// <para>The sweep's own setting: until 2026-10-14 a sweep simply inherited whatever band the
+    /// live pipeline held, i.e. whichever FFT measurement happened to be open last, which no
+    /// stored result could say afterwards.</para>
+    /// </summary>
+    double MeasurementLoFreqHz = 20.0,
+    double MeasurementHiFreqHz = 20000.0)
 {
     public const WindowType Window = WindowType.Hann;
 
@@ -70,6 +87,9 @@ public sealed record ImdSweepRequest(
 
         if (FftSize <= 0 || (FftSize & (FftSize - 1)) != 0)
             throw new ArgumentOutOfRangeException(nameof(FftSize), FftSize, "FFT size must be a power of two.");
+        if (MeasurementLoFreqHz < 0.0 || MeasurementHiFreqHz <= MeasurementLoFreqHz)
+            throw new ArgumentOutOfRangeException(nameof(MeasurementHiFreqHz), MeasurementHiFreqHz,
+                "The measurement band's upper edge must be above its lower one, and neither may be negative.");
         if (!(SampleRateHz > 0.0))
             throw new ArgumentOutOfRangeException(nameof(SampleRateHz), SampleRateHz, "Sample rate must be positive.");
 

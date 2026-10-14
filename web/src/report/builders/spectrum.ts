@@ -47,12 +47,18 @@ export function metricsSections(subject: ReportSubject): ReportSection[] {
     const rows: ReportRow[] = []
     if (genRow && sections.length === 0) rows.push(genRow)
     let caveat: string | null = null
+    let band: string | null = null
     for (const label of selectedMetrics) {
       const tile = byLabel.get(label)
       // The weighting qualifier travels with the label, as it does on the tile.
       if (tile) rows.push({ label: tile.qualifier ? `${tile.label} (${tile.qualifier})` : tile.label, value: tile.value.replace(/\n/g, ', ') })
       if (tile?.caveat) caveat = tile.caveat
+      if (tile?.band) band = tile.band
     }
+    // The band those figures were integrated over, once per channel for the same reason the caveat
+    // is once per channel: on screen it is a footnote under each tile, and thirteen copies of the
+    // same two numbers down a printed column is noise. Only when a printed row actually carries it.
+    if (band) rows.push({ label: 'Measurement band', value: band })
     // Paper has no tooltip, so the reason those rows read "n/a" is spelled out once per channel
     // rather than repeated on each of the thirteen that carry it.
     if (caveat) rows.push({ label: NOT_APPLICABLE, value: `${caveat.charAt(0).toUpperCase()}${caveat.slice(1)}.` })

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { DeviceKindName, DeviceRanges, DeviceStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
+import type { DeviceKindName, DeviceRanges, DeviceStatus, ProgrammableLoadStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
 import { useProjects } from '../composables/useProjects'
+import { DEVICE_DOT_CLASS, devicePill, telemetryRows } from '../device/statusReadout'
+import { LOAD_TONE_CLASS, loadReadout } from '../programmableLoad/readout'
 import { DISTORTING_DUTS } from '../simulator/hints'
 import { allSimulatorKnobsVisible, visibleSimulatorKnobs } from '../simulator/knobs'
 import { formatGain, type GainUnit } from '../soundcard/gainUnits'
@@ -212,7 +214,24 @@ const props = defineProps<{
   ranges: DeviceRanges | null
   /** True while any measurement runner owns the session — see App.vue's runnerActive. */
   runnerActive: boolean
+  /**
+   * The programmable load, or null before the one startup read has returned. **Nothing about it
+   * renders until a load has been chosen in Configuration ▸ Acquisition** — few benches own one, so
+   * the default is a bar that looks exactly as it did before this existed.
+   */
+  load: ProgrammableLoadStatus | null
 }>()
+
+/**
+ * Everything the load box shows, including its tooltip and its tone. All of it is in
+ * `programmableLoad/readout.ts` rather than here, because nothing in a `.vue` is testable and every
+ * line of it is a rule the hardware forced — two decimals of amps, "?" rather than "Open" when the
+ * relays have not been read back, and a latched fault outranking every other note.
+ */
+const loadBox = computed(() => loadReadout(props.load))
+
+/** The gate. Few benches own a QA451, so the box exists only once one has been chosen. */
+const showLoadBox = computed(() => props.load !== null && props.load.kind !== 'None')
 
 const emit = defineEmits<{
   setSimulatedProfile: [patch: SimulatedProfileRequest]
@@ -221,6 +240,7 @@ const emit = defineEmits<{
   setInputRange: [dbv: number]
   openSoundCard: []
   openQa403: []
+  openLoad: []
   setExternalGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
   setOutputRange: [dbv: number]
   connect: []
@@ -272,6 +292,41 @@ const outputRangeClass = computed(() =>
     ? 'text-red-600 dark:text-red-400'
     : 'text-neutral-500 dark:text-neutral-400',
 )
+
+/**
+ * The two glyphs beside the range readouts, from the mockup: a narrowing stack of rules for the
+ * input attenuator, a rising trace into a corner for the output range.
+ */
+const RANGE_ICON = {
+  attenuation: 'M4 6h16M7 12h10M10 18h4',
+  output: 'M4 18 10 12l4 4 6-8M14 8h6v6',
+}
+
+/**
+ * Whether a retry of the failed request means "open the analyzer". The error line is shared by the
+ * 2 s poll and every action in App.vue, so a Retry button on it would be wrong for most of what can
+ * land there — but a disconnected analyzer is exactly the state the mockup draws it in, and it is
+ * also the one state where the message and the Connect button would otherwise both be on the bar
+ * saying the same thing. One affordance at a time: Retry while there is something to explain, the
+ * plain Connect button while there is not.
+ */
+const errorRetryable = computed(() => props.status != null && !props.status.connected)
+
+/**
+ * Every control on the bar is 28 px tall on a 7 px radius, and every caption is the same muted
+ * grey — the mockup's own measurements. One string each rather than seven copies, which is what
+ * let the old bar's dropdowns drift apart from its readouts. Selects take no background of their
+ * own: `style.css`'s base rule already gives every `select` the control tone.
+ */
+const BAR_SELECT = 'h-7 rounded-md border border-neutral-300 px-1.5 text-xs disabled:opacity-50 dark:border-neutral-700'
+const BAR_READOUT =
+  'inline-flex h-7 items-center gap-1.5 rounded-md border border-neutral-200 bg-[var(--surface-control)] px-2 font-mono text-neutral-900 dark:border-neutral-700 dark:text-neutral-100'
+const BAR_LABEL = 'text-neutral-500 dark:text-neutral-400'
+/** The indigo "auto" chip inside a range readout: the range is the device's answer, not a choice. */
+const BAR_AUTO_CHIP =
+  'rounded px-1.5 py-px font-sans text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200'
+/** A hairline between the segments inside one box — neutral whatever tone the box itself carries. */
+const BAR_SEGMENT = 'flex items-center border-l border-neutral-200 px-2.5 dark:border-neutral-700'
 
 /**
  * Falls back to the standard QA403 ladders so the dropdowns are never empty in the window between
@@ -395,23 +450,20 @@ function onSimulatedDutChange(e: Event) {
 }
 
 /**
- * The analyzer's own sensors, formatted the way the front panel's own software shows them. Absent
- * on the simulator and until the first reading lands, and the whole group is hidden in that case
- * rather than showing dashes for something the device is not measuring at all.
- *
- * Three figures where the vendor's status bar has four: its ISO Current reads `---` on a QA403, and
- * the register behind it answers a constant (4626, i.e. 0x1212) rather than a current on this
- * model, so there is nothing to show.
+ * The analyzer's identity and its own housekeeping sensors, in the vendor software's order. Which
+ * rows exist in which state, the glyphs and the warm-board threshold are all in
+ * `device/statusReadout.ts` — nothing in a `.vue` is testable here, and the gating is a rule rather
+ * than a formatting choice.
  */
-const telemetry = computed(() => {
-  const t = props.status?.telemetry
-  if (!t) return null
-  return {
-    usbVoltage: `${t.usbVoltageV.toFixed(3)} V`,
-    usbCurrent: `${t.usbCurrentMa.toFixed(0)} mA`,
-    temperature: `${t.temperatureC.toFixed(1)} °C`,
-  }
-})
+const telemetry = computed(() => telemetryRows(props.status))
+
+/** The dot, the name and the one word at the left-hand end. */
+const pill = computed(() => devicePill(props.status, selectedKindLabel.value))
+
+/** What the Analyzer dropdown calls the *selected* analyzer — the pill's name before one answers. */
+const selectedKindLabel = computed(
+  () => DEVICE_KINDS.find((kind) => kind.value === props.status?.deviceKind)?.label ?? 'Analyzer',
+)
 
 /**
  * Reading these costs three register exchanges on the control endpoint, which is the one thing that
@@ -420,6 +472,13 @@ const telemetry = computed(() => {
  * reading, and a row that disappears whenever a measurement starts reads as a fault.
  */
 const telemetryStale = computed(() => props.status?.acquiring === true)
+
+/**
+ * Replaces each row's own tooltip while the readings are frozen, rather than sitting on the group:
+ * a title on the wrapper is unreachable, since every row inside it carries one of its own.
+ */
+const telemetryStaleTitle =
+  "The analyzer's own sensors — last read before this acquisition started. Reading them needs the control endpoint, which is left alone while samples are streaming."
 /**
  * The sound card's controls stand in for the QA403's two attenuators, because a card has neither:
  * one fixed full scale on each side. What varies on that bench is the front-end in front of it, so
@@ -513,441 +572,527 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
 </script>
 
 <template>
+  <!--
+    One 44 px row, the height of the mockup's own artboard, laid out as: the analyzer and what it
+    reports about itself on the left, everything that is set on the bench on the right, and a
+    hairline between each group of them. It still *wraps* rather than clipping, unlike the mockup's
+    `overflow: hidden` — the mockup is 1920 px wide and this app folds its rails at 1024, where a
+    clipped bar would put the external gain and both ranges out of reach.
+  -->
   <footer
-    class="flex flex-wrap items-center gap-4 border-t border-neutral-200 bg-[var(--surface-panel)] px-4 py-2 text-xs dark:border-neutral-800"
+    class="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-neutral-200 bg-[var(--surface-panel)] px-3 py-1.5 text-xs dark:border-neutral-800"
   >
-    <div class="flex items-center gap-2">
-      <span class="h-2.5 w-2.5 rounded-full" :class="status?.connected ? 'bg-emerald-500' : 'bg-neutral-400'" />
-      <span class="font-semibold text-neutral-900 dark:text-neutral-100">
-        {{ status?.connected ? status.productName : 'Disconnected' }}
-      </span>
-      <!-- Says which kind of disconnected this is: never attached, or unplugged while we were using it. -->
-      <span
-        v-if="status && !status.connected && status.deviceLost"
-        class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-        title="The QA403 stopped responding — it was unplugged or powered off. Plug it back in and press Connect."
-      >
-        Device removed
-      </span>
-      <span
-        v-if="status?.isSimulated"
-        class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-      >
-        Simulated
-      </span>
-      <!-- Which analyzer the session is talking to. Always offered, and independent of whether it is
-           connected: switching to the QA403 with none attached is how you arm the Connect button. -->
+    <!-- The analyzer, as one pill: a dot, what it calls itself, and the one word that says whether
+         it is answering. "Removed" is its own word rather than a badge beside it — unplugged
+         mid-session is a state of the device, not a second thing to read. -->
+    <span
+      class="inline-flex h-7 shrink-0 items-center gap-[7px] rounded-full border border-neutral-200 bg-[var(--surface-control)] py-0 pl-2 pr-2.5 font-semibold text-neutral-900 dark:border-neutral-700 dark:text-neutral-100"
+      :title="pill.title"
+    >
+      <span class="h-2 w-2 shrink-0 rounded-full ring-[3px]" :class="DEVICE_DOT_CLASS[pill.tone]" />
+      {{ pill.name }}
+      <span class="font-normal" :class="BAR_LABEL">{{ pill.state }}</span>
+    </span>
+    <span
+      v-if="status?.isSimulated"
+      class="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+    >
+      Simulated
+    </span>
+    <!-- Which analyzer the session is talking to. Always offered, and independent of whether it is
+         connected: switching to the QA403 with none attached is how you arm the Connect button. -->
+    <label v-if="status" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="analyzerSwitchTitle">
+      Analyzer
+      <select :class="BAR_SELECT" :value="status.deviceKind" :disabled="status.acquiring" @change="onDeviceKindChange">
+        <option v-for="kind in DEVICE_KINDS" :key="kind.value" :value="kind.value">{{ kind.label }}</option>
+      </select>
+    </label>
+    <!-- The QA403's own settings, in the same place and with the same glyph as the sound card's
+         below. Keyed on the selected analyzer, not on a connection: these are stored settings,
+         and one of them (the rate) decides what the FFT screen offers before anything is up. -->
+    <button
+      v-if="isQa403"
+      type="button"
+      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      aria-label="QA403 settings"
+      :title="qa403Title"
+      @click="emit('openQa403')"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    </button>
+    <!-- Sound-card settings. Keyed on the selected analyzer rather than on a connection, for the
+         same reason the simulator's controls are: the card has to be choosable before it is up,
+         and when nothing is chosen yet this button is the only way to get anywhere. -->
+    <button
+      v-if="isSoundCard"
+      type="button"
+      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      aria-label="Sound card settings"
+      :title="soundCardTitle"
+      @click="emit('openSoundCard')"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    </button>
+    <!-- Said out loud rather than left to be discovered: every ratio is still exact, but nothing
+         on screen is a voltage until both calibration steps have run. -->
+    <span
+      v-if="isSoundCard && status?.connected && status.soundCardCalibrated === false"
+      class="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+      title="Levels are dBFS, not volts. THD, IMD, crosstalk and the response shape are exact regardless — a consistent full-scale constant cancels out of every ratio."
+    >
+      Uncalibrated
+    </span>
+
+    <!-- Simulator-only: what the synthesized DUT adds on top of the generator's stimulus. Keyed on
+         the *selected* analyzer rather than on isSimulated, so the DUT can be chosen while the
+         simulator is still coming up. Each knob is then shown only where the open measurement can
+         read it, or while it is engaged — see simulator/knobs.ts. The DUT dropdown is never
+         hidden: picking a model that does not suit the screen is how the hint above the chart gets
+         its chance to say so. -->
+    <template v-if="status?.deviceKind === 'Simulated'">
       <label
-        v-if="status"
-        class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-        :title="analyzerSwitchTitle"
+        v-if="knobs.noise"
+        class="flex items-center gap-1.5"
+        :class="BAR_LABEL"
+        title="Simulated DUT noise floor (white + 1/f). Turn off for a clean spectrum."
       >
-        Analyzer
-        <select
-          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
-          :value="status.deviceKind"
-          :disabled="status.acquiring"
-          @change="onDeviceKindChange"
-        >
-          <option v-for="kind in DEVICE_KINDS" :key="kind.value" :value="kind.value">{{ kind.label }}</option>
+        <input type="checkbox" :checked="status.simulatedNoiseEnabled ?? false" @change="onSimulatedNoiseChange" />
+        Noise
+      </label>
+      <label
+        v-if="knobs.hum"
+        class="flex items-center gap-1.5"
+        :class="BAR_LABEL"
+        title="Simulated mains hum: 50 Hz plus two harmonics, each 6 dB down."
+      >
+        <input type="checkbox" :checked="status.simulatedHumEnabled ?? false" @change="onSimulatedHumChange" />
+        Hum
+      </label>
+      <label
+        v-if="knobs.harmonics"
+        class="flex items-center gap-1.5"
+        :class="[BAR_LABEL, { 'opacity-50': harmonicsSwitchInert }]"
+        :title="harmonicsSwitchTitle"
+      >
+        <input
+          type="checkbox"
+          :checked="status.simulatedHarmonicsEnabled ?? false"
+          :disabled="harmonicsSwitchInert"
+          @change="onSimulatedHarmonicsChange"
+        />
+        Harmonics
+      </label>
+      <label
+        v-if="knobs.crosstalk"
+        class="flex items-center gap-1.5"
+        :class="BAR_LABEL"
+        title="Simulated inter-channel coupling: each channel leaks into the other at −70 dB through the audio band, rising 6 dB per octave above 6 kHz (≈ −59 dB at 20 kHz sampled at 192 kHz, −53 dB at 48 kHz) — a capacitive coupling. Off, the channels are perfectly separate."
+      >
+        <input type="checkbox" :checked="status.simulatedCrosstalkEnabled ?? false" @change="onSimulatedCrosstalkChange" />
+        Crosstalk
+      </label>
+      <label
+        v-if="knobs.outputStage"
+        class="flex items-center gap-1.5"
+        :class="BAR_LABEL"
+        title="The output impedance the simulated amplifier presents at its terminals — a property of the amplifier, separate from the DUT model, which is its open-circuit behaviour. None by default; the other two only take effect once a load is connected below, and then on every measurement, not only the output-impedance one."
+      >
+        Zout
+        <select :class="BAR_SELECT" :value="status.simulatedOutputStage ?? 'None'" @change="onSimulatedOutputStageChange">
+          <option v-for="stage in OUTPUT_STAGES" :key="stage.value" :value="stage.value" :title="stage.title">{{ stage.label }}</option>
         </select>
       </label>
+      <label
+        v-if="knobs.load"
+        class="flex items-center gap-1.5"
+        :class="BAR_LABEL"
+        title="What hangs on the simulated amplifier's output. Change it between the two passes of an output-impedance run, the way you would swap the resistor on a bench."
+      >
+        Load
+        <select :class="BAR_SELECT" :value="status.simulatedLoad ?? 'Open'" @change="onSimulatedLoadChange">
+          <option v-for="load in LOADS" :key="load.value" :value="load.value">{{ load.label }}</option>
+        </select>
+      </label>
+      <label
+        class="flex items-center gap-1.5"
+        :class="BAR_LABEL"
+        title="What the simulator pretends is patched between its generator and its input. A straight wire has no response and no memory, so the impulse response is a single spike and both decay surfaces show nothing."
+      >
+        DUT
+        <select :class="BAR_SELECT" :value="status.simulatedDut ?? 'StraightWire'" @change="onSimulatedDutChange">
+          <optgroup v-for="group in DUT_GROUPS" :key="group" :label="group">
+            <option
+              v-for="model in DUT_MODELS.filter((m) => m.group === group)"
+              :key="model.value"
+              :value="model.value"
+              :title="model.title"
+            >
+              {{ model.label }}
+            </option>
+          </optgroup>
+        </select>
+      </label>
+      <button
+        v-if="anyKnobHidden || showAllKnobs"
+        type="button"
+        class="rounded px-1 leading-none text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-100"
+        :class="{ 'text-neutral-900 dark:text-neutral-100': showAllKnobs }"
+        :aria-pressed="showAllKnobs"
+        :aria-label="showAllKnobs ? 'Hide the simulator controls this measurement does not use' : 'Show all simulator controls'"
+        :title="
+          showAllKnobs
+            ? 'Showing every simulator control. Click to go back to the ones this measurement reads.'
+            : 'Some simulator controls are hidden because this measurement cannot read them. Click to show them all.'
+        "
+        @click="showAllKnobs = !showAllKnobs"
+      >
+        ⋯
+      </button>
+    </template>
 
-      <!-- Simulator-only: what the synthesized DUT adds on top of the generator's stimulus. Keyed on
-           the *selected* analyzer rather than on isSimulated, so the DUT can be chosen while the
-           simulator is still coming up. Each knob is then shown only where the open measurement can
-           read it, or while it is engaged — see simulator/knobs.ts. The DUT dropdown is never
-           hidden: picking a model that does not suit the screen is how the hint above the chart gets
-           its chance to say so. -->
-      <template v-if="status?.deviceKind === 'Simulated'">
-        <label
-          v-if="knobs.noise"
-          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          title="Simulated DUT noise floor (white + 1/f). Turn off for a clean spectrum."
-        >
-          <input type="checkbox" :checked="status.simulatedNoiseEnabled ?? false" @change="onSimulatedNoiseChange" />
-          Noise
-        </label>
-        <label
-          v-if="knobs.hum"
-          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          title="Simulated mains hum: 50 Hz plus two harmonics, each 6 dB down."
-        >
-          <input type="checkbox" :checked="status.simulatedHumEnabled ?? false" @change="onSimulatedHumChange" />
-          Hum
-        </label>
-        <label
-          v-if="knobs.harmonics"
-          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          :class="{ 'opacity-50': harmonicsSwitchInert }"
-          :title="harmonicsSwitchTitle"
-        >
-          <input
-            type="checkbox"
-            :checked="status.simulatedHarmonicsEnabled ?? false"
-            :disabled="harmonicsSwitchInert"
-            @change="onSimulatedHarmonicsChange"
-          />
-          Harmonics
-        </label>
-        <label
-          v-if="knobs.crosstalk"
-          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          title="Simulated inter-channel coupling: each channel leaks into the other at −70 dB through the audio band, rising 6 dB per octave above 6 kHz (≈ −59 dB at 20 kHz sampled at 192 kHz, −53 dB at 48 kHz) — a capacitive coupling. Off, the channels are perfectly separate."
-        >
-          <input type="checkbox" :checked="status.simulatedCrosstalkEnabled ?? false" @change="onSimulatedCrosstalkChange" />
-          Crosstalk
-        </label>
-        <label
-          v-if="knobs.outputStage"
-          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          title="The output impedance the simulated amplifier presents at its terminals — a property of the amplifier, separate from the DUT model, which is its open-circuit behaviour. None by default; the other two only take effect once a load is connected below, and then on every measurement, not only the output-impedance one."
-        >
-          Zout
-          <select
-            class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
-            :value="status.simulatedOutputStage ?? 'None'"
-            @change="onSimulatedOutputStageChange"
-          >
-            <option v-for="stage in OUTPUT_STAGES" :key="stage.value" :value="stage.value" :title="stage.title">{{ stage.label }}</option>
-          </select>
-        </label>
-        <label
-          v-if="knobs.load"
-          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          title="What hangs on the simulated amplifier's output. Change it between the two passes of an output-impedance run, the way you would swap the resistor on a bench."
-        >
-          Load
-          <select
-            class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
-            :value="status.simulatedLoad ?? 'Open'"
-            @change="onSimulatedLoadChange"
-          >
-            <option v-for="load in LOADS" :key="load.value" :value="load.value">{{ load.label }}</option>
-          </select>
-        </label>
-        <label
-          class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400"
-          title="What the simulator pretends is patched between its generator and its input. A straight wire has no response and no memory, so the impulse response is a single spike and both decay surfaces show nothing."
-        >
-          DUT
-          <select
-            class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
-            :value="status.simulatedDut ?? 'StraightWire'"
-            @change="onSimulatedDutChange"
-          >
-            <optgroup v-for="group in DUT_GROUPS" :key="group" :label="group">
-              <option
-                v-for="model in DUT_MODELS.filter((m) => m.group === group)"
-                :key="model.value"
-                :value="model.value"
-                :title="model.title"
-              >
-                {{ model.label }}
-              </option>
-            </optgroup>
-          </select>
-        </label>
-        <button
-          v-if="anyKnobHidden || showAllKnobs"
-          type="button"
-          class="rounded px-1 leading-none text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-100"
-          :class="{ 'text-neutral-900 dark:text-neutral-100': showAllKnobs }"
-          :aria-pressed="showAllKnobs"
-          :aria-label="showAllKnobs ? 'Hide the simulator controls this measurement does not use' : 'Show all simulator controls'"
-          :title="
-            showAllKnobs
-              ? 'Showing every simulator control. Click to go back to the ones this measurement reads.'
-              : 'Some simulator controls are hidden because this measurement cannot read them. Click to show them all.'
-          "
-          @click="showAllKnobs = !showAllKnobs"
-        >
-          ⋯
-        </button>
-      </template>
-      <!-- The QA403's own settings, in the same place and with the same glyph as the sound card's
-           below. Keyed on the selected analyzer, not on a connection: these are stored settings,
-           and one of them (the rate) decides what the FFT screen offers before anything is up. -->
-      <button
-        v-if="isQa403"
-        type="button"
-        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-        aria-label="QA403 settings"
-        :title="qa403Title"
-        @click="emit('openQa403')"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-        </svg>
-      </button>
-      <!-- Sound-card settings. Keyed on the selected analyzer rather than on a connection, for the
-           same reason the simulator's controls are: the card has to be choosable before it is up,
-           and when nothing is chosen yet this button is the only way to get anywhere. -->
-      <button
-        v-if="isSoundCard"
-        type="button"
-        class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-        aria-label="Sound card settings"
-        :title="soundCardTitle"
-        @click="emit('openSoundCard')"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-        </svg>
-      </button>
-      <!-- Said out loud rather than left to be discovered: every ratio is still exact, but nothing
-           on screen is a voltage until both calibration steps have run. -->
+    <!--
+      The app starts whether or not a QA403 is attached (a missing one used to abort startup
+      outright), so "offline" is a normal state to arrive in rather than a failure. Covers the
+      mid-session unplug too: the server releases the dead handle and reports connected=false, so
+      the same button brings the device back once it is plugged in again. Hidden while the error
+      pill below is showing its own Retry — the two do the same thing, and one affordance at a time.
+    -->
+    <button
+      v-if="status && !status.connected && !(error && errorRetryable)"
+      type="button"
+      class="h-7 rounded-md border border-neutral-300 px-2.5 font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+      :disabled="connecting"
+      title="Look for a QA403 on USB and connect to it."
+      @click="emit('connect')"
+    >
+      {{ connecting ? 'Connecting…' : 'Connect' }}
+    </button>
+    <span
+      v-if="status?.acquiring"
+      class="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+    >
+      Acquiring
+    </span>
+
+    <span v-if="telemetry.length > 0" class="mx-0.5 h-5 border-l border-neutral-200 dark:border-neutral-800" />
+
+    <!--
+      The analyzer's identity and its own housekeeping sensors, in the vendor software's order. Not
+      a measurement of anything on the bench: they say whether the USB port is feeding the unit
+      properly and how warm it has become.
+
+      Dimmed, not hidden, while a measurement runs: reading the three sensors costs three register
+      exchanges on the control endpoint, which is the one thing that must not happen with transfers
+      in flight, so the server stops refreshing them for the length of an acquisition. The numbers
+      are still the last real reading, and a row that disappears whenever a measurement starts
+      reads as a fault.
+    -->
+    <span v-if="telemetry.length > 0" class="flex items-center gap-3.5" :class="telemetryStale ? 'opacity-50' : ''">
       <span
-        v-if="isSoundCard && status?.connected && status.soundCardCalibrated === false"
-        class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-        title="Levels are dBFS, not volts. THD, IMD, crosstalk and the response shape are exact regardless — a consistent full-scale constant cancels out of every ratio."
+        v-for="row in telemetry"
+        :key="row.key"
+        class="flex items-center gap-1.5"
+        :title="telemetryStale ? telemetryStaleTitle : row.title"
       >
-        Uncalibrated
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="shrink-0"
+          :class="row.iconClass"
+          aria-hidden="true"
+        >
+          <path :d="row.icon" />
+        </svg>
+        <span v-if="row.label" :class="BAR_LABEL">{{ row.label }}</span>
+        <span class="font-mono" :class="row.valueClass">{{ row.value }}</span>
       </span>
-      <!--
-        The app starts whether or not a QA403 is attached (a missing one used to abort startup
-        outright), so "Disconnected" is a normal state to arrive in rather than a failure. Covers the
-        mid-session unplug too: the server releases the dead handle and reports connected=false, so
-        the same button brings the device back once it is plugged in again.
-      -->
+    </span>
+
+    <!--
+      Only shown once it happens, because it should never happen. A dropped chunk splices the
+      sample stream, which lifts the measured noise floor and smears tones — so this is a warning
+      that the numbers on screen are wrong, not a throughput statistic.
+    -->
+    <span
+      v-if="status && status.droppedRxChunks > 0"
+      class="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
+      title="RX chunks dropped because the host fell behind. Each one splices the sample stream, so noise-floor and THD+N readings taken since are unreliable."
+    >
+      {{ status.droppedRxChunks }} dropped
+    </span>
+    <!--
+      The other half of the pipeline, and shown separately for the same reason the server keeps two
+      counters: RX chunks drop before calibration, blocks drop after it. Only droppedRxChunks was
+      ever displayed, so this bar read clean through runs that lost 439 blocks — 1.8 M frames, over
+      9 seconds of audio — which is exactly the "the numbers on screen are wrong" case it exists to
+      warn about.
+    -->
+    <span
+      v-if="status && status.droppedBlocks > 0"
+      class="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
+      title="Assembled blocks dropped because the consumer fell behind calibration. Each one is a hole in the sample stream, so noise-floor and THD+N readings taken since are unreliable."
+    >
+      {{ status.droppedBlocks }} blocks dropped
+    </span>
+    <!--
+      The transport's own drops, and the one of the three that does NOT mean the measurement is
+      wrong: the samples all arrived and anything saved from this run is sound. What is lost is a
+      frame of one tick's *set*, which this client pairs by seq — so a torn tick reads as the
+      oscilloscope's "no fundamental to remove" flicker, or a chart a tick behind the meters.
+      Amber rather than red for exactly that reason, and worded as "display" so the distinction is
+      on the badge rather than only in the tooltip. The max is shown because one wedged tab says
+      nothing about the others; the total comes along once they differ.
+    -->
+    <span
+      v-if="status && status.droppedStreamFramesMax > 0"
+      class="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+      title="Stream frames dropped on the way to the browser because a client fell behind. The measurement itself is unaffected — the samples all arrived — but a tick that loses one of its frames can draw torn, which is what the oscilloscope's flicker looks like."
+    >
+      {{ status.droppedStreamFramesMax }} display
+      <template v-if="status.droppedStreamFramesTotal > status.droppedStreamFramesMax">
+        / {{ status.droppedStreamFramesTotal }} total
+      </template>
+      dropped
+    </span>
+
+    <!--
+      The request error, inline beside the analyzer it is about rather than on a line of its own
+      under the bar. Truncated with the whole message in the tooltip: the line is shared by the 2 s
+      poll and every action in App.vue, and some of what lands here is a sentence. Retry is offered
+      only where retrying means "open the analyzer" — see errorRetryable.
+    -->
+    <span
+      v-if="error"
+      role="status"
+      class="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300"
+      :title="error"
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" class="shrink-0" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v6M12 16.5h.01" />
+      </svg>
+      <span class="truncate">{{ error }}</span>
       <button
-        v-if="status && !status.connected"
+        v-if="errorRetryable"
         type="button"
-        class="rounded border border-neutral-300 px-2 py-0.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="ml-1 h-5 shrink-0 rounded-full bg-red-600 px-2 text-[11px] font-semibold text-white hover:bg-red-700 disabled:opacity-50"
         :disabled="connecting"
-        title="Look for a QA403 on USB and connect to it."
+        title="Look for the analyzer again and connect to it."
         @click="emit('connect')"
       >
-        {{ connecting ? 'Connecting…' : 'Connect' }}
+        {{ connecting ? 'Connecting…' : 'Retry' }}
       </button>
-      <span
-        v-if="status?.acquiring"
-        class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+    </span>
+
+    <span class="flex-1"></span>
+
+    <!--
+      The programmable load — a second instrument, independent of which analyzer is selected, and
+      the only thing on this bar that is not about the analyzer at all.
+
+      Hidden until a load has been chosen in Configuration ▸ Acquisition. Few benches own a QA451,
+      and a permanently empty readout in front of everyone else would be worse than no feature:
+      with the setting at its default this bar is what it was before.
+
+      The box is itself the button, the way the external-gain badge beside it is: the readings are
+      what you want, and making them inert with a separate icon to click reads as a bug. Its
+      readings are segments rather than a dot-separated string so the eye can find the one it is
+      after — every one of them is a different kind of thing.
+    -->
+    <span v-if="showLoadBox" class="flex items-center gap-1.5">
+      <span :class="BAR_LABEL">Load</span>
+      <button
+        type="button"
+        class="flex h-7 items-stretch overflow-hidden rounded-md border font-mono"
+        :class="LOAD_TONE_CLASS[loadBox.tone]"
+        aria-haspopup="dialog"
+        aria-label="Programmable load"
+        :title="loadBox.title"
+        @click="emit('openLoad')"
       >
-        Acquiring
-      </span>
-    </div>
-
-    <div v-if="status?.connected" class="flex items-center gap-3 text-neutral-500 dark:text-neutral-400">
-      <span>S/N {{ status.serialNumber }}</span>
-      <span>FW {{ status.firmwareVersion }}</span>
-      <!--
-        The analyzer's own housekeeping sensors, in the vendor software's order. Not a measurement
-        of anything on the bench: they say whether the USB port is feeding the unit properly and how
-        warm it has become. Hidden entirely on a device that has no sensors (the simulator).
-      -->
-      <span
-        v-if="telemetry"
-        class="flex items-center gap-3"
-        :class="telemetryStale ? 'opacity-50' : ''"
-        :title="
-          telemetryStale
-            ? 'The analyzer\'s own sensors — last read before this acquisition started. Reading them needs the control endpoint, which is left alone while samples are streaming.'
-            : 'The analyzer\'s own sensors: its USB supply rail, what it draws from it, and its internal temperature.'
-        "
-      >
-        <span>{{ telemetry.usbVoltage }}</span>
-        <span>{{ telemetry.usbCurrent }}</span>
-        <span>{{ telemetry.temperature }}</span>
-      </span>
-      <!--
-        Only shown once it happens, because it should never happen. A dropped chunk splices the
-        sample stream, which lifts the measured noise floor and smears tones — so this is a warning
-        that the numbers on screen are wrong, not a throughput statistic.
-      -->
-      <span
-        v-if="status.droppedRxChunks > 0"
-        class="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
-        title="RX chunks dropped because the host fell behind. Each one splices the sample stream, so noise-floor and THD+N readings taken since are unreliable."
-      >
-        {{ status.droppedRxChunks }} dropped
-      </span>
-
-      <!--
-        The other half of the pipeline, and shown separately for the same reason the server keeps two
-        counters: RX chunks drop before calibration, blocks drop after it. Only droppedRxChunks was
-        ever displayed, so this bar read clean through runs that lost 439 blocks — 1.8 M frames, over
-        9 seconds of audio — which is exactly the "the numbers on screen are wrong" case it exists to
-        warn about.
-      -->
-      <span
-        v-if="status.droppedBlocks > 0"
-        class="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
-        title="Assembled blocks dropped because the consumer fell behind calibration. Each one is a hole in the sample stream, so noise-floor and THD+N readings taken since are unreliable."
-      >
-        {{ status.droppedBlocks }} blocks dropped
-      </span>
-
-      <!--
-        The transport's own drops, and the one of the three that does NOT mean the measurement is
-        wrong: the samples all arrived and anything saved from this run is sound. What is lost is a
-        frame of one tick's *set*, which this client pairs by seq — so a torn tick reads as the
-        oscilloscope's "no fundamental to remove" flicker, or a chart a tick behind the meters.
-        Amber rather than red for exactly that reason, and worded as "display" so the distinction is
-        on the badge rather than only in the tooltip. The max is shown because one wedged tab says
-        nothing about the others; the total comes along once they differ.
-      -->
-      <span
-        v-if="status.droppedStreamFramesMax > 0"
-        class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-        title="Stream frames dropped on the way to the browser because a client fell behind. The measurement itself is unaffected — the samples all arrived — but a tick that loses one of its frames can draw torn, which is what the oscilloscope's flicker looks like."
-      >
-        {{ status.droppedStreamFramesMax }} display
-        <template v-if="status.droppedStreamFramesTotal > status.droppedStreamFramesMax">
-          / {{ status.droppedStreamFramesTotal }} total
-        </template>
-        dropped
-      </span>
-    </div>
-
-    <div class="ml-auto flex items-center gap-4">
-      <!--
-        Always on the bar, on every analyzer, because it is now the only place the external gain can
-        be read or set -- the Configuration dialog's copy is gone, and with it the field that wrote
-        a value the sound card's bench never applied.
-
-        Amber only while something is declared: a divider in front of an input corrects every level
-        on screen, and a bench that has forgotten it is on reads a DUT 20 dB louder than it is. Grey
-        at 0 says the opposite just as usefully -- nothing in the path, every level as measured --
-        and keeps the control where the eye already learned to find it.
-
-        The badge is itself the button, with the pencil beside it saying so: the number is the thing
-        you want to change, and making it inert while a 16 px icon beside it is not reads as a bug.
-      -->
-      <div v-if="status" ref="gainAnchor" class="relative flex items-center gap-1.5">
-        <button
-          type="button"
-          class="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          :class="gainDeclared ? 'text-amber-700 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-400'"
-          :aria-expanded="gainOpen"
-          :title="
-            gainDeclared
-              ? 'External gain in front of the inputs: every level shown is the DUT’s output, with this undone. Click to change.'
-              : 'Nothing declared in front of the inputs, so every level shown is as measured. Click to declare a divider or a front-end.'
-          "
-          @click="gainOpen = !gainOpen"
-        >
-          Ext. gain
-          <!-- A dot when a gain is declared, as the mockup draws it: a divider the bench has
-               forgotten about makes every level wrong by its whole size, so the badge has to say
-               "something is set here" before it is read. -->
-          <span
-            class="inline-flex h-[26px] items-center gap-2 rounded-lg border px-2.5 font-mono"
-            :class="
-              gainDeclared
-                ? 'border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
-                : 'border-neutral-200 dark:border-neutral-700'
-            "
-          >
-            <span v-if="gainDeclared" class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"></span>
-            L {{ formatGain(gainLeftDb, gainUnit) }} · R {{ formatGain(gainRightDb, gainUnit) }}
+        <span class="flex items-center bg-teal-50 px-2.5 font-semibold text-teal-700 dark:bg-teal-950/50 dark:text-teal-300">
+          {{ loadBox.model }}
+        </span>
+        <span v-if="load?.connected === false" :class="BAR_SEGMENT" class="text-neutral-500 dark:text-neutral-400">
+          not available
+        </span>
+        <template v-else>
+          <span :class="BAR_SEGMENT">{{ loadBox.impedance }}</span>
+          <span v-if="loadBox.dutPower" :class="BAR_SEGMENT" class="gap-1.5">
+            <span class="h-1.5 w-1.5 rounded-full" :class="load?.dutPowerOn === true ? 'bg-emerald-500' : 'bg-neutral-400'" />
+            <span
+              :class="
+                load?.dutPowerOn === true
+                  ? 'font-semibold text-emerald-600 dark:text-emerald-400'
+                  : 'text-neutral-500 dark:text-neutral-400'
+              "
+            >
+              {{ loadBox.dutPower }}
+            </span>
           </span>
-        </button>
-        <button
-          type="button"
-          class="flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-          :aria-expanded="gainOpen"
-          aria-label="Edit external gain"
-          title="Edit the external gain."
-          @click="gainOpen = !gainOpen"
-        >
-          <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M11.5 2.5a1.6 1.6 0 0 1 2.3 2.3L5.6 13 2.5 13.5l.5-3.1z" />
-          </svg>
-        </button>
+          <span v-if="loadBox.temperature" :class="BAR_SEGMENT">{{ loadBox.temperature }}</span>
+          <span v-if="loadBox.current" :class="BAR_SEGMENT">{{ loadBox.current }}</span>
+        </template>
+      </button>
+    </span>
 
-        <!--
-          Anchored above the badge rather than centred on the screen: it edits the thing it is
-          pointing at, and a modal for two numbers would dim the very readings the gain changes.
-          bottom-full puts it clear of the bar; right-0 keeps it inside the window, since the badge
-          sits at the right-hand end of a bar that reaches the edge.
-        -->
-        <div v-if="gainOpen" class="absolute bottom-full right-0 z-30 mb-2">
-          <ExternalGainPopover
-            :left-db="gainLeftDb"
-            :right-db="gainRightDb"
-            :unit="gainUnit"
-            :bench-label="gainBenchLabel"
-            :disabled="rangesLocked"
-            @apply="applyGain"
-            @close="gainOpen = false"
-          />
-        </div>
-      </div>
+    <span class="mx-0.5 h-5 border-l border-neutral-200 dark:border-neutral-800" />
+
+    <!--
+      Always on the bar, on every analyzer, because it is now the only place the external gain can
+      be read or set -- the Configuration dialog's copy is gone, and with it the field that wrote
+      a value the sound card's bench never applied.
+
+      Amber only while something is declared: a divider in front of an input corrects every level
+      on screen, and a bench that has forgotten it is on reads a DUT 20 dB louder than it is. Grey
+      at 0 says the opposite just as usefully -- nothing in the path, every level as measured --
+      and keeps the control where the eye already learned to find it.
+
+      One button, with the pencil inside it: the number is the thing you want to change, and the
+      two separate buttons this replaced both did the same thing.
+    -->
+    <span v-if="status" ref="gainAnchor" class="relative flex items-center gap-1.5">
+      <span :class="BAR_LABEL">Ext. gain</span>
+      <button
+        type="button"
+        class="flex h-7 items-center gap-[7px] rounded-md border py-0 pl-2.5 pr-2 font-mono"
+        :class="
+          gainDeclared
+            ? 'border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-200'
+            : 'border-neutral-200 bg-[var(--surface-control)] text-neutral-900 dark:border-neutral-700 dark:text-neutral-100'
+        "
+        :aria-expanded="gainOpen"
+        aria-label="Edit external gain"
+        :title="
+          gainDeclared
+            ? 'External gain in front of the inputs: every level shown is the DUT’s output, with this undone. Click to change.'
+            : 'Nothing declared in front of the inputs, so every level shown is as measured. Click to declare a divider or a front-end.'
+        "
+        @click="gainOpen = !gainOpen"
+      >
+        <!-- A dot when a gain is declared, as the mockup draws it: a divider the bench has
+             forgotten about makes every level wrong by its whole size, so the badge has to say
+             "something is set here" before it is read. -->
+        <span v-if="gainDeclared" class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"></span>
+        L {{ formatGain(gainLeftDb, gainUnit) }} · R {{ formatGain(gainRightDb, gainUnit) }}
+        <svg
+          viewBox="0 0 24 24"
+          class="h-[13px] w-[13px] shrink-0"
+          :class="gainDeclared ? 'text-amber-600 dark:text-amber-300' : 'text-blue-600 dark:text-blue-400'"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+        </svg>
+      </button>
+
       <!--
-        Auto is the default and is what every measurement needs: the input range tracks the signal
-        (the device's own hardware ranger, or the session's SessionInputRanger where there is
-        none) and the output range is derived from the generator
-        amplitude (OutputRangeSelector). Manual pins both, which is what reproducing another
-        analyzer's reading takes — the same 8.6 dBV loopback measured on the 12 dBV input range and
-        on the 18 dBV one differs by 5 dB of H3 and 1.7 dB of noise floor, and nothing but the range
-        explains it.
+        Anchored above the badge rather than centred on the screen: it edits the thing it is
+        pointing at, and a modal for two numbers would dim the very readings the gain changes.
+        bottom-full puts it clear of the bar; right-0 keeps it inside the window, since the badge
+        sits at the right-hand end of a bar that reaches the edge.
       -->
-      <label v-if="status && !isSoundCard" class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400" :title="rangingTitle">
-        Ranging
-        <select
-          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
-          :value="status.rangingMode"
+      <div v-if="gainOpen" class="absolute bottom-full right-0 z-30 mb-2">
+        <ExternalGainPopover
+          :left-db="gainLeftDb"
+          :right-db="gainRightDb"
+          :unit="gainUnit"
+          :bench-label="gainBenchLabel"
           :disabled="rangesLocked"
-          @change="onRangingModeChange"
-        >
-          <option v-for="mode in RANGING_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
-        </select>
-      </label>
-      <span v-if="!isSoundCard" class="flex items-center gap-2 text-neutral-500 dark:text-neutral-400" :title="attenuationTitle">
-        Attenuation
-        <!--
-          The dropdown replaces the readout rather than sitting beside it: two widgets showing one
-          number invite the question of which is the truth. Both read status.inputRangeDbv, which is
-          the device's own answer (IAnalyzerDevice.InputRangeDbv) rather than what was last asked
-          for — so a range the device declines to take shows up as the select snapping back.
-        -->
-        <select
-          v-if="manual"
-          class="rounded border border-neutral-300 bg-transparent px-1 py-0.5 font-mono text-xs disabled:opacity-50 dark:border-neutral-700"
-          :value="String(status?.inputRangeDbv ?? '')"
-          :disabled="rangesLocked || !status?.connected"
-          @change="onInputRangeChange"
-        >
-          <option v-for="dbv in inputRanges" :key="dbv" :value="String(dbv)">{{ dbv }} dB</option>
-        </select>
-        <span v-else class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
-          {{ status?.inputRangeDbv ?? '--' }} dB
-        </span>
-      </span>
-      <!--
-        The output range is an analog attenuator whose setting sets the DAC's noise floor, which is
-        why Auto derives it rather than parking on 18 dBV: that wasted 33 dB of headroom on a -15 dBV
-        tone and put the noise straight into every loopback measurement. Manual hands the choice
-        over, and a level the chosen range cannot carry is said out loud rather than quietly
-        corrected — correcting it would make "Manual" mean "manual until the app disagrees".
-      -->
-      <span v-if="!isSoundCard" class="flex items-center gap-2" :class="outputRangeClass" :title="outputRangeTitle">
-        Output range
-        <select
-          v-if="manual"
-          class="rounded border bg-transparent px-1 py-0.5 font-mono text-xs disabled:opacity-50"
-          :class="
-            status?.outputRangeClipping
-              ? 'border-red-400 dark:border-red-600'
-              : 'border-neutral-300 dark:border-neutral-700'
-          "
-          :value="String(status?.outputRangeDbv ?? '')"
-          :disabled="rangesLocked || !status?.connected"
-          @change="onOutputRangeChange"
-        >
-          <option v-for="dbv in outputRanges" :key="dbv" :value="String(dbv)">{{ dbv }} dBV</option>
-        </select>
-        <span v-else class="rounded border border-neutral-200 px-2 py-0.5 font-mono dark:border-neutral-800">
-          {{ status?.outputRangeDbv ?? '--' }} dBV
-        </span>
-        <span v-if="status?.outputRangeClipping" class="text-xs font-medium">clipping</span>
-      </span>
-    </div>
+          @apply="applyGain"
+          @close="gainOpen = false"
+        />
+      </div>
+    </span>
 
-    <p v-if="error" class="w-full text-red-600 dark:text-red-400">{{ error }}</p>
+    <!--
+      Auto is the default and is what every measurement needs: the input range tracks the signal
+      (the device's own hardware ranger, or the session's SessionInputRanger where there is
+      none) and the output range is derived from the generator
+      amplitude (OutputRangeSelector). Manual pins both, which is what reproducing another
+      analyzer's reading takes — the same 8.6 dBV loopback measured on the 12 dBV input range and
+      on the 18 dBV one differs by 5 dB of H3 and 1.7 dB of noise floor, and nothing but the range
+      explains it.
+    -->
+    <label v-if="status && !isSoundCard" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="rangingTitle">
+      Ranging
+      <select :class="BAR_SELECT" :value="status.rangingMode" :disabled="rangesLocked" @change="onRangingModeChange">
+        <option v-for="mode in RANGING_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+      </select>
+    </label>
+    <span v-if="!isSoundCard" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="attenuationTitle">
+      Attenuation
+      <!--
+        The dropdown replaces the readout rather than sitting beside it: two widgets showing one
+        number invite the question of which is the truth. Both read status.inputRangeDbv, which is
+        the device's own answer (IAnalyzerDevice.InputRangeDbv) rather than what was last asked
+        for — so a range the device declines to take shows up as the select snapping back. The
+        "auto" chip is only on the readout, because under Manual it is not.
+      -->
+      <select
+        v-if="manual"
+        :class="BAR_SELECT"
+        class="font-mono"
+        :value="String(status?.inputRangeDbv ?? '')"
+        :disabled="rangesLocked || !status?.connected"
+        @change="onInputRangeChange"
+      >
+        <option v-for="dbv in inputRanges" :key="dbv" :value="String(dbv)">{{ dbv }} dB</option>
+      </select>
+      <span v-else :class="BAR_READOUT">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true">
+          <path :d="RANGE_ICON.attenuation" />
+        </svg>
+        {{ status?.inputRangeDbv ?? '—' }} dB
+        <span :class="BAR_AUTO_CHIP">auto</span>
+      </span>
+    </span>
+    <!--
+      The output range is an analog attenuator whose setting sets the DAC's noise floor, which is
+      why Auto derives it rather than parking on 18 dBV: that wasted 33 dB of headroom on a -15 dBV
+      tone and put the noise straight into every loopback measurement. Manual hands the choice
+      over, and a level the chosen range cannot carry is said out loud rather than quietly
+      corrected — correcting it would make "Manual" mean "manual until the app disagrees".
+    -->
+    <span v-if="!isSoundCard" class="flex items-center gap-1.5" :class="outputRangeClass" :title="outputRangeTitle">
+      Output range
+      <select
+        v-if="manual"
+        :class="BAR_SELECT"
+        class="font-mono"
+        :value="String(status?.outputRangeDbv ?? '')"
+        :disabled="rangesLocked || !status?.connected"
+        @change="onOutputRangeChange"
+      >
+        <option v-for="dbv in outputRanges" :key="dbv" :value="String(dbv)">{{ dbv }} dBV</option>
+      </select>
+      <span v-else :class="BAR_READOUT">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true">
+          <path :d="RANGE_ICON.output" />
+        </svg>
+        {{ status?.outputRangeDbv ?? '—' }} dBV
+        <span :class="BAR_AUTO_CHIP">auto</span>
+      </span>
+      <span v-if="status?.outputRangeClipping" class="font-medium">clipping</span>
+    </span>
+
     <!-- Persistent, unlike the request error above: the startup check found the file damaged, and
          nothing the user does in this session changes that. -->
     <p

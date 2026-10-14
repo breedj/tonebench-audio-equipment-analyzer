@@ -9,7 +9,7 @@
 // channels and the swatch names the trace rather than a channel.
 
 /** Every trace the sweep chart can draw, by the key `SweepTraceKey` uses. */
-export type SweepTraceColorKey = 'magnitude' | 'thd' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6plus' | 'noise'
+export type SweepTraceColorKey = 'magnitude' | 'thd' | 'thdn' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6plus' | 'noise' | 'snr'
 
 export const SWEEP_TRACE_COLORS: Record<SweepTraceColorKey, readonly [string, string]> = {
   magnitude: ['#be185d', '#f472b6'],
@@ -24,6 +24,12 @@ export const SWEEP_TRACE_COLORS: Record<SweepTraceColorKey, readonly [string, st
   // the right channel lands on a mid grey that a neutral Noise trace is very hard to tell from, so
   // grey belongs to the THD family alone.
   noise: ['#0d7d84', '#2dd4bf'],
+  // The two added 2026-10-14. Both have to stay clear of the eight above, which already spend
+  // rose, neutral, blue, orange, green, red, purple and teal -- so fuchsia and brown, the two
+  // remaining hues that survive being blended toward the background for the right channel.
+  // THD+N is THD plus the noise, so it is drawn at THD's weight rather than a harmonic's.
+  thdn: ['#a21caf', '#e879f9'],
+  snr: ['#78350f', '#d8a05a'],
 }
 
 /** The one a given theme draws. `dark` is the app's `.dark` class being on, not the OS preference. */

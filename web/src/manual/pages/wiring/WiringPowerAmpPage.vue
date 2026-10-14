@@ -184,7 +184,7 @@ const { showPage } = useManual()
     <ul>
       <li>
         <strong>Enter the attenuation in the status bar's <em>Ext. gain</em> panel</strong> (click
-        the badge or the pencil beside it), per input, as a negative number: −24 for the divider
+        the badge, which carries a pencil), per input, as a negative number: −24 for the divider
         above, −20 for a plain 10:1. Every level
         the app reports is then the amplifier's, not the analyzer's — spectrum, meters, sweeps,
         output-referred drive targets, all of it — while the input range it chooses still refers to

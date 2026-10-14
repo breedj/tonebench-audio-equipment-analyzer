@@ -614,6 +614,14 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/SettingsPage.vue')),
   },
   {
+    id: 'programmable-load',
+    title: 'The programmable load',
+    summary:
+      'The QA451 as a second instrument: switching it on, the three loads, the DUT supply, the readings and what a latched fault means.',
+    group: 'Reference',
+    component: manualPage(() => import('./pages/ProgrammableLoadPage.vue')),
+  },
+  {
     id: 'simulation-import',
     title: 'Importing a simulation',
     summary: 'Reading an LTspice or QSpice run as a trace: which measurement takes which run, which directives reach the result, what to step, and what is refused.',

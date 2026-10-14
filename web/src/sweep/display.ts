@@ -18,6 +18,8 @@ export interface SweepDisplay {
   showD4: boolean
   showD5: boolean
   showD6Plus: boolean
+  showThdN: boolean
+  showSnr: boolean
   showLeft: boolean
   showRight: boolean
   thickLines: boolean
@@ -46,6 +48,11 @@ export function defaultSweepDisplay(): SweepDisplay {
     showD4: false,
     showD5: false,
     showD6Plus: false,
+    // Both off for a new measurement, like every trace past D3: a chart that came up with seven
+    // lines would be unreadable, and a stored type without the field keeps this default, so
+    // nothing saved before they existed starts drawing them.
+    showThdN: false,
+    showSnr: false,
     showLeft: true,
     showRight: false,
     thickLines: true,
@@ -101,6 +108,8 @@ export function sweepDisplayFromParams(paramsJson: string | null | undefined, ba
   if (typeof stored.chartShowD4 === 'boolean') display.showD4 = stored.chartShowD4
   if (typeof stored.chartShowD5 === 'boolean') display.showD5 = stored.chartShowD5
   if (typeof stored.chartShowD6Plus === 'boolean') display.showD6Plus = stored.chartShowD6Plus
+  if (typeof stored.chartShowThdN === 'boolean') display.showThdN = stored.chartShowThdN
+  if (typeof stored.chartShowSnr === 'boolean') display.showSnr = stored.chartShowSnr
   if (typeof stored.chartShowLeft === 'boolean') display.showLeft = stored.chartShowLeft
   if (typeof stored.chartShowRight === 'boolean') display.showRight = stored.chartShowRight
   if (typeof stored.chartThickLines === 'boolean') display.thickLines = stored.chartThickLines

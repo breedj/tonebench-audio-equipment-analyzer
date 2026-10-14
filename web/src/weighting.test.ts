@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { parseSpectrumUnit, unitAxisLabel, unitOffsetDb, unitSuffix } from './spectrumUnits'
 import {
+  BANDWIDTH_PRESETS,
+  bandwidthLabel,
   bandwidthPreset,
   bandwidthPresetValues,
+  bandwidthRangeError,
+  DEFAULT_BANDWIDTH,
   isWeighted,
   NO_WEIGHTING,
   weightingFromStored,
@@ -54,6 +58,42 @@ describe('bandwidth presets', () => {
     expect(bandwidthPresetValues('audio')).toEqual({ loHz: 20, hiHz: 20000 })
     expect(bandwidthPresetValues('wide')).toEqual({ loHz: 20, hiHz: 80000 })
     expect(bandwidthPresetValues('custom')).toBeNull()
+  })
+
+  // The default the Custom boxes open on has to be a preset, or picking Custom on a fresh bench
+  // would show a band the dropdown above it does not agree with.
+  it('starts on the audio preset', () => {
+    expect(DEFAULT_BANDWIDTH).toEqual({ loHz: 20, hiHz: 20000 })
+    expect(bandwidthPreset(DEFAULT_BANDWIDTH.loHz, DEFAULT_BANDWIDTH.hiHz)).toBe('audio')
+  })
+})
+
+describe('bandwidthLabel', () => {
+  it('uses the preset label for a preset, so a tile and the dropdown read alike', () => {
+    expect(bandwidthLabel(20, 20000)).toBe(BANDWIDTH_PRESETS[0].label)
+    expect(bandwidthLabel(20, 80000)).toBe(BANDWIDTH_PRESETS[1].label)
+  })
+
+  it('writes a custom band without the trailing zeros a measured corner carries', () => {
+    expect(bandwidthLabel(20, 22000)).toBe('20 Hz – 22 kHz')
+    expect(bandwidthLabel(10, 22050)).toBe('10 Hz – 22.05 kHz')
+    expect(bandwidthLabel(0, 1000)).toBe('0 Hz – 1 kHz')
+  })
+})
+
+describe('bandwidthRangeError', () => {
+  it('passes a band', () => {
+    expect(bandwidthRangeError(20, 20000)).toBeNull()
+    expect(bandwidthRangeError(0, 1)).toBeNull()
+  })
+
+  // Exactly the server's own refusal on PUT /api/spectrum-config, so the picker never sends one.
+  it('refuses an inverted, equal, negative or blank pair', () => {
+    expect(bandwidthRangeError(20000, 20)).not.toBeNull()
+    expect(bandwidthRangeError(1000, 1000)).not.toBeNull()
+    expect(bandwidthRangeError(-1, 20000)).not.toBeNull()
+    expect(bandwidthRangeError(Number.NaN, 20000)).not.toBeNull()
+    expect(bandwidthRangeError(20, Number.NaN)).not.toBeNull()
   })
 })
 

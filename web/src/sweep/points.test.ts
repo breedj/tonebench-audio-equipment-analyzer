@@ -11,7 +11,9 @@ import {
   percentToDb,
   sweepDistortionDb,
   sweepTraceLabel,
+  sweepTraceValue,
 } from './points'
+import type { ThdSweepPoint } from '../api/client'
 
 describe('logPerOctave', () => {
   it('returns stepsPerOctave*octaves + 1 points across a whole number of octaves', () => {
@@ -261,5 +263,41 @@ describe('sweepTraceLabel', () => {
     expect(sweepTraceLabel('d3', 'FrequencyNormalized', 'imd')).toBe('IM3')
     expect(sweepTraceLabel('noise', 'Conventional', 'imd')).toBe('Noise')
     expect(sweepTraceLabel('magnitude', 'Conventional', 'imd')).toBe('Magn')
+  })
+
+  // Both are integrated over the measurement band rather than referenced to one harmonic, so like
+  // Magnitude and Noise they have no normalized counterpart to be renamed into.
+  it('leaves the two band figures unprefixed under the normalized method', () => {
+    expect(sweepTraceLabel('thdn', 'FrequencyNormalized')).toBe('THD+N')
+    expect(sweepTraceLabel('snr', 'FrequencyNormalized')).toBe('SNR')
+  })
+})
+
+describe('sweepTraceValue for the band figures', () => {
+  const point = (over: Partial<ThdSweepPoint> = {}) =>
+    ({ thdNPercent: 0.5, snrDb: 95, thdPercent: 0.4, harmonicPercent: [], ...over }) as ThdSweepPoint
+
+  it('plots THD+N as the percentage it is stored as', () => {
+    expect(sweepTraceValue(point(), 'thdn', 'Conventional')).toBe(0.5)
+    // Not normalized: there is no per-harmonic reference for an integrated figure.
+    expect(sweepTraceValue(point(), 'thdn', 'FrequencyNormalized')).toBe(0.5)
+  })
+
+  /**
+   * The one conversion on this chart. SNR counts upward and the axis counts down from the
+   * fundamental, so the trace draws the noise the figure measures: 95 dB SNR is 0.0018 % of the
+   * fundamental, which is where it can be read against THD, THD+N and the noise floor. The report
+   * table and the CSV print the 95 dB instead -- see sweepMetricRow.
+   */
+  it('plots SNR as the noise it measures, not as the ratio', () => {
+    expect(sweepTraceValue(point({ snrDb: 95 }), 'snr', 'Conventional')).toBeCloseTo(0.001778, 6)
+    expect(sweepTraceValue(point({ snrDb: 0 }), 'snr', 'Conventional')).toBeCloseTo(100, 6)
+    expect(sweepTraceValue(point({ snrDb: 20 }), 'snr', 'Conventional')).toBeCloseTo(10, 6)
+  })
+
+  // An IMD point has neither figure (imd/points.ts fills both with NaN), and the chart draws NaN
+  // as a gap rather than as a zero at the bottom of the plot.
+  it('is NaN where the point has no SNR', () => {
+    expect(sweepTraceValue(point({ snrDb: Number.NaN }), 'snr', 'Conventional')).toBeNaN()
   })
 })

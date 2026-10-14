@@ -5,7 +5,7 @@
 import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, MultitoneFrame } from './streaming/protocol'
 import type { AveragingMode, GeneratorKind, GeneratorTone, MultitoneSettings, PeriodicWaveSettings, WhiteNoiseSettings } from './api/client'
 import { isWaveKind, waveEffectiveFreqHz, waveIdealThdPercent } from './periodicWave'
-import { weightingQualifier } from './weighting'
+import { bandwidthLabel, weightingQualifier } from './weighting'
 
 export interface MetricTile {
   label: string
@@ -16,6 +16,15 @@ export interface MetricTile {
    * always absent on the fundamental, THD, Gain, Pk and RMS tiles, which no weighting touches.
    */
   qualifier?: string
+  /**
+   * The measurement band this figure was integrated over, written as the metrics picker's
+   * dropdown writes it ("20 Hz - 20 kHz"). Present on exactly the tiles the band applies to --
+   * the same set `qualifier` covers -- so a tile can print it under its number and nothing else
+   * has to decide which readings the band governs. Taken from the noise frame, i.e. the band the
+   * record was actually read with rather than whatever the setting says now; absent when no noise
+   * frame came with the tiles (a result stored before those rows existed).
+   */
+  band?: string
   /**
    * Why this tile reads NOT_APPLICABLE instead of a number: the stimulus is not a single sine, so
    * the figure's "fundamental" is only the loudest tone of several and everything else it plays
@@ -290,8 +299,14 @@ export function channelTiles(
   // the set that assumes the record holds one fundamental — a weighting changes what "noise" means,
   // and a second tone changes what is counted as noise at all. A tile that reads n/a drops the
   // weighting qualifier with its number: there is no integral left for it to describe.
+  // The band is stamped on in both branches, suppressed or not: it says what the figure *would*
+  // be integrated over, and a footer that came and went with the stimulus would move every tile
+  // in the row.
+  const band = noise ? bandwidthLabel(noise.measurementLoHz, noise.measurementHiHz) : undefined
   const noiseFigure = (tile: MetricTile): MetricTile =>
-    caveat ? { label: tile.label, value: NOT_APPLICABLE, caveat } : qualifier ? { ...tile, qualifier } : tile
+    caveat
+      ? { label: tile.label, value: NOT_APPLICABLE, caveat, ...(band ? { band } : {}) }
+      : { ...tile, ...(qualifier ? { qualifier } : {}), ...(band ? { band } : {}) }
   const noiseTiles: MetricTile[] = noise
     ? [
         noiseFigure({ label: 'RMS dBV(bw)', value: `${noise.bandRmsDbv.toFixed(2)} dBV` }),

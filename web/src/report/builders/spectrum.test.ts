@@ -151,6 +151,9 @@ describe('a two-tone result\'s metric rows', () => {
       ['SNR dB', 'n/a'],
       ['RMS dBV(bw)', 'n/a'],
       ['RMS dBV', '-18.04 dBV'],
+      // The band the suppressed figures would have been integrated over, once per channel like
+      // the caveat under it -- a band tile is printed, so the band is stated.
+      ['Measurement band', '20 Hz – 20 kHz'],
       ['n/a', expect.stringMatching(/^The stimulus is a two-tone pair,.*\.$/)],
     ])
   })
@@ -158,7 +161,7 @@ describe('a two-tone result\'s metric rows', () => {
   it("leaves a single-tone result's rows, weighting qualifiers and all, exactly as they were", () => {
     const sections = metricsSections(subjectOf(['THD+N %', 'SNR dB'], { kind: 'Tones', toneCount: 1 }))
     const rows = sections[0].rows ?? []
-    expect(rows.map((r) => r.label)).toEqual(['THD+N % (A)', 'SNR dB (A)'])
+    expect(rows.map((r) => r.label)).toEqual(['THD+N % (A)', 'SNR dB (A)', 'Measurement band'])
     expect(rows.every((r) => r.value !== 'n/a')).toBe(true)
   })
 })
@@ -205,6 +208,7 @@ describe('spectrum report sections', () => {
       { label: 'THD %', value: '0.00100 %' },
       { label: 'Noise dBV/√Hz (A)', value: '-149.50 dBV/√Hz' },
       { label: 'Noise in nV/√Hz (A)', value: '33.5 nV/√Hz' },
+      { label: 'Measurement band', value: '20 Hz – 20 kHz' },
     ])
   })
 

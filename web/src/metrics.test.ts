@@ -221,6 +221,29 @@ describe('channelTiles', () => {
     expect(channelTiles(meters, [], 8).some((t) => t.label.startsWith('Noise'))).toBe(false)
   })
 
+  // The band footer under a tile and the weighting qualifier on it describe the same integral, so
+  // the two sets are pinned against each other rather than against a hand-written list: a figure
+  // that gains a weighting has to gain a band with it, and the reverse.
+  it('stamps the band on exactly the tiles a weighting qualifies', () => {
+    const weighted = { ...noise, weighting: { standard: 'A' as const, user1: false, user2: false } }
+    const tiles = channelTiles(meters, [], 8, null, false, weighted, 0)
+    expect(tiles.filter((t) => t.band).map((t) => t.label)).toEqual(tiles.filter((t) => t.qualifier).map((t) => t.label))
+  })
+
+  it('writes the band the record was read with, not the setting now, and keeps it on a suppressed tile', () => {
+    const wide = { ...noise, measurementLoHz: 20, measurementHiHz: 80000 }
+    expect(channelTiles(meters, [], 8, null, false, wide, 0).find((t) => t.label === 'SNR dB')?.band).toBe('20 Hz – 80 kHz')
+    const suppressed = channelTiles(meters, [], 8, null, false, wide, 0, null, twoTone).find((t) => t.label === 'SNR dB')
+    expect(suppressed?.value).toBe(NOT_APPLICABLE)
+    expect(suppressed?.band).toBe('20 Hz – 80 kHz')
+  })
+
+  // Nothing is back-filled: a result stored before the noise rows existed has no band to quote,
+  // and its THD+N tile says nothing rather than claiming the current setting.
+  it('leaves the band off every tile when no noise frame came with them', () => {
+    expect(channelTiles(meters, [], 8).some((t) => t.band)).toBe(false)
+  })
+
   it('qualifies only the noise-integrated tiles with the weighting', () => {
     const weighted = { ...noise, weighting: { standard: 'A' as const, user1: true, user2: false } }
     const tiles = channelTiles(meters, [], 8, null, false, weighted, 0)

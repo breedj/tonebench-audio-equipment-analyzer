@@ -178,11 +178,12 @@ describe('sweepMeasurementSections', () => {
     ])
     expect(sections[1].headers).toEqual([
       'Frequency', 'Generator', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
+      'THD+N', 'SNR',
     ])
     expect(sections[1].cells!.map((c) => c[0])).toEqual(['100 Hz', '1.00 kHz', '10.0 kHz'])
     expect(sections[1].cells![1]).toEqual([
       '1.00 kHz', '100 mV (-20.00 dBV)', '0.050%', '-0.30 dB', '0.30%', '0.10%', '0.020%', '0.0010%', '0.0050%',
-      '1.25 mW (8 Ω)', '0.0010%',
+      '1.25 mW (8 Ω)', '0.0010%', '0.50%', '90.00 dB',
     ])
     expect(sections[2].figures![0]).toEqual({ label: 'Points', value: '1' })
   })

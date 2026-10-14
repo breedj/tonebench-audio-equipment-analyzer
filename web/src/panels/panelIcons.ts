@@ -141,7 +141,7 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
   'fft settings': { icon: 'sliders', tone: 'orange' },
   generator: { icon: 'sine', tone: 'orange' },
   advanced: { icon: 'sliders', tone: 'amber' },
-  'bandwidth & weighting': { icon: 'sliders', tone: 'cyan' },
+  'weighting': { icon: 'sliders', tone: 'cyan' },
 
   display: { icon: 'eye', tone: 'pink' },
 

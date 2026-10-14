@@ -29,7 +29,10 @@ public sealed class MeasurementSaveService(
     ProjectRepository projectRepository,
     MeasurementRepository measurementRepository,
     IOptions<JsonOptions> jsonOptions,
-    UserWeightingSetting? userWeighting = null)
+    UserWeightingSetting? userWeighting = null,
+    // Optional and last, like the weighting above it: dozens of tests construct this service
+    // directly, and a load is not something a save needs in order to work. DI fills it in the app.
+    LoadSessionService? load = null)
 {
     // Reuses the app's own HTTP JSON options (JsonStringEnumConverter etc, configured once in
     // Program.cs) rather than a second, independently-drifting JsonSerializerOptions instance —
@@ -161,6 +164,11 @@ public sealed class MeasurementSaveService(
             MeasureNoiseFloor: true,
             AdaptiveResolution: true,
             ThdMethod: nameof(Services.ThdMethod.Conventional),
+            // The band a new sweep starts on, matching the panels' own default -- see
+            // BandwidthField.vue. Written rather than left null: a *configured* type does have
+            // a band, and null is reserved for a row that predates the setting.
+            MeasurementLoFreqHz: 20.0,
+            MeasurementHiFreqHz: 20000.0,
             // On for a new measurement only: a stored type keeps its own (null reads as off), so
             // nothing saved earlier starts refitting its axes -- see SweepDisplayPanel.vue.
             ChartAutofitOnDone: true), SerializerOptions);
@@ -184,6 +192,11 @@ public sealed class MeasurementSaveService(
             AverageCount: 4,
             SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
             MeasureNoiseFloor: true,
+            // The band a new sweep starts on, matching the panels' own default -- see
+            // BandwidthField.vue. Written rather than left null: a *configured* type does have
+            // a band, and null is reserved for a row that predates the setting.
+            MeasurementLoFreqHz: 20.0,
+            MeasurementHiFreqHz: 20000.0,
             ChartAutofitOnDone: true), SerializerOptions);
 
     /// <summary>
@@ -212,6 +225,11 @@ public sealed class MeasurementSaveService(
             AverageCount: 4,
             SampleRateHz: ThdSweepRequest.AmplitudeSweepSampleRateHz,
             MeasureNoiseFloor: true,
+            // The band a new sweep starts on, matching the panels' own default -- see
+            // BandwidthField.vue. Written rather than left null: a *configured* type does have
+            // a band, and null is reserved for a row that predates the setting.
+            MeasurementLoFreqHz: 20.0,
+            MeasurementHiFreqHz: 20000.0,
             ChartAutofitOnDone: true), SerializerOptions);
     }
 
@@ -481,6 +499,8 @@ public sealed class MeasurementSaveService(
             CaptureDelayMs = session.LastAppliedCaptureDelayMs,
             ExternalGainLeftDb = session.ExternalGainLeftDb,
             ExternalGainRightDb = session.ExternalGainRightDb,
+            ProgrammableLoadKind = LoadKindStamp,
+            ProgrammableLoadOhms = LoadOhmsStamp,
         };
         // The pipeline knows the tones it measured with but not which template put them there;
         // the type does. Carried over only when the type's stored pair is the one that ran.
@@ -610,7 +630,10 @@ public sealed class MeasurementSaveService(
                     request.MeasureNoiseFloor,
                     CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
-                    StopThdPercent: request.StopThdPercent),
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                    StopThdPercent: request.StopThdPercent,
+                    MeasurementLoFreqHz: request.MeasurementLoFreqHz,
+                    MeasurementHiFreqHz: request.MeasurementHiFreqHz),
                 SerializerOptions)
             : JsonSerializer.Serialize(
                 new ThdVsFrequencyParameters(
@@ -621,7 +644,10 @@ public sealed class MeasurementSaveService(
                     request.MeasureNoiseFloor, status.GeneratorAmpDbv,
                     request.AdaptiveResolution, request.ThdMethod.ToString(),
                     CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                    MeasurementLoFreqHz: request.MeasurementLoFreqHz,
+                    MeasurementHiFreqHz: request.MeasurementHiFreqHz),
                 SerializerOptions);
 
         // One capture per sweep point, in sweep order. Points arrive per channel, so group them back
@@ -681,7 +707,10 @@ public sealed class MeasurementSaveService(
                 request.FftSize, ImdSweepRequest.Window, request.AverageCount, request.SampleRateHz,
                 request.MeasureNoiseFloor, request.MaxProductFreqHz,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                MeasurementLoFreqHz: request.MeasurementLoFreqHz,
+                MeasurementHiFreqHz: request.MeasurementHiFreqHz),
             SerializerOptions);
 
         // Grouped by the level, which is the axis; capture.freq_hz carries the low tone, which is
@@ -800,7 +829,8 @@ public sealed class MeasurementSaveService(
                 BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
                 BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
             SerializerOptions);
 
         var info = session.Info;
@@ -879,7 +909,8 @@ public sealed class MeasurementSaveService(
                 GeneratorAmpDbvLeftToRight: levels.TryGetValue(FrequencyResponseTraceKind.CrosstalkLeftToRight, out double l2r) ? l2r : null,
                 GeneratorAmpDbvRightToLeft: levels.TryGetValue(FrequencyResponseTraceKind.CrosstalkRightToLeft, out double r2l) ? r2l : null,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
             SerializerOptions);
 
         var info = session.Info;
@@ -923,7 +954,8 @@ public sealed class MeasurementSaveService(
                 GeneratorAmpDbv: status.GeneratorAmpDbv,
                 InputRangeDbv: status.InputRangeDbv,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
             SerializerOptions);
 
         var traces = new List<ResponseTraceInput> { ToImpedanceTraceInput(status.Trace, ResponseTraceKind.OutputImpedance) };
@@ -980,7 +1012,8 @@ public sealed class MeasurementSaveService(
                 BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
                 BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
             SerializerOptions);
 
         var info = session.Info;
@@ -1038,7 +1071,8 @@ public sealed class MeasurementSaveService(
                 request.ExtractHarmonics, request.MaxHarmonicOrder,
                 status.GeneratorAmpDbv, request.ChirpStartHz, request.LoadOhms,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
             SerializerOptions);
 
         var info = session.Info;
@@ -1147,7 +1181,8 @@ public sealed class MeasurementSaveService(
                 StepsPerOctave: request.StepsPerOctave,
                 AdaptiveResolution: request.AdaptiveResolution,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
-                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb),
+                ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
             SerializerOptions);
 
         var info = session.Info;
@@ -1492,6 +1527,35 @@ public sealed class MeasurementSaveService(
             return null;
         }
     }
+
+    /// <summary>
+    /// What the programmable load was doing, for a result's <c>params_json</c>: its kind's name and
+    /// the ohms it was presenting.
+    ///
+    /// <para>(null, null) for a bench with no load selected, which is the overwhelming majority —
+    /// and the reason the kind is recorded beside the ohms rather than the ohms alone. "No load on
+    /// this bench" and "a load whose relays have not been read back" are different facts, and a
+    /// single null field could not tell them apart.</para>
+    ///
+    /// <para>Reads <see cref="LoadSessionService.StatusSnapshot"/>, which touches no hardware: a
+    /// save must never be the thing that goes to an instrument.</para>
+    ///
+    /// <para>The two properties below read it separately, one per named argument, which keeps each
+    /// of the ten save sites to a single line — the thing that makes them reviewable as one diff.
+    /// Safe because the snapshot only moves when someone presses a load control, and a save is
+    /// itself a separate press.</para>
+    /// </summary>
+    private (string? Kind, int? Ohms) LoadStamp()
+    {
+        var snapshot = load?.StatusSnapshot;
+        return snapshot is null || snapshot.Kind == ProgrammableLoadKind.None
+            ? (null, null)
+            : (snapshot.Kind.ToString(), snapshot.ImpedanceOhms);
+    }
+
+    private string? LoadKindStamp => LoadStamp().Kind;
+
+    private int? LoadOhmsStamp => LoadStamp().Ohms;
 
     private async Task<string?> ResolveImdPresetNameAsync(long measurementTypeId, FftSpectrumParameters parameters, CancellationToken ct)
     {

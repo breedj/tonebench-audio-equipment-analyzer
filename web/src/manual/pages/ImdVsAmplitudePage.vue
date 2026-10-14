@@ -154,6 +154,18 @@ const { showPage } = useManual()
           <td>How many records are averaged before a point is recorded.</td>
         </tr>
         <tr>
+          <td>Bandwidth</td>
+          <td>
+            The band this sweep's <strong>noise floor</strong> trace is measured over.
+            <strong>20 Hz &ndash; 20 kHz</strong>, <strong>20 Hz &ndash; 80 kHz</strong>, or
+            <strong>Custom</strong>, which shows two boxes for the edges. It is this sweep's own
+            setting, saved and restored with the measurement; before 2026-10-14 a sweep used
+            whatever band the FFT screen had been left on. Not the same number as the product band
+            limit below, which bounds which IMD products are counted &mdash; with one connection:
+            clear the product limit and it falls back to this band's upper edge.
+          </td>
+        </tr>
+        <tr>
           <td>Measure noise floor first</td>
           <td>Captures one generator-off record before the sweep, giving the residual the traces sit above.</td>
         </tr>

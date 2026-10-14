@@ -66,6 +66,15 @@ public static class StartupSettingsLoader
         services.GetRequiredService<AnalyzerKindSetting>().Kind =
             await ConfigEndpoints.ReadAnalyzerKindAsync(config, ct);
 
+        // Which programmable load to look for. This one is *not* order-sensitive --
+        // LoadSessionService builds nothing in its constructor, so resolving it cannot pin the kind
+        // the way resolving DeviceSessionService pins the analyzer's. It is loaded here anyway,
+        // beside the setting it resembles, because the rule about this method is an order rather
+        // than a case-by-case judgement: a later change that gave the load service a field
+        // initializer would otherwise re-arm the analyzer kind's trap silently.
+        services.GetRequiredService<LoadKindSetting>().Kind =
+            await LoadEndpoints.ReadLoadKindAsync(config, ct);
+
         // The experimental 384 kHz opt-in. The device reads this through a Func rather than
         // capturing it (Qa40xUsbDevice.Allow384kHz), so unlike the two settings above it would in
         // fact survive being loaded after the first device was built. It is loaded here anyway: the

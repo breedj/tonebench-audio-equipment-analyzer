@@ -27,7 +27,9 @@ public class ThdAmplitudeSweepStartRequestTests
             ProcessRight: true,
             AverageCount: 3,
             MeasureNoiseFloor: false,
-            StopThdPercent: 0.75);
+            StopThdPercent: 0.75,
+            MeasurementLoFreqHz: 10.0,
+            MeasurementHiFreqHz: 30_000.0);
 
         var measurement = wire.ToMeasurement();
 
@@ -43,6 +45,8 @@ public class ThdAmplitudeSweepStartRequestTests
         Assert.Equal(3, measurement.AverageCount);
         Assert.False(measurement.MeasureNoiseFloor);
         Assert.Equal(0.75, measurement.StopThdPercent);
+        Assert.Equal(10.0, measurement.MeasurementLoFreqHz);
+        Assert.Equal(30_000.0, measurement.MeasurementHiFreqHz);
 
         // What the axis fixes rather than asks for.
         Assert.Equal(SweepAxis.Amplitude, measurement.Axis);
@@ -66,7 +70,7 @@ public class ThdAmplitudeSweepStartRequestTests
     [Fact]
     public void TheWireRecordStillHasTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(10, ConstructorParameterCount(typeof(ThdAmplitudeSweepStartRequest)));
+        Assert.Equal(12, ConstructorParameterCount(typeof(ThdAmplitudeSweepStartRequest)));
     }
 
     /// <summary>

@@ -152,6 +152,13 @@ try
     builder.Services.AddSingleton<ExternalGainSetting>();
     builder.Services.AddSingleton<SoundCardSetting>();
     builder.Services.AddSingleton<AnalyzerKindSetting>();
+
+    // The programmable load. Unlike the analyzer's, none of these three has to be registered or
+    // loaded in any particular order: LoadSessionService builds nothing in its constructor, so
+    // resolving it cannot pin a setting that is read afterwards -- see LoadKindSetting.
+    builder.Services.AddSingleton<LoadKindSetting>();
+    builder.Services.AddSingleton<ProgrammableLoadFactory>();
+    builder.Services.AddSingleton<LoadSessionService>();
     builder.Services.AddSingleton<SoundCardCalibrationRunner>();
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SoundCardCalibrationRunner>());
     // Report an issue. A singleton like every other service here, although it holds no state: it
@@ -179,6 +186,12 @@ try
     // unrelated) has not started, and it stops before the database service checkpoints the file.
     builder.Services.AddHostedService<ProjectStartupHostedService>();
     builder.Services.AddHostedService<DeviceLifecycleHostedService>();
+
+    // After the analyzer's, so it stops *before* it (hosted services stop in reverse registration
+    // order). That ordering is not load-bearing — the two are different USB devices sharing
+    // nothing — but putting the load away early means it happens before anything slower can run
+    // out of the shutdown budget.
+    builder.Services.AddHostedService<LoadLifecycleHostedService>();
 
     // Update-check (docs/tonebench-stack-spec.md §8): a short timeout and silent-on-failure
     // UpdateCheckService are what keep an offline bench machine from ever seeing an error over
@@ -323,6 +336,7 @@ try
     app.MapImpedanceEndpoints();
     app.MapConfigEndpoints();
     app.MapSoundCardEndpoints();
+    app.MapLoadEndpoints();
     app.MapStreamingEndpoints();
     app.MapProjectsEndpoints();
     app.MapProjectSessionEndpoints();
@@ -485,12 +499,15 @@ static void StartShutdownWatchdog(IHostApplicationLifetime lifetime)
 /// <summary>
 /// The GETs a screen polls on a timer, which the request log drops to Verbose while they succeed.
 ///
-/// <para>Two of them, and the second was found by reading a log file rather than by reasoning:
+/// <para>Three of them, and the second was found by reading a log file rather than by reasoning:
 /// 1949 of the 2182 lines in one day's log — <b>89 %</b> — were
 /// <c>GET /api/soundcard/levels</c>, the sound-card dialog's level bars at 120 ms. That is a log
 /// in which nothing else can be found, and it is the log a tester is asked to send. The status
 /// poll (<c>GET /api/device</c>, once a second) was already excluded for the same reason; the
-/// difference is only that nobody had the dialog open for four minutes until now.</para>
+/// difference is only that nobody had the dialog open for four minutes until now. The third,
+/// <c>GET /api/load</c> at 1 Hz, was added with the load itself and is the easy one to forget: it
+/// runs for the whole session on any bench that has selected a programmable load, so it would have
+/// repeated the same lesson a third time.</para>
 ///
 /// <para>Only a <i>successful</i> GET. A poll that starts failing is the most interesting thing in
 /// the file — it is how a lost device, a wedged runner or a 409 storm announces itself — so the
@@ -502,7 +519,7 @@ static bool IsSuccessfulPoll(HttpContext httpContext, Exception? exception)
         return false;
 
     PathString path = httpContext.Request.Path;
-    return path == "/api/device" || path == "/api/soundcard/levels";
+    return path == "/api/device" || path == "/api/soundcard/levels" || path == "/api/load";
 }
 
 /// <summary>The stored detailed-logging switch, or off when nothing is stored or the document is unreadable.</summary>

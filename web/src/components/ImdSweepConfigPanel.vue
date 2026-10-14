@@ -7,6 +7,8 @@ import { useProjects } from '../composables/useProjects'
 import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, type ImdPresetId } from '../imd/presets'
 import CollapsibleSection from './CollapsibleSection.vue'
 import EstimateBadge from './EstimateBadge.vue'
+import BandwidthField from './BandwidthField.vue'
+import { DEFAULT_BANDWIDTH } from '../weighting'
 import { estimateDurationSeconds, formatDuration, logPerOctave } from '../sweep/points'
 
 /**
@@ -61,6 +63,18 @@ const form = reactive({
   averageCount: 4,
   measureNoiseFloor: true,
   maxProductFreqHz: 20000,
+  /**
+   * The band this sweep's noise figures are read over: the **noise-floor trace**
+   * (SweepCaptureSupport.MeanBandBinVrms), which is the only one of them that is drawn. A sweep's
+   * own setting rather than inherited from whichever FFT measurement was open last (2026-10-14).
+   *
+   * Nearly separate from the product band limit beside it, and the exception is worth knowing:
+   * a *null* product limit falls back to this band's upper edge
+   * (SpectrumRecordAnalyzer: `: band.HiBinInclusive`). The panel always sends a figure, so in
+   * practice the two are independent -- but they are not unrelated.
+   */
+  measurementLoFreqHz: DEFAULT_BANDWIDTH.loHz as number,
+  measurementHiFreqHz: DEFAULT_BANDWIDTH.hiHz as number,
 })
 
 const presetActive = computed(() => form.preset !== 'Custom')
@@ -109,6 +123,10 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.measureNoiseFloor === 'boolean') form.measureNoiseFloor = stored.measureNoiseFloor
   // Null in the record means "the measurement band" — 20 kHz on the pipeline's defaults.
   form.maxProductFreqHz = typeof stored.maxProductFreqHz === 'number' ? stored.maxProductFreqHz : 20000
+  // Absent on a sweep saved before the band was one of its settings; those ran on whatever the
+  // live pipeline held, which is unknowable now, so the default stands rather than a guess.
+  if (typeof stored.measurementLoFreqHz === 'number') form.measurementLoFreqHz = stored.measurementLoFreqHz
+  if (typeof stored.measurementHiFreqHz === 'number') form.measurementHiFreqHz = stored.measurementHiFreqHz
 
   void nextTick(() => {
     restoring = false
@@ -192,6 +210,8 @@ function buildParamsJson(): string {
     sampleRateHz: SWEEP_SAMPLE_RATE_HZ,
     measureNoiseFloor: form.measureNoiseFloor,
     maxProductFreqHz: form.maxProductFreqHz,
+    measurementLoFreqHz: form.measurementLoFreqHz,
+    measurementHiFreqHz: form.measurementHiFreqHz,
   }
   return JSON.stringify(parameters)
 }
@@ -214,6 +234,8 @@ function run() {
     averageCount: form.averageCount,
     measureNoiseFloor: form.measureNoiseFloor,
     maxProductFreqHz: form.maxProductFreqHz,
+    measurementLoFreqHz: form.measurementLoFreqHz,
+    measurementHiFreqHz: form.measurementHiFreqHz,
   })
 }
 </script>
@@ -391,6 +413,13 @@ function run() {
 
     <div class="text-xs">
     </div>
+
+    <BandwidthField
+      v-model:lo-hz="form.measurementLoFreqHz"
+      v-model:hi-hz="form.measurementHiFreqHz"
+      :disabled="running"
+      hint="The band the noise-floor trace is measured over. It also becomes the product limit if the product band limit below is cleared. It does not bound the harmonics."
+    />
 
     <label
       class="tb-check-row"

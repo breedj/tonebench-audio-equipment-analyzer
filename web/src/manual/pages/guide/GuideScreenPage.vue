@@ -116,15 +116,15 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
-          <td>Green dot and a name</td>
+          <td>Green dot, a name and <strong>connected</strong></td>
           <td>The analyzer is connected and ready.</td>
         </tr>
         <tr>
-          <td><strong>Disconnected</strong> with a Connect button</td>
+          <td><strong>offline</strong> with a Connect button</td>
           <td>No analyzer found. Plug it in and press Connect. This is normal, not a fault.</td>
         </tr>
         <tr>
-          <td><strong>Device removed</strong></td>
+          <td>Red dot and <strong>removed</strong></td>
           <td>It was unplugged or switched off. Plug it back in and press Connect.</td>
         </tr>
         <tr>

@@ -30,7 +30,7 @@ function channelEnabled(ch: number): boolean {
 // The spectrum chart's live x span (see useChartDisplay.ts) — this chart deliberately has no zoom
 // of its own: it is stacked directly under the spectrum and the two are only readable together if
 // a column means the same frequency in both.
-const { activeXRange, spectrumUnit, dutGainDb } = useChartDisplay()
+const { activeXRange, spectrumUnit, dutGainDb, xFrom, xTo } = useChartDisplay()
 const { isDark } = useAppTheme()
 
 const CHANNEL_LABELS = ['L', 'R']
@@ -448,17 +448,36 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
 
 defineExpose({ exportPng, clearHistory })
 
+/**
+ * The chart with no history in it: the frequency axis the spectrum above is showing (or, before
+ * anything has ever been drawn, the panel's own From/To), an empty time axis, and no picture
+ * between them. Drawn rather than left unbuilt because an unbuilt plot collapses the panel to its
+ * header row — so an FFT screen that had not been run yet was a strip instead of a chart, and
+ * pressing RUN made the column jump.
+ */
+function drawEmpty() {
+  const span = xSpan() ?? { min: xFrom.value, max: xTo.value }
+  ensurePlot(span)
+  if (!plot) return
+  plot.setData([[span.min, span.max], [null, null]])
+  applySpans(span)
+}
+
 function update() {
   // App.vue empties the whole spectrum record when a run starts — history from the previous run
   // has nothing to do with this one, and would otherwise sit at the bottom of the chart drifting
   // upward for the next 11 seconds.
   if (Object.keys(props.spectrum).length === 0) {
     if (rows.length > 0) clearHistory()
+    drawEmpty()
     return
   }
 
   const frame = props.spectrum[selectedChannel.value]
-  if (!frame) return
+  if (!frame) {
+    drawEmpty()
+    return
+  }
 
   if ((frame.header.flags & STREAM_FLAG_ZOOMED) === 0) {
     fullLoFreqHz = frame.loFreqHz
@@ -481,12 +500,21 @@ function update() {
   // — the picture is the plugin's image, not a line.
   plot.setData([[span.min, span.max], [null, null]])
 
-  // Both setScales after setData, never before: setData re-applies the scales synchronously and
-  // would clobber a pending setScale (the same ordering SpectrumChart's zoom restore needs). Each
-  // is gated on a visible change so a settled chart isn't re-scaling on every frame.
-  //
-  // The x push is what makes the axis labels follow the spectrum chart's zoom — the plugin's image
-  // is drawn straight from xSpan(), so without it the picture zooms and the labels don't.
+  applySpans(span)
+}
+
+/**
+ * Pushes the two scales. Always called *after* setData, never before: setData re-applies the
+ * scales synchronously and would clobber a pending setScale (the same ordering SpectrumChart's
+ * zoom restore needs). Each is gated on a visible change so a settled chart isn't re-scaling on
+ * every frame.
+ *
+ * The x push is what makes the axis labels follow the spectrum chart's zoom — the plugin's image
+ * is drawn straight from xSpan(), so without it the picture zooms and the labels don't.
+ */
+function applySpans(span: { min: number; max: number }) {
+  if (!plot) return
+
   if (!lastXSpan || lastXSpan.min !== span.min || lastXSpan.max !== span.max) {
     lastXSpan = { min: span.min, max: span.max }
     plot.setScale('x', { min: span.min, max: span.max })
@@ -508,6 +536,9 @@ watch(selectedChannel, () => {
 // Not a bare redraw: following the spectrum chart's zoom means both re-rendering every row onto
 // the new pixel grid and moving the x scale, and update() is what does the second half.
 watch(activeXRange, update)
+// The empty chart's axis is the panel's own From/To (see drawEmpty), since there is no spectrum
+// above to follow yet. Once there is, xSpan() answers from that instead and this is a no-op.
+watch([xFrom, xTo], update)
 watch([topDb, bottomDb], () => plot?.redraw())
 watch(autoLevels, () => {
   updateAutoLevels()
@@ -549,6 +580,10 @@ watch(isDark, () => {
 onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
+  // Draws whatever the store already holds, and the empty axes when it holds nothing. Every other
+  // path in is a watcher on changing data, so without this a remount with unchanged data drew
+  // nothing at all — the same reason SpectrumChart's own onMounted calls update().
+  update()
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()

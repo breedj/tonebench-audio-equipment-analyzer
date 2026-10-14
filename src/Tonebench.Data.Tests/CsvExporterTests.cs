@@ -74,7 +74,7 @@ public class CsvExporterTests
 
         Assert.Equal(
             "freq_hz,ch0_magnitude_db,ch0_thd_percent,ch0_d2_percent,ch0_d3_percent,ch0_d4_percent,"
-                + "ch0_d5_percent,ch0_d6plus_percent,ch0_noise_percent",
+                + "ch0_d5_percent,ch0_d6plus_percent,ch0_noise_percent,ch0_thd_n_percent,ch0_snr_db",
             dataLines[0]);
         Assert.Equal(2, dataLines.Length - 1);
         Assert.StartsWith("100.000000,", dataLines[1]);
@@ -96,10 +96,10 @@ public class CsvExporterTests
             .Where(l => !l.StartsWith('#'))
             .ToArray();
 
-        Assert.EndsWith("ch1_d6plus_percent,ch1_noise_percent", dataLines[0]);
-        Assert.Equal(17, dataLines[1].Split(',').Length); // freq + 8 columns x 2 channels
+        Assert.EndsWith("ch1_noise_percent,ch1_thd_n_percent,ch1_snr_db", dataLines[0]);
+        Assert.Equal(21, dataLines[1].Split(',').Length); // freq + 10 columns x 2 channels
         Assert.Equal("-1.000000", dataLines[1].Split(',')[1]);
-        Assert.Equal("-2.000000", dataLines[1].Split(',')[9]);
+        Assert.Equal("-2.000000", dataLines[1].Split(',')[11]);
     }
 
     /// <summary>
@@ -174,20 +174,21 @@ public class CsvExporterTests
             .ToArray();
 
         Assert.EndsWith(
-            "ch0_noise_percent,ch0_nthd_percent,ch0_nd2_percent,ch0_nd3_percent,ch0_nd4_percent,ch0_nd5_percent,ch0_nd6plus_percent",
+            "ch0_noise_percent,ch0_thd_n_percent,ch0_snr_db,"
+                + "ch0_nthd_percent,ch0_nd2_percent,ch0_nd3_percent,ch0_nd4_percent,ch0_nd5_percent,ch0_nd6plus_percent",
             dataLines[0]);
 
         var first = dataLines[1].Split(',');
-        Assert.Equal(15, first.Length);
-        Assert.Equal("0.020000", first[9]);
-        Assert.Equal("0.016000", first[10]);
-        Assert.Equal("0.008000", first[11]);
-        Assert.Equal("", first[12]);   // nd4: no reference at this point
-        Assert.Equal("0.001000", first[14]);
+        Assert.Equal(17, first.Length);
+        Assert.Equal("0.020000", first[11]);
+        Assert.Equal("0.016000", first[12]);
+        Assert.Equal("0.008000", first[13]);
+        Assert.Equal("", first[14]);   // nd4: no reference at this point
+        Assert.Equal("0.001000", first[16]);
 
         var top = dataLines[2].Split(',');
-        Assert.Equal(15, top.Length);
-        Assert.All(top[9..], field => Assert.Equal("", field));
+        Assert.Equal(17, top.Length);
+        Assert.All(top[11..], field => Assert.Equal("", field));
     }
 
     /// <summary>
@@ -208,7 +209,8 @@ public class CsvExporterTests
 
         Assert.Equal(
             "generator_volt,ch0_output_dbv,ch0_power_w,ch0_magnitude_db,ch0_thd_percent,ch0_d2_percent,"
-                + "ch0_d3_percent,ch0_d4_percent,ch0_d5_percent,ch0_d6plus_percent,ch0_noise_percent",
+                + "ch0_d3_percent,ch0_d4_percent,ch0_d5_percent,ch0_d6plus_percent,ch0_noise_percent,"
+                + "ch0_thd_n_percent,ch0_snr_db",
             dataLines[0]);
 
         // 0.01 V and 0.1 V -- the levels, ascending, not the repeated 1 kHz.
@@ -287,6 +289,8 @@ public class CsvExporterTests
         ["h5_percent"] = 0.001,
         ["d6plus_percent"] = 0.0005,
         ["noise_percent"] = 0.0001,
+        ["thd_n_percent"] = 0.02,
+        ["snr_db"] = 95.0,
     };
 
     /// <summary>One level-swept point: the frequency-sweep metrics plus the two that mark the axis.</summary>

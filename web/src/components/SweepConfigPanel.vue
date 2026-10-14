@@ -13,6 +13,8 @@ import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
 import EstimateBadge from './EstimateBadge.vue'
+import BandwidthField from './BandwidthField.vue'
+import { DEFAULT_BANDWIDTH } from '../weighting'
 import {
   adaptiveFftBounds,
   adaptiveFftSize,
@@ -104,6 +106,19 @@ const form = reactive({
   averageCount: 4,
   measureNoiseFloor: true,
   /**
+   * The band this sweep's noise figures are read over: the noise-floor trace
+   * (SweepCaptureSupport.MeanBandBinVrms over this band) and the THD+N and SNR on every point,
+   * all three of which are chart traces since 2026-10-14. It explicitly does *not* bound the
+   * harmonics: BuildSweepOptions sets
+   * HarmonicMaxFreqHz to Nyquist instead, because bounded at 20 kHz every harmonic of a point above
+   * ~7 kHz is out of band and THD reads exactly 0 -- see SpectrumPipelineOptions.HarmonicMaxFreqHz.
+   *
+   * A sweep's own setting rather than inherited from whichever FFT measurement was open last,
+   * which is what it was until 2026-10-14.
+   */
+  measurementLoFreqHz: DEFAULT_BANDWIDTH.loHz as number,
+  measurementHiFreqHz: DEFAULT_BANDWIDTH.hiHz as number,
+  /**
    * Size the FFT per point and pick the sample rate from the sweep range, rather than holding the
    * fixed preset below across every point — see SweepResolution server-side. On by default: a fixed
    * size is chosen for the bottom of the sweep and then paid at every point above it, which is most
@@ -159,6 +174,10 @@ function applyStoredParams(paramsJson: string) {
   // they must reload as rather than silently changing resolution on reopen.
   form.adaptiveResolution = stored.adaptiveResolution === true
   if (typeof stored.measureNoiseFloor === 'boolean') form.measureNoiseFloor = stored.measureNoiseFloor
+  // Absent on a sweep saved before the band was one of its settings; those ran on whatever the
+  // live pipeline held, which is unknowable now, so the default stands rather than a guess.
+  if (typeof stored.measurementLoFreqHz === 'number') form.measurementLoFreqHz = stored.measurementLoFreqHz
+  if (typeof stored.measurementHiFreqHz === 'number') form.measurementHiFreqHz = stored.measurementHiFreqHz
   // Absent in types saved before the method existed; those ran conventional.
   form.thdMethod = stored.thdMethod === 'FrequencyNormalized' ? 'FrequencyNormalized' : 'Conventional'
 
@@ -314,6 +333,8 @@ function buildParamsJson(): string {
     measureNoiseFloor: form.measureNoiseFloor,
     adaptiveResolution: form.adaptiveResolution,
     thdMethod: form.thdMethod,
+    measurementLoFreqHz: form.measurementLoFreqHz,
+    measurementHiFreqHz: form.measurementHiFreqHz,
     generatorAmpDbv: 0,
   }
   return JSON.stringify(parameters)
@@ -342,6 +363,8 @@ function run() {
     measureNoiseFloor: form.measureNoiseFloor,
     adaptiveResolution: form.adaptiveResolution,
     thdMethod: form.thdMethod,
+    measurementLoFreqHz: form.measurementLoFreqHz,
+    measurementHiFreqHz: form.measurementHiFreqHz,
   })
 }
 </script>
@@ -429,6 +452,13 @@ function run() {
         <option v-for="method in THD_METHODS" :key="method.value" :value="method.value">{{ method.label }}</option>
       </select>
     </label>
+
+    <BandwidthField
+      v-model:lo-hz="form.measurementLoFreqHz"
+      v-model:hi-hz="form.measurementHiFreqHz"
+      :disabled="running"
+      hint="The band the noise floor, THD+N and SNR traces are read over. It does NOT bound the harmonics: a sweep measures those up to Nyquist, or every point above about 7 kHz would read THD 0, so THD and D2-D5 do not move when you change this."
+    />
 
     <label
       class="tb-check-row"

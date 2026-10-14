@@ -1,12 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { SPLASH_FADE_MS, SPLASH_HOLD_MS } from './splash'
+import { SPLASH_FADE_MS, SPLASH_HOLD_MS, SPLASH_TOTAL_MS } from './splash'
 
 const COMPONENT = readFileSync(new URL('./components/SplashScreen.vue', import.meta.url), 'utf8')
 
 describe('the splash screen durations', () => {
-  it('holds for the four seconds that were asked for', () => {
-    expect(SPLASH_HOLD_MS).toBe(4000)
+  // The three seconds asked for are the whole time it is on screen, fade included — which is why
+  // the hold is derived from the total rather than being the round number itself.
+  it('is on screen for the three seconds that were asked for, fade and all', () => {
+    expect(SPLASH_TOTAL_MS).toBe(3000)
+    expect(SPLASH_HOLD_MS + SPLASH_FADE_MS).toBe(SPLASH_TOTAL_MS)
   })
 
   /**

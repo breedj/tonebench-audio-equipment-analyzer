@@ -288,6 +288,57 @@ export interface SoundCardConfig {
   minStimulusFrequencyHz: number
 }
 
+/** Which programmable load this bench has, if any. Chosen in Configuration ▸ Acquisition. */
+export type ProgrammableLoadKindName = 'None' | 'Qa451' | 'Simulated'
+
+/** One poll of the load. Mirrors `LoadReadingResponse` in Tonebench.App/Services/LoadSessionService.cs. */
+export interface ProgrammableLoadReading {
+  /** Whole degrees — the device reports a signed byte, so do not print decimals. */
+  leftTemperatureC: number
+  rightTemperatureC: number
+  /**
+   * DC current through the sense path, in amps. **Quantised to about 48.5 mA** on the bench unit
+   * whatever the wire's milliamp units suggest, so two decimals is all it can mean and a single
+   * sample is worth no better than ~50 mA (docs/qa451-protocol.md).
+   */
+  currentA: number
+  /** A heatsink is over temperature — 60 °C on a QA451B, which also disconnects the loads. */
+  overTemperature: boolean
+  overCurrent: boolean
+  /**
+   * A fault has latched in hardware and **no command clears it** — the USB cable has to be pulled.
+   * True for every over-current trip.
+   */
+  requiresReplug: boolean
+  /** All nine status bits as the device sent them; only five are understood. */
+  rawStatusBits: number
+}
+
+/** Mirrors `LoadStatusResponse`. Everything the load screens need, in one document. */
+export interface ProgrammableLoadStatus {
+  kind: ProgrammableLoadKindName
+  connected: boolean
+  model: string | null
+  firmwareVersion: number | null
+  requiredFirmwareVersion: number | null
+  firmwareSupported: boolean | null
+  /** The only usable identifier: the device's own serial register answers a placeholder. */
+  usbSerial: string | null
+  /** What this device can present, in ohms, 0 meaning open. */
+  supportedImpedances: number[]
+  /**
+   * The engaged load in ohms, or **null when that is not known** — a real state, not a gap: it is
+   * what a connect that skipped the reset leaves behind until a poll reads the relays back. Never
+   * read null as Open.
+   */
+  impedanceOhms: number | null
+  /** Whether the DUT supply switch is closed; null when not known, as above. */
+  dutPowerOn: boolean | null
+  reading: ProgrammableLoadReading | null
+  /** Why it is not connected, when it is not — the server's own sentence. */
+  error: string | null
+}
+
 export interface SoundCardLevels {
   /** Peak on that input as dB below full scale, or null when nothing has been analysed. */
   leftDbFs: number | null
@@ -1854,7 +1905,7 @@ export interface WeightingConfigRequest {
   user2?: boolean
 }
 
-/** What the Bandwidth & weighting panel shows for a user weighting slot; null when the slot is empty. */
+/** What the Weighting panel shows for a user weighting slot; null when the slot is empty. */
 export interface UserWeightingSummary {
   name: string
   sourcePath: string | null
@@ -2693,6 +2744,14 @@ export interface ThdSweepStartRequest {
    * divided by; those extra points come back like any other.
    */
   thdMethod: ThdMethodName
+  /**
+   * The band this sweep's noise figures are read over: the noise-floor trace (the one the chart
+   * draws) and the THD+N and SNR recorded on each point. It does *not* bound the harmonics — the
+   * runner measures those to Nyquist, see ThdSweepRequest.MeasurementLoFreqHz. The sweep's own
+   * setting (see BandwidthField.vue); a sweep inherited the live FFT band until 2026-10-14.
+   */
+  measurementLoFreqHz: number
+  measurementHiFreqHz: number
 }
 
 /**
@@ -2714,6 +2773,9 @@ export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
   chartShowD4?: boolean | null
   chartShowD5?: boolean | null
   chartShowD6Plus?: boolean | null
+  /** The band-integrated traces: THD+N, and SNR drawn as the noise it measures. Null on a type saved before they existed, read as off. */
+  chartShowThdN?: boolean | null
+  chartShowSnr?: boolean | null
   chartShowLeft?: boolean | null
   chartShowRight?: boolean | null
   chartThickLines?: boolean | null
@@ -2757,6 +2819,14 @@ export interface ThdAmplitudeSweepStartRequest {
   measureNoiseFloor: boolean
   /** End the sweep once a channel's THD exceeds this many percent; the crossing point is kept. Null or absent means sweep to the end. */
   stopThdPercent?: number | null
+  /**
+   * The band this sweep's noise figures are read over: the noise-floor trace (the one the chart
+   * draws) and the THD+N and SNR recorded on each point. It does *not* bound the harmonics — the
+   * runner measures those to Nyquist, see ThdSweepRequest.MeasurementLoFreqHz. The sweep's own
+   * setting (see BandwidthField.vue); a sweep inherited the live FFT band until 2026-10-14.
+   */
+  measurementLoFreqHz: number
+  measurementHiFreqHz: number
 }
 
 /**
@@ -2778,6 +2848,9 @@ export interface ThdVsAmplitudeParameters {
   averageCount: number
   sampleRateHz: number
   measureNoiseFloor: boolean
+  /** The band the run's noise figures were integrated over. Null on a result saved before the band was one of a sweep's own settings. */
+  measurementLoFreqHz?: number | null
+  measurementHiFreqHz?: number | null
   /** Which quantity the x axis plots. Absent on a type saved before the field existed. */
   chartXAxis?: SweepXAxisName | null
   chartUnit?: 'percent' | 'db' | null
@@ -2789,6 +2862,9 @@ export interface ThdVsAmplitudeParameters {
   chartShowD4?: boolean | null
   chartShowD5?: boolean | null
   chartShowD6Plus?: boolean | null
+  /** The band-integrated traces: THD+N, and SNR drawn as the noise it measures. Null on a type saved before they existed, read as off. */
+  chartShowThdN?: boolean | null
+  chartShowSnr?: boolean | null
   chartShowLeft?: boolean | null
   chartShowRight?: boolean | null
   chartThickLines?: boolean | null
@@ -2903,6 +2979,14 @@ export interface ImdSweepStartRequest {
   measureNoiseFloor: boolean
   /** Highest product frequency counted; null means the measurement band's upper edge (in-band products only). */
   maxProductFreqHz: number | null
+  /**
+   * The band this sweep's noise-floor trace is measured over. The sweep's own setting (see
+   * BandwidthField.vue); a sweep inherited the live FFT band until 2026-10-14. Separate from
+   * `maxProductFreqHz` except in one case: a null product limit falls back to this band's upper
+   * edge server-side.
+   */
+  measurementLoFreqHz: number
+  measurementHiFreqHz: number
 }
 
 export interface ImdSweepStarted {
@@ -2966,6 +3050,9 @@ export interface ImdVsAmplitudeParameters {
   sampleRateHz: number
   measureNoiseFloor: boolean
   maxProductFreqHz: number | null
+  /** The band the run's noise figures were integrated over. Null on a result saved before the band was one of a sweep's own settings. */
+  measurementLoFreqHz?: number | null
+  measurementHiFreqHz?: number | null
   chartXAxis?: string | null
   chartUnit?: string | null
   chartShowNoiseFloor?: boolean | null
@@ -2976,6 +3063,9 @@ export interface ImdVsAmplitudeParameters {
   chartShowD4?: boolean | null
   chartShowD5?: boolean | null
   chartShowD6Plus?: boolean | null
+  /** The band-integrated traces: THD+N, and SNR drawn as the noise it measures. Null on a type saved before they existed, read as off. */
+  chartShowThdN?: boolean | null
+  chartShowSnr?: boolean | null
   chartShowLeft?: boolean | null
   chartShowRight?: boolean | null
   chartThickLines?: boolean | null
@@ -3113,6 +3203,29 @@ export const api = {
     }),
   cancelSoundCardCalibration: () =>
     request<SoundCardCalibrationState>('/soundcard/calibration/cancel', { method: 'POST' }),
+
+  // ---- programmable load ---------------------------------------------------------------------
+  // A second instrument, independent of which analyzer is selected. Every one of these answers with
+  // the whole status document, so a command's result is the hardware's own account of itself rather
+  // than what was asked for.
+  getLoad: () => request<ProgrammableLoadStatus>('/load'),
+  /** Retries the open. Rejects 503 with the status document as its body when nothing is attached. */
+  connectLoad: () => request<ProgrammableLoadStatus>('/load/connect', { method: 'POST' }),
+  /** Persisted: the bench's choice, and the gate for everything else in the UI. */
+  setLoadKind: (kind: ProgrammableLoadKindName) =>
+    request<ProgrammableLoadStatus>('/load/kind', { method: 'PUT', body: JSON.stringify({ kind }) }),
+  /** 0 (open), 4 or 8 — ohms in the path, matching QuantAsylum's own REST API. */
+  setLoadImpedance: (ohms: number) =>
+    request<ProgrammableLoadStatus>(`/load/impedance/${ohms}`, { method: 'PUT' }),
+  /**
+   * The DUT's own supply, through the load's high-side switch. **Takes about 1.5 s**: the device
+   * runs a soft start and does not answer during it, and the request returns once the supply is
+   * actually up.
+   */
+  setLoadDutPower: (on: boolean) =>
+    request<ProgrammableLoadStatus>(`/load/dut-power/${on ? 1 : 0}`, { method: 'PUT' }),
+  /** No load, DUT power off. */
+  setLoadSafeState: () => request<ProgrammableLoadStatus>('/load/safe-state', { method: 'POST' }),
 
   setSimulatedProfile: (patch: SimulatedProfileRequest) =>
     request<DeviceStatus>('/device/sim-profile', { method: 'POST', body: JSON.stringify(patch) }),

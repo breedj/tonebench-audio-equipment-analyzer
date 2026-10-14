@@ -35,7 +35,9 @@ public class ThdSweepStartRequestTests
             SampleRateHz: 96_000.0,
             MeasureNoiseFloor: false,
             AdaptiveResolution: true,
-            ThdMethod: "FrequencyNormalized");
+            ThdMethod: "FrequencyNormalized",
+            MeasurementLoFreqHz: 10.0,
+            MeasurementHiFreqHz: 30_000.0);
 
         var measurement = wire.ToMeasurement(
             ThdSweepLevelMode.OutputPower, ThdSweepLevelUnit.Watt, WindowType.FlatTop, ThdMethod.FrequencyNormalized);
@@ -56,6 +58,8 @@ public class ThdSweepStartRequestTests
         Assert.False(measurement.MeasureNoiseFloor);
         Assert.True(measurement.AdaptiveResolution);
         Assert.Equal(ThdMethod.FrequencyNormalized, measurement.ThdMethod);
+        Assert.Equal(10.0, measurement.MeasurementLoFreqHz);
+        Assert.Equal(30_000.0, measurement.MeasurementHiFreqHz);
 
         // The frequency endpoint never sets the amplitude-axis fields; they stay at their defaults.
         Assert.Equal(SweepAxis.Frequency, measurement.Axis);
@@ -69,8 +73,8 @@ public class ThdSweepStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(16, ConstructorParameterCount(typeof(ThdSweepStartRequest)));
-        Assert.Equal(21, ConstructorParameterCount(typeof(ThdSweepRequest)));
+        Assert.Equal(18, ConstructorParameterCount(typeof(ThdSweepStartRequest)));
+        Assert.Equal(23, ConstructorParameterCount(typeof(ThdSweepRequest)));
     }
 
     /// <summary>

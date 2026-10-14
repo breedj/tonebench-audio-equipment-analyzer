@@ -83,14 +83,30 @@ describe('formatGenerator', () => {
 })
 
 describe('sweepMetricColumns and sweepMetricRow', () => {
-  it('lay out the same eleven columns for a conventional THD sweep against frequency', () => {
+  it('lay out the same thirteen columns for a conventional THD sweep against frequency', () => {
     expect(sweepMetricColumns('Conventional', 'thd', 'frequency')).toEqual([
       'Frequency', 'Generator', 'THD', 'Magnitude', 'D2', 'D3', 'D4', 'D5', 'D6+', 'Power', 'Noise floor',
+      'THD+N', 'SNR',
     ])
     expect(sweepMetricRow(point(), 'Conventional', 'frequency', 'percent', 8)).toEqual([
       '1.00 kHz', '100 mV (-20.00 dBV)', '0.40%', '-0.30 dB', '0.30%', '0.10%', '0.020%', '0.0010%', '0.0050%',
-      '1.25 mW (8 Ω)', '0.0010%',
+      '1.25 mW (8 Ω)', '0.0010%', '0.50%', '90.00 dB',
     ])
+  })
+
+  // The IMD sweep measures neither, so its table does not carry two columns of dashes.
+  it('leave the two band figures off an IMD table', () => {
+    const columns = sweepMetricColumns('Conventional', 'imd', 'outputVolt')
+    expect(columns).not.toContain('THD+N')
+    expect(columns).not.toContain('SNR')
+    expect(sweepMetricRow(point(), 'Conventional', 'outputVolt', 'percent', 8, 'imd')).toHaveLength(columns.length)
+  })
+
+  // SNR is the one cell that does not follow the unit toggle: the chart has to draw its noise term
+  // to share the distortion axis, and a table does not, so it prints the figure as it is quoted.
+  it('print SNR counting upward in dB whichever unit the distortion cells are in', () => {
+    expect(sweepMetricRow(point(), 'Conventional', 'frequency', 'percent', 8).at(-1)).toBe('90.00 dB')
+    expect(sweepMetricRow(point(), 'Conventional', 'frequency', 'db', 8).at(-1)).toBe('90.00 dB')
   })
 
   it('rename the total and the orders for a normalized run and for the IMD family', () => {
@@ -112,7 +128,7 @@ describe('sweepMetricColumns and sweepMetricRow', () => {
   it('write the dB cells gain-compensated, like the traces above them', () => {
     expect(sweepMetricRow(point(), 'Conventional', 'frequency', 'db', 8).slice(2)).toEqual([
       '-48.26 dB', '-0.30 dB', '-50.76 dB', '-60.30 dB', '-74.28 dB', '-100.30 dB', '-86.32 dB',
-      '1.25 mW (8 Ω)', '-100.30 dB',
+      '1.25 mW (8 Ω)', '-100.30 dB', '-46.32 dB', '90.00 dB',
     ])
   })
 

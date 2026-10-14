@@ -139,6 +139,28 @@ const { showPage } = useManual()
             so the chart does not carry eleven near-identical lines down in the grass.
           </td>
         </tr>
+        <tr>
+          <td>THD+N</td>
+          <td>
+            Distortion <em>and</em> noise together, over the measurement <strong>Bandwidth</strong>
+            set in the Sweep panel: everything in that band except the fundamental itself, over the
+            fundamental. It sits above THD by however much noise the DUT has, and the two converge
+            as the distortion rises &mdash; which is the whole reading. It is the figure a
+            specification usually means by "THD".
+          </td>
+        </tr>
+        <tr>
+          <td>SNR</td>
+          <td>
+            The fundamental over the noise in that same band, with the distortion taken out.
+            <strong>It is drawn as the noise it measures, not as the ratio</strong>: this axis
+            counts downward from the fundamental, so a 95 dB SNR is plotted at &minus;95 dB
+            (0.0018 %), where it can be compared with THD, THD+N and the noise floor. Drawing it
+            upward would need a second axis for one trace. The metrics table in a report and the
+            <code>snr_db</code> column of an exported CSV print it the usual way up, counting
+            upward in dB.
+          </td>
+        </tr>
       </tbody>
     </table>
     <p>
@@ -325,6 +347,26 @@ const { showPage } = useManual()
             like a genuinely low-distortion region.
           </td>
         </tr>
+        <tr>
+          <td>Bandwidth</td>
+          <td>
+            The band this sweep's noise figures are read over: the <strong>noise floor</strong>,
+            <strong>THD+N</strong> and <strong>SNR</strong> traces, and nothing else.
+            <strong>20 Hz &ndash; 20 kHz</strong>, <strong>20 Hz &ndash; 80 kHz</strong>, or
+            <strong>Custom</strong>, which shows two boxes for the edges. It does <em>not</em> bound
+            the harmonics, unlike the same control on the FFT screen: a sweep measures those up to
+            Nyquist, because bounded at 20 kHz every harmonic of a point above about 7 kHz would be
+            out of band and THD would read exactly zero from there up. So THD, D2&ndash;D5 and D6+
+            do not move when you widen it, and the three band figures do. The lower edge is also held clear of
+            DC: a window spreads the input's DC offset over its own main lobe, so a band cannot
+            start closer than a few bins from 0 Hz. That costs nothing at a long record &mdash; 20 Hz
+            is bin 14 of a 131072-point FFT &mdash; but an adaptive sweep's short records at the top
+            have 23 or 47 Hz bins, where the band really does start at about 120 or 235 Hz whatever
+            you ask for. It is this sweep's own setting, saved and restored with the measurement; before
+            2026-10-14 a sweep used whatever band the FFT screen had been left on, which no stored
+            result could say afterwards.
+          </td>
+        </tr>
       </tbody>
     </table>
 
@@ -424,10 +466,12 @@ const { showPage } = useManual()
         <tr>
           <td>Graph data</td>
           <td>
-            Which traces are drawn: THD, D2, D3, D4, D5, D6+, the noise floor, and — on the dB axis
-            only — <strong>Magnitude</strong>, the measured fundamental relative to the generator
-            setpoint. That last one is the DUT's frequency response riding along with the sweep,
-            free.
+            Which traces are drawn: THD, D2, D3, D4, D5, D6+, the noise floor,
+            <strong>THD+N</strong> and <strong>SNR</strong>, and — on the dB axis only —
+            <strong>Magnitude</strong>, the measured fundamental relative to the generator setpoint.
+            That last one is the DUT's frequency response riding along with the sweep, free. All
+            start off except THD, D2 and D3: a chart that came up with nine lines would be
+            unreadable.
           </td>
         </tr>
         <tr>

@@ -327,14 +327,47 @@ function computeData(): { data: uPlot.AlignedData; periods: number | null } | nu
   return { data: [xs, left, right] as unknown as uPlot.AlignedData, periods }
 }
 
+/**
+ * How long the scope's own frame is. The server sends the last 2048 samples of each analysed
+ * record (`SpectrumPipeline.ScopeSampleCount`), and this is read for one thing only: the time axis
+ * of the *empty* chart, where there is no frame to measure. If it ever changes server-side, the
+ * axis an unrun screen draws is a little wrong and nothing else is.
+ */
+const SCOPE_FRAME_SAMPLES = 2048
+
+/**
+ * The chart with no waveform in it: the time axis the next capture will land on, a volt axis
+ * around zero, and nothing drawn between them. It used to destroy the plot instead, which left the
+ * panel collapsed to its header row — so an FFT screen that had not been run yet was a strip
+ * rather than a chart, and pressing RUN made the column jump. The half of that which was right is
+ * kept: whatever the last setData painted must not stay on the canvas.
+ *
+ * The time axis is what the Periods field is asking for at the staged tone — the same arithmetic
+ * findTriggerWindow does with a real frame — so changing Periods before a run visibly changes the
+ * axis rather than looking inert. With no tone to trigger on (a chirp, noise, nothing staged) it
+ * is the whole frame, which is what an untriggered capture would draw. The volt axis is a plain
+ * ±1 V: nothing here knows what the DUT will put out, and uPlot's own answer for an all-null
+ * series is 0..100.
+ */
+function drawEmpty() {
+  ensurePlot()
+  if (!plot) return
+
+  const freqHz = generatorFreqHz(props.status)
+  const sampleRateHz = stagedSampleRateHz.value
+  const wholeFrameMs = sampleRateHz > 0 ? (SCOPE_FRAME_SAMPLES / sampleRateHz) * 1000 : 10
+  const spanMs = freqHz ? Math.min(wholeFrameMs, (scopePeriods.value / freqHz) * 1000) : wholeFrameMs
+
+  shownPeriods.value = null
+  plot.setData([[0, spanMs], [null, null], [null, null]] as unknown as uPlot.AlignedData)
+  plot.setScale('y', { min: -1, max: 1 })
+}
+
 function update() {
   const computed = computeData()
-  // Destroying rather than merely returning matters here: a bare return leaves whatever the last
-  // setData() call painted sitting on the canvas, so the chart would keep showing a stale waveform
-  // under the "Waiting for data…" label in the header (see the Clear button in App.vue).
+  // Nothing has arrived yet, or the Clear button emptied the record (see App.vue).
   if (!computed) {
-    plot?.destroy()
-    plot = null
+    drawEmpty()
     return
   }
 

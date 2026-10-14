@@ -83,6 +83,17 @@ public sealed record FftSpectrumParameters(
     double? ExternalGainLeftDb = null,
     double? ExternalGainRightDb = null,
     /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
     /// The two-tone intermodulation analysis in force, if any -- see
     /// <c>SpectrumPipelineOptions.Intermodulation</c>. All null (the default, and every row saved
     /// before this existed) means no IMD figure. <paramref name="ImdPreset"/> is the generator
@@ -304,6 +315,14 @@ public sealed record ThdVsFrequencyParameters(
     bool? ChartShowD4 = null,
     bool? ChartShowD5 = null,
     bool? ChartShowD6Plus = null,
+    /// <summary>
+    /// The two band-integrated traces, added 2026-10-14: distortion-plus-noise, and the SNR drawn
+    /// as the noise it measures (see sweep/points.ts's sweepTraceValue, the one place that
+    /// convention lives). Null on a row saved before they existed, which reads as off -- so an
+    /// older measurement does not come back with two lines it never had.
+    /// </summary>
+    bool? ChartShowThdN = null,
+    bool? ChartShowSnr = null,
     bool? ChartShowLeft = null,
     bool? ChartShowRight = null,
     bool? ChartThickLines = null,
@@ -339,6 +358,17 @@ public sealed record ThdVsFrequencyParameters(
     double? ExternalGainLeftDb = null,
     double? ExternalGainRightDb = null,
     /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
     /// The two <strong>Fit all</strong> toggles on the rail's point previews -- the spectrum's
     /// level axis and the oscilloscope's volts axis held to one window covering every point of
     /// every sweep on the chart, instead of scaling to the selected point. Display preferences
@@ -346,7 +376,17 @@ public sealed record ThdVsFrequencyParameters(
     /// before they existed -- which is read as off, the behaviour that type was saved with.
     /// </summary>
     bool? ChartFitPreviewSpectrum = null,
-    bool? ChartFitPreviewScope = null)
+    bool? ChartFitPreviewScope = null,
+    /// <summary>
+    /// The band this run's noise-based figures were integrated over -- THD+N, SNR and the
+    /// noise-floor pass -- and whose upper edge bounded which harmonics counted toward THD. The
+    /// sweep's own setting since 2026-10-14; **null on a row written before that**, where the run
+    /// simply used whatever band the live pipeline held and nothing recorded which that was. Not
+    /// back-filled with the default for that reason: a quoted band would assert something the row
+    /// does not say.
+    /// </summary>
+    double? MeasurementLoFreqHz = null,
+    double? MeasurementHiFreqHz = null)
 {
     /// <summary>
     /// Present when this sweep was imported from a <c>.step</c>ped transient run rather than
@@ -466,6 +506,14 @@ public sealed record ThdVsAmplitudeParameters(
     bool? ChartShowD4 = null,
     bool? ChartShowD5 = null,
     bool? ChartShowD6Plus = null,
+    /// <summary>
+    /// The two band-integrated traces, added 2026-10-14: distortion-plus-noise, and the SNR drawn
+    /// as the noise it measures (see sweep/points.ts's sweepTraceValue, the one place that
+    /// convention lives). Null on a row saved before they existed, which reads as off -- so an
+    /// older measurement does not come back with two lines it never had.
+    /// </summary>
+    bool? ChartShowThdN = null,
+    bool? ChartShowSnr = null,
     bool? ChartShowLeft = null,
     bool? ChartShowRight = null,
     bool? ChartThickLines = null,
@@ -496,6 +544,17 @@ public sealed record ThdVsAmplitudeParameters(
     double? ExternalGainLeftDb = null,
     double? ExternalGainRightDb = null,
     /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
     /// End the sweep once a channel's THD exceeds this many percent; null means sweep to the end.
     /// A type setting like the rest of the grid, saved with the result so a curve that stops short
     /// can say it did so on purpose.
@@ -503,7 +562,17 @@ public sealed record ThdVsAmplitudeParameters(
     double? StopThdPercent = null,
     /// <summary>See <see cref="ThdVsFrequencyParameters.ChartFitPreviewSpectrum"/> -- the rail previews' Fit all toggles.</summary>
     bool? ChartFitPreviewSpectrum = null,
-    bool? ChartFitPreviewScope = null);
+    bool? ChartFitPreviewScope = null,
+    /// <summary>
+    /// The band this run's noise-based figures were integrated over -- THD+N, SNR and the
+    /// noise-floor pass -- and whose upper edge bounded which harmonics counted toward THD. The
+    /// sweep's own setting since 2026-10-14; **null on a row written before that**, where the run
+    /// simply used whatever band the live pipeline held and nothing recorded which that was. Not
+    /// back-filled with the default for that reason: a quoted band would assert something the row
+    /// does not say.
+    /// </summary>
+    double? MeasurementLoFreqHz = null,
+    double? MeasurementHiFreqHz = null);
 
 /// <summary>
 /// Configured or as-run parameters for the 'ImdVsAmplitude' measurement kind: a two-tone pair
@@ -549,6 +618,14 @@ public sealed record ImdVsAmplitudeParameters(
     bool? ChartShowD4 = null,
     bool? ChartShowD5 = null,
     bool? ChartShowD6Plus = null,
+    /// <summary>
+    /// The two band-integrated traces, added 2026-10-14: distortion-plus-noise, and the SNR drawn
+    /// as the noise it measures (see sweep/points.ts's sweepTraceValue, the one place that
+    /// convention lives). Null on a row saved before they existed, which reads as off -- so an
+    /// older measurement does not come back with two lines it never had.
+    /// </summary>
+    bool? ChartShowThdN = null,
+    bool? ChartShowSnr = null,
     bool? ChartShowLeft = null,
     bool? ChartShowRight = null,
     bool? ChartThickLines = null,
@@ -571,9 +648,30 @@ public sealed record ImdVsAmplitudeParameters(
     /// </summary>
     double? ExternalGainLeftDb = null,
     double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null,
     /// <summary>See <see cref="ThdVsFrequencyParameters.ChartFitPreviewSpectrum"/> -- the rail previews' Fit all toggles.</summary>
     bool? ChartFitPreviewSpectrum = null,
-    bool? ChartFitPreviewScope = null);
+    bool? ChartFitPreviewScope = null,
+    /// <summary>
+    /// The band this run's noise-based figures were integrated over -- THD+N, SNR and the
+    /// noise-floor pass -- and whose upper edge bounded which harmonics counted toward THD. The
+    /// sweep's own setting since 2026-10-14; **null on a row written before that**, where the run
+    /// simply used whatever band the live pipeline held and nothing recorded which that was. Not
+    /// back-filled with the default for that reason: a quoted band would assert something the row
+    /// does not say.
+    /// </summary>
+    double? MeasurementLoFreqHz = null,
+    double? MeasurementHiFreqHz = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm
@@ -894,7 +992,18 @@ public sealed record CrosstalkParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the
@@ -946,7 +1055,18 @@ public sealed record OutputImpedanceParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null);
 
 /// <summary>
 /// An impedance measurement type's <c>params_json</c>.
@@ -1041,7 +1161,18 @@ public sealed record ImpedanceParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null)
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null)
 {
     /// <summary>
     /// Present when this result was imported from a simulator's <c>.ac</c> run rather than
@@ -1314,7 +1445,18 @@ public sealed record FrequencyResponseParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null)
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null)
 {
     /// <summary>
     /// Set only on a result imported from a simulator's <c>.ac</c> run — the frequency-domain
@@ -1591,7 +1733,18 @@ public sealed record SteppedResponseParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null);
 
 /// <summary>The <c>impulse_result.kind</c> values — mirrors the subset of FrequencyResponseTraceKind an impulse response has.</summary>
 public static class ImpulseTraceKind
@@ -1787,7 +1940,18 @@ public sealed record ImpulseResponseParameters(
     /// results saved before it was recorded.
     /// </summary>
     double? ExternalGainLeftDb = null,
-    double? ExternalGainRightDb = null);
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved: a <c>ProgrammableLoadKind</c>
+    /// name ("Qa451", "Simulated"), and what it was presenting in ohms with 0 meaning open. A
+    /// string because that enum lives in Tonebench.App, which this assembly does not reference.
+    /// Both null for a bench with no load; the ohms alone are null when the relays had not been
+    /// read back, which is a real state and not a gap. Provenance only -- applying a measurement
+    /// type must never push this back to a relay. Not the sweeps' own <c>LoadOhms</c>, which is
+    /// the figure typed for power arithmetic and can legitimately disagree with it.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null);
 
 /// <summary>
 /// The values <c>measurement_result.source</c> takes. Null in the database means a measured run --

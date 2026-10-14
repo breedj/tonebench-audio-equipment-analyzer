@@ -4,6 +4,7 @@ import Modal from './Modal.vue'
 import PanelIcon from './PanelIcon.vue'
 import type { PanelIconName } from '../panels/panelIcons'
 import type { MeasurementKindTone } from '../measurements/kinds'
+import type { ProgrammableLoadKindName } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
 import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
@@ -12,7 +13,7 @@ import { useDiagnosticLogging } from '../composables/useDiagnosticLogging'
 import { useDiagnostics } from '../composables/useDiagnostics'
 import { commitNumber } from '../config/numberField'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
-import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import { useProgrammableLoad } from '../composables/useProgrammableLoad'
 import { useStartupConfig } from '../composables/useStartupConfig'
 import { useUpdateCheck } from '../composables/useUpdateCheck'
 import { DATE_TIME_FORMATS, formatDateTime, type DateTimeFormatId } from '../dateTime'
@@ -24,7 +25,6 @@ const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
 const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
-const { config, apply: applyConfig } = useSpectrumConfig()
 const { updateCheckEnabled } = useUpdateCheck()
 const { showWelcomeOnStartup, load: loadStartupConfig, setShowWelcomeOnStartup } = useStartupConfig()
 void loadStartupConfig()
@@ -79,28 +79,28 @@ const lastRecordingSummary = computed(() => {
 })
 
 /**
- * Which tab is showing. Grouped by what a setting is *about* rather than by where it is stored — the
- * metrics bandwidth is live pipeline state and the capture delay a configuration document, but both
- * are things you reach for while setting up an acquisition.
+ * Which tab is showing. Grouped by what a setting is *about* rather than by where it is stored.
  *
  * Everything here is global: it applies whichever measurement is selected and whichever analyzer is
- * attached. The two settings that are not — the experimental 384 kHz rate and the auto-ranging
+ * attached, and none of it is part of a measurement's saved settings. The **Measurement** tab is
+ * gone (2026-10-14) because its one field broke that promise — the metrics bandwidth is saved in an
+ * FFT type's params_json and re-applied with it, so it belongs to the measurement; it is now beside
+ * the tiles it qualifies, in the metrics picker (MetricPickerDialog.vue). The two settings that are not — the experimental 384 kHz rate and the auto-ranging
  * step-down delay — moved to the QA403's own dialog on the status bar (Qa403Dialog.vue), beside the
  * sound card's. A field that appears only when particular hardware is plugged in does not belong in
  * a dialog whose first line promises that nothing here depends on the device.
  */
-type ConfigTab = 'General' | 'Acquisition' | 'Measurement' | 'Impedance' | 'Diagnostics'
-const TABS: ConfigTab[] = ['General', 'Acquisition', 'Measurement', 'Impedance', 'Diagnostics']
+type ConfigTab = 'General' | 'Acquisition' | 'Impedance' | 'Diagnostics'
+const TABS: ConfigTab[] = ['General', 'Acquisition', 'Impedance', 'Diagnostics']
 
 /**
  * The glyph and hue the *selected* tab wears (2026-10-13 mockup). Only the selected one carries it:
- * five tinted circles in a row would be a palette rather than a position, and what the colour is
- * for is saying which section you are in.
+ * a tinted circle on every tab in the row would be a palette rather than a position, and what the
+ * colour is for is saying which section you are in.
  */
 const TAB_LOOKS: Record<ConfigTab, { icon: PanelIconName; tone: MeasurementKindTone }> = {
   General: { icon: 'sliders', tone: 'violet' },
   Acquisition: { icon: 'signalIn', tone: 'blue' },
-  Measurement: { icon: 'ruler', tone: 'indigo' },
   Impedance: { icon: 'resistor', tone: 'teal' },
   Diagnostics: { icon: 'checklist', tone: 'red' },
 }
@@ -119,6 +119,20 @@ watch(
   },
   { immediate: true },
 )
+
+/**
+ * The programmable load's switch. No draft string and no local staging: it is a dropdown of three
+ * fixed values, and the *server's* answer is what the rest of the UI keys off — so the select reads
+ * the status and a refused switch snaps back to what the bench actually has.
+ */
+const { status: loadStatus, error: loadError, setKind: setLoadKind } = useProgrammableLoad()
+const loadKind = computed(() => loadStatus.value?.kind ?? 'None')
+
+function onLoadKindChange(event: Event) {
+  void setLoadKind((event.target as HTMLSelectElement).value as ProgrammableLoadKindName).catch(() => {
+    // The composable has put the sentence on loadError, which is rendered under the control.
+  })
+}
 
 /**
  * The capture delay is edited through its own draft string, and that is not a style choice — it is
@@ -176,27 +190,6 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'Light', label: 'Light' },
   { value: 'Dark', label: 'Dark' },
 ]
-
-// The band THD+N / SNR / noise floor / band RMS / noise density are integrated over — live pipeline
-// state, applied on change straight through the same useSpectrumConfig() config as the FFT
-// settings panel, whose Bandwidth dropdown writes the same two fields (these are its "Custom"). It
-// IS part of an FFT measurement type's saved params (MeasurementSaveService.ApplyAsync restores
-// it); the earlier claim here that it was not had gone stale.
-const bandwidth = reactive({ loFreqHz: 20, hiFreqHz: 20000 })
-
-watch(
-  config,
-  (c) => {
-    if (!c) return
-    bandwidth.loFreqHz = c.measurementLoFreqHz
-    bandwidth.hiFreqHz = c.measurementHiFreqHz
-  },
-  { immediate: true },
-)
-
-async function applyBandwidth() {
-  await applyConfig({ measurementLoFreqHz: bandwidth.loFreqHz, measurementHiFreqHz: bandwidth.hiFreqHz })
-}
 
 // --- Impedance fixture -------------------------------------------------------------------------
 
@@ -542,6 +535,33 @@ async function clearStoredCalibration() {
             />
           </label>
 
+          <!--
+            The programmable load's switch, and the gate for that whole feature: until it is set to
+            something other than None there is no load box on the status bar, no dialog to open and
+            no polling. Few benches have a QA451, and the alternative — a permanently empty readout
+            in front of everyone who hasn't — is worse than not having the feature.
+
+            It is a setting rather than an auto-detect because the choice is also "and use the
+            simulated one", and because an instrument this app can switch relays on should never
+            appear because something was plugged in.
+          -->
+          <label
+            class="flex flex-col gap-1"
+            title="A QuantAsylum QA451 switches 4 Ω and 8 Ω across an amplifier's output and can power the amplifier from a bench supply. Leave this at None unless the bench has one: nothing about the load appears anywhere until it is chosen. Simulated drives the same screens with no hardware attached."
+          >
+            Programmable load
+            <select
+              :value="loadKind"
+              class="w-48 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+              @change="onLoadKindChange"
+            >
+              <option value="None">None</option>
+              <option value="Qa451">QA451 / QA451B</option>
+              <option value="Simulated">Simulated</option>
+            </select>
+          </label>
+          <p v-if="loadError" class="text-xs text-red-600 dark:text-red-400">{{ loadError }}</p>
+
           <!-- Said rather than left to be hunted for: both of these were on this tab until
                2026-10-05, and someone who knew where they were will come back here first. -->
           <p class="text-xs text-neutral-500 dark:text-neutral-400">
@@ -549,32 +569,6 @@ async function clearStoredCalibration() {
             analyzer rather than to the bench, and are now in <strong>QA403 settings</strong> — the
             gear beside the status bar's Analyzer picker.
           </p>
-        </template>
-
-        <template v-else-if="activeTab === 'Measurement'">
-          <label
-            class="flex flex-col gap-1"
-            title="Bandwidth THD+N, SNR and the noise floor are measured over. Also keeps DC out of the noise integration. Applies globally, regardless of which measurement is selected."
-          >
-            Metrics bandwidth (Hz)
-            <span class="flex items-center gap-1">
-              <input
-                type="number"
-                min="0"
-                v-model.number="bandwidth.loFreqHz"
-                class="w-20 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-                @change="applyBandwidth"
-              />
-              <span class="text-neutral-400">–</span>
-              <input
-                type="number"
-                min="1"
-                v-model.number="bandwidth.hiFreqHz"
-                class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-                @change="applyBandwidth"
-              />
-            </span>
-          </label>
         </template>
 
         <template v-else-if="activeTab === 'Diagnostics'">

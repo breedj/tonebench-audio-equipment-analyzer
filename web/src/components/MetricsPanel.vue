@@ -89,6 +89,15 @@ const accentClass = computed(() =>
         :title="`Not applicable — ${tile.caveat}.`"
       >{{ NOT_APPLICABLE }}</div>
       <div v-else class="whitespace-pre-line font-mono text-lg">{{ tile.value }}</div>
+      <!-- The band the figure was integrated over, on the tiles it governs and no others (see
+           MetricTile.band). Small and grey at the foot of the tile rather than in the label row:
+           it is the same two numbers on every such tile, so it has to read as a footnote and not
+           compete with the number above it. -->
+      <div
+        v-if="tile.band"
+        class="mt-0.5 text-[10px] leading-tight text-neutral-400 dark:text-neutral-500"
+        title="The measurement band this figure is integrated over — set in the metrics picker."
+      >{{ tile.band }}</div>
     </div>
   </div>
   <div v-else class="text-xs text-neutral-400 dark:text-neutral-600">

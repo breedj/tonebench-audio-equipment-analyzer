@@ -32,14 +32,14 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
-          <td>Status bar says <strong>Disconnected</strong></td>
+          <td>Status bar says <strong>offline</strong></td>
           <td>
             No analyzer found. Plug it in, then press <strong>Connect</strong>. The app starts happily
             without one, so this is a normal state and not a crash.
           </td>
         </tr>
         <tr>
-          <td>Status bar says <strong>Device removed</strong></td>
+          <td>Status bar says <strong>removed</strong></td>
           <td>
             It was unplugged or switched off mid-session. Plug it back in and press Connect; you do not
             need to restart anything.

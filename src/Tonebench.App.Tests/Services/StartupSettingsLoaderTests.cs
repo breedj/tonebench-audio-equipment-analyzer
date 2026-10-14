@@ -100,6 +100,11 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         services.AddSingleton<ExternalGainSetting>();
         services.AddSingleton<SoundCardSetting>();
         services.AddSingleton<AnalyzerKindSetting>();
+
+        // The load's selection is read in the same block. It needs no factory or session here:
+        // unlike the analyzer's, nothing builds a load at resolution time, which is the whole
+        // reason it is not order-sensitive — see LoadKindSetting.
+        services.AddSingleton<LoadKindSetting>();
         services.AddSingleton<UserWeightingSetting>();
         services.AddSingleton<UserWeightingService>();
         services.AddSingleton<DiagnosticRecorder>();

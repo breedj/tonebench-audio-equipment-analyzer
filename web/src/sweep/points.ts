@@ -365,7 +365,7 @@ export function mergePreviewSeries(left: SweepPreviewSeries | null, right: Sweep
 // ---------------------------------------------------------------------------
 
 /** The sweep chart's traces, in its own order. */
-export type SweepTraceKey = 'magnitude' | 'thd' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6plus' | 'noise'
+export type SweepTraceKey = 'magnitude' | 'thd' | 'thdn' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6plus' | 'noise' | 'snr'
 
 /**
  * One point's value for a trace, under the method the point's run used. NaN where the point has
@@ -398,6 +398,18 @@ export function sweepTraceValue(point: ThdSweepPoint, key: SweepTraceKey, method
       return normalized ? (point.normalizedD6PlusPercent ?? Number.NaN) : point.d6PlusPercent
     case 'noise':
       return point.noisePercent
+    case 'thdn':
+      // Not normalized: THD+N is an integrated figure over the measurement band, so there is no
+      // per-harmonic reference to divide it by -- the same reason Magnitude and Noise are not.
+      return point.thdNPercent
+    case 'snr':
+      // SNR is the one figure here that counts upward, and this axis counts down from the
+      // fundamental. So what is drawn is the noise the figure measures -- 100*10^(-SNR/20), i.e.
+      // N-D as a share of the fundamental -- which puts a 95 dB SNR at 0.0018 % / -95 dB, beside
+      // THD, THD+N and the noise floor where it can be compared with them. Drawing it upward would
+      // need a second y axis for one trace. An IMD point has no SNR (imd/points.ts sets NaN), and
+      // NaN is what the chart draws as a gap.
+      return Number.isFinite(point.snrDb) ? 100 * Math.pow(10, -point.snrDb / 20) : Number.NaN
   }
 }
 
@@ -416,6 +428,8 @@ export function sweepTraceLabel(key: SweepTraceKey, method: ThdMethodName, famil
     d5: 'D5',
     d6plus: 'D6+',
     noise: 'Noise',
+    thdn: 'THD+N',
+    snr: 'SNR',
   }
   // The IMD sweep draws its figures through the same trace slots (see imd/points.ts), so only
   // the names differ: the total and the orders, never the magnitude or the noise.
@@ -430,7 +444,9 @@ export function sweepTraceLabel(key: SweepTraceKey, method: ThdMethodName, famil
   }
   const label = (family === 'imd' ? imd : base)[key]
   if (method !== 'FrequencyNormalized' || family === 'imd') return label
-  return key === 'magnitude' || key === 'noise' ? label : `n${label}`
+  // THD+N and SNR keep their names for the reason Magnitude and Noise do: they are integrated over
+  // the band rather than referenced to one harmonic, so there is no normalized counterpart.
+  return key === 'magnitude' || key === 'noise' || key === 'thdn' || key === 'snr' ? label : `n${label}`
 }
 
 /**

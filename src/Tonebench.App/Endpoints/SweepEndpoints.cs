@@ -138,7 +138,10 @@ public sealed record ThdSweepStartRequest(
     /// <summary>Size the FFT per point and pick the sample rate from the sweep range — see <see cref="ThdSweepRequest.AdaptiveResolution"/>. Defaults off so an older client keeps the fixed behaviour.</summary>
     bool AdaptiveResolution = false,
     /// <summary>"Conventional" or "FrequencyNormalized" — see <see cref="Services.ThdMethod"/>. Absent means conventional, so an older client is unaffected.</summary>
-    string? ThdMethod = null)
+    string? ThdMethod = null,
+    /// <summary>The band this sweep's noise figures are read over - see <see cref="ThdSweepRequest.MeasurementLoFreqHz"/>. Defaulted so an older client keeps the 20 Hz - 20 kHz band it always ran.</summary>
+    double MeasurementLoFreqHz = 20.0,
+    double MeasurementHiFreqHz = 20000.0)
 {
     /// <summary>
     /// The runner's request, field by field. A method rather than an inline construction in the
@@ -153,7 +156,8 @@ public sealed record ThdSweepStartRequest(
             ProcessLeft, ProcessRight,
             FftSize, window, AverageCount,
             SampleRateHz, MeasureNoiseFloor, AdaptiveResolution,
-            ThdMethod: thdMethod);
+            ThdMethod: thdMethod,
+            MeasurementLoFreqHz: MeasurementLoFreqHz, MeasurementHiFreqHz: MeasurementHiFreqHz);
 }
 
 /// <summary>
@@ -174,7 +178,10 @@ public sealed record ThdAmplitudeSweepStartRequest(
     /// <summary>Capture one generator-off record before the sweep, for the residual the distortion traces sit above.</summary>
     bool MeasureNoiseFloor = true,
     /// <summary>End the sweep once a channel's THD exceeds this many percent — see <see cref="ThdSweepRequest.StopThdPercent"/>. Absent means sweep to the end.</summary>
-    double? StopThdPercent = null)
+    double? StopThdPercent = null,
+    /// <summary>The band this sweep's noise figures are read over - see <see cref="ThdSweepRequest.MeasurementLoFreqHz"/>. Defaulted so an older client keeps the 20 Hz - 20 kHz band it always ran.</summary>
+    double MeasurementLoFreqHz = 20.0,
+    double MeasurementHiFreqHz = 20000.0)
 {
     /// <summary>
     /// The runner's request, with everything this axis fixes filled in. A method for the same
@@ -203,7 +210,8 @@ public sealed record ThdAmplitudeSweepStartRequest(
             FixedFreqHz: FixedFreqHz,
             StartAmplitudeVolt: StartAmplitudeVolt,
             EndAmplitudeVolt: EndAmplitudeVolt,
-            StopThdPercent: StopThdPercent);
+            StopThdPercent: StopThdPercent,
+            MeasurementLoFreqHz: MeasurementLoFreqHz, MeasurementHiFreqHz: MeasurementHiFreqHz);
 }
 
 public sealed record SaveSweepRequest(long MeasurementTypeId, string Name, string? Notes);

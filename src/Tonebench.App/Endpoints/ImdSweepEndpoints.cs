@@ -92,7 +92,10 @@ public sealed record ImdSweepStartRequest(
     bool ProcessRight,
     int AverageCount,
     bool MeasureNoiseFloor = true,
-    double? MaxProductFreqHz = null)
+    double? MaxProductFreqHz = null,
+    /// <summary>The band this sweep's noise figures are read over - see <see cref="ThdSweepRequest.MeasurementLoFreqHz"/>. Defaulted so an older client keeps the 20 Hz - 20 kHz band it always ran.</summary>
+    double MeasurementLoFreqHz = 20.0,
+    double MeasurementHiFreqHz = 20000.0)
 {
     /// <summary>
     /// The runner's request, field by field — a method so a test can check every wire field
@@ -103,7 +106,8 @@ public sealed record ImdSweepStartRequest(
         new(
             preset, ToneLowHz, ToneHighHz, LowToHighRatio, method, MaxOrder,
             StartLevelVolt, EndLevelVolt, StepsPerOctave, LoadOhms,
-            ProcessLeft, ProcessRight, AverageCount, MeasureNoiseFloor, MaxProductFreqHz);
+            ProcessLeft, ProcessRight, AverageCount, MeasureNoiseFloor, MaxProductFreqHz,
+            MeasurementLoFreqHz: MeasurementLoFreqHz, MeasurementHiFreqHz: MeasurementHiFreqHz);
 }
 
 public sealed record SaveImdSweepRequest(long MeasurementTypeId, string Name, string? Notes);

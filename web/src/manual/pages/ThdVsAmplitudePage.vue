@@ -30,7 +30,7 @@ const { showPage } = useManual()
     <p>
       At each level the generator plays one tone, and one capture is analysed for the fundamental
       and its harmonics — the same per-point data as the frequency sweep: THD, D2 through D5, D6+,
-      the fundamental level, and optionally the generator-off residual. The x axis is the level
+      THD+N, SNR, the fundamental level, and optionally the generator-off residual. The x axis is the level
       rather than the frequency, and can be read as the DUT's output voltage, its output power, or
       the voltage that went in. How a tone's amplitude is measured, how the harmonics become THD,
       D2–D5 and D6+, and what the percent and dB axes each mean are set out under
@@ -104,6 +104,26 @@ const { showPage } = useManual()
             Captures one generator-off record before the sweep, giving the residual the distortion
             traces sit above. See the caution below about what that trace means at the top of a
             level sweep.
+          </td>
+        </tr>
+        <tr>
+          <td>Bandwidth</td>
+          <td>
+            The band this sweep's noise figures are read over: the <strong>noise floor</strong>,
+            <strong>THD+N</strong> and <strong>SNR</strong> traces, and nothing else.
+            <strong>20 Hz &ndash; 20 kHz</strong>, <strong>20 Hz &ndash; 80 kHz</strong>, or
+            <strong>Custom</strong>, which shows two boxes for the edges. It does <em>not</em> bound
+            the harmonics, unlike the same control on the FFT screen: a sweep measures those up to
+            Nyquist, because bounded at 20 kHz every harmonic of a point above about 7 kHz would be
+            out of band and THD would read exactly zero from there up. So THD, D2&ndash;D5 and D6+
+            do not move when you widen it, and the three band figures do. The lower edge is also held clear of
+            DC: a window spreads the input's DC offset over its own main lobe, so a band cannot
+            start closer than a few bins from 0 Hz. That costs nothing at a long record &mdash; 20 Hz
+            is bin 14 of a 131072-point FFT &mdash; but an adaptive sweep's short records at the top
+            have 23 or 47 Hz bins, where the band really does start at about 120 or 235 Hz whatever
+            you ask for. It is this sweep's own setting, saved and restored with the measurement; before
+            2026-10-14 a sweep used whatever band the FFT screen had been left on, which no stored
+            result could say afterwards.
           </td>
         </tr>
         <tr>

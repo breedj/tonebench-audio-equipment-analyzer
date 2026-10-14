@@ -19,6 +19,7 @@ import { formatSweepX, sweepXValue, type SweepXAxis } from '../../sweep/xAxis'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject, ReportSubjectData } from '../types'
 import { descriptionSections, genericSettingsSection } from './generic'
+import { bandwidthLabel } from '../../weighting'
 
 /**
  * The sweep chapter — THD vs frequency, THD vs amplitude and IMD vs amplitude, which share one
@@ -88,6 +89,8 @@ function commonRows(params: {
   sampleRateHz?: number
   averageCount?: number
   measureNoiseFloor?: boolean
+  measurementLoFreqHz?: number | null
+  measurementHiFreqHz?: number | null
 }): ReportRow[] {
   const rows: ReportRow[] = []
   if (typeof params.processLeft === 'boolean' || typeof params.processRight === 'boolean') {
@@ -107,6 +110,12 @@ function commonRows(params: {
   if (typeof params.averageCount === 'number') rows.push({ label: 'Averages per point', value: String(params.averageCount) })
   if (typeof params.measureNoiseFloor === 'boolean') {
     rows.push({ label: 'Noise floor', value: params.measureNoiseFloor ? 'Measured first, generator off' : 'Not measured' })
+  }
+  // Only when the row records it: a sweep saved before the band was one of its own settings ran on
+  // whatever the live pipeline held, and printing the default there would assert something the row
+  // does not say.
+  if (typeof params.measurementLoFreqHz === 'number' && typeof params.measurementHiFreqHz === 'number') {
+    rows.push({ label: 'Measurement band', value: bandwidthLabel(params.measurementLoFreqHz, params.measurementHiFreqHz) })
   }
   return rows
 }
@@ -275,7 +284,7 @@ export function sweepMeasurementSections(data: SweepReportData, kind: string, lo
       {
         kind: 'table',
         headers: sweepMetricColumns(data.method, data.family, xAxis),
-        cells: points.map((p) => sweepMetricRow(p, data.method, xAxis, unit, loadOhms)),
+        cells: points.map((p) => sweepMetricRow(p, data.method, xAxis, unit, loadOhms, data.family)),
       },
     )
   }

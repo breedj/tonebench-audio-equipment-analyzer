@@ -67,13 +67,20 @@ public readonly ref struct PsdSpectrum
 
     /// <summary>
     /// The inclusive bin window covering [<paramref name="frequencyLoHz"/>, <paramref name="frequencyHiHz"/>],
-    /// clamped to the spectrum. Bin 0 (DC) is never included unless the caller explicitly asks for
-    /// 0 Hz: an analyzer's noise figures are defined over an audio band, and on a DC-coupled input
-    /// the offset sitting in bin 0 is orders of magnitude larger than the noise being measured.
+    /// clamped to the spectrum. A caller asking for 0 Hz gets DC; any other band starts at
+    /// <see cref="WindowSums.DcGuardBins"/> at the earliest, because the offset sitting in bin 0 of
+    /// a DC-coupled input is orders of magnitude larger than the noise being measured and the
+    /// window smears it over its main lobe. That guard used to be a bare "not bin 0", which is
+    /// enough only while the bins are fine enough for the requested edge to land past the lobe on
+    /// its own -- see DcGuardBins for the 61 dB this cost on real hardware when they were not.
+    ///
+    /// <para>The upper edge is deliberately left rounding to nearest. The error there is at most
+    /// half a bin past the requested edge, with nothing enormous waiting on the other side of it,
+    /// so changing it would move every stored figure for no measured gain.</para>
     /// </summary>
     public BinRange BandOf(double frequencyLoHz, double frequencyHiHz) =>
         new(
-            Math.Max(frequencyLoHz > 0.0 ? 1 : 0, BinOfFrequency(frequencyLoHz)),
+            Math.Max(frequencyLoHz > 0.0 ? Sums.DcGuardBins : 0, BinOfFrequency(frequencyLoHz)),
             Math.Min(ValuesV2PerHz.Length - 1, BinOfFrequency(frequencyHiHz)));
 
     /// <summary>The whole spectrum including DC — only for callers that genuinely want everything.</summary>

@@ -193,6 +193,45 @@ public class ZoomedSpectrumFrameTests
         Assert.InRange(header.NPoints, 265u, 285u);
     }
 
+    /// <summary>
+    /// The chart's panel window is not a zoom, and a frame cut for it must not say it is.
+    ///
+    /// <para>From is a round 10 Hz while the overview's own first column centre is the bin below
+    /// it, so "the axis covers the whole span" reads false by one bin and the chart reports a
+    /// viewport although nothing has been zoomed. Those bins resolve to the overview's own range,
+    /// and the frame is the overview — but flagged <see cref="StreamFlags.Zoomed"/> it tells the
+    /// client not to take its axis from it, which leaves a stopped capture's store holding nothing
+    /// that describes the full span. The chart's span is per plot instance, so the next remount —
+    /// switching measurement away and back — then had nothing to scale to and drew its empty state
+    /// over the capture. Reported 2026-10-14 as "the FFT data is gone except for the min/max data".
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task StoppedPipeline_WithAWindowCoveringTheWholeSpan_RebuildsTheOverviewUnflagged()
+    {
+        var hub = new SpectrumBroadcastHub();
+        var pipeline = NewPipeline(hub);
+        var (liveId, liveReader) = hub.Subscribe();
+
+        pipeline.Start(SampleRateHz, channelCount: 1);
+        EnqueueTone(pipeline, FftSize);
+        var overview = await ReadSpectrumHeaderAsync(liveReader);
+        await pipeline.StopAsync();
+
+        // What reportViewport sends on an untouched chart: the panel's own From/To, whose top is
+        // past Nyquist and whose bottom is a hair above the overview's first column.
+        var (id, reader) = hub.Subscribe();
+        var window = new SpectrumViewport(10.0, 100000.0);
+        hub.SetViewport(id, window);
+        pipeline.ResendRetainedTo(id, window);
+
+        var header = await ReadSpectrumHeaderAsync(reader);
+
+        Assert.False(header.Flags.HasFlag(StreamFlags.Zoomed));
+        Assert.Equal(overview.X0, header.X0);
+        Assert.Equal(overview.Dx, header.Dx);
+    }
+
     /// <summary>Zooming back out has to restore the overview, not leave the zoomed frame up.</summary>
     [Fact]
     public async Task StoppedPipeline_WithNoWindow_RebuildsTheOverview()

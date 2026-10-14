@@ -1,14 +1,18 @@
 <script setup lang="ts">
 /**
- * The Notes box directly above every screen's History details, at the same width: free text about the measurement
+ * The Notes box in every screen's chart column, at History details' own width: free text about the measurement
  * itself — what is under test, how it is wired, what to look for — kept with the measurement type
  * and shown again whenever it is opened. Staged through useProjects like the settings: typing
  * marks the measurement dirty and Save / Save as… write it. The Save measurement dialog copies the
  * text into a new result's own notes, so a result carries the description its measurement had
  * when it was taken, and a report's Description element prints both.
  *
- * Each screen in App.vue places it immediately before its MeasurementHistoryPanel, so the two
- * panels always share a column and a width — a new screen adds both together.
+ * Six of the seven screens in App.vue place it immediately before their MeasurementHistoryPanel, so
+ * the two panels share a column and a width — a new screen adds both together. The FFT screen is
+ * the exception and has to be: its History spans the whole measurement view at the foot of the page,
+ * under the overlay list and the harmonics/other-peaks grids, so a Notes box kept above it was far
+ * enough down to read as absent (Joost, 2026-10-14). It sits under that screen's charts instead,
+ * which is where the other six have it relative to their own chart — the parity that was asked for.
  */
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'

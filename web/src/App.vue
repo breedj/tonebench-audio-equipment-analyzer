@@ -5167,6 +5167,15 @@ onBeforeUnmount(() => stopLoadPolling?.())
                    skip a zero-width resize while hidden and refit when shown again. -->
               <SpectrogramChart v-show="chartShowSpectrogram" ref="spectrogramChart" class="mt-3" :spectrum="spectrum" />
               <OscilloscopeChart v-show="chartShowOscilloscope" class="mt-3" :scope="scope" :residual="scopeResidual" :status="status" />
+
+              <!-- Notes sits here, under the charts, and is the one screen where it is NOT directly
+                   above History details. On the other six screens the two are adjacent because both
+                   are in the chart column; here History spans the whole view at the foot of the page,
+                   below the overlay list and the harmonics/other-peaks grids, and a Notes box that
+                   followed it down was three screens of scrolling away — reported as missing
+                   (Joost, 2026-10-14), having last been visible at the foot of the settings rail
+                   before it moved to History's width on 2026-09-19. -->
+              <MeasurementNotesPanel class="mt-3" />
             </div>
 
             <template #aside>
@@ -5213,8 +5222,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
           <!-- History details sits at the bottom, spanning the whole measurement view rather than
                the centre column it used to share with the charts: its rows are a name, a timestamp,
-               per-channel headlines and three buttons, which a third of the width could only wrap. -->
-          <MeasurementNotesPanel />
+               per-channel headlines and three buttons, which a third of the width could only wrap.
+               Notes does NOT follow it down here, unlike on the other six screens — see the chart
+               column above for why. -->
           <MeasurementHistoryPanel @error="reportError" @report="openReport" />
           </template>
         </template>

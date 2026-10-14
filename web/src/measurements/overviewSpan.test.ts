@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { overviewSpan, type Span } from './overviewSpan'
+import { overviewSpan, spanFrom, type Span } from './overviewSpan'
 
 const cols = (lo: number, hi: number) => [{ freqHz: lo }, { freqHz: (lo + hi) / 2 }, { freqHz: hi }]
 const NONE: Span = { lo: 0, hi: -1 }
@@ -62,6 +62,34 @@ describe('overviewSpan', () => {
     // One report, then silence: every later pass reaches the same decision.
     expect(new Set(reports).size).toBe(1)
     expect(reports[0]).toBe('10-20000')
+  })
+})
+
+describe('spanFrom', () => {
+  it('takes the span from a source that is not windowed', () => {
+    expect(spanFrom(NONE, { lo: 9.03, hi: 96000 }, false)).toEqual({ lo: 9.03, hi: 96000 })
+  })
+
+  it('keeps the known span when the source only describes a window', () => {
+    const known = { lo: 9.03, hi: 96000 }
+    expect(spanFrom(known, { lo: 900, hi: 1100 }, true)).toEqual(known)
+  })
+
+  /**
+   * The regression. A remount leaves the chart with no span at all, and what the store holds at
+   * that moment is routinely a zoomed frame — so a rule of "overview frames only" answers "no
+   * span", which reads as "no data" and draws the empty state over a capture that is right there.
+   * The frame's own window is narrow but it is true, and the overview that follows replaces it.
+   */
+  it('takes a windowed span when no span is known yet, so a remount never reads as no data', () => {
+    expect(spanFrom(NONE, { lo: 900, hi: 1100 }, true)).toEqual({ lo: 900, hi: 1100 })
+  })
+
+  it('is what overviewSpan decides with, so the live and overlay paths cannot drift', () => {
+    const known = { lo: 9.03, hi: 96000 }
+    const windowed = { loFreqHz: 900, hiFreqHz: 1100 }
+    expect(overviewSpan(known, cols(900, 1100), windowed)).toEqual(spanFrom(known, { lo: 900, hi: 1100 }, true))
+    expect(overviewSpan(NONE, cols(900, 1100), windowed)).toEqual(spanFrom(NONE, { lo: 900, hi: 1100 }, true))
   })
 })
 

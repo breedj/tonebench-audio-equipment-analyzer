@@ -37,10 +37,31 @@ export function overviewSpan(
 ): Span {
   if (!columns || columns.length === 0) return previous
 
-  // A windowed source keeps whatever span is already known. The exception is first render, where
-  // a windowed source is the only one there is and a slightly narrow span beats none at all —
-  // without it the chart would have nothing to scale to until the next overview arrived.
-  if (fetchedWindow && previous.hi > 0) return previous
+  return spanFrom(
+    previous,
+    { lo: columns[0]!.freqHz, hi: columns[columns.length - 1]!.freqHz },
+    fetchedWindow != null,
+  )
+}
 
-  return { lo: columns[0]!.freqHz, hi: columns[columns.length - 1]!.freqHz }
+/**
+ * {@link overviewSpan}'s rule for a source that states its own edges rather than listing columns —
+ * a live spectrum frame, whose header carries the span and whose `STREAM_FLAG_ZOOMED` says whether
+ * that span is the spectrum's or only the window it was cut for.
+ *
+ * <p><b>The exception is the whole of this.</b> A windowed source keeps whatever span is already
+ * known, but on first render it is the only source there is, and a slightly narrow span beats none
+ * at all. The live path did not have that exception until 2026-10-14 and simply left the span
+ * unset, which the chart reads as "nothing to draw": it rendered its empty state over a capture
+ * that was sitting right there in the store, and `minMaxBandPlugin` — which draws straight from the
+ * frames rather than from the plot's data — went on painting the band across the empty axes.
+ * Reported as "the FFT data is gone except for the min/max data" after switching measurement away
+ * and back, which is exactly when it bites: `fullLoFreqHz`/`fullHiFreqHz` live in the chart
+ * component, so a remount starts with no span, and whether the store holds an overview frame at
+ * that moment is a matter of what the server last re-sent. Screenshot and Report went with it —
+ * `exportPng` throws "There is no spectrum to export" off the same answer.</p>
+ */
+export function spanFrom(previous: Span, span: Span, windowed: boolean): Span {
+  if (windowed && previous.hi > 0) return previous
+  return span
 }

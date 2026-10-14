@@ -23,7 +23,7 @@ import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { FFT_LIVE_COLOR, fftOverlayColor, soleBandOverlay, spectrumAxisOverlay } from '../measurements/spectrumOverlayColors'
-import { overviewSpan } from '../measurements/overviewSpan'
+import { overviewSpan, spanFrom } from '../measurements/overviewSpan'
 import { api, type MeasurementChannel, type WeightingCurveResponse } from '../api/client'
 import { unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useUserWeighting } from '../composables/useUserWeighting'
@@ -421,8 +421,14 @@ function minMaxBandPlugin(
 // setData too (the x scale is auto:false, so setData re-applies the same min/max every frame) —
 // without both guards this would emit 20 times a second saying nothing new.
 let viewportTimer: ReturnType<typeof setTimeout> | undefined
-let lastReportedLo = Number.NaN
-let lastReportedHi = Number.NaN
+// Seeded `undefined`, not NaN: NaN is what a full-span report *is* below, so seeding it meant a
+// fresh plot's first report of "not zoomed" was deduplicated away as already said. It had not been
+// said — the viewport is remembered per *client* on the server and this component is remounted by
+// every measurement switch, so after a zoom the server went on serving the old window and the
+// chart came back holding that slice alone, with no gesture left to correct it. The other half of
+// the same bug is in overviewSpan.ts's spanFrom.
+let lastReportedLo: number | undefined
+let lastReportedHi: number | undefined
 
 function reportViewport(u: uPlot) {
   const min = u.scales.x.min
@@ -1013,10 +1019,19 @@ function computeFrame(): FrameData | null {
   // first overlay — recomputed every call, so switching overlays re-fits it.
   let lo = fullLoFreqHz
   let hi = fullHiFreqHz
-  if (primary && (primary.header.flags & STREAM_FLAG_ZOOMED) === 0) {
-    lo = primary.loFreqHz
-    hi = primary.hiFreqHz
-  } else if (!primary && firstOverlayEntry && firstOverlayChannel) {
+  if (primary) {
+    // `spanFrom` rather than "overview frames only", because this plot's span is its own: the two
+    // module-level edges above are reset by every remount, and switching measurement away and back
+    // remounts this component. With only a zoomed frame in the store at that moment — which is the
+    // ordinary state of a stopped capture, see ResendRetainedTo — refusing its span left the chart
+    // with nothing to scale to and it drew its empty state over a capture it was holding. The band
+    // kept being painted, since minMaxBandPlugin reads the frames and not the plot's data.
+    ;({ lo, hi } = spanFrom(
+      { lo, hi },
+      { lo: primary.loFreqHz, hi: primary.hiFreqHz },
+      (primary.header.flags & STREAM_FLAG_ZOOMED) !== 0,
+    ))
+  } else if (firstOverlayEntry && firstOverlayChannel) {
     // `spectrumWindow` is the overlay's STREAM_FLAG_ZOOMED. The rule, and the request loop that
     // not applying it here produced, are written out in overviewSpan -- which is where it lives so
     // it can be tested, nothing in a .vue being testable here.

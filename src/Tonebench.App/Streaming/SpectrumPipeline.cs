@@ -444,8 +444,19 @@ public sealed class SpectrumPipeline(
                     hub.Send(clientId, StreamFrame.EncodeNoiseFigures(channel, retained.Seq, noise, held: false));
 
                 int overviewLoBin = Math.Clamp((int)Math.Round(displayLoFreqHz / retained.BinSizeHz), 1, specLen - 2);
+
+                // No <see cref="ZoomedFrameMinFactor"/> here — any real zoom earns its frame, as
+                // the remarks above say — but a window that resolves to the overview's own bins is
+                // not a zoom at all, and must not be flagged as one. The chart's panel window
+                // routinely does: its From is a round 10 Hz while the overview's first column
+                // centre is the bin below it (9.03 Hz at 65536 points / 192 kHz), so "covers the
+                // whole span" reads false by one bin and the chart reports a viewport although
+                // nothing is zoomed. Flagged Zoomed, that frame tells the client not to take its
+                // axis from it — and a stopped capture's store then holds nothing that describes
+                // the full span, which is half of the empty-chart bug in overviewSpan.ts.
                 bool zoomed = ResolveWindowBins(
-                    viewport, retained.BinSizeHz, specLen, overviewLoBin, out int loBin, out int hiBin);
+                        viewport, retained.BinSizeHz, specLen, overviewLoBin, out int loBin, out int hiBin)
+                    && (loBin > overviewLoBin || hiBin < specLen - 1);
                 if (!zoomed)
                 {
                     loBin = overviewLoBin;

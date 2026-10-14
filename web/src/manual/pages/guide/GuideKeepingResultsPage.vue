@@ -66,7 +66,7 @@ const { showPage } = useManual()
       </li>
     </ol>
     <p>
-      There is a <strong>Notes</strong> box above the history list for anything you will want to know
+      There is a <strong>Notes</strong> box under the chart for anything you will want to know
       later — which valves were in it, how it was wired, what you were trying. When you save a result, it
       starts with a copy of those notes, and a PDF report prints both.
     </p>

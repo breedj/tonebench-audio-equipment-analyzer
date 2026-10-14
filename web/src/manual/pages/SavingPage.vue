@@ -79,7 +79,9 @@ const { showPage } = useManual()
       into History first.
     </p>
     <p>
-      Above every screen's History details sits a <strong>Notes</strong> box: free text about the
+      Under every screen's chart sits a <strong>Notes</strong> box — directly above History details,
+      except on the FFT screen, where History spans the foot of the page and Notes stays with the
+      charts. It is free text about the
       measurement itself — the DUT, the wiring, what to look for. It is saved with the measurement
       by the same Save and Save as…, and typing in it marks the measurement unsaved like any
       setting. When a result is saved, the Save dialog starts with a copy of these notes, to keep or

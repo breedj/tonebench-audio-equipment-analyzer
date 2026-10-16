@@ -20,6 +20,7 @@ import {
   STREAM_FLAG_IMD_UNRESOLVED,
   STREAM_FLAG_SCOPE_RESIDUAL,
   STREAM_FLAG_OUTPUT_IMPEDANCE,
+  STREAM_FLAG_ZOOMED,
   StreamMsgType,
   type IntermodulationFrame,
   type MetersFrame,
@@ -36,6 +37,19 @@ import { useSweep } from './useSweep'
 
 const RECONNECT_DELAY_MS = 1000
 
+/** One measurement's live FFT display -- see {@link useSpectrumStream}'s `captureFftDisplay`. */
+export interface FftDisplayState {
+  spectrum: Record<number, SpectrumFrame>
+  spectrumOverview: Record<number, SpectrumFrame>
+  meters: Record<number, MetersFrame>
+  intermodulation: Record<number, IntermodulationFrame>
+  imdUnresolved: Record<number, boolean>
+  multitone: Record<number, MultitoneFrame>
+  noise: Record<number, NoiseFiguresFrame>
+  scope: Record<number, ScopeFrame>
+  scopeResidual: Record<number, ScopeFrame>
+}
+
 /**
  * Owns the single /ws/stream WebSocket connection and decodes incoming binary frames straight
  * into typed views (no JSON.parse anywhere in this path). Keyed by channel (0=L, 1=R) so both
@@ -43,6 +57,24 @@ const RECONNECT_DELAY_MS = 1000
  */
 export function useSpectrumStream() {
   const spectrum = shallowRef<Record<number, SpectrumFrame>>({})
+  /**
+   * The last *overview* frame per channel — the un-flagged one, covering the whole measured span.
+   *
+   * <p>A zoom is answered by frames covering only the window asked for (STREAM_FLAG_ZOOMED), which
+   * is the point of it: the column budget is spent where it is being looked at. But those frames
+   * then replace `spectrum` entirely, and anything that wants the measurement rather than the view
+   * is left with the slice — which is how a report taken on a zoomed chart came out with its axis
+   * at the panel's own From/To and a curve across a fiftieth of it, the rest simply absent (Joost,
+   * 2026-10-16). Kept beside the drawn frames rather than re-requested, because the server cannot
+   * answer two windows at once: one frame set per client.</p>
+   *
+   * <p>While <b>stopped</b> this is exact: the last tick before Stop produced it, and that tick's
+   * record is the retained snapshot the server would re-send anyway. While a capture is <b>running
+   * and zoomed</b> it is the last full-span tick before the zoom gesture, so a report taken then
+   * shows the whole span as of that moment rather than of this one. That is the honest trade: the
+   * alternative is a report of a measurement with most of it missing.</p>
+   */
+  const spectrumOverview = shallowRef<Record<number, SpectrumFrame>>({})
   const meters = shallowRef<Record<number, MetersFrame>>({})
   // Present only while the pipeline has a two-tone IMD spec; keyed by channel like `meters`. The
   // owner clears it together with `meters` (App.vue's run/clear paths) — a stale IMD tile after
@@ -210,6 +242,11 @@ const outputImpedance = useOutputImpedance()
         const noiseFrame = noise.value[header.channel]
         if (noiseFrame) frame.enbwHz = noiseFrame.enbwHz
         spectrum.value = { ...spectrum.value, [header.channel]: frame }
+        // Only an un-flagged frame describes the whole span -- see `spectrumOverview`. The same
+        // test SpectrumChart applies before it sizes an axis from a frame.
+        if ((header.flags & STREAM_FLAG_ZOOMED) === 0) {
+          spectrumOverview.value = { ...spectrumOverview.value, [header.channel]: frame }
+        }
       } else if (header.msgType === StreamMsgType.NoiseFigures) {
         noise.value = { ...noise.value, [header.channel]: decodeNoiseFiguresFrame(event.data) }
       } else if (header.msgType === StreamMsgType.Meters) {
@@ -281,5 +318,62 @@ const outputImpedance = useOutputImpedance()
     socket?.close()
   })
 
-  return { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, connected, setViewport, clearScope }
+  /**
+   * The whole live FFT display as one value: every store the FFT analysis screen draws from, and
+   * nothing else. Taken and put back as a set, because that is what they are -- a tick writes all
+   * of them, and a display holding one measurement's spectrum beside another's meters is a lie
+   * nothing on screen would flag.
+   *
+   * <p>What it deliberately does <b>not</b> carry is the two running histories the charts keep
+   * themselves: the spectrogram's rows and the peak-hold maps. Those are properties of a
+   * continuous display rather than of a capture, they are already discarded by a weighting or unit
+   * change for the same reason, and the server's retained snapshot cannot re-derive them either.
+   * The caller clears them; see App.vue's switchFftOwner.</p>
+   */
+  function captureFftDisplay(): FftDisplayState {
+    return {
+      spectrum: spectrum.value,
+      spectrumOverview: spectrumOverview.value,
+      meters: meters.value,
+      intermodulation: intermodulation.value,
+      imdUnresolved: imdUnresolved.value,
+      multitone: multitone.value,
+      noise: noise.value,
+      scope: scope.value,
+      scopeResidual: scopeResidual.value,
+    }
+  }
+
+  /** Puts a {@link captureFftDisplay} back, or clears every store when given null. */
+  function restoreFftDisplay(state: FftDisplayState | null) {
+    // Through clearScope either way: it owns the pending-group bookkeeping behind `scope`, and a
+    // half-built group left standing would publish itself over whatever is restored here.
+    clearScope()
+    spectrum.value = state?.spectrum ?? {}
+    spectrumOverview.value = state?.spectrumOverview ?? {}
+    meters.value = state?.meters ?? {}
+    intermodulation.value = state?.intermodulation ?? {}
+    imdUnresolved.value = state?.imdUnresolved ?? {}
+    multitone.value = state?.multitone ?? {}
+    noise.value = state?.noise ?? {}
+    scope.value = state?.scope ?? {}
+    scopeResidual.value = state?.scopeResidual ?? {}
+  }
+
+  return {
+    spectrum,
+    spectrumOverview,
+    meters,
+    intermodulation,
+    imdUnresolved,
+    multitone,
+    noise,
+    scope,
+    scopeResidual,
+    connected,
+    setViewport,
+    clearScope,
+    captureFftDisplay,
+    restoreFftDisplay,
+  }
 }

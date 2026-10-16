@@ -32,6 +32,8 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(DiagnosticsEndpoints.DiagnosticsConfigRequest))]
 [JsonSerializable(typeof(DiagnosticsEndpoints.DiagnosticsStatus))]
 [JsonSerializable(typeof(AcquisitionStartRequest))]
+[JsonSerializable(typeof(SpectrumRetentionOwnerRequest))]
+[JsonSerializable(typeof(SpectrumRetentionOwnerResponse))]
 [JsonSerializable(typeof(SpectrumConfigRequest))]
 [JsonSerializable(typeof(WeightingCurveResponse))]
 [JsonSerializable(typeof(SpectrumPipelineOptions))]

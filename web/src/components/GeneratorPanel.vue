@@ -151,7 +151,11 @@ defineExpose({ buildRequest, resyncTones })
       </fieldset>
 
       <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-        <label class="tb-check-row" title="Amplifier load, used for both channels' power figures.">
+        <!-- `change` like every other field here: the load reaches no device, but the emit is
+             also what marks the open measurement dirty (App.vue's applyGeneratorLive), and
+             without it an edited load left the Save button hidden with autosave off and was
+             then lost on the next measurement switch. Joost, 2026-10-16. -->
+        <label class="tb-check-row" title="Amplifier load, used for both channels' power figures. Saved with the measurement.">
           Load
           <input
             type="number"
@@ -159,6 +163,7 @@ defineExpose({ buildRequest, resyncTones })
             step="0.1"
             v-model.number="loadOhms"
             class="w-16 rounded border border-neutral-300 px-1 py-0.5 dark:border-neutral-700"
+            @change="emit('change')"
           />
           Ω
         </label>

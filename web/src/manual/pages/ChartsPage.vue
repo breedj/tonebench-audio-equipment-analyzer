@@ -58,7 +58,10 @@ import SettingsTable from '../components/SettingsTable.vue'
     <p>
       A <strong>Screenshot</strong> keeps the zoom: the PNG shows the window on screen, at a fixed
       size and in the light colour scheme. A report's chart does not — it is drawn with the display
-      panel's ranges, so two reports of one measurement compare like for like.
+      panel's ranges, and of the whole measured span rather than the zoom window, so two reports of
+      one measurement compare like for like and a report taken while zoomed in is still a report of
+      the measurement. (Taken during a running capture, that full-span curve is the last pass before
+      the zoom rather than the newest one; stop first if the difference matters.)
     </p>
 
     <h2>Cursors and readouts</h2>

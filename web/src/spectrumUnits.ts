@@ -61,3 +61,49 @@ export function unitAxisLabel(unit: SpectrumUnit): string {
 export function unitSuffix(unit: SpectrumUnit): string {
   return unit === 'dBV' ? 'dBV' : 'dBV/√Hz'
 }
+
+/**
+ * What the harmonic markers over the spectrum are labelled with: each harmonic's level relative to
+ * the fundamental, or its own absolute level. Only the markers -- the trace's own axis is
+ * {@link SpectrumUnit} above, and the two are deliberately independent: dBc is a *ratio*, so it has
+ * no place on a level axis, and a marker that silently changed meaning with the axis would make the
+ * two unreadable together.
+ *
+ * <p>dBc by default, which is what the markers always showed and what a distortion figure is quoted
+ * in; dBV answers the other question the same lines are used for -- how loud is H3, in absolute
+ * terms, against the noise floor beside it. Both are the figures the harmonics table prints in its
+ * two columns (HarmonicsTable.vue), from the same arithmetic: dBV = fundamental dBV + dBc.</p>
+ *
+ * <p>Note the label stays in dBV under the chart's density units, exactly as that table does: a
+ * harmonic is a coherent tone and has a level, not a density (see this file's own header).</p>
+ */
+export const HARMONIC_MARKER_UNITS = ['dBc', 'dBV'] as const
+export type HarmonicMarkerUnit = (typeof HARMONIC_MARKER_UNITS)[number]
+
+export const DEFAULT_HARMONIC_MARKER_UNIT: HarmonicMarkerUnit = 'dBc'
+
+/** A stored `chartHarmonicMarkerUnit` string, or anything else, as a unit -- unknown values are dBc. */
+export function parseHarmonicMarkerUnit(value: string | null | undefined): HarmonicMarkerUnit {
+  return (HARMONIC_MARKER_UNITS as readonly string[]).includes(value ?? '')
+    ? (value as HarmonicMarkerUnit)
+    : DEFAULT_HARMONIC_MARKER_UNIT
+}
+
+/**
+ * The text beside a harmonic marker: the harmonic's dBc, or its absolute dBV derived from the
+ * fundamental the same tick measured. One decimal in dBV (a level is read against a 10 dB grid) and
+ * none in dBc, which is how the markers have always printed and keeps the labels narrow enough to
+ * sit between two adjacent orders at the low end of a log axis.
+ *
+ * <p>Null when dBV was asked for and there is no fundamental level to add -- a marker labelled
+ * with a bare dBc figure under a dBV heading would be wrong by whatever the fundamental is.</p>
+ */
+export function harmonicMarkerLabel(
+  unit: HarmonicMarkerUnit,
+  dbc: number,
+  fundamentalDbv: number | undefined,
+): string | null {
+  if (unit === 'dBc') return dbc.toFixed(0)
+  if (fundamentalDbv === undefined || !Number.isFinite(fundamentalDbv)) return null
+  return (fundamentalDbv + dbc).toFixed(1)
+}

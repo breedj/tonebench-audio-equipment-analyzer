@@ -229,10 +229,16 @@ public sealed record DateTimeFormatConfig(string Format = "system")
 /// <summary>
 /// The Screenshot dialog's answers, kept so the next screenshot needs none of them asked again.
 /// The title rides along only while <paramref name="SaveText"/> is on -- unticked, the client
-/// sends it as null and a reopened dialog starts blank. The size is a pixel width, the aspect
+/// sends it as null. The size is a pixel width, the aspect
 /// ratio and destination are the client's own ids (<c>web/src/screenshot.ts</c>), validated no
 /// further than "present", for the same reason as <see cref="DateTimeFormatConfig"/>.
 /// </summary>
+/// <param name="TitleFor">
+/// The measurement <paramref name="Title"/> was typed for, by name, or null for none. A kept title
+/// is only offered again on that same measurement -- every other one opens on its own name (see
+/// ScreenshotDialog.vue). Null on a document an older build wrote, which therefore offers its
+/// stored title nowhere, which is the behaviour being corrected.
+/// </param>
 public sealed record ScreenshotSettingsConfig(
     string? Title = null,
     bool SaveText = false,
@@ -240,7 +246,8 @@ public sealed record ScreenshotSettingsConfig(
     int WidthPx = 1500,
     string AspectRatio = "3:2",
     string Destination = "file",
-    bool Monochrome = false)
+    bool Monochrome = false,
+    string? TitleFor = null)
 {
     public const int MinWidthPx = 500;
     public const int MaxWidthPx = 2000;
@@ -252,7 +259,8 @@ public sealed record ScreenshotSettingsConfig(
         WidthPx >= MinWidthPx && WidthPx <= MaxWidthPx
         && !string.IsNullOrWhiteSpace(AspectRatio) && AspectRatio.Length <= 16
         && !string.IsNullOrWhiteSpace(Destination) && Destination.Length <= 32
-        && (Title is null || Title.Length <= 500);
+        && (Title is null || Title.Length <= 500)
+        && (TitleFor is null || TitleFor.Length <= 500);
 }
 
 /// <summary>

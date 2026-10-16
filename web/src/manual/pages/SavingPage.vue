@@ -72,11 +72,20 @@ const { showPage } = useManual()
     </p>
     <p>
       Selecting another measurement stops whatever is running and silences the generator, restores
-      that measurement's own settings, and clears any curve or spectrum the <em>other</em>
-      measurement had left on the screen you are arriving at. A measurement's own last run stays: go
-      to something else and come back and your sweep is still there, unless something else has been
-      run in the meantime. Nothing is thrown away that was ever saved — a run you want to keep goes
-      into History first.
+      that measurement's own settings, and puts back whatever <em>that</em> measurement last
+      measured — never what the one you came from did. A measurement's own last run stays: go to
+      something else and come back and your sweep, or your spectrum, is still there. Two FFT
+      measurements keep their captures separately, so you can switch between them to compare, and
+      <strong>Save measurement result</strong> on each writes the one on its own screen. Nothing is
+      thrown away that was ever saved — a run you want to keep goes into History first.
+    </p>
+    <p>
+      Two things are not kept across a switch, on either screen: the spectrogram's rows and the
+      peak-hold trace. Both are a running history of a continuous display rather than a capture —
+      nothing stored can re-draw them — so they start again when you come back. Reloading the page
+      is a harder reset still: the app keeps these captures in memory, so after a reload only the
+      measurement that was open still has its own, and the others are empty until they are run
+      again.
     </p>
     <p>
       Under every screen's chart sits a <strong>Notes</strong> box — directly above History details,
@@ -201,9 +210,12 @@ const { showPage } = useManual()
         The dialog's answers are remembered for the next screenshot:
         <ul>
           <li>
-            <strong>Title</strong> — printed centred above the chart; empty for none.
-            <strong>Save text</strong> keeps it for the next screenshot, so a caption need not be
-            retyped for every chart of a session; unticked, the box starts empty next time.
+            <strong>Title</strong> — printed centred above the chart; empty for none. The box
+            opens holding the open measurement's name, which is the caption wanted most of the
+            time and is there to type over. <strong>Save text</strong> keeps whatever you type for
+            the next screenshot <em>of that same measurement</em>, so a series of charts of one DUT
+            needs the caption once; every other measurement still opens on its own name, and
+            renaming a measurement drops a caption that no longer describes it.
           </li>
           <li>
             <strong>Add date</strong> prints the date and time at the bottom right, in the format

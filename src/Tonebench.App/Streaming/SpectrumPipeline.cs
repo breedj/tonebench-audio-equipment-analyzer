@@ -66,6 +66,29 @@ public sealed class SpectrumPipeline(
     private readonly RetainedSpectrum[] _retained = [new(), new()];
     private readonly object _retainedLock = new();
 
+    // Which measurement the slot above belongs to, and the slots of the measurements switched away
+    // from -- see SwitchRetentionOwner. Both under _retainedLock, which already serialises every
+    // read and write of _retained. The key is the client's own "projectId:typeId" string and this
+    // code never parses it: whatever the client calls a measurement is what it gets back.
+    private string? _retentionOwner;
+    private readonly Dictionary<string, RetainedSpectrum[]> _parkedRetention = [];
+    private readonly List<string> _parkedOrder = [];
+
+    /// <summary>
+    /// How many measurements' retained captures are held aside at once (see
+    /// <see cref="SwitchRetentionOwner"/>), least recently parked evicted first.
+    ///
+    /// <para>Four rather than "all of them", because a retained snapshot is the whole
+    /// full-resolution record and the top FFT size is not cheap: at 1,048,576 points one channel's
+    /// <c>AmpPower</c> is a <c>double[524289]</c> (4.2 MB) and its <c>Complex</c> copy another
+    /// 8.4 MB, so one measurement of two channels is ~25 MB and a project with thirty of them would
+    /// be three quarters of a gigabyte of captures nobody has asked to see. Four covers switching
+    /// between a handful of measurements on a bench, which is what this is for; the fifth
+    /// measurement back simply shows an empty chart on return, which is what <i>every</i>
+    /// measurement did before this existed.</para>
+    /// </summary>
+    private const int MaxParkedRetention = 4;
+
     // Set once a channel's SpectrumPipelineOptions.SingleShot capture completes; ProcessTick then
     // skips that channel entirely, which is what "holds" the last broadcast frame on screen. Only
     // Flush() clears it, so toggling SingleShot off and back on without a Flush would otherwise
@@ -365,6 +388,91 @@ public sealed class SpectrumPipeline(
 
             return result?.ToArray() ?? [];
         }
+    }
+
+    /// <summary>
+    /// Points the retained snapshot at the measurement now on screen: the slot in use is parked
+    /// under the owner it belonged to, and whatever <paramref name="owner"/> had parked becomes the
+    /// live slot. Returns false when nothing moved.
+    ///
+    /// <para><b>Why the server has to know this at all.</b> There is one pipeline and one retained
+    /// snapshot, and every run writes it — a sweep, an impedance calibration, anything (see
+    /// measurements/liveOwner.ts). So the client used to answer "two FFT measurements must not show
+    /// each other's capture" by <i>clearing</i> it on every switch between them, which is also what
+    /// lost the first one's trace: switch to the second and the first was gone for good (reported
+    /// 2026-10-16). Keeping each measurement's display client-side is most of the fix, but
+    /// <b>Save measurement result</b> writes this snapshot, so a restored display over somebody
+    /// else's snapshot is the 2026-09-27 bug again — Save storing another measurement's capture.
+    /// Parking the snapshot with it is what makes the restored display real.</para>
+    ///
+    /// <para>Switching <b>from</b> a null owner adopts the current slot rather than parking it:
+    /// that is the state a fresh process is in, and a capture made before any measurement was open
+    /// belongs to the first one that claims it — the same rule the client applies to an unowned
+    /// display. Switching <b>to</b> null parks and leaves the slot empty.</para>
+    ///
+    /// <para>Called on every measurement switch whatever the kinds involved, and that breadth is
+    /// the point: a sweep selected between two FFT measurements writes this snapshot too, and
+    /// leaving the owner behind while it ran would hand the first measurement the sweep's last
+    /// point. Capped at <see cref="MaxParkedRetention"/>.</para>
+    /// </summary>
+    public bool SwitchRetentionOwner(string? owner)
+    {
+        lock (_retainedLock)
+        {
+            if (_retentionOwner == owner)
+                return false;
+
+            if (_retentionOwner is { } previous)
+            {
+                // Only a slot with something in it: parking empties, so parking an empty one would
+                // evict a real capture to store nothing.
+                if (_retained.Any(r => r.AmpPower is not null))
+                {
+                    if (!_parkedRetention.ContainsKey(previous))
+                        _parkedOrder.Add(previous);
+                    _parkedRetention[previous] = [.. _retained];
+
+                    while (_parkedOrder.Count > MaxParkedRetention)
+                    {
+                        _parkedRetention.Remove(_parkedOrder[0]);
+                        _parkedOrder.RemoveAt(0);
+                    }
+                }
+                else
+                {
+                    // Nothing to park, but the previous owner's stale slot must not outlive the
+                    // capture it described -- a Clear or a Flush is exactly this case.
+                    if (_parkedRetention.Remove(previous))
+                        _parkedOrder.Remove(previous);
+                }
+
+                // Fresh instances, because UpdateRetainedSnapshot mutates the slot it finds in
+                // place and reuses its arrays: handing the same objects to the next capture would
+                // rewrite what was just parked.
+                for (int ch = 0; ch < MaxChannels; ch++)
+                    _retained[ch] = new RetainedSpectrum();
+            }
+
+            // Outside the park, so a measurement selected while the owner is null (a fresh process,
+            // or a project that was closed and reopened) still gets its own capture back. Its
+            // parked slot beats the unowned one in the slot: a capture made with no measurement
+            // open belongs to nobody, and this one is demonstrably that measurement's.
+            if (owner is not null && _parkedRetention.Remove(owner, out var adopted))
+            {
+                _parkedOrder.Remove(owner);
+                for (int ch = 0; ch < MaxChannels; ch++)
+                    _retained[ch] = adopted[ch];
+            }
+
+            _retentionOwner = owner;
+            return true;
+        }
+    }
+
+    /// <summary>The measurement the retained snapshot belongs to, or null -- see <see cref="SwitchRetentionOwner"/>.</summary>
+    public string? RetentionOwner
+    {
+        get { lock (_retainedLock) return _retentionOwner; }
     }
 
     /// <summary>

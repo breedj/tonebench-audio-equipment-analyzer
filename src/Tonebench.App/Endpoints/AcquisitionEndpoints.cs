@@ -160,6 +160,23 @@ public static class AcquisitionEndpoints
             pipeline.Flush();
             return Results.Ok();
         });
+
+        // Which measurement the retained snapshot belongs to -- see
+        // SpectrumPipeline.SwitchRetentionOwner for the whole reasoning. The client posts this on
+        // every measurement switch, whatever the kinds involved, because every kind's run writes
+        // that one snapshot. Not refused while a measurement runs: a switch stops everything first
+        // (ProjectSessionService refuses one that cannot), and refusing it would leave the snapshot
+        // pointing at a measurement that is no longer on screen, which is the fault it prevents.
+        group.MapPost("/retention-owner", (SpectrumRetentionOwnerRequest request, SpectrumPipeline pipeline) =>
+        {
+            pipeline.SwitchRetentionOwner(string.IsNullOrWhiteSpace(request.Owner) ? null : request.Owner);
+            // Whether the measurement now named has a capture here, which is what the client needs
+            // to decide about a display nothing owns -- a fresh page, where the snapshot sent on
+            // connect belongs to whichever measurement was open before the reload. Selecting *that*
+            // one adopts it (and this says so); selecting any other must clear it, or its trace
+            // sits on a screen whose Save would correctly refuse it.
+            return Results.Ok(new SpectrumRetentionOwnerResponse(pipeline.LatestSnapshots().Length > 0));
+        });
     }
 
     /// <summary>
@@ -181,6 +198,16 @@ public static class AcquisitionEndpoints
         return true;
     }
 }
+
+/// <summary>
+/// The measurement whose retained capture the pipeline should hold -- the client's own
+/// <c>"projectId:typeId"</c> key (measurements/liveOwner.ts), or null/empty for "no measurement
+/// open". Opaque to the server, which only ever compares it.
+/// </summary>
+public sealed record SpectrumRetentionOwnerRequest(string? Owner);
+
+/// <param name="HasCapture">Whether the retained slot now in use holds a spectrum.</param>
+public sealed record SpectrumRetentionOwnerResponse(bool HasCapture);
 
 /// <param name="SingleShot">
 /// True for the FFT screen's Single button: capture the configured averages, then hold (see

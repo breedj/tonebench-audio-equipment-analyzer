@@ -3,8 +3,17 @@ import { computed, watch } from 'vue'
 import { useChartDisplay } from '../composables/useChartDisplay'
 import { useExperimental384k } from '../composables/useExperimental384k'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
+import {
+  FREQ_FROM_PRESETS,
+  FREQ_TO_PRESETS,
+  freqRangeAfterFromChange,
+  freqRangeAfterToChange,
+} from '../freqRangePresets'
 import { SPECTRUM_UNIT_OPTIONS } from '../spectrumUnits'
+import type { SegmentedOption } from '../panels/segmented'
+import type { HarmonicMarkerUnit } from '../spectrumUnits'
 import CollapsibleSection from './CollapsibleSection.vue'
+import SegmentedToggle from './SegmentedToggle.vue'
 
 const {
   yTop,
@@ -27,6 +36,7 @@ const {
   dutGainDb,
   showWeightingCurve,
   showHarmonicMarkers,
+  harmonicMarkerUnit,
   requestAutofitY,
   requestAutofitX,
   requestResetPeakHold,
@@ -41,9 +51,6 @@ const processRight = computed(() => spectrumConfig.value?.processRight ?? false)
 
 watch(processLeft, (enabled) => { visibleL.value = enabled }, { immediate: true })
 watch(processRight, (enabled) => { visibleR.value = enabled }, { immediate: true })
-
-const FREQ_FROM_PRESETS = [5, 10, 20, 50, 100, 200, 500]
-const FREQ_TO_PRESETS = [1000, 2000, 5000, 10000, 20000, 100000]
 
 /**
  * Nyquist's own bucket for the experimental 384 kHz rate (the top of Autofit's ladder — see
@@ -69,13 +76,34 @@ void loadExperimental384k()
 function withCurrentValue(presets: number[], current: number): number[] {
   return presets.includes(current) ? presets : [...presets, current].sort((a, b) => a - b)
 }
-const fromOptions = computed(() => withCurrentValue(FREQ_FROM_PRESETS, xFrom.value))
+const fromOptions = computed(() => withCurrentValue([...FREQ_FROM_PRESETS], xFrom.value))
 const toOptions = computed(() =>
   withCurrentValue(
-    experimental384kEnabled.value ? [...FREQ_TO_PRESETS, EXPERIMENTAL_384K_FREQ_TO_HZ] : FREQ_TO_PRESETS,
+    experimental384kEnabled.value ? [...FREQ_TO_PRESETS, EXPERIMENTAL_384K_FREQ_TO_HZ] : [...FREQ_TO_PRESETS],
     xTo.value,
   ),
 )
+
+/**
+ * The two selects are bound to the pick rather than to `xFrom`/`xTo` directly, because the lists
+ * overlap across the whole band (freqRangePresets.ts) and so a pick can reverse the window. The
+ * other end is moved to the next entry past it instead -- which is why these are `@change`
+ * handlers on a `:value` and not a `v-model`: v-model writes the reversed value first, and the
+ * chart redraws on it before the rule can answer.
+ */
+function onFromPicked(event: Event) {
+  const picked = Number((event.target as HTMLSelectElement).value)
+  const next = freqRangeAfterFromChange(picked, { fromHz: xFrom.value, toHz: xTo.value }, toOptions.value)
+  xFrom.value = next.fromHz
+  xTo.value = next.toHz
+}
+
+function onToPicked(event: Event) {
+  const picked = Number((event.target as HTMLSelectElement).value)
+  const next = freqRangeAfterToChange(picked, { fromHz: xFrom.value, toHz: xTo.value }, fromOptions.value)
+  xFrom.value = next.fromHz
+  xTo.value = next.toHz
+}
 
 // A unit switch moves every level on the chart by the same constant (about -6 dB for a 4 Hz ENBW,
 // -20 dB more for a DUT of 20 dB gain), so the window that fitted the old unit is wrong for the
@@ -105,6 +133,16 @@ function autofitAll() {
 // consequence: with the chart in dBV and the gain at 0, the way to reach the field is to pick the
 // input-referred unit; it then stays visible after switching back, because it still divides the tile.
 // The Units tooltip says so.
+/**
+ * What the harmonic markers are labelled with. A segmented toggle rather than a dropdown because
+ * there are only two answers and both are two characters wide; shown only while the markers are,
+ * since it describes nothing otherwise.
+ */
+const HARMONIC_MARKER_UNIT_OPTIONS: SegmentedOption<HarmonicMarkerUnit>[] = [
+  { value: 'dBc', label: 'dBc', title: "Each harmonic's level relative to the fundamental -- the figure a distortion number is quoted in." },
+  { value: 'dBV', label: 'dBV', title: "Each harmonic's own absolute level, for reading it against the noise floor beside it. Needs a fundamental to be measured." },
+]
+
 const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' || dutGainDb.value !== 0)
 </script>
 
@@ -174,8 +212,9 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
         <label class="tb-field">
           From
           <select
-            v-model.number="xFrom"
+            :value="xFrom"
             class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+            @change="onFromPicked"
           >
             <option v-for="f in fromOptions" :key="f" :value="f">{{ f }}</option>
           </select>
@@ -183,8 +222,9 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
         <label class="tb-field">
           To
           <select
-            v-model.number="xTo"
+            :value="xTo"
             class="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+            @change="onToPicked"
           >
             <option v-for="f in toOptions" :key="f" :value="f">{{ f }}</option>
           </select>
@@ -251,11 +291,17 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
         </button>
         <label
           class="tb-check-row"
-          title="The vertical lines at H2, H3 … over the spectrum, each labelled with its level in dBc. The harmonics table below the chart reads the same figures either way."
+          title="The vertical lines at H2, H3 … over the spectrum, each labelled with its level in whichever unit is picked below. The harmonics table below the chart reads the same figures either way."
         >
           <input v-model="showHarmonicMarkers" type="checkbox" class="tb-check" />
           Harmonic markers
         </label>
+        <SegmentedToggle
+          v-if="showHarmonicMarkers"
+          v-model="harmonicMarkerUnit"
+          :options="HARMONIC_MARKER_UNIT_OPTIONS"
+          group-label="Harmonic marker unit"
+        />
         <label
           class="tb-check-row"
           title="Draws the weighting in effect as a dashed amber curve — shape only, hung 20 dB below the top of the level range. Nothing is drawn while the weighting is None."

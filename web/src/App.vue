@@ -5,7 +5,7 @@ import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
 import { generatorLevelUnitOf } from './generatorLevel'
 import { useDevice } from './composables/useDevice'
 import { DEVICE_STATUS_KEY } from './simulator/hints'
-import { useSpectrumStream } from './composables/useSpectrumStream'
+import { useSpectrumStream, type FftDisplayState } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
 import { curveOverlayScreen, type CurveOverlayScreen } from './measurements/overlayScope'
 import { spectrumAxisOverlay } from './measurements/spectrumOverlayColors'
@@ -14,7 +14,7 @@ import { useTrash } from './composables/useTrash'
 import { useProjectSession } from './composables/useProjectSession'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
-import { useLoadOhms } from './composables/useLoadOhms'
+import { DEFAULT_LOAD_OHMS, useLoadOhms } from './composables/useLoadOhms'
 import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useChartDisplay } from './composables/useChartDisplay'
 import { useUserWeighting } from './composables/useUserWeighting'
@@ -158,6 +158,7 @@ import { nearestSweepPoint } from './sweep/points'
 import { fitPreviewAxis, fitScopePreviewAxis, useSweepPreviewFit } from './sweep/previewAxis'
 import { sweepXValue, type SweepXAxis } from './sweep/xAxis'
 import {
+  FFT_SPECTRUM_KIND,
   isAmplitudeSweepKind,
   isFrequencyResponseKind,
   isImdSweepKind,
@@ -188,7 +189,20 @@ const soundCard = useSoundCard()
  * is polled at all until a load has been chosen in Configuration — see useProgrammableLoad.
  */
 const { status: loadStatus, startPolling: startLoadPolling } = useProgrammableLoad()
-const { spectrum, meters, intermodulation, imdUnresolved, multitone, noise, scope, scopeResidual, setViewport, clearScope } = useSpectrumStream()
+const {
+  spectrum,
+  spectrumOverview,
+  meters,
+  intermodulation,
+  imdUnresolved,
+  multitone,
+  noise,
+  scope,
+  scopeResidual,
+  setViewport,
+  captureFftDisplay,
+  restoreFftDisplay,
+} = useSpectrumStream()
 const { overlays, load: loadMeasurements, setOverlayWindow } = useMeasurements()
 const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
@@ -210,10 +224,13 @@ const {
   showOscilloscope: chartShowOscilloscope,
   showHarmonics: chartShowHarmonics,
   showOtherPeaks: chartShowOtherPeaks,
+  visibleL: chartVisibleL,
+  visibleR: chartVisibleR,
   spectrumUnit: chartSpectrumUnit,
   dutGainDb: chartDutGainDb,
   showWeightingCurve: chartShowWeightingCurve,
   showHarmonicMarkers: chartShowHarmonicMarkers,
+  harmonicMarkerUnit: chartHarmonicMarkerUnit,
   storedHarmonicsSort: chartStoredHarmonicsSort,
   storedOtherPeaksSort: chartStoredOtherPeaksSort,
   applyLoaded: applyLoadedChartDisplay,
@@ -261,6 +278,29 @@ const {
 // The ideal levels are 1/n for a square and 1/n^2 for a triangle, so the table reads the DUT's own
 // high end directly: -9.54 dBc at H3 on a perfect square, -19.08 at H5.
 const showFundamentalMarkers = computed(() => stimulusKind.value === 'Tones' || isWaveKind(stimulusKind.value))
+
+/**
+ * The layout of the FFT screen's per-channel table grids -- harmonics, IMD products, other peaks,
+ * and the multitone table that replaces the first of them.
+ *
+ * <p>One column per channel the display rail's <b>Channels</b> checkboxes have ticked, rather than
+ * two columns always: the tables used to be rendered for both channels whatever was selected, so a
+ * one-channel measurement -- which is the default, and most benches' normal case -- printed an
+ * empty "R" card beside every populated "L" one (Joost, 2026-10-16). A single column is held to
+ * half the width and centred, so it comes out the width of the Notes box above it instead of a
+ * table of four short columns stretched across the whole view.</p>
+ *
+ * <p>Keyed on the display rail's own checkboxes and not on the acquisition panel's L/R: those two
+ * agree except where the user has unticked a channel they *are* measuring, and in that case the
+ * question "which tables do I want on screen" is exactly what the display rail answers. (The
+ * acquisition panel's own state forces the rail's, see ChartDisplayPanel, so a channel that is not
+ * measured can never be ticked here.)</p>
+ */
+const peakTableGridClass = computed(() =>
+  chartVisibleL.value && chartVisibleR.value
+    ? 'grid grid-cols-1 gap-4 xl:grid-cols-2'
+    : 'grid grid-cols-1 gap-4 xl:mx-auto xl:w-1/2',
+)
 
 // Whether the pipeline is measuring two-tone IMD right now — what the Intermodulation table
 // needs to tell "no frame yet" from "nothing configured".
@@ -401,6 +441,21 @@ async function onTrashRestored() {
 const { autosaveEnabled, load: loadAutosave } = useAutosave()
 void loadAutosave()
 
+/**
+ * Set by {@link swapFftDisplay}, consumed once the arriving measurement's own chart preferences
+ * have been applied: the spectrum chart is put back to its From/To, dropping the drag-zoom the
+ * previous measurement was left at.
+ *
+ * <p>It cannot be done in the swap itself, which runs before the selection moves — the panel still
+ * holds the window being left, and resetting to that one pins the chart there (seen: measurement 2
+ * at 10 Hz–100 kHz, switch to measurement 1 stored at 500 Hz–10 kHz, and the axis stayed at the
+ * four decades while the dropdowns read the right numbers). The `[xFrom, xTo]` watcher inside the
+ * chart does the work whenever the two measurements' windows differ; this covers the case they do
+ * not, where that watcher never fires and the zoom would carry over. On a tick, after the applies,
+ * so nothing rebuilds the plot behind it (ensurePlot restores the scale it found).</p>
+ */
+let fftViewNeedsReset = false
+
 // Syncs the display-only settings — the metrics-picker selection, the oscilloscope's period count,
 // and the spectrum chart's own axis bounds/line-style toggles — whenever a measurement type is
 // (re)loaded. None of these reach the device or the pipeline, so unlike the generator/acquisition
@@ -412,6 +467,18 @@ watch(
     applyLoadedMetrics(params?.selectedMetrics)
     applyLoadedScopePeriods(params?.scopePeriods)
     applyLoadedChartDisplay(params)
+    // The Load field, FFT types only: `loadedParams` is the live device state for every other
+    // kind (ApplyAsync's HasNoLiveConfiguration arm), so its null here would overwrite the figure
+    // a sweep panel has just restored from its own params_json.
+    // `types`/`currentTypeId` rather than the `currentType` computed, which is declared further
+    // down the file: this watcher is immediate, so it runs during setup and would read it in its
+    // temporal dead zone.
+    const kind = types.value.find((t) => t.id === currentTypeId.value)?.kind
+    if (params && kind === FFT_SPECTRUM_KIND) loadOhms.value = params.loadOhms ?? DEFAULT_LOAD_OHMS
+    if (fftViewNeedsReset) {
+      fftViewNeedsReset = false
+      void nextTick(() => spectrumChart.value?.resetToPanelWindow())
+    }
     // The server applied the type's spectrum options (FFT size, IMD spec, scope residual...) on
     // the way here; re-read them so every reader of the shared config sees this type's.
     if (params) void reloadSpectrumConfig()
@@ -1520,6 +1587,14 @@ watch(
     responsePoleZeroYMinHz, responsePoleZeroYMaxHz,
     responseInvertLoopSign, responseRestoreDelay,
     responseFitAutoOrder, responseFitOrder, responseFitZeroOrder,
+    // The fit overlay and the six s-plane surface controls. Stored and restored like everything
+    // above, and missing from this list until 2026-10-16: with autosave off, changing the surface
+    // palette or unticking the fitted model left the Save button hidden, and the choice was
+    // discarded on the next measurement switch without a word. The same class of gap as the FFT
+    // screen's Load field -- a control bound to a ref that nothing watches.
+    responseShowFittedModel, responseHideOutOfBandRoots,
+    responseSurfaceScale, responseSurfaceMode, responseSurfaceTopDb, responseSurfaceBottomDb,
+    responseSurfacePalette, responseSurfaceContours,
   ],
   () => {
     if (!responseDisplayRestoring && isFrequencyResponse.value) markDirty()
@@ -2199,13 +2274,7 @@ function runMeasurement(runConfig: RunConfig, singleShot = false) {
     // Drop whatever the previous run last displayed, most importantly any `held` flag from an
     // earlier Single capture — otherwise the auto-stop watcher below could see stale held=true
     // meters left over from before this run even produces its first fresh frame.
-    meters.value = {}
-    intermodulation.value = {}
-    imdUnresolved.value = {}
-    multitone.value = {}
-    noise.value = {}
-    spectrum.value = {}
-    clearScope()
+    restoreFftDisplay(null)
 
     // Armed before the start request goes out, not after it returns: a held meters frame can
     // land before the response does (a 4096-point record is 21 ms at 192 kHz), and a held channel
@@ -2702,7 +2771,11 @@ function buildLiveSubject(): ReportSubject | null {
     // the spectrogram's picture is the history the chart on screen collected, and only it can draw it.
     subject.data = {
       kind: 'spectrum',
-      spectrum: spectrum.value,
+      // The full-span frames, never the drawn ones: a report is of the measurement and not of the
+      // view, and `renderChartPng` passes captureZoom: false so the chart is drawn at the display
+      // panel's own From/To either way. Handed the zoomed frames it filled that axis with the zoom
+      // window's columns and left the rest of the span blank. See `spectrumOverview`.
+      spectrum: Object.keys(spectrumOverview.value).length > 0 ? spectrumOverview.value : spectrum.value,
       meters: meters.value,
       intermodulation: intermodulation.value,
       multitone: multitone.value,
@@ -2748,12 +2821,7 @@ function openProjectReport() {
 function clearMeasurement() {
   return withErrorReporting(async () => {
     await api.clearSpectrum()
-    meters.value = {}
-    intermodulation.value = {}
-    multitone.value = {}
-    noise.value = {}
-    spectrum.value = {}
-    clearScope()
+    restoreFftDisplay(null)
   })
 }
 
@@ -2806,30 +2874,109 @@ watch(
 async function discardForeignLiveState(nextTypeId: number) {
   const nextOwner = liveOwnerKey(currentProjectId.value, nextTypeId)
   const nextStore = liveScreenStore(types.value.find((t) => t.id === nextTypeId)?.kind)
+
+  // The server's retained snapshot follows the measurement on screen whatever kind it is, and that
+  // breadth is the point: a sweep selected between two FFT measurements writes that one snapshot
+  // too, so leaving the owner behind while it ran would hand the first measurement the sweep's last
+  // point. See SpectrumPipeline.SwitchRetentionOwner.
+  const retention =
+    nextOwner === liveOwnerNow.value
+      ? Promise.resolve(null)
+      : api.setSpectrumRetentionOwner(nextOwner).catch(() => null)
+
+  // The live FFT display is swapped rather than discarded, and only on arrival at a screen that
+  // draws it -- see swapFftDisplay.
+  if (nextStore === 'fft') {
+    const adopted = swapFftDisplay(nextOwner)
+    const answer = await retention
+    // A display nothing owned is adopted rather than cleared (a fresh page, where the snapshot the
+    // server sends on connect belongs to whichever measurement was open before the reload) -- but
+    // only by the measurement that snapshot is actually *of*. For any other, the server has just
+    // handed over an empty slot, and the trace on screen is one whose Save would rightly refuse
+    // it. Only this branch, and only on the answer: the swap path above has already put the
+    // arriving measurement's own display back.
+    if (!adopted && answer !== null && !answer.hasCapture) {
+      restoreFftDisplay(null)
+      requestChartResetPeakHold()
+      spectrogramChart.value?.clearHistory()
+    }
+    return
+  }
+
   const stale = foreignLiveStores(liveOwners.value, nextOwner, [nextStore])
-  if (stale.length === 0) return
+  if (stale.length === 0) {
+    await retention
+    return
+  }
 
   // Released first: a clear that fails (a runner still unwinding answers 409) must not leave the
   // owner behind for the next switch to try again on state it has already reported as wrong.
   liveOwners.value = releaseLive(liveOwners.value, stale)
 
-  await Promise.all(stale.map((store) => discardLiveStore(store).catch(() => undefined)))
+  await Promise.all([retention, ...stale.map((store) => discardLiveStore(store).catch(() => undefined))])
+}
+
+/**
+ * Every measurement's own live FFT display, by owner key — the spectrum, the meters, the harmonics,
+ * the oscilloscope and the IMD/multitone tables as {@link captureFftDisplay} takes them.
+ *
+ * <p>Bounded by how many FFT measurements have been looked at, at roughly 50 kB each (the drawn
+ * ~1600 columns per channel plus two 2048-sample scope tails), so unlike the server's own parked
+ * snapshots — which are the whole full-resolution record and are capped for it — this needs no cap.
+ * It does not survive a reload, which is deliberate and the same reason `liveOwners` does not: the
+ * runs belong to the server, and on a fresh page an unowned display is adopted as it always was.</p>
+ */
+const fftDisplays = new Map<string, FftDisplayState>()
+
+/**
+ * Hands the live FFT display over to `nextOwner`: what is on screen is kept under the measurement
+ * it belongs to, and whatever that one had kept is put back.
+ *
+ * <p>Until 2026-10-16 this was a discard, and with two FFT measurements in a project that meant the
+ * first one's trace, tiles and harmonics were gone the moment the second was selected — reported as
+ * "the last measured data disappears when switching back and forth". A discard was right about one
+ * thing and that part is kept: the two must not show each other's capture, which is also why the
+ * <i>server's</i> snapshot is parked with it (the retention-owner call above) rather than left
+ * pointing at whichever measurement ran last. Save therefore writes the capture on screen, which is
+ * the whole reason a restored display is allowed to be there.</p>
+ *
+ * <p>Three things it deliberately does not do. It does not touch the display when nothing owns it
+ * (a reload mid-run, where the server has just re-sent its snapshot to a fresh page): an unowned
+ * display is adopted, exactly as `foreignLiveStores` has it. It does not keep the <b>peak-hold maps
+ * or the spectrogram's rows</b> — those are histories of a continuous display rather than of a
+ * capture, no frame can re-derive them, and the weighting/unit watcher already discards them for
+ * the same reason. And it is only reached on arrival at a screen that <i>draws</i> the display, so
+ * glancing at a sweep's settings and coming back leaves an FFT capture, peak-hold and all, exactly
+ * where it was.</p>
+ */
+/** True when the display on screen was swapped for the arriving measurement's own, false when it was adopted as it stood. */
+function swapFftDisplay(nextOwner: string | null): boolean {
+  const held = liveOwners.value.fft ?? null
+  if (held === nextOwner) return true
+  if (held === null) {
+    liveOwners.value = claimLive(liveOwners.value, null, nextOwner)
+    return false
+  }
+
+  fftDisplays.set(held, captureFftDisplay())
+  restoreFftDisplay(nextOwner === null ? null : fftDisplays.get(nextOwner) ?? null)
+  requestChartResetPeakHold()
+  spectrogramChart.value?.clearHistory()
+  // Not reset here: this runs *before* the selection moves, so the panel still holds the window
+  // being left and resetting to it would pin the chart there. See `fftViewNeedsReset`.
+  fftViewNeedsReset = true
+  liveOwners.value =
+    nextOwner === null ? releaseLive(liveOwners.value, ['fft']) : claimLive(liveOwners.value, null, nextOwner)
+  return true
 }
 
 function discardLiveStore(store: LiveStore): Promise<unknown> {
   switch (store) {
     case 'fft':
-      // The client's own display *and* the server's retained snapshot: leaving the latter would let
-      // Save write the other measurement's capture as this one's result.
-      meters.value = {}
-      intermodulation.value = {}
-      imdUnresolved.value = {}
-      multitone.value = {}
-      noise.value = {}
-      spectrum.value = {}
-      clearScope()
-      // The two histories the charts keep themselves, which no frame can re-derive — the same pair
-      // the weighting/unit watcher near the top of this file clears, and for the same reason.
+      // Unreachable from discardForeignLiveState, which swaps the FFT display rather than
+      // discarding it (see swapFftDisplay). Kept because `LiveStore` includes it and a kind added
+      // later must not fall through this switch silently.
+      restoreFftDisplay(null)
       requestChartResetPeakHold()
       spectrogramChart.value?.clearHistory()
       return api.clearSpectrum()
@@ -2884,6 +3031,12 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowPeakHold: chartShowPeakHold.value,
     chartShowFftTrace: chartShowFftTrace.value,
     chartShowHarmonicMarkers: chartShowHarmonicMarkers.value,
+    chartHarmonicMarkerUnit: chartHarmonicMarkerUnit.value,
+    // The Generator panel's Load field. Shared with every sweep panel (useLoadOhms), but stored
+    // per measurement like every other setting on screen -- until 2026-10-16 the FFT screen was
+    // the one screen that read it and never wrote it, so the figure a measurement's power tiles
+    // divided by was whichever sweep had last been opened, and editing it dirtied nothing.
+    loadOhms: loadOhms.value,
     chartAutofitOnDone: chartAutofitOnDone.value,
     chartShowSpectrogram: chartShowSpectrogram.value,
     chartShowOscilloscope: chartShowOscilloscope.value,
@@ -5201,29 +5354,29 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
           <!-- The multitone table takes the harmonics table's place while a comb plays: it is the
                comb's own distortion reading, and the harmonics grid below is gated off for it.
-               Its own container rather than a widening of that gate, which is there for a reason. -->
-          <div
-            v-if="multitoneConfigured && chartShowHarmonics"
-            class="grid grid-cols-1 gap-4 xl:grid-cols-2"
-          >
-            <MultitoneTable v-if="spectrumConfig?.processLeft ?? true" :multitone="multitone" :channel="0" channel-label="L" />
-            <MultitoneTable v-if="spectrumConfig?.processRight ?? true" :multitone="multitone" :channel="1" channel-label="R" />
+               Its own container rather than a widening of that gate, which is there for a reason.
+               Its columns follow the display rail's Channels checkboxes exactly as the harmonics
+               grid below does -- see peakTableGridClass. -->
+          <div v-if="multitoneConfigured && chartShowHarmonics" :class="peakTableGridClass">
+            <MultitoneTable v-if="chartVisibleL" :multitone="multitone" :channel="0" channel-label="L" />
+            <MultitoneTable v-if="chartVisibleR" :multitone="multitone" :channel="1" channel-label="R" />
           </div>
 
           <!-- Harmonics/other-peaks only mean something relative to a single fundamental tone —
                Multitone's comb and White noise have none (see showFundamentalMarkers above). The
                Display panel's own two checkboxes are on top of that, and can hide either table on a
-               stimulus that does have a fundamental. -->
+               stimulus that does have a fundamental; its Channels checkboxes decide which columns
+               exist at all (peakTableGridClass). -->
           <div
-            v-if="showFundamentalMarkers && (chartShowHarmonics || chartShowOtherPeaks)"
-            class="grid grid-cols-1 gap-4 xl:grid-cols-2"
+            v-if="showFundamentalMarkers && (chartShowHarmonics || chartShowOtherPeaks) && (chartVisibleL || chartVisibleR)"
+            :class="peakTableGridClass"
           >
-            <div class="flex flex-col gap-4">
+            <div v-if="chartVisibleL" class="flex flex-col gap-4">
               <HarmonicsTable v-if="chartShowHarmonics" :meters="meters" :channel="0" channel-label="L" />
               <ImdProductsTable v-if="chartShowHarmonics && imdConfigured" :imd="intermodulation" :channel="0" channel-label="L" :configured="imdConfigured" :unresolved="imdUnresolved[0] ?? false" />
               <OtherPeaksTable v-if="chartShowOtherPeaks" :meters="meters" :channel="0" channel-label="L" />
             </div>
-            <div class="flex flex-col gap-4">
+            <div v-if="chartVisibleR" class="flex flex-col gap-4">
               <HarmonicsTable v-if="chartShowHarmonics" :meters="meters" :channel="1" channel-label="R" />
               <ImdProductsTable v-if="chartShowHarmonics && imdConfigured" :imd="intermodulation" :channel="1" channel-label="R" :configured="imdConfigured" :unresolved="imdUnresolved[1] ?? false" />
               <OtherPeaksTable v-if="chartShowOtherPeaks" :meters="meters" :channel="1" channel-label="R" />
@@ -5325,7 +5478,14 @@ onBeforeUnmount(() => stopLoadPolling?.())
       :preselect-result-id="reportPreselectResultId"
       @close="reportOpen = false"
     />
-    <ScreenshotDialog :open="screenshotDialogOpen" @close="screenshotDialogOpen = false" @confirm="screenshotChart" />
+    <!-- The open measurement's name is the title the box opens with unless Save text is keeping
+         one -- see ScreenshotDialog's own remarks. -->
+    <ScreenshotDialog
+      :open="screenshotDialogOpen"
+      :default-title="currentType?.name ?? ''"
+      @close="screenshotDialogOpen = false"
+      @confirm="screenshotChart"
+    />
     <ProjectReportDialog
       :open="projectReportOpen"
       :project="currentProject"

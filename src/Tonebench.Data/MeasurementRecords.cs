@@ -169,7 +169,29 @@ public sealed record FftSpectrumParameters(
     /// measurement the user has merely selected.
     /// </summary>
     string? ChartHarmonicsSort = null,
-    string? ChartOtherPeaksSort = null)
+    string? ChartOtherPeaksSort = null,
+    /// <summary>
+    /// What the spectrum chart's harmonic markers are labelled with -- <c>"dBc"</c> (each
+    /// harmonic's level relative to the fundamental) or <c>"dBV"</c> (its own absolute level). See
+    /// the client's <c>HARMONIC_MARKER_UNITS</c>. Display only, like the toggles above; never
+    /// validated here, so a string another build wrote reads back as the dBc default rather than
+    /// failing a measurement the user has merely selected. Null means dBc, which is what the
+    /// markers always showed and therefore what a row saved before this existed has to mean.
+    /// </summary>
+    string? ChartHarmonicMarkerUnit = null,
+    /// <summary>
+    /// The amplifier load the FFT screen's power tiles divide by, in ohms -- the Generator panel's
+    /// <b>Load</b> field (the client's <c>useLoadOhms</c>, shared with every sweep panel's own
+    /// <c>LoadOhms</c>). A type setting, saved with the result that used it.
+    ///
+    /// <para>Not the same thing as <see cref="ProgrammableLoadOhms"/>, which is what a QA451's
+    /// relays were actually presenting: this one is the figure the user typed for the arithmetic,
+    /// and the two can legitimately disagree. Null means the client's own 8 Ohm default, which is
+    /// what every row saved before this existed means -- the field was on screen and shared
+    /// between screens, but nothing on the FFT screen stored it, so its value came from whichever
+    /// sweep measurement had last been opened.</para>
+    /// </summary>
+    double? LoadOhms = null)
 {
     /// <summary>
     /// Set only on a result imported from a circuit simulation -- see migration 014. Null means a

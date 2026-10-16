@@ -204,7 +204,11 @@ public sealed record StagedMeasurementConfig(
     bool? ChartShowHarmonicMarkers = null,
     /// <summary>How the two peak tables are sorted -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicsSort"/>.</summary>
     string? ChartHarmonicsSort = null,
-    string? ChartOtherPeaksSort = null);
+    string? ChartOtherPeaksSort = null,
+    /// <summary>What the harmonic markers are labelled with -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicMarkerUnit"/>.</summary>
+    string? ChartHarmonicMarkerUnit = null,
+    /// <summary>The Generator panel's Load field, for the power tiles -- see <see cref="Tonebench.Data.FftSpectrumParameters.LoadOhms"/>.</summary>
+    double? LoadOhms = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -262,4 +266,8 @@ public sealed record MeasurementTypeAppliedResponse(
     bool? ChartShowHarmonicMarkers = null,
     /// <summary>How the two peak tables are sorted — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicsSort"/>.</summary>
     string? ChartHarmonicsSort = null,
-    string? ChartOtherPeaksSort = null);
+    string? ChartOtherPeaksSort = null,
+    /// <summary>What the harmonic markers are labelled with — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicMarkerUnit"/>.</summary>
+    string? ChartHarmonicMarkerUnit = null,
+    /// <summary>The Generator panel's Load field — see <see cref="Tonebench.Data.FftSpectrumParameters.LoadOhms"/>.</summary>
+    double? LoadOhms = null);

@@ -8,6 +8,7 @@ import {
   SCREENSHOT_DESTINATIONS,
   SCREENSHOT_SIZES,
   screenshotFrameLayout,
+  screenshotTitleFor,
   type ScreenshotSettings,
 } from '../screenshot'
 
@@ -16,9 +17,23 @@ import {
  * below it, the picture's size and aspect ratio, where it goes (clipboard, file, or both), and
  * colour or black and white. Every answer is remembered (useScreenshotSettings — stored with the
  * app's configuration), so a series of screenshots for one document needs them once; the title is
- * kept only while **Save text** is ticked. What the answers do to the picture is `screenshot.ts`'s.
+ * kept only while **Save text** is ticked, and then only for its own measurement. What the answers
+ * do to the picture is `screenshot.ts`'s.
+ *
+ * <p><b>The title opens as the open measurement's name</b> (`defaultTitle`) rather than empty or
+ * than whatever was last typed — the caption wanted nearly every time, and the one the app already
+ * knows. **Save text** keeps a typed caption for the next screenshot *of that same measurement*;
+ * every other one still opens on its own name. The rule is `screenshotTitleFor`, which is pure and
+ * tested.</p>
+ *
+ * <p>It was the last title typed *anywhere*, for ever. Two bugs in one: `remember` kept the whole
+ * answer set in its module singleton including the title, so within a session the box carried a
+ * caption from another measurement; and with Save text on — which is how Joost's bench is set up —
+ * the stored copy did the same across restarts, so a screenshot of "FFT analysis" opened holding
+ * "Elliptic - Nyquist" from an earlier session. Reported 2026-10-16, twice: the first fix scoped
+ * only the unticked case and so changed nothing on a bench with it ticked.</p>
  */
-const props = defineProps<{ open: boolean }>()
+const props = defineProps<{ open: boolean; defaultTitle?: string }>()
 const emit = defineEmits<{ close: []; confirm: [settings: ScreenshotSettings] }>()
 
 const { settings: stored, load } = useScreenshotSettings()
@@ -34,6 +49,11 @@ watch(
     if (!open) return
     await Promise.all([load(), loadDateFormat()])
     Object.assign(form, stored.value)
+    // After the stored answers, which is what the rule reads. `titleFor` is the dialog's own
+    // bookkeeping and never the user's: it is stamped here with the measurement this screenshot is
+    // of, so a title typed now is offered again here and nowhere else.
+    form.titleFor = props.defaultTitle?.trim() ?? ''
+    form.title = screenshotTitleFor(stored.value, form.titleFor)
   },
   { immediate: true },
 )
@@ -68,7 +88,7 @@ function confirm() {
       <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
         <label
           class="flex items-center gap-2"
-          title="Keeps the title for the next screenshot, so it need not be retyped for every chart of a session."
+          title="Keeps the title for the next screenshot of this measurement, so it need not be retyped for every chart of one run. Another measurement still opens on its own name."
         >
           <input v-model="form.saveText" type="checkbox" />
           <span>Save text</span>

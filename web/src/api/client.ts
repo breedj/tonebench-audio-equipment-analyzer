@@ -1778,6 +1778,12 @@ export interface StoredResponsePreviewsResponse {
   points: StoredResponsePreviewPoint[]
 }
 
+/** What `setSpectrumRetentionOwner` answers — see SpectrumPipeline.SwitchRetentionOwner. */
+export interface SpectrumRetentionOwnerResponse {
+  /** Whether the measurement now named has a retained capture on the server. */
+  hasCapture: boolean
+}
+
 export interface DeviceRanges {
   sampleRatesHz: number[]
   inputRangesDbv: number[]
@@ -2088,6 +2094,8 @@ export interface DateTimeFormatConfig {
  */
 export interface ScreenshotSettingsConfig {
   title: string | null
+  /** The measurement `title` was typed for, by name — a kept title is only offered again on that one. */
+  titleFor: string | null
   saveText: boolean
   addDate: boolean
   widthPx: number
@@ -2220,6 +2228,10 @@ export interface MeasurementTypeAppliedResponse {
   /** How the Harmonics and Other peaks tables are sorted — see measurements/peakSort.ts. Null is each table's natural order. */
   chartHarmonicsSort?: string | null
   chartOtherPeaksSort?: string | null
+  /** What those markers are labelled with — see spectrumUnits.ts's HARMONIC_MARKER_UNITS. Null means dBc. */
+  chartHarmonicMarkerUnit?: string | null
+  /** The Generator panel's Load field, for the power tiles — see useLoadOhms.ts. Null means its 8 Ω default. */
+  loadOhms?: number | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
@@ -2278,6 +2290,10 @@ export interface StagedMeasurementConfig {
   /** How the Harmonics and Other peaks tables are sorted — see measurements/peakSort.ts. Null is each table's natural order. */
   chartHarmonicsSort?: string | null
   chartOtherPeaksSort?: string | null
+  /** What those markers are labelled with — see spectrumUnits.ts's HARMONIC_MARKER_UNITS. Null means dBc. */
+  chartHarmonicMarkerUnit?: string | null
+  /** The Generator panel's Load field, for the power tiles — see useLoadOhms.ts. Null means its 8 Ω default. */
+  loadOhms?: number | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
@@ -3247,6 +3263,16 @@ export const api = {
 
   /** Backs the "Clear" button: discards the retained (stopped) spectrum server-side, so Save measurement result has nothing stale left to save. */
   clearSpectrum: () => request<void>('/acquisition/clear', { method: 'POST' }),
+  /**
+   * Hands the pipeline the measurement its retained capture belongs to — the liveOwner key, or null
+   * for none. Posted on every measurement switch whatever the kinds involved; see
+   * SpectrumPipeline.SwitchRetentionOwner.
+   */
+  setSpectrumRetentionOwner: (owner: string | null) =>
+    request<SpectrumRetentionOwnerResponse>('/acquisition/retention-owner', {
+      method: 'POST',
+      body: JSON.stringify({ owner }),
+    }),
 
   // The open project file — see ProjectSessionEndpoints.cs. Every mutation answers with the new
   // session state; 400 carries a message about the file, 409 one about why not right now (a

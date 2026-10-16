@@ -4,6 +4,7 @@ import {
   SCREENSHOT_SIZES,
   SCREENSHOT_TITLE_BAND_PX,
   screenshotFrameLayout,
+  screenshotTitleFor,
   toScreenshotAspectRatioId,
   toScreenshotDestinationId,
   toScreenshotWidthPx,
@@ -49,5 +50,40 @@ describe('stored answers this build may not know', () => {
     expect(toScreenshotAspectRatioId('16:9')).toBe('3:2')
     expect(toScreenshotDestinationId('both')).toBe('both')
     expect(toScreenshotDestinationId('printer')).toBe('file')
+  })
+})
+
+describe('screenshotTitleFor', () => {
+  const kept = { title: 'Elliptic - Nyquist', titleFor: 'Bode sweep', saveText: true }
+
+  it('opens on the measurement name when nothing is kept', () => {
+    expect(screenshotTitleFor({ title: '', titleFor: '', saveText: false }, 'FFT analysis')).toBe('FFT analysis')
+  })
+
+  // The report, twice over: a bench with Save text ticked saw every screenshot of every
+  // measurement open holding one caption typed for another, session after session.
+  it('does not offer a kept title on a different measurement', () => {
+    expect(screenshotTitleFor(kept, 'FFT analysis')).toBe('FFT analysis')
+  })
+
+  it('offers it again on the measurement it was typed for', () => {
+    expect(screenshotTitleFor(kept, 'Bode sweep')).toBe('Elliptic - Nyquist')
+  })
+
+  it('ignores a kept title once Save text is off, even on its own measurement', () => {
+    expect(screenshotTitleFor({ ...kept, saveText: false }, 'Bode sweep')).toBe('Bode sweep')
+  })
+
+  it('falls through a blank kept title rather than opening empty', () => {
+    expect(screenshotTitleFor({ title: '   ', titleFor: 'Bode sweep', saveText: true }, 'Bode sweep')).toBe('Bode sweep')
+  })
+
+  it('compares names trimmed, since that is how both are stored', () => {
+    expect(screenshotTitleFor(kept, '  Bode sweep  ')).toBe('Elliptic - Nyquist')
+  })
+
+  // Nothing open: there is no name to fall back to, and an empty box means no title band.
+  it('is empty with no measurement open', () => {
+    expect(screenshotTitleFor(kept, '')).toBe('')
   })
 })

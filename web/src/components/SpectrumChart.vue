@@ -25,7 +25,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { FFT_LIVE_COLOR, fftOverlayColor, soleBandOverlay, spectrumAxisOverlay } from '../measurements/spectrumOverlayColors'
 import { overviewSpan, spanFrom } from '../measurements/overviewSpan'
 import { api, type MeasurementChannel, type WeightingCurveResponse } from '../api/client'
-import { unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
+import { harmonicMarkerLabel, unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useUserWeighting } from '../composables/useUserWeighting'
 import { exportGridTheme } from '../charts/palette'
 
@@ -93,6 +93,7 @@ const {
   dutGainDb,
   showWeightingCurve,
   showHarmonicMarkers,
+  harmonicMarkerUnit,
   activeXRange,
   resetPeakHoldTrigger,
   autofitYTrigger,
@@ -529,7 +530,10 @@ function harmonicMarkersPlugin(theme: Theme, interactive: boolean): uPlot.Plugin
       ctx.moveTo(x, u.bbox.top)
       ctx.lineTo(x, u.bbox.top + u.bbox.height)
       ctx.stroke()
-      ctx.fillText(`${h.dbc.toFixed(0)}`, x + 3, u.bbox.top + 10)
+      // The line is drawn whatever the label says: it marks where the order falls, which is the
+      // half of the marker that cannot be missing. Only the text waits on a fundamental.
+      const label = harmonicMarkerLabel(harmonicMarkerUnit.value, h.dbc, ch0.fundamentalDbv)
+      if (label !== null) ctx.fillText(label, x + 3, u.bbox.top + 10)
     }
 
     ctx.restore()
@@ -1219,7 +1223,23 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
   }
 }
 
-defineExpose({ exportPng })
+/**
+ * Puts the chart back to the display panel's own window, dropping a drag-zoom.
+ *
+ * <p>Called when the live display is handed from one measurement to another (App.vue's
+ * swapFftDisplay): the two measurements may well store the same From/To, in which case the
+ * `[xFrom, xTo]` watcher above never fires and the second one would be drawn inside the first one's
+ * zoom. Goes through the panel's window rather than the data's full span, because that is the
+ * window the arriving measurement stored; the Reset button's own answer is deliberately the data's
+ * span instead (see resetZoom).</p>
+ */
+function resetToPanelWindow() {
+  plot?.setScale('x', { min: xFrom.value, max: xTo.value })
+  plot?.setScale('y', { min: yBottom.value, max: yTop.value })
+  if (showingEmpty) drawEmpty()
+}
+
+defineExpose({ exportPng, resetToPanelWindow })
 
 watch(() => props.spectrum, update)
 watch(() => props.overlays, update, { deep: true })
@@ -1231,7 +1251,7 @@ watch(showFftTrace, update)
 watch(showWeightingCurve, () => plot?.redraw())
 // A draw-hook-only flag, like the weighting curve's: nothing about the data or the scales changes,
 // so a redraw is the whole update.
-watch(showHarmonicMarkers, () => plot?.redraw())
+watch([showHarmonicMarkers, harmonicMarkerUnit], () => plot?.redraw())
 watch(yTop, () => plot?.redraw())
 watch(thickLines, update)
 watch(showDataPoints, update)

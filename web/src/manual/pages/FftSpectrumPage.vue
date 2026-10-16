@@ -87,8 +87,11 @@ const { showPage } = useManual()
     <h2>Generator panel</h2>
     <p>
       Left and right play the <em>same</em> stimulus; the two checkboxes at the top only decide
-      which outputs are actually driven. The <strong>Load</strong> in ohms is shared with every
-      other screen's power figures. The DUT's own gain is not set here — it lives under the
+      which outputs are actually driven. The <strong>Load</strong> in ohms is what the power figures
+      divide by, and it is saved with the measurement: two measurements of the same amplifier into
+      4 Ω and into 8 Ω each keep their own. The field is shared with every other screen while it is
+      on screen, so a sweep opened next shows whatever the last measurement set, and then its own
+      once it is selected. The DUT's own gain is not set here — it lives under the
       <strong>Units</strong> dropdown in the display panel, described under Level range below.
     </p>
     <p>
@@ -529,12 +532,23 @@ const { showPage } = useManual()
     </p>
     <p>
       <strong>Harmonic markers</strong> are the vertical lines at the fundamental and each harmonic,
-      labelled with that order's level in dBc. Unticking it leaves the trace clean: at the low end of
+      labelled with that order's level. Unticking it leaves the trace clean: at the low end of
       a log axis the first few orders land within a handful of pixels of one another, and over a
       dense trace or a two-channel capture the lines can hide more than they point at. The
       <strong>Harmonics</strong> panel under the chart reads the same figures either way, and so does
       a report. It does not affect the gap markers a multitone stimulus draws, which belong to the
       multitone table rather than to any one fundamental.
+    </p>
+    <p>
+      The <strong>dBc / dBV</strong> toggle under it picks which of the harmonics table's two
+      columns the labels print. <strong>dBc</strong> is each order's level relative to the
+      fundamental — the figure a distortion number is quoted in, and what the markers have always
+      shown. <strong>dBV</strong> is its own absolute level, which is the one to read when the
+      question is whether H3 is above the noise floor beside it rather than how large it is against
+      the tone. The lines do not move; only the text does, and a dBV label needs a fundamental to
+      have been measured. The choice is saved with the measurement. Note the label stays in dBV
+      under the density units above, exactly as the harmonics table does: a harmonic is a tone and
+      has a level, not a density.
     </p>
     <p>
       With a weighting selected the trace itself is weighted — the A curve's roll-off below 1 kHz is
@@ -599,7 +613,10 @@ const { showPage } = useManual()
       single fundamental to refer to, so neither appears for Multitone or White noise. A square or
       triangle keeps them both: those shapes have one unmistakable fundamental, and the harmonics
       table against their known series is most of what the measurement is for. Other peaks
-      starts collapsed; its ▸ opens it.
+      starts collapsed; its ▸ opens it. Both are drawn per channel, and only for the channels the
+      display panel's <strong>Channels</strong> row has ticked: with one channel the single column
+      sits in the middle of the page rather than beside an empty card for the one you are not
+      measuring.
     </p>
     <p>
       <strong>Click a column heading</strong> — Frequency, Level or dBc — to sort either table by
@@ -638,7 +655,13 @@ const { showPage } = useManual()
       <strong>Level range</strong> and <strong>Frequency range</strong> set the spectrum's window.
       One <strong>Autofit</strong>, under the level range, fits both: the frequency axis to 10 Hz and
       just past Nyquist for the current sample rate, and the level axis to the highest and lowest
-      point plotted with 10 dB of headroom. The frequency <strong>To</strong> list ends at 100 kHz,
+      point plotted with 10 dB of headroom. The two frequency lists overlap across the whole band —
+      <strong>From</strong> runs 5 Hz to 50 kHz and <strong>To</strong> 10 Hz to 100 kHz — so a
+      window inside one decade, 5 to 10 kHz for a tweeter's breakup or 20 to 100 Hz for a hum, can
+      be picked rather than dragged. Because they overlap, picking one past the other would reverse
+      the window, so the other end moves instead: a From at or above the current To pushes To up to
+      the next entry above it, and a To at or below the current From pulls From down to the next
+      entry below. The <strong>To</strong> list ends at 100 kHz,
       which covers a 192 kHz capture whole; enabling the experimental 384 kHz rate adds a 200 kHz
       entry to it, so the wider band can be chosen by hand and not only reached with Autofit. <strong>Units</strong> picks what the level axis reads:
       <strong>dBV</strong> per bin; <strong>dBV/√Hz</strong>, a noise density, which is the bin's

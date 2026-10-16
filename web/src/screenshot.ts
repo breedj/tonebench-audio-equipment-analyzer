@@ -52,6 +52,12 @@ export const SCREENSHOT_DESTINATIONS: readonly { id: ScreenshotDestinationId; la
 /** Everything the dialog asks, in the shape the server stores (`screenshot.settings`) and App.vue consumes. */
 export interface ScreenshotSettings {
   title: string
+  /**
+   * The measurement `title` was typed for, by name — so a kept title is offered again on that
+   * measurement and nowhere else. Set by the dialog from the measurement it was opened on, never
+   * by the user; empty when none was open. See `screenshotTitleFor`.
+   */
+  titleFor: string
   saveText: boolean
   addDate: boolean
   widthPx: number
@@ -62,6 +68,7 @@ export interface ScreenshotSettings {
 
 export const DEFAULT_SCREENSHOT_SETTINGS: ScreenshotSettings = {
   title: '',
+  titleFor: '',
   saveText: false,
   addDate: false,
   widthPx: 1500,
@@ -86,6 +93,30 @@ export function toScreenshotAspectRatioId(value: unknown): ScreenshotAspectRatio
 
 export function toScreenshotDestinationId(value: unknown): ScreenshotDestinationId {
   return SCREENSHOT_DESTINATIONS.some((d) => d.id === value) ? (value as ScreenshotDestinationId) : DEFAULT_SCREENSHOT_SETTINGS.destination
+}
+
+/**
+ * The title the Screenshot dialog opens holding, for the measurement named by `measurement`.
+ *
+ * <p>The open measurement's name, which is the caption wanted nearly every time and the one the
+ * app already knows — <b>unless</b> **Save text** is on and the kept title was typed for this same
+ * measurement, in which case that one comes back, which is what the checkbox is for.</p>
+ *
+ * <p>Scoping it to the measurement is the whole of the fix. Before 2026-10-16 the box carried the
+ * last title typed anywhere, for ever: Joost's bench had Save text on, so every screenshot of
+ * every measurement opened holding "Elliptic - Nyquist" from some earlier session. Keying it on
+ * the name rather than on an id is deliberate — the name is what the caption says, so renaming the
+ * measurement rightly drops a caption that no longer describes it, and two measurements that share
+ * a name may as well share one.</p>
+ */
+export function screenshotTitleFor(
+  stored: Pick<ScreenshotSettings, 'title' | 'titleFor' | 'saveText'>,
+  measurement: string,
+): string {
+  const name = measurement.trim()
+  const kept = stored.title.trim()
+  if (stored.saveText && kept.length > 0 && stored.titleFor.trim() === name) return stored.title
+  return name
 }
 
 /** The title band above the chart, in pixels; zero without a title. */

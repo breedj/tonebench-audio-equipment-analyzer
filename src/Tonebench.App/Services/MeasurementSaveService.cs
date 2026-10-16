@@ -1685,7 +1685,9 @@ public sealed class MeasurementSaveService(
             parameters.ChartShowFftTrace,
             parameters.ChartShowHarmonicMarkers,
             parameters.ChartHarmonicsSort,
-            parameters.ChartOtherPeaksSort);
+            parameters.ChartOtherPeaksSort,
+            parameters.ChartHarmonicMarkerUnit,
+            parameters.LoadOhms);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -1751,6 +1753,8 @@ public sealed class MeasurementSaveService(
             ChartShowHarmonicMarkers = staged?.ChartShowHarmonicMarkers,
             ChartHarmonicsSort = staged?.ChartHarmonicsSort,
             ChartOtherPeaksSort = staged?.ChartOtherPeaksSort,
+            ChartHarmonicMarkerUnit = staged?.ChartHarmonicMarkerUnit,
+            LoadOhms = staged?.LoadOhms,
             GeneratorLevelUnit = staged?.GeneratorLevelUnit,
             // Live pipeline state, like the IMD spec: the oscilloscope's Residual checkbox pushes
             // it through spectrum-config the moment it is toggled.

@@ -1,5 +1,12 @@
 import { nextTick, ref, watch, type InjectionKey, type Ref } from 'vue'
-import { DEFAULT_SPECTRUM_UNIT, parseSpectrumUnit, type SpectrumUnit } from '../spectrumUnits'
+import {
+  DEFAULT_HARMONIC_MARKER_UNIT,
+  DEFAULT_SPECTRUM_UNIT,
+  parseHarmonicMarkerUnit,
+  parseSpectrumUnit,
+  type HarmonicMarkerUnit,
+  type SpectrumUnit,
+} from '../spectrumUnits'
 import { formatPeakSort, parsePeakSort, type PeakSort } from '../measurements/peakSort'
 import { useProjects } from './useProjects'
 
@@ -64,6 +71,9 @@ const showWeightingCurve = ref(false)
 // they point at. The harmonics *table* is the separate `showHarmonics` flag above and reads the
 // same numbers either way.
 const showHarmonicMarkers = ref(true)
+// What those markers are labelled with -- each harmonic's level re the fundamental, or its own
+// absolute level. See HARMONIC_MARKER_UNITS; dBc is what they always showed.
+const harmonicMarkerUnit = ref<HarmonicMarkerUnit>(DEFAULT_HARMONIC_MARKER_UNIT)
 
 // How the two peak tables are sorted, one setting each, shared by their L and R instances -- see
 // HarmonicsTable.vue and measurements/peakSort.ts. Null is each table's own natural order (order
@@ -86,7 +96,7 @@ watch([
   yTop, yBottom, xFrom, xTo, thickLines, showDataPoints, showMinMax, showPeakHold, showFftTrace,
   autofitOnDone,
   showSpectrogram, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
-  showHarmonicMarkers,
+  showHarmonicMarkers, harmonicMarkerUnit,
   harmonicsSort, otherPeaksSort,
 ], () => {
   if (!restoring) useProjects().markDirty()
@@ -156,6 +166,8 @@ export interface StoredSpectrumDisplay {
   dutGainDb?: number | null
   chartShowWeightingCurve?: boolean | null
   chartShowHarmonicMarkers?: boolean | null
+  /** What the harmonic markers are labelled with, in HARMONIC_MARKER_UNITS's form. Null means dBc. */
+  chartHarmonicMarkerUnit?: string | null
   /** How the two peak tables are sorted, in peakSort.ts's stored form. Null is the natural order. */
   chartHarmonicsSort?: string | null
   chartOtherPeaksSort?: string | null
@@ -186,6 +198,8 @@ export interface SpectrumDisplaySource {
   showWeightingCurve: Ref<boolean>
   /** Whether the harmonic markers are drawn over the spectrum -- the harmonics table is separate. */
   showHarmonicMarkers: Ref<boolean>
+  /** What those markers are labelled with -- see HARMONIC_MARKER_UNITS. */
+  harmonicMarkerUnit: Ref<HarmonicMarkerUnit>
   activeXRange: Ref<{ min: number; max: number } | null>
   resetPeakHoldTrigger: Ref<number>
   autofitYTrigger: Ref<number>
@@ -232,6 +246,7 @@ export function createSpectrumDisplaySource(
     // the one the result was captured under.
     showWeightingCurve: ref(false),
     showHarmonicMarkers: ref(loaded?.chartShowHarmonicMarkers ?? true),
+    harmonicMarkerUnit: ref(parseHarmonicMarkerUnit(loaded?.chartHarmonicMarkerUnit)),
     activeXRange: ref(null),
     resetPeakHoldTrigger: ref(0),
     autofitYTrigger: ref(0),
@@ -285,6 +300,7 @@ export function useChartDisplay() {
     dutGainDb.value = loaded?.dutGainDb ?? 0
     showWeightingCurve.value = loaded?.chartShowWeightingCurve ?? false
     showHarmonicMarkers.value = loaded?.chartShowHarmonicMarkers ?? true
+    harmonicMarkerUnit.value = parseHarmonicMarkerUnit(loaded?.chartHarmonicMarkerUnit)
     harmonicsSort.value = parsePeakSort(loaded?.chartHarmonicsSort)
     otherPeaksSort.value = parsePeakSort(loaded?.chartOtherPeaksSort)
     void nextTick(() => {
@@ -325,6 +341,7 @@ export function useChartDisplay() {
     dutGainDb,
     showWeightingCurve,
     showHarmonicMarkers,
+    harmonicMarkerUnit,
     harmonicsSort,
     otherPeaksSort,
     /** The two sorts in the form params_json stores them -- see buildStagedConfig in App.vue. */

@@ -10,6 +10,7 @@ import {
   type ReportStatusTone,
 } from '../api/client'
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
+import { parseAnnotations } from '../measurements/spectrumAnnotations'
 import { formatWithPreference } from '../composables/useDateTimeFormat'
 import { splitVersion } from '../about/version'
 import { useLoadOhms } from '../composables/useLoadOhms'
@@ -148,6 +149,13 @@ function parseStoredDisplay(paramsJson: string | null | undefined): StoredSpectr
  * A stored result's curves and the display state to draw them with. The display is the owning
  * measurement type's, because a result's own `params_json` records the run and not the screen (see
  * responseDisplayFromParams); a type that no longer exists leaves each kind's defaults.
+ *
+ * <p><b>Its annotations are the one exception</b>, and that exception is the point of them: they are
+ * notes about <i>this capture</i> — "this hum is the transformer", "the corner is here" — not a
+ * preference about how the screen is arranged. A result saved last month must print the notes it was
+ * saved with however the measurement's chart is set up today, which is the opposite of the rule for
+ * everything else in this function. The copy is made by MeasurementSaveService.SaveAsync and
+ * re-edited through PUT /api/measurements/{id} (the Edit measurement dialog's list).</p>
  */
 async function loadStoredData(detail: MeasurementDetail, type: MeasurementType | null): Promise<ReportSubjectData> {
   const displayParams = type?.paramsJson
@@ -179,6 +187,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       display: createSpectrumDisplaySource(
         stored,
         detail.channelsData.map((c) => c.channel),
+        parseAnnotations(parseStoredDisplay(detail.paramsJson)?.chartAnnotations),
       ),
       selectedMetrics:
         Array.isArray(selected) && selected.length > 0
@@ -383,6 +392,16 @@ export async function loadStoredSubject(resultId: number, types: readonly Measur
   }
 }
 
+/**
+ * The ordinal badges on the chart's labels are drawn only when the Annotations table is included:
+ * unticked, a number on the picture would tie a label to a row nobody printed. Set on the subject's
+ * own display source, which is what the headless render draws through, right before it renders.
+ */
+function applyAnnotationNumbers(subject: ReportSubject, elements: readonly ReportElementId[]) {
+  if (subject.data.kind !== 'spectrum') return
+  subject.data.display.annotationNumbers.value = elements.includes('annotations')
+}
+
 async function imageSection(chart: RenderedChart, caption: string): Promise<ReportSection> {
   return { kind: 'image', png: await blobToBase64(chart.png), caption }
 }
@@ -441,6 +460,7 @@ export async function buildChapter(
   if (subject.data.kind === 'none') {
     sections.push({ kind: 'callout', title: 'Not measured.', text: 'This chapter carries the settings and notes only.' })
   }
+  applyAnnotationNumbers(subject, elements)
   if (elements.includes('chart')) sections.push(...(await ownChartSections(subject, views, monochrome)))
   sections.push(...(await extraChartSections(subject, elements, monochrome)))
   sections.push(...chapterSections(subject, elements))
@@ -469,6 +489,11 @@ export async function buildChapter(
 async function buildCombinedChapter(plan: ReportPlan, onProgress?: (message: string) => void): Promise<ReportChapter> {
   const [primary, ...rest] = plan.subjects
   const sections: ReportSection[] = []
+
+  // In a combined chapter the chart draws the *primary* subject's annotations — an overlay is
+  // plotted from its curves and carries no display source of its own — while each subject's own
+  // table follows under its own heading below.
+  for (const subject of plan.subjects) applyAnnotationNumbers(subject, plan.elements)
 
   if (plan.elements.includes('chart')) {
     for (const view of plan.views) {

@@ -69,7 +69,9 @@ import SettingsTable from '../components/SettingsTable.vue'
       <li>
         <strong>Spectrum:</strong> the header shows the frequency and level under the pointer,
         snapped to the nearest local peak within a few pixels — so pointing near a harmonic reads
-        the harmonic, not the skirt beside it.
+        the harmonic, not the skirt beside it. This is the one chart that can also be
+        <em>annotated</em>: labels placed on it by clicking, which are saved with the measurement and
+        drawn on screenshots and in the report. See the FFT spectrum page.
       </li>
       <li>
         <strong>Frequency response:</strong> the header lists the value of every visible trace at

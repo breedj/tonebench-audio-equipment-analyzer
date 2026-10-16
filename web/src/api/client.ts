@@ -2,6 +2,11 @@
 // Wire shapes must stay in sync with Tonebench.App/Endpoints/*.cs by hand — no codegen.
 
 import { apiErrorMessage } from './errorMessage'
+// The wire shape of an annotation is the module's own, re-exported here rather than redeclared, so
+// the chart, the panel, the report and the four requests below cannot drift into two ideas of one.
+import type { SpectrumAnnotation } from '../measurements/spectrumAnnotations'
+
+export type { SpectrumAnnotation }
 
 export interface DeviceStatus {
   connected: boolean
@@ -568,6 +573,12 @@ export interface ReportKindSettings {
   views?: string[] | null
   /** How several measurements share a report: one chart, or a chart each. Absent before it existed. */
   mode?: 'combined' | 'individual' | null
+  /**
+   * Which elements the dialog offered when this choice was made — see useReportSettings.elementsFor.
+   * It is what distinguishes an element the user unticked from one that did not exist yet. Absent on
+   * a document written before it was recorded.
+   */
+  offered?: string[] | null
 }
 
 export interface ReportSettingsConfig {
@@ -2232,6 +2243,8 @@ export interface MeasurementTypeAppliedResponse {
   chartHarmonicMarkerUnit?: string | null
   /** The Generator panel's Load field, for the power tiles — see useLoadOhms.ts. Null means its 8 Ω default. */
   loadOhms?: number | null
+  /** The notes drawn on the chart — see measurements/spectrumAnnotations.ts. Null means none. */
+  chartAnnotations?: SpectrumAnnotation[] | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
@@ -2294,6 +2307,8 @@ export interface StagedMeasurementConfig {
   chartHarmonicMarkerUnit?: string | null
   /** The Generator panel's Load field, for the power tiles — see useLoadOhms.ts. Null means its 8 Ω default. */
   loadOhms?: number | null
+  /** The notes drawn on the chart — see measurements/spectrumAnnotations.ts. Null means none. */
+  chartAnnotations?: SpectrumAnnotation[] | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
@@ -2599,11 +2614,25 @@ export interface SaveMeasurementRequest {
   measurementTypeId: number
   name: string
   notes?: string | null
+  /**
+   * The chart's annotations at the moment of the save, which the result keeps as its own copy. Sent
+   * with the save rather than left to be read back off the measurement type, because a user
+   * annotates a trace in order to save it and the type's stored copy would routinely be one edit
+   * stale. Omitted means none were sent, and the result then takes the type's.
+   */
+  chartAnnotations?: SpectrumAnnotation[] | null
 }
 
 export interface UpdateMeasurementRequest {
   name: string
   notes?: string | null
+  /**
+   * This result's own annotations. **Omitted (or null) means leave them alone** and an empty array
+   * means cleared — the dialog saves a name and notes for every kind, and a request that does not
+   * carry this field must not wipe what the result was saved with. The server refuses it on any
+   * kind but an FFT spectrum.
+   */
+  chartAnnotations?: SpectrumAnnotation[] | null
 }
 
 /**

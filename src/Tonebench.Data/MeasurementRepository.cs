@@ -1279,6 +1279,29 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     }
 
     /// <summary>
+    /// Replaces a result's whole <c>params_json</c> document. False when there is no such result, or
+    /// it is in the trash -- for the reason <see cref="UpdateResultAsync"/> excludes one: a trashed
+    /// result is not editable.
+    /// </summary>
+    /// <remarks>
+    /// The caller owns the document: the one writer
+    /// (<c>MeasurementSaveService.SetResultAnnotationsAsync</c>) splices a single field into what was
+    /// stored rather than rebuilding it, so a result written by another build keeps every field this
+    /// one does not know about.
+    /// </remarks>
+    public async Task<bool> UpdateResultParamsJsonAsync(long resultId, string paramsJson, CancellationToken ct)
+    {
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        int affected = await connection.ExecuteAsync(
+            """
+            UPDATE measurement_result SET params_json = @paramsJson
+            WHERE id = @resultId AND deleted_utc IS NULL;
+            """,
+            new { resultId, paramsJson });
+        return affected > 0;
+    }
+
+    /// <summary>
     /// Moves the result to the trash: one UPDATE, nothing destroyed. False when there is no such
     /// result, or it is already in the trash.
     /// </summary>

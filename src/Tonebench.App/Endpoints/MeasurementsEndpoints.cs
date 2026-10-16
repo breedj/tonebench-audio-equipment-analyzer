@@ -16,7 +16,8 @@ public static class MeasurementsEndpoints
         {
             try
             {
-                long resultId = await saveService.SaveAsync(request.MeasurementTypeId, request.Name, request.Notes, ct);
+                long resultId = await saveService.SaveAsync(
+                    request.MeasurementTypeId, request.Name, request.Notes, request.ChartAnnotations, ct);
                 var detail = await BuildDetailResponseAsync(resultId, repo, pipeline, ct);
                 return Results.Ok(detail);
             }
@@ -84,10 +85,36 @@ public static class MeasurementsEndpoints
             return Results.Ok(new MeasurementSpectrumResponse(channels.ToArray()));
         });
 
-        group.MapPut("/{id:long}", async (long id, UpdateMeasurementRequest request, MeasurementRepository repo, CancellationToken ct) =>
+        group.MapPut("/{id:long}", async (
+            long id,
+            UpdateMeasurementRequest request,
+            MeasurementRepository repo,
+            MeasurementSaveService saveService,
+            CancellationToken ct) =>
         {
             bool updated = await repo.UpdateResultAsync(id, request.Name, request.Notes, ct);
-            return updated ? Results.Ok() : Results.NotFound();
+            if (!updated) return Results.NotFound();
+
+            // Null means leave them alone (see the request record) -- so the dialog's plain
+            // name/notes save, and every caller written before annotations existed, cannot wipe a
+            // result's notes by omission.
+            if (request.ChartAnnotations is not null)
+            {
+                try
+                {
+                    await saveService.SetResultAnnotationsAsync(id, request.ChartAnnotations, ct);
+                }
+                catch (KeyNotFoundException)
+                {
+                    return Results.NotFound();
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Results.Conflict(ex.Message);
+                }
+            }
+
+            return Results.Ok();
         });
 
         // Moves the result to the trash — see MeasurementRepository.TrashResultAsync, and
@@ -396,9 +423,28 @@ public static class MeasurementsEndpoints
         summary.Source);
 }
 
-public sealed record SaveMeasurementRequest(long MeasurementTypeId, string Name, string? Notes);
+/// <param name="ChartAnnotations">
+/// The notes on the chart at the moment of the save, which the result keeps as its own copy.
+/// <b>Null means none were sent</b>, in which case the result takes whatever its measurement
+/// type has stored -- see <c>MeasurementSaveService.SaveAsync</c> for why this one
+/// client-staged field travels with the save rather than only being read back from the type.
+/// </param>
+public sealed record SaveMeasurementRequest(
+    long MeasurementTypeId,
+    string Name,
+    string? Notes,
+    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);
 
-public sealed record UpdateMeasurementRequest(string Name, string? Notes);
+/// <param name="ChartAnnotations">
+/// This result's own annotations. <b>Null means do not touch them</b> and an <b>empty list
+/// means cleared</b>: the Edit measurement dialog saves a name and notes for every kind, and a
+/// request that simply does not carry this field must not wipe what a result was saved with.
+/// Refused with a 409 on any kind but FFTSpectrum, rather than quietly ignored.
+/// </param>
+public sealed record UpdateMeasurementRequest(
+    string Name,
+    string? Notes,
+    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);
 
 public sealed record MeasurementListResponse(MeasurementSummaryResponse[] Items);
 

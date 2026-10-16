@@ -208,7 +208,13 @@ public sealed record StagedMeasurementConfig(
     /// <summary>What the harmonic markers are labelled with -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicMarkerUnit"/>.</summary>
     string? ChartHarmonicMarkerUnit = null,
     /// <summary>The Generator panel's Load field, for the power tiles -- see <see cref="Tonebench.Data.FftSpectrumParameters.LoadOhms"/>.</summary>
-    double? LoadOhms = null);
+    double? LoadOhms = null,
+    /// <summary>
+    /// The chart's annotations -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartAnnotations"/>.
+    /// A field missing from this DTO is not an error, it is a silent default: left off, the notes a
+    /// user placed would quietly fail to survive a measurement switch.
+    /// </summary>
+    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -270,4 +276,6 @@ public sealed record MeasurementTypeAppliedResponse(
     /// <summary>What the harmonic markers are labelled with — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartHarmonicMarkerUnit"/>.</summary>
     string? ChartHarmonicMarkerUnit = null,
     /// <summary>The Generator panel's Load field — see <see cref="Tonebench.Data.FftSpectrumParameters.LoadOhms"/>.</summary>
-    double? LoadOhms = null);
+    double? LoadOhms = null,
+    /// <summary>The chart's annotations, so selecting a measurement puts the notes it was saved with back on the chart — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartAnnotations"/>.</summary>
+    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);

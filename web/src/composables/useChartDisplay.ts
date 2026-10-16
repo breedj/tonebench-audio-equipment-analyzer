@@ -8,6 +8,11 @@ import {
   type SpectrumUnit,
 } from '../spectrumUnits'
 import { formatPeakSort, parsePeakSort, type PeakSort } from '../measurements/peakSort'
+import {
+  parseAnnotations,
+  type AnnotationStyle,
+  type SpectrumAnnotation,
+} from '../measurements/spectrumAnnotations'
 import { useProjects } from './useProjects'
 
 // Module-level singleton, same pattern as useMeasurements.ts / useSpectrumConfig.ts — the chart
@@ -82,6 +87,13 @@ const harmonicMarkerUnit = ref<HarmonicMarkerUnit>(DEFAULT_HARMONIC_MARKER_UNIT)
 const harmonicsSort = ref<PeakSort | null>(null)
 const otherPeaksSort = ref<PeakSort | null>(null)
 
+// The notes drawn on the chart -- see measurements/spectrumAnnotations.ts. Persisted with the
+// measurement like every other chart setting, so the labels placed on a trace survive a measurement
+// switch, a reload and a restart; a *saved result* keeps its own frozen copy, which is the one thing
+// here a result does not take from its type (see MeasurementSaveService.SaveAsync and the report's
+// loadStoredData). Replaced, never mutated in place, or the dirty watcher below would not see it.
+const annotations = ref<SpectrumAnnotation[]>([])
+
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
 // stored params — loading is the opposite of an unsaved edit. Same pattern as
 // SweepConfigPanel.vue's own `restoring` flag.
@@ -97,7 +109,7 @@ watch([
   autofitOnDone,
   showSpectrogram, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
   showHarmonicMarkers, harmonicMarkerUnit,
-  harmonicsSort, otherPeaksSort,
+  harmonicsSort, otherPeaksSort, annotations,
 ], () => {
   if (!restoring) useProjects().markDirty()
 })
@@ -142,6 +154,16 @@ const resetPeakHoldTrigger = ref(0)
 const autofitYTrigger = ref(0)
 const autofitXTrigger = ref(0)
 
+// The annotation editing state: which style the next click places (null = the chart is not armed,
+// which is how a plain click keeps doing nothing and drag-zoom keeps working), and which label's
+// inline text box is open. Transient like the triggers above -- nothing here is saved, and a report
+// render has neither.
+const annotationArmed = ref<AnnotationStyle | null>(null)
+const annotationEditing = ref<number | null>(null)
+// Whether the ordinal badges are drawn on the labels. On everywhere except a report whose
+// Annotations table was not included, where a number would tie a label to a row nobody printed.
+const annotationNumbers = ref(true)
+
 /**
  * The stored chart preferences of an FFT measurement type — the `chart*` half of
  * FftSpectrumParameters. Every field optional: a type saved before one existed falls back to that
@@ -171,6 +193,12 @@ export interface StoredSpectrumDisplay {
   /** How the two peak tables are sorted, in peakSort.ts's stored form. Null is the natural order. */
   chartHarmonicsSort?: string | null
   chartOtherPeaksSort?: string | null
+  /**
+   * The chart's annotations. Deliberately `unknown` rather than the typed array: parseStoredDisplay
+   * casts a parsed document blindly, so a narrow type here would let a caller trust rows that came
+   * out of a `params_json` another build wrote. Every reader goes through parseAnnotations.
+   */
+  chartAnnotations?: unknown
 }
 
 /**
@@ -200,6 +228,10 @@ export interface SpectrumDisplaySource {
   showHarmonicMarkers: Ref<boolean>
   /** What those markers are labelled with -- see HARMONIC_MARKER_UNITS. */
   harmonicMarkerUnit: Ref<HarmonicMarkerUnit>
+  /** The notes drawn on the chart -- see measurements/spectrumAnnotations.ts. */
+  annotations: Ref<SpectrumAnnotation[]>
+  /** Whether each label carries its ordinal, which ties it to a row of the report's table. */
+  annotationNumbers: Ref<boolean>
   activeXRange: Ref<{ min: number; max: number } | null>
   resetPeakHoldTrigger: Ref<number>
   autofitYTrigger: Ref<number>
@@ -218,10 +250,16 @@ export const SPECTRUM_DISPLAY_KEY: InjectionKey<SpectrumDisplaySource> = Symbol(
 /**
  * A display source of its own, seeded from a stored type's preferences, that shares nothing with
  * the screen's singleton — for rendering a stored FFT result headless. Same defaults as applyLoaded.
+ *
+ * <p>`annotations` is a separate argument rather than being read off `loaded`, and that is
+ * deliberate: a stored result's annotations are <b>its own</b>, out of its own `params_json`, while
+ * everything else here is the owning measurement type's. Taking them as a parameter is what stops a
+ * caller passing the type's by accident.</p>
  */
 export function createSpectrumDisplaySource(
   loaded: StoredSpectrumDisplay | null | undefined,
   channels: readonly number[],
+  annotations: readonly SpectrumAnnotation[] = [],
 ): SpectrumDisplaySource {
   const yTopRef = ref(loaded?.chartYTopDbv ?? DEFAULT_Y_TOP)
   const yBottomRef = ref(loaded?.chartYBottomDbv ?? DEFAULT_Y_BOTTOM)
@@ -247,6 +285,8 @@ export function createSpectrumDisplaySource(
     showWeightingCurve: ref(false),
     showHarmonicMarkers: ref(loaded?.chartShowHarmonicMarkers ?? true),
     harmonicMarkerUnit: ref(parseHarmonicMarkerUnit(loaded?.chartHarmonicMarkerUnit)),
+    annotations: ref(annotations.slice()),
+    annotationNumbers: ref(true),
     activeXRange: ref(null),
     resetPeakHoldTrigger: ref(0),
     autofitYTrigger: ref(0),
@@ -303,6 +343,9 @@ export function useChartDisplay() {
     harmonicMarkerUnit.value = parseHarmonicMarkerUnit(loaded?.chartHarmonicMarkerUnit)
     harmonicsSort.value = parsePeakSort(loaded?.chartHarmonicsSort)
     otherPeaksSort.value = parsePeakSort(loaded?.chartOtherPeaksSort)
+    annotations.value = parseAnnotations(loaded?.chartAnnotations)
+    annotationArmed.value = null
+    annotationEditing.value = null
     void nextTick(() => {
       restoring = false
     })
@@ -318,6 +361,11 @@ export function useChartDisplay() {
 
   function requestResetPeakHold() {
     resetPeakHoldTrigger.value++
+  }
+
+  /** Arms the chart for the next click, or disarms it. */
+  function armAnnotation(style: AnnotationStyle | null) {
+    annotationArmed.value = style
   }
 
   return {
@@ -344,6 +392,11 @@ export function useChartDisplay() {
     harmonicMarkerUnit,
     harmonicsSort,
     otherPeaksSort,
+    annotations,
+    annotationArmed,
+    annotationEditing,
+    annotationNumbers,
+    armAnnotation,
     /** The two sorts in the form params_json stores them -- see buildStagedConfig in App.vue. */
     storedHarmonicsSort: () => formatPeakSort(harmonicsSort.value),
     storedOtherPeaksSort: () => formatPeakSort(otherPeaksSort.value),

@@ -231,6 +231,7 @@ const {
   showWeightingCurve: chartShowWeightingCurve,
   showHarmonicMarkers: chartShowHarmonicMarkers,
   harmonicMarkerUnit: chartHarmonicMarkerUnit,
+  annotations: chartAnnotations,
   storedHarmonicsSort: chartStoredHarmonicsSort,
   storedOtherPeaksSort: chartStoredOtherPeaksSort,
   applyLoaded: applyLoadedChartDisplay,
@@ -3032,6 +3033,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowFftTrace: chartShowFftTrace.value,
     chartShowHarmonicMarkers: chartShowHarmonicMarkers.value,
     chartHarmonicMarkerUnit: chartHarmonicMarkerUnit.value,
+    chartAnnotations: chartAnnotations.value,
     // The Generator panel's Load field. Shared with every sweep panel (useLoadOhms), but stored
     // per measurement like every other setting on screen -- until 2026-10-16 the FFT screen was
     // the one screen that read it and never wrote it, so the figure a measurement's power tiles

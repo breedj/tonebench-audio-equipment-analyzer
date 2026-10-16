@@ -85,6 +85,7 @@ describe('panelIconFor', () => {
       'Calibration',
       'Weighting',
       'Advanced',
+      'Annotations',
     ]
     const missed = titles.filter((t) => panelIconFor(t) === PANEL_ICON_FALLBACK)
     expect(missed).toEqual([])

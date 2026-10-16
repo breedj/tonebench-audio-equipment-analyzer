@@ -39,6 +39,18 @@ public sealed class MeasurementSaveService(
     // params_json round-trips WindowType/AveragingMode/GeneratorKind the same way the REST API does.
     private JsonSerializerOptions SerializerOptions => jsonOptions.Value.SerializerOptions;
 
+    /// <summary>
+    /// The <c>measurement_type.kind</c> value for the live FFT spectrum screen. Mirrors
+    /// web/src/measurements/kinds.ts.
+    ///
+    /// <para>The one kind with no predicate of its own, because it is what every <c>Is*Kind</c>
+    /// below says no to -- see <see cref="HasNoLiveConfiguration"/>. Named here all the same, for
+    /// the one place that has to ask the question positively rather than by elimination
+    /// (<see cref="SetResultAnnotationsAsync"/>): a future kind must be refused there, not treated
+    /// as an FFT result.</para>
+    /// </summary>
+    public const string FftSpectrumKind = "FFTSpectrum";
+
     /// <summary>The <c>measurement_type.kind</c> value for a THD-vs-frequency sweep. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string ThdVsFrequencyKind = "ThdVsFrequency";
 
@@ -483,7 +495,12 @@ public sealed class MeasurementSaveService(
     /// stable, stopped trace — see docs on why streaming data itself is never persisted) or when
     /// nothing has been captured yet; the endpoint layer turns both into a 409.
     /// </summary>
-    public async Task<long> SaveAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveAsync(
+        long measurementTypeId,
+        string name,
+        string? notes,
+        IReadOnlyList<SpectrumAnnotation>? annotations,
+        CancellationToken ct)
     {
         if (session.Acquiring)
             throw new InvalidOperationException("Stop acquisition before saving a measurement — only a stopped, stable trace is saved.");
@@ -509,13 +526,22 @@ public sealed class MeasurementSaveService(
         // reach the server only when the type is saved, so a result takes them from its type: the
         // "Noise in nV/sqrt(Hz)" row a report recomputes needs the gain that was on screen, and the
         // type's is the best record of it.
-        parameters = parameters with { DutGainDb = null, ChartUnit = null, GeneratorLevelUnit = null };
+        //
+        // The chart's annotations are client-staged in exactly the same way, but they are *sent with
+        // the save* rather than only read back from the type, and the difference matters: nobody
+        // edits the DUT gain in the minute before pressing Save, whereas a user annotates a trace in
+        // order to save it, so the type's stored copy would routinely be one edit stale and the
+        // result would print yesterday's notes. The type's copy is the fallback for a save path that
+        // sends none (an older client, or a call from a test) -- so null means "not sent" and an
+        // empty list means "none", which is the same distinction PUT /api/measurements/{id} makes.
+        parameters = parameters with { DutGainDb = null, ChartUnit = null, GeneratorLevelUnit = null, ChartAnnotations = annotations };
         if (await ReadStoredTypeParametersAsync(measurementTypeId, ct) is { } typeParameters)
             parameters = parameters with
             {
                 DutGainDb = typeParameters.DutGainDb,
                 ChartUnit = typeParameters.ChartUnit,
                 GeneratorLevelUnit = typeParameters.GeneratorLevelUnit,
+                ChartAnnotations = annotations ?? typeParameters.ChartAnnotations,
             };
 
         // The weighting a result records is the one the saved trace was produced under -- the
@@ -1603,6 +1629,52 @@ public sealed class MeasurementSaveService(
     }
 
     /// <summary>
+    /// Replaces a stored FFT result's own annotations -- the Edit measurement dialog's list, which is
+    /// the only way to reach them once a result is saved (nothing puts a stored result back on the
+    /// chart).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Splices a <see cref="JsonNode"/> rather than deserializing and re-serializing</b>,
+    /// and that is the load-bearing part: a result's <c>params_json</c> is the record of a run,
+    /// possibly written by another build, and a round trip through today's
+    /// <see cref="FftSpectrumParameters"/> would silently drop every field this build does not know
+    /// and rewrite every null -- i.e. it would change what the result says it measured in order to
+    /// add a note about it. Same technique and same reason as <see cref="HealedFftParamsJson"/>.</para>
+    ///
+    /// <para>Refused rather than ignored on any other kind: silently dropping a field the caller
+    /// sent is the "a silent default rather than an error" failure this codebase has been bitten by
+    /// twice. A document that will not parse is refused too, never replaced.</para>
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No such result, or it is in the trash.</exception>
+    /// <exception cref="InvalidOperationException">Not an FFT result, or its stored parameters cannot be read.</exception>
+    public async Task SetResultAnnotationsAsync(
+        long resultId,
+        IReadOnlyList<SpectrumAnnotation> annotations,
+        CancellationToken ct)
+    {
+        var detail = await measurementRepository.GetResultAsync(resultId, ct)
+            ?? throw new KeyNotFoundException($"There is no measurement result {resultId}.");
+
+        if (detail.Kind != FftSpectrumKind)
+            throw new InvalidOperationException("Annotations belong to an FFT spectrum result.");
+
+        JsonObject? stored;
+        try
+        {
+            stored = JsonNode.Parse(detail.ParamsJson) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            stored = null;
+        }
+        if (stored is null)
+            throw new InvalidOperationException("This result's stored parameters cannot be read.");
+
+        stored["chartAnnotations"] = JsonSerializer.SerializeToNode(annotations, SerializerOptions);
+        await measurementRepository.UpdateResultParamsJsonAsync(resultId, stored.ToJsonString(SerializerOptions), ct);
+    }
+
+    /// <summary>
     /// Whether a stored FFT record holds everything <see cref="ApplyAsync"/> pushes onto the
     /// pipeline and the device. Public so a test can pin the signature of a document that was
     /// written incomplete: no generator, no harmonics, an empty band.
@@ -1687,7 +1759,8 @@ public sealed class MeasurementSaveService(
             parameters.ChartHarmonicsSort,
             parameters.ChartOtherPeaksSort,
             parameters.ChartHarmonicMarkerUnit,
-            parameters.LoadOhms);
+            parameters.LoadOhms,
+            parameters.ChartAnnotations);
 
     /// <summary>
     /// The live pipeline/device state as an <see cref="FftSpectrumParameters"/> snapshot, optionally
@@ -1755,6 +1828,7 @@ public sealed class MeasurementSaveService(
             ChartOtherPeaksSort = staged?.ChartOtherPeaksSort,
             ChartHarmonicMarkerUnit = staged?.ChartHarmonicMarkerUnit,
             LoadOhms = staged?.LoadOhms,
+            ChartAnnotations = staged?.ChartAnnotations,
             GeneratorLevelUnit = staged?.GeneratorLevelUnit,
             // Live pipeline state, like the IMD spec: the oscilloscope's Residual checkbox pushes
             // it through spectrum-config the moment it is toggled.

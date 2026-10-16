@@ -200,7 +200,60 @@ public sealed record FftSpectrumParameters(
     /// be re-analysed at a different window, FFT size, level offset or band.
     /// </summary>
     public SimulationParameters? Simulation { get; init; }
+
+    /// <summary>
+    /// The notes drawn on the spectrum chart -- see <see cref="SpectrumAnnotation"/>.
+    ///
+    /// <para>Display state like the <c>Chart*</c> toggles, and a body property rather than a
+    /// sixtieth positional parameter for the reason <see cref="Simulation"/> is one. Null means
+    /// none, which is every row written before this existed.</para>
+    ///
+    /// <para><b>A type's are the live working set; a result keeps its own frozen copy</b>, and that
+    /// is the one thing here a result does not take from its measurement type at display time: an
+    /// annotation is a note about <i>this capture</i> ("this hum is the transformer"), not a
+    /// preference about how the screen is arranged, so a result saved last month must print the
+    /// notes it was saved with however the measurement's chart is set up today. Written by
+    /// <c>MeasurementSaveService.SaveAsync</c> and re-edited by
+    /// <c>PUT /api/measurements/{id}</c>.</para>
+    ///
+    /// <para>Never validated here, the <see cref="ChartHarmonicsSort"/> rule: the client's
+    /// <c>parseAnnotations</c> drops what it cannot draw, so a <c>params_json</c> another build
+    /// wrote -- or a hand-edited one -- cannot fail a measurement the user has merely
+    /// selected.</para>
+    /// </summary>
+    public IReadOnlyList<SpectrumAnnotation>? ChartAnnotations { get; init; }
 }
+
+/// <summary>
+/// One note drawn on the spectrum chart: a marker at a (frequency, level) point of the trace with a
+/// labelled box beside it (<c>"point"</c>), or a dashed rule at a frequency labelled at the top of
+/// the plot (<c>"frequency"</c>).
+/// </summary>
+/// <param name="Id">Unique within its own list and stable across edits. Not the ordinal a reader
+/// sees: the chart, the panel and the report all number the list left to right at draw time, so a
+/// delete cannot leave a gap in the numbering.</param>
+/// <param name="Style"><c>"point"</c> or <c>"frequency"</c>. A string rather than an enum because
+/// nothing here reads it -- see the remarks on <see cref="FftSpectrumParameters.ChartAnnotations"/>
+/// about validation.</param>
+/// <param name="LevelDbv">Always dBV, never the value the chart happens to be plotting: the chart's
+/// unit is a per-frame constant add, so a level stored this way stays glued to its spot on the trace
+/// across a unit switch and a DUT-gain edit. Null for a frequency rule, which has no level.</param>
+/// <param name="Channel">0 = left, 1 = right; null for a frequency rule, or a point placed where no
+/// trace was identified.</param>
+/// <param name="LabelOffsetOctaves">Where the label sits relative to its marker, in <b>data
+/// units</b> -- x in octaves, y in dB -- and point style only. The report's chart is 1600x900 while
+/// the screen's is a few hundred pixels tall, and both span the same axis window, so an offset
+/// expressed this way is a fixed fraction of the picture and lands in the same place at either size;
+/// a pixel offset would not.</param>
+public sealed record SpectrumAnnotation(
+    int Id,
+    string Style,
+    string Text,
+    double FreqHz,
+    double? LevelDbv = null,
+    int? Channel = null,
+    double LabelOffsetOctaves = 0.0,
+    double LabelOffsetDb = 0.0);
 
 /// <summary>
 /// Where an imported simulation came from. Kept in full so the result can say what produced it

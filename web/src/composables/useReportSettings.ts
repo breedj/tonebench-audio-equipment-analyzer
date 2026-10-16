@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { api, type ReportKindSettings } from '../api/client'
-import { defaultReportElements, migrateStoredElements, reportElementsForKind, type ReportElementId } from '../report/elements'
+import { defaultReportElements, reportElementsForKind, storedChoiceElements, type ReportElementId } from '../report/elements'
 import type { ReportMode } from '../report/types'
 import { defaultReportViews, reportViewsForKind } from '../report/views'
 
@@ -48,11 +48,13 @@ export function useReportSettings() {
 
   /** The elements a report of this kind includes: the stored choice, or the kind's defaults. */
   function elementsFor(kind: string): ReportElementId[] {
-    const offered = reportElementsForKind(kind).map((element) => element.id)
     const stored = kinds.value[kind]?.elements
     if (!stored) return defaultReportElements(kind)
-    const meant = migrateStoredElements(stored)
-    return offered.filter((id) => meant.includes(id))
+    return storedChoiceElements(
+      reportElementsForKind(kind).map((element) => element.id),
+      stored,
+      kinds.value[kind]?.offered,
+    )
   }
 
   /** The chart views a report of this kind includes: the stored choice, or the kind's default view. */
@@ -85,7 +87,14 @@ export function useReportSettings() {
   async function setChoiceFor(kind: string, choice: ReportKindChoice) {
     kinds.value = {
       ...kinds.value,
-      [kind]: { elements: [...choice.elements], views: [...choice.views], mode: choice.mode },
+      [kind]: {
+        elements: [...choice.elements],
+        views: [...choice.views],
+        mode: choice.mode,
+        // What this choice was offered, so a later build can tell an unticked element from one that
+        // did not exist when the choice was made — see elementsFor.
+        offered: reportElementsForKind(kind).map((element) => element.id),
+      },
     }
     await persist()
   }

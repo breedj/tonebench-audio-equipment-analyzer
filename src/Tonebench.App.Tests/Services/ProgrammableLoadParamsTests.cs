@@ -195,7 +195,7 @@ public class ProgrammableLoadParamsTests
                 await session.StopAcquisitionAsync();
             }
 
-            return await saveService.SaveAsync(typeId, $"capture {Guid.NewGuid():N}", null, CancellationToken.None);
+            return await saveService.SaveAsync(typeId, $"capture {Guid.NewGuid():N}", null, null, CancellationToken.None);
         }
 
         public async Task<FftSpectrumParameters> ReadParamsAsync(long resultId)

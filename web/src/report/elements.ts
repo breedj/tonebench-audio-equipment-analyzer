@@ -28,6 +28,7 @@ export type ReportElementId =
   | 'harmonics'
   | 'oscilloscope'
   | 'spectrogram'
+  | 'annotations'
 
 export interface ReportElement {
   id: ReportElementId
@@ -125,6 +126,12 @@ const SPECTROGRAM: ReportElement = {
   hint: 'The spectrogram under the spectrum, with the history it has collected. Only for the measurement on screen, and only while the spectrogram is shown.',
 }
 
+const ANNOTATIONS: ReportElement = {
+  id: 'annotations',
+  label: 'Annotations',
+  hint: 'The notes drawn on the chart, as a numbered table. The numbers are the labels on the chart image, so a reader can tie one to the other.',
+}
+
 /** What every kind offers. */
 export const GENERIC_REPORT_ELEMENTS: readonly ReportElement[] = [CHART, DESCRIPTION, SETTINGS]
 
@@ -135,7 +142,8 @@ export function reportElementsForKind(kind: string | null | undefined): readonly
   if (isSweepKind(kind)) return [CHART, DESCRIPTION, SETTINGS, SWEEP_MEASUREMENTS]
   if (isImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPEDANCE_MEASUREMENTS, IMPEDANCE_COMPONENT, IMPEDANCE_EQUIVALENT]
   if (isImpulseResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPULSE_MEASUREMENTS]
-  if (kind === FFT_SPECTRUM_KIND) return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, OSCILLOSCOPE, SPECTROGRAM]
+  if (kind === FFT_SPECTRUM_KIND)
+    return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, ANNOTATIONS, OSCILLOSCOPE, SPECTROGRAM]
   return GENERIC_REPORT_ELEMENTS
 }
 
@@ -177,4 +185,30 @@ export function migrateStoredElements(stored: readonly string[]): string[] {
 /** Whether a kind's report can carry its chart — i.e. its chart component exposes `exportPng`. Every kind's does. */
 export function reportHasChart(kind: string | null | undefined): boolean {
   return reportElementsForKind(kind).some((element) => element.id === 'chart')
+}
+
+/**
+ * What a stored element choice means now, for a kind that offers `offered`.
+ *
+ * <p>Two jobs. It reads the choice the way it was meant (see {@link migrateStoredElements}), and it
+ * <b>includes any element the choice was never offered</b> — which is what lets an element added
+ * later reach a bench that has already saved a choice.</p>
+ *
+ * <p>That second half cannot be done the way the impedance split is back-filled. That has a *tell*:
+ * a choice naming either new id was made after it. A single new id has none, so a list without it is
+ * indistinguishable from one the user deliberately unticked, and back-filling unconditionally would
+ * mean unticking it never sticks — for exactly the user who has the feature and does not want it in
+ * the report. So the choice records what it was offered when it was made, and anything added since
+ * is new rather than declined. `offeredWhenSaved` null or empty (a document written before that was
+ * recorded) means every element is new exactly once; the choice is rewritten with its own offered
+ * list the next time it is saved, and an untick after that sticks.</p>
+ */
+export function storedChoiceElements(
+  offered: readonly ReportElementId[],
+  stored: readonly string[],
+  offeredWhenSaved: readonly string[] | null | undefined,
+): ReportElementId[] {
+  const meant = migrateStoredElements(stored)
+  const known = offeredWhenSaved ?? []
+  return offered.filter((id) => meant.includes(id) || !known.includes(id))
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useChartDisplay } from '../composables/useChartDisplay'
 import { useExperimental384k } from '../composables/useExperimental384k'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
@@ -12,6 +12,8 @@ import {
 import { SPECTRUM_UNIT_OPTIONS } from '../spectrumUnits'
 import type { SegmentedOption } from '../panels/segmented'
 import type { HarmonicMarkerUnit } from '../spectrumUnits'
+import { MAX_ANNOTATIONS, type AnnotationStyle } from '../measurements/spectrumAnnotations'
+import AnnotationRows from './AnnotationRows.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
 
@@ -37,10 +39,36 @@ const {
   showWeightingCurve,
   showHarmonicMarkers,
   harmonicMarkerUnit,
+  annotations,
+  annotationArmed,
+  armAnnotation,
   requestAutofitY,
   requestAutofitX,
   requestResetPeakHold,
 } = useChartDisplay()
+
+/**
+ * Which style the Add button arms the chart for. A local ref rather than a stored setting: it is a
+ * choice about the next click, not about the measurement, and it is the one control here that
+ * nothing is read back from.
+ */
+const annotationStyle = ref<AnnotationStyle>('point')
+
+const ANNOTATION_STYLE_OPTIONS: SegmentedOption<AnnotationStyle>[] = [
+  { value: 'point', label: 'Point', title: 'A marker on the trace with a label beside it, which can be dragged clear.' },
+  { value: 'frequency', label: 'Frequency', title: 'A dashed rule at one frequency, labelled at the top of the plot.' },
+]
+
+const annotationsFull = computed(() => annotations.value.length >= MAX_ANNOTATIONS)
+
+function onAddAnnotation() {
+  armAnnotation(annotationArmed.value === null ? annotationStyle.value : null)
+}
+
+function removeAllAnnotations() {
+  annotations.value = []
+  armAnnotation(null)
+}
 
 // FFT settings' L/R checkboxes (SpectrumConfigPanel.vue) are the source of truth for whether a
 // channel is processed at all — a channel turned off there has no data to show, so its own
@@ -230,6 +258,53 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
           </select>
         </label>
       </div>
+    </CollapsibleSection>
+
+    <!-- The notes drawn on the chart. Here rather than in Display below because it is about what the
+         chart carries rather than how it is drawn, and because it is reached while reading the chart.
+         The icon and tone are passed explicitly, which is what a new panel does -- the title table in
+         panels/panelIcons.ts exists for the panels that predate it. -->
+    <CollapsibleSection title="Annotations" size="xs" icon="notes" tone="violet">
+      <div class="grid grid-cols-2 gap-2.5">
+        <SegmentedToggle
+          v-model="annotationStyle"
+          :options="ANNOTATION_STYLE_OPTIONS"
+          group-label="Annotation style"
+        />
+        <button
+          type="button"
+          class="btn-panel-accent"
+          :disabled="annotationsFull && annotationArmed === null"
+          :title="
+            annotationsFull && annotationArmed === null
+              ? `${MAX_ANNOTATIONS} is the most one chart carries.`
+              : 'Arms the chart: the next click on it places an annotation.'
+          "
+          @click="onAddAnnotation"
+        >
+          {{ annotationArmed === null ? 'Add' : 'Cancel' }}
+        </button>
+      </div>
+      <p v-if="annotationArmed !== null" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+        Click the chart to place it — the click snaps to the nearest peak.
+      </p>
+      <p
+        v-else-if="annotations.length === 0"
+        class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400"
+      >
+        No annotations. Add one, then click the chart. They are drawn on screenshots and in the report,
+        and a saved result keeps the ones it was saved with.
+      </p>
+      <AnnotationRows v-model="annotations" />
+      <button
+        v-if="annotations.length > 0"
+        type="button"
+        class="btn-panel-accent"
+        title="Removes every annotation from this chart."
+        @click="removeAllAnnotations"
+      >
+        Remove all
+      </button>
     </CollapsibleSection>
 
     <!-- text-xs throughout, the same size SweepDisplayPanel uses, so the two screens' display

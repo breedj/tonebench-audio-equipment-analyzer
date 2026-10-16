@@ -330,6 +330,56 @@ public class MeasurementRepositoryTests
         }
     }
 
+    [Fact]
+    public async Task UpdateResultParamsJson_WritesTheDocumentAndLeavesTheOtherResultsAlone()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var (measurementRepo, typeId, _) = await SetUpAsync(path);
+            long edited = await measurementRepo.SaveResultAsync(
+                BuildSaveRequest(typeId, channels: 1, binCount: 8, seed: 1) with { ParamsJson = """{"fftSize":8192}""" },
+                CancellationToken.None);
+            long untouched = await measurementRepo.SaveResultAsync(
+                BuildSaveRequest(typeId, channels: 1, binCount: 8, seed: 2) with { ParamsJson = """{"fftSize":4096}""" },
+                CancellationToken.None);
+
+            Assert.True(await measurementRepo.UpdateResultParamsJsonAsync(edited, """{"fftSize":8192,"chartAnnotations":[]}""", CancellationToken.None));
+
+            Assert.Equal(
+                """{"fftSize":8192,"chartAnnotations":[]}""",
+                (await measurementRepo.GetResultAsync(edited, CancellationToken.None))!.ParamsJson);
+            Assert.Equal(
+                """{"fftSize":4096}""",
+                (await measurementRepo.GetResultAsync(untouched, CancellationToken.None))!.ParamsJson);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateResultParamsJson_OnAResultInTheTrash_ChangesNothing()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var (measurementRepo, typeId, _) = await SetUpAsync(path);
+            long resultId = await measurementRepo.SaveResultAsync(
+                BuildSaveRequest(typeId, channels: 1, binCount: 8, seed: 1) with { ParamsJson = """{"fftSize":8192}""" },
+                CancellationToken.None);
+            Assert.True(await measurementRepo.TrashResultAsync(resultId, CancellationToken.None));
+
+            // A trashed result is not editable, for the reason UpdateResultAsync excludes one.
+            Assert.False(await measurementRepo.UpdateResultParamsJsonAsync(resultId, """{"replaced":true}""", CancellationToken.None));
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
     private static async Task<(MeasurementRepository MeasurementRepo, long TypeId, ProjectRepository ProjectRepo)> SetUpAsync(
         string path, string typeParamsJson = "{}")
     {

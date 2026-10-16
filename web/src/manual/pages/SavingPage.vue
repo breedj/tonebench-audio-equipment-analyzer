@@ -270,7 +270,9 @@ const { showPage } = useManual()
         block (peak, gate, what the gate resolves, the record, the reference, the records taken, the
         generator level and the removed DUT delay) and, when harmonics were extracted, each order's
         level at 100 Hz, 1 kHz and 10 kHz with the frequency it stays valid to. For an FFT the <strong>Metrics</strong> tiles chosen
-        with the Metrics button, the <strong>Harmonics table</strong>, and the
+        with the Metrics button, the <strong>Harmonics table</strong>, the
+        <strong>Annotations</strong> drawn on the chart as a numbered table (the numbers are the
+        labels on the chart image, and a result prints the annotations it was saved with), and the
         <strong>Oscilloscope</strong> and <strong>Spectrogram</strong> under the spectrum. Those last
         two exist only for the measurement on screen (a stored result keeps no waveform and no
         history), and the spectrogram only while the display panel shows it. Until you choose, a report

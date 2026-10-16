@@ -154,6 +154,10 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
   history: { icon: 'clock', tone: 'amber' },
   'history details': { icon: 'clock', tone: 'amber' },
   notes: { icon: 'notes', tone: 'green' },
+  // The FFT chart's annotations -- a note *on* a chart rather than beside a measurement, hence its
+  // own hue. The panel passes these explicitly, as a new panel should; the row is here because the
+  // title list in panelIcons.test.ts asserts every rendered title resolves to something deliberate.
+  annotations: { icon: 'notes', tone: 'violet' },
   'copy as…': { icon: 'copy', tone: 'green' },
 
   gate: { icon: 'gate', tone: 'teal' },

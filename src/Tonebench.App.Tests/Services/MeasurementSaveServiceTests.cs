@@ -134,7 +134,7 @@ public class MeasurementSaveServiceTests
             // acquiring-but-otherwise-nonexistent measurementTypeId (1) would surface as a
             // foreign-key-shaped failure instead of this one if the guard clause ran too late.
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                saveService.SaveAsync(measurementTypeId: 1, name: "test", notes: null, CancellationToken.None));
+                saveService.SaveAsync(measurementTypeId: 1, name: "test", notes: null, annotations: null, CancellationToken.None));
         }
         finally
         {

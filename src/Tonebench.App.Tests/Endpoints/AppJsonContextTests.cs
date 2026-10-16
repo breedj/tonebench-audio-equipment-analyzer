@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Tonebench.App.Endpoints;
@@ -46,6 +47,33 @@ public class AppJsonContextTests
             missing.Count == 0,
             "These endpoint DTOs have no source-generated JSON metadata, so they will throw on a "
                 + $"trimmed publish: {string.Join(", ", missing)}");
+    }
+
+    /// <summary>
+    /// The annotation list is the one nested type on this surface that lives in another assembly
+    /// (<c>Tonebench.Data</c>), so it has no line of its own and relies entirely on being reachable
+    /// from a registered root. Serialized through a resolver that is <i>only</i> the generated
+    /// context, which is what a trimmed publish has: missing metadata throws here rather than on a
+    /// bench.
+    /// </summary>
+    [Fact]
+    public void TheAnnotationListRoundTripsThroughTheSourceGeneratedResolver()
+    {
+        var contextType = typeof(FrequencyResponseStartRequest).Assembly
+            .GetTypes()
+            .Single(t => t.Name == "AppJsonContext");
+        var context = (JsonSerializerContext)contextType
+            .GetProperty("Default", BindingFlags.Public | BindingFlags.Static)!
+            .GetValue(null)!;
+        var options = new JsonSerializerOptions { TypeInfoResolver = context };
+
+        var request = new UpdateMeasurementRequest(
+            "renamed", null, [new Tonebench.Data.SpectrumAnnotation(1, "point", "Mains hum", 50.0, -98.2, 0, 0.45, 14.0)]);
+
+        string json = JsonSerializer.Serialize(request, typeof(UpdateMeasurementRequest), options);
+        var back = (UpdateMeasurementRequest?)JsonSerializer.Deserialize(json, typeof(UpdateMeasurementRequest), options);
+
+        Assert.Equal(request.ChartAnnotations, back!.ChartAnnotations);
     }
 
     /// <summary>

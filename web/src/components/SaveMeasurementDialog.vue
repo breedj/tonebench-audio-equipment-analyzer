@@ -3,6 +3,7 @@ import { computed, reactive, watch } from 'vue'
 import Modal from './Modal.vue'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
+import { useChartDisplay } from '../composables/useChartDisplay'
 import { isCrosstalkKind, isFrequencyResponseKind, isImpedanceKind, isOutputImpedanceKind,
   isImpulseResponseKind, isImdSweepKind, isSweepKind } from '../measurements/kinds'
 
@@ -18,6 +19,9 @@ const { save, saveSweep, saveImdSweep, saveResponse, saveImpulse,
     saveImpedance, saveCrosstalk, saveOutputImpedance, error } = useMeasurements()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
+
+// The spectrum chart's annotations, for the FFT arm of onSave below.
+const { annotations: chartAnnotations } = useChartDisplay()
 
 const form = reactive({
   name: '',
@@ -62,7 +66,11 @@ async function onSave() {
   // The IMD sweep before the generic sweep arm: it is a sweep kind, but its own runner holds the points.
   else if (isImdSweepKind(currentType.value.kind)) await saveImdSweep(req)
   else if (isSweepKind(currentType.value.kind)) await saveSweep(req)
-  else await save(req)
+  // The FFT arm is the only one that carries annotations: they are drawn on the spectrum chart, and
+  // this is where a result takes its own frozen copy of them. Sent with the save rather than read
+  // back off the measurement type afterwards, because the type's copy is only as fresh as the last
+  // time the measurement itself was saved -- see SaveMeasurementRequest.chartAnnotations.
+  else await save({ ...req, chartAnnotations: chartAnnotations.value })
   emit('saved')
   emit('close')
 }

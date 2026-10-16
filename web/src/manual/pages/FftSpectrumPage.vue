@@ -689,6 +689,33 @@ const { showPage } = useManual()
       are only hidden: what they showed is still there when they are ticked back on.
     </p>
 
+    <h2>Annotations</h2>
+    <p>
+      A note drawn on the spectrum itself, for the thing you want a reader — or yourself next month —
+      to look at. Pick a style in the <strong>Annotations</strong> panel and press
+      <strong>Add</strong>: the chart arms, and the next click on it places the annotation. The click
+      snaps to the nearest peak, so clicking near the third harmonic rules exactly on it. Type the
+      note and press Enter; Escape leaves a note you have not typed anything into out altogether.
+    </p>
+    <p>
+      <strong>Point</strong> marks one place on the trace — a dot at its frequency and level, a short
+      line, and the note in a box you can drag clear of the curve. <strong>Frequency</strong> marks a
+      frequency alone, as a dashed rule down the plot with the note at the top; several of those stack
+      into rows so they do not cover each other. The panel lists them in the order they read across
+      the chart, numbered the same way the labels are, and each row can be retyped — the note, the
+      frequency, and a point's level in dBV — or deleted. <strong>Remove all</strong> clears the
+      chart. One chart carries up to 24.
+    </p>
+    <p>
+      The annotations are saved with the measurement, so they are still there after a restart, and a
+      <em>result</em> keeps the ones that were on the chart when it was saved: changing the
+      measurement's annotations later does not rewrite what a result was saved with. To correct a
+      saved result's notes, open <strong>Edit</strong> on its history row — the list there is the same
+      one, without the chart to click on. They are drawn on screenshots and on the report's chart, and
+      the report's <strong>Annotations</strong> element lists them in a table whose numbers are the
+      labels on the picture.
+    </p>
+
     <h2>Zooming</h2>
     <p>
       Drag horizontally across the spectrum to zoom the frequency axis; double-click, or press

@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import Modal from './Modal.vue'
+import AnnotationRows from './AnnotationRows.vue'
 import MeasurementKindChip from './MeasurementKindChip.vue'
 import { useMeasurements } from '../composables/useMeasurements'
 import { useProjects } from '../composables/useProjects'
-import type { MeasurementSummary } from '../api/client'
+import { FFT_SPECTRUM_KIND } from '../measurements/kinds'
+import { parseAnnotations, type SpectrumAnnotation } from '../measurements/spectrumAnnotations'
+import { api, type MeasurementSummary } from '../api/client'
 
 const props = defineProps<{ open: boolean; item: MeasurementSummary | null }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -25,18 +28,52 @@ const form = reactive({
   notes: '',
 })
 
+/**
+ * This result's own annotations, read out of its stored `params_json`.
+ *
+ * <p>The list here is the only way to reach them once a result is saved: annotations are placed by
+ * clicking the <i>live</i> chart, and nothing in this app puts a stored FFT result back on it. The
+ * summary this dialog is handed carries a name and notes only, so the fetch is unavoidable.</p>
+ *
+ * <p><b>Null means they could not be read</b>, which is what keeps a failed fetch from wiping them:
+ * onSave then sends nothing for the field, and the server leaves the stored list alone.</p>
+ */
+const annotations = ref<SpectrumAnnotation[] | null>(null)
+const annotationsUnreadable = ref(false)
+const isFft = computed(() => kind.value === FFT_SPECTRUM_KIND)
+
+async function loadAnnotations(resultId: number) {
+  annotations.value = null
+  annotationsUnreadable.value = false
+  try {
+    const detail = await api.getMeasurement(resultId)
+    annotations.value = parseAnnotations((JSON.parse(detail.paramsJson) as { chartAnnotations?: unknown }).chartAnnotations)
+  } catch {
+    annotationsUnreadable.value = true
+  }
+}
+
 watch(
   () => props.open,
   (open) => {
     if (!open || !props.item) return
     form.name = props.item.name
     form.notes = props.item.notes ?? ''
+    annotations.value = null
+    annotationsUnreadable.value = false
+    if (isFft.value) void loadAnnotations(props.item.resultId)
   },
 )
 
 async function onSave() {
   if (!props.item || !form.name.trim()) return
-  await update(props.item.resultId, { name: form.name.trim(), notes: form.notes.trim() || null })
+  // The field is left off entirely unless the list was read: omitted means "leave them alone", and
+  // an empty array would mean "cleared" — see UpdateMeasurementRequest.
+  await update(props.item.resultId, {
+    name: form.name.trim(),
+    notes: form.notes.trim() || null,
+    ...(annotations.value === null ? {} : { chartAnnotations: annotations.value }),
+  })
   emit('saved')
   emit('close')
 }
@@ -79,6 +116,29 @@ async function onSave() {
         </label>
 
         <p v-if="error" class="text-[12px] text-red-600 dark:text-red-400">{{ error }}</p>
+      </div>
+
+      <!-- shrink-0, like every direct child of a scrolling dialog body: .dialog-card hides its
+           overflow, so a card the flex column shrank would clip its own content and read as a
+           failed load rather than as a missing scrollbar. -->
+      <div v-if="isFft" class="dialog-card mt-3 shrink-0 flex flex-col gap-3 p-3.5">
+        <div class="flex flex-col gap-1">
+          <span class="text-[12px] font-semibold text-neutral-700 dark:text-neutral-200">Annotations</span>
+          <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+            Drawn on this result's chart and listed in its report. Add new ones by clicking the live
+            chart.
+          </p>
+        </div>
+        <p v-if="annotationsUnreadable" class="text-[11px] text-neutral-500 dark:text-neutral-400">
+          Could not read this result's annotations. Saving will leave them as they are.
+        </p>
+        <p
+          v-else-if="annotations !== null && annotations.length === 0"
+          class="text-[11px] text-neutral-500 dark:text-neutral-400"
+        >
+          This result has none.
+        </p>
+        <AnnotationRows v-if="annotations !== null" v-model="annotations" />
       </div>
     </div>
 

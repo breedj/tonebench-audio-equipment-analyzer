@@ -126,7 +126,7 @@ public class IntermodulationTypeParamsTests
             var snapshot = h.Pipeline.LatestSnapshots().Single();
             Assert.NotNull(snapshot.Meters?.Intermodulation);
 
-            long resultId = await h.SaveService.SaveAsync(typeId, "imd capture", null, CancellationToken.None);
+            long resultId = await h.SaveService.SaveAsync(typeId, "imd capture", null, null, CancellationToken.None);
             var detail = await h.Measurements.GetResultAsync(resultId, CancellationToken.None);
 
             Assert.NotNull(detail);

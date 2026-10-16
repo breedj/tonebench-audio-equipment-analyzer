@@ -126,7 +126,7 @@ public class WeightingTypeParamsTests
             // what the trace was captured under.
             h.Pipeline.Options = h.Pipeline.Options with { Weighting = new WeightingSpec(WeightingStandard.RiaaRecord) };
 
-            long resultId = await h.SaveService.SaveAsync(typeId, "weighted capture", null, CancellationToken.None);
+            long resultId = await h.SaveService.SaveAsync(typeId, "weighted capture", null, null, CancellationToken.None);
             var detail = await h.Measurements.GetResultAsync(resultId, CancellationToken.None);
 
             Assert.NotNull(detail);

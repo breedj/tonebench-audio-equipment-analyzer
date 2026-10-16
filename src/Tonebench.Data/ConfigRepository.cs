@@ -512,7 +512,18 @@ public sealed record UserWeightingTable(string Name, string? SourcePath, IReadOn
 /// <param name="Elements">The element ids to include, in the client's own order.</param>
 /// <param name="Views">Which of the kind's chart views to include (the client's ids); null on a document written before views were chosen.</param>
 /// <param name="Mode">How several measurements share a report: <c>combined</c> (one chart) or <c>individual</c> (a chart each); null before it existed.</param>
-public sealed record ReportKindSettings(string[] Elements, string[]? Views = null, string? Mode = null);
+/// <param name="Offered">
+/// The element ids the Report dialog offered when this choice was made. It is what tells an element
+/// the user <i>declined</i> from one that did not exist yet: the client includes an element its
+/// stored choice was never offered, so a newly added one reaches a bench that has already saved a
+/// choice, and an untick after that sticks. Null on a document written before it was recorded, which
+/// reads as "offered nothing", i.e. every element is new exactly once.
+/// </param>
+public sealed record ReportKindSettings(
+    string[] Elements,
+    string[]? Views = null,
+    string? Mode = null,
+    string[]? Offered = null);
 
 /// <summary>
 /// The report settings document, one entry per measurement kind. Lives here rather than in the
@@ -531,6 +542,7 @@ public sealed record ReportSettingsConfig(Dictionary<string, ReportKindSettings>
                              && kind.Value?.Elements is { } elements
                              && elements.All(e => !string.IsNullOrWhiteSpace(e))
                              && (kind.Value.Views is null || kind.Value.Views.All(v => !string.IsNullOrWhiteSpace(v)))
+                             && (kind.Value.Offered is null || kind.Value.Offered.All(e => !string.IsNullOrWhiteSpace(e)))
                              && kind.Value.Mode is null or "combined" or "individual");
 }
 

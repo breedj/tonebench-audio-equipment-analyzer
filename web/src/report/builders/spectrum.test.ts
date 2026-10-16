@@ -7,7 +7,8 @@ import { NO_WEIGHTING } from '../../weighting'
 import type { StimulusSummary } from '../../metrics'
 import type { ReportSubject } from '../types'
 import { chapterSections } from './index'
-import { harmonicsSections, metricsSections, multitoneSections } from './spectrum'
+import { annotationsSections, harmonicsSections, metricsSections, multitoneSections } from './spectrum'
+import type { SpectrumAnnotation } from '../../measurements/spectrumAnnotations'
 
 /** A stored FFT result the way MeasurementSaveService writes one: a metric row per meter and a pair per harmonic. */
 const detail: MeasurementDetail = {
@@ -238,20 +239,29 @@ describe('spectrum report sections', () => {
 })
 
 describe('report element defaults', () => {
-  it('offers the FFT its metrics, harmonics and the two secondary charts', () => {
+  it('offers the FFT its metrics, harmonics, annotations and the two secondary charts', () => {
     expect(reportElementsForKind('FFTSpectrum').map((e) => e.id)).toEqual([
       'chart',
       'description',
       'settings',
       'metrics',
       'harmonics',
+      'annotations',
       'oscilloscope',
       'spectrogram',
     ])
   })
 
   it('includes everything a kind offers except the settings until the user chooses', () => {
-    expect(defaultReportElements('FFTSpectrum')).toEqual(['chart', 'description', 'metrics', 'harmonics', 'oscilloscope', 'spectrogram'])
+    expect(defaultReportElements('FFTSpectrum')).toEqual([
+      'chart',
+      'description',
+      'metrics',
+      'harmonics',
+      'annotations',
+      'oscilloscope',
+      'spectrogram',
+    ])
     expect(defaultReportElements('FrequencyResponse')).toEqual(['chart', 'description', 'measurements'])
     expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description', 'measurements'])
     expect(defaultReportElements('Impedance')).toEqual(['chart', 'description', 'measurements', 'component', 'equivalent'])
@@ -458,5 +468,64 @@ describe('multitone', () => {
     const metricRows = metricsSections(withMultitone).find((s) => s.title === 'Metrics — L')
     expect(metricRows?.kind === 'keyValues' && (metricRows.rows ?? []).some((r) => r.label === 'TD+N %')).toBe(true)
     expect(harmonicsSections(subjectOf([])).map((s) => s.title)).not.toContain('Multitone — L')
+  })
+})
+
+describe('the annotations table', () => {
+  function annotated(annotations: SpectrumAnnotation[]) {
+    const subject = subjectOf([])
+    if (subject.data.kind !== 'spectrum') throw new Error('not a spectrum subject')
+    subject.data.display.annotations.value = annotations
+    return subject
+  }
+
+  const hum: SpectrumAnnotation = {
+    id: 2,
+    style: 'point',
+    text: 'Mains hum',
+    freqHz: 50,
+    levelDbv: -98.24,
+    channel: 0,
+    labelOffsetOctaves: 0.4,
+    labelOffsetDb: 12,
+  }
+  const corner: SpectrumAnnotation = {
+    id: 1,
+    style: 'frequency',
+    text: 'Bandwidth corner',
+    freqHz: 21500,
+    levelDbv: null,
+    channel: null,
+    labelOffsetOctaves: 0,
+    labelOffsetDb: 0,
+  }
+
+  it('prints the annotations numbered the way the chart numbers them', () => {
+    const [section] = annotationsSections(annotated([corner, hum]))
+    expect(section.title).toBe('Annotations')
+    expect(section.headers).toEqual(['#', 'Frequency', 'Level', 'Channel', 'Note'])
+    // Left to right, whatever order they are stored in -- the same numbering the chart's badges use.
+    expect(section.cells).toEqual([
+      ['1', '50.00 Hz', '-98.2 dBV', 'L', 'Mains hum'],
+      ['2', '21.50 kHz', '\u2014', '\u2014', 'Bandwidth corner'],
+    ])
+  })
+
+  it('prints nothing at all when there are none', () => {
+    expect(annotationsSections(annotated([]))).toEqual([])
+  })
+
+  it('omits the channel column when no annotation names one', () => {
+    const [section] = annotationsSections(annotated([corner]))
+    expect(section.headers).toEqual(['#', 'Frequency', 'Level', 'Note'])
+    expect(section.cells).toEqual([['1', '21.50 kHz', '\u2014', 'Bandwidth corner']])
+  })
+
+  it('is built for an FFT subject only when its element is chosen', () => {
+    const subject = annotated([hum])
+    const titles = (elements: string[]) =>
+      chapterSections(subject, elements as never).map((section) => section.title)
+    expect(titles(['annotations'])).toContain('Annotations')
+    expect(titles(['metrics'])).not.toContain('Annotations')
   })
 })

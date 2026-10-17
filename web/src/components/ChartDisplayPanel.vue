@@ -264,8 +264,12 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
          chart carries rather than how it is drawn, and because it is reached while reading the chart.
          The icon and tone are passed explicitly, which is what a new panel does -- the title table in
          panels/panelIcons.ts exists for the panels that predate it. -->
-    <CollapsibleSection title="Annotations" size="xs" icon="notes" tone="violet">
-      <div class="grid grid-cols-2 gap-2.5">
+    <CollapsibleSection title="Annotations" size="xs" icon="notes" tone="violet" :default-open="false">
+      <!-- The style picker takes whatever the button leaves, rather than the two splitting the row
+           evenly: half a rail is not enough for "Frequency" and the word was clipped (Joost,
+           2026-10-17). The button is a fixed width rather than sized to its own label, or the
+           picker beside it would jump sideways every time Add became Cancel. -->
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2.5">
         <SegmentedToggle
           v-model="annotationStyle"
           :options="ANNOTATION_STYLE_OPTIONS"
@@ -273,7 +277,7 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
         />
         <button
           type="button"
-          class="btn-panel-accent"
+          class="btn-panel-accent w-[3.75rem] px-0"
           :disabled="annotationsFull && annotationArmed === null"
           :title="
             annotationsFull && annotationArmed === null

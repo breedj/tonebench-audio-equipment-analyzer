@@ -10,6 +10,7 @@ import { sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 import BusyNote from './BusyNote.vue'
+import InlineCodeText from './InlineCodeText.vue'
 
 /**
  * `sweepTarget` is set when the open measurement is a THD-vs-frequency one, where a `.step`ped run
@@ -251,7 +252,7 @@ async function submit() {
       </p>
 
       <p v-if="error" class="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-        {{ error }}
+        <InlineCodeText :text="error" />
       </p>
 
       <template v-if="info">
@@ -313,7 +314,7 @@ async function submit() {
           :key="warning"
           class="mb-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
         >
-          {{ warning }}
+          <InlineCodeText :text="warning" />
         </p>
 
         <div class="grid gap-4 sm:grid-cols-2">

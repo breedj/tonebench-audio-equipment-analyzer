@@ -14,6 +14,7 @@ import { sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 import BusyNote from './BusyNote.vue'
+import InlineCodeText from './InlineCodeText.vue'
 
 const props = defineProps<{ open: boolean; measurementTypeId: number | null }>()
 const emit = defineEmits<{ close: []; imported: [resultIds: number[]] }>()
@@ -165,7 +166,7 @@ async function submit() {
       </p>
 
       <p v-if="error" class="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-        {{ error }}
+        <InlineCodeText :text="error" />
       </p>
 
       <template v-if="info">
@@ -201,7 +202,7 @@ async function submit() {
           :key="warning"
           class="mb-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
         >
-          {{ warning }}
+          <InlineCodeText :text="warning" />
         </p>
 
         <fieldset v-if="isStepped" class="mb-3 rounded border border-neutral-200 p-2 dark:border-neutral-700">

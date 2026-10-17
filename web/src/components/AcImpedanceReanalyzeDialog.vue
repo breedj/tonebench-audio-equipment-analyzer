@@ -20,6 +20,7 @@ import {
 } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import BusyNote from './BusyNote.vue'
+import InlineCodeText from './InlineCodeText.vue'
 
 const props = defineProps<{ open: boolean; resultId: number | null }>()
 const emit = defineEmits<{ close: []; reanalyzed: [resultId: number] }>()
@@ -98,7 +99,7 @@ async function apply() {
       </p>
 
       <p v-if="error" class="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-        {{ error }}
+        <InlineCodeText :text="error" />
       </p>
 
       <template v-if="stored">

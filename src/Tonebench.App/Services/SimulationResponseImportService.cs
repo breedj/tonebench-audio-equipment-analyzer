@@ -145,8 +145,10 @@ public sealed class SimulationResponseImportService(
         if (sweeps.Count > 1)
         {
             warnings.Add(
-                $"This is a stepped (`.step`) run: {sweeps.Count} sweeps in one file. Each one is imported as a " +
-                "result of its own, so they can be shown over each other and deleted separately." +
+                // Only the count: what a stepped import then does with the sweeps is said beside the
+                // checkboxes that pick them, the way the transient dialog's pair already divides it.
+                // Said in both places it was the same sentence twice, one under the other.
+                $"This is a stepped (`.step`) run: {sweeps.Count} sweeps in one file." +
                 (sweeps[^1].Label is null
                     ? " They are numbered, because the simulator records what it stepped only on the console."
                     : ""));
@@ -173,7 +175,7 @@ public sealed class SimulationResponseImportService(
             warnings.Add(
                 $"This sweep has {axis.PointsPerDecade:F0} points per decade, which is " +
                 $"{(Math.Pow(10.0, 1.0 / Math.Max(axis.PointsPerDecade, 1.0)) - 1.0) * 100.0:F0} % between " +
-                "points -- a -3 dB corner can be located no more closely than that. Raise the density, e.g. " +
+                "points — a -3 dB corner can be located no more closely than that. Raise the density, e.g. " +
                 "`.ac dec 100 <start> <stop>`.");
         }
 
@@ -229,7 +231,7 @@ public sealed class SimulationResponseImportService(
         {
             throw new FormatException(
                 $"{name} has a frequency axis that goes backwards at point {starts[1]}, and its header does not " +
-                "say it is a stepped (`.step`) run -- a stepped file from either simulator carries a `stepped` " +
+                "say it is a stepped (`.step`) run — a stepped file from either simulator carries a `stepped` " +
                 "flag, and this one does not. Re-run the simulation.");
         }
 
@@ -762,7 +764,7 @@ public sealed class SimulationResponseImportService(
         string isWhat = variable.Unit.Length == 0 ? $"a \"{variable.Type}\" trace" : $"in {variable.Unit}";
         throw new FormatException(
             $"{Path.GetFileName(path)}'s {variable.Name} is {isWhat}, not {what}. An impedance is volts over " +
-            "amps, so this import needs one of each -- a node voltage, and the current through the source " +
+            "amps, so this import needs one of each — a node voltage, and the current through the source " +
             "driving it.");
     }
 
@@ -797,7 +799,7 @@ public sealed class SimulationResponseImportService(
         if (spec.RightChannelIsReference != stored.RightChannelIsReference && (leftRow is null || rightRow is null))
         {
             throw new ArgumentException(
-                "This result holds only one curve, so there is nothing to divide it by -- which of two traces is " +
+                "This result holds only one curve, so there is nothing to divide it by — which of two traces is " +
                 "the reference can only be changed on a result that imported both. Import the file again with a " +
                 "reference trace if you need it.");
         }
@@ -999,7 +1001,7 @@ public sealed class SimulationResponseImportService(
         {
             warnings.Add(
                 $"The reference trace varies by {max - min:F2} dB across the sweep, so it is loaded by the " +
-                "circuit rather than being a stiff source. Dividing by it -- which this import is doing -- is " +
+                "circuit rather than being a stiff source. Dividing by it — which this import is doing — is " +
                 "what makes the result the circuit's own gain.");
         }
     }

@@ -163,11 +163,11 @@ public sealed class SimulationImportService(
             string why = header.Flavour switch
             {
                 SpiceFlavour.LTspice when !header.IsUncompressed =>
-                    "It was saved with LTspice's waveform compression on, which discards most of the samples -- " +
+                    "It was saved with LTspice's waveform compression on, which discards most of the samples — " +
                     "add `.options plotwinsize=0` to the schematic and run it again.",
                 SpiceFlavour.QSpice =>
                     $"Its coarsest timestep is {axis.MaxStepS * 1e6:F1} us, which can only carry " +
-                    $"{representableHz / 1e3:F1} kHz. QSpice chooses its own steps unless told otherwise -- give " +
+                    $"{representableHz / 1e3:F1} kHz. QSpice chooses its own steps unless told otherwise — give " +
                     "the transient directive a maximum step, e.g. `.tran 0 100m 0 1u`.",
                 _ =>
                     $"Its coarsest timestep is {axis.MaxStepS * 1e6:F1} us, which can only carry " +
@@ -194,8 +194,8 @@ public sealed class SimulationImportService(
         if (header.Flavour == SpiceFlavour.LTspice && !header.ValuesAreDouble)
         {
             warnings.Add(
-                "Saved at single precision. That is almost always fine -- measured, it changes harmonic levels by " +
-                "nothing down to -110 dBc -- but `.options numdgt=7` writes full precision if you need it.");
+                "Saved at single precision. That is almost always fine — measured, it changes harmonic levels by " +
+                "nothing down to -110 dBc — but `.options numdgt=7` writes full precision if you need it.");
         }
 
         double resampleRateHz = axis.ResampleRateHz(measurementHiFreqHz);
@@ -204,7 +204,7 @@ public sealed class SimulationImportService(
             warnings.Add(
                 $"This run uses adaptive timesteps, from {axis.MinStepS * 1e12:G3} ps to " +
                 $"{axis.MaxStepS * 1e6:F1} us. It will be resampled at {resampleRateHz / 1e6:F2} MHz, which is " +
-                "far more than the audio band needs -- but a run with a fixed maximum timestep is easier to " +
+                "far more than the audio band needs — but a run with a fixed maximum timestep is easier to " +
                 "trust, and much smaller. Give the transient directive a maximum step, e.g. " +
                 "`.tran 0 <stop> <start> 1u`.");
         }
@@ -258,7 +258,7 @@ public sealed class SimulationImportService(
         {
             throw new FormatException(
                 $"{name} has a time axis that goes backwards at point {starts[1]}, and its header does not say " +
-                "it is a stepped (`.step`) run -- a stepped file from either simulator carries a `stepped` flag, " +
+                "it is a stepped (`.step`) run — a stepped file from either simulator carries a `stepped` flag, " +
                 "and this one does not. Re-run the simulation.");
         }
 
@@ -315,7 +315,7 @@ public sealed class SimulationImportService(
               $"{binsBelowBandEdge:F1} bins in";
 
         warnings.Add(
-            $"This run saves {durationS * 1e3:F0} ms, which gives {binHz:F2} Hz resolution -- {severity}. " +
+            $"This run saves {durationS * 1e3:F0} ms, which gives {binHz:F2} Hz resolution — {severity}. " +
             $"Resolution is 1 divided by the saved length and no setting here can improve it, so save at " +
             $"least {neededS * 1e3:F0} ms (`.tran 0 <stop> <start>` with stop - start >= {neededS * 1e3:F0} ms) " +
             "if you need the low end.");
@@ -443,7 +443,7 @@ public sealed class SimulationImportService(
             throw new ArgumentException(
                 $"A sweep needs more than one point, and this file holds {chosen.Count} run" +
                 $"{(chosen.Count == 1 ? "" : "s")}. A `.step` over the tone frequency is what makes a transient " +
-                "run into a sweep -- e.g. `.step param freq 1k 10k 1k` beside a `.tran`. Import it on an FFT " +
+                "run into a sweep — e.g. `.step param freq 1k 10k 1k` beside a `.tran`. Import it on an FFT " +
                 "analysis measurement instead to read it as a spectrum.");
         }
 
@@ -618,7 +618,7 @@ public sealed class SimulationImportService(
             $"No tone was found in {where}: either that run produced nothing, or the loudest thing in the " +
             "analysed band is quieter than the rest of it, which no tone is. The band is " +
             $"{request.MeasurementLoFreqHz:G4}-{request.MeasurementHiFreqHzOrDefault():G4} Hz, and a tone " +
-            "outside it cannot be measured -- widen the band, or untick that run and import the rest.");
+            "outside it cannot be measured — widen the band, or untick that run and import the rest.");
     }
 
     /// <summary>
@@ -640,7 +640,7 @@ public sealed class SimulationImportService(
 
                 throw new FormatException(
                     $"{StepName(sweeps[j], runs.Count)} and {StepName(sweeps[i], runs.Count)} both measure " +
-                    $"{runs[i][0].FreqHz:G6} Hz, so there is no sweep here -- a point per frequency is what makes " +
+                    $"{runs[i][0].FreqHz:G6} Hz, so there is no sweep here — a point per frequency is what makes " +
                     "one. If the step changes something other than the tone, import this on an FFT analysis " +
                     "measurement instead, where each run becomes its own spectrum.");
             }
@@ -704,7 +704,7 @@ public sealed class SimulationImportService(
         {
             throw new ArgumentException(
                 $"This result's samples start at {spec.SamplesStartS * 1e3:F3} ms, so it cannot be analysed from " +
-                $"{spec.StartTimeS * 1e3:F3} ms -- the earlier part of the run was not imported. Import the file " +
+                $"{spec.StartTimeS * 1e3:F3} ms — the earlier part of the run was not imported. Import the file " +
                 "again from an earlier start time if you need it.");
         }
 

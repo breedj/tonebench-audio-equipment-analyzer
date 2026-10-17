@@ -81,9 +81,8 @@ const { showPage } = useManual()
       flickers.
     </p>
     <p>
-      Selecting another measurement is refused while one is running: the sidebar's rows go grey
-      and say so, and the way on is the screen's own <strong>Stop</strong> or
-      <strong>Cancel</strong>. That is deliberate — a switch stops the run, and a sweep twenty
+      Selecting another measurement is refused while one is running: the sidebar's rows go grey,
+      and the way on is the screen's own <strong>Stop</strong> or <strong>Cancel</strong>. That is deliberate — a switch stops the run, and a sweep twenty
       minutes into its grid is not something a stray click should be able to throw away. With
       nothing running, selecting another measurement silences the generator, restores that
       measurement's own settings, and puts back whatever <em>that</em> measurement last measured —

@@ -68,24 +68,75 @@ export function formatPower(watt: number, loadOhms: number): string {
 }
 
 /**
- * The metrics table's columns, in order, for one run's method. One list rather than a label
- * carried alongside every value: the header is written once per block and the rows underneath it
- * are bare values, so the two only line up if they come from the same order — see sweepMetricRow,
- * which returns exactly this many strings. Per run rather than one global list because a
- * frequency-normalized run reads nTHD/nD2… while a conventional one overlaid on it reads THD/D2…,
- * and the header is the only place that difference is stated; the IMD family renames the total and
- * the orders the same way.
+ * One column of the metrics table: its header, and which line of the *screen's* readout it is
+ * written on. Paper has one line (see {@link sweepMetricColumns}); the chart column has not, which
+ * is what `readoutLine` is for.
  */
-export function sweepMetricColumns(method: ThdMethodName, family: SweepTraceFamily, xAxis: SweepXAxis): string[] {
+interface MetricColumnSpec {
+  label: string
+  /** 0 = what was played and what came back; 1 = the distortion orders. See {@link sweepReadoutLines}. */
+  readoutLine: 0 | 1
+}
+
+/**
+ * The metrics table's columns, in order, for one run's method — with the line each is written on
+ * when the screen breaks them in two.
+ *
+ * <p>One list rather than a label carried alongside every value: the header is written once per
+ * block and the rows underneath it are bare values, so the two only line up if they come from the
+ * same order — see sweepMetricRow, which returns exactly this many strings. Per run rather than one
+ * global list because a frequency-normalized run reads nTHD/nD2… while a conventional one overlaid
+ * on it reads THD/D2…, and the header is the only place that difference is stated; the IMD family
+ * renames the total and the orders the same way.</p>
+ */
+function sweepMetricColumnSpecs(method: ThdMethodName, family: SweepTraceFamily, xAxis: SweepXAxis): MetricColumnSpec[] {
   const t = (key: SweepTraceKey) => sweepTraceLabel(key, method, family)
+  const level = (label: string): MetricColumnSpec => ({ label, readoutLine: 0 })
+  const order = (label: string): MetricColumnSpec => ({ label, readoutLine: 1 })
   return [
-    sweepXLabel(xAxis),
-    ...(showsGeneratorColumn(xAxis) ? ['Generator'] : []),
-    t('thd'), 'Magnitude', t('d2'), t('d3'), t('d4'), t('d5'), t('d6plus'), 'Power', 'Noise floor',
+    level(sweepXLabel(xAxis)),
+    ...(showsGeneratorColumn(xAxis) ? [level('Generator')] : []),
+    order(t('thd')), level('Magnitude'),
+    order(t('d2')), order(t('d3')), order(t('d4')), order(t('d5')), order(t('d6plus')),
+    level('Power'), level('Noise floor'),
     // The two band-integrated figures, printed for every sweep that has them -- an IMD run carries
     // NaN for both and formatDistortion renders that as the table's own dash.
-    ...(family === 'imd' ? [] : ['THD+N', 'SNR']),
+    ...(family === 'imd' ? [] : [level('THD+N'), level('SNR')]),
   ]
+}
+
+/**
+ * The metrics table's columns, in order, for one run's method — the flat list, which is the order
+ * {@link sweepMetricRow} returns its values in and the order the report's table prints.
+ */
+export function sweepMetricColumns(method: ThdMethodName, family: SweepTraceFamily, xAxis: SweepXAxis): string[] {
+  return sweepMetricColumnSpecs(method, family, xAxis).map((c) => c.label)
+}
+
+/**
+ * How the *screen's* readout breaks those columns into two lines, as indices into
+ * {@link sweepMetricColumns} / {@link sweepMetricRow}.
+ *
+ * <p>Fourteen columns do not fit the chart column: even at 11 px with no forced nowrap the readout
+ * wants 652 px, and the column is 533 px at a 1440 px window and 373 px at 1280 — so it scrolled
+ * sideways, and the last readings sat behind a scrollbar nobody looks for (reported 2026-10-17,
+ * after a first attempt that only narrowed it). Two lines is what Joost asked for, and this is
+ * where the split is decided rather than in the template, so the header and the values can only
+ * ever be split the same way.</p>
+ *
+ * <p>The split is by <b>meaning</b>, not by halving the list: line 0 is the level the point was
+ * played and measured at and the noise around it, line 1 is the distortion orders, which belong
+ * together and are the narrowest columns there are. Indices rather than labels because the values
+ * have to follow their own column, and `sweepMetricRow` is positional.</p>
+ *
+ * <p>Nothing here reaches the report: paper has room for one line, and
+ * {@link sweepMetricColumns} is unchanged for it.</p>
+ */
+export function sweepReadoutLines(method: ThdMethodName, family: SweepTraceFamily, xAxis: SweepXAxis): number[][] {
+  const specs = sweepMetricColumnSpecs(method, family, xAxis)
+  return [0, 1].map((line) =>
+    specs.reduce<number[]>((out, spec, i) => (spec.readoutLine === line ? [...out, i] : out), []),
+  )
 }
 
 /** One point's row of values for the metrics table, in sweepMetricColumns order, under its run's method. */

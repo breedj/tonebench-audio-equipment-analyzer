@@ -1,4 +1,7 @@
 import {
+  IMD_VS_AMPLITUDE_KIND,
+  THD_VS_AMPLITUDE_KIND,
+  THD_VS_FREQUENCY_KIND,
   isCrosstalkKind,
   isFrequencyResponseKind,
   isImpedanceKind,
@@ -76,4 +79,37 @@ export function curveOverlayScreen(kind: string | null | undefined): CurveOverla
   if (isImpedanceKind(kind)) return 'Impedance'
   if (isOutputImpedanceKind(kind)) return 'OutputImpedance'
   return null
+}
+
+/** A screen whose overlays are stored sweep points — one per sweep kind, see `sweepOverlayScreen`. */
+export type SweepOverlayScreen =
+  | typeof THD_VS_FREQUENCY_KIND
+  | typeof THD_VS_AMPLITUDE_KIND
+  | typeof IMD_VS_AMPLITUDE_KIND
+
+/**
+ * Which sweep screen a stored result may be overlaid on, or null for a kind that stores no sweep
+ * points at all.
+ *
+ * <p><b>The same trap as `curveOverlayScreen`, one family further along.</b> All three sweep kinds
+ * read back into `sweepPoints` — an IMD run is mapped onto the very same point shape, see
+ * imd/points.ts — so "does this overlay carry what my chart draws" is true for results of
+ * measurements that have nothing to do with each other. Overlays deliberately stay loaded when you
+ * move between measurements, so a THD-vs-frequency result checked on for its own screen then drew
+ * itself onto the next THD-vs-amplitude chart, and into that screen's cursor readings and its two
+ * preview charts with it (reported 2026-10-17). Its points carry a frequency that means nothing on
+ * a volts axis, so every one of them landed at an arbitrary place.</p>
+ *
+ * <p><b>Exact kind equality, and no two kinds share a screen</b> — unlike the chirp and the
+ * stepped sine above, which are two ways of measuring one curve. These three are three different
+ * measurements: a frequency sweep's x axis is hertz and an amplitude sweep's is volts, so one
+ * cannot be drawn against the other at all; and a THD run under an IMD run would be labelled with
+ * the IMD family's names (IMD, IM2…), since the labels follow the screen and not the run. The cap
+ * `useMeasurements.visibleOverlayCount` applies is already per exact kind, so this is the same
+ * partition the checkbox limit has always used.</p>
+ */
+export function sweepOverlayScreen(kind: string | null | undefined): SweepOverlayScreen | null {
+  return kind === THD_VS_FREQUENCY_KIND || kind === THD_VS_AMPLITUDE_KIND || kind === IMD_VS_AMPLITUDE_KIND
+    ? kind
+    : null
 }

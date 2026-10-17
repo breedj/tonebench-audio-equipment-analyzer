@@ -6,6 +6,7 @@ import {
   formatMagnitude,
   formatPower,
   sweepMetricColumns,
+  sweepReadoutLines,
   sweepMetricRow,
   sweepSummary,
 } from './readings'
@@ -79,6 +80,41 @@ describe('formatGenerator', () => {
     expect(formatGenerator(-20)).toBe('100 mV (-20.00 dBV)')
     expect(formatGenerator(0)).toBe('1 V (0.00 dBV)')
     expect(formatGenerator(Number.NaN)).toBe('—')
+  })
+})
+
+describe('sweepReadoutLines', () => {
+  /**
+   * The readout is written on two lines because fourteen columns do not fit the chart column
+   * (reported twice, 2026-10-17). The split is only a presentation of the flat list, so the two
+   * lines together have to BE the flat list — one index each, none missing, none twice — or the
+   * screen quietly stops reporting a figure the report still prints.
+   */
+  it('covers every column exactly once, on every method, family and axis', () => {
+    for (const method of ['Conventional', 'FrequencyNormalized'] as const) {
+      for (const family of ['thd', 'imd'] as const) {
+        for (const xAxis of ['frequency', 'outputVolt', 'outputWatt', 'inputVolt'] as const) {
+          const columns = sweepMetricColumns(method, family, xAxis)
+          const indices = sweepReadoutLines(method, family, xAxis).flat()
+          expect([...indices].sort((a, b) => a - b)).toEqual(columns.map((_, i) => i))
+        }
+      }
+    }
+  })
+
+  it('puts the level and noise figures above the distortion orders', () => {
+    const columns = sweepMetricColumns('Conventional', 'thd', 'outputVolt')
+    const [level, orders] = sweepReadoutLines('Conventional', 'thd', 'outputVolt')
+    expect(level.map((i) => columns[i])).toEqual([
+      'Output voltage', 'Generator', 'Magnitude', 'Power', 'Noise floor', 'THD+N', 'SNR',
+    ])
+    expect(orders.map((i) => columns[i])).toEqual(['THD', 'D2', 'D3', 'D4', 'D5', 'D6+'])
+  })
+
+  it('renames the orders with the run, like the header it is split from', () => {
+    const columns = sweepMetricColumns('Conventional', 'imd', 'outputVolt')
+    const [, orders] = sweepReadoutLines('Conventional', 'imd', 'outputVolt')
+    expect(orders.map((i) => columns[i])).toEqual(['IMD', 'IM2', 'IM3', 'IM4', 'IM5', 'IM6+'])
   })
 })
 

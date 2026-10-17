@@ -4,6 +4,7 @@ import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
 import { useSweep } from '../composables/useSweep'
 import { dashAttr, sweepOverlayDash } from '../measurements/sweepOverlayStyles'
+import { sweepOverlayScreen } from '../measurements/overlayScope'
 import {
   isSweepKind,
   isFrequencyResponseKind,
@@ -86,7 +87,11 @@ function isChecked(resultId: number): boolean {
 const showsSweepDash = computed(() => isSweepKind(currentKind.value))
 
 function sweepDashFor(resultId: number): string | undefined {
-  return dashAttr(sweepOverlayDash(overlays.value, resultId, sweepPoints.value.length > 0))
+  // Scoped to the open kind, like the chart's own list: a stored run of another sweep kind is not
+  // drawn, so promising it a pattern would point at a line that is not there.
+  return dashAttr(
+    sweepOverlayDash(overlays.value, resultId, sweepPoints.value.length > 0, sweepOverlayScreen(currentKind.value)),
+  )
 }
 
 // At most MAX_VISIBLE_OVERLAYS of the open type's kind may be plotted at once (see the constant for

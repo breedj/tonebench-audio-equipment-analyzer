@@ -86,7 +86,7 @@ const plotted = computed(() =>
   [
     { dash: undefined as number[] | undefined, curves: ordered.value },
     ...props.overlays.map((o) => ({
-      dash: sweepOverlayDash(props.overlays, o.id, props.harmonics.length > 0) ?? undefined,
+      dash: sweepOverlayDash(props.overlays, o.id, props.harmonics.length > 0, null) ?? undefined,
       curves: [...(o.harmonicCurves ?? [])].sort((a, b) => a.order - b.order),
     })),
   ].flatMap((run) => run.curves.map((curve) => ({ curve, dash: run.dash }))),

@@ -310,7 +310,7 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         label: overlay.name,
         stroke: t.trace,
         width: props.thickLines ? 2 : 1,
-        dash: sweepOverlayDash(props.overlays, overlay.id, props.impulse !== null) ?? undefined,
+        dash: sweepOverlayDash(props.overlays, overlay.id, props.impulse !== null, null) ?? undefined,
         points: { show: false },
         alpha: props.impulse === null ? 1 : 0.7,
       })),

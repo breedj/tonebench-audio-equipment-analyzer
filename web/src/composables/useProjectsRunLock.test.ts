@@ -37,7 +37,7 @@ describe('useProjects: selecting another measurement while one is running', () =
     vi.restoreAllMocks()
   })
 
-  it('is refused, with a reason, and nothing is stopped on the way', async () => {
+  it('is refused silently, and nothing is stopped on the way', async () => {
     const projects = useProjects()
     const cancel = vi.spyOn(api, 'cancelRuns')
     projects.setRunActive(true)
@@ -45,7 +45,9 @@ describe('useProjects: selecting another measurement while one is running', () =
     await projects.selectType(8)
 
     expect(projects.currentTypeId.value).toBe(7)
-    expect(projects.error.value).toMatch(/running/i)
+    // No message: the sidebar has already greyed the row, and a standing sentence repeating that
+    // took a line of the sidebar for the length of every run (Joost, 2026-10-17).
+    expect(projects.error.value).toBeNull()
     // The whole point: the run is still running. stopRun is what a switch would have called.
     expect(cancel).not.toHaveBeenCalled()
   })
@@ -60,15 +62,13 @@ describe('useProjects: selecting another measurement while one is running', () =
     expect(projects.error.value).toBeNull()
   })
 
-  it('goes through again once the run ends, and the refusal does not outlive it', async () => {
+  it('goes through again once the run ends', async () => {
     const projects = useProjects()
     projects.setRunActive(true)
     await projects.selectType(8)
-    expect(projects.error.value).not.toBeNull()
+    expect(projects.currentTypeId.value).toBe(7)
 
     projects.setRunActive(false)
-    expect(projects.error.value).toBeNull()
-
     await projects.selectType(8)
     expect(projects.currentTypeId.value).toBe(8)
   })

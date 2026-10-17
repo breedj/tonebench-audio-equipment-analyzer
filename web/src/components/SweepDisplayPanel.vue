@@ -21,6 +21,9 @@ import { computed, watch } from 'vue'
 import { useImdSweep } from '../composables/useImdSweep'
 import { useSweep } from '../composables/useSweep'
 import { useMeasurements } from '../composables/useMeasurements'
+import { useProjects } from '../composables/useProjects'
+import { sweepOverlays } from '../measurements/sweepOverlayStyles'
+import { sweepOverlayScreen } from '../measurements/overlayScope'
 import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
 import { AMPLITUDE_X_AXES, sweepXLabel, sweepXUnit, sweepXValue, type SweepXAxis } from '../sweep/xAxis'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
@@ -165,6 +168,10 @@ const thdMethod = computed<ThdMethodName>(() => (family.value === 'imd' ? 'Conve
 const requestedEndFreqHz = computed(() => (family.value === 'imd' ? null : thdSweep.requestedEndFreqHz.value))
 const { overlays } = useMeasurements()
 
+// The open measurement's kind, which says which stored sweeps are on the chart this panel fits.
+const { currentTypeId, types } = useProjects()
+const currentKind = computed(() => types.value.find((t) => t.id === currentTypeId.value)?.kind ?? null)
+
 /**
  * One run's points with what Autofit needs to know about them: which figures the run is about
  * (a normalized run's nTHD is not its THD, and fitting the wrong one puts the trace off-screen),
@@ -190,10 +197,13 @@ function largestAtMost(options: number[], value: number): number {
   return atMost.length > 0 ? Math.max(...atMost) : Math.min(...options)
 }
 
-/** Stored sweeps actually drawable right now — visible, and carrying points — same filter ThdSweepChart applies to its own overlays prop. */
+/**
+ * Stored sweeps actually drawable right now — the same call ThdSweepChart makes for its own
+ * overlays, kind and all: Autofit has to fit what is drawn, and a sweep of another kind is not
+ * (see measurements/overlayScope.ts).
+ */
 function activeOverlaySweeps(): SweepRun[] {
-  return overlays.value
-    .filter((o) => o.visible && o.sweepPoints?.length)
+  return sweepOverlays(overlays.value, sweepOverlayScreen(currentKind.value))
     .map((o) => ({ points: o.sweepPoints!, method: o.sweepMethod ?? 'Conventional', endFreqHz: o.sweepEndFreqHz ?? null }))
 }
 

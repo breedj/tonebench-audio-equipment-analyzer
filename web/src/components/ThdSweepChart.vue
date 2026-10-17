@@ -18,7 +18,7 @@ import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
 import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
 import { SWEEP_TRACE_COLORS } from '../sweep/traceColors'
-import { sweepMetricColumns, sweepMetricRow } from '../sweep/readings'
+import { sweepMetricColumns, sweepMetricRow, sweepReadoutLines } from '../sweep/readings'
 import {
   decadeOrFallbackSplits,
   freqMinorGridAxis,
@@ -32,6 +32,7 @@ import {
 import { interpolateOnGrid } from '../sweep/align'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { dashAttr, overlayRunIndex, sweepLineStyle, sweepOverlays } from '../measurements/sweepOverlayStyles'
+import { sweepOverlayScreen } from '../measurements/overlayScope'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
 import { exportGridStroke, exportGridTheme } from '../charts/palette'
@@ -123,6 +124,13 @@ const props = defineProps<{
    * everything else here is shared. Defaults to the THD family for the two THD screens.
    */
   traceFamily?: SweepTraceFamily
+  /**
+   * The open measurement's kind, which decides *which stored runs may be drawn here*: only that
+   * kind's. All three sweep kinds store their points in one shape, so without this a
+   * THD-vs-frequency result landed on a THD-vs-amplitude chart (see overlayScope.ts). Distinct
+   * from `traceFamily`, which only names the traces.
+   */
+  kind: string
   /**
    * The pinned cursor's x value, or null when nothing is pinned — one of this chart's own grid
    * values, emitted by `cursorPin` below and owned by the parent (App.vue), which is what makes it
@@ -326,11 +334,13 @@ const activeTraces = computed(() =>
 )
 
 /**
- * The overlays actually drawable here: visible, and carrying stored sweep points. An FFT result
- * checked on while the sweep screen is open has no points and is skipped rather than drawn empty.
- * Shared with MeasurementChecklist's swatches so both derive a run's dash from the same slot order.
+ * The overlays actually drawable here: visible, carrying stored sweep points, and of this screen's
+ * own kind. An FFT result checked on while the sweep screen is open has no points and is skipped
+ * rather than drawn empty; a sweep of another kind has points that mean nothing on this axis and is
+ * skipped too (see overlayScope.ts). Shared with MeasurementChecklist's swatches so both derive a
+ * run's dash from the same slot order.
  */
-const activeOverlays = computed(() => sweepOverlays(props.overlays))
+const activeOverlays = computed(() => sweepOverlays(props.overlays, sweepOverlayScreen(props.kind)))
 
 /**
  * Whether the live sweep occupies run 0 — the solid line. With no live sweep (a stored result opened
@@ -720,6 +730,11 @@ function metricColumns(method: ThdMethodName, traceFamily: SweepTraceFamily = fa
   return sweepMetricColumns(method, traceFamily, props.xAxis)
 }
 
+/** Which columns go on each of the readout's two lines — see sweepReadoutLines for why there are two. */
+function metricLines(method: ThdMethodName, traceFamily: SweepTraceFamily = family.value): number[][] {
+  return sweepReadoutLines(method, traceFamily, props.xAxis)
+}
+
 /** One channel's row of values for the metrics table, in metricColumns order, under its run's method. */
 function metricsFor(point: ThdSweepPoint, method: ThdMethodName): string[] {
   return sweepMetricRow(point, method, props.xAxis, props.unit, loadOhms.value)
@@ -736,6 +751,8 @@ const metricGroups = computed(() => {
     key: string
     name: string | null
     columns: string[]
+    /** Indices into `columns`/`values`, one array per readout line — see sweepReadoutLines. */
+    lines: number[][]
     rows: { key: string; label: string; colorClass: string; values: string[] }[]
   }[] = []
 
@@ -748,7 +765,8 @@ const metricGroups = computed(() => {
     ]
       .filter((r) => r.point !== null)
       .map((r) => ({ key: r.key, label: r.label, colorClass: r.colorClass, values: metricsFor(r.point!, method) }))
-    if (rows.length > 0) groups.push({ key, name, columns: metricColumns(method, traceFamily), rows })
+    if (rows.length > 0)
+      groups.push({ key, name, columns: metricColumns(method, traceFamily), lines: metricLines(method, traceFamily), rows })
   }
 
   add('live', null, thdMethod.value, props.selectedLeft, props.selectedRight, family.value)
@@ -1215,14 +1233,15 @@ onBeforeUnmount(() => {
          columns this used to be, which repeated all ten labels for each channel and again for each
          run — unreadable as a comparison, which is the only reason to show two runs at once. -->
     <!--
-      Sized to fit the chart column rather than to scroll out of it. Fourteen columns at 12 px with
-      16 px of padding each came to 1010 px in a 693 px column on a 1600 px window: the last two
-      readings were off the end and the only way to them was a horizontal scrollbar nobody looks
-      for (reported 2026-10-17). So 11 px, 8 px of padding, and -- the one that does the work --
-      no `whitespace-nowrap`, which lets "Output voltage", "Noise floor", "1 V (0.00 dBV)" and
-      "498 mW (8 Ω)" break at their spaces and each column fall back to its own widest word. The
-      numbers themselves carry no spaces, so none of them can be broken. `overflow-x-auto` stays as
-      the backstop for a narrow window, where this is taller rather than wider.
+      Sized to fit the chart column rather than to scroll out of it, and that took two goes. Fourteen
+      columns at 12 px with 16 px of padding came to 1010 px in a 693 px column; 11 px, 8 px of
+      padding and no forced `whitespace-nowrap` — so "Output voltage", "Noise floor",
+      "1 V (0.00 dBV)" and "498 mW (8 Ω)" break at their spaces and each column falls back to its own
+      widest word — took that to 652 px, which still scrolled at any window under about 1560 px
+      (reported twice, 2026-10-17). The rest is sweepReadoutLines: the columns are written on **two
+      lines**, the level and noise figures above the distortion orders. The numbers themselves carry
+      no spaces, so none of them can be broken; `overflow-x-auto` stays as the backstop for a very
+      narrow window, where this is taller rather than wider.
     -->
     <div v-if="metricGroups.length" class="overflow-x-auto border-t border-neutral-200 pt-2 dark:border-neutral-800">
       <table class="min-w-full text-[11px]">
@@ -1231,7 +1250,13 @@ onBeforeUnmount(() => {
              the live sweep reads 22 Hz and a history result reads 90 kHz. Separate tables each
              sized their own columns and the blocks came out staggered. The run's name is a
              full-width row for the same reason — a heading outside the table would not be part of
-             the column grid, and the group would drift from it. -->
+             the column grid, and the group would drift from it.
+
+             The two readout lines share that one grid as well, which is also why they are rows of
+             one table and not two tables stacked: the channel column is then the same column on
+             both, so a run's "Left" sits above its own "Left" instead of drifting from it. The
+             widths they share cost a little — a column holds the wider of the two lines' cells —
+             and that is the price of the one thing a split readout has to keep. -->
         <tbody v-for="group in metricGroups" :key="group.key">
           <tr v-if="group.name">
             <td
@@ -1242,33 +1267,31 @@ onBeforeUnmount(() => {
               {{ group.name }}
             </td>
           </tr>
-          <tr class="text-neutral-400 dark:text-neutral-500">
-            <th class="py-0.5 pr-2 text-left font-normal"><span class="sr-only">Channel</span></th>
-            <th
-              v-for="col in group.columns"
-              :key="col"
-              class="py-0.5 pr-2 text-left font-normal"
+          <template v-for="(line, lineIdx) in group.lines" :key="lineIdx">
+            <tr class="text-neutral-400 dark:text-neutral-500">
+              <th class="py-0.5 pr-2 text-left font-normal"><span class="sr-only">Channel</span></th>
+              <th v-for="i in line" :key="i" class="py-0.5 pr-2 text-left font-normal">
+                {{ group.columns[i] }}
+              </th>
+            </tr>
+            <tr
+              v-for="row in group.rows"
+              :key="`${row.key}-${lineIdx}`"
+              class="border-t border-neutral-100 dark:border-neutral-800"
             >
-              {{ col }}
-            </th>
-          </tr>
-          <tr
-            v-for="row in group.rows"
-            :key="row.key"
-            class="border-t border-neutral-100 dark:border-neutral-800"
-          >
-            <td class="py-0.5 pr-2 whitespace-nowrap" :class="row.colorClass">
-              <span class="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle"></span>
-              {{ row.label }}
-            </td>
-            <td
-              v-for="(value, i) in row.values"
-              :key="i"
-              class="py-0.5 pr-2 font-mono text-neutral-800 dark:text-neutral-100"
-            >
-              {{ value }}
-            </td>
-          </tr>
+              <td class="py-0.5 pr-2 whitespace-nowrap" :class="row.colorClass">
+                <span class="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle"></span>
+                {{ row.label }}
+              </td>
+              <td
+                v-for="i in line"
+                :key="i"
+                class="py-0.5 pr-2 font-mono text-neutral-800 dark:text-neutral-100"
+              >
+                {{ row.values[i] }}
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>

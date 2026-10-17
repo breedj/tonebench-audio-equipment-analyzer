@@ -7,7 +7,8 @@ import { useDevice } from './composables/useDevice'
 import { DEVICE_STATUS_KEY } from './simulator/hints'
 import { useSpectrumStream, type FftDisplayState } from './composables/useSpectrumStream'
 import { useMeasurements, type OverlayEntry } from './composables/useMeasurements'
-import { curveOverlayScreen, type CurveOverlayScreen } from './measurements/overlayScope'
+import { curveOverlayScreen, sweepOverlayScreen, type CurveOverlayScreen } from './measurements/overlayScope'
+import { sweepOverlays } from './measurements/sweepOverlayStyles'
 import { spectrumAxisOverlay } from './measurements/spectrumOverlayColors'
 import { useProjects } from './composables/useProjects'
 import { useTrash } from './composables/useTrash'
@@ -958,11 +959,14 @@ const sweepSelectedRight = computed(() => selectedSweepPointFor(1))
 
 /**
  * The Spectrum/Oscilloscope preview pair drawn underneath the live one for each checked history
- * item — same filter ThdSweepChart's own activeOverlays uses (visible, and actually carrying
- * sweep points), so an FFT-kind result checked on while this screen is open is silently skipped
- * rather than drawn empty.
+ * item — literally the same call ThdSweepChart's own activeOverlays makes, so the previews, the
+ * cursor readings and the chart cannot disagree about which runs are on screen. An FFT result
+ * checked on here has no points and is skipped; a sweep of another kind is skipped too, which is
+ * the whole of overlayScope.ts's `sweepOverlayScreen`.
  */
-const visibleSweepOverlays = computed(() => overlays.value.filter((o) => o.visible && o.sweepPoints?.length))
+const visibleSweepOverlays = computed(() =>
+  sweepOverlays(overlays.value, sweepOverlayScreen(currentType.value?.kind)),
+)
 
 /**
  * The one y window the spectrum previews share while their Fit-all toggle is on: every point of
@@ -5233,6 +5237,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :x-from="sweepXFrom"
                   :x-to="sweepXTo"
                   :x-axis="sweepChartXAxis"
+                  :kind="currentType?.kind ?? ''"
                   :overlays="overlays"
                   :selected-left="sweepSelectedLeft"
                   :selected-right="sweepSelectedRight"

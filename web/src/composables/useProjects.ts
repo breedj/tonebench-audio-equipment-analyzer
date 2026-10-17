@@ -38,12 +38,6 @@ const error = ref<string | null>(null)
  * anyway while a run is live.</p>
  */
 const runActive = ref(false)
-
-/**
- * What a refused switch says, in one place: `selectType` sets it as the error, and the sidebar
- * shows it on the rows it has already disabled. Two spellings of the same sentence would drift.
- */
-export const RUN_ACTIVE_MESSAGE = 'A measurement is running — stop it before opening another measurement.'
 /** False until the first GET /api/project has answered, so the shell does not flash the welcome screen on a reload of an open project. */
 const sessionLoaded = ref(false)
 let refreshPromise: Promise<void> | null = null
@@ -175,13 +169,11 @@ export function useProjects() {
    * generator/acquisition staged into loadedParams for the Run button. See SpectrumConfigPanel.vue and App.vue's runFromCurrentSettings.
    */
   async function selectType(id: number) {
-    if (id !== currentTypeId.value && runActive.value) {
-      // The sidebar disables its rows while this is true, so reaching here means a path that does
-      // not go through them -- the history list, a dialog, a keyboard shortcut. Named rather than
-      // silent: a click that does nothing reads as a broken sidebar.
-      error.value = RUN_ACTIVE_MESSAGE
-      return
-    }
+    // Silently, and that is deliberate: the sidebar has already greyed every row that would get
+    // here, so the refusal is visible before the click rather than afterwards, and the standing
+    // sentence it used to print took a line of the sidebar for the length of every run (Joost,
+    // 2026-10-17). This still guards the paths that do not go through those rows.
+    if (id !== currentTypeId.value && runActive.value) return
     if (id !== currentTypeId.value && !(await confirmDiscardCurrentIfDirty())) return
     await stopRun()
     // After the stop and before the selection moves — see `liveStateReset`. A failure here is not
@@ -234,8 +226,6 @@ export function useProjects() {
   /** Reports whether anything is measuring — see `runActive`. App.vue keeps this in step. */
   function setRunActive(active: boolean) {
     runActive.value = active
-    // The refusal above describes a state that has just ended, so it must not outlive it.
-    if (!active && error.value === RUN_ACTIVE_MESSAGE) error.value = null
   }
 
   /** Registers the foreign-live-state discard — see `liveStateReset`. App.vue calls this once. */

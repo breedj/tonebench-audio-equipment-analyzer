@@ -1,4 +1,5 @@
 import type { OverlayEntry } from '../composables/useMeasurements'
+import { sweepOverlayScreen, type SweepOverlayScreen } from './overlayScope'
 
 /**
  * Line styling for the THD-vs-frequency chart (ThdSweepChart.vue), its legend, and the sweep
@@ -61,16 +62,25 @@ export function overlayRunIndex(slot: number, liveDrawn: boolean): number {
 }
 
 /**
- * The overlays this chart can actually draw: visible, and carrying stored sweep points. An FFT
- * result checked on while the sweep screen is open has no points and is skipped rather than drawn
- * empty.
+ * The overlays this chart can actually draw: visible, carrying stored sweep points, and belonging
+ * to the screen that is asking. An FFT result checked on while a sweep screen is open has no points
+ * and is skipped rather than drawn empty.
  *
- * Filtered by shape rather than by kind (unlike fftOverlays) because that is what the chart itself
- * can consume. Shared with the checklist so the two cannot disagree about slot order -- a run's
- * dash is its position in *this* list, so both callers must derive it the same way.
+ * <p>Shape alone is not enough and `screen` is not optional -- all three sweep kinds read back into
+ * `sweepPoints`, so a THD-vs-frequency run drew itself onto a THD-vs-amplitude chart at arbitrary
+ * x positions (reported 2026-10-17). See `measurements/overlayScope.ts`. A null screen is a caller
+ * that draws no sweep at all and gets nothing, which is what the response and impulse charts want
+ * from `sweepOverlayDash`: their overlays carry curves, and the dash they need is
+ * `responseOverlayDash`'s.</p>
+ *
+ * <p>Shared with the checklist so the two cannot disagree about slot order -- a run's dash is its
+ * position in *this* list, so both callers must derive it the same way, from the same screen.</p>
  */
-export function sweepOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
-  return overlays.filter((o) => o.visible && o.sweepPoints?.length)
+export function sweepOverlays(overlays: OverlayEntry[], screen: SweepOverlayScreen | null): OverlayEntry[] {
+  if (screen === null) return []
+  return overlays.filter(
+    (o) => o.visible && o.sweepPoints?.length && sweepOverlayScreen(o.detail.kind) === screen,
+  )
 }
 
 /**
@@ -84,8 +94,13 @@ export function sweepOverlays(overlays: OverlayEntry[]): OverlayEntry[] {
  * Null for an overlay that is not currently drawn -- the checklist renders no swatch for it rather
  * than one that promises a line the chart is not showing.
  */
-export function sweepOverlayDash(overlays: OverlayEntry[], id: number, liveDrawn: boolean): number[] | null {
-  const idx = sweepOverlays(overlays).findIndex((o) => o.id === id)
+export function sweepOverlayDash(
+  overlays: OverlayEntry[],
+  id: number,
+  liveDrawn: boolean,
+  screen: SweepOverlayScreen | null,
+): number[] | null {
+  const idx = sweepOverlays(overlays, screen).findIndex((o) => o.id === id)
   if (idx < 0) return null
   return runDash(overlayRunIndex(idx, liveDrawn))
 }

@@ -633,7 +633,9 @@ function buildSeries(p: Palette): uPlot.Series[] {
       // drawn at a fixed weight ignored both checkboxes, so Thick lines and Data points changed only
       // half the chart and the comparison was between two differently-drawn curves.
       width,
-      dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? undefined,
+      // Null screen: these overlays carry curves, not sweep points, so this is always undefined --
+      // a Bode plot tells its curves apart by position. The polar chart uses responseOverlayDash.
+      dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value, null) ?? undefined,
       points,
       alpha: liveDrawn.value ? 0.7 : 1,
     })
@@ -648,7 +650,9 @@ function buildSeries(p: Palette): uPlot.Series[] {
         // Markers stay off here, as they are on the live delay curve — this follows the live
         // series it mirrors, not the magnitude's.
         width,
-        dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value) ?? undefined,
+        // Null screen: these overlays carry curves, not sweep points, so this is always undefined --
+      // a Bode plot tells its curves apart by position. The polar chart uses responseOverlayDash.
+      dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value, null) ?? undefined,
         points: { show: false },
         alpha: liveDrawn.value ? 0.7 : 1,
       })

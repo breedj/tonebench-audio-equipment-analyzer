@@ -284,6 +284,8 @@ export async function renderView(
           xFrom: window.xFrom,
           xTo: window.xTo,
           xAxis: window.xAxis,
+          // Which stored runs may be drawn under this one -- its own kind's, see overlayScope.ts.
+          kind: primary.kind,
           overlays: overlayEntries,
           selectedLeft: null,
           selectedRight: null,

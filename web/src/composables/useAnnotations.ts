@@ -14,7 +14,7 @@
  * same reason the FFT's report render injects its display source rather than importing it.</p>
  */
 
-import { nextTick, ref } from 'vue'
+import { ref } from 'vue'
 import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
 
 /** The notes drawn on the open measurement's charts. Replaced, never mutated — see addAnnotation. */
@@ -33,12 +33,6 @@ const armed = ref<AnnotationStyle | null>(null)
  */
 const numbers = ref(true)
 
-/**
- * Suppresses the dirty watchers while a measurement's stored annotations are being applied — loading
- * is the opposite of an unsaved edit. The same flag every per-kind restore uses.
- */
-let restoring = false
-
 export function useAnnotations() {
   /** Arms a chart for the next click, or disarms it. */
   function arm(style: AnnotationStyle | null) {
@@ -53,20 +47,16 @@ export function useAnnotations() {
    * has never been saved would otherwise keep the <i>previous</i> measurement's notes on screen.
    * That is deliberate for display preferences and wrong for notes, which belong to one
    * measurement.</p>
+   *
+   * <p>It carries no `restoring` flag of its own: every caller is inside its kind's own
+   * `applyStoredXDisplay`, which has already set that kind's flag, so the dirty watcher is suppressed
+   * by the time this writes. A second flag here would be one more thing to keep in step for no
+   * benefit.</p>
    */
   function applyLoaded(loaded: readonly ChartAnnotation[]) {
-    restoring = true
     annotations.value = [...loaded]
     armed.value = null
-    void nextTick(() => {
-      restoring = false
-    })
   }
 
-  /** Whether a write to {@link annotations} right now is a restore rather than a user edit. */
-  function isRestoring(): boolean {
-    return restoring
-  }
-
-  return { annotations, armed, numbers, arm, applyLoaded, isRestoring }
+  return { annotations, armed, numbers, arm, applyLoaded }
 }

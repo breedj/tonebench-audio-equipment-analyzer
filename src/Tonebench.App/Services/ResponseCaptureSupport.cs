@@ -509,6 +509,20 @@ internal static class ResponseCaptureSupport
         // a delayed DUT's physical phase runs through many turns in the passband.
         var groupDelayS = GroupDelay.FromUniformPhase(result.PhaseDeg, binHz, request.SmoothingDenominator, firstBin, lastBin);
         var phaseDelayS = GroupDelay.PhaseDelayUniform(result.PhaseDeg, binHz, firstBin, lastBin, anchorBin: reference.Index);
+
+        // The phase curve is anchored at the same bin, for the reason the phase delay is: the
+        // unwrapper starts at bin 0 and walks the sub-band junk, so what it hands out carries an
+        // arbitrary whole number of turns -- a constant that says nothing about the DUT and that
+        // the ±180° axis cannot show. Measured on a real amplifier (QA403 1077527945, 1 W into
+        // 8 Ohm, chirp from 2 Hz): a response flat to a decibel read −467° at 10 Hz and −562° at
+        // 90 kHz, i.e. a curve with 95° of real shape in it, sitting a turn and a half off the
+        // bottom of the plot with nothing drawn anywhere. Anchored, the same capture reads −107°
+        // to −202° about an inverting amplifier's own −180°.
+        //
+        // Before the add-back, never after: the delay is restored on the client, and a DUT with a
+        // real delay runs through many turns in its passband, which is exactly what anchoring must
+        // not delete. Group delay is a derivative and so is immune either way.
+        double anchorTurnsDeg = GroupDelay.WholeTurnsDeg(result.PhaseDeg[reference.Index]);
         for (int k = firstBin; k <= lastBin; k++)
         {
             groupDelayS[k] += addBackDelayS;
@@ -540,7 +554,7 @@ internal static class ResponseCaptureSupport
             // be the column's slope drawn as noise, and the group delay has already been integrated
             // over its window.
             int centre = Math.Clamp((int)Math.Round(centerBins[c]), 0, result.PhaseDeg.Length - 1);
-            phaseDeg[c] = (float)result.PhaseDeg[centre];
+            phaseDeg[c] = (float)(result.PhaseDeg[centre] - anchorTurnsDeg);
             coherence[c] = (float)result.Coherence[centre];
             groupDelay[c] = (float)groupDelayS[centre];
             phaseDelay[c] = (float)phaseDelayS[centre];

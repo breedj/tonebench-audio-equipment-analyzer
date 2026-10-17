@@ -13,6 +13,7 @@ import { PALETTE_NAMES } from '../measurements/decay'
 import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
 import { useMeasurements, type OverlayEntry } from '../composables/useMeasurements'
 import { autofitRange } from '../measurements/autofitRange'
+import { phaseSeries } from '../response/phaseCurve'
 import {
   DELAY_MAX_US,
   DELAY_MIN_US,
@@ -93,7 +94,7 @@ const delayTopUs = defineModel<number>('delayTopUs', { required: true })
 const delayBottomUs = defineModel<number>('delayBottomUs', { required: true })
 const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 
-const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable, running, latencySamples } =
+const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable, running, latencySamples, sampleRateHz } =
   useFrequencyResponse()
 
 /**
@@ -426,10 +427,21 @@ const fitTraces = computed<ResponseTrace[]>(() => {
 /**
  * Matches the chart's own `phaseTrace` — Autofit has to size the curve that is actually drawn, and
  * the phase curve belongs to the measurement rather than to the view.
+ *
+ * <p>Under `PerTrace` the chart falls back to the Left curve when no channel is checked, rather
+ * than to the right one, which with the right input as the reference is the stimulus leg. This
+ * follows it: an empty list here would leave Autofit doing nothing on a chart that is drawing a
+ * phase.</p>
  */
-const phaseTraces = computed<ResponseTrace[]>(() =>
-  phaseKind.value === 'PerTrace' ? fitTraces.value : tracesOfKind('Gain'),
-)
+const phaseTraces = computed<ResponseTrace[]>(() => {
+  if (phaseKind.value !== 'PerTrace') return tracesOfKind('Gain')
+  return fitTraces.value.length > 0 ? fitTraces.value : tracesOfKind('Left')
+})
+
+/** The three values `phaseSeries` needs to reproduce the chart's curve. */
+function restoreOptions() {
+  return { restoreDelay: restoreDelay.value, latencySamples: latencySamples.value, sampleRateHz: sampleRateHz.value }
+}
 
 function autofitDb() {
   const list = fitTraces.value.filter((t) => t.magnitudeMaxDb.length > 0)
@@ -469,11 +481,15 @@ function autofitPhase() {
   let lo = Infinity
   let hi = -Infinity
   for (const trace of list) {
-    for (let i = 0; i < trace.phaseDeg.length; i++) {
+    // The chart's own series, not the raw column: a window fitted to the phase the chart blanks
+    // would be sized to a wind-up of hundreds of thousands of degrees, and one fitted without the
+    // restored delay would be a turn or more out from the curve on screen.
+    const curve = phaseSeries(trace, phaseKind.value, restoreOptions(), trace.phaseDeg.length)
+    for (let i = 0; i < curve.length; i++) {
       const freqHz = trace.freqHz[i]
       if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
-      const deg = trace.phaseDeg[i]
-      if (!Number.isFinite(deg)) continue
+      const deg = curve[i]
+      if (deg === null || !Number.isFinite(deg)) continue
       lo = Math.min(lo, deg)
       hi = Math.max(hi, deg)
     }

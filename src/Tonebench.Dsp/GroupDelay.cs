@@ -199,8 +199,15 @@ public static class GroupDelay
         return result;
     }
 
-    /// <summary>The multiple of 360° that brings <paramref name="phaseDeg"/> into <c>(−180°, 180°]</c> when subtracted.</summary>
-    private static double WholeTurnsDeg(double phaseDeg) => 360.0 * Math.Ceiling((phaseDeg - 180.0) / 360.0);
+    /// <summary>
+    /// The multiple of 360° that brings <paramref name="phaseDeg"/> into <c>(−180°, 180°]</c> when
+    /// subtracted.
+    ///
+    /// <para>Public because the phase *curve* is anchored with it too, and by the same index — see
+    /// <c>ResponseCaptureSupport.BuildTrace</c>. One definition of the convention, so a trace's
+    /// phase and its phase delay cannot disagree about which turn they are on.</para>
+    /// </summary>
+    public static double WholeTurnsDeg(double phaseDeg) => 360.0 * Math.Ceiling((phaseDeg - 180.0) / 360.0);
 
     /// <summary>Σ i² for i = 1..m (0 for m &lt; 1).</summary>
     private static double SquaresUpTo(int m) => m < 1 ? 0.0 : (double)m * (m + 1) * ((2.0 * m) + 1) / 6.0;

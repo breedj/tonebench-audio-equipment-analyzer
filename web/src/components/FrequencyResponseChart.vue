@@ -25,6 +25,7 @@ import ToolbarIcon from './ToolbarIcon.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
+import { phaseColumnUsable, phaseFloorDb, phaseSeries } from '../response/phaseCurve'
 
 const props = defineProps<{
   traces: ResponseTrace[]
@@ -312,67 +313,18 @@ const phaseTrace = computed<ResponseTrace | null>(() => {
 })
 
 /**
- * How far below a trace's own reference level its phase stops being a measurement.
- *
- * <p>The unwrapper starts at bin 0 and walks every bin, so once the response is into the analyzer's
- * noise it unwraps noise and winds up without bound. Measured against the simulator's Butterworth
- * over a 96 kHz span: the phase leaves ±180° at the first stopband column (5.3 kHz, −42 dB), reads
- * +402° at −58 dB and <b>−311 068°</b> at −89 dB, so from the stopband on there is no phase line
- * anywhere on the plot — which is how "the phase is not plotted" was reported (2026-10-17).</p>
- *
- * <p>60 dB rather than a figure derived from the noise, because there is none to derive it from: a
- * chirp's coherence is 1.0 by construction at one average (and a noise-free simulation agrees with
- * itself at −600 dB), which is the same reason `complexPlane` gates on level and not on coherence.
- * It is a *display* floor and it is deliberately far shallower than that one's −120 dB: there the
- * question is whether a bin measured anything at all, here it is whether a reader could follow the
- * curve — and a Bode magnitude window is at most some 60 dB tall, so a column blanked here is one
- * whose magnitude is off the plot as well.</p>
- */
-const PHASE_FLOOR_BELOW_REFERENCE_DB = -60
-
-/**
- * The level the phase floor is measured down from: the trace's bandwidth reference, or its peak
- * where there is none.
- *
- * <p><b>Only on a deconvolved run</b> — the chirp and the impulse response, which are the two that
- * report `PerTrace` and the two whose phase comes from unwrapping a continuous spectrum bin by bin.
- * A stepped sweep measures one tone at a time and removes no delay, so its phase is a coherent
- * reading at every point it took and stays physical down to the analyzer's own floor; blanking it
- * would delete a measurement rather than a wind-up.</p>
- */
-function phaseFloorDbOf(trace: ResponseTrace | null): number {
-  if (!trace || props.phaseKind !== 'PerTrace') return Number.NEGATIVE_INFINITY
-  // Null on a row an older build wrote (migration 011), where the peak was the only reference there was.
-  const reference = trace.referenceDb ?? trace.peakDb
-  return Number.isFinite(reference) ? reference + PHASE_FLOOR_BELOW_REFERENCE_DB : Number.NEGATIVE_INFINITY
-}
-
-/** Degrees of phase to put back per hertz — `360·τ/fs`, and zero whenever there is no delay to restore. */
-const delayDegPerHz = computed(() => {
-  if (!props.restoreDelay) return 0
-  const samples = props.latencySamples
-  const fs = props.sampleRateHz
-  if (samples == null || fs == null || !Number.isFinite(samples) || !(fs > 0)) return 0
-  return (360 * samples) / fs
-})
-
-/**
- * The phase series: the trace's own phase, with the removed delay put back when asked for, and
- * <b>null</b> — a gap, not a zero — on every column whose magnitude is below
- * {@link PHASE_FLOOR_BELOW_REFERENCE_DB}. Sign as `complexPlane.toComplexCurve` applies it, so the
- * Bode phase and the Nyquist contour cannot disagree about which way a restored delay goes.
+ * The phase series the chart draws: the trace's own phase, the removed delay back on it when the
+ * display panel asks for that, and a gap wherever the response is into the noise. The rule lives in
+ * `response/phaseCurve.ts` because the panel's Autofit has to size the axis to the very same curve
+ * — and because nothing in a `.vue` is testable here.
  */
 function phaseSeriesOf(trace: ResponseTrace | null, length: number): (number | null)[] {
-  const out = new Array<number | null>(length).fill(null)
-  if (!trace) return out
-  const floorDb = phaseFloorDbOf(trace)
-  const derotate = delayDegPerHz.value
-  for (let i = 0; i < length && i < trace.phaseDeg.length; i++) {
-    const phase = trace.phaseDeg[i]
-    if (!Number.isFinite(phase) || !(trace.magnitudeMaxDb[i] >= floorDb)) continue
-    out[i] = phase - derotate * trace.freqHz[i]
-  }
-  return out
+  return phaseSeries(trace, props.phaseKind, restoreOptions(), length)
+}
+
+/** The three props `delayDegPerHz` reads, as one object. */
+function restoreOptions() {
+  return { restoreDelay: props.restoreDelay, latencySamples: props.latencySamples, sampleRateHz: props.sampleRateHz }
 }
 
 /** What the phase curve is entitled to be called — a difference between two measured paths is not a DUT's phase response. */
@@ -405,10 +357,10 @@ const delayLabelText = computed(() => delayLabel(delayView.value, props.phaseKin
 function delaySeriesOf(trace: ResponseTrace | null, length: number): (number | null)[] {
   const values = delayValuesOf(trace, delayView.value)
   if (!trace || !values || values.length !== length) return new Array<number | null>(length).fill(null)
-  const floorDb = phaseFloorDbOf(trace)
+  const floorDb = phaseFloorDb(trace, props.phaseKind)
   const scale = delayScale(delayUnit.value)
   return Array.from(values, (v, i) =>
-    Number.isFinite(v) && trace.magnitudeMaxDb[i] >= floorDb ? v * scale : null,
+    Number.isFinite(v) && phaseColumnUsable(trace, i, floorDb) ? v * scale : null,
   )
 }
 

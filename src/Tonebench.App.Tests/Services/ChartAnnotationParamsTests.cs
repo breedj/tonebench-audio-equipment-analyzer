@@ -265,11 +265,31 @@ public class ChartAnnotationParamsTests
     }
 
     [Fact]
-    public async Task SetResultAnnotations_OnAResultOfAnotherKind_IsRefused()
+    public async Task SetResultAnnotations_OnAResultOfAnotherKind_WritesThem()
     {
         await WithHarnessAsync(async h =>
         {
+            // Every kind, since annotations left the FFT screen: a stored sweep's own notes are
+            // reachable exactly the way a stored spectrum's are, and this method never did anything
+            // FFT-specific to begin with.
             long resultId = await h.WriteResultAsync("ThdVsFrequency", "{}");
+            var watts = Row("""{"id":1,"style":"point","text":"Clipping","view":"Sweep","x":12.5,"y":1.2,"xQuantity":"outputWatt","yQuantity":"pct"}""");
+
+            await h.SaveService.SetResultAnnotationsAsync(resultId, [watts], CancellationToken.None);
+
+            var stored = JsonNode.Parse((await h.ReadResultDetailAsync(resultId)).ParamsJson)!.AsObject();
+            var back = Assert.Single(stored["chartAnnotations"]!.AsArray())!.AsObject();
+            Assert.Equal("outputWatt", (string?)back["xQuantity"]);
+            Assert.Equal(12.5, (double?)back["x"]);
+        });
+    }
+
+    [Fact]
+    public async Task SetResultAnnotations_OnAResultWhoseParamsCannotBeRead_IsStillRefused()
+    {
+        await WithHarnessAsync(async h =>
+        {
+            long resultId = await h.WriteResultAsync("ThdVsFrequency", "not json");
 
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => h.SaveService.SetResultAnnotationsAsync(resultId, [Hum], CancellationToken.None));

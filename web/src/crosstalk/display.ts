@@ -1,3 +1,4 @@
+import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
 import type { CrosstalkParameters } from '../api/client'
 
 /**
@@ -14,10 +15,16 @@ export interface CrosstalkDisplay {
   xFromHz: number
   xToHz: number
   autofitOnDone: boolean
+  /**
+   * The notes drawn on this measurement's charts, as stored -- across every view, so one report
+   * render can print a table per picture. See measurements/chartAnnotations.ts.
+   */
+  annotations: ChartAnnotation[]
 }
 
 /** A fresh crosstalk type's window: 0 down to −120 dB — where any amplifier's crosstalk lives — over the audio band and a bit. */
 export const DEFAULT_CROSSTALK_DISPLAY: Readonly<CrosstalkDisplay> = Object.freeze({
+  annotations: [],
   thickLines: true,
   showDataPoints: true,
   yTopDb: 0,
@@ -54,6 +61,11 @@ export function crosstalkDisplayFromParams(
   if (typeof stored.chartXFromHz === 'number' && stored.chartXFromHz > 0) display.xFromHz = stored.chartXFromHz
   if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) display.xToHz = stored.chartXToHz
   if (typeof stored.chartAutofitOnDone === 'boolean') display.autofitOnDone = stored.chartAutofitOnDone
+
+  display.annotations = parseAnnotations(
+    (stored as { chartAnnotations?: unknown }).chartAnnotations,
+    { view: 'Crosstalk', xQuantity: 'hz', yQuantity: 'db' },
+  )
 
   return display
 }

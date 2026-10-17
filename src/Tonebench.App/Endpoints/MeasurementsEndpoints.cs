@@ -440,7 +440,8 @@ public sealed record SaveMeasurementRequest(
 /// This result's own annotations. <b>Null means do not touch them</b> and an <b>empty list
 /// means cleared</b>: the Edit measurement dialog saves a name and notes for every kind, and a
 /// request that simply does not carry this field must not wipe what a result was saved with.
-/// Refused with a 409 on any kind but FFTSpectrum, rather than quietly ignored.
+/// Accepted on every kind -- a stored result of any kind can be given its own notes after the
+/// fact, which is the one way to reach them once it is saved.
 /// </param>
 public sealed record UpdateMeasurementRequest(
     string Name,

@@ -1,3 +1,4 @@
+import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
 import type { ImpedanceParameters, ImpedanceView, ImpedanceZScale } from '../api/client'
 
 /**
@@ -20,10 +21,16 @@ export interface ImpedanceDisplay {
   xToHz: number
   phaseTopDeg: number
   phaseBottomDeg: number
+  /**
+   * The notes drawn on this measurement's charts, as stored -- across every view, so one report
+   * render can print a table per picture. See measurements/chartAnnotations.ts.
+   */
+  annotations: ChartAnnotation[]
 }
 
 /** What a fresh impedance measurement shows before anything is stored — the literals App.vue starts from. */
 export const DEFAULT_IMPEDANCE_DISPLAY: Readonly<ImpedanceDisplay> = Object.freeze({
+  annotations: [],
   view: 'Bode',
   showPhase: true,
   showCoherence: false,
@@ -77,6 +84,11 @@ export function impedanceDisplayFromParams(
   if (typeof stored.chartXToHz === 'number' && stored.chartXToHz > 0) display.xToHz = stored.chartXToHz
   if (typeof stored.chartPhaseTopDeg === 'number') display.phaseTopDeg = stored.chartPhaseTopDeg
   if (typeof stored.chartPhaseBottomDeg === 'number') display.phaseBottomDeg = stored.chartPhaseBottomDeg
+
+  display.annotations = parseAnnotations(
+    (stored as { chartAnnotations?: unknown }).chartAnnotations,
+    { view: 'Bode', xQuantity: 'hz', yQuantity: 'ohm' },
+  )
 
   return display
 }

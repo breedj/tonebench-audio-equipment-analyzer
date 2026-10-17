@@ -2,9 +2,6 @@ import type { ReportRow, ReportSection } from '../../api/client'
 import { channelTiles, GEN_METRIC_LABEL, NOT_APPLICABLE } from '../../metrics'
 import type { IntermodulationFrame, MetersFrame, MultitoneFrame } from '../../streaming/protocol'
 import { imdProductLabel } from '../../imd/products'
-import { numberedAnnotations } from '../../measurements/chartAnnotations'
-import { annotationQuantity } from '../../charts/annotationQuantities'
-import { SPECTRUM_ANNOTATION_VIEW } from '../../charts/annotationViews'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { descriptionSections, genericSettingsSection } from './generic'
@@ -197,58 +194,10 @@ export function intermodulationSections(intermodulation: Record<number, Intermod
   return sections
 }
 
-/**
- * The Annotations table: the notes drawn on the chart, numbered left to right the way the chart
- * numbers them — numberedAnnotations is the one rule both read, so a reader can tie a label on the
- * picture to a row here.
- *
- * <p>Levels are dBV, which is what is stored and what the chart's own labels and the display rail
- * quote, whatever unit the axis is in: a point names a level, and the harmonics table makes the same
- * call under a density axis. A frequency rule has no level, so its cell is a dash.</p>
- *
- * <p>Silent when there are none — unlike the harmonics table, which says why it is empty. "No
- * annotations" on every un-annotated chapter of a project report is noise rather than
- * information.</p>
- */
-export function annotationsSections(subject: ReportSubject): ReportSection[] {
-  if (subject.data.kind !== 'spectrum') return []
-  const annotations = numberedAnnotations(subject.data.display.annotations.value, SPECTRUM_ANNOTATION_VIEW)
-  if (annotations.length === 0) return []
-
-  // The channel column only where some annotation names one: a chart of notes on frequencies alone
-  // would otherwise carry a column of dashes.
-  const withChannel = annotations.some((a) => a.channel !== null)
-  const headers = ['#', 'Frequency', 'Level', ...(withChannel ? ['Channel'] : []), 'Note']
-
-  return [
-    {
-      kind: 'table',
-      title: 'Annotations',
-      headers,
-      // A region carries its ranges in the same two columns rather than earning two more: a pair of
-      // extra columns would widen the table for a few rows and leave every point dashing through them.
-      cells: annotations.map((a) => [
-        `${a.number}`,
-        a.style === 'box' && a.x2 !== null
-          ? annotationQuantity(a.xQuantity).formatRange(a.x, a.x2)
-          : annotationQuantity(a.xQuantity).format(a.x),
-        a.y === null
-          ? '—'
-          : a.style === 'box' && a.y2 !== null
-            ? annotationQuantity(a.yQuantity).formatRange(a.y2, a.y)
-            : annotationQuantity(a.yQuantity).format(a.y),
-        ...(withChannel ? [a.channel === null ? '—' : CHANNEL_LABELS[a.channel]] : []),
-        a.text || '—',
-      ]),
-    },
-  ]
-}
-
 export function spectrumSections(subject: ReportSubject, elements: readonly ReportElementId[]): ReportSection[] {
   const sections: ReportSection[] = []
   if (elements.includes('metrics')) sections.push(...metricsSections(subject))
   if (elements.includes('harmonics')) sections.push(...harmonicsSections(subject))
-  if (elements.includes('annotations')) sections.push(...annotationsSections(subject))
   if (elements.includes('description')) sections.push(...descriptionSections(subject))
   if (elements.includes('settings')) sections.push(genericSettingsSection(subject.paramsJson))
   return sections

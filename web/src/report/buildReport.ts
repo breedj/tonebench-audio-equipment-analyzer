@@ -9,7 +9,13 @@ import {
   type ReportSection,
 } from '../api/client'
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
-import { LEGACY_SPECTRUM_FRAME, parseAnnotations } from '../measurements/chartAnnotations'
+import {
+  LEGACY_SPECTRUM_FRAME,
+  parseAnnotations,
+  readStoredAnnotations,
+  type ChartAnnotation,
+} from '../measurements/chartAnnotations'
+import { storedAnnotationFrame } from '../charts/annotationViews'
 import { formatWithPreference } from '../composables/useDateTimeFormat'
 import { splitVersion } from '../about/version'
 import { useLoadOhms } from '../composables/useLoadOhms'
@@ -147,6 +153,29 @@ function parseStoredDisplay(paramsJson: string | null | undefined): StoredSpectr
  * everything else in this function. The copy is made by MeasurementSaveService.SaveAsync and
  * re-edited through PUT /api/measurements/{id} (the Edit measurement dialog's list).</p>
  */
+/**
+ * A display with the result's <b>own</b> annotations where it has any, and the measurement type's
+ * otherwise.
+ *
+ * <p>The asymmetry with the FFT arm below is deliberate and is the price of adding no save plumbing.
+ * The FFT's save <i>copies</i> the list onto the result, so its annotations are always the result's
+ * own and a fallback there would make a result saved before the feature existed inherit the
+ * measurement's current notes — exactly what a frozen copy exists to prevent. No other kind's save
+ * copies anything, so until a stored result is given its own set in the Edit dialog, its report
+ * prints the measurement's. `readStoredAnnotations` answering <b>null</b> for a document with no
+ * list is what tells the two apart: an empty list is a result somebody cleared, and stays empty.</p>
+ */
+function withResultAnnotations<T extends { annotations: ChartAnnotation[] }>(
+  display: T,
+  detail: MeasurementDetail,
+): T {
+  const own = readStoredAnnotations(
+    parseStoredDisplay(detail.paramsJson)?.chartAnnotations,
+    storedAnnotationFrame(detail.kind),
+  )
+  return own === null ? display : { ...display, annotations: own }
+}
+
 async function loadStoredData(detail: MeasurementDetail, type: MeasurementType | null): Promise<ReportSubjectData> {
   const displayParams = type?.paramsJson
 
@@ -154,7 +183,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
     return {
       kind: 'response',
       traces: toResponseTraces((await api.getStoredResponse(detail.resultId)).traces),
-      display: responseDisplayFromParams(displayParams),
+      display: withResultAnnotations(responseDisplayFromParams(displayParams), detail),
       phaseKind: responsePhaseKindFromParams(detail.kind, detail.paramsJson),
       rightChannelIsReference: responseRightChannelIsReferenceFromParams(detail.paramsJson),
       latencySamples: null,
@@ -200,7 +229,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       points: imd ? toImdSweepPoints(stored) : toSweepPoints(stored),
       method: sweepMethodFromParams(detail.paramsJson),
       family: imd ? 'imd' : 'thd',
-      display: sweepDisplayFromParams(displayParams),
+      display: withResultAnnotations(sweepDisplayFromParams(displayParams), detail),
     }
   }
 
@@ -218,7 +247,10 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       impulse: trace.impulse,
       traces: toResponseTraces(response.traces),
       harmonics: stored.harmonics,
-      display: impulseDisplayFromParams(displayParams, defaultImpulseDisplay(detail.sampleRateHz)),
+      display: withResultAnnotations(
+        impulseDisplayFromParams(displayParams, defaultImpulseDisplay(detail.sampleRateHz)),
+        detail,
+      ),
       run: {
         referenceMode: storedImpulse?.referenceMode ?? run.referenceMode,
         referenceName: storedImpulse?.referenceName ?? null,
@@ -236,7 +268,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
     return {
       kind: 'impedance',
       traces: toImpedanceTraces((await api.getStoredResponse(detail.resultId)).traces),
-      display: impedanceDisplayFromParams(displayParams),
+      display: withResultAnnotations(impedanceDisplayFromParams(displayParams), detail),
       // The component and the equivalent circuit's frequency are screen settings, stored with the
       // display on the type — not with the run.
       dutType: impedanceDutTypeFromParams(displayParams),
@@ -250,7 +282,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
     return {
       kind: 'crosstalk',
       traces: toResponseTraces((await api.getStoredResponse(detail.resultId)).traces),
-      display: crosstalkDisplayFromParams(displayParams),
+      display: withResultAnnotations(crosstalkDisplayFromParams(displayParams), detail),
     }
   }
 
@@ -261,7 +293,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
     return {
       kind: 'outputImpedance',
       trace: toImpedanceTraces((await api.getStoredResponse(detail.resultId)).traces).find((t) => t.kind === 'Impedance') ?? null,
-      display: outputImpedanceDisplayFromParams(displayParams),
+      display: withResultAnnotations(outputImpedanceDisplayFromParams(displayParams), detail),
       nominalOhms: run.nominalOhms,
       rightChannelIsReference: run.rightChannelIsReference,
     }
@@ -461,7 +493,7 @@ export async function buildChapter(
   applyAnnotationNumbers(subject, elements)
   if (elements.includes('chart')) sections.push(...(await ownChartSections(subject, views, monochrome)))
   sections.push(...(await extraChartSections(subject, elements, monochrome)))
-  sections.push(...chapterSections(subject, elements))
+  sections.push(...chapterSections(subject, elements, elements.includes('chart') ? views : []))
   hoistFigures(sections)
 
   return {
@@ -518,7 +550,7 @@ async function buildCombinedChapter(plan: ReportPlan, onProgress?: (message: str
     for (const chart of await renderExtraCharts(subject, plan.elements, plan.monochrome)) {
       sections.push(await imageSection(chart, `${chart.caption} — ${subjectLabel(subject)}`))
     }
-    sections.push(...chapterSections(subject, textElements))
+    sections.push(...chapterSections(subject, textElements, plan.views))
   }
 
   return {

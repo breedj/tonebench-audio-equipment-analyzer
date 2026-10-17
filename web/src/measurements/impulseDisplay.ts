@@ -1,3 +1,4 @@
+import { parseAnnotations, type ChartAnnotation } from './chartAnnotations'
 import type {
   BurstDecayResolutionName,
   DecayChartMode,
@@ -48,6 +49,11 @@ export interface ImpulseDisplay {
   burstMaxPeriods: number
   burstPointsPerPeriod: number
   burstResolution: BurstDecayResolutionName
+  /**
+   * The notes drawn on this measurement's charts, as stored -- across every view, so one report
+   * render can print a table per picture. See measurements/chartAnnotations.ts.
+   */
+  annotations: ChartAnnotation[]
 }
 
 /**
@@ -57,6 +63,7 @@ export interface ImpulseDisplay {
  */
 export function defaultImpulseDisplay(sampleRateHz: number): ImpulseDisplay {
   return {
+    annotations: [],
     normalised: false,
     thickLines: true,
     showDataPoints: false,
@@ -139,6 +146,11 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartBurstMaxPeriods === 'number') display.burstMaxPeriods = stored.chartBurstMaxPeriods
   if (typeof stored.chartBurstPointsPerPeriod === 'number') display.burstPointsPerPeriod = stored.chartBurstPointsPerPeriod
   if (stored.chartBurstResolution) display.burstResolution = stored.chartBurstResolution
+
+  display.annotations = parseAnnotations(
+    (stored as { chartAnnotations?: unknown }).chartAnnotations,
+    { view: 'Impulse', xQuantity: 'ms', yQuantity: 'volt' },
+  )
 
   return display
 }

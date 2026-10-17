@@ -24,6 +24,29 @@ describe('responseDisplayFromParams', () => {
     expect(responseDisplayFromParams(JSON.stringify({ chartView: 'Gain' })).view).toBe('Gain')
   })
 
+  it('restores the notes drawn on the chart, in this kind’s own view and quantities', () => {
+    const json = JSON.stringify({
+      chartAnnotations: [{ id: 1, style: 'point', text: 'Resonance', x: 38, y: 12.2 }],
+    })
+    expect(responseDisplayFromParams(json).annotations).toEqual([
+      {
+        id: 1,
+        style: 'point',
+        text: 'Resonance',
+        view: 'Bode',
+        x: 38,
+        y: 12.2,
+        x2: null,
+        y2: null,
+        xQuantity: 'hz',
+        yQuantity: 'dbv',
+        channel: null,
+        labelOffsetX: 0,
+        labelOffsetY: 0,
+      },
+    ])
+  })
+
   it('restores every chart field a type stores', () => {
     const json = JSON.stringify({
       chartView: 'Dbv',
@@ -69,6 +92,9 @@ describe('responseDisplayFromParams', () => {
     })
 
     expect(responseDisplayFromParams(json)).toEqual({
+      // A type that stores no notes restores none -- the annotations are read from this same
+      // document, so the field is part of a display's shape like every other one here.
+      annotations: [],
       view: 'Dbv',
       showLeft: false,
       showRight: true,

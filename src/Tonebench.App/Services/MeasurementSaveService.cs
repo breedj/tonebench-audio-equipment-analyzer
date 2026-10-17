@@ -1632,9 +1632,9 @@ public sealed class MeasurementSaveService(
     }
 
     /// <summary>
-    /// Replaces a stored FFT result's own annotations -- the Edit measurement dialog's list, which is
-    /// the only way to reach them once a result is saved (nothing puts a stored result back on the
-    /// chart).
+    /// Replaces a stored result's own annotations, whatever kind it is -- the Edit measurement
+    /// dialog's list, which is the only way to reach them once a result is saved (nothing puts a
+    /// stored result back on a chart).
     /// </summary>
     /// <remarks>
     /// <para><b>Splices a <see cref="JsonNode"/> rather than deserializing and re-serializing</b>,
@@ -1644,12 +1644,13 @@ public sealed class MeasurementSaveService(
     /// and rewrite every null -- i.e. it would change what the result says it measured in order to
     /// add a note about it. Same technique and same reason as <see cref="HealedFftParamsJson"/>.</para>
     ///
-    /// <para>Refused rather than ignored on any other kind: silently dropping a field the caller
-    /// sent is the "a silent default rather than an error" failure this codebase has been bitten by
-    /// twice. A document that will not parse is refused too, never replaced.</para>
+    /// <para>Every kind, since annotations left the FFT screen. This method never did anything
+    /// FFT-specific -- it splices one field into one document -- so opening it up was deleting the
+    /// guard that used to refuse the other kinds, and nothing else. A document that will not parse
+    /// is still refused, never replaced.</para>
     /// </remarks>
     /// <exception cref="KeyNotFoundException">No such result, or it is in the trash.</exception>
-    /// <exception cref="InvalidOperationException">Not an FFT result, or its stored parameters cannot be read.</exception>
+    /// <exception cref="InvalidOperationException">The result's stored parameters cannot be read.</exception>
     public async Task SetResultAnnotationsAsync(
         long resultId,
         IReadOnlyList<JsonElement> annotations,
@@ -1657,9 +1658,6 @@ public sealed class MeasurementSaveService(
     {
         var detail = await measurementRepository.GetResultAsync(resultId, ct)
             ?? throw new KeyNotFoundException($"There is no measurement result {resultId}.");
-
-        if (detail.Kind != FftSpectrumKind)
-            throw new InvalidOperationException("Annotations belong to an FFT spectrum result.");
 
         JsonObject? stored;
         try

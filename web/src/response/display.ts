@@ -1,3 +1,4 @@
+import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
 import type {
   DecayPalette,
   FrequencyResponseParameters,
@@ -86,10 +87,16 @@ export interface ResponseDisplay {
   surfaceBottomDb: number
   surfacePalette: DecayPalette
   surfaceContours: boolean
+  /**
+   * The notes drawn on this measurement's charts, as stored -- across every view, so one report
+   * render can print a table per picture. See measurements/chartAnnotations.ts.
+   */
+  annotations: ChartAnnotation[]
 }
 
 /** What a fresh measurement type shows before anything is stored — the literals App.vue starts from. */
 export const DEFAULT_RESPONSE_DISPLAY: Readonly<ResponseDisplay> = Object.freeze({
+  annotations: [],
   // FR (dBV) rather than Gain (dB): the absolute level is what a response measurement starts as,
   // and a gain is only meaningful once a reference channel is in the picture. A type that was
   // saved showing Gain keeps showing it -- this is what a fresh one opens on.
@@ -217,6 +224,11 @@ export function responseDisplayFromParams(
     display.surfaceBottomDb = stored.chartSurfaceBottomDb
   if (isDecayPalette(stored.chartSurfacePalette)) display.surfacePalette = stored.chartSurfacePalette
   if (typeof stored.chartSurfaceContours === 'boolean') display.surfaceContours = stored.chartSurfaceContours
+
+  display.annotations = parseAnnotations(
+    (stored as { chartAnnotations?: unknown }).chartAnnotations,
+    { view: 'Bode', xQuantity: 'hz', yQuantity: 'dbv' },
+  )
 
   return display
 }

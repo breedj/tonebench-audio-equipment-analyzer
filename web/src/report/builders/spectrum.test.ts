@@ -7,8 +7,7 @@ import { NO_WEIGHTING } from '../../weighting'
 import type { StimulusSummary } from '../../metrics'
 import type { ReportSubject } from '../types'
 import { chapterSections } from './index'
-import { annotationsSections, harmonicsSections, metricsSections, multitoneSections } from './spectrum'
-import type { ChartAnnotation } from '../../measurements/chartAnnotations'
+import { harmonicsSections, metricsSections, multitoneSections } from './spectrum'
 
 /** A stored FFT result the way MeasurementSaveService writes one: a metric row per meter and a pair per harmonic. */
 const detail: MeasurementDetail = {
@@ -262,12 +261,20 @@ describe('report element defaults', () => {
       'oscilloscope',
       'spectrogram',
     ])
-    expect(defaultReportElements('FrequencyResponse')).toEqual(['chart', 'description', 'measurements'])
-    expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description', 'measurements'])
-    expect(defaultReportElements('Impedance')).toEqual(['chart', 'description', 'measurements', 'component', 'equivalent'])
-    expect(defaultReportElements('ImpulseResponse')).toEqual(['chart', 'description', 'measurements'])
-    // A kind no build of this client knows: chart and description, and the settings dump behind them.
-    expect(defaultReportElements('SomethingNewer')).toEqual(['chart', 'description'])
+    expect(defaultReportElements('FrequencyResponse')).toEqual(['chart', 'description', 'annotations', 'measurements'])
+    expect(defaultReportElements('ThdVsFrequency')).toEqual(['chart', 'description', 'annotations', 'measurements'])
+    expect(defaultReportElements('Impedance')).toEqual([
+      'chart',
+      'description',
+      'annotations',
+      'measurements',
+      'component',
+      'equivalent',
+    ])
+    expect(defaultReportElements('ImpulseResponse')).toEqual(['chart', 'description', 'annotations', 'measurements'])
+    // A kind no build of this client knows: chart, description and its notes, with the settings
+    // dump behind them.
+    expect(defaultReportElements('SomethingNewer')).toEqual(['chart', 'description', 'annotations'])
   })
 
   it('reads a choice saved before the impedance split as still including the component fit', () => {
@@ -471,98 +478,3 @@ describe('multitone', () => {
   })
 })
 
-describe('the annotations table', () => {
-  function annotated(annotations: ChartAnnotation[]) {
-    const subject = subjectOf([])
-    if (subject.data.kind !== 'spectrum') throw new Error('not a spectrum subject')
-    subject.data.display.annotations.value = annotations
-    return subject
-  }
-
-  const hum: ChartAnnotation = {
-    id: 2,
-    style: 'point',
-    text: 'Mains hum',
-    view: 'Spectrum',
-    x: 50,
-    y: -98.24,
-    x2: null,
-    y2: null,
-    xQuantity: 'hz',
-    yQuantity: 'dbv',
-    channel: 0,
-    labelOffsetX: 0.4,
-    labelOffsetY: 12,
-  }
-  const corner: ChartAnnotation = {
-    id: 1,
-    style: 'frequency',
-    text: 'Bandwidth corner',
-    view: 'Spectrum',
-    x: 21500,
-    y: null,
-    x2: null,
-    y2: null,
-    xQuantity: 'hz',
-    yQuantity: 'dbv',
-    channel: null,
-    labelOffsetX: 0,
-    labelOffsetY: 0,
-  }
-
-  it('prints the annotations numbered the way the chart numbers them', () => {
-    const [section] = annotationsSections(annotated([corner, hum]))
-    expect(section.title).toBe('Annotations')
-    expect(section.headers).toEqual(['#', 'Frequency', 'Level', 'Channel', 'Note'])
-    // Left to right, whatever order they are stored in -- the same numbering the chart's badges use.
-    expect(section.cells).toEqual([
-      ['1', '50.00 Hz', '-98.2 dBV', 'L', 'Mains hum'],
-      ['2', '21.50 kHz', '\u2014', '\u2014', 'Bandwidth corner'],
-    ])
-  })
-
-  it('prints nothing at all when there are none', () => {
-    expect(annotationsSections(annotated([]))).toEqual([])
-  })
-
-  it('omits the channel column when no annotation names one', () => {
-    const [section] = annotationsSections(annotated([corner]))
-    expect(section.headers).toEqual(['#', 'Frequency', 'Level', 'Note'])
-    expect(section.cells).toEqual([['1', '21.50 kHz', '\u2014', 'Bandwidth corner']])
-  })
-
-  const band: ChartAnnotation = {
-    id: 3,
-    style: 'box',
-    text: 'Hum band',
-    view: 'Spectrum',
-    x: 900,
-    y: -40,
-    x2: 1200,
-    y2: -95,
-    xQuantity: 'hz',
-    yQuantity: 'dbv',
-    channel: null,
-    labelOffsetX: 0.3,
-    labelOffsetY: 10,
-  }
-
-  it('prints a box as a frequency range and a level range in the same two columns', () => {
-    const [section] = annotationsSections(annotated([band]))
-    expect(section.headers).toEqual(['#', 'Frequency', 'Level', 'Note'])
-    expect(section.cells).toEqual([['1', '0.90 \u2013 1.20 kHz', '-95.0 \u2013 -40.0 dBV', 'Hum band']])
-  })
-
-  it('still prints a stored frequency rule, which the chart no longer offers to add', () => {
-    const [section] = annotationsSections(annotated([corner]))
-    expect(section.cells).toEqual([['1', '21.50 kHz', '\u2014', 'Bandwidth corner']])
-  })
-
-  it('is built for an FFT subject only when its element is chosen', () => {
-    const subject = annotated([hum])
-    const titles = (elements: string[]) =>
-      chapterSections(subject, elements as never).map((section) => section.title)
-    expect(titles(['annotations'])).toContain('Annotations')
-    expect(titles(['metrics'])).not.toContain('Annotations')
-  })
-})

@@ -5,7 +5,6 @@ import AnnotationRows from './AnnotationRows.vue'
 import MeasurementKindChip from './MeasurementKindChip.vue'
 import { useMeasurements } from '../composables/useMeasurements'
 import { useProjects } from '../composables/useProjects'
-import { FFT_SPECTRUM_KIND } from '../measurements/kinds'
 import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
 import { storedAnnotationFrame } from '../charts/annotationViews'
 import { api, type MeasurementSummary } from '../api/client'
@@ -41,7 +40,6 @@ const form = reactive({
  */
 const annotations = ref<ChartAnnotation[] | null>(null)
 const annotationsUnreadable = ref(false)
-const isFft = computed(() => kind.value === FFT_SPECTRUM_KIND)
 
 async function loadAnnotations(resultId: number) {
   annotations.value = null
@@ -65,7 +63,7 @@ watch(
     form.notes = props.item.notes ?? ''
     annotations.value = null
     annotationsUnreadable.value = false
-    if (isFft.value) void loadAnnotations(props.item.resultId)
+    void loadAnnotations(props.item.resultId)
   },
 )
 
@@ -125,12 +123,13 @@ async function onSave() {
       <!-- shrink-0, like every direct child of a scrolling dialog body: .dialog-card hides its
            overflow, so a card the flex column shrank would clip its own content and read as a
            failed load rather than as a missing scrollbar. -->
-      <div v-if="isFft" class="dialog-card mt-3 shrink-0 flex flex-col gap-3 p-3.5">
+      <div class="dialog-card mt-3 shrink-0 flex flex-col gap-3 p-3.5">
         <div class="flex flex-col gap-1">
           <span class="text-[12px] font-semibold text-neutral-700 dark:text-neutral-200">Annotations</span>
           <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-            Drawn on this result's chart and listed in its report. Add new ones by clicking the live
-            chart.
+            Drawn on this result's charts and listed in its report. Add new ones by clicking the
+            live chart; here they can be corrected, since there is no way to put a stored result back
+            on one.
           </p>
         </div>
         <p v-if="annotationsUnreadable" class="text-[11px] text-neutral-500 dark:text-neutral-400">
@@ -142,6 +141,9 @@ async function onSave() {
         >
           This result has none.
         </p>
+        <!-- No `view`: a stored result may carry notes from several of its charts, and this list
+             is the only place they can all be reached, so it groups them by the chart each was
+             drawn on rather than showing one chart's. -->
         <AnnotationRows v-if="annotations !== null" v-model="annotations" />
       </div>
     </div>

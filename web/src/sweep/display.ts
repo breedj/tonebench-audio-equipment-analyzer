@@ -1,3 +1,4 @@
+import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
 import type { ThdVsAmplitudeParameters, ThdVsFrequencyParameters } from '../api/client'
 import { isAmplitudeSweepKind } from '../measurements/kinds'
 import type { SweepXAxis } from './xAxis'
@@ -34,11 +35,17 @@ export interface SweepDisplay {
   /** The amplitude sweep's axis, and one window per axis in that axis' own unit. */
   amplitudeXAxis: SweepXAxis
   amplitudeBounds: Record<string, { from: number; to: number }>
+  /**
+   * The notes drawn on this measurement's charts, as stored -- across every view, so one report
+   * render can print a table per picture. See measurements/chartAnnotations.ts.
+   */
+  annotations: ChartAnnotation[]
 }
 
 /** What a fresh sweep measurement shows before anything is stored — the literals App.vue starts from. */
 export function defaultSweepDisplay(): SweepDisplay {
   return {
+    annotations: [],
     unit: 'percent',
     showNoiseFloor: false,
     showMagnitude: false,
@@ -120,6 +127,11 @@ export function sweepDisplayFromParams(paramsJson: string | null | undefined, ba
   if (typeof stored.chartXToHz === 'number') display.xToHz = stored.chartXToHz
   if (typeof stored.chartYTopDb === 'number') display.yTopDb = stored.chartYTopDb
   if (typeof stored.chartYBottomDb === 'number') display.yBottomDb = stored.chartYBottomDb
+
+  display.annotations = parseAnnotations(
+    (stored as { chartAnnotations?: unknown }).chartAnnotations,
+    { view: 'Sweep', xQuantity: 'hz', yQuantity: 'pct' },
+  )
 
   return display
 }

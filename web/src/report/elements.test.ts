@@ -45,3 +45,36 @@ describe('storedChoiceElements', () => {
     expect(storedChoiceElements(impedance, ['chart', 'measurements'], impedance)).toContain('component')
   })
 })
+
+describe('the annotations element', () => {
+  it('is offered on every kind, since a note is the same thing on every chart', () => {
+    const kinds = [
+      'FFTSpectrum',
+      'ThdVsFrequency',
+      'ThdVsAmplitude',
+      'ImdVsAmplitude',
+      'FrequencyResponse',
+      'SteppedResponse',
+      'ImpulseResponse',
+      'Impedance',
+      'OutputImpedance',
+      'Crosstalk',
+      'SomethingNewer',
+    ]
+    for (const kind of kinds) {
+      expect(reportElementsForKind(kind).map((e) => e.id)).toContain('annotations')
+    }
+  })
+
+  it('reaches a choice saved before its kind offered it, once', () => {
+    // The Offered back-fill: an element a stored choice was never shown is added to it, so a bench
+    // that chose its report elements last month starts getting the new table rather than silently
+    // never seeing it. An untick afterwards sticks, because the choice then records it as offered.
+    const offered = reportElementsForKind('FrequencyResponse').map((e) => e.id)
+    const offeredBefore = ['chart', 'description', 'settings', 'measurements']
+    expect(storedChoiceElements(offered, ['chart', 'measurements'], offeredBefore)).toContain('annotations')
+
+    // Once the choice records it as offered, an untick sticks.
+    expect(storedChoiceElements(offered, ['chart', 'measurements'], offered)).not.toContain('annotations')
+  })
+})

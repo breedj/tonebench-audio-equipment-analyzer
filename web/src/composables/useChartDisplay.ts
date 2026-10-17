@@ -15,6 +15,7 @@ import {
   type ChartAnnotation,
 } from '../measurements/chartAnnotations'
 import { useProjects } from './useProjects'
+import { useAnnotations } from './useAnnotations'
 
 // Module-level singleton, same pattern as useMeasurements.ts / useSpectrumConfig.ts — the chart
 // itself and the display-options column (a separate sibling in the layout, not nested inside the
@@ -93,7 +94,12 @@ const otherPeaksSort = ref<PeakSort | null>(null)
 // switch, a reload and a restart; a *saved result* keeps its own frozen copy, which is the one thing
 // here a result does not take from its type (see MeasurementSaveService.SaveAsync and the report's
 // loadStoredData). Replaced, never mutated in place, or the dirty watcher below would not see it.
-const annotations = ref<ChartAnnotation[]>([])
+//
+// The refs themselves live in useAnnotations, shared with every other measurement kind: a
+// measurement keeps one list across all of its charts, and only one measurement is on screen at a
+// time. They are re-exported here so the FFT screen's own panels and SpectrumDisplaySource keep
+// their shape.
+const { annotations, armed: annotationArmed, numbers: annotationNumbers } = useAnnotations()
 
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
 // stored params — loading is the opposite of an unsaved edit. Same pattern as
@@ -155,14 +161,6 @@ const resetPeakHoldTrigger = ref(0)
 const autofitYTrigger = ref(0)
 const autofitXTrigger = ref(0)
 
-// Which style the next click places: null = the chart is not armed, which is how a plain click keeps
-// doing nothing and drag-zoom keeps working. Transient like the triggers above -- nothing here is
-// saved, and a report render has none of it. Which label's text box is open is *not* here: that is
-// internal to useAnnotationOverlay, which owns the editor it belongs to.
-const annotationArmed = ref<AnnotationStyle | null>(null)
-// Whether the ordinal badges are drawn on the labels. On everywhere except a report whose
-// Annotations table was not included, where a number would tie a label to a row nobody printed.
-const annotationNumbers = ref(true)
 
 /**
  * The stored chart preferences of an FFT measurement type — the `chart*` half of

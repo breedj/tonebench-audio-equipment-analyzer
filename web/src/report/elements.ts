@@ -129,19 +129,23 @@ const SPECTROGRAM: ReportElement = {
 const ANNOTATIONS: ReportElement = {
   id: 'annotations',
   label: 'Annotations',
-  hint: 'The notes drawn on the chart, as a numbered table. The numbers are the labels on the chart image, so a reader can tie one to the other.',
+  hint: 'The notes drawn on this measurement’s charts, as a numbered table per chart. The numbers are the labels on the chart images, so a reader can tie one to the other.',
 }
 
-/** What every kind offers. */
-export const GENERIC_REPORT_ELEMENTS: readonly ReportElement[] = [CHART, DESCRIPTION, SETTINGS]
+/**
+ * What every kind offers — the annotations included, since a note is the same thing on every chart
+ * and a kind with no readings builder can still carry one.
+ */
+export const GENERIC_REPORT_ELEMENTS: readonly ReportElement[] = [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS]
 
 export function reportElementsForKind(kind: string | null | undefined): readonly ReportElement[] {
-  if (isFrequencyResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, MEASUREMENTS]
-  if (isCrosstalkKind(kind)) return [CHART, DESCRIPTION, SETTINGS, CROSSTALK_MEASUREMENTS]
-  if (isOutputImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, OUTPUT_IMPEDANCE_MEASUREMENTS]
-  if (isSweepKind(kind)) return [CHART, DESCRIPTION, SETTINGS, SWEEP_MEASUREMENTS]
-  if (isImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPEDANCE_MEASUREMENTS, IMPEDANCE_COMPONENT, IMPEDANCE_EQUIVALENT]
-  if (isImpulseResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, IMPULSE_MEASUREMENTS]
+  if (isFrequencyResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, MEASUREMENTS]
+  if (isCrosstalkKind(kind)) return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, CROSSTALK_MEASUREMENTS]
+  if (isOutputImpedanceKind(kind)) return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, OUTPUT_IMPEDANCE_MEASUREMENTS]
+  if (isSweepKind(kind)) return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, SWEEP_MEASUREMENTS]
+  if (isImpedanceKind(kind))
+    return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, IMPEDANCE_MEASUREMENTS, IMPEDANCE_COMPONENT, IMPEDANCE_EQUIVALENT]
+  if (isImpulseResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, IMPULSE_MEASUREMENTS]
   if (kind === FFT_SPECTRUM_KIND)
     return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, ANNOTATIONS, OSCILLOSCOPE, SPECTROGRAM]
   return GENERIC_REPORT_ELEMENTS

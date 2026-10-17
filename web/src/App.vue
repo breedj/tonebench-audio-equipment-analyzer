@@ -18,6 +18,7 @@ import { useMetricSelection } from './composables/useMetricSelection'
 import { DEFAULT_LOAD_OHMS, useLoadOhms } from './composables/useLoadOhms'
 import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useChartDisplay } from './composables/useChartDisplay'
+import { useAnnotations } from './composables/useAnnotations'
 import { useUserWeighting } from './composables/useUserWeighting'
 import { weightingLabel } from './weighting'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
@@ -242,6 +243,11 @@ const {
   requestAutofitX: requestChartAutofitX,
   requestResetPeakHold: requestChartResetPeakHold,
 } = useChartDisplay()
+
+// The notes drawn on the open measurement's charts. One list for every kind -- see
+// useAnnotations -- so the six display getters below and every screen's rail read the same
+// state, and a measurement switch clears it exactly once.
+const { annotations, applyLoaded: applyLoadedAnnotations } = useAnnotations()
 
 // The user weighting tables' names, for the chart's annunciator and the report.
 const userWeighting = useUserWeighting()
@@ -1231,6 +1237,11 @@ watch(
 /** The sweep chart's display state as the refs above hold it — what a live report renders the chart with. */
 function currentSweepDisplay(): SweepDisplay {
   return {
+    // The one display field that is not a ref of this screen's own: annotations live in the shared
+    // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
+    // so a note placed or edited marks the measurement dirty like every other display change, and so
+    // a live report renders the chart with what is on it.
+    annotations: annotations.value,
     unit: sweepUnit.value,
     showNoiseFloor: sweepShowNoiseFloor.value,
     showMagnitude: sweepShowMagnitude.value,
@@ -1275,6 +1286,10 @@ function applyStoredSweepDisplay(paramsJson: string) {
   // The chart's own fields go through the shared restore (sweep/display.ts), which the PDF report
   // also uses to render a stored sweep — so a type restores the same on screen and on paper.
   const display = sweepDisplayFromParams(paramsJson, currentSweepDisplay())
+  // The notes come back with the rest of the display state, and are applied even when the
+  // list is empty -- a measurement that has never carried one must not be left showing the
+  // previous measurement's, which is what every other field here deliberately does.
+  applyLoadedAnnotations(display.annotations)
   sweepAmplitudeXAxis.value = display.amplitudeXAxis
   for (const [axis, bounds] of Object.entries(display.amplitudeBounds)) sweepAmplitudeBounds[axis] = { ...bounds }
   sweepUnit.value = display.unit
@@ -1481,6 +1496,11 @@ let responseDisplayRestoring = false
 /** The Bode chart's display state as the refs above hold it — what a live report renders the chart with. */
 function currentResponseDisplay(): ResponseDisplay {
   return {
+    // The one display field that is not a ref of this screen's own: annotations live in the shared
+    // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
+    // so a note placed or edited marks the measurement dirty like every other display change, and so
+    // a live report renders the chart with what is on it.
+    annotations: annotations.value,
     view: responseView.value,
     showLeft: responseShowLeft.value,
     showRight: responseShowRight.value,
@@ -1543,6 +1563,10 @@ function applyStoredResponseDisplay(paramsJson: string) {
   // report also uses to render a stored measurement — so a type restores the same on screen and on
   // paper. What follows is the screen's own state: the polar views, autofit and the fit order.
   const display = responseDisplayFromParams(paramsJson, currentResponseDisplay())
+  // The notes come back with the rest of the display state, and are applied even when the
+  // list is empty -- a measurement that has never carried one must not be left showing the
+  // previous measurement's, which is what every other field here deliberately does.
+  applyLoadedAnnotations(display.annotations)
   responseView.value = display.view
   responseShowLeft.value = display.showLeft
   responseShowRight.value = display.showRight
@@ -1683,6 +1707,11 @@ let impedanceDisplayRestoring = false
 /** The impedance chart's display state as the refs above hold it — what a live report renders the chart with. */
 function currentImpedanceDisplay(): ImpedanceDisplay {
   return {
+    // The one display field that is not a ref of this screen's own: annotations live in the shared
+    // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
+    // so a note placed or edited marks the measurement dirty like every other display change, and so
+    // a live report renders the chart with what is on it.
+    annotations: annotations.value,
     view: impedanceView.value,
     showPhase: impedanceShowPhase.value,
     showCoherence: impedanceShowCoherence.value,
@@ -1713,6 +1742,10 @@ function applyStoredImpedanceDisplay(paramsJson: string) {
   // The chart's own fields go through the shared restore (impedance/display.ts), which the PDF
   // report also uses to render a stored impedance — so a type restores the same on screen and on paper.
   const display = impedanceDisplayFromParams(paramsJson, currentImpedanceDisplay())
+  // The notes come back with the rest of the display state, and are applied even when the
+  // list is empty -- a measurement that has never carried one must not be left showing the
+  // previous measurement's, which is what every other field here deliberately does.
+  applyLoadedAnnotations(display.annotations)
   impedanceView.value = display.view
   impedanceShowPhase.value = display.showPhase
   impedanceShowCoherence.value = display.showCoherence
@@ -1778,6 +1811,11 @@ let crosstalkDisplayRestoring = false
 
 function currentCrosstalkDisplay(): CrosstalkDisplay {
   return {
+    // The one display field that is not a ref of this screen's own: annotations live in the shared
+    // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
+    // so a note placed or edited marks the measurement dirty like every other display change, and so
+    // a live report renders the chart with what is on it.
+    annotations: annotations.value,
     thickLines: crosstalkThickLines.value,
     showDataPoints: crosstalkShowDataPoints.value,
     yTopDb: crosstalkYTopDb.value,
@@ -1791,6 +1829,10 @@ function currentCrosstalkDisplay(): CrosstalkDisplay {
 function applyStoredCrosstalkDisplay(paramsJson: string) {
   crosstalkDisplayRestoring = true
   const display = crosstalkDisplayFromParams(paramsJson, currentCrosstalkDisplay())
+  // The notes come back with the rest of the display state, and are applied even when the
+  // list is empty -- a measurement that has never carried one must not be left showing the
+  // previous measurement's, which is what every other field here deliberately does.
+  applyLoadedAnnotations(display.annotations)
   crosstalkThickLines.value = display.thickLines
   crosstalkShowDataPoints.value = display.showDataPoints
   crosstalkYTopDb.value = display.yTopDb
@@ -1866,6 +1908,11 @@ let outputImpedanceDisplayRestoring = false
 
 function currentOutputImpedanceDisplay(): OutputImpedanceDisplay {
   return {
+    // The one display field that is not a ref of this screen's own: annotations live in the shared
+    // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
+    // so a note placed or edited marks the measurement dirty like every other display change, and so
+    // a live report renders the chart with what is on it.
+    annotations: annotations.value,
     zTopOhms: outputImpedanceZTopOhms.value,
     zBottomOhms: outputImpedanceZBottomOhms.value,
     zScale: outputImpedanceZScale.value,
@@ -1884,6 +1931,10 @@ function currentOutputImpedanceDisplay(): OutputImpedanceDisplay {
 function applyStoredOutputImpedanceDisplay(paramsJson: string) {
   outputImpedanceDisplayRestoring = true
   const display = outputImpedanceDisplayFromParams(paramsJson, currentOutputImpedanceDisplay())
+  // The notes come back with the rest of the display state, and are applied even when the
+  // list is empty -- a measurement that has never carried one must not be left showing the
+  // previous measurement's, which is what every other field here deliberately does.
+  applyLoadedAnnotations(display.annotations)
   outputImpedanceZTopOhms.value = display.zTopOhms
   outputImpedanceZBottomOhms.value = display.zBottomOhms
   outputImpedanceZScale.value = display.zScale
@@ -3327,6 +3378,11 @@ let impulseDisplayRestoring = false
 /** The impulse screen's display state as the refs above hold it — what a live report renders its charts with. */
 function currentImpulseDisplay(): ImpulseDisplay {
   return {
+    // The one display field that is not a ref of this screen's own: annotations live in the shared
+    // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
+    // so a note placed or edited marks the measurement dirty like every other display change, and so
+    // a live report renders the chart with what is on it.
+    annotations: annotations.value,
     normalised: impulseNormalised.value,
     thickLines: impulseThickLines.value,
     showDataPoints: impulseShowDataPoints.value,
@@ -3379,6 +3435,10 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   // which the PDF report also uses to render a stored impulse — so a type restores the same on
   // screen and on paper. The other views' state follows below.
   const display = impulseDisplayFromParams(paramsJson, currentImpulseDisplay())
+  // The notes come back with the rest of the display state, and are applied even when the
+  // list is empty -- a measurement that has never carried one must not be left showing the
+  // previous measurement's, which is what every other field here deliberately does.
+  applyLoadedAnnotations(display.annotations)
   impulseNormalised.value = display.normalised
   impulseThickLines.value = display.thickLines
   impulseShowDataPoints.value = display.showDataPoints
@@ -3566,7 +3626,24 @@ function onLoopbackCaptured(id: number) {
   if (panel) panel.selectReference(id)
 }
 
+/**
+ * A non-FFT measurement type's `params_json`, with its annotations.
+ *
+ * <p>Spliced here, in <b>one</b> place, rather than added to each of the six branches below. Those
+ * branches hand-build their documents field by field, and a field missing from one of them is not
+ * an error -- it is a default, so the type would save and simply lose its notes (the
+ * `ChartStartHz` trap, written up in CLAUDE.md). One seam cannot be forgotten by the seventh kind.
+ *
+ * <p>The FFT screen is not covered and does not need to be: it returns undefined from here and goes
+ * through `buildStagedConfig`, which carries the same field explicitly.</p>
+ */
 function buildTypeParamsJson(): string | undefined {
+  const json = buildTypeParamsJsonCore()
+  if (json === undefined) return undefined
+  return JSON.stringify({ ...JSON.parse(json), chartAnnotations: annotations.value })
+}
+
+function buildTypeParamsJsonCore(): string | undefined {
   if (isImpulseResponse.value) {
     const base = impulseConfigPanel.value?.buildParamsJson()
     if (!base) return undefined

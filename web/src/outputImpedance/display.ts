@@ -1,3 +1,4 @@
+import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
 import type { ImpedanceZScale, OutputImpedanceParameters } from '../api/client'
 
 /**
@@ -20,10 +21,16 @@ export interface OutputImpedanceDisplay {
   thickLines: boolean
   showDataPoints: boolean
   autofitOnDone: boolean
+  /**
+   * The notes drawn on this measurement's charts, as stored -- across every view, so one report
+   * render can print a table per picture. See measurements/chartAnnotations.ts.
+   */
+  annotations: ChartAnnotation[]
 }
 
 /** A fresh type's window: 10 mΩ–10 Ω on a log axis — a solid-state amplifier's coil and a tube amplifier's transformer both fit — with the damping factor beside it. */
 export const DEFAULT_OUTPUT_IMPEDANCE_DISPLAY: Readonly<OutputImpedanceDisplay> = Object.freeze({
+  annotations: [],
   zTopOhms: 10,
   zBottomOhms: 0.01,
   zScale: 'Log' as ImpedanceZScale,
@@ -71,6 +78,11 @@ export function outputImpedanceDisplayFromParams(
   if (typeof stored.chartThickLines === 'boolean') display.thickLines = stored.chartThickLines
   if (typeof stored.chartShowDataPoints === 'boolean') display.showDataPoints = stored.chartShowDataPoints
   if (typeof stored.chartAutofitOnDone === 'boolean') display.autofitOnDone = stored.chartAutofitOnDone
+
+  display.annotations = parseAnnotations(
+    (stored as { chartAnnotations?: unknown }).chartAnnotations,
+    { view: 'Bode', xQuantity: 'hz', yQuantity: 'ohm' },
+  )
 
   return display
 }

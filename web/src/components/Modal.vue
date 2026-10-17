@@ -88,12 +88,12 @@ function onCancel(e: Event) {
 <template>
   <dialog
     ref="dialogRef"
-    class="m-auto w-full rounded-2xl border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 dark:border-neutral-800 dark:text-neutral-100"
+    class="m-auto w-full overflow-hidden rounded-2xl border border-neutral-200 bg-[var(--surface-panel)] p-0 text-neutral-900 backdrop:bg-black/40 open:flex open:flex-col dark:border-neutral-800 dark:text-neutral-100"
     :class="WIDTHS[props.size]"
     @cancel="onCancel"
   >
     <div
-      class="flex items-center justify-between border-b border-neutral-200 bg-[var(--surface-panel)] dark:border-neutral-800"
+      class="flex shrink-0 items-center justify-between border-b border-neutral-200 bg-[var(--surface-panel)] dark:border-neutral-800"
       :class="titled ? 'py-2.5 pl-5 pr-3' : 'px-4 py-3'"
     >
       <PanelIcon v-if="props.icon" :icon="props.icon" :tone="props.tone" :size="32" class="mr-3" />
@@ -134,15 +134,30 @@ function onCancel(e: Event) {
     </div>
     <!-- Between the header and the body: the Configuration dialog's tab strip, which belongs to
          neither. -->
-    <slot name="under-header" />
-    <div :class="props.flush ? '' : 'p-4'" :style="props.ground ? { backgroundColor: 'var(--surface-ground)' } : undefined">
+    <div class="shrink-0 empty:hidden"><slot name="under-header" /></div>
+    <!--
+      The one scrolling part. The dialog is a flex column (only while open, or an author
+      `display: flex` would beat the user agent's `display: none` and show a closed dialog), so a
+      body taller than the viewport scrolls *inside* the chrome instead of taking the header and the
+      footer with it. `min-h-0` is what lets it shrink below its content: a flex item's automatic
+      minimum size is its content height, so without it the body refuses to shrink, the dialog grows
+      past its own max-height and the footer lands below the fold -- which is exactly what the
+      Export dialog did at 768 px, with its Export button off-screen at y=745 and no way to reach
+      it (2026-10-17). A body with its own `max-h` scroller still works; it simply stops being the
+      one that moves.
+    -->
+    <div
+      class="min-h-0 flex-1 overflow-y-auto"
+      :class="props.flush ? '' : 'p-4'"
+      :style="props.ground ? { backgroundColor: 'var(--surface-ground)' } : undefined"
+    >
       <slot />
     </div>
     <!-- The actions, on their own strip under a rule: in a dialog this long they would otherwise be
          wherever the scroll happened to leave them. -->
     <div
       v-if="$slots.footer"
-      class="flex items-center gap-2 border-t border-neutral-200 px-4 py-3 dark:border-neutral-800"
+      class="flex shrink-0 items-center gap-2 border-t border-neutral-200 px-4 py-3 dark:border-neutral-800"
       :style="{ backgroundColor: 'var(--surface-panel)' }"
     >
       <slot name="footer" />

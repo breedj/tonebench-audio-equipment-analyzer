@@ -783,6 +783,13 @@ public sealed record ImdVsAmplitudeParameters(
     /// </summary>
     string? ProgrammableLoadKind = null,
     int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// End the sweep once a channel's IMD exceeds this many percent; null means sweep to the end.
+    /// <see cref="ThdVsAmplitudeParameters.StopThdPercent"/> on the figure this sweep measures: a
+    /// type setting like the rest of the grid, saved with the result so a curve that stops short
+    /// can say it did so on purpose.
+    /// </summary>
+    double? StopImdPercent = null,
     /// <summary>See <see cref="ThdVsFrequencyParameters.ChartFitPreviewSpectrum"/> -- the rail previews' Fit all toggles.</summary>
     bool? ChartFitPreviewSpectrum = null,
     bool? ChartFitPreviewScope = null,

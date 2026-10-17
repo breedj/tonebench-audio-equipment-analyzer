@@ -736,6 +736,7 @@ public sealed class MeasurementSaveService(
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                StopImdPercent: request.StopImdPercent,
                 MeasurementLoFreqHz: request.MeasurementLoFreqHz,
                 MeasurementHiFreqHz: request.MeasurementHiFreqHz),
             SerializerOptions);

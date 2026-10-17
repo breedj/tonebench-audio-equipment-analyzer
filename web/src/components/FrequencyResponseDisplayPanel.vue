@@ -691,7 +691,8 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
       </template>
     </div>
 
-    <!-- Only the chirp removes a delay, so only the chirp can put one back. -->
+    <!-- Only the chirp removes a delay, so only the chirp can put one back. The Bode plot has its
+         own copy of this control, beside the phase trace it acts on -- see below. -->
     <label v-if="!bodeShowing && latencySamples !== null" class="tb-check-row">
       <input v-model="restoreDelay" type="checkbox" class="tb-check" />
       <span title="The chirp estimator removes a bulk delay per record; this puts it back, so the contour is the physical one. Overlays are always drawn uncorrected.">
@@ -758,6 +759,17 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
       >
         <input v-model="showPhase" type="checkbox" class="tb-check" />
         {{ phaseKind === 'ChannelDifference' ? 'Phase difference' : 'Phase' }}
+      </label>
+      <!-- The same setting the complex views carry, here because the phase is what it acts on: with
+           the delay removed a minimum-phase DUT reads a few degrees across its whole passband (8-10°
+           on the simulator's Butterworth), which is both uninformative and drawn on top of the level
+           trace. Shown under the phase checkbox rather than at the top of the rail so the two read
+           as one control and its answer. -->
+      <label v-if="phaseAvailable && latencySamples !== null" class="tb-check-row pl-5">
+        <input v-model="restoreDelay" type="checkbox" class="tb-check" />
+        <span title="The chirp estimator removes a bulk propagation delay per record, and on a minimum-phase DUT that delay is most of its phase — which is why the passband reads a few degrees. This puts it back, so the phase is the physical one (0 → −450° through a 5th-order corner). Overlays are always drawn uncorrected.">
+          Restore removed delay
+        </span>
       </label>
       <!-- Gated exactly like phase: the delay curves are derived from it and mean nothing without it. -->
       <label v-if="phaseAvailable" class="tb-field" :title="delayHint">

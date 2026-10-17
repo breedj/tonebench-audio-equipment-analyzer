@@ -7,7 +7,6 @@ import {
   type ReportDocument,
   type ReportRow,
   type ReportSection,
-  type ReportStatusTone,
 } from '../api/client'
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
 import { parseAnnotations } from '../measurements/spectrumAnnotations'
@@ -60,22 +59,12 @@ export function kindLabel(kind: string): string {
   return measurementKindLabel(kind)
 }
 
-function formatTimestamp(subject: ReportSubject): string {
-  if (!subject.timestampUtc) return subject.data.kind === 'none' ? 'Not measured — settings and notes only' : 'On screen — not saved'
+/** When a stored result was measured, in the configured format; null for anything not saved. */
+function formatTimestamp(subject: ReportSubject): string | null {
+  if (!subject.timestampUtc) return null
   // Configuration ▸ General ▸ Date and time format — the same choice the Screenshot's date line follows.
   const date = new Date(subject.timestampUtc)
   return Number.isNaN(date.getTime()) ? subject.timestampUtc : formatWithPreference(date)
-}
-
-/**
- * What the contents page says about a chapter, and which pill it wears. Three states, and they are
- * the three a reader has to tell apart: a stored result (when), the measurement on screen (not
- * saved), and a measurement that has never run (settings only).
- */
-function chapterStatus(subject: ReportSubject): { status: string; statusTone: ReportStatusTone } {
-  if (subject.timestampUtc) return { status: formatTimestamp(subject), statusTone: 'stored' }
-  if (subject.data.kind === 'none') return { status: 'Settings only', statusTone: 'none' }
-  return { status: 'On screen, not saved', statusTone: 'live' }
 }
 
 /** The chapter's own heading: what this chapter is *of*, under the measurement's name. */
@@ -426,9 +415,17 @@ async function extraChartSections(subject: ReportSubject, elements: readonly Rep
   return sections
 }
 
-/** The rows that head a subject's part of a chapter: when it was taken and what it was taken with. */
+/**
+ * The rows that head a subject's part of a chapter: when it was taken and what it was taken with.
+ *
+ * <p><b>Only a stored result has a "Taken" row.</b> A measurement read off the screen has no
+ * timestamp to print, and the row said so — "Taken: On screen — not saved" — which told a reader
+ * nothing they could use and read as a fault in the report. A chapter with nothing measured already
+ * opens with a callout saying so.</p>
+ */
 function subjectMeta(subject: ReportSubject): ReportRow[] {
-  return [{ label: 'Taken', value: formatTimestamp(subject) }, ...subject.facts]
+  const taken = formatTimestamp(subject)
+  return taken === null ? [...subject.facts] : [{ label: 'Taken', value: taken }, ...subject.facts]
 }
 
 /**
@@ -473,7 +470,6 @@ export async function buildChapter(
     // reader looking for "what measurement is this" finds it beside the rest of the facts.
     eyebrow: subject.typeName,
     accent: reportAccent(subject.kind),
-    ...chapterStatus(subject),
     meta: [{ label: 'Measurement', value: kindLabel(subject.kind) }, { label: 'Project', value: subject.projectName }, ...subjectMeta(subject)],
     notes: null,
     sections,
@@ -526,13 +522,10 @@ async function buildCombinedChapter(plan: ReportPlan, onProgress?: (message: str
   }
 
   return {
-    // One chapter of several measurements, so its heading names them rather than one of them; the
-    // contents page says how many, which is the only status true of the set.
+    // One chapter of several measurements, so its heading names them rather than one of them.
     title: plan.subjects.map(subjectLabel).join(', '),
     eyebrow: primary.typeName,
     accent: reportAccent(primary.kind),
-    status: `${plan.subjects.length} measurements`,
-    statusTone: 'stored',
     meta: [
       { label: 'Measurement', value: kindLabel(primary.kind) },
       { label: 'Project', value: primary.projectName },

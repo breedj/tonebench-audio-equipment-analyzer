@@ -93,6 +93,8 @@ public sealed record ImdSweepStartRequest(
     int AverageCount,
     bool MeasureNoiseFloor = true,
     double? MaxProductFreqHz = null,
+    /// <summary>End the sweep once a channel's IMD exceeds this many percent — see <see cref="ImdSweepRequest.StopImdPercent"/>. Absent means sweep to the end.</summary>
+    double? StopImdPercent = null,
     /// <summary>The band this sweep's noise figures are read over - see <see cref="ThdSweepRequest.MeasurementLoFreqHz"/>. Defaulted so an older client keeps the 20 Hz - 20 kHz band it always ran.</summary>
     double MeasurementLoFreqHz = 20.0,
     double MeasurementHiFreqHz = 20000.0)
@@ -107,6 +109,7 @@ public sealed record ImdSweepStartRequest(
             preset, ToneLowHz, ToneHighHz, LowToHighRatio, method, MaxOrder,
             StartLevelVolt, EndLevelVolt, StepsPerOctave, LoadOhms,
             ProcessLeft, ProcessRight, AverageCount, MeasureNoiseFloor, MaxProductFreqHz,
+            StopImdPercent: StopImdPercent,
             MeasurementLoFreqHz: MeasurementLoFreqHz, MeasurementHiFreqHz: MeasurementHiFreqHz);
 }
 

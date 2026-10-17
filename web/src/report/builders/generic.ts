@@ -1,4 +1,5 @@
-import type { ReportRow, ReportSection } from '../../api/client'
+import type { ReportRow, ReportSection, SweepLevelUnit } from '../../api/client'
+import { levelUnitLabel } from '../../measurements/levelMode'
 import type { ReportSubject } from '../types'
 
 /**
@@ -21,10 +22,70 @@ export function descriptionSections(subject: ReportSubject): ReportSection[] {
   return sections
 }
 
-/** "frequencySpanHz" → "Frequency span hz": readable enough for a kind nobody has labelled yet. */
+/**
+ * The words a key is spelled with that a reader would get wrong from the key alone: the units, and
+ * the acronyms this app's own vocabulary is full of. `humanizeKey` lowercases every word before
+ * looking it up, so this table is the whole of what stops `dutGainDb` reading as "Dut gain db".
+ *
+ * <p>Keyed on a whole word, never a substring — "dbv" is a unit and "dbvolts" would not be — and
+ * deliberately short: a word nobody listed is simply left as it is, which is what the naive
+ * spelling already did.</p>
+ */
+const KEY_WORDS: Record<string, string> = {
+  db: 'dB',
+  dbv: 'dBV',
+  dbfs: 'dBFS',
+  dbc: 'dBc',
+  dbr: 'dBr',
+  hz: 'Hz',
+  khz: 'kHz',
+  ms: 'ms',
+  us: 'µs',
+  dut: 'DUT',
+  fft: 'FFT',
+  imd: 'IMD',
+  thd: 'THD',
+  rms: 'RMS',
+  snr: 'SNR',
+  csv: 'CSV',
+  pcm: 'PCM',
+  id: 'ID',
+}
+
+/** "frequencySpanHz" → "Frequency span Hz": readable enough for a kind nobody has labelled yet. */
 export function humanizeKey(key: string): string {
-  const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase()
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .split(' ')
+    .filter((word) => word.length > 0)
+  if (words.length === 0) return ''
+
+  const spelled = words.map((word) => KEY_WORDS[word] ?? word)
+  // The first word is capitalised only when the table has not already spelled it: "DUT gain dB",
+  // not "DUT Gain dB", and not "DUt gain dB" either.
+  if (!(words[0] in KEY_WORDS)) spelled[0] = spelled[0].charAt(0).toUpperCase() + spelled[0].slice(1)
+  return spelled.join(' ')
+}
+
+/**
+ * The suffix a key's own name promises as a unit, and which words of the label it therefore replaces.
+ *
+ * <p>Only ohms so far, and it earns its place: `loadOhms` read "Load ohms: 8", a label wearing a
+ * unit the value then had to be read without. The label drops the word and the value carries the
+ * symbol, which is how every hand-written row in the other builders already prints a load.</p>
+ */
+const KEY_SUFFIX_UNITS: { suffix: string; unit: string }[] = [{ suffix: 'Ohms', unit: 'Ω' }]
+
+/** A key's label and the unit its value is to be suffixed with, from the key alone. */
+function labelAndUnit(key: string): { label: string; unit: string | null } {
+  for (const { suffix, unit } of KEY_SUFFIX_UNITS) {
+    if (key.length > suffix.length && key.endsWith(suffix)) {
+      return { label: humanizeKey(key.slice(0, -suffix.length)), unit }
+    }
+  }
+  return { label: humanizeKey(key), unit: null }
 }
 
 export function formatScalar(value: unknown): string | null {
@@ -51,11 +112,24 @@ export function genericSettingsRows(paramsJson: string): ReportRow[] {
   const rows: ReportRow[] = []
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (key.startsWith('chart')) continue
-    const text = formatScalar(value)
+    const text = formatValue(key, value)
     if (text === null) continue
-    rows.push({ label: humanizeKey(key), value: text })
+    const { label, unit } = labelAndUnit(key)
+    rows.push({ label, value: unit === null ? text : `${text} ${unit}` })
   }
   return rows
+}
+
+/**
+ * A setting's value as a reader expects it rather than as it is stored. One rule: a key naming a
+ * *unit* holds an enum name (`Dbv`, `MilliWatt`), and the dropdown that wrote it spells that name
+ * `dBV` and `mW` — so the report quotes it the way the panel does. `levelUnitLabel` is that
+ * dropdown's own table and hands back anything it does not recognise unchanged, which is what makes
+ * it safe against a params_json another build wrote.
+ */
+function formatValue(key: string, value: unknown): string | null {
+  if (key.endsWith('Unit') && typeof value === 'string') return levelUnitLabel(value as SweepLevelUnit)
+  return formatScalar(value)
 }
 
 /**

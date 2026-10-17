@@ -75,6 +75,12 @@ const form = reactive({
    */
   measurementLoFreqHz: DEFAULT_BANDWIDTH.loHz as number,
   measurementHiFreqHz: DEFAULT_BANDWIDTH.hiHz as number,
+  /**
+   * The early abort, the THD amplitude sweep's on the figure this sweep measures. Two fields for
+   * one nullable setting, as that panel does it: unticking must not lose the threshold typed.
+   */
+  stopOnImd: false,
+  stopImdPercent: 1,
 })
 
 const presetActive = computed(() => form.preset !== 'Custom')
@@ -127,6 +133,14 @@ function applyStoredParams(paramsJson: string) {
   // live pipeline held, which is unknowable now, so the default stands rather than a guess.
   if (typeof stored.measurementLoFreqHz === 'number') form.measurementLoFreqHz = stored.measurementLoFreqHz
   if (typeof stored.measurementHiFreqHz === 'number') form.measurementHiFreqHz = stored.measurementHiFreqHz
+  // Stored as one nullable number; the form keeps the checkbox and the value apart so unticking
+  // does not lose the threshold the user typed.
+  if (typeof stored.stopImdPercent === 'number' && stored.stopImdPercent > 0) {
+    form.stopOnImd = true
+    form.stopImdPercent = stored.stopImdPercent
+  } else if (stored.stopImdPercent === null) {
+    form.stopOnImd = false
+  }
 
   void nextTick(() => {
     restoring = false
@@ -184,8 +198,12 @@ const invalid = computed(() => {
   if (!form.processLeft && !form.processRight) return 'Select at least one channel.'
   if (!(loadOhms.value > 0)) return 'A load above 0 Ω is needed to report output power.'
   if (!(form.maxProductFreqHz > 0)) return 'The product band limit must be positive.'
+  if (form.stopOnImd && !(form.stopImdPercent > 0)) return 'The IMD stop threshold must be above 0 %.'
   return null
 })
+
+/** The threshold as the server takes it: a number when armed, null for "sweep to the end". */
+const stopImdPercent = computed(() => (form.stopOnImd ? form.stopImdPercent : null))
 
 defineExpose({ run, invalid, buildParamsJson })
 
@@ -210,6 +228,7 @@ function buildParamsJson(): string {
     sampleRateHz: SWEEP_SAMPLE_RATE_HZ,
     measureNoiseFloor: form.measureNoiseFloor,
     maxProductFreqHz: form.maxProductFreqHz,
+    stopImdPercent: stopImdPercent.value,
     measurementLoFreqHz: form.measurementLoFreqHz,
     measurementHiFreqHz: form.measurementHiFreqHz,
   }
@@ -234,6 +253,7 @@ function run() {
     averageCount: form.averageCount,
     measureNoiseFloor: form.measureNoiseFloor,
     maxProductFreqHz: form.maxProductFreqHz,
+    stopImdPercent: stopImdPercent.value,
     measurementLoFreqHz: form.measurementLoFreqHz,
     measurementHiFreqHz: form.measurementHiFreqHz,
   })
@@ -442,6 +462,27 @@ function run() {
         :disabled="running"
         class="tb-input w-28"
       />
+    </label>
+
+    <label
+      class="tb-check-row flex-wrap"
+      title="Ends the sweep as soon as a measured channel's IMD exceeds this figure. The point that crossed it is kept — it is the one that says where the DUT gave up — so the DUT is driven one step past the threshold. Off: the sweep runs to its end level."
+    >
+      <input v-model="form.stopOnImd" type="checkbox" :disabled="running" />
+      <span class="whitespace-nowrap">Stop when IMD exceeds</span>
+      <!-- The box gets a width of its own and the row wraps as two whole things -- see
+           AmplitudeSweepConfigPanel, whose own label broke over three lines in a 226 px rail. -->
+      <span class="flex items-center gap-2">
+        <input
+          v-model.number="form.stopImdPercent"
+          type="number"
+          min="0.001"
+          step="0.1"
+          :disabled="running || !form.stopOnImd"
+          class="tb-input w-18 shrink-0"
+        />
+        %
+      </span>
     </label>
 
 

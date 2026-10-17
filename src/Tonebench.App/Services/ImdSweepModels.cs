@@ -40,6 +40,15 @@ public sealed record ImdSweepRequest(
     bool MeasureNoiseFloor,
     /// <summary>Highest product frequency counted; null means the pipeline's measurement band (20 kHz) — in-band products only.</summary>
     double? MaxProductFreqHz = null,
+    /// <summary>
+    /// End the sweep early once any measured channel's IMD exceeds this many percent — the THD
+    /// amplitude sweep's <see cref="ThdSweepRequest.StopThdPercent"/> on the figure this sweep
+    /// measures. The point that crossed it is kept (it is the informative one) and the run finishes
+    /// as <see cref="ThdSweepPhase.Finished"/> with <see cref="ImdSweepStatus.StopReason"/> saying
+    /// why. Null means sweep to the end. A DUT is driven one step past the threshold by
+    /// construction; the check needs the point to exist.
+    /// </summary>
+    double? StopImdPercent = null,
     /// <summary>Not offered on the wire (the endpoint fixes them); parameters so a test can run the fast preset.</summary>
     int FftSize = ThdSweepRequest.AmplitudeSweepFftSize,
     double SampleRateHz = ThdSweepRequest.AmplitudeSweepSampleRateHz,
@@ -140,6 +149,9 @@ public sealed record ImdSweepRequest(
 
         if (MaxProductFreqHz is { } maxProduct && !(maxProduct > 0.0))
             throw new ArgumentOutOfRangeException(nameof(MaxProductFreqHz), maxProduct, "The product band limit must be positive.");
+
+        if (StopImdPercent is { } stopImd && !(stopImd > 0.0))
+            throw new ArgumentOutOfRangeException(nameof(StopImdPercent), StopImdPercent, "The IMD stop threshold must be above 0 %.");
     }
 }
 
@@ -181,6 +193,12 @@ public sealed record ImdSweepStatus(
     string? Error,
     IReadOnlyList<ImdSweepPoint> Points,
     IntermodulationMethod Method,
-    int MaxOrder);
+    int MaxOrder,
+    /// <summary>
+    /// Why a <see cref="ThdSweepPhase.Finished"/> sweep ended before its last planned point -- the
+    /// IMD stop threshold, today. Null for a sweep that ran to the end. Not a phase of its own, so
+    /// nothing that asks "is it over" has to learn about it. See <see cref="ThdSweepStatus.StopReason"/>.
+    /// </summary>
+    string? StopReason = null);
 
 public sealed record ImdSweepStarted(int PointCount, IReadOnlyList<double> LevelsVolt);

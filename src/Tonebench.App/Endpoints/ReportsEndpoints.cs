@@ -68,18 +68,13 @@ public sealed record ReportDocument(
 /// <param name="Eyebrow">The measurement it belongs to, over the title in the chapter's band.</param>
 /// <param name="Accent">The kind's colour as <c>#rrggbb</c>, which is what makes a chapter findable
 /// by its edge; the band's tint is mixed from it rather than sent, so the two cannot disagree.</param>
-/// <param name="Status">What the contents page says about this chapter: when it was measured, or
-/// that it carries settings only.</param>
-/// <param name="StatusTone">Which pill the status wears: <c>stored</c>, <c>live</c> or <c>none</c>.</param>
 public sealed record ReportChapter(
     string Title,
     ReportRow[] Meta,
     string? Notes,
     ReportSection[] Sections,
     string? Eyebrow = null,
-    string? Accent = null,
-    string? Status = null,
-    string? StatusTone = null);
+    string? Accent = null);
 
 public sealed record ReportRow(string Label, string Value);
 

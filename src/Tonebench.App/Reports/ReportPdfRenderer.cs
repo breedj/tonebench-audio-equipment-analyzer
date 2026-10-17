@@ -291,15 +291,6 @@ public static class ReportPdfRenderer
                     text.Span($" — {chapter.Title}").FontColor(palette.Label);
             });
 
-            if (!string.IsNullOrWhiteSpace(chapter.Status))
-            {
-                var (background, ink) = StatusPill(chapter.StatusTone, palette);
-                row.AutoItem().AlignMiddle().PaddingRight(Px(10))
-                    .Background(background).CornerRadius(Px(8))
-                    .PaddingVertical(Px(2)).PaddingHorizontal(Px(8))
-                    .Text(chapter.Status).FontSize(Px(12)).FontColor(ink);
-            }
-
             row.ConstantItem(Px(26)).AlignMiddle().AlignRight().Text(text =>
             {
                 text.DefaultTextStyle(t => t.FontSize(Px(13)).SemiBold());
@@ -307,16 +298,6 @@ public static class ReportPdfRenderer
             });
         });
     }
-
-    private static (string Background, string Ink) StatusPill(string? tone, Palette palette) =>
-        palette.Monochrome
-            ? ("#f1f5f9", "#475569")
-            : tone switch
-            {
-                "stored" => ("#d8f5e0", "#15803d"),
-                "live" => ("#fdeccb", "#92400e"),
-                _ => ("#f1f5f9", "#475569"),
-            };
 
     private static string SectionName(int chapterIndex) => $"chapter-{chapterIndex}";
 

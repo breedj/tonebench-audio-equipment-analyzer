@@ -43,6 +43,7 @@ public sealed class ImdSweepRunner(
     private List<ImdSweepPoint> _points = [];
     private IntermodulationMethod _method = IntermodulationMethod.Smpte;
     private int _maxOrder = IntermodulationPresets.SmpteDefaultMaxOrder;
+    private string? _stopReason;
     private ImdSweepRequest? _lastRequest;
 
     /// <summary>The sweeps of the measurements switched away from — see <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning.</summary>
@@ -58,7 +59,8 @@ public sealed class ImdSweepRunner(
         get
         {
             lock (_stateLock)
-                return new ImdSweepStatus(Running, _phase, _index, _total, _currentLevelVolt, _error, [.. _points], _method, _maxOrder);
+                return new ImdSweepStatus(
+                    Running, _phase, _index, _total, _currentLevelVolt, _error, [.. _points], _method, _maxOrder, _stopReason);
         }
     }
 
@@ -86,6 +88,7 @@ public sealed class ImdSweepRunner(
                 _total = steps.Length;
                 _currentLevelVolt = 0.0;
                 _error = null;
+                _stopReason = null;
                 _points = [];
                 _method = request.Method;
                 _maxOrder = request.MaxOrder;
@@ -142,6 +145,7 @@ public sealed class ImdSweepRunner(
             _total = 0;
             _currentLevelVolt = 0.0;
             _error = null;
+            _stopReason = null;
 
             return Status;
         }
@@ -161,7 +165,7 @@ public sealed class ImdSweepRunner(
 
             var current = _points.Count == 0
                 ? null
-                : new ParkedSweep(_phase, _index, _total, _currentLevelVolt, _error, _points, _method, _maxOrder, _lastRequest);
+                : new ParkedSweep(_phase, _index, _total, _currentLevelVolt, _error, _stopReason, _points, _method, _maxOrder, _lastRequest);
 
             var outcome = _parking.Switch(owner, current);
             if (!outcome.Changed)
@@ -174,6 +178,7 @@ public sealed class ImdSweepRunner(
                 _total = parked.Total;
                 _currentLevelVolt = parked.CurrentLevelVolt;
                 _error = parked.Error;
+                _stopReason = parked.StopReason;
                 _points = parked.Points;
                 _method = parked.Method;
                 _maxOrder = parked.MaxOrder;
@@ -187,6 +192,7 @@ public sealed class ImdSweepRunner(
                 _total = 0;
                 _currentLevelVolt = 0.0;
                 _error = null;
+                _stopReason = null;
                 _lastRequest = null;
             }
 
@@ -202,7 +208,7 @@ public sealed class ImdSweepRunner(
 
     /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus the as-run request.</summary>
     private sealed record ParkedSweep(
-        ThdSweepPhase Phase, int Index, int Total, double CurrentLevelVolt, string? Error,
+        ThdSweepPhase Phase, int Index, int Total, double CurrentLevelVolt, string? Error, string? StopReason,
         List<ImdSweepPoint> Points, IntermodulationMethod Method, int MaxOrder, ImdSweepRequest? LastRequest);
 
     private async Task RunAsync(ImdSweepRequest request, Step[] steps, CancellationToken ct)
@@ -316,10 +322,30 @@ public sealed class ImdSweepRunner(
                     rangeRatchetDbv = Math.Max(rangeRatchetDbv, inputRangeAfter);
                 }
 
+                ImdSweepPoint? overThreshold = null;
                 foreach (var point in BuildPoints(step, request, snapshots, noiseVrms))
                 {
                     AddPoint(point);
                     hub.Broadcast(StreamFrame.EncodeImdSweepPoint(point, (uint)i));
+                    if (request.StopImdPercent is { } stopImd && double.IsFinite(point.ImdPercent) && point.ImdPercent > stopImd
+                        && (overThreshold is null || point.ImdPercent > overThreshold.ImdPercent))
+                    {
+                        overThreshold = point;
+                    }
+                }
+
+                // The point that crossed the threshold stays -- it is the one that says where the
+                // DUT gave up -- and the sweep ends here as Finished, not as a phase of its own.
+                // ThdSweepRunner's own stop, on the figure this sweep measures.
+                if (overThreshold is { } stopPoint)
+                {
+                    string channelName = stopPoint.Channel == 0 ? "L" : "R";
+                    lock (_stateLock)
+                    {
+                        _stopReason =
+                            $"Stopped at {step.LevelVolt:0.###} Vrms: IMD {stopPoint.ImdPercent:0.###} % on {channelName} exceeded {request.StopImdPercent:0.###} %.";
+                    }
+                    break;
                 }
             }
 

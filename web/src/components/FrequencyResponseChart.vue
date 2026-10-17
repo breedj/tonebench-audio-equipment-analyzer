@@ -85,6 +85,24 @@ const props = defineProps<{
    * Absent on the report's headless render, which has no cursor and draws no line.
    */
   pinnedX?: number | null
+  /**
+   * Put the chirp's removed bulk delay back on the phase (and so on the delay curves) — the display
+   * panel's **Restore removed delay**, which the complex views have always had and the Bode plot
+   * gained 2026-10-17.
+   *
+   * <p>The estimator de-rotates every record by an estimated latency before accumulating, and on a
+   * minimum-phase DUT that latency <em>is</em> most of its phase: measured against the simulator's
+   * 5th-order Butterworth, the passband reads 8–10° with it removed and the textbook 0 → −450°
+   * through the corner with it back. Off by default, because excess phase is the right reading for
+   * a DUT whose own delay is the thing being removed — a loudspeaker, a converter, anything behind
+   * a buffer.</p>
+   *
+   * <p>Null latency on a stepped run: `arg(L/R)` comes from two channels of one capture, so the
+   * record's arbitrary start offset is common-mode and there is nothing to restore.</p>
+   */
+  restoreDelay?: boolean
+  latencySamples?: number | null
+  sampleRateHz?: number | null
 }>()
 
 /**
@@ -282,9 +300,80 @@ const outOfRange = computed(() => {
  * case where the trace on screen really does carry its own: the chirp estimates Left and Right
  * against the synthesised sweep.
  */
-const phaseTrace = computed<ResponseTrace | null>(() =>
-  props.phaseKind === 'PerTrace' ? primaryTrace.value : gainTrace.value,
-)
+const phaseTrace = computed<ResponseTrace | null>(() => {
+  if (props.phaseKind !== 'PerTrace') return gainTrace.value
+  // The curve on screen, and never one that is not. `primaryTrace` stood here, and its fallback
+  // chain reaches the *right* trace the moment the Left checkbox is cleared -- which with the right
+  // input as the reference is a curve the chart refuses to draw at all, being the stimulus leg. Its
+  // phase is flat 0 by construction, so clearing Left silently replaced the DUT's phase with a
+  // straight line through the middle of the plot. Reported 2026-10-17 as the phase appearing only
+  // once Left was unticked; what appeared was the generator's own leg.
+  return visibleTraces.value[0] ?? leftTrace.value ?? rightTrace.value
+})
+
+/**
+ * How far below a trace's own reference level its phase stops being a measurement.
+ *
+ * <p>The unwrapper starts at bin 0 and walks every bin, so once the response is into the analyzer's
+ * noise it unwraps noise and winds up without bound. Measured against the simulator's Butterworth
+ * over a 96 kHz span: the phase leaves ±180° at the first stopband column (5.3 kHz, −42 dB), reads
+ * +402° at −58 dB and <b>−311 068°</b> at −89 dB, so from the stopband on there is no phase line
+ * anywhere on the plot — which is how "the phase is not plotted" was reported (2026-10-17).</p>
+ *
+ * <p>60 dB rather than a figure derived from the noise, because there is none to derive it from: a
+ * chirp's coherence is 1.0 by construction at one average (and a noise-free simulation agrees with
+ * itself at −600 dB), which is the same reason `complexPlane` gates on level and not on coherence.
+ * It is a *display* floor and it is deliberately far shallower than that one's −120 dB: there the
+ * question is whether a bin measured anything at all, here it is whether a reader could follow the
+ * curve — and a Bode magnitude window is at most some 60 dB tall, so a column blanked here is one
+ * whose magnitude is off the plot as well.</p>
+ */
+const PHASE_FLOOR_BELOW_REFERENCE_DB = -60
+
+/**
+ * The level the phase floor is measured down from: the trace's bandwidth reference, or its peak
+ * where there is none.
+ *
+ * <p><b>Only on a deconvolved run</b> — the chirp and the impulse response, which are the two that
+ * report `PerTrace` and the two whose phase comes from unwrapping a continuous spectrum bin by bin.
+ * A stepped sweep measures one tone at a time and removes no delay, so its phase is a coherent
+ * reading at every point it took and stays physical down to the analyzer's own floor; blanking it
+ * would delete a measurement rather than a wind-up.</p>
+ */
+function phaseFloorDbOf(trace: ResponseTrace | null): number {
+  if (!trace || props.phaseKind !== 'PerTrace') return Number.NEGATIVE_INFINITY
+  // Null on a row an older build wrote (migration 011), where the peak was the only reference there was.
+  const reference = trace.referenceDb ?? trace.peakDb
+  return Number.isFinite(reference) ? reference + PHASE_FLOOR_BELOW_REFERENCE_DB : Number.NEGATIVE_INFINITY
+}
+
+/** Degrees of phase to put back per hertz — `360·τ/fs`, and zero whenever there is no delay to restore. */
+const delayDegPerHz = computed(() => {
+  if (!props.restoreDelay) return 0
+  const samples = props.latencySamples
+  const fs = props.sampleRateHz
+  if (samples == null || fs == null || !Number.isFinite(samples) || !(fs > 0)) return 0
+  return (360 * samples) / fs
+})
+
+/**
+ * The phase series: the trace's own phase, with the removed delay put back when asked for, and
+ * <b>null</b> — a gap, not a zero — on every column whose magnitude is below
+ * {@link PHASE_FLOOR_BELOW_REFERENCE_DB}. Sign as `complexPlane.toComplexCurve` applies it, so the
+ * Bode phase and the Nyquist contour cannot disagree about which way a restored delay goes.
+ */
+function phaseSeriesOf(trace: ResponseTrace | null, length: number): (number | null)[] {
+  const out = new Array<number | null>(length).fill(null)
+  if (!trace) return out
+  const floorDb = phaseFloorDbOf(trace)
+  const derotate = delayDegPerHz.value
+  for (let i = 0; i < length && i < trace.phaseDeg.length; i++) {
+    const phase = trace.phaseDeg[i]
+    if (!Number.isFinite(phase) || !(trace.magnitudeMaxDb[i] >= floorDb)) continue
+    out[i] = phase - derotate * trace.freqHz[i]
+  }
+  return out
+}
 
 /** What the phase curve is entitled to be called — a difference between two measured paths is not a DUT's phase response. */
 const phaseLabel = computed(() => (props.phaseKind === 'ChannelDifference' ? 'Phase difference' : 'Phase'))
@@ -308,12 +397,19 @@ const delayRange = computed<[number, number]>(() => [
 ])
 const delayLabelText = computed(() => delayLabel(delayView.value, props.phaseKind === 'ChannelDifference'))
 
-/** The selected delay curve of a trace in the axis' unit; all-null (a gap, not a zero line) when the trace never recorded one. */
+/**
+ * The selected delay curve of a trace in the axis' unit; all-null (a gap, not a zero line) when the
+ * trace never recorded one. Blanked column for column with the phase it is the derivative of —
+ * where the phase is noise the delay is its slope, which is noise multiplied by the bin spacing.
+ */
 function delaySeriesOf(trace: ResponseTrace | null, length: number): (number | null)[] {
   const values = delayValuesOf(trace, delayView.value)
-  if (!values || values.length !== length) return new Array<number | null>(length).fill(null)
+  if (!trace || !values || values.length !== length) return new Array<number | null>(length).fill(null)
+  const floorDb = phaseFloorDbOf(trace)
   const scale = delayScale(delayUnit.value)
-  return Array.from(values, (v) => (Number.isFinite(v) ? v * scale : null))
+  return Array.from(values, (v, i) =>
+    Number.isFinite(v) && trace.magnitudeMaxDb[i] >= floorDb ? v * scale : null,
+  )
 }
 
 /**
@@ -499,10 +595,7 @@ function buildData(): uPlot.AlignedData {
 
   // Both go out in their own units now that each has its own scale — degrees and 0..1 — so the
   // cursor and the axis agree with each other.
-  if (props.showPhase) {
-    const source = phaseTrace.value
-    series.push(source ? Float64Array.from(source.phaseDeg) : new Float64Array(x.length))
-  }
+  if (props.showPhase) series.push(phaseSeriesOf(phaseTrace.value, x.length))
 
   if (props.showCoherence) {
     const source = primaryTrace.value
@@ -1300,6 +1393,9 @@ watch(() => [props.showOneDb, props.showThreeDb], () => refresh())
 // A settings change, not a data change, but still only a re-range: the phase scale is not part of
 // the drag-zoom (uPlot zooms the first plotted series, which is the dB one), so nothing about the
 // series or their styling needs rebuilding here.
+// Data, not styling: the delay is put back inside the phase series, so a refresh is all it needs.
+watch(() => [props.restoreDelay, props.latencySamples, props.sampleRateHz], () => refresh())
+
 watch(phaseRange, () => refresh())
 watch(delayRange, () => refresh())
 </script>

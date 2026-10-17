@@ -204,13 +204,13 @@ describe('frequencyResponseSections / chapterSections', () => {
     // Every kind has a builder now, so the generic branch is what an unknown one falls to — a type
     // from a newer build, or the notes-and-settings chapter of a measurement that has no result.
     const other = chapterSections({ ...subject, kind: 'SomethingNewer', paramsJson: JSON.stringify({ frequencySpanHz: 24000, chartView: 'x' }) }, ['settings'])
-    expect(other).toEqual([{ kind: 'keyValues', title: 'Settings', rows: [{ label: 'Frequency span hz', value: '24000' }] }])
+    expect(other).toEqual([{ kind: 'keyValues', title: 'Settings', rows: [{ label: 'Frequency span Hz', value: '24000' }] }])
   })
 })
 
 describe('generic settings', () => {
   it('humanizes keys and skips chart fields and nested objects', () => {
-    expect(humanizeKey('frequencySpanHz')).toBe('Frequency span hz')
+    expect(humanizeKey('frequencySpanHz')).toBe('Frequency span Hz')
     expect(genericSettingsRows(JSON.stringify({ a: 1.5, chartView: 'Gain', nested: { x: 1 }, flag: true, empty: null }))).toEqual([
       { label: 'A', value: '1.5' },
       { label: 'Flag', value: 'Yes' },

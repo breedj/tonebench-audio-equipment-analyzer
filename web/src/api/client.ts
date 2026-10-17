@@ -621,13 +621,7 @@ export interface ReportChapter {
   eyebrow?: string | null
   /** The kind's colour as `#rrggbb` (report/palette.ts); the renderer mixes the band's tint from it. */
   accent?: string | null
-  /** What the contents page says about this chapter. */
-  status?: string | null
-  statusTone?: ReportStatusTone | null
 }
-
-/** Which pill the contents page gives a chapter's status. */
-export type ReportStatusTone = 'stored' | 'live' | 'none'
 
 export interface ReportRow {
   label: string
@@ -3181,6 +3175,8 @@ export interface ImdSweepStartRequest {
   measureNoiseFloor: boolean
   /** Highest product frequency counted; null means the measurement band's upper edge (in-band products only). */
   maxProductFreqHz: number | null
+  /** End the sweep once a channel's IMD exceeds this many percent; null sweeps to the end. */
+  stopImdPercent?: number | null
   /**
    * The band this sweep's noise-floor trace is measured over. The sweep's own setting (see
    * BandwidthField.vue); a sweep inherited the live FFT band until 2026-10-14. Separate from
@@ -3226,6 +3222,8 @@ export interface ImdSweepStatus {
   points: ImdSweepPoint[]
   method: ImdMethodName
   maxOrder: number
+  /** Why a finished sweep ended early (the IMD stop threshold); null for one that ran to the end. */
+  stopReason?: string | null
 }
 
 /**
@@ -3252,6 +3250,8 @@ export interface ImdVsAmplitudeParameters {
   sampleRateHz: number
   measureNoiseFloor: boolean
   maxProductFreqHz: number | null
+  /** End the sweep once a channel's IMD exceeds this many percent; null means it ran (or runs) to the end. */
+  stopImdPercent?: number | null
   /** The band the run's noise figures were integrated over. Null on a result saved before the band was one of a sweep's own settings. */
   measurementLoFreqHz?: number | null
   measurementHiFreqHz?: number | null

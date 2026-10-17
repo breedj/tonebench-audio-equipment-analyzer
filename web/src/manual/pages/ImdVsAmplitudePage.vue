@@ -87,8 +87,10 @@ const { showPage } = useManual()
     <p>
       <strong>Run sweep</strong> walks the levels once and stops. <strong>Cancel</strong> stops
       early and keeps the points measured so far. <strong>Clear</strong> discards them, and is
-      disabled while a sweep runs. The IMD sweep has its own runner: a THD sweep's result stays on
-      its own screen while this one runs, and vice versa.
+      disabled while a sweep runs. A sweep armed with <strong>Stop when IMD exceeds</strong> ends
+      itself at the first point over that figure, keeps that point, and says so in amber under the
+      progress line. The IMD sweep has its own runner: a THD sweep's result stays on its own screen
+      while this one runs, and vice versa.
     </p>
 
     <h2>Sweep settings</h2>
@@ -175,6 +177,17 @@ const { showPage } = useManual()
             The highest product frequency counted — 20 kHz by default, the tutorial's "in-band
             products only". For CCIF 19 + 20 kHz that counts 18 kHz and omits 21 kHz; widen it to
             count the products above the band as well.
+          </td>
+        </tr>
+        <tr>
+          <td>Stop when IMD exceeds … %</td>
+          <td>
+            Ends the sweep as soon as a measured channel reads more than this IMD, instead of
+            driving on to the end level. The point that crossed the threshold is kept — it is the
+            one that says where the amplifier gave up — which also means the DUT is driven one step
+            past the figure. Off, the sweep runs to its end level. The threshold is saved with the
+            measurement type and with every result. Its counterpart on a distortion sweep is
+            <strong>Stop when THD exceeds</strong>; both read the figure their own screen plots.
           </td>
         </tr>
       </tbody>

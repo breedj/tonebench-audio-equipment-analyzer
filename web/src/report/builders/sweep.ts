@@ -185,6 +185,9 @@ function imdVsAmplitudeRows(params: Partial<ImdVsAmplitudeParameters>): ReportRo
   }
   if (typeof params.stepsPerOctave === 'number') rows.push({ label: 'Steps per octave', value: String(params.stepsPerOctave) })
   if (typeof params.loadOhms === 'number') rows.push({ label: 'Load', value: `${formatNumber(params.loadOhms)} Ω` })
+  if (typeof params.stopImdPercent === 'number') {
+    rows.push({ label: 'Stop when IMD exceeds', value: `${formatNumber(params.stopImdPercent)} %` })
+  }
   rows.push(...commonRows(params))
   if (typeof params.maxProductFreqHz === 'number') rows.push({ label: 'Product band limit', value: formatHz(params.maxProductFreqHz) })
   push(rows, captureDelayRow(params))

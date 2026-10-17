@@ -317,4 +317,68 @@ public class ImdSweepRunnerTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Request(maxOrder: 13).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => Request(ratio: 0.0).Validate());
     }
+
+    /// <summary>
+    /// The simulator's solid-state model, noise and hum off: distortionless below its 1 V peak rail
+    /// and a wall above it, so a sweep past ~0.7 Vrms crosses any sensible threshold at a known
+    /// point. <see cref="ThdSweepRunnerTests"/>' own clipping DUT.
+    /// </summary>
+    private static SimulatedDevice ClippingDut()
+    {
+        var device = new SimulatedDevice(randomSeed: 1);
+        device.SignalProfile = device.SignalProfile with
+        {
+            Dut = SimulatedDutModel.SolidStateClipping,
+            NoiseEnabled = false,
+            HumEnabled = false,
+        };
+
+        return device;
+    }
+
+    [Fact]
+    public async Task Sweep_WithAnImdStopThreshold_EndsAtTheFirstPointOverIt_AndKeepsThatPoint()
+    {
+        var harness = await CreateAsync(ClippingDut());
+        var request = Request(startVolt: 0.01, endVolt: 3.0, stepsPerOctave: 1) with { StopImdPercent = 1.0 };
+
+        var started = await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.True(status.Points.Count < started.PointCount, $"expected fewer than {started.PointCount} points, got {status.Points.Count}");
+        Assert.True(status.Points[^1].ImdPercent > 1.0, $"the last point should be the one over the threshold, read {status.Points[^1].ImdPercent:0.###} %");
+        Assert.All(status.Points.SkipLast(1), p => Assert.True(p.ImdPercent <= 1.0, $"a point before the stop read {p.ImdPercent:0.###} %"));
+        Assert.NotNull(status.StopReason);
+        Assert.Contains("exceeded 1 %", status.StopReason);
+        Assert.Equal(started.PointCount, status.Total);
+
+        // And the reason is parked with the sweep: a measurement switch and back must not leave a
+        // curve that stops short with nothing on screen saying why.
+        harness.Runner.SwitchOwner("1:1");
+        harness.Runner.SwitchOwner("1:2");
+        Assert.Equal(status.StopReason, harness.Runner.SwitchOwner("1:1").StopReason);
+    }
+
+    [Fact]
+    public async Task Sweep_WithoutAnImdStopThreshold_RunsToTheEnd()
+    {
+        var harness = await CreateAsync(ClippingDut());
+        var request = Request(startVolt: 0.01, endVolt: 3.0, stepsPerOctave: 1);
+
+        var started = await harness.Runner.StartAsync(request, CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        Assert.Equal(started.PointCount, status.Points.Count);
+        Assert.Null(status.StopReason);
+        Assert.True(status.Points[^1].ImdPercent > 1.0, "the clipping model should be well over 1 % at 3 Vrms");
+    }
+
+    [Fact]
+    public void Validate_RejectsAnImdStopThresholdAtOrBelowZero()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => (Request() with { StopImdPercent = 0.0 }).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => (Request() with { StopImdPercent = -1.0 }).Validate());
+    }
 }

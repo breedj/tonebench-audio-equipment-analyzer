@@ -33,6 +33,7 @@ public class ImdSweepStartRequestTests
             AverageCount: 6,
             MeasureNoiseFloor: false,
             MaxProductFreqHz: 30_000.0,
+            StopImdPercent: 0.75,
             MeasurementLoFreqHz: 10.0,
             MeasurementHiFreqHz: 25_000.0);
 
@@ -53,6 +54,7 @@ public class ImdSweepStartRequestTests
         Assert.Equal(6, measurement.AverageCount);
         Assert.False(measurement.MeasureNoiseFloor);
         Assert.Equal(30_000.0, measurement.MaxProductFreqHz);
+        Assert.Equal(0.75, measurement.StopImdPercent);
         // The band is this sweep's own, and is not the product limit above it.
         Assert.Equal(10.0, measurement.MeasurementLoFreqHz);
         Assert.Equal(25_000.0, measurement.MeasurementHiFreqHz);
@@ -66,8 +68,8 @@ public class ImdSweepStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(17, ConstructorParameterCount(typeof(ImdSweepStartRequest)));
-        Assert.Equal(19, ConstructorParameterCount(typeof(ImdSweepRequest)));
+        Assert.Equal(18, ConstructorParameterCount(typeof(ImdSweepStartRequest)));
+        Assert.Equal(20, ConstructorParameterCount(typeof(ImdSweepRequest)));
     }
 
     /// <summary>A field the run used but params_json never recorded leaves a stored result that cannot say what produced it.</summary>

@@ -22,6 +22,8 @@ const total = ref(0)
 /** The sine-equivalent generator level of the point being measured, in volts. */
 const currentLevelVolt = ref(0)
 const error = ref<string | null>(null)
+/** Why a finished sweep ended early (the IMD stop threshold) — null for one that ran to the end. */
+const stopReason = ref<string | null>(null)
 const method = ref<ImdMethodName>('Smpte')
 const maxOrder = ref(5)
 
@@ -57,6 +59,7 @@ function applyStatus(status: ImdSweepStatus) {
   total.value = status.total
   currentLevelVolt.value = status.currentLevelVolt
   error.value = status.error
+  stopReason.value = status.stopReason ?? null
   method.value = status.method
   maxOrder.value = status.maxOrder
   measured.value = status.points.map(imdStatusPointToDistortionPoint)
@@ -82,8 +85,11 @@ function ingestProgress(frame: SweepProgressFrame) {
     frame.phase === SweepPhase.NoiseFloor ||
     frame.phase === SweepPhase.Sweeping
 
-  // The frame carries no message; the reason lives on the status endpoint.
-  if (frame.phase === SweepPhase.Failed) void refresh()
+  // The frame carries no message; the reason lives on the status endpoint -- an error on a failed
+  // sweep, and on a finished one whether it stopped short at the IMD threshold. useSweep refreshes
+  // on both for the same reason: without Finished here a sweep that ended early draws its points
+  // and says nothing about why there are no more.
+  if (frame.phase === SweepPhase.Failed || frame.phase === SweepPhase.Finished) void refresh()
   // A sweep another tab started announces itself through its progress frames only.
   if (!wasRunning && running.value) void refresh()
 }
@@ -95,6 +101,7 @@ async function refresh() {
 async function start(request: ImdSweepStartRequest) {
   measured.value = []
   error.value = null
+  stopReason.value = null
   index.value = 0
   currentLevelVolt.value = 0
   const started = await api.startImdSweep(request)
@@ -124,6 +131,7 @@ export function useImdSweep() {
     total,
     currentLevelVolt,
     error,
+    stopReason,
     method,
     maxOrder,
     points,

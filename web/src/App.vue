@@ -601,6 +601,8 @@ const isImdSweep = computed(() => isImdSweepKind(currentType.value?.kind))
 const sweepRunning = computed(() => (isImdSweep.value ? imdSweep.running.value : thdSweepRunning.value))
 const sweepProgressLabel = computed(() => (isImdSweep.value ? imdSweep.progressLabel.value : thdSweepProgressLabel.value))
 const sweepError = computed(() => (isImdSweep.value ? imdSweep.error.value : thdSweepError.value))
+/** Why a finished sweep ended early, from whichever runner the open kind belongs to — both have a stop threshold. */
+const sweepStopReason = computed(() => (isImdSweep.value ? imdSweep.stopReason.value : thdSweepStopReason.value))
 const sweepPoints = computed(() => (isImdSweep.value ? imdSweep.points.value : thdSweepPoints.value))
 const sweepThdMethod = computed<import('./api/client').ThdMethodName>(() => (isImdSweep.value ? 'Conventional' : thdSweepMethod.value))
 /** THD/D2.. or IMD/IM2.. on the chart, the display panel and the report — see sweep/points.ts. */
@@ -4600,6 +4602,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :delay-view="responsePhaseAvailable ? responseDelayView : 'None'"
                   :delay-top-us="responseDelayTopUs"
                   :delay-bottom-us="responseDelayBottomUs"
+                  :restore-delay="responseRestoreDelay"
+                  :latency-samples="responseLatencySamples"
+                  :sample-rate-hz="responseSampleRateHz"
                   :axis-titles="true"
                   :pinned-x="pinnedResponseHz"
                   @cursor-pin="onResponseCursorPin"
@@ -5274,8 +5279,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
               <template #default>
                 <p v-if="sweepError" class="text-xs text-red-600 dark:text-red-400">{{ sweepError }}</p>
-                <p v-else-if="!isImdSweep && thdSweepStopReason" class="text-xs text-amber-600 dark:text-amber-400">
-                  {{ thdSweepStopReason }}
+                <p v-else-if="sweepStopReason" class="text-xs text-amber-600 dark:text-amber-400">
+                  {{ sweepStopReason }}
                 </p>
 
                 <ThdSweepChart

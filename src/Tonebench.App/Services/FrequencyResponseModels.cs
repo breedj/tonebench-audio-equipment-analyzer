@@ -317,19 +317,13 @@ public sealed record FrequencyResponseRequest(
     public BandwidthReferenceSpec BandwidthReferenceSpec =>
         new(BandwidthReference, BandwidthReferenceLowHz, BandwidthReferenceHighHz);
 
-    /// <summary>The requested drive level in dBV, whatever unit it was entered in.</summary>
-    public double LevelDbv => LevelUnit switch
-    {
-        ThdSweepLevelUnit.Dbv => LevelValue,
-        ThdSweepLevelUnit.Volt => VoltToDbv(LevelValue),
-        ThdSweepLevelUnit.MilliVolt => VoltToDbv(LevelValue / 1000.0),
-        // P = V²/R, so the voltage to solve for is sqrt(P·R) — the same conversion
-        // ThdSweepRequest.LevelDbv makes, and the only arithmetic the power mode adds over
-        // OutputVoltage. Everything downstream of here sees a target voltage and cannot tell which
-        // of the two modes named it.
-        ThdSweepLevelUnit.Watt => VoltToDbv(Math.Sqrt(Math.Max(LevelValue, 0.0) * LoadOhms)),
-        _ => throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "Unknown drive level unit."),
-    };
+    /// <summary>
+    /// The requested drive level in dBV, whatever unit it was entered in — see
+    /// <see cref="ThdSweepLevelUnits.ToDbv"/>, which is the one place a power unit's sqrt(P·R)
+    /// lives. Everything downstream of here sees a target voltage and cannot tell which of the two
+    /// output-referred modes named it.
+    /// </summary>
+    public double LevelDbv => LevelUnit.ToDbv(LevelValue, LoadOhms);
 
     /// <summary>
     /// True when the generator amplitude has to be found by probing rather than taken from the
@@ -374,7 +368,7 @@ public sealed record FrequencyResponseRequest(
         // does. What it deliberately does *not* claim is that the DUT delivers that power across
         // the whole sweep — the level is solved once, from the sweep's median gain, so the power is
         // the band-average one, not a per-frequency guarantee.
-        if (LevelUnit == ThdSweepLevelUnit.Watt && LevelMode != ThdSweepLevelMode.OutputPower)
+        if (LevelUnit.IsPower() && LevelMode != ThdSweepLevelMode.OutputPower)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(LevelUnit), LevelUnit, "Watts only make sense for the output-power level mode.");
@@ -382,10 +376,10 @@ public sealed record FrequencyResponseRequest(
 
         if (LevelMode == ThdSweepLevelMode.OutputPower)
         {
-            if (LevelUnit != ThdSweepLevelUnit.Watt)
+            if (!LevelUnit.IsPower())
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(LevelUnit), LevelUnit, "An output-power level is specified in watts.");
+                    nameof(LevelUnit), LevelUnit, "An output-power level is specified in watts or milliwatts.");
             }
 
             if (!(LoadOhms > 0.0))
@@ -434,11 +428,9 @@ public sealed record FrequencyResponseRequest(
         {
             throw new ArgumentOutOfRangeException(
                 nameof(LevelValue), LevelValue,
-                LevelUnit == ThdSweepLevelUnit.Watt ? "A target power must be positive." : "A voltage amplitude must be positive.");
+                LevelUnit.IsPower() ? "A target power must be positive." : "A voltage amplitude must be positive.");
         }
     }
-
-    private static double VoltToDbv(double volts) => 20.0 * Math.Log10(Math.Max(volts, 1e-12));
 }
 
 /// <summary>What a client polling <c>GET /api/frequency-response/status</c> sees.</summary>

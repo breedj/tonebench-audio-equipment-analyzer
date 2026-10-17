@@ -289,7 +289,12 @@ const { showPage } = useManual()
         </tr>
         <tr>
           <td>Level / Power and Unit</td>
-          <td>The target itself, in dBV, V or mV — or in watts in output-power mode.</td>
+          <td>
+            The target itself, in dBV, V or mV — or in watts or milliwatts in output-power mode.
+            Each level mode keeps its own figure <em>and</em> its own unit, so switching mode
+            brings back what that mode was last set to rather than reading the previous
+            mode's number in the new unit.
+          </td>
         </tr>
         <tr>
           <td>Load (Ω)</td>

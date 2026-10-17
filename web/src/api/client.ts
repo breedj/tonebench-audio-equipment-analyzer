@@ -928,6 +928,12 @@ export interface FrequencyResponseParameters {
   levelMode: SweepLevelMode
   levelValue: number
   levelUnit: SweepLevelUnit
+  /**
+   * What each level mode was last set to — see `LevelByModeParams`. Null on a result (a run has one
+   * level) and on a type stored before this existed, where the panel seeds the selected mode from
+   * `levelValue`/`levelUnit` and leaves the other two at their defaults.
+   */
+  levelByMode?: LevelByModeParams | null
   rightChannelIsReference: boolean
   smoothingDenominator: number
   averageCount: number
@@ -1209,6 +1215,12 @@ export interface OutputImpedanceParameters {
   levelMode: SweepLevelMode
   levelValue: number
   levelUnit: SweepLevelUnit
+  /**
+   * What each level mode was last set to — see `LevelByModeParams`. Null on a result (a run has one
+   * level) and on a type stored before this existed, where the panel seeds the selected mode from
+   * `levelValue`/`levelUnit` and leaves the other two at their defaults.
+   */
+  levelByMode?: LevelByModeParams | null
   loadOhms: number
   secondLoadOhms?: number | null
   nominalOhms: number
@@ -1244,6 +1256,12 @@ export interface CrosstalkParameters {
   levelMode: SweepLevelMode
   levelValue: number
   levelUnit: SweepLevelUnit
+  /**
+   * What each level mode was last set to — see `LevelByModeParams`. Null on a result (a run has one
+   * level) and on a type stored before this existed, where the panel seeds the selected mode from
+   * `levelValue`/`levelUnit` and leaves the other two at their defaults.
+   */
+  levelByMode?: LevelByModeParams | null
   loadOhms: number
   fftSize: number
   window: WindowType
@@ -1277,6 +1295,12 @@ export interface SteppedResponseParameters {
   levelMode: SweepLevelMode
   levelValue: number
   levelUnit: SweepLevelUnit
+  /**
+   * What each level mode was last set to — see `LevelByModeParams`. Null on a result (a run has one
+   * level) and on a type stored before this existed, where the panel seeds the selected mode from
+   * `levelValue`/`levelUnit` and leaves the other two at their defaults.
+   */
+  levelByMode?: LevelByModeParams | null
   loadOhms: number
   generateLeft: boolean
   generateRight: boolean
@@ -1597,6 +1621,12 @@ export interface ImpulseResponseParameters {
   levelMode: SweepLevelMode
   levelValue: number
   levelUnit: SweepLevelUnit
+  /**
+   * What each level mode was last set to — see `LevelByModeParams`. Null on a result (a run has one
+   * level) and on a type stored before this existed, where the panel seeds the selected mode from
+   * `levelValue`/`levelUnit` and leaves the other two at their defaults.
+   */
+  levelByMode?: LevelByModeParams | null
   smoothingDenominator: number
   averageCount: number
   referenceMode: ImpulseReferenceModeName
@@ -2832,8 +2862,28 @@ export function measurementsQuery(filter: MeasurementFilter = {}): string {
 /** Mirrors Tonebench.App.Services.ThdSweepLevelMode. */
 export type SweepLevelMode = 'GeneratorVoltage' | 'OutputVoltage' | 'OutputPower'
 
-/** Mirrors Tonebench.App.Services.ThdSweepLevelUnit. 'Watt' is only valid with the OutputPower mode. */
-export type SweepLevelUnit = 'Dbv' | 'Volt' | 'MilliVolt' | 'Watt'
+/**
+ * Mirrors Tonebench.App.Services.ThdSweepLevelUnit. The two power units are only valid with the
+ * OutputPower mode and the three voltage units only with the other two; the server rejects every
+ * other pairing rather than guessing, and `levelUnitsFor` (measurements/levelMode.ts) is what keeps
+ * a panel from offering one.
+ */
+export type SweepLevelUnit = 'Dbv' | 'Volt' | 'MilliVolt' | 'Watt' | 'MilliWatt'
+
+/**
+ * Mirrors Tonebench.Data.PerModeLevels: the level each `levelMode` was last configured with, so
+ * switching mode in a settings panel brings back that mode's own figure instead of reading the
+ * previous one's number in the new unit. `levelValue`/`levelUnit` remain the active pair — what a
+ * run used — and this is the memory of the other two. See measurements/levelMode.ts.
+ */
+export interface LevelByModeParams {
+  generatorValue: number
+  generatorUnit: SweepLevelUnit
+  outputVoltageValue: number
+  outputVoltageUnit: SweepLevelUnit
+  outputPowerValue: number
+  outputPowerUnit: SweepLevelUnit
+}
 
 /**
  * Mirrors Tonebench.App.Services.ThdMethod: what each harmonic is divided by. Conventional is the
@@ -2932,6 +2982,12 @@ export interface ThdVsFrequencyParameters extends ThdSweepStartRequest {
    */
   chartFitPreviewSpectrum?: boolean | null
   chartFitPreviewScope?: boolean | null
+  /**
+   * What each level mode was last set to — see `LevelByModeParams`. Null on a result (a run has one
+   * level) and on a type stored before this existed, where the panel seeds the selected mode from
+   * `levelValue`/`levelUnit` and leaves the other two at their defaults.
+   */
+  levelByMode?: LevelByModeParams | null
 }
 
 /**

@@ -63,14 +63,7 @@ public sealed record OutputImpedanceRequest(
     public bool SecondPassIsOpen => SecondLoadOhms is null;
 
     /// <summary>The requested drive level in dBV, whatever unit it was entered in. Watts convert through the load: V = sqrt(P·R).</summary>
-    public double LevelDbv => LevelUnit switch
-    {
-        ThdSweepLevelUnit.Dbv => LevelValue,
-        ThdSweepLevelUnit.Volt => VoltToDbv(LevelValue),
-        ThdSweepLevelUnit.MilliVolt => VoltToDbv(LevelValue / 1000.0),
-        ThdSweepLevelUnit.Watt => VoltToDbv(Math.Sqrt(Math.Max(LevelValue, 0.0) * LoadOhms)),
-        _ => throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "Unknown drive level unit."),
-    };
+    public double LevelDbv => LevelUnit.ToDbv(LevelValue, LoadOhms);
 
     /// <summary>True when the generator amplitude has to be found by probing the DUT's output at 1 kHz, in the loaded pass.</summary>
     public bool SolvesGeneratorLevel => LevelMode != ThdSweepLevelMode.GeneratorVoltage;
@@ -142,11 +135,11 @@ public sealed record OutputImpedanceRequest(
                 "An output-impedance run is driven by generator (input) voltage, DUT output voltage or DUT output power.");
         }
 
-        if (LevelUnit == ThdSweepLevelUnit.Watt && LevelMode != ThdSweepLevelMode.OutputPower)
+        if (LevelUnit.IsPower() && LevelMode != ThdSweepLevelMode.OutputPower)
             throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "Watts only make sense for the output-power level mode.");
 
-        if (LevelMode == ThdSweepLevelMode.OutputPower && LevelUnit != ThdSweepLevelUnit.Watt)
-            throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "An output-power level is specified in watts.");
+        if (LevelMode == ThdSweepLevelMode.OutputPower && !LevelUnit.IsPower())
+            throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "An output-power level is specified in watts or milliwatts.");
 
         if (double.IsNaN(LevelValue) || double.IsInfinity(LevelValue))
             throw new ArgumentOutOfRangeException(nameof(LevelValue), LevelValue, "Amplitude must be a finite number.");
@@ -155,7 +148,7 @@ public sealed record OutputImpedanceRequest(
         {
             throw new ArgumentOutOfRangeException(
                 nameof(LevelValue), LevelValue,
-                LevelUnit == ThdSweepLevelUnit.Watt ? "A target power must be positive." : "A voltage amplitude must be positive.");
+                LevelUnit.IsPower() ? "A target power must be positive." : "A voltage amplitude must be positive.");
         }
 
         RequireResolvableTone();
@@ -184,7 +177,6 @@ public sealed record OutputImpedanceRequest(
             advice);
     }
 
-    private static double VoltToDbv(double volts) => 20.0 * Math.Log10(Math.Max(volts, 1e-12));
 }
 
 /// <summary>The arithmetic of the load-step measurement, on its own so it can be pinned.</summary>

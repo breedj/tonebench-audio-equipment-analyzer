@@ -345,6 +345,39 @@ public sealed record SimulationParameters(
     double? PcmStartS = null);
 
 /// <summary>
+/// The level each <c>LevelMode</c> was last configured with, so switching mode in a settings panel
+/// brings back the figure that mode was set up with instead of reinterpreting the previous mode's
+/// number in the new mode's unit — a -20 dBV generator level read as "-20 W", which is not a power
+/// at all (reported 2026-10-17).
+///
+/// <para>Six measurement kinds carry a level mode and all six store this, because a fix that is
+/// true of one settings panel and false of the next is how two screens come to disagree about the
+/// same measurement. The <em>active</em> mode's figures stay on <c>LevelValue</c>/<c>LevelUnit</c>
+/// — those are what a run used, and what every validation, report and CSV reads — and this is only
+/// the memory of the two modes not currently selected. The panel overlays the active pair onto the
+/// matching slot when it loads a type (see <c>web/src/measurements/levelMode.ts</c>), so the two
+/// can never disagree about the mode that is actually selected.</para>
+///
+/// <para>Null on a <c>measurement_result</c>: a run has one level, in one mode, and the modes it
+/// did not use are a property of the configuration rather than of the measurement. Null also on a
+/// type stored before this existed, which reads as "seed the active mode from the pair above and
+/// leave the other two at their defaults".</para>
+/// </summary>
+/// <param name="GeneratorValue">The generator-voltage mode's level, in <paramref name="GeneratorUnit"/>.</param>
+/// <param name="GeneratorUnit">A voltage unit — <c>Dbv</c>, <c>Volt</c> or <c>MilliVolt</c>.</param>
+/// <param name="OutputVoltageValue">The DUT-output-voltage mode's level, in <paramref name="OutputVoltageUnit"/>.</param>
+/// <param name="OutputVoltageUnit">A voltage unit, as above.</param>
+/// <param name="OutputPowerValue">The DUT-output-power mode's level, in <paramref name="OutputPowerUnit"/>.</param>
+/// <param name="OutputPowerUnit">A power unit — <c>Watt</c> or <c>MilliWatt</c>.</param>
+public sealed record PerModeLevels(
+    double GeneratorValue,
+    string GeneratorUnit,
+    double OutputVoltageValue,
+    string OutputVoltageUnit,
+    double OutputPowerValue,
+    string OutputPowerUnit);
+
+/// <summary>
 /// Configured (on <c>measurement_type</c>) or as-run (on <c>measurement_result</c>) parameters for
 /// the 'ThdVsFrequency' measurement kind -- the sweep's own settings, deliberately a separate
 /// record from <see cref="FftSpectrumParameters"/> rather than more optional properties on it: a
@@ -461,7 +494,12 @@ public sealed record ThdVsFrequencyParameters(
     /// does not say.
     /// </summary>
     double? MeasurementLoFreqHz = null,
-    double? MeasurementHiFreqHz = null)
+    double? MeasurementHiFreqHz = null,
+    /// <summary>
+    /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
+    /// Null on a result and on a type stored before it existed.
+    /// </summary>
+    PerModeLevels? LevelByMode = null)
 {
     /// <summary>
     /// Present when this sweep was imported from a <c>.step</c>ped transient run rather than
@@ -1078,7 +1116,12 @@ public sealed record CrosstalkParameters(
     /// the figure typed for power arithmetic and can legitimately disagree with it.
     /// </summary>
     string? ProgrammableLoadKind = null,
-    int? ProgrammableLoadOhms = null);
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
+    /// Null on a result and on a type stored before it existed.
+    /// </summary>
+    PerModeLevels? LevelByMode = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the
@@ -1141,7 +1184,12 @@ public sealed record OutputImpedanceParameters(
     /// the figure typed for power arithmetic and can legitimately disagree with it.
     /// </summary>
     string? ProgrammableLoadKind = null,
-    int? ProgrammableLoadOhms = null);
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
+    /// Null on a result and on a type stored before it existed.
+    /// </summary>
+    PerModeLevels? LevelByMode = null);
 
 /// <summary>
 /// An impedance measurement type's <c>params_json</c>.
@@ -1531,7 +1579,12 @@ public sealed record FrequencyResponseParameters(
     /// the figure typed for power arithmetic and can legitimately disagree with it.
     /// </summary>
     string? ProgrammableLoadKind = null,
-    int? ProgrammableLoadOhms = null)
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
+    /// Null on a result and on a type stored before it existed.
+    /// </summary>
+    PerModeLevels? LevelByMode = null)
 {
     /// <summary>
     /// Set only on a result imported from a simulator's <c>.ac</c> run — the frequency-domain
@@ -1819,7 +1872,12 @@ public sealed record SteppedResponseParameters(
     /// the figure typed for power arithmetic and can legitimately disagree with it.
     /// </summary>
     string? ProgrammableLoadKind = null,
-    int? ProgrammableLoadOhms = null);
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
+    /// Null on a result and on a type stored before it existed.
+    /// </summary>
+    PerModeLevels? LevelByMode = null);
 
 /// <summary>The <c>impulse_result.kind</c> values — mirrors the subset of FrequencyResponseTraceKind an impulse response has.</summary>
 public static class ImpulseTraceKind
@@ -2026,7 +2084,12 @@ public sealed record ImpulseResponseParameters(
     /// the figure typed for power arithmetic and can legitimately disagree with it.
     /// </summary>
     string? ProgrammableLoadKind = null,
-    int? ProgrammableLoadOhms = null);
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
+    /// Null on a result and on a type stored before it existed.
+    /// </summary>
+    PerModeLevels? LevelByMode = null);
 
 /// <summary>
 /// The values <c>measurement_result.source</c> takes. Null in the database means a measured run --

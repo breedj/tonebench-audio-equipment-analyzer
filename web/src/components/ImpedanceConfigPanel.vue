@@ -24,6 +24,7 @@ import { useProjects } from '../composables/useProjects'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useImpedance } from '../composables/useImpedance'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
+import { isPowerUnit } from '../measurements/levelMode'
 import { formatHz } from '../response/format'
 import { formatOhms } from '../impedance/equivalent'
 import { matchesStoredFixture } from '../impedance/fixture'
@@ -169,8 +170,10 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.calibrationLevelValue === 'number') {
     form.calibrationLevelValue = stored.calibrationLevelValue
   }
-  // Watts is never restored: a one-port has no output power to aim at, and the server rejects it.
-  if (stored.levelUnit && stored.levelUnit !== 'Watt') form.levelUnit = stored.levelUnit
+  // A power unit is never restored: a one-port has no output power to aim at, so there is no level
+  // mode here at all, and the server rejects watts and milliwatts alike. Asked through isPowerUnit
+  // rather than `!== 'Watt'`, which was true of exactly one of the two power units.
+  if (stored.levelUnit && !isPowerUnit(stored.levelUnit)) form.levelUnit = stored.levelUnit
   if (typeof stored.smoothingDenominator === 'number') form.smoothingDenominator = stored.smoothingDenominator
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (typeof stored.chirpStartHz === 'number') form.chirpStartHz = stored.chirpStartHz

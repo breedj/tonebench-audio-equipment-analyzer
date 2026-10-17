@@ -13,6 +13,18 @@ import {
   type SweepLevelUnit,
   type WindowType,
 } from '../api/client'
+import {
+  activeLevel,
+  applyStoredLevel,
+  createLevelForm,
+  isPowerMode as modeIsPower,
+  levelByModeOf,
+  levelInvalid,
+  levelTargetVolt,
+  POWER_LEVEL_UNITS,
+  setLevelUnit,
+  setLevelValue,
+} from '../measurements/levelMode'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
@@ -35,6 +47,10 @@ const LEVEL_MODES: { value: SweepLevelMode; label: string }[] = [
   { value: 'OutputPower', label: 'Output power' },
 ]
 
+/**
+ * This panel's own order, mV first, kept from the previous app's dialog. The power mode's units
+ * come from measurements/levelMode.ts, which is also what validates a unit against its mode.
+ */
 const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
   { value: 'MilliVolt', label: 'mV' },
   { value: 'Volt', label: 'V' },
@@ -45,9 +61,8 @@ const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
 const form = reactive({
   frequencySpanHz: 96000 as number,
   resolutionMultiplier: 1,
-  levelMode: 'OutputVoltage' as SweepLevelMode,
-  levelValue: 0,
-  levelUnit: 'Dbv' as SweepLevelUnit,
+  /** The level mode and the figure each mode was last set to — see measurements/levelMode.ts. */
+  level: createLevelForm({ mode: 'OutputVoltage' }),
   smoothingDenominator: 24,
   averageCount: 1,
   referenceMode: 'None' as ImpulseReferenceModeName,
@@ -79,12 +94,9 @@ function applyStoredParams(paramsJson: string) {
   restoring = true
   if (typeof stored.frequencySpanHz === 'number') form.frequencySpanHz = stored.frequencySpanHz
   if (typeof stored.resolutionMultiplier === 'number') form.resolutionMultiplier = stored.resolutionMultiplier
-  if (stored.levelMode) form.levelMode = stored.levelMode
-  if (typeof stored.levelValue === 'number') form.levelValue = stored.levelValue
-  // Watts is never restored into this field, which holds the voltage unit and nothing else — see
-  // FrequencyResponseConfigPanel for why restoring it leaves a hidden control holding a unit the
-  // server rejects.
-  if (stored.levelUnit && stored.levelUnit !== 'Watt') form.levelUnit = stored.levelUnit
+  // Mode, the selected mode's own value and unit, and the memory of the other two modes — all four
+  // in one place, because which of them a stored row carries depends on when it was written.
+  applyStoredLevel(form.level, stored)
   if (typeof stored.smoothingDenominator === 'number') form.smoothingDenominator = stored.smoothingDenominator
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (stored.referenceMode) form.referenceMode = stored.referenceMode
@@ -118,8 +130,23 @@ watch(
   { deep: true },
 )
 
-const isPowerMode = computed(() => form.levelMode === 'OutputPower')
-const solvesLevel = computed(() => form.levelMode !== 'GeneratorVoltage')
+const isPowerMode = computed(() => modeIsPower(form.level.mode))
+const solvesLevel = computed(() => form.level.mode !== 'GeneratorVoltage')
+
+/**
+ * The level box and its unit dropdown, both reading and writing the *selected* mode's own slot — a
+ * writable computed rather than a direct field binding, because which field that is depends on the
+ * mode, and so does the list of units the dropdown offers.
+ */
+const levelValue = computed({
+  get: () => activeLevel(form.level).value,
+  set: (value: number) => setLevelValue(form.level, value),
+})
+const levelUnit = computed({
+  get: () => activeLevel(form.level).unit,
+  set: (unit) => setLevelUnit(form.level, unit),
+})
+const levelUnits = computed(() => (isPowerMode.value ? POWER_LEVEL_UNITS : VOLTAGE_UNITS))
 const usesStoredLoopback = computed(() => form.referenceMode === 'StoredLoopback')
 
 const sampleRateHz = computed(() => form.frequencySpanHz * 2)
@@ -173,7 +200,7 @@ const estimatedSeconds = computed(() => {
   return (form.averageCount + 1) * perRecord + probe
 })
 
-const targetVolt = computed(() => Math.sqrt(Math.max(form.levelValue, 0) * Math.max(loadOhms.value, 0)))
+const targetVolt = computed(() => levelTargetVolt(form.level, loadOhms.value))
 const targetDbv = computed(() => (targetVolt.value > 0 ? 20 * Math.log10(targetVolt.value) : Number.NaN))
 
 const selectedReference = computed(() =>
@@ -200,11 +227,8 @@ const referenceRateMismatch = computed(
 )
 
 const invalid = computed<string | null>(() => {
-  if (!Number.isFinite(form.levelValue)) return 'Amplitude must be a number.'
-  if (isPowerMode.value && !(form.levelValue > 0)) return 'Output power must be above 0 W.'
-  if (isPowerMode.value && !(loadOhms.value > 0)) return 'A target power needs a load above 0 Ω.'
-  if (!isPowerMode.value && form.levelUnit !== 'Dbv' && form.levelValue <= 0)
-    return 'A voltage amplitude must be positive.'
+  const levelProblem = levelInvalid(form.level, loadOhms.value)
+  if (levelProblem) return levelProblem
   if (form.averageCount < 1 || form.averageCount > 10) return 'Averages must be between 1 and 10.'
   if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
     return 'Chirp start must be between 0.5 and 1000 Hz.'
@@ -233,9 +257,12 @@ function buildParamsJson(): string {
   const parameters: ImpulseResponseParameters = {
     frequencySpanHz: form.frequencySpanHz,
     resolutionMultiplier: form.resolutionMultiplier,
-    levelMode: form.levelMode,
-    levelValue: form.levelValue,
-    levelUnit: isPowerMode.value ? 'Watt' : form.levelUnit,
+    levelMode: form.level.mode,
+    // The selected mode's pair is what this type is configured to run at; levelByMode beside it is
+    // the memory of the two modes that are not selected.
+    levelValue: activeLevel(form.level).value,
+    levelUnit: activeLevel(form.level).unit,
+    levelByMode: levelByModeOf(form.level),
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
     referenceMode: form.referenceMode,
@@ -258,9 +285,9 @@ function buildRequest(continuous: boolean): ImpulseResponseStartRequest | null {
   return {
     frequencySpanHz: form.frequencySpanHz,
     resolutionMultiplier: form.resolutionMultiplier,
-    levelMode: form.levelMode,
-    levelValue: form.levelValue,
-    levelUnit: isPowerMode.value ? 'Watt' : form.levelUnit,
+    levelMode: form.level.mode,
+    levelValue: activeLevel(form.level).value,
+    levelUnit: activeLevel(form.level).unit,
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
     referenceMode: form.referenceMode,
@@ -306,7 +333,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
     >
       Set generator by
       <select
-        v-model="form.levelMode"
+        v-model="form.level.mode"
         :disabled="running"
         class="tb-input"
       >
@@ -316,23 +343,25 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
 
     <div class="grid grid-cols-[2fr_1fr] gap-2.5">
       <label class="tb-field">
-        {{ isPowerMode ? 'Power (W)' : 'Amplitude' }}
+        {{ isPowerMode ? 'Power' : 'Amplitude' }}
         <input
-          v-model.number="form.levelValue"
+          v-model.number="levelValue"
           type="number"
           step="any"
           :disabled="running"
           class="tb-input"
         />
       </label>
-      <label v-if="!isPowerMode" class="tb-field">
+      <!-- Shown for every mode: the power mode offers W and mW where the two voltage modes offer
+           dBV, V and mV, and each mode remembers which of its own it was last set in. -->
+      <label class="tb-field">
         <span class="invisible">Unit</span>
         <select
-          v-model="form.levelUnit"
+          v-model="levelUnit"
           :disabled="running"
           class="tb-input"
         >
-          <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
+          <option v-for="unit in levelUnits" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
       </label>
     </div>

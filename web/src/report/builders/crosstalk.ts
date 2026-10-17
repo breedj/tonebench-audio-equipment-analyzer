@@ -40,6 +40,8 @@ function formatLevel(value: number, unit: SweepLevelUnit): string {
       return `${formatNumber(value)} mV`
     case 'Watt':
       return `${formatNumber(value)} W`
+    case 'MilliWatt':
+      return `${formatNumber(value)} mW`
   }
 }
 

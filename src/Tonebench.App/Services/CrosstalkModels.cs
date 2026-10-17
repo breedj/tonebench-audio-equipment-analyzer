@@ -89,14 +89,7 @@ public sealed record CrosstalkRequest(
     public IReadOnlyList<CrosstalkPass> Passes => Direction.Passes();
 
     /// <summary>The requested drive level in dBV, whatever unit it was entered in. Watts convert through the load: V = sqrt(P·R).</summary>
-    public double LevelDbv => LevelUnit switch
-    {
-        ThdSweepLevelUnit.Dbv => LevelValue,
-        ThdSweepLevelUnit.Volt => VoltToDbv(LevelValue),
-        ThdSweepLevelUnit.MilliVolt => VoltToDbv(LevelValue / 1000.0),
-        ThdSweepLevelUnit.Watt => VoltToDbv(Math.Sqrt(Math.Max(LevelValue, 0.0) * LoadOhms)),
-        _ => throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "Unknown drive level unit."),
-    };
+    public double LevelDbv => LevelUnit.ToDbv(LevelValue, LoadOhms);
 
     /// <summary>True when the generator amplitude has to be found by probing the aggressor's output — see <see cref="SteppedResponseRequest.SolvesGeneratorLevel"/>.</summary>
     public bool SolvesGeneratorLevel => LevelMode != ThdSweepLevelMode.GeneratorVoltage;
@@ -161,13 +154,13 @@ public sealed record CrosstalkRequest(
                 "A crosstalk run is driven by generator (input) voltage, DUT output voltage or DUT output power.");
         }
 
-        if (LevelUnit == ThdSweepLevelUnit.Watt && LevelMode != ThdSweepLevelMode.OutputPower)
+        if (LevelUnit.IsPower() && LevelMode != ThdSweepLevelMode.OutputPower)
             throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "Watts only make sense for the output-power level mode.");
 
         if (LevelMode == ThdSweepLevelMode.OutputPower)
         {
-            if (LevelUnit != ThdSweepLevelUnit.Watt)
-                throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "An output-power level is specified in watts.");
+            if (!LevelUnit.IsPower())
+                throw new ArgumentOutOfRangeException(nameof(LevelUnit), LevelUnit, "An output-power level is specified in watts or milliwatts.");
             if (!(LoadOhms > 0.0))
                 throw new ArgumentOutOfRangeException(nameof(LoadOhms), LoadOhms, "A target power needs a load above 0 ohm to name a voltage.");
         }
@@ -179,7 +172,7 @@ public sealed record CrosstalkRequest(
         {
             throw new ArgumentOutOfRangeException(
                 nameof(LevelValue), LevelValue,
-                LevelUnit == ThdSweepLevelUnit.Watt ? "A target power must be positive." : "A voltage amplitude must be positive.");
+                LevelUnit.IsPower() ? "A target power must be positive." : "A voltage amplitude must be positive.");
         }
 
         RequireResolvableTone();
@@ -209,7 +202,6 @@ public sealed record CrosstalkRequest(
             advice);
     }
 
-    private static double VoltToDbv(double volts) => 20.0 * Math.Log10(Math.Max(volts, 1e-12));
 }
 
 /// <summary>

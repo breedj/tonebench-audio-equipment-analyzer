@@ -87,7 +87,10 @@ const { showPage } = useManual()
         </tr>
         <tr>
           <td>Level / Power, Unit, Load (Ω)</td>
-          <td>The target and the load it is referred to, as on the other screens.</td>
+          <td>
+            The target and the load it is referred to, as on the other screens — a power in watts
+            or milliwatts, and each mode remembering its own figure and unit.
+          </td>
         </tr>
         <tr>
           <td>Generator channels</td>

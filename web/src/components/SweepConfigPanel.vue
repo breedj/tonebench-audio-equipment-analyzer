@@ -1,13 +1,23 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, watch } from 'vue'
 import type {
-  SweepLevelMode,
-  SweepLevelUnit,
   ThdMethodName,
   ThdSweepStartRequest,
   ThdVsFrequencyParameters,
   WindowType,
 } from '../api/client'
+import {
+  activeLevel,
+  applyStoredLevel,
+  createLevelForm,
+  isPowerMode as modeIsPower,
+  LEVEL_MODES,
+  levelByModeOf,
+  levelInvalid,
+  levelUnitsFor,
+  setLevelUnit,
+  setLevelValue,
+} from '../measurements/levelMode'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useProjects } from '../composables/useProjects'
@@ -69,14 +79,6 @@ const MIN_FUNDAMENTAL_BINS = 5
  */
 const SWEEP_WINDOW: WindowType = 'Hann'
 
-// The three ways to specify drive level, ported from the previous app's E_GeneratorType. The two
-// output-referred modes are what make "THD at 1 W into 8 ohm" expressible at all.
-const LEVEL_MODES: { value: SweepLevelMode; label: string }[] = [
-  { value: 'GeneratorVoltage', label: 'Generator voltage' },
-  { value: 'OutputVoltage', label: 'DUT output voltage' },
-  { value: 'OutputPower', label: 'DUT output power' },
-]
-
 /**
  * What each harmonic is divided by. Conventional is the textbook figure; frequency normalized is
  * Temme's (Listen Inc.): harmonic n over the fundamental the same sweep measured at n·f, so the
@@ -88,19 +90,16 @@ const THD_METHODS: { value: ThdMethodName; label: string }[] = [
   { value: 'FrequencyNormalized', label: 'Frequency normalized' },
 ]
 
-const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
-  { value: 'Dbv', label: 'dBV' },
-  { value: 'Volt', label: 'V' },
-  { value: 'MilliVolt', label: 'mV' },
-]
-
 const form = reactive({
   startFreqHz: 20,
   endFreqHz: 20000,
   stepsPerOctave: 5,
-  levelMode: 'GeneratorVoltage' as SweepLevelMode,
-  levelValue: -20,
-  levelUnit: 'Dbv' as SweepLevelUnit,
+  /**
+   * The level mode and the figure each mode was last set to — see measurements/levelMode.ts. One
+   * value per mode rather than one shared value: a generator voltage read as a power is not a
+   * level at all.
+   */
+  level: createLevelForm({ mode: 'GeneratorVoltage' }),
   processLeft: true,
   processRight: false,
   averageCount: 4,
@@ -158,14 +157,9 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.startFreqHz === 'number') form.startFreqHz = stored.startFreqHz
   if (typeof stored.endFreqHz === 'number') form.endFreqHz = stored.endFreqHz
   if (typeof stored.stepsPerOctave === 'number') form.stepsPerOctave = stored.stepsPerOctave
-  if (stored.levelMode) form.levelMode = stored.levelMode
-  if (typeof stored.levelValue === 'number') form.levelValue = stored.levelValue
-  // Watts is never restored into this field, which holds the *voltage* unit and nothing else: the
-  // unit a run actually sends is derived from the mode (see buildRequest), and the power mode hides
-  // this control entirely. Restoring it would leave the field holding "Watt" behind that hidden
-  // control, so switching the type back to a voltage mode would send a voltage level in watts —
-  // which the server rejects outright, from a form that looks perfectly ordinary.
-  if (stored.levelUnit && stored.levelUnit !== 'Watt') form.levelUnit = stored.levelUnit
+  // Mode, the selected mode's own value and unit, and the memory of the other two modes — all four
+  // in one place, because which of them a stored row carries depends on when it was written.
+  applyStoredLevel(form.level, stored)
   if (typeof stored.loadOhms === 'number' && stored.loadOhms > 0) loadOhms.value = stored.loadOhms
   if (typeof stored.processLeft === 'boolean') form.processLeft = stored.processLeft
   if (typeof stored.processRight === 'boolean') form.processRight = stored.processRight
@@ -206,7 +200,22 @@ watch(
   { deep: true },
 )
 
-const isPowerMode = computed(() => form.levelMode === 'OutputPower')
+const isPowerMode = computed(() => modeIsPower(form.level.mode))
+
+/**
+ * The level box and its unit dropdown, both reading and writing the *selected* mode's own slot. A
+ * writable computed rather than a direct `form.level.levelValue` binding, because which field that
+ * is depends on the mode — and the two dropdowns' contents change with it.
+ */
+const levelValue = computed({
+  get: () => activeLevel(form.level).value,
+  set: (value: number) => setLevelValue(form.level, value),
+})
+const levelUnit = computed({
+  get: () => activeLevel(form.level).unit,
+  set: (unit) => setLevelUnit(form.level, unit),
+})
+const levelUnits = computed(() => levelUnitsFor(form.level.mode))
 
 /**
  * Turning adaptive resolution off means asking for the fixed reference sweep, and 8 averages is
@@ -300,9 +309,8 @@ const invalid = computed(() => {
   if (form.startFreqHz < minFreqHz.value)
     return `Start frequency must be at least ${minFreqHz.value.toFixed(1)} Hz — below that the fundamental is too few bins up to separate from its own harmonics.`
   if (!form.processLeft && !form.processRight) return 'Select at least one channel.'
-  if (form.levelMode !== 'GeneratorVoltage' && !(loadOhms.value > 0)) return 'An output-referred level needs a load above 0 Ω.'
-  if (isPowerMode.value && !(form.levelValue > 0)) return 'Output power must be above 0 W.'
-  return null
+  if (form.level.mode !== 'GeneratorVoltage' && !(loadOhms.value > 0)) return 'An output-referred level needs a load above 0 Ω.'
+  return levelInvalid(form.level, loadOhms.value)
 })
 
 defineExpose({ run, invalid, buildParamsJson })
@@ -320,9 +328,12 @@ function buildParamsJson(): string {
     startFreqHz: form.startFreqHz,
     endFreqHz: form.endFreqHz,
     stepsPerOctave: form.stepsPerOctave,
-    levelMode: form.levelMode,
-    levelValue: form.levelValue,
-    levelUnit: isPowerMode.value ? 'Watt' : form.levelUnit,
+    levelMode: form.level.mode,
+    // The selected mode's pair is the authoritative record of what this type is configured to run
+    // at; levelByMode beside it is the memory of the two modes that are not selected.
+    levelValue: activeLevel(form.level).value,
+    levelUnit: activeLevel(form.level).unit,
+    levelByMode: levelByModeOf(form.level),
     loadOhms: loadOhms.value,
     processLeft: form.processLeft,
     processRight: form.processRight,
@@ -346,11 +357,12 @@ function run() {
     startFreqHz: form.startFreqHz,
     endFreqHz: form.endFreqHz,
     stepsPerOctave: form.stepsPerOctave,
-    levelMode: form.levelMode,
-    levelValue: form.levelValue,
-    // Watts is the only unit that means anything for the power mode, and the only mode it means
-    // anything for — the server rejects the other combinations rather than guessing.
-    levelUnit: isPowerMode.value ? 'Watt' : form.levelUnit,
+    levelMode: form.level.mode,
+    // The selected mode's own value and unit. A power unit is only valid with the power mode and a
+    // voltage unit only with the other two — the server rejects the other pairings rather than
+    // guessing, and the panel cannot offer one (levelUnitsFor).
+    levelValue: activeLevel(form.level).value,
+    levelUnit: activeLevel(form.level).unit,
     loadOhms: loadOhms.value,
     processLeft: form.processLeft,
     processRight: form.processRight,
@@ -403,20 +415,22 @@ function run() {
       title="Generator voltage holds the drive constant. The two output modes probe at 1 kHz first and solve for the generator level that reaches the target."
     >
       Level mode
-      <select v-model="form.levelMode" :disabled="running" class="tb-input">
+      <select v-model="form.level.mode" :disabled="running" class="tb-input">
         <option v-for="mode in LEVEL_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
       </select>
     </label>
 
-    <div class="grid gap-2.5" :class="isPowerMode ? 'grid-cols-1' : 'grid-cols-[2fr_1fr]'">
+    <!-- One value-and-unit row for every mode, each mode holding its own pair: the power mode's
+         units are W and mW where the two voltage modes' are dBV, V and mV. -->
+    <div class="grid grid-cols-[2fr_1fr] gap-2.5">
       <label class="tb-field">
-        {{ isPowerMode ? 'Power (W)' : 'Level' }}
-        <input v-model.number="form.levelValue" type="number" step="any" :disabled="running" class="tb-input" />
+        {{ isPowerMode ? 'Power' : 'Level' }}
+        <input v-model.number="levelValue" type="number" step="any" :disabled="running" class="tb-input" />
       </label>
-      <label v-if="!isPowerMode" class="tb-field">
+      <label class="tb-field">
         Unit
-        <select v-model="form.levelUnit" :disabled="running" class="tb-input">
-          <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
+        <select v-model="levelUnit" :disabled="running" class="tb-input">
+          <option v-for="unit in levelUnits" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
         </select>
       </label>
     </div>
@@ -424,7 +438,7 @@ function run() {
     <!-- Shared with the FFT view's power readouts (useLoadOhms) rather than a second field that
          could disagree with it. -->
     <label
-      v-if="form.levelMode !== 'GeneratorVoltage'"
+      v-if="form.level.mode !== 'GeneratorVoltage'"
       class="tb-field"
       title="Amplifier load. Used to turn watts into a target voltage, and to report power per point."
     >

@@ -35,13 +35,77 @@ public enum ThdSweepLevelMode
     OutputPower,
 }
 
-/// <summary>The unit a level is expressed in. Watts is only meaningful for <see cref="ThdSweepLevelMode.OutputPower"/>.</summary>
+/// <summary>
+/// The unit a level is expressed in. The two power units are only meaningful for
+/// <see cref="ThdSweepLevelMode.OutputPower"/>, and the three voltage units only for the other two
+/// modes — <c>ThdSweepLevelUnits.IsPower</c> is the predicate every validation asks that with, so a
+/// unit added here lands on the right side of all of them at once.
+/// </summary>
 public enum ThdSweepLevelUnit
 {
     Dbv,
     Volt,
     MilliVolt,
     Watt,
+
+    /// <summary>
+    /// Milliwatts, for the output-power mode. A headphone amplifier or a line stage is quoted in
+    /// mW, and typing 0.001 W for it is how a decimal point gets lost; the figure is stored in the
+    /// unit it was typed in so the panel reloads showing the same number.
+    /// </summary>
+    MilliWatt,
+}
+
+/// <summary>
+/// What every level unit means, in one place.
+///
+/// <para>Six measurement kinds carry a <c>LevelUnit</c> and each had its own copy of this switch
+/// and its own <c>== Watt</c> comparisons. A unit added to the enum then has to be found in six
+/// files, and the one that reads a power unit as a voltage does not fail — it drives the DUT at
+/// sqrt(P·R) volts fewer or more than asked. Hence one conversion and one predicate.</para>
+/// </summary>
+public static class ThdSweepLevelUnits
+{
+    /// <summary>
+    /// A unit naming power rather than voltage, i.e. one that needs the load to mean anything.
+    /// This is the question every <c>Validate</c> asks — never <c>== Watt</c>, which was true of
+    /// exactly one of the two power units.
+    /// </summary>
+    public static bool IsPower(this ThdSweepLevelUnit unit) =>
+        unit is ThdSweepLevelUnit.Watt or ThdSweepLevelUnit.MilliWatt;
+
+    /// <summary>
+    /// The level in dBV. A power converts through the load — P = V²/R, so the voltage to aim for is
+    /// sqrt(P·R) — which is the only arithmetic the power mode adds over OutputVoltage: everything
+    /// downstream sees a target voltage and cannot tell which mode named it.
+    ///
+    /// <para>Floored at 1e-12 V (−240 dBV) rather than returning −∞ for a zero level: every caller
+    /// rejects a non-positive non-dBV level before this is read, so the floor is only ever reached
+    /// by a path that is about to fail anyway, and an infinity in a generator config is worse than
+    /// a silly number.</para>
+    /// </summary>
+    public static double ToDbv(this ThdSweepLevelUnit unit, double value, double loadOhms) => unit switch
+    {
+        ThdSweepLevelUnit.Dbv => value,
+        ThdSweepLevelUnit.Volt => VoltToDbv(value),
+        ThdSweepLevelUnit.MilliVolt => VoltToDbv(value / 1000.0),
+        ThdSweepLevelUnit.Watt => VoltToDbv(Math.Sqrt(Math.Max(value, 0.0) * loadOhms)),
+        ThdSweepLevelUnit.MilliWatt => VoltToDbv(Math.Sqrt(Math.Max(value / 1000.0, 0.0) * loadOhms)),
+        _ => throw new ArgumentOutOfRangeException(nameof(unit), unit, "Unknown drive level unit."),
+    };
+
+    /// <summary>The unit as it is written in a message or a label — "0.5 mW", not "0.5 MilliWatt".</summary>
+    public static string Label(this ThdSweepLevelUnit unit) => unit switch
+    {
+        ThdSweepLevelUnit.Dbv => "dBV",
+        ThdSweepLevelUnit.Volt => "V",
+        ThdSweepLevelUnit.MilliVolt => "mV",
+        ThdSweepLevelUnit.Watt => "W",
+        ThdSweepLevelUnit.MilliWatt => "mW",
+        _ => unit.ToString(),
+    };
+
+    private static double VoltToDbv(double volts) => 20.0 * Math.Log10(Math.Max(volts, 1e-12));
 }
 
 /// <summary>
@@ -168,14 +232,7 @@ public sealed record ThdSweepRequest(
     double MeasurementHiFreqHz = 20000.0)
 {
     /// <summary>The level expressed in dBV. Watts are converted through the load: V = sqrt(P·R).</summary>
-    public double LevelDbv => LevelUnit switch
-    {
-        ThdSweepLevelUnit.Dbv => LevelValue,
-        ThdSweepLevelUnit.Volt => 20.0 * Math.Log10(Math.Max(LevelValue, double.Epsilon)),
-        ThdSweepLevelUnit.MilliVolt => 20.0 * Math.Log10(Math.Max(LevelValue / 1000.0, double.Epsilon)),
-        ThdSweepLevelUnit.Watt => 20.0 * Math.Log10(Math.Max(Math.Sqrt(Math.Max(LevelValue, 0.0) * LoadOhms), double.Epsilon)),
-        _ => LevelValue,
-    };
+    public double LevelDbv => LevelUnit.ToDbv(LevelValue, LoadOhms);
 
     /// <summary>
     /// Bins the fundamental must be up before its harmonics can be measured at all.
@@ -310,8 +367,15 @@ public sealed record ThdSweepRequest(
         // the start frequency is genuinely too low to analyze at any size the sweep will use.
         RequireResolvableFundamental(StartFreqHz, nameof(StartFreqHz), FftSizeAt(StartFreqHz));
 
-        if (LevelUnit == ThdSweepLevelUnit.Watt && LevelMode != ThdSweepLevelMode.OutputPower)
+        if (LevelUnit.IsPower() && LevelMode != ThdSweepLevelMode.OutputPower)
             throw new ArgumentOutOfRangeException(nameof(LevelUnit), "Watts only make sense for the output-power level mode.");
+        if (LevelMode == ThdSweepLevelMode.OutputPower && !LevelUnit.IsPower())
+            throw new ArgumentOutOfRangeException(nameof(LevelUnit), "The output-power level mode needs its level in watts or milliwatts.");
+        if (LevelMode == ThdSweepLevelMode.OutputPower && LevelValue <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(LevelValue), LevelValue, $"A target power must be positive ({LevelUnit.Label()}).");
+        }
         if (StopThdPercent is not null)
             throw new ArgumentOutOfRangeException(nameof(StopThdPercent), StopThdPercent, "A THD stop threshold only applies to an amplitude sweep.");
     }

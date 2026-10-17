@@ -106,7 +106,10 @@ const { showPage } = useManual()
         </tr>
         <tr>
           <td>Level / Power, Unit</td>
-          <td>The target, as on the other screens. A power converts through the load.</td>
+          <td>
+            The target, as on the other screens — in watts or milliwatts here, converted through the
+            load. Each mode remembers its own figure and unit.
+          </td>
         </tr>
         <tr>
           <td>Load 1 (Ω)</td>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AnnotationsPanel from './AnnotationsPanel.vue'
 import { computed, watch } from 'vue'
 import type { ImpedanceView, ImpedanceZScale } from '../api/client'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
@@ -430,4 +431,8 @@ watch(
       Autofit each measurement
     </label>
   </CollapsibleSection>
+
+  <!-- The notes of whichever projection is on screen -- `view`'s values are the annotation view
+       ids, so this follows the Bode/locus switch with no mapping. -->
+  <AnnotationsPanel :view="view" />
 </template>

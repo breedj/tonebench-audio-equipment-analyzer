@@ -181,6 +181,12 @@ const QUANTITIES: Readonly<Record<string, AnnotationQuantity>> = Object.freeze({
   volt: decades('Level', 'V', LINEAR_SPACE),
   // --- impedance. Strictly positive, hence ratio offsets in both the log and the linear axis mode.
   ohm: decades('Impedance', 'Ω', RATIO_SPACE),
+  // --- the impedance locus. Resistance is positive on a passive part and reactance is signed, but
+  //     both are *linear* here, unlike |Z| above: the locus plots them on linear axes through zero,
+  //     where a ratio offset has no meaning and a negative real part is a real reading (see
+  //     ImpedanceMath.NegativeRealFraction, which exists because one happens).
+  resistanceOhm: fixed('Resistance', 'Ω', 3, LINEAR_SPACE),
+  reactanceOhm: fixed('Reactance', 'Ω', 3, LINEAR_SPACE),
   // --- the complex planes. Signed throughout.
   re: fixed('Real part', '', 3, LINEAR_SPACE),
   im: fixed('Imaginary part', '', 3, LINEAR_SPACE),

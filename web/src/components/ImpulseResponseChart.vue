@@ -12,6 +12,19 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { useZoomBounds } from '../composables/useZoomBounds'
 import { impulseTimeGrid, resampleImpulse } from '../measurements/impulseOverlay'
 import { formatImpulsePeak, impulseUnit } from '../measurements/impulseUnit'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { exportGridTheme } from '../charts/palette'
 
@@ -26,7 +39,13 @@ import { exportGridTheme } from '../charts/palette'
  * same reason the spectrum charts do it. It matters more here than anywhere: a reflection can be a
  * single sample, and a column that showed only one side of the waveform would hide half of them.</para>
  */
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the impulse trace's. See FrequencyResponseChart. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   impulse: ImpulseTraceJson | null
   /**
    * Checked history items. Drawn as a line each, in the trace colour with the run's own dash — the
@@ -315,7 +334,14 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         alpha: props.impulse === null ? 1 : 0.7,
       })),
     ],
-    plugins: [minMaxBandPlugin(t), impulseMarkerPlugin(t)],
+    // Last: whatever draws after the annotations paints over their labels.
+    plugins: [
+      minMaxBandPlugin(t),
+      impulseMarkerPlugin(t),
+      // `t` is one of two frozen tables rather than a palette object, so the theme is read
+      // from the one that built it.
+      annotationsPlugin(annotationOverlay, ANNOTATION_AXES.value, () => annotationTheme(t === THEME.dark)),
+    ],
     // Both axes, because a reflection is read off the time axis and its level off the other, and
     // demanding a pixel-accurate one-axis drag to get either would make both awkward.
     cursor: interactive ? { drag: { x: true, y: true, uni: 12 } } : { show: false },
@@ -392,6 +418,11 @@ function rebuild() {
   // also what makes the x window honour the panel's props rather than the data's span (CLAUDE.md).
   const blank = [[], [], ...series.value.overlays.map(() => [])] as unknown as uPlot.AlignedData
   plot.value = new uPlot(buildOptions(width, chartHeight.value, theme(), true), blank, el)
+
+  // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
+  // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
+  attachAnnotationListeners(plot.value, annotationOverlay)
+  syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value)
   // uPlot has no double-click-to-reset of its own once drag zoom is on.
   plot.value.over.addEventListener('dblclick', resetZoom)
   refresh()
@@ -417,13 +448,69 @@ function fit() {
 }
 watch(chartHeight, fit)
 
+/**
+ * What this chart's two axes are, in annotation terms.
+ *
+ * <p>Its x is a <b>linear time in milliseconds that crosses zero</b> — the pre-ringing before the
+ * impulse sits at a negative time — which is the case the parser's "any finite x" rule and the
+ * linear offset space exist for. A log axis has no position for t = 0 at all.</p>
+ *
+ * <p>Its y quantity follows the view, like the frequency-response chart's: volts in the volts view,
+ * dB re peak in the normalised one. Not volts converted to dB, which could not be converted back —
+ * an impulse swings negative and a sign does not survive a logarithm. So a note placed on one view
+ * is skipped on the other rather than redrawn wrongly, and returns on the way back. The volts
+ * view's axis is auto-scaled to V, mV or µV; the note is stored in <b>volts</b> and the factor
+ * applied on the way out, so it keeps its place when a quieter measurement changes the unit.</p>
+ */
+const ANNOTATION_AXES = computed<UplotAnnotationAxes>(() => ({
+  x: { quantity: 'ms' },
+  y: props.normalised
+    ? { quantity: 'db' }
+    : {
+        quantity: 'volt',
+        toDisplay: (volts) => volts * unit.value.factor,
+        fromDisplay: (shown) => shown / unit.value.factor,
+      },
+}))
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => 'Impulse',
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot.value ? cssAnnotationPlot(plot.value, ANNOTATION_AXES.value) : null),
+  surface: () => plot.value?.over ?? null,
+  overlayRect: () => (plot.value ? annotationOverlayRect(plot.value) : null),
+  redraw: () => plot.value?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value),
+})
+
+function onWindowMouseUp() {
+  finishBoxGesture(plot.value, annotationOverlay)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+// A redraw, never a rebuild: annotations are draw-hook state, and a rebuild throws the zoom away.
+watch(
+  () => [annotationList.value, props.annotationNumbers] as const,
+  () => plot.value?.redraw(),
+  { deep: true },
+)
+
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   rebuild()
   observer = new ResizeObserver(fit)
   if (container.value) observer.observe(container.value)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
   observer = null
   plot.value?.destroy()
@@ -473,6 +560,9 @@ watch(
       </button>
       <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
-    <div ref="container" class="w-full"></div>
+    <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
+      <div ref="container" class="w-full"></div>
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
+    </div>
   </section>
 </template>

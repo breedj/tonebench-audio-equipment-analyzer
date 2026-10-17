@@ -1,5 +1,19 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import { SWEEP_ANNOTATION_VIEW } from '../charts/annotationViews'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
@@ -16,7 +30,14 @@ import ToolbarIcon from './ToolbarIcon.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
-import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
+import {
+  percentToDb,
+  sweepDistortionDb,
+  sweepTraceLabel,
+  sweepTraceValue,
+  type SweepTraceFamily,
+  type SweepTraceKey,
+} from '../sweep/points'
 import { SWEEP_TRACE_COLORS } from '../sweep/traceColors'
 import { sweepMetricColumns, sweepMetricRow, sweepReadoutLines } from '../sweep/readings'
 import {
@@ -62,7 +83,13 @@ import { exportGridStroke, exportGridTheme } from '../charts/palette'
  * likewise uncompensated.
  */
 
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the sweep's. See FrequencyResponseChart. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   /** Per-trace visibility. Every trace is individually switchable from the display panel. */
   showMagnitude: boolean
   showThd: boolean
@@ -663,7 +690,8 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
       ...(decadeGridY ? [minorGridAxis('y', 3, theme)] : []),
     ],
     series,
-    plugins: [pinnedCursorPlugin(theme)],
+    // Last: whatever draws after the annotations paints over their labels.
+    plugins: [pinnedCursorPlugin(theme), annotationsPlugin(annotationOverlay, ANNOTATION_AXES.value, () => annotationTheme(dark))],
     cursor: interactive
       ? {
           points: { show: false },
@@ -919,7 +947,65 @@ function ensurePlot() {
   // else, so a click on an axis or a label is not a click on a point.
   plot.over.addEventListener('mousedown', notePressOrigin)
   plot.over.addEventListener('click', onPlotClick)
+
+  // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
+  // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
+  attachAnnotationListeners(plot, annotationOverlay)
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
 }
+
+/**
+ * What this chart's two axes are, in annotation terms — and the case the whole quantity design
+ * exists for.
+ *
+ * <p>Its <b>x is one of four unrelated quantities of the same point</b>: hertz on a frequency
+ * sweep, and output volts, output watts or input volts on an amplitude one. A note placed against
+ * watts is stored in watts, so switching the axis to volts hides it rather than redrawing it at
+ * the same number in another unit — and switching back brings it out again.</p>
+ *
+ * <p>Its y is always stored as the distortion <b>percentage</b>, whichever unit the axis shows,
+ * which is the same decision the spectrum's dBV levels make. The dB conversion is a display one,
+ * and because percent is a ratio quantity a label's offset is a ratio too: a ratio in percent is a
+ * constant difference in dB, so a label stays exactly where it was put across the unit switch.</p>
+ */
+const ANNOTATION_AXES = computed<UplotAnnotationAxes>(() => ({
+  x: { quantity: props.xAxis === 'frequency' ? 'hz' : props.xAxis },
+  y:
+    props.unit === 'db'
+      ? {
+          quantity: 'pct',
+          toDisplay: (percent) => percentToDb(percent),
+          fromDisplay: (db) => 100 * Math.pow(10, db / 20),
+        }
+      : { quantity: 'pct' },
+}))
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => SWEEP_ANNOTATION_VIEW,
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot ? cssAnnotationPlot(plot, ANNOTATION_AXES.value) : null),
+  surface: () => plot?.over ?? null,
+  overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
+  redraw: () => plot?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+})
+
+function onWindowMouseUp() {
+  finishBoxGesture(plot, annotationOverlay)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+// A redraw, never a rebuild: annotations are draw-hook state, and a rebuild throws the zoom away.
+watch(
+  () => [annotationList.value, props.annotationNumbers] as const,
+  () => plot?.redraw(),
+  { deep: true },
+)
 
 /**
  * Where the button went down, so a drag-zoom can be told from a click.
@@ -1132,12 +1218,16 @@ function handleResize() {
 watch(chartHeight, handleResize)
 
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
   update()
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   resizeObserver?.disconnect()
   plot?.destroy()
   plot = null
@@ -1180,8 +1270,9 @@ onBeforeUnmount(() => {
       </button>
       <span v-else>Click a point to pin · drag to zoom</span>
     </div>
-    <div class="relative">
+    <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
       <div ref="containerRef" class="sweep-chart w-full"></div>
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
       <!-- Off-scale cue: a checked trace has a value above/below the currently visible y window. -->
       <div
         v-if="outOfRange.above"

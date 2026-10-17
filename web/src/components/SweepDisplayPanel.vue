@@ -27,6 +27,8 @@ import { sweepOverlayScreen } from '../measurements/overlayScope'
 import { sweepDistortionDb, sweepTraceLabel, sweepTraceValue, type SweepTraceFamily, type SweepTraceKey } from '../sweep/points'
 import { AMPLITUDE_X_AXES, sweepXLabel, sweepXUnit, sweepXValue, type SweepXAxis } from '../sweep/xAxis'
 import type { ThdMethodName, ThdSweepPoint } from '../api/client'
+import AnnotationsPanel from './AnnotationsPanel.vue'
+import { SWEEP_ANNOTATION_VIEW } from '../charts/annotationViews'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -603,4 +605,6 @@ function swatch(key: SweepTraceColorKey): string {
       Show data points
     </label>
   </CollapsibleSection>
+
+  <AnnotationsPanel :view="SWEEP_ANNOTATION_VIEW" />
 </template>

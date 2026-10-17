@@ -4327,6 +4327,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
               <template #default>
                 <ImpulseResponseChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
                   v-if="impulseView === 'Impulse'"
                   ref="impulseChart"
                   :impulse="impulseTrace"
@@ -4381,6 +4383,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :axis-titles="true"
                 />
                 <ImpulseHarmonicsChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
                   v-else-if="impulseView === 'Harmonics'"
                   ref="impulseHarmonicsChart"
                   :harmonics="impulseHarmonics"
@@ -4693,6 +4697,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   @cursor-pin="onResponseCursorPin"
                 />
                 <ResponseSPlaneChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
                   v-else-if="activeResponseProjection === 'SPlane'"
                   ref="responseSPlaneChart"
                   :run-label="isSteppedResponse ? 'Run sweep' : 'Run'"
@@ -4716,6 +4722,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :x-to-hz="responseXToHz"
                 />
                 <ResponsePolarChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
                   v-else
                   ref="responsePolarChart"
                   :run-label="isSteppedResponse ? 'Run sweep' : 'Run'"
@@ -5056,6 +5064,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <!-- The impedance chart with its damping-factor axis: Zout is an impedance curve in
                      every respect, so the ohms axis, the log scale and the phase axis are its. -->
                 <ImpedanceChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
+                  annotation-view="Bode"
                   ref="outputImpedanceChart"
                   :traces="outputImpedanceTraces"
                   :overlays="visibleOutputImpedanceOverlays"
@@ -5195,6 +5206,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <p v-if="impedanceWarning" class="text-xs text-amber-700 dark:text-amber-400">{{ impedanceWarning }}</p>
 
                 <ImpedanceChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
+                  annotation-view="Bode"
                   v-if="impedanceView === 'Bode'"
                   ref="impedanceChart"
                   :traces="impedanceTraces"
@@ -5213,6 +5227,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :phase-bottom-deg="impedancePhaseBottomDeg"
                 />
                 <ImpedancePlaneChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
                   v-else
                   ref="impedancePlaneChart"
                   :traces="impedanceTraces"
@@ -5370,6 +5386,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 </p>
 
                 <ThdSweepChart
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
                   ref="sweepChart"
                   :unit="sweepUnit"
                   :show-noise-floor="sweepShowNoiseFloor"

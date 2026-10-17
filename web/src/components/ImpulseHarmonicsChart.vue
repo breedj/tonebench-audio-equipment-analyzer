@@ -24,7 +24,27 @@ import { exportGridTheme } from '../charts/palette'
  * f₂/k. H5 therefore ends at a fifth of the sweep's top. Drawing past `upperValidHz` would be
  * drawing frequencies nothing measured.</para>
  */
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
+
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the harmonic curves'. See FrequencyResponseChart. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   harmonics: HarmonicCurveJson[]
   /**
    * Checked history items. Unlike the two decay surfaces this chart can genuinely overlay — colour
@@ -203,6 +223,8 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
     // Fires on setData too (both scales are auto:false, so setData re-applies the same window),
     // hence the change gate inside noteScale.
     hooks: interactive ? { setScale: [(u: uPlot) => noteScale(u)] } : {},
+    // Last: whatever draws after the annotations paints over their labels.
+    plugins: [annotationsPlugin(annotationOverlay, ANNOTATION_AXES, () => annotationTheme(dark))],
   }
 }
 
@@ -213,6 +235,11 @@ function rebuild() {
   plot.value?.destroy()
   const width = el.getBoundingClientRect().width || 600
   plot.value = new uPlot(buildOptions(width, chartHeight.value, isDark.value, true), data.value, el)
+
+  // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
+  // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
+  attachAnnotationListeners(plot.value, annotationOverlay)
+  syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value)
   // uPlot has no double-click-to-reset of its own once drag zoom is on.
   plot.value.over.addEventListener('dblclick', resetZoom)
   applyScales()
@@ -287,13 +314,50 @@ function fit() {
 }
 watch(chartHeight, fit)
 
+/**
+ * What this chart's two axes are: a log frequency against the harmonic level in dBc. Neither
+ * depends on a prop, so this is a constant rather than a computed.
+ */
+const ANNOTATION_AXES: UplotAnnotationAxes = { x: { quantity: 'hz' }, y: { quantity: 'dbc' } }
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => 'Harmonics',
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot.value ? cssAnnotationPlot(plot.value, ANNOTATION_AXES) : null),
+  surface: () => plot.value?.over ?? null,
+  overlayRect: () => (plot.value ? annotationOverlayRect(plot.value) : null),
+  redraw: () => plot.value?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value),
+})
+
+function onWindowMouseUp() {
+  finishBoxGesture(plot.value, annotationOverlay)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+// A redraw, never a rebuild: annotations are draw-hook state, and a rebuild throws the zoom away.
+watch(
+  () => [annotationList.value, props.annotationNumbers] as const,
+  () => plot.value?.redraw(),
+  { deep: true },
+)
+
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   rebuild()
   observer = new ResizeObserver(fit)
   if (container.value) observer.observe(container.value)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
   observer = null
   plot.value?.destroy()
@@ -344,6 +408,9 @@ watch(
       </button>
       <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
-    <div ref="container" class="w-full"></div>
+    <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
+      <div ref="container" class="w-full"></div>
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
+    </div>
   </section>
 </template>

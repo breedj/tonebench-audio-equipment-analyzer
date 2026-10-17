@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AnnotationsPanel from './AnnotationsPanel.vue'
 import { computed } from 'vue'
 import type {
   BurstDecayResolutionName,
@@ -675,4 +676,9 @@ const referenceLabel = computed(() => {
       <p v-if="status.error" class="text-[11px] text-red-600 dark:text-red-400">{{ status.error }}</p>
     </template>
   </CollapsibleSection>
+
+  <!-- The notes of whichever chart is on screen. `view`'s values are the annotation view ids, so
+       this follows the Impulse/Response/Harmonics/CSD/burst switch with no mapping -- and on the
+       two decay surfaces, which carry no notes, it simply lists none. -->
+  <AnnotationsPanel :view="view" />
 </template>

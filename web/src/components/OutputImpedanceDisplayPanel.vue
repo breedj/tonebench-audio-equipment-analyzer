@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AnnotationsPanel from './AnnotationsPanel.vue'
+import { BODE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import { computed, watch } from 'vue'
 import type { ImpedanceZScale } from '../api/client'
 import type { ImpedanceTrace } from '../composables/useImpedance'
@@ -249,4 +251,6 @@ watch(running, (isRunning, wasRunning) => {
       <label class="tb-check-row"><input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points</label>
     </div>
   </CollapsibleSection>
+
+  <AnnotationsPanel :view="BODE_ANNOTATION_VIEW" />
 </template>

@@ -10,6 +10,12 @@ import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
 import { fitTransform, niceTicks, thinPositions, type PlaneTransform, type Viewport } from '../charts/planeTransform'
 import { dragZoomViewport } from '../charts/dragZoom'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import { planeAnnotationPlot, planeGeometryKey } from '../charts/planeAnnotations'
+import { SPLANE_ANNOTATION_VIEW } from '../charts/annotationViews'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 import { useResponseComplexCurve } from '../composables/useResponseComplexCurve'
 import { fitRootPoints, nearestRoot, visibleRoots, type RootPoint } from '../response/poleZeroMap'
 import { fitRational, suggestOrder, POOR_FIT_DB, type FitResult } from '../response/rationalFit'
@@ -57,7 +63,13 @@ import { useAppTheme } from '../composables/useAppTheme'
  * the field's own slice along it *is* the Bode magnitude, which `surfaceField.test.ts` pins.
  */
 
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the heat map's. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   traces: ResponseTrace[]
   overlays: OverlayEntry[]
   /** The panel's fit, so the picture and the pole/zero table can never disagree. */
@@ -352,7 +364,39 @@ function draw() {
   ctx.restore()
 }
 
+/**
+ * Whether this view can carry a note at all.
+ *
+ * <p><b>The heat map only.</b> The relief is a 3-D projection, where a point has an across, a depth
+ * <i>and</i> a height and a two-coordinate annotation cannot name one; the slice is a different
+ * pair of axes again (frequency against magnitude) and would need a view id of its own. The heat
+ * map is a plain σ/jω plane in hertz and takes the standard treatment. Notes stay stored and listed
+ * in the other two modes, and are simply not drawn — the same judgement an annotation outside the
+ * plotted window gets.</p>
+ */
+const annotatable = computed(() => props.mode === 'Heatmap')
+
+/** The scene, plus the annotations over it. A wrapper, for the reason ResponsePolarChart's gives. */
 function renderScene(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  dark: boolean,
+  viewport: Viewport,
+  showHover: boolean,
+  forExport: boolean,
+  dpr: number,
+): PlaneTransform {
+  const t = renderSceneCore(ctx, width, height, dark, viewport, showHover, forExport, dpr)
+  if (annotatable.value) {
+    const plot = planeAnnotationPlot(t, { width, height }, INSETS, { x: 'sigmaHz', y: 'jwHz' }, ctx)
+    annotationOverlay.noteGeometry(planeGeometryKey({ width, height }, t))
+    annotationOverlay.paint(ctx, plot, annotationTheme(dark))
+  }
+  return t
+}
+
+function renderSceneCore(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
@@ -1037,6 +1081,37 @@ function localPoint(event: PointerEvent) {
   return { x: event.clientX - rect.left, y: event.clientY - rect.top }
 }
 
+const annotationOverlay = useAnnotationOverlay({
+  view: () => SPLANE_ANNOTATION_VIEW,
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => {
+    const box = container.value
+    if (!box || !transform || !annotatable.value) return null
+    const width = box.clientWidth || 800
+    const height = box.clientHeight || chartHeight.value
+    return planeAnnotationPlot(transform, { width, height }, INSETS, { x: 'sigmaHz', y: 'jwHz' }, canvas.value?.getContext('2d') ?? null)
+  },
+  surface: () => container.value,
+  overlayRect: () => {
+    const box = container.value
+    if (!box) return null
+    return { left: 0, top: 0, width: box.clientWidth || 800, height: box.clientHeight || chartHeight.value }
+  },
+  redraw: () => draw(),
+})
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+watch(
+  () => [annotationList.value, props.annotationNumbers, annotationArmed.value, props.mode] as const,
+  () => draw(),
+  { deep: true },
+)
+
 function onPointerDown(event: PointerEvent) {
   const point = localPoint(event)
   dragStart.value = point
@@ -1093,6 +1168,27 @@ function onPointerUp(event: PointerEvent) {
   const point = localPoint(event)
   dragStart.value = null
   dragNow.value = null
+  // Armed on the heat map, the drag this chart already rubber-bands becomes the annotation
+  // gesture; unarmed, or in a mode that carries no notes, it falls through to the zoom.
+  if (start && annotatable.value && annotationArmed.value === 'box') {
+    annotationOverlay.placeBoxFrom({
+      left: Math.min(start.x, point.x),
+      top: Math.min(start.y, point.y),
+      width: Math.abs(point.x - start.x),
+      height: Math.abs(point.y - start.y),
+    })
+    draw()
+    return
+  }
+  if (start && annotatable.value && annotationArmed.value !== null) {
+    const moved = Math.abs(point.x - start.x) > 4 || Math.abs(point.y - start.y) > 4
+    if (!moved) {
+      annotationOverlay.placeAt(point, annotationArmed.value)
+      draw()
+      return
+    }
+  }
+
   if (start && transform) {
     const selected = dragZoomViewport(start, point, transform)
     if (selected) zoomViewport.value = selected
@@ -1186,12 +1282,14 @@ async function exportPng({
 let observer: ResizeObserver | null = null
 
 onMounted(() => {
+  window.addEventListener('keydown', onWindowKeyDown)
   draw()
   observer = new ResizeObserver(() => draw())
   if (container.value) observer.observe(container.value)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
   observer = null
 })
@@ -1268,11 +1366,14 @@ defineExpose({ curve: readCurve, exportPng })
       <canvas
         ref="canvas"
         class="h-full w-full touch-none"
+        :class="annotationArmed && annotatable ? 'cursor-crosshair' : ''"
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
         @pointerleave="hoverRoot = null; hoverPoint = null"
+        @click="annotationOverlay.onClick"
       />
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
     </div>
 
     <p v-if="warning" class="text-xs text-amber-600 dark:text-amber-400">{{ warning }}</p>

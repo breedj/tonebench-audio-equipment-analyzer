@@ -182,6 +182,8 @@ export async function renderView(
           {
             traces,
             overlays: overlayEntries,
+            annotations: display.annotations,
+            annotationNumbers,
             projection: view,
             radiusMode: display.nyquistRadius,
             radiusFloorDb: display.nyquistRadiusFloorDb,
@@ -222,6 +224,8 @@ export async function renderView(
           {
             traces,
             overlays: overlayEntries,
+            annotations: display.annotations,
+            annotationNumbers,
             mode: display.surfaceMode,
             thickLines: display.thickLines,
             scale: display.surfaceScale,
@@ -271,6 +275,8 @@ export async function renderView(
       const png = await renderChartPng(
         ThdSweepChart,
         {
+          annotations: display.annotations,
+          annotationNumbers,
           unit: display.unit,
           showNoiseFloor: display.showNoiseFloor,
           showMagnitude: display.showMagnitude,
@@ -316,6 +322,8 @@ export async function renderView(
             {
               impulse,
               overlays: overlayEntries,
+              annotations: display.annotations,
+              annotationNumbers,
               normalised: display.normalised,
               thickLines: display.thickLines,
               timeFromMs: display.timeFromMs,
@@ -370,6 +378,8 @@ export async function renderView(
             {
               harmonics,
               overlays: overlayEntries,
+              annotations: display.annotations,
+              annotationNumbers,
               thickLines: display.thickLines,
               showDataPoints: display.showDataPoints,
               freqFromHz: display.freqFromHz,
@@ -416,6 +426,9 @@ export async function renderView(
           {
             traces,
             overlays: overlayEntries,
+            annotations: display.annotations,
+            annotationView: 'Bode',
+            annotationNumbers,
             showPhase: display.showPhase,
             showCoherence: display.showCoherence,
             showShortCal: display.showShortCal,
@@ -436,7 +449,14 @@ export async function renderView(
       if (view === 'Nyquist') {
         const png = await renderChartPng(
           ImpedancePlaneChart,
-          { traces, xFromHz: display.xFromHz, xToHz: display.xToHz, thickLines: display.thickLines },
+          {
+            traces,
+            xFromHz: display.xFromHz,
+            xToHz: display.xToHz,
+            thickLines: display.thickLines,
+            annotations: display.annotations,
+            annotationNumbers,
+          },
           options,
         )
         return { png, caption: 'Impedance locus' }
@@ -452,6 +472,9 @@ export async function renderView(
         {
           traces: [trace],
           overlays: overlayEntries,
+          annotations: display.annotations,
+          annotationView: 'Bode',
+          annotationNumbers,
           showPhase: data.rightChannelIsReference && display.showPhase,
           showCoherence: false,
           showShortCal: false,

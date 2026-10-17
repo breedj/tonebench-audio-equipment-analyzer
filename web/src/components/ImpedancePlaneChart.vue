@@ -29,13 +29,31 @@ import { EXPORT_GRID_WIDTH_SCALE, exportGridStroke } from '../charts/palette'
  * transmission-line idea. At audio frequencies there is no line to reflect off, so it would be a
  * curved grid over the same information.</p>
  */
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the locus'. See FrequencyResponseChart. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   traces: ImpedanceTrace[]
   /** Only points inside the Bode chart's own frequency window are drawn, so the two views agree. */
   xFromHz: number
   xToHz: number
   thickLines: boolean
 }>()
+
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import { NYQUIST_ANNOTATION_VIEW } from '../charts/annotationViews'
+import {
+  paintPlaneBand,
+  planeAnnotationPlot,
+  planeGeometryKey,
+  usePlaneBoxGesture,
+} from '../charts/planeAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 
 const { isDark } = useAppTheme()
 
@@ -189,6 +207,8 @@ function renderScene(ctx: CanvasRenderingContext2D, width: number, height: numbe
   ctx.fillStyle = color(AXIS_COLOR)
   ctx.lineWidth = gridLineWidth()
 
+  // Placed before the grid loop only so `transform` is in scope for the annotation paint at the
+  // end; the painting itself is the last thing this function does.
   for (const x of niceTicks(view.xMin, view.xMax, 6)) {
     const px = transform.toScreenX(x)
     ctx.beginPath()
@@ -251,6 +271,15 @@ function renderScene(ctx: CanvasRenderingContext2D, width: number, height: numbe
     ctx.restore()
   }
 
+  // The annotations go last, over everything: a label under the locus cannot be read. This one call
+  // puts them on the screen, in exportPng's canvas, in the Screenshot dialog and in the report --
+  // all four end in this function.
+  annotationOverlay.noteGeometry(planeGeometryKey({ width, height }, transform))
+  annotationOverlay.paint(
+    ctx,
+    planeAnnotationPlot(transform, { width, height }, INSETS, { x: 'resistanceOhm', y: 'reactanceOhm' }, ctx),
+    annotationTheme(dark),
+  )
 }
 
 /**
@@ -300,6 +329,10 @@ function drawMarker() {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
   ctx.clearRect(0, 0, width, height)
 
+  // The rubber band a box gesture is sweeping rides this overlay too: it repaints on every move
+  // already, where the scene behind it does not.
+  paintPlaneBand(ctx, boxGesture.band.value, color(AXIS_COLOR))
+
   const point = hover.value
   if (!point) return
 
@@ -313,7 +346,81 @@ function drawMarker() {
   ctx.fill()
 }
 
+/**
+ * The annotation adapter for this plane.
+ *
+ * <p>Resistance against reactance, both in ohms and both <b>linear</b> — unlike the Bode plot's
+ * |Z|, which is a ratio quantity on a log axis. This plane runs through zero and a measured real
+ * part can legitimately be negative (ImpedanceMath.NegativeRealFraction exists because one is), so
+ * a ratio offset would have no meaning here.</p>
+ *
+ * <p>Everything else is free: the chart draws in CSS pixels through one renderScene the export
+ * calls at 1:1, so one adapter serves the painting and the DOM handles alike.</p>
+ */
+function annotationPlot() {
+  const box = container.value
+  if (!box) return null
+  const width = box.clientWidth || 800
+  const height = box.clientHeight || chartHeight.value
+  const transform = fitTransform(viewport.value, width, height, INSETS, true)
+  return planeAnnotationPlot(
+    transform,
+    { width, height },
+    INSETS,
+    { x: 'resistanceOhm', y: 'reactanceOhm' },
+    canvas.value?.getContext('2d') ?? null,
+  )
+}
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => NYQUIST_ANNOTATION_VIEW,
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: annotationPlot,
+  surface: () => container.value,
+  overlayRect: () => {
+    const box = container.value
+    if (!box) return null
+    return { left: 0, top: 0, width: box.clientWidth || 800, height: box.clientHeight || chartHeight.value }
+  },
+  redraw: () => draw(),
+})
+
+const boxGesture = usePlaneBoxGesture(annotationOverlay, () => drawMarker())
+
+function pointerIn(event: MouseEvent): { x: number; y: number } | null {
+  const box = container.value
+  if (!box) return null
+  const rect = box.getBoundingClientRect()
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top }
+}
+
+function onAnnotationDown(event: MouseEvent) {
+  annotationOverlay.notePress(event)
+  const pos = pointerIn(event)
+  if (pos) boxGesture.onPointerDown(pos)
+}
+
+function onWindowMouseUp() {
+  // Ends a swept region. The click handler below is a no-op while armed for a box, so the two
+  // cannot both fire for one gesture.
+  boxGesture.onWindowUp()
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+watch(
+  () => [annotationList.value, props.annotationNumbers, annotationArmed.value] as const,
+  () => draw(),
+  { deep: true },
+)
+
 function onMove(event: MouseEvent) {
+  const pos = pointerIn(event)
+  if (pos) boxGesture.onPointerMove(pos)
   const box = container.value
   if (!box || points.value.length === 0) return
 
@@ -366,12 +473,16 @@ const hoverText = computed(() => {
 let observer: ResizeObserver | null = null
 
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   draw()
   observer = new ResizeObserver(() => draw())
   if (container.value) observer.observe(container.value)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
   observer = null
 })
@@ -405,12 +516,16 @@ watch([isDark, () => props.thickLines], () => draw())
     <div
       ref="container"
       class="plot-surface relative w-full"
+      :class="annotationArmed ? 'cursor-crosshair' : ''"
       :style="{ height: `${chartHeight}px` }"
       @mousemove="onMove"
       @mouseleave="onLeave"
+      @mousedown="onAnnotationDown"
+      @click="annotationOverlay.onClick"
     >
       <canvas ref="canvas" class="absolute inset-0" />
       <canvas ref="overlay" class="pointer-events-none absolute inset-0" />
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
     </div>
 
     <p v-if="points.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">

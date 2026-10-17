@@ -1,5 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { ImpedanceZScale } from '../api/client'
@@ -41,7 +54,15 @@ import { standardOnGrid } from '../impedance/standard'
  * decimator and <c>response_trace</c> columns hold. It is converted back to ohms here, at the last
  * possible moment — nobody reads a loudspeaker's impedance in decibels.</p>
  */
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the Bode plot's. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Which chart of the measurement this instance is. Both impedance kinds call their Bode plot that. */
+  annotationView?: string
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   traces: ImpedanceTrace[]
   /** Stored measurements checked on in the History list, drawn dashed behind the live curve. */
   overlays: OverlayEntry[]
@@ -739,6 +760,8 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
           // afterwards — so this is the one unambiguous "the user zoomed" signal.
           setSelect: [
             (u: uPlot) => {
+              // A box gesture fires this too, and it is not a zoom -- see FrequencyResponseChart.
+              if (annotationOverlay.armedForBox.value) return
               if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
             },
           ],
@@ -762,7 +785,8 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
           ],
         }
       : {},
-    plugins: [minMaxBandPlugin(p)],
+    // Last: whatever draws after the annotations paints over their labels.
+    plugins: [minMaxBandPlugin(p), annotationsPlugin(annotationOverlay, ANNOTATION_AXES, () => annotationTheme(p.dark))],
   }
 }
 
@@ -841,6 +865,11 @@ function rebuild() {
   const height = el.clientHeight || chartHeight.value
   plot.value = new uPlot(buildOptions(width, height, palette.value, true), buildData(), el)
 
+  // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
+  // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
+  attachAnnotationListeners(plot.value, annotationOverlay)
+  syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value)
+
   if (restore?.x) plot.value.setScale('x', restore.x)
   if (restore?.y) plot.value.setScale('y', restore.y)
 }
@@ -858,7 +887,49 @@ function refresh() {
 
 let observer: ResizeObserver | null = null
 
+/**
+ * What this chart's two axes are, in annotation terms.
+ *
+ * <p>Ohms, and <b>the same ohms in both of the y axis' modes</b>. The axis flips between log and
+ * linear at runtime, but |Z| is strictly positive either way, so its offsets are ratios in both and
+ * a label keeps its relative place across the switch — which is exactly why an annotation's space
+ * belongs to its quantity and not to the chart's current `distr`. The damping-factor axis re-labels
+ * this same scale, so a note stored in ohms needs nothing from it.</p>
+ *
+ * <p>Not a computed: neither quantity depends on a prop.</p>
+ */
+const ANNOTATION_AXES: UplotAnnotationAxes = { x: { quantity: 'hz' }, y: { quantity: 'ohm' } }
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => props.annotationView ?? 'Bode',
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot.value ? cssAnnotationPlot(plot.value, ANNOTATION_AXES) : null),
+  surface: () => plot.value?.over ?? null,
+  overlayRect: () => (plot.value ? annotationOverlayRect(plot.value) : null),
+  redraw: () => plot.value?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value),
+})
+
+function onWindowMouseUp() {
+  finishBoxGesture(plot.value, annotationOverlay)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+// A redraw, never a rebuild: annotations are draw-hook state, and a rebuild throws the zoom away.
+watch(
+  () => [annotationList.value, props.annotationNumbers, props.annotationView] as const,
+  () => plot.value?.redraw(),
+  { deep: true },
+)
+
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   rebuild()
   observer = new ResizeObserver(() => {
     const el = container.value
@@ -868,6 +939,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
   observer = null
   plot.value?.destroy()
@@ -947,8 +1020,14 @@ const outOfRange = computed(() => {
       <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
 
-    <div ref="plotBox" class="relative w-full" :style="{ height: `${chartHeight}px` }">
+    <div
+      ref="plotBox"
+      class="relative w-full"
+      :class="annotationArmed ? 'cursor-crosshair' : ''"
+      :style="{ height: `${chartHeight}px` }"
+    >
       <div ref="container" class="h-full w-full" @dblclick="resetZoom" />
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
       <div
         v-if="outOfRange.above"
         class="pointer-events-none absolute right-2 top-2 text-amber-500 dark:text-amber-400"

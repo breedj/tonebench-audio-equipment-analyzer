@@ -10,6 +10,11 @@ import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
 import { fitTransform, niceTicks, thinPositions, type PlaneTransform, type Viewport } from '../charts/planeTransform'
 import { dragZoomViewport } from '../charts/dragZoom'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import { planeAnnotationPlot, planeGeometryKey } from '../charts/planeAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 import {
   axisTickHz,
   mappedRadius,
@@ -64,7 +69,13 @@ import { EXPORT_GRID_WIDTH_SCALE, exportGridStroke } from '../charts/palette'
  * it is a different plane (s, not G(jω) — see response/poleZeroMap.ts), so it shares the canvas,
  * the grid, the zoom and the legend, and draws the roots where the others draw the curve.
  */
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the open projection's. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   traces: ResponseTrace[]
   overlays: OverlayEntry[]
   projection: 'Nyquist' | 'Nichols' | 'PoleZero'
@@ -389,7 +400,49 @@ function draw() {
 }
 
 /** The whole picture — grid, decorations, overlays, the curve, the fit, the crossings — onto any context. */
+/**
+ * What each projection's two axes are, in annotation terms.
+ *
+ * <p>Three different planes behind one component, which is why the annotation `view` and the
+ * quantities both follow the projection: a note on the Nyquist plot is a real and an imaginary
+ * part, one on Nichols a phase in degrees against a gain in dB, one on the pole–zero map a sigma
+ * and a jω in hertz. All six are <b>linear</b> and signed — these planes run through zero.</p>
+ */
+function annotationQuantities(): { x: string; y: string } {
+  switch (props.projection) {
+    case 'Nyquist':
+      return { x: 're', y: 'im' }
+    case 'Nichols':
+      return { x: 'deg', y: 'db' }
+    default:
+      return { x: 'sigmaHz', y: 'jwHz' }
+  }
+}
+
+/**
+ * The scene, plus the annotations over it.
+ *
+ * <p>A wrapper rather than a paint before each of the core's several returns — one seam cannot be
+ * forgotten by a fourth projection, and this is the one function the screen, `exportPng`, the
+ * Screenshot dialog and the report all go through.</p>
+ */
 function renderScene(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  dark: boolean,
+  viewport: Viewport,
+  showHover: boolean,
+  forExport = false,
+): PlaneTransform {
+  const t = renderSceneCore(ctx, width, height, dark, viewport, showHover, forExport)
+  const plot = planeAnnotationPlot(t, { width, height }, INSETS, annotationQuantities(), ctx)
+  annotationOverlay.noteGeometry(`${props.projection}|${planeGeometryKey({ width, height }, t)}`)
+  annotationOverlay.paint(ctx, plot, annotationTheme(dark))
+  return t
+}
+
+function renderSceneCore(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
@@ -1039,6 +1092,37 @@ function localPoint(event: PointerEvent): { x: number; y: number } {
   return { x: event.clientX - rect.left, y: event.clientY - rect.top }
 }
 
+const annotationOverlay = useAnnotationOverlay({
+  view: () => props.projection,
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => {
+    const box = container.value
+    if (!box || !transform) return null
+    const width = box.clientWidth || 800
+    const height = box.clientHeight || chartHeight.value
+    return planeAnnotationPlot(transform, { width, height }, INSETS, annotationQuantities(), canvas.value?.getContext('2d') ?? null)
+  },
+  surface: () => container.value,
+  overlayRect: () => {
+    const box = container.value
+    if (!box) return null
+    return { left: 0, top: 0, width: box.clientWidth || 800, height: box.clientHeight || chartHeight.value }
+  },
+  redraw: () => draw(),
+})
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+watch(
+  () => [annotationList.value, props.annotationNumbers, annotationArmed.value] as const,
+  () => draw(),
+  { deep: true },
+)
+
 function onPointerDown(event: PointerEvent) {
   const point = localPoint(event)
   dragStart.value = point
@@ -1072,6 +1156,28 @@ function onPointerUp(event: PointerEvent) {
   dragStart.value = null
   dragNow.value = null
 
+  // Armed, the drag this chart already rubber-bands becomes the annotation gesture instead of a
+  // zoom, and a still click places a marker. Unarmed, both fall through to the zoom exactly as
+  // before. The band itself is drawDragBox's and needed no change.
+  if (start && annotationArmed.value === 'box') {
+    annotationOverlay.placeBoxFrom({
+      left: Math.min(start.x, point.x),
+      top: Math.min(start.y, point.y),
+      width: Math.abs(point.x - start.x),
+      height: Math.abs(point.y - start.y),
+    })
+    draw()
+    return
+  }
+  if (start && annotationArmed.value !== null) {
+    const moved = Math.abs(point.x - start.x) > 4 || Math.abs(point.y - start.y) > 4
+    if (!moved) {
+      annotationOverlay.placeAt(point, annotationArmed.value)
+      draw()
+      return
+    }
+  }
+
   if (start && transform) {
     // Null for a click rather than a drag — too small a box would zoom to a meaningless sliver.
     const selected = dragZoomViewport(start, point, transform)
@@ -1103,12 +1209,14 @@ function drawDragBox() {
 let observer: ResizeObserver | null = null
 
 onMounted(() => {
+  window.addEventListener('keydown', onWindowKeyDown)
   draw()
   observer = new ResizeObserver(() => draw())
   if (container.value) observer.observe(container.value)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
   observer = null
 })
@@ -1199,11 +1307,14 @@ defineExpose({ margins, curve: readCurve, autoWindow, exportPng })
       <canvas
         ref="canvas"
         class="h-full w-full touch-none"
+        :class="annotationArmed ? 'cursor-crosshair' : ''"
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
         @pointerleave="hover = null; hoverRoot = null"
+        @click="annotationOverlay.onClick"
       />
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
     </div>
 
     <p v-if="curve.length === 0" class="text-xs text-neutral-500 dark:text-neutral-400">

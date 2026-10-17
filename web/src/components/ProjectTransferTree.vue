@@ -187,9 +187,11 @@ function timestamp(iso: string): string {
                 />
                 <span>{{ policy === 'Merge' ? 'Merge into it' : policy === 'Skip' ? 'Skip' : 'Keep both' }}</span>
               </label>
+              <!-- No article before the kind: "Impedance", "IMD vs amplitude" and "FFT analysis"
+                   all want "an", and a rule on the first letter gets FFT wrong anyway. -->
               <span v-if="blockedSet.has(type.typeId)" class="text-[11.5px] text-red-600 dark:text-red-400">
-                cannot merge — the measurement of that name here is a
-                {{ measurementKindLabel(props.clashes.get(type.typeId)?.kind) }}
+                cannot merge — the measurement of that name here is a different kind
+                ({{ measurementKindLabel(props.clashes.get(type.typeId)?.kind) }})
               </span>
             </div>
           </template>

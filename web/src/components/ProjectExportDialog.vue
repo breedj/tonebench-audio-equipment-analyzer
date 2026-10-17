@@ -317,7 +317,10 @@ const destinationName = computed(() =>
       <span v-if="busy" class="flex-1 truncate text-[12px] text-neutral-500 dark:text-neutral-400">
         Copying…
       </span>
-      <span v-else-if="readiness.reason" class="flex-1 truncate text-[12px] text-neutral-500 dark:text-neutral-400">
+      <!-- Not truncated, unlike the figures beside it: this is the one footer line that says what
+           to do about something, and "Change its ch…" is the half that matters cut off. It wraps
+           instead, which only makes the strip taller. -->
+      <span v-else-if="readiness.reason" class="flex-1 text-[12px] leading-snug text-neutral-500 dark:text-neutral-400">
         {{ readiness.reason }}
       </span>
       <span v-else class="flex-1 truncate text-[12px] text-neutral-500 dark:text-neutral-400">

@@ -463,9 +463,11 @@ public static class ProjectTransferRepository
                 // so a mismatch has to stop the transfer and say what is there.
                 if (!string.Equals(existing.Kind, source.Kind, StringComparison.Ordinal))
                 {
+                    // No article before either kind: several of them want "an", and a rule on the
+                    // first letter gets FFTSpectrum wrong whichever way it goes.
                     throw new InvalidOperationException(
-                        $"'{source.Name}' cannot be merged: the measurement of that name here is a "
-                            + $"{existing.Kind} and the one being copied is a {source.Kind}.");
+                        $"'{source.Name}' cannot be merged: the measurement of that name here is "
+                            + $"{existing.Kind}, and the one being copied is {source.Kind}.");
                 }
 
                 await connection.ExecuteAsync(

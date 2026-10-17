@@ -259,14 +259,17 @@ async function submit() {
         <div class="mb-4 rounded border border-neutral-200 p-3 text-xs dark:border-neutral-800">
           <p class="truncate font-mono text-[11px] text-neutral-500 dark:text-neutral-400" :title="info.path">{{ info.path }}</p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
-            <div><dt class="inline text-neutral-500">Run</dt> <dd class="inline">{{ info.plotname }}</dd></div>
-            <div><dt class="inline text-neutral-500">Points</dt> <dd class="inline">{{ info.pointCount.toLocaleString() }}</dd></div>
-            <div><dt class="inline text-neutral-500">Saved</dt> <dd class="inline">{{ (info.startTimeS * 1e3).toFixed(2) }}–{{ (info.endTimeS * 1e3).toFixed(2) }} ms</dd></div>
-            <div><dt class="inline text-neutral-500">Timestep</dt> <dd class="inline">{{ fmtStep(info.medianStepS) }} median, {{ fmtStep(info.maxStepS) }} worst</dd></div>
-            <div><dt class="inline text-neutral-500">Simulator rate</dt> <dd class="inline">{{ fmtRate(info.nativeRateHz) }}</dd></div>
-            <div><dt class="inline text-neutral-500">Traces</dt> <dd class="inline">{{ info.traces.length }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Run</dt><dd class="inline">{{ info.plotname }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount.toLocaleString() }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Saved</dt><dd class="inline">{{ (info.startTimeS * 1e3).toFixed(2) }}–{{ (info.endTimeS * 1e3).toFixed(2) }} ms</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Timestep</dt><dd class="inline">{{ fmtStep(info.medianStepS) }} median, {{ fmtStep(info.maxStepS) }} worst</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Simulator rate</dt><dd class="inline">{{ fmtRate(info.nativeRateHz) }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Traces</dt><dd class="inline">{{ info.traces.length }}</dd></div>
             <div v-if="isStepped">
-              <dt class="inline text-neutral-500">Runs</dt>
+              <dt class="mr-1 inline text-neutral-500">Runs</dt>
+              <!-- The space is inside the <dd>, as in the two .ac dialogs: this pair is split
+                   across lines, and Vue condenses whitespace that contains a newline away, so the
+                   row read "Runs51 (stepped)" where every sibling on one line reads correctly. -->
               <dd class="inline">{{ sweeps.length }} (stepped)</dd>
             </div>
           </dl>

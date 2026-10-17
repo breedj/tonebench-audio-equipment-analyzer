@@ -172,17 +172,17 @@ async function submit() {
         <div class="mb-3 rounded border border-neutral-200 p-2 text-xs dark:border-neutral-800">
           <p class="truncate font-mono text-[11px] text-neutral-500 dark:text-neutral-400" :title="info.path">{{ info.path }}</p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
-            <div><dt class="inline text-neutral-500">Run</dt> <dd class="inline"> {{ info.plotname }}</dd></div>
-            <div><dt class="inline text-neutral-500">Points</dt> <dd class="inline"> {{ info.pointCount.toLocaleString() }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Run</dt><dd class="inline">{{ info.plotname }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount.toLocaleString() }}</dd></div>
             <div>
-              <dt class="inline text-neutral-500">Sweep</dt>
-              <dd class="inline"> {{ fmtHz(info.startFreqHz) }}–{{ fmtHz(info.endFreqHz) }}</dd>
+              <dt class="mr-1 inline text-neutral-500">Sweep</dt>
+              <dd class="inline">{{ fmtHz(info.startFreqHz) }}–{{ fmtHz(info.endFreqHz) }}</dd>
             </div>
-            <div><dt class="inline text-neutral-500">Voltages</dt> <dd class="inline"> {{ voltages.length }}</dd></div>
-            <div><dt class="inline text-neutral-500">Currents</dt> <dd class="inline"> {{ currents.length }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Voltages</dt><dd class="inline">{{ voltages.length }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Currents</dt><dd class="inline">{{ currents.length }}</dd></div>
             <div v-if="isStepped">
-              <dt class="inline text-neutral-500">Sweeps</dt>
-              <dd class="inline"> {{ sweeps.length }} (stepped)</dd>
+              <dt class="mr-1 inline text-neutral-500">Sweeps</dt>
+              <dd class="inline">{{ sweeps.length }} (stepped)</dd>
             </div>
           </dl>
         </div>

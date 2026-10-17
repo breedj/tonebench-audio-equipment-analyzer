@@ -180,6 +180,20 @@ const selectedReference = computed(() =>
   references.value.find((r) => r.id === form.referenceCalibrationId) ?? null,
 )
 
+/**
+ * The measurement names a calibration this bench does not have. That is what an *imported*
+ * measurement looks like: `referenceCalibrationId` is a row id in the configuration database of the
+ * bench that set it up, so on any other bench it names a different calibration or none. The stored
+ * results are unaffected — the runner divided the calibration out before writing them — it is only
+ * running this measurement again that needs one picked here.
+ *
+ * Without this the selector simply reads "— none —" and nothing says why, which is the difference
+ * between a setting to make and a setting that looks lost.
+ */
+const referenceNotOnThisBench = computed(
+  () => usesStoredLoopback.value && form.referenceCalibrationId !== null && selectedReference.value === null,
+)
+
 /** A calibration describes filters at one sample rate; using it at another is refused rather than resampled. */
 const referenceRateMismatch = computed(
   () => selectedReference.value !== null && Math.abs(selectedReference.value.sampleRateHz - sampleRateHz.value) > 0.5,
@@ -203,6 +217,8 @@ const invalid = computed<string | null>(() => {
     return `At this resolution the gate can keep at most ${maxGatePostMs.value.toFixed(0)} ms after the impulse.`
   if (usesStoredLoopback.value && form.referenceCalibrationId === null)
     return 'Pick a loopback calibration, or capture one.'
+  if (referenceNotOnThisBench.value)
+    return 'The loopback calibration this measurement was set up with is not on this bench. Pick one, or capture a new one.'
   if (referenceRateMismatch.value)
     return `That calibration was taken at ${(selectedReference.value!.sampleRateHz / 1000).toFixed(0)} kHz and cannot be used at ${(sampleRateHz.value / 1000).toFixed(0)} kHz.`
   return null
@@ -502,6 +518,12 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
           </option>
         </select>
       </label>
+      <p v-if="referenceNotOnThisBench" class="text-[11.5px] text-amber-700 dark:text-amber-400">
+        The loopback calibration this measurement was set up with is not on this bench — a
+        calibration belongs to the analyzer that took it and does not travel with an imported
+        measurement. Any stored results are already corrected; pick a calibration here, or capture
+        one, before running it again.
+      </p>
       <button
         type="button"
         :disabled="running"

@@ -98,6 +98,13 @@ public class MigrationRunnerTests
                  (13L, "013_trash.sql"), (14L, "014_simulation_source.sql"),
                  (15L, "015_capture_fs_integer.sql")],
                 rows);
+
+            // LatestVersion and ReadVersionAsync are what a transfer uses to decide between
+            // reading a file in place, migrating a throwaway copy of it, and refusing it as having
+            // been written by a newer build. Pinned against the list above rather than against
+            // itself, so adding a migration and forgetting one of the two shows up here.
+            Assert.Equal(rows[^1].Version, new MigrationRunner().LatestVersion);
+            Assert.Equal((int)rows[^1].Version, await MigrationRunner.ReadVersionAsync(connection, CancellationToken.None));
         }
         finally
         {

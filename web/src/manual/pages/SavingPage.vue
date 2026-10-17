@@ -51,6 +51,16 @@ const { showPage } = useManual()
       continues there, leaving the original untouched, which is the safe way to start a variant of a
       setup you want to keep.
     </p>
+    <p>
+      <strong>Export…</strong> and <strong>Import…</strong> move <em>part</em> of a project between
+      files: pick measurements and the results under them, and they are written into another
+      <code>.tbench</code> — which is itself an ordinary project, so it can be opened or imported
+      from. That is how a measurement gets sent to somebody else, and how theirs comes back in beside
+      yours; the
+      <button type="button" class="manual-link" @click="showPage('projects')">Projects</button>
+      chapter has the whole of it, including what happens to a name that is already in use and the
+      two things that do not travel with a measurement.
+    </p>
 
     <h2>Measurements</h2>
     <p>

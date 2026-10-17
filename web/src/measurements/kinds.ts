@@ -281,3 +281,22 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
 export function measurementKindTone(kind: string | null | undefined): MeasurementKindTone {
   return MEASUREMENT_KINDS.find((k) => k.kind === kind)?.tone ?? 'blue'
 }
+
+/**
+ * A kind's label, falling back to the raw kind string so an unknown one is still readable rather
+ * than blank. `report/buildReport.ts` re-exports this as `kindLabel` for its own callers; it lives
+ * here because the transfer dialogs want it and have no business pulling the report builder in.
+ */
+export function measurementKindLabel(kind: string | null | undefined): string {
+  return MEASUREMENT_KINDS.find((k) => k.kind === kind)?.label ?? kind ?? ''
+}
+
+/**
+ * Whether this build knows the kind at all. The transfer dialogs ask, because a project file
+ * written by a newer build can carry a kind that needed no migration to add — Crosstalk and Output
+ * impedance both reuse `response_trace` — so the schema version cannot answer it, and importing one
+ * would put a row in the sidebar with no glyph and a 500 behind it.
+ */
+export function isKnownMeasurementKind(kind: string | null | undefined): boolean {
+  return MEASUREMENT_KINDS.some((k) => k.kind === kind)
+}

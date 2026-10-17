@@ -51,12 +51,31 @@ public sealed class SqliteConnectionFactory
     /// fabricate a project. Only the project session (creating a file) and the configuration factory
     /// pass <see langword="true"/>.</para>
     /// </summary>
-    public static async Task<SqliteConnection> OpenAtAsync(string path, bool create, CancellationToken ct)
+    public static Task<SqliteConnection> OpenAtAsync(string path, bool create, CancellationToken ct) =>
+        OpenCoreAsync(path, create, pooling: true, ct);
+
+    /// <summary>
+    /// <see cref="OpenAtAsync"/> with pooling off, so <c>Dispose</c> really closes the native
+    /// handle instead of returning it to the pool.
+    ///
+    /// <para>Two things need that, both in <c>ProjectTransferRepository</c>'s path. A connection
+    /// that has <c>ATTACH</c>ed a second database must never go back into the pool: the next reuse
+    /// either fails its own <c>ATTACH</c> because the schema name is taken, or silently keeps the
+    /// other file (and its <c>-shm</c>) open. And the throwaway copy an import reads has to be
+    /// deletable the moment it is finished with, which a pooled handle prevents — the only other
+    /// lever is <see cref="CloseAllPools"/>, which is process-wide and would drop the open
+    /// project's pool on every import.</para>
+    /// </summary>
+    public static Task<SqliteConnection> OpenUnpooledAtAsync(string path, bool create, CancellationToken ct) =>
+        OpenCoreAsync(path, create, pooling: false, ct);
+
+    private static async Task<SqliteConnection> OpenCoreAsync(string path, bool create, bool pooling, CancellationToken ct)
     {
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = path,
             Mode = create ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite,
+            Pooling = pooling,
         }.ToString();
         var connection = new SqliteConnection(connectionString);
         try

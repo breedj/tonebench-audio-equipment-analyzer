@@ -30,7 +30,7 @@ import {
   isImpedanceKind,
   isImpulseResponseKind,
   isSweepKind,
-  MEASUREMENT_KINDS,
+  measurementKindLabel,
   isImdSweepKind,
 } from '../measurements/kinds'
 import { responseDisplayFromParams, responsePhaseKindFromParams, responseRightChannelIsReferenceFromParams } from '../response/display'
@@ -55,8 +55,9 @@ import { reportViewsForKind } from './views'
  * split is this way round.
  */
 
+/** Kept as this module's name for it; the table it reads lives in `measurements/kinds.ts`. */
 export function kindLabel(kind: string): string {
-  return MEASUREMENT_KINDS.find((k) => k.kind === kind)?.label ?? kind
+  return measurementKindLabel(kind)
 }
 
 function formatTimestamp(subject: ReportSubject): string {

@@ -2015,6 +2015,89 @@ export interface SaveProjectAsRequest extends CreateProjectRequest {
   includeResults: boolean
 }
 
+/**
+ * One saved result in a project file, as the transfer dialogs list it.
+ *
+ * `approximateBytes` is a whole number of bytes — roughly what this result's stored blobs come to,
+ * so the dialog can say how large a transfer is before someone tries to e-mail it. Formatting it is
+ * `projects/transferSelection.ts`'s job.
+ */
+export interface ProjectContentsResult {
+  resultId: number
+  name: string
+  timestampUtc: string
+  /** `'simulation'` for an imported one, null for a measured run — the same marker History groups by. */
+  source: string | null
+  captures: number
+  approximateBytes: number
+}
+
+export interface ProjectContentsType {
+  typeId: number
+  kind: string
+  name: string
+  notes: string | null
+  sortOrder: number
+  results: ProjectContentsResult[]
+}
+
+/**
+ * A project file's measurements and saved results. Served for the open project and for a file that
+ * is not open, in one shape, so the Export and Import dialogs render through the same component.
+ * `path` is always the file the user named, even where the server read it through a copy of itself.
+ */
+export interface ProjectContents {
+  path: string
+  projectId: number
+  projectName: string
+  projectNotes: string | null
+  schemaVersion: number
+  types: ProjectContentsType[]
+}
+
+/** What to do with an incoming measurement whose name the destination already has. */
+export type NameClashOutcome = 'Created' | 'Merged' | 'Skipped'
+
+/** One measurement to copy, and which of its saved results to take with it. */
+export interface ProjectTransferItem {
+  typeId: number
+  /** Empty is meaningful: the measurement's settings and none of its runs. */
+  resultIds: number[]
+  /** Overrides the request's own policy for this measurement alone. */
+  onNameClash?: string
+}
+
+export interface ProjectExportRequest {
+  /** Absolute; `.tbench` is appended when missing. Created if it is not there, appended to if it is. */
+  path: string
+  /** For a file that has to be created. Ignored when the file is already a project, which keeps its own. */
+  projectName: string | null
+  projectNotes: string | null
+  items: ProjectTransferItem[]
+  onNameClash?: string
+}
+
+export interface ProjectImportRequest {
+  path: string
+  items: ProjectTransferItem[]
+  onNameClash?: string
+}
+
+export interface ProjectTransferType {
+  sourceTypeId: number
+  sourceName: string
+  destinationTypeId: number | null
+  /** What it ended up called — different from the source name only when renamed, null when skipped. */
+  destinationName: string | null
+  outcome: NameClashOutcome
+}
+
+export interface ProjectTransfer {
+  types: ProjectTransferType[]
+  resultsCopied: number
+  capturesCopied: number
+}
+
 export interface ProjectPropertiesRequest {
   name: string
   notes: string | null
@@ -3318,6 +3401,21 @@ export const api = {
   deleteProject: (path: string) => request<void>('/project/delete', { method: 'POST', body: JSON.stringify({ path }) }),
 
   saveProjectAs: (req: SaveProjectAsRequest) => request<ProjectSession>('/project/save-as', { method: 'POST', body: JSON.stringify(req) }),
+
+  /**
+   * A project file's measurements and saved results. No `path` means the open project; a path means
+   * that file, which is read without being opened — nothing about the session moves.
+   */
+  getProjectContents: (path?: string | null) =>
+    request<ProjectContents>(`/project/contents${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+
+  /** Copies picked measurements out of the open project into another `.tbench`. The open project stays open. */
+  exportProject: (req: ProjectExportRequest) =>
+    request<ProjectTransfer>('/project/export', { method: 'POST', body: JSON.stringify(req) }),
+
+  /** Copies picked measurements out of another `.tbench` into the open project. */
+  importProject: (req: ProjectImportRequest) =>
+    request<ProjectTransfer>('/project/import', { method: 'POST', body: JSON.stringify(req) }),
 
   updateProjectProperties: (req: ProjectPropertiesRequest) =>
     request<ProjectSession>('/project/properties', { method: 'PUT', body: JSON.stringify(req) }),

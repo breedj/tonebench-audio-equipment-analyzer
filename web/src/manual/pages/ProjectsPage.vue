@@ -91,6 +91,15 @@ const { showPage } = useManual()
         <button type="button" class="manual-link" @click="showPage('saving')">Projects, saving and history</button>.
       </li>
       <li>
+        <strong>Export…</strong> writes measurements and their saved results into another project
+        file, to send or copy somewhere else — see <strong>Sending measurements to someone</strong>
+        below.
+      </li>
+      <li>
+        <strong>Import…</strong> reads another project file and copies measurements out of it into
+        this one.
+      </li>
+      <li>
         <strong>Delete</strong> closes the project and deletes its file, after a confirmation that
         names the file. Every measurement and result in it goes with it, including anything in its
         trash — the trash lives inside the project file, so deleting the file is not the same as
@@ -104,6 +113,60 @@ const { showPage } = useManual()
       Opening, creating, closing and deleting all ask first when the open measurement has unsaved
       changes, and all stop a running measurement. While a sweep or an acquisition is running they
       are refused with a message — stop it, then try again.
+    </p>
+
+    <h2>Sending measurements to someone</h2>
+    <p>
+      <strong>Export…</strong> takes the measurements you tick — all of their saved results, some of
+      them, or none at all — and writes them into another project file. The file it writes is an
+      ordinary <code>.tbench</code> project, so whoever receives it can either open it from their own
+      Project menu or import from it into a project they already have. There is no separate transfer
+      format to explain, and nothing is left behind beside the file: it is checkpointed on the way
+      out, so the one file is complete and safe to attach to an e-mail.
+    </p>
+    <p>
+      The destination can be a new file or one that already exists. A new one asks for a project name
+      and description, filled in from the project you are exporting from. An existing one is
+      <em>appended to</em> and keeps its own name and description, so one file can collect
+      measurements from several sessions. Each row shows roughly how large it is, and the footer the
+      total — worth a glance before mailing it, since a measurement holding simulation samples can
+      run to hundreds of megabytes.
+    </p>
+    <p>
+      A measurement ticked with none of its results takes its settings and notes alone, which is the
+      same thing <strong>Save As…</strong> without results does for a whole project.
+    </p>
+    <p>
+      <strong>Import…</strong> is the other direction: pick a file, and it lists what is inside
+      without opening it. The file is only read, never written — including one that arrived read-only
+      or straight out of a running app, which the app reads through a copy of itself rather than
+      modifying. A file written by an older version is brought up to date in that copy, so the one
+      you were sent is left exactly as it arrived. A file written by a <em>newer</em> version is
+      refused, naming both versions: there could be measurements in it this build does not
+      understand.
+    </p>
+    <p>
+      Where an incoming measurement has a name this project already uses, that row offers a choice.
+      <strong>Keep both</strong>, the default, brings it in under a suffixed name — “Amp 1 kHz (2)” —
+      so nothing already here is touched. <strong>Merge into it</strong> puts the incoming results
+      under the measurement of that name you already have, which is what you want when it is the same
+      test from another bench; the measurement's own settings and notes stay yours, only results are
+      added. <strong>Skip</strong> leaves it out. The choice is per measurement, because the answer
+      genuinely differs: two benches' versions of one test want merging, and two unrelated
+      measurements that happen to share a name very much do not. A merge is refused when the two are
+      different kinds of measurement.
+    </p>
+    <p>
+      Two things do not travel with a measurement, because they describe the bench rather than the
+      measurement. An impulse-response measurement's <strong>loopback calibration</strong> lives in
+      this app's own settings, not in the project file, so an imported one has none selected and says
+      so; its stored results are unaffected, having been corrected before they were saved. A
+      <strong>user noise-weighting</strong> curve is referenced by slot, so a measurement set up for
+      “User 1” will use whatever is in that slot here.
+    </p>
+    <p>
+      Both are refused while a measurement is running, and both leave the open project open — unlike
+      <strong>Save As…</strong>, neither switches you to another file.
     </p>
 
     <h2>What can be opened</h2>

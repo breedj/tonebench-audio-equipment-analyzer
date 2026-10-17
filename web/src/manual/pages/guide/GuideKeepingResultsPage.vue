@@ -111,7 +111,38 @@ const { showPage } = useManual()
       <li>
         <strong>CSV</strong> — the actual numbers, for a spreadsheet or your own plotting.
       </li>
+      <li>
+        <strong>Project ▸ Export…</strong> — the measurements themselves, charts and all, in a file
+        somebody else can open in their own Tonebench. See below.
+      </li>
     </ul>
+
+    <h2>Sending a measurement to someone</h2>
+    <p>
+      A screenshot shows somebody what you saw. If you want them to be able to <em>look round</em>
+      it — zoom in, read the cursor, put their own measurement beside it — send them the measurement
+      instead.
+    </p>
+    <p>
+      <strong>Project ▸ Export…</strong> asks which measurements, and which of their saved results,
+      and writes them into a new file. Tick what you want, choose where the file goes, press
+      <strong>Export</strong>. It is one file with everything in it, so you can just attach it to an
+      e-mail. The footer tells you how big it is before you do.
+    </p>
+    <p>
+      At the other end they use <strong>Project ▸ Import…</strong> to pick the file and tick what
+      they want out of it, which lands in the project they already have. Or they can simply open the
+      file from <strong>Project ▸ Open…</strong>, since it is a project like any other. Their own
+      measurements are not touched either way; if a name collides, the app brings the new one in as
+      “… (2)” unless they say otherwise.
+    </p>
+    <p>
+      One thing to mention when you send an impulse-response measurement: the loopback calibration it
+      was set up with belongs to <em>your</em> analyzer and stays here. The results you send are
+      already corrected, so they read correctly — but if they want to run that measurement
+      themselves, they will have to capture a loopback on their own bench first. The app says so when
+      they open it.
+    </p>
 
     <h2>Looking after the file</h2>
     <p>

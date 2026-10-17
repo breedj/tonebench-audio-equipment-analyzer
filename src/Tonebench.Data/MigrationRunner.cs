@@ -25,6 +25,31 @@ public sealed class MigrationRunner(string resourcePrefix = MigrationRunner.Meas
 
     private static readonly Regex VersionPattern = new(@"^(\d+)_", RegexOptions.Compiled);
 
+    /// <summary>
+    /// The highest version this build carries. A file whose <c>schema_version</c> is above it was
+    /// written by a newer Tonebench and must be refused rather than read: its tables may have
+    /// columns this build knows nothing about, and a copy driven by this build's column lists would
+    /// drop them silently. See <see cref="ReadVersionAsync"/>.
+    /// </summary>
+    public int LatestVersion => DiscoverMigrations().Max(m => m.Version);
+
+    /// <summary>
+    /// <c>MAX(version)</c> from <c>schema_version</c>, or 0 when the table is absent — this only
+    /// reports, and leaves what that means to the caller. <c>ProjectSessionService</c> reads a
+    /// missing table as "an SQLite database but not one of ours"; a transfer compares the number
+    /// against <see cref="LatestVersion"/> to decide between reading the file in place, migrating a
+    /// throwaway copy of it, and refusing it outright.
+    /// </summary>
+    public static async Task<int> ReadVersionAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT COALESCE((SELECT MAX(version) FROM schema_version), 0) " +
+            "WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version');";
+        object? result = await command.ExecuteScalarAsync(ct);
+        return result is null or DBNull ? 0 : Convert.ToInt32(result);
+    }
+
     public async Task RunAsync(SqliteConnection connection, CancellationToken ct)
     {
         await EnsureSchemaVersionTableAsync(connection, ct);

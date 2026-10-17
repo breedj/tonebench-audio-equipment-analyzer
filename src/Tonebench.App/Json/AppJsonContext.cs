@@ -163,6 +163,12 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(RecentProjectResponse))]
 [JsonSerializable(typeof(IEnumerable<RecentProjectResponse>))]
 [JsonSerializable(typeof(RemoveRecentProjectRequest))]
+// The transfer surface. Only the four roots: the nested records are reachable from them, which is
+// the question the generated context actually answers on a trimmed build (see AppJsonContextTests).
+[JsonSerializable(typeof(ProjectContentsResponse))]
+[JsonSerializable(typeof(ProjectExportRequest))]
+[JsonSerializable(typeof(ProjectImportRequest))]
+[JsonSerializable(typeof(ProjectTransferResponse))]
 [JsonSerializable(typeof(FileBrowseResponse))]
 // A Tonebench.Data record, so AppJsonContextTests' scan of the Endpoints namespace does not see it —
 // registered by hand, like the three config documents above it.

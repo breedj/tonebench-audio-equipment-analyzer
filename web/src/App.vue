@@ -117,6 +117,8 @@ import ResponseFormulaPanel from './components/ResponseFormulaPanel.vue'
 import ResponseMeasurementsPanel from './components/ResponseMeasurementsPanel.vue'
 import ReportDialog from './components/ReportDialog.vue'
 import ProjectReportDialog from './components/ProjectReportDialog.vue'
+import ProjectExportDialog from './components/ProjectExportDialog.vue'
+import ProjectImportDialog from './components/ProjectImportDialog.vue'
 import ToolbarIcon from './components/ToolbarIcon.vue'
 import MeasurementStatusBar from './components/MeasurementStatusBar.vue'
 import ScreenshotDialog from './components/ScreenshotDialog.vue'
@@ -510,6 +512,19 @@ const saveDialogOpen = ref(false)
 // -- see measurements/simulationImport.ts. Which dialog it opens is still decided here, from the
 // kind, since what a file means depends on the screen it lands on.
 
+/**
+ * After a Project ▸ Import…: the sidebar and the History list both have new rows to show.
+ *
+ * Deliberately no `selectType`. An imported measurement must not steal the selection — that would
+ * throw away the live state of whatever is on screen, which is the seam the trash view follows for
+ * the same reason.
+ */
+async function onMeasurementsImported() {
+  const projectId = currentProjectId.value
+  if (projectId !== null) await loadTypes(projectId)
+  await loadMeasurements()
+}
+
 async function onSimulationImported() {
   // The new result has to appear in the History list before it can be checked, and the trash
   // badge is unaffected -- this adds a row rather than removing one.
@@ -524,6 +539,10 @@ const reportOpen = ref(false)
 const reportLiveSubject = shallowRef<ReportSubject | null>(null)
 const reportPreselectResultId = ref<number | null>(null)
 const projectReportOpen = ref(false)
+// Project ▸ Export… / Import…: measurements and results between two project files. Separate refs
+// rather than one mode, because the two dialogs ask different questions of different files.
+const projectExportOpen = ref(false)
+const projectImportOpen = ref(false)
 const saveTypeAsOpen = ref(false)
 // The Project menu's dialogs: one form for New…/Save As…/Properties… (its mode says which), and
 // the file dialog for Open…. See useProjectSession for what each action does once confirmed.
@@ -3647,6 +3666,12 @@ function onProjectAction(action: ProjectMenuAction) {
     case 'report':
       openProjectReport()
       break
+    case 'export':
+      projectExportOpen.value = true
+      break
+    case 'import':
+      projectImportOpen.value = true
+      break
     case 'delete':
       void withErrorReporting(async () => {
         await projectSession.remove()
@@ -5494,6 +5519,17 @@ onBeforeUnmount(() => stopLoadPolling?.())
       :types="types"
       :live-subject="reportLiveSubject"
       @close="projectReportOpen = false"
+    />
+    <ProjectExportDialog
+      :open="projectExportOpen"
+      :project="currentProject"
+      @close="projectExportOpen = false"
+    />
+    <ProjectImportDialog
+      :open="projectImportOpen"
+      :types="types"
+      @close="projectImportOpen = false"
+      @imported="onMeasurementsImported"
     />
     <ConfigDialog :open="configDialogOpen" @close="closeConfigDialog" />
     <!-- `screenshot` and `clientState` are callbacks rather than props: nothing is rendered or

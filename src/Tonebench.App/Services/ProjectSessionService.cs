@@ -219,6 +219,195 @@ public sealed class ProjectSessionService(
         }
     }
 
+    /// <summary>
+    /// The open project's measurements and saved results — the tree the Export dialog ticks.
+    /// No <see cref="ThrowIfBusy"/>: this only reads, like <see cref="UpdatePropertiesAsync"/>.
+    /// </summary>
+    public async Task<ProjectContents> ReadContentsAsync(CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            return await ReadOpenContentsAsync(_current ?? throw new InvalidOperationException("No project is open."), ct);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Another file's measurements and saved results, read without opening it — the tree the Import
+    /// dialog ticks. Nothing about the session changes: not <see cref="Current"/>, not
+    /// <see cref="CurrentProjectFile"/>, not the recent list, not the last-opened document.
+    ///
+    /// <para>Deliberately outside <c>_lock</c>, unlike every other method here. It touches a file
+    /// that is not this session's, so a project switch cannot affect it and it has nothing to
+    /// serialise against — and inspecting a large file can take a moment, which is a moment the
+    /// status poll should not spend blocked.</para>
+    /// </summary>
+    public async Task<ProjectContents> ReadContentsAsync(string path, CancellationToken ct)
+    {
+        string full = ProjectPaths.Normalize(path);
+
+        // The open project answers from the session rather than through ProjectTransferSource,
+        // which would open a second connection to the file this process already has open and
+        // report a schema version it had to re-read to find out.
+        if (Current is { } open && RecentProjects.PathComparer.Equals(full, open.Path))
+            return await ReadContentsAsync(ct);
+
+        await using var source = await ProjectTransferSource.OpenAsync(full, ct);
+        return await source.ReadContentsAsync(ct);
+    }
+
+    /// <summary>
+    /// Copies picked measurements and results from the open project into another project file,
+    /// which is created if it is not there and appended to if it is. The open project stays open:
+    /// unlike <see cref="SaveAsAsync"/> this is not a switch, so nothing is closed, adopted or
+    /// added to the recent list.
+    /// </summary>
+    /// <param name="name">The new file's project name — ignored when the file already exists, which keeps its own.</param>
+    public async Task<TransferReport> ExportAsync(
+        string path, string? name, string? notes,
+        IReadOnlyList<TransferSelection> selection, TypeNameClash onClash, CancellationToken ct)
+    {
+        string full = ProjectPaths.EnsureExtension(ProjectPaths.Normalize(path));
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            ThrowIfBusy("exporting measurements");
+            var source = _current ?? throw new InvalidOperationException("No project is open.");
+            if (RecentProjects.PathComparer.Equals(full, source.Path))
+                throw new InvalidOperationException("Choose a different file: that is the project that is open now.");
+            if (selection.Count == 0)
+                throw new ProjectFileException("Nothing was picked to export.");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+
+            bool created = !File.Exists(full);
+            ProjectRow destination = created
+                ? await CreateFileAsync(full, RequireName(name ?? source.Name), notes, ct)
+                : await PrepareExistingDestinationAsync(full, ct);
+
+            try
+            {
+                var report = await ProjectTransferRepository.TransferAsync(
+                    full, source.Path, destination.Id, selection, onClash, ct);
+
+                // The checkpoint is the point of the whole feature, not housekeeping. A .tbench
+                // attached to an e-mail without its -wal is missing whatever had not been folded
+                // in — which, straight after an export, is everything the export just wrote.
+                // TRUNCATE leaves the log empty and ClearAllPools releases the last handle, so
+                // SQLite deletes the -wal and -shm and the user is left with one complete file.
+                var (completed, frames) = await SqliteConnectionFactory.CheckpointAsync(full, ct);
+                SqliteConnectionFactory.CloseAllPools();
+                if (!completed)
+                    logger.LogWarning("Export checkpoint of {Path} reported busy ({Frames} WAL frames)", full, frames);
+
+                logger.LogInformation(
+                    "Exported {Types} measurement(s) and {Results} result(s) to {Path} ({Mode})",
+                    report.Types.Count, report.ResultsCopied, full, created ? "new file" : "appended");
+                return report;
+            }
+            catch when (created)
+            {
+                // A failed export that left a one-project file behind would read as a successful
+                // one with nothing in it. One transaction, so there is nothing to half-undo.
+                SqliteConnectionFactory.CloseAllPools();
+                foreach (string candidate in new[] { full, full + "-wal", full + "-shm" })
+                {
+                    try
+                    {
+                        if (File.Exists(candidate))
+                            File.Delete(candidate);
+                    }
+                    catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+                    {
+                        logger.LogWarning(cleanup, "Could not remove {Path} after a failed export", candidate);
+                    }
+                }
+
+                throw;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Copies picked measurements and results out of another project file into the open one. The
+    /// source is read through <see cref="ProjectTransferSource"/>, which is what keeps a file that
+    /// arrived by e-mail from being rewritten by being read.
+    /// </summary>
+    public async Task<TransferReport> ImportAsync(
+        string path, IReadOnlyList<TransferSelection> selection, TypeNameClash onClash, CancellationToken ct)
+    {
+        string full = ProjectPaths.Normalize(path);
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            ThrowIfBusy("importing measurements");
+            var destination = _current ?? throw new InvalidOperationException("No project is open.");
+            if (RecentProjects.PathComparer.Equals(full, destination.Path))
+                throw new InvalidOperationException("That is the project that is open now; choose another file.");
+            if (selection.Count == 0)
+                throw new ProjectFileException("Nothing was picked to import.");
+
+            await using var source = await ProjectTransferSource.OpenAsync(full, ct);
+            var report = await ProjectTransferRepository.TransferAsync(
+                destination.Path, source.Path, destination.Id, selection, onClash, ct);
+
+            logger.LogInformation(
+                "Imported {Types} measurement(s) and {Results} result(s) from {Path}{Copied}",
+                report.Types.Count, report.ResultsCopied, full,
+                source.IsCopy ? " (read through a migrated copy)" : "");
+            return report;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// An export destination that already exists: validated as a project file and migrated
+    /// <i>in place</i>, which is right here and wrong for an import's source — this is the file
+    /// being written, so bringing it up to date is part of writing it.
+    /// </summary>
+    private static async Task<ProjectRow> PrepareExistingDestinationAsync(string full, CancellationToken ct)
+    {
+        if (!await LooksLikeSqliteAsync(full, ct))
+            throw new ProjectFileException($"'{full}' is not a Tonebench project file (not an SQLite database).");
+
+        await using var connection = await SqliteConnectionFactory.OpenUnpooledAtAsync(full, create: false, ct);
+        if (!await TableExistsAsync(connection, "schema_version"))
+            throw new ProjectFileException($"'{full}' is an SQLite database but not a Tonebench project file.");
+
+        var runner = new MigrationRunner();
+        int version = await MigrationRunner.ReadVersionAsync(connection, ct);
+        if (version > runner.LatestVersion)
+        {
+            throw new ProjectFileException(
+                $"'{full}' was written by a newer version of Tonebench (its database is at version {version}; "
+                    + $"this build knows {runner.LatestVersion}). Update Tonebench to write to it.");
+        }
+
+        await runner.RunAsync(connection, ct);
+        return await SingleProjectAsync(connection, full);
+    }
+
+    private static async Task<ProjectContents> ReadOpenContentsAsync(ProjectSessionInfo info, CancellationToken ct)
+    {
+        await using var connection = await SqliteConnectionFactory.OpenAtAsync(info.Path, create: false, ct);
+        var types = await ProjectTransferRepository.ListContentsAsync(connection, info.Id, ct);
+        return new ProjectContents(
+            info.Path, info.Id, info.Name, info.Notes, new MigrationRunner().LatestVersion, types);
+    }
+
     public async Task<ProjectSessionInfo> UpdatePropertiesAsync(string name, string? notes, CancellationToken ct)
     {
         name = RequireName(name);
@@ -274,10 +463,14 @@ public sealed class ProjectSessionService(
 
     // ---- internals -------------------------------------------------------------------------------
 
-    private void ThrowIfBusy()
+    /// <param name="action">
+    /// What is being refused, so the message names it. The default keeps the wording every caller
+    /// that predates the transfer methods already produced.
+    /// </param>
+    private void ThrowIfBusy(string action = "changing projects")
     {
         if (runs.Any(r => r.Running))
-            throw new InvalidOperationException("Stop the running measurement before changing projects.");
+            throw new InvalidOperationException($"Stop the running measurement before {action}.");
     }
 
     private static string RequireName(string name)
@@ -398,7 +591,13 @@ public sealed class ProjectSessionService(
         }
     }
 
-    private static async Task<ProjectRow> SingleProjectAsync(SqliteConnection connection, string path)
+    // The three helpers below are internal rather than private because ProjectTransferSource
+    // validates a project file it is about to read from in exactly this order and with exactly
+    // these wordings — a second copy of them would be a second answer to "is this one of ours".
+    // They stay here rather than moving to Tonebench.Data because they throw ProjectFileException,
+    // which is an App-layer type, and because nothing outside this assembly should call them.
+
+    internal static async Task<ProjectRow> SingleProjectAsync(SqliteConnection connection, string path)
     {
         var projects = await ProjectRepository.ListProjectsAsync(connection);
         return projects.Count switch
@@ -411,7 +610,7 @@ public sealed class ProjectSessionService(
         };
     }
 
-    private static async Task<bool> LooksLikeSqliteAsync(string path, CancellationToken ct)
+    internal static async Task<bool> LooksLikeSqliteAsync(string path, CancellationToken ct)
     {
         var header = new byte[SqliteHeader.Length];
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -419,7 +618,7 @@ public sealed class ProjectSessionService(
         return read == header.Length && header.AsSpan().SequenceEqual(SqliteHeader);
     }
 
-    private static async Task<bool> TableExistsAsync(SqliteConnection connection, string name) =>
+    internal static async Task<bool> TableExistsAsync(SqliteConnection connection, string name) =>
         await connection.ExecuteScalarAsync<long>(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @name;", new { name }) > 0;
 

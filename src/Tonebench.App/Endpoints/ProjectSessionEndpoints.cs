@@ -1,4 +1,5 @@
 ﻿using Tonebench.App.Services;
+using Tonebench.Data;
 
 namespace Tonebench.App.Endpoints;
 
@@ -51,6 +52,31 @@ public static class ProjectSessionEndpoints
         project.MapPut("/properties", (ProjectPropertiesRequest request, ProjectSessionService session, CancellationToken ct) =>
             RunAsync(async () => ToResponse(await session.UpdatePropertiesAsync(request.Name, request.Notes, ct))));
 
+        // The measurements and saved results of a project file — the open one with no `path`, any
+        // other file with one. One shape for both, so the Export dialog (which ticks the open
+        // project) and the Import dialog (which ticks a file it was handed) render through the same
+        // component and cannot drift apart. Reading another file opens nothing: the session, the
+        // recent list and the last-opened document are all untouched.
+        project.MapGet("/contents", (string? path, ProjectSessionService session, CancellationToken ct) =>
+            RunAsync(async () => ToResponse(string.IsNullOrWhiteSpace(path)
+                ? await session.ReadContentsAsync(ct)
+                : await session.ReadContentsAsync(path, ct))));
+
+        project.MapPost("/export", (ProjectExportRequest request, ProjectSessionService session, CancellationToken ct) =>
+            RunAsync(async () =>
+            {
+                var (selection, onClash) = ReadSelection(request.Items, request.OnNameClash);
+                return ToResponse(await session.ExportAsync(
+                    request.Path, request.ProjectName, request.ProjectNotes, selection, onClash, ct));
+            }));
+
+        project.MapPost("/import", (ProjectImportRequest request, ProjectSessionService session, CancellationToken ct) =>
+            RunAsync(async () =>
+            {
+                var (selection, onClash) = ReadSelection(request.Items, request.OnNameClash);
+                return ToResponse(await session.ImportAsync(request.Path, selection, onClash, ct));
+            }));
+
         var projects = app.MapGroup("/api/projects");
 
         // Missing files are listed as missing, not pruned: the user decides whether an entry for a
@@ -102,7 +128,12 @@ public static class ProjectSessionEndpoints
         });
     }
 
-    private static async Task<IResult> RunAsync(Func<Task<ProjectSessionResponse?>> action)
+    /// <summary>
+    /// Generic over the response so the transfer routes share this one error mapping rather than
+    /// growing a second copy of it — which is the whole reason they live in this file.
+    /// </summary>
+    private static async Task<IResult> RunAsync<T>(Func<Task<T?>> action)
+        where T : class
     {
         try
         {
@@ -124,6 +155,49 @@ public static class ProjectSessionEndpoints
             return Results.Text(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
+
+    /// <summary>
+    /// The wire selection as the transfer wants it, with every clash policy parsed up front.
+    ///
+    /// <para>A bad policy name is a <see cref="ProjectFileException"/> — a 400 listing the valid
+    /// names — rather than an uncaught <c>ArgumentException</c> 500 or, worse, a silent fall back to
+    /// the default: "rename" and "merge" do different things to the user's project and guessing
+    /// between them is not a service.</para>
+    /// </summary>
+    internal static (IReadOnlyList<TransferSelection> Selection, TypeNameClash OnClash) ReadSelection(
+        IReadOnlyList<ProjectTransferItemRequest>? items, string? onNameClash)
+    {
+        if (!EnumParsing.TryParse(onNameClash, TypeNameClash.Rename, out var fallback, out string error))
+            throw new ProjectFileException(error);
+
+        var selection = new List<TransferSelection>();
+        foreach (var item in items ?? [])
+        {
+            if (!EnumParsing.TryParse<TypeNameClash>(item.OnNameClash, fallback, out var policy, out error))
+                throw new ProjectFileException(error);
+
+            // null, not the fallback, when the item said nothing: the repository takes the
+            // request's default in that case, and recording the resolved value here would make a
+            // later change to that default silently not apply.
+            selection.Add(new TransferSelection(
+                item.TypeId, item.ResultIds ?? [], item.OnNameClash is null ? null : policy));
+        }
+
+        return (selection, fallback);
+    }
+
+    private static ProjectContentsResponse ToResponse(ProjectContents contents) =>
+        new(contents.Path, contents.ProjectId, contents.ProjectName, contents.ProjectNotes, contents.SchemaVersion,
+            [.. contents.Types.Select(t => new ProjectContentsTypeResponse(
+                t.TypeId, t.Kind, t.Name, t.Notes, t.SortOrder,
+                [.. t.Results.Select(r => new ProjectContentsResultResponse(
+                    r.ResultId, r.Name, r.Timestamp, r.Source, r.Captures, r.ApproximateBytes))]))]);
+
+    private static ProjectTransferResponse ToResponse(TransferReport report) =>
+        new([.. report.Types.Select(t => new ProjectTransferTypeResponse(
+                t.SourceTypeId, t.SourceName, t.DestinationTypeId, t.DestinationName, t.Outcome.ToString()))],
+            report.ResultsCopied,
+            report.CapturesCopied);
 
     private static ProjectSessionResponse ToResponse(ProjectSessionInfo? info) =>
         info is null
@@ -148,6 +222,77 @@ public sealed record ProjectPropertiesRequest(string Name, string? Notes);
 public sealed record RecentProjectResponse(string Path, string Name, DateTimeOffset LastOpenedUtc, bool Exists);
 
 public sealed record RemoveRecentProjectRequest(string Path);
+
+/// <summary>
+/// One project file's measurements and saved results. <paramref name="Path"/> is always the file
+/// the user named, even where it was read through a migrated copy of itself.
+/// </summary>
+public sealed record ProjectContentsResponse(
+    string Path,
+    long ProjectId,
+    string ProjectName,
+    string? ProjectNotes,
+    int SchemaVersion,
+    IReadOnlyList<ProjectContentsTypeResponse> Types);
+
+public sealed record ProjectContentsTypeResponse(
+    long TypeId,
+    string Kind,
+    string Name,
+    string? Notes,
+    int SortOrder,
+    IReadOnlyList<ProjectContentsResultResponse> Results);
+
+/// <param name="ApproximateBytes">
+/// Roughly what this result's stored blobs come to, so the dialog can say how large a transfer is
+/// before it is attempted. A whole number of bytes, never a formatted string and never a floating
+/// point value — see <c>ProjectContentsResult</c> for why that matters on a response record.
+/// </param>
+public sealed record ProjectContentsResultResponse(
+    long ResultId,
+    string Name,
+    DateTimeOffset TimestampUtc,
+    string? Source,
+    int Captures,
+    long ApproximateBytes);
+
+/// <param name="OnNameClash">
+/// This measurement's own clash policy, overriding the request's. Null — the usual case — takes the
+/// request's.
+/// </param>
+public sealed record ProjectTransferItemRequest(
+    long TypeId,
+    IReadOnlyList<long> ResultIds,
+    string? OnNameClash = null);
+
+/// <param name="ProjectName">
+/// The project name to give a file that does not exist yet. Ignored when the file is already a
+/// project: an export appends to it and leaves its own name and description alone.
+/// </param>
+public sealed record ProjectExportRequest(
+    string Path,
+    string? ProjectName,
+    string? ProjectNotes,
+    IReadOnlyList<ProjectTransferItemRequest> Items,
+    string? OnNameClash = null);
+
+public sealed record ProjectImportRequest(
+    string Path,
+    IReadOnlyList<ProjectTransferItemRequest> Items,
+    string? OnNameClash = null);
+
+/// <param name="DestinationName">What it ended up called — different from the source name only when it was renamed, null when it was skipped.</param>
+public sealed record ProjectTransferTypeResponse(
+    long SourceTypeId,
+    string SourceName,
+    long? DestinationTypeId,
+    string? DestinationName,
+    string Outcome);
+
+public sealed record ProjectTransferResponse(
+    IReadOnlyList<ProjectTransferTypeResponse> Types,
+    int ResultsCopied,
+    int CapturesCopied);
 
 public sealed record FileBrowseEntry(string Name, string Path, DateTimeOffset? ModifiedUtc, long? SizeBytes);
 

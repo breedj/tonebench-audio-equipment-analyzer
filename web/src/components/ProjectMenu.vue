@@ -7,7 +7,17 @@ import { firstEnabledIndex, lastEnabledIndex, nextEnabledIndex } from '../menu/m
 // the same relatedTarget test MeasurementSidebar uses for its floating rail. Arrow keys move
 // through the enabled items with wrap-around (menuNavigation.ts), Enter/Space activates.
 
-export type ProjectMenuAction = 'new' | 'open' | 'save' | 'saveAs' | 'properties' | 'report' | 'delete' | 'close'
+export type ProjectMenuAction =
+  | 'new'
+  | 'open'
+  | 'save'
+  | 'saveAs'
+  | 'properties'
+  | 'report'
+  | 'export'
+  | 'import'
+  | 'delete'
+  | 'close'
 
 const props = defineProps<{
   /** The open project's name, or null on the welcome screen. */
@@ -37,6 +47,11 @@ const items = computed<Item[]>(() => {
     { action: 'saveAs', label: 'Save As…', title: 'Save this project as a new file and continue in the copy.', disabled: props.busy || !open },
     { action: 'properties', label: 'Properties…', title: 'Rename the project or edit its description.', disabled: props.busy || !open },
     { action: 'report', label: 'Report…', title: 'A PDF of the stored results in this project, one chapter each, grouped by measurement.', disabled: props.busy || !open },
+    // Transfer, its own group: these two move measurements between project files rather than acting
+    // on this one, and the divider on 'export' is what separates them from the file operations
+    // above while leaving Delete/Close as the bottom group they already were.
+    { action: 'export', label: 'Export…', title: 'Write measurements and results into another project file, to send or copy elsewhere.', disabled: props.busy || !open, divider: true },
+    { action: 'import', label: 'Import…', title: 'Copy measurements and results out of another project file into this one.', disabled: props.busy || !open },
     { action: 'delete', label: 'Delete', title: 'Close this project and delete its file.', disabled: props.busy || !open, divider: true },
     { action: 'close', label: 'Close', title: 'Close this project and return to the welcome screen.', disabled: props.busy || !open },
   ]

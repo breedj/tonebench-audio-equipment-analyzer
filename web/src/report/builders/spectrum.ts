@@ -2,7 +2,11 @@ import type { ReportRow, ReportSection } from '../../api/client'
 import { channelTiles, GEN_METRIC_LABEL, NOT_APPLICABLE } from '../../metrics'
 import type { IntermodulationFrame, MetersFrame, MultitoneFrame } from '../../streaming/protocol'
 import { imdProductLabel } from '../../imd/products'
-import { formatAnnotationHz, numberedAnnotations } from '../../measurements/spectrumAnnotations'
+import {
+  formatAnnotationHz,
+  formatAnnotationHzRange,
+  numberedAnnotations,
+} from '../../measurements/spectrumAnnotations'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { descriptionSections, genericSettingsSection } from './generic'
@@ -223,10 +227,18 @@ export function annotationsSections(subject: ReportSubject): ReportSection[] {
       kind: 'table',
       title: 'Annotations',
       headers,
+      // A region carries its ranges in the same two columns rather than earning two more: a pair of
+      // extra columns would widen the table for a few rows and leave every point dashing through them.
       cells: annotations.map((a) => [
         `${a.number}`,
-        formatAnnotationHz(a.freqHz),
-        a.levelDbv === null ? '—' : `${a.levelDbv.toFixed(1)} dBV`,
+        a.style === 'box' && a.freqHz2 !== null
+          ? formatAnnotationHzRange(a.freqHz, a.freqHz2)
+          : formatAnnotationHz(a.freqHz),
+        a.levelDbv === null
+          ? '—'
+          : a.style === 'box' && a.levelDbv2 !== null
+            ? `${a.levelDbv2.toFixed(1)} – ${a.levelDbv.toFixed(1)} dBV`
+            : `${a.levelDbv.toFixed(1)} dBV`,
         ...(withChannel ? [a.channel === null ? '—' : CHANNEL_LABELS[a.channel]] : []),
         a.text || '—',
       ]),

@@ -30,6 +30,10 @@ public class SpectrumAnnotationParamsTests
     private static readonly SpectrumAnnotation Hum = new(1, "point", "Mains hum", 50.0, -98.2, 0, 0.45, 14.0);
     private static readonly SpectrumAnnotation Corner = new(2, "frequency", "Bandwidth corner", 21_500.0);
 
+    /// <summary>A region from 1 to 4 kHz between -40 and -80 dBV: top-left corner first, bottom-right second.</summary>
+    private static readonly SpectrumAnnotation Band =
+        new(3, "box", "Hum band", 1_000.0, -40.0, null, 0.3, 12.0, 4_000.0, -80.0);
+
     [Fact]
     public async Task BuildCurrentParametersJson_CarriesTheStagedAnnotations()
     {
@@ -123,6 +127,53 @@ public class SpectrumAnnotationParamsTests
             long resultId = await h.SaveService.SaveAsync(typeId, "deliberately none", null, [], CancellationToken.None);
 
             Assert.Empty((await h.ReadResultParamsAsync(resultId)).ChartAnnotations!);
+        });
+    }
+
+    [Fact]
+    public async Task BuildCurrentParametersJson_CarriesABoxAnnotationsSecondCorner()
+    {
+        await WithHarnessAsync(async h =>
+        {
+            var parameters = Deserialize(h.SaveService.BuildCurrentParametersJson(Staged(Band)));
+
+            // Record equality covers the two new fields, so this also pins that nothing on the way
+            // through drops a corner.
+            Assert.Equal(Band, Assert.Single(parameters.ChartAnnotations!));
+            await Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Apply_OfATypeWhoseAnnotationsPredateTheBoxStyle_ReadsItsSecondCornerAsNull()
+    {
+        await WithHarnessAsync(async h =>
+        {
+            // A params_json written before a box existed: the two fields are simply absent.
+            var document = JsonNode.Parse(h.SaveService.BuildCurrentParametersJson())!.AsObject();
+            document["chartAnnotations"] =
+                JsonNode.Parse("""[{"id":1,"style":"point","text":"Mains hum","freqHz":50,"levelDbv":-98.2}]""");
+            long typeId = await h.CreateTypeAsync("FFTSpectrum", document.ToJsonString());
+
+            var applied = await h.SaveService.ApplyAsync(typeId, CancellationToken.None);
+
+            var back = Assert.Single(applied.ChartAnnotations!);
+            Assert.Null(back.FreqHz2);
+            Assert.Null(back.LevelDbv2);
+            Assert.Equal(-98.2, back.LevelDbv);
+        });
+    }
+
+    [Fact]
+    public async Task SetResultAnnotations_OfABox_WritesBothCorners()
+    {
+        await WithHarnessAsync(async h =>
+        {
+            long resultId = await h.WriteResultAsync("FFTSpectrum", h.SaveService.BuildCurrentParametersJson());
+
+            await h.SaveService.SetResultAnnotationsAsync(resultId, [Band], CancellationToken.None);
+
+            Assert.Equal(Band, Assert.Single((await h.ReadResultParamsAsync(resultId)).ChartAnnotations!));
         });
     }
 

@@ -42,10 +42,24 @@ export interface AnnotationLayoutItem {
   style: AnnotationStyle
   text: string
   freqHz: number
-  /** The plotted level for a point; null for a frequency rule, or when the unit cannot be converted. */
+  /**
+   * The plotted level: a point's marker, or a <b>box</b>'s top edge. Null for a frequency rule, or
+   * when the unit cannot be converted.
+   */
   levelDb: number | null
+  /** A box's other two edges, already in the plotted unit. Null for every other style. */
+  freqHz2: number | null
+  levelDb2: number | null
   labelOffsetOctaves: number
   labelOffsetDb: number
+}
+
+/** A rectangle in plot pixels. */
+export interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
 }
 
 export interface AnnotationPlacement {
@@ -60,6 +74,8 @@ export interface AnnotationPlacement {
   anchor: { x: number; y: number; r: number } | null
   /** The vertical rule, for a frequency annotation. */
   rule: { x: number; y1: number; y2: number } | null
+  /** The marked region, for a box — already clamped to the plotting area. */
+  box: Rect | null
   label: { x: number; y: number; w: number; h: number }
   leader: { x1: number; y1: number; x2: number; y2: number } | null
   /** The ordinal's circle, or null when the numbers are off (see `numbers` below). */
@@ -118,6 +134,185 @@ function clamp(value: number, lo: number, hi: number): number {
 }
 
 /**
+ * A box's region in plot pixels, <b>clamped</b> to the plotting area — or null when it does not
+ * overlap the window at all.
+ *
+ * <p>Clamped, where a point outside the window is skipped, and the difference is the point of both
+ * rules: a marker pressed against the axis claims a column that is not there, while a region
+ * clipped at the axis claims exactly the columns that <i>are</i> there. Clamping here rather than
+ * leaving it to the canvas clip is what puts the stroke <b>on</b> the plot edge, which is the
+ * visible statement "this continues past here".</p>
+ */
+export function boxRect(item: AnnotationLayoutItem, plot: AnnotationPlot): Rect | null {
+  if (item.levelDb === null || item.freqHz2 === null || item.levelDb2 === null) return null
+  if (!(item.freqHz > 0) || !(item.freqHz2 > 0)) return null
+
+  const x1 = plot.xToPos(item.freqHz)
+  const x2 = plot.xToPos(item.freqHz2)
+  const y1 = plot.yToPos(item.levelDb)
+  const y2 = plot.yToPos(item.levelDb2)
+  if (![x1, x2, y1, y2].every(Number.isFinite)) return null
+
+  const right = plot.left + plot.width
+  const bottom = plot.top + plot.height
+  const lo = { x: Math.min(x1, x2), y: Math.min(y1, y2) }
+  const hi = { x: Math.max(x1, x2), y: Math.max(y1, y2) }
+  if (hi.x <= plot.left || lo.x >= right || hi.y <= plot.top || lo.y >= bottom) return null
+
+  const x = clamp(lo.x, plot.left, right)
+  const y = clamp(lo.y, plot.top, bottom)
+  return { x, y, w: clamp(hi.x, plot.left, right) - x, h: clamp(hi.y, plot.top, bottom) - y }
+}
+
+/**
+ * The connector between two rectangles: the nearest edges, per axis independently, so it leaves each
+ * one square. Null when they overlap on both axes — the label is on the region and there is nothing
+ * to join, the same judgement {@link leaderTo} makes when the label swallows its marker.
+ */
+export function leaderBetween(a: Rect, b: Rect): { x1: number; y1: number; x2: number; y2: number } | null {
+  const span = (aLo: number, aLen: number, bLo: number, bLen: number) => {
+    const aHi = aLo + aLen
+    const bHi = bLo + bLen
+    if (bLo >= aHi) return { from: aHi, to: bLo, apart: true }
+    if (bHi <= aLo) return { from: aLo, to: bHi, apart: true }
+    const mid = (Math.max(aLo, bLo) + Math.min(aHi, bHi)) / 2
+    return { from: mid, to: mid, apart: false }
+  }
+
+  const x = span(a.x, a.w, b.x, b.w)
+  const y = span(a.y, a.h, b.y, b.h)
+  if (!x.apart && !y.apart) return null
+  return { x1: x.from, y1: y.from, x2: x.to, y2: y.to }
+}
+
+/** Which part of a box a grip drags. */
+export type BoxHandleKind = 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'se' | 'sw'
+
+export interface BoxHandle {
+  kind: BoxHandleKind
+  rect: Rect
+}
+
+/**
+ * The grips laid over a box: four corners, four edge bands and one move grip inset at the top left.
+ *
+ * <p><b>Move is a grip and not the box's interior</b>, which is the whole reason this list looks the
+ * way it does: a region can cover the plot, and the interior is where drag-zoom lives — marking a
+ * region and then zooming into it is the obvious next thing a user does. The same judgement keeps
+ * the label's own handle small.</p>
+ *
+ * <p>A box too small to carry them keeps only its corners, so the grips can never overlap each other
+ * and strand the region.</p>
+ */
+export function boxHandles(box: Rect, m: AnnotationMetrics): BoxHandle[] {
+  const g = Math.max(6, m.fontPx * 0.8)
+  const corners: BoxHandle[] = [
+    { kind: 'nw', rect: { x: box.x - g / 2, y: box.y - g / 2, w: g, h: g } },
+    { kind: 'ne', rect: { x: box.x + box.w - g / 2, y: box.y - g / 2, w: g, h: g } },
+    { kind: 'se', rect: { x: box.x + box.w - g / 2, y: box.y + box.h - g / 2, w: g, h: g } },
+    { kind: 'sw', rect: { x: box.x - g / 2, y: box.y + box.h - g / 2, w: g, h: g } },
+  ]
+  if (box.w < 3 * g || box.h < 3 * g) return corners
+
+  const midX = box.x + box.w / 2
+  const midY = box.y + box.h / 2
+  return [
+    ...corners,
+    { kind: 'n', rect: { x: midX - g, y: box.y - g / 2, w: 2 * g, h: g } },
+    { kind: 's', rect: { x: midX - g, y: box.y + box.h - g / 2, w: 2 * g, h: g } },
+    { kind: 'w', rect: { x: box.x - g / 2, y: midY - g, w: g, h: 2 * g } },
+    { kind: 'e', rect: { x: box.x + box.w - g / 2, y: midY - g, w: g, h: 2 * g } },
+    { kind: 'move', rect: { x: box.x + g * 0.75, y: box.y + g * 0.75, w: g * 1.4, h: g * 1.4 } },
+  ]
+}
+
+/** A box in data units — the shape the drag maths works in. */
+export interface DataBox {
+  freqHz: number
+  freqHz2: number
+  levelDb: number
+  levelDb2: number
+}
+
+/**
+ * The box a grip drag proposes, from the box it started on and where the pointer is now (in data
+ * units).
+ *
+ * <p><b>Move keeps the region's extent in octaves and dB, never in pixels</b>: a region dragged
+ * along a log axis keeps the octave width it was drawn with rather than stretching as it travels.
+ * Resize touches only the edges its kind names, and an edge dragged past its opposite simply
+ * crosses it — the caller normalises on the way to storage, which is what every resize tool does.</p>
+ */
+export function boxFromDrag(kind: BoxHandleKind, start: DataBox, pointer: { freqHz: number; levelDb: number }): DataBox {
+  if (!(pointer.freqHz > 0) || !Number.isFinite(pointer.levelDb)) return start
+
+  if (kind === 'move') {
+    const octaves = Math.log2(start.freqHz2 / start.freqHz)
+    const height = start.levelDb - start.levelDb2
+    return {
+      freqHz: pointer.freqHz,
+      freqHz2: pointer.freqHz * Math.pow(2, octaves),
+      levelDb: pointer.levelDb,
+      levelDb2: pointer.levelDb - height,
+    }
+  }
+
+  const next = { ...start }
+  if (kind.includes('w')) next.freqHz = pointer.freqHz
+  if (kind.includes('e')) next.freqHz2 = pointer.freqHz
+  if (kind.includes('n')) next.levelDb = pointer.levelDb
+  if (kind.includes('s')) next.levelDb2 = pointer.levelDb
+  return next
+}
+
+/**
+ * A dragged box kept inside the window and no smaller than `minSpan`.
+ *
+ * <p>A box that would leave the window is <b>translated</b> back in rather than squashed, so a move
+ * never silently resizes. The size floor is a UI-integrity one — about a grip's width — so the grips
+ * can never collapse into each other and strand the region; it is a different number and a different
+ * reason from the minimum size of the <i>gesture</i> that draws a box in the first place.</p>
+ */
+export function clampBoxToWindow(
+  box: DataBox,
+  window: { loHz: number; hiHz: number; bottomDb: number; topDb: number },
+  minSpan: { octaves: number; db: number },
+): DataBox {
+  if (!(box.freqHz > 0) || !(box.freqHz2 > 0) || !(window.loHz > 0) || !(window.hiHz > window.loHz)) return box
+  if (!Number.isFinite(box.levelDb) || !Number.isFinite(box.levelDb2)) return box
+
+  let loHz = Math.min(box.freqHz, box.freqHz2)
+  let hiHz = Math.max(box.freqHz, box.freqHz2)
+  let top = Math.max(box.levelDb, box.levelDb2)
+  let bottom = Math.min(box.levelDb, box.levelDb2)
+
+  // The floor first, so a box squeezed to nothing against an edge still has grips to grab.
+  if (Math.log2(hiHz / loHz) < minSpan.octaves) hiHz = loHz * Math.pow(2, minSpan.octaves)
+  if (top - bottom < minSpan.db) top = bottom + minSpan.db
+
+  const widthOctaves = Math.log2(hiHz / loHz)
+  const heightDb = top - bottom
+  if (loHz < window.loHz) {
+    loHz = window.loHz
+    hiHz = loHz * Math.pow(2, widthOctaves)
+  }
+  if (hiHz > window.hiHz) {
+    hiHz = window.hiHz
+    loHz = Math.max(window.loHz, hiHz * Math.pow(2, -widthOctaves))
+  }
+  if (top > window.topDb) {
+    top = window.topDb
+    bottom = top - heightDb
+  }
+  if (bottom < window.bottomDb) {
+    bottom = window.bottomDb
+    top = Math.min(window.topDb, bottom + heightDb)
+  }
+
+  return { freqHz: loHz, freqHz2: hiHz, levelDb: top, levelDb2: bottom }
+}
+
+/**
  * The leader line from a marker to the nearest edge of its label box — so a label dragged to the
  * left of its peak gets a line out of the dot's left side rather than one crossing the box.
  */
@@ -136,6 +331,33 @@ function leaderTo(
     y1: anchor.y + (dy / length) * anchor.r,
     x2: targetX,
     y2: targetY,
+  }
+}
+
+/**
+ * Where a label sits for an annotation anchored at `(anchorHz, anchorDb)`: its stored offset applied
+ * in data units, then clamped inside the plot. Shared by the point and the box so the two cannot
+ * drift — a box's anchor is its top-left corner, which is exactly why it needs no second rule.
+ */
+function labelBoxAt(
+  plot: AnnotationPlot,
+  anchorHz: number,
+  anchorDb: number,
+  offsetOctaves: number,
+  offsetDb: number,
+  fallback: { x: number; y: number },
+  w: number,
+  h: number,
+): Rect {
+  const right = plot.left + plot.width
+  const bottom = plot.top + plot.height
+  const cx = plot.xToPos(anchorHz * Math.pow(2, offsetOctaves))
+  const cy = plot.yToPos(anchorDb + offsetDb)
+  return {
+    x: clamp((Number.isFinite(cx) ? cx : fallback.x) - w / 2, plot.left, right - w),
+    y: clamp((Number.isFinite(cy) ? cy : fallback.y) - h / 2, plot.top, bottom - h),
+    w,
+    h,
   }
 }
 
@@ -177,6 +399,7 @@ export function layoutAnnotations(
       fontPx: m.fontPx,
       anchor: null,
       rule: null,
+      box: null,
       label: { x: 0, y: 0, w: 0, h: m.boxHeight },
       leader: null,
       badge: null,
@@ -184,16 +407,46 @@ export function layoutAnnotations(
       textY: 0,
     }
 
+    const textWidth = item.text ? plot.measureText(item.text, m.fontPx) : 0
+    const badgeWidth = numbers ? 2 * m.badgeR + m.badgeGap : 0
+    const w = m.padX * 2 + badgeWidth + textWidth
+    const h = m.boxHeight
+
+    // The box is laid out *before* the off-window test below, which looks at `item.freqHz` alone: a
+    // region whose low edge is left of the window is still mostly on screen, and testing its left
+    // edge the way a point's position is tested would make it vanish on the first zoom.
+    if (item.style === 'box') {
+      const rect = boxRect(item, plot)
+      if (rect === null || item.levelDb === null) {
+        placements.push(base)
+        continue
+      }
+      const label = labelBoxAt(
+        plot,
+        item.freqHz,
+        item.levelDb,
+        item.labelOffsetOctaves,
+        item.labelOffsetDb,
+        { x: rect.x + rect.w / 2, y: rect.y },
+        w,
+        h,
+      )
+      placements.push({
+        ...base,
+        visible: true,
+        box: rect,
+        label,
+        leader: leaderBetween(rect, label),
+        ...labelContents(label, m, numbers),
+      })
+      continue
+    }
+
     const x = plot.xToPos(item.freqHz)
     if (!Number.isFinite(x) || x < plot.left || x > right) {
       placements.push(base)
       continue
     }
-
-    const textWidth = item.text ? plot.measureText(item.text, m.fontPx) : 0
-    const badgeWidth = numbers ? 2 * m.badgeR + m.badgeGap : 0
-    const w = m.padX * 2 + badgeWidth + textWidth
-    const h = m.boxHeight
 
     if (item.style === 'point') {
       if (item.levelDb === null || !Number.isFinite(item.levelDb)) {
@@ -206,14 +459,16 @@ export function layoutAnnotations(
         continue
       }
       const anchor = { x, y: clamp(y, plot.top, bottom), r: m.markerR }
-      const cx = plot.xToPos(item.freqHz * Math.pow(2, item.labelOffsetOctaves))
-      const cy = plot.yToPos(item.levelDb + item.labelOffsetDb)
-      const label = {
-        x: clamp((Number.isFinite(cx) ? cx : x) - w / 2, plot.left, right - w),
-        y: clamp((Number.isFinite(cy) ? cy : y) - h / 2, plot.top, bottom - h),
+      const label = labelBoxAt(
+        plot,
+        item.freqHz,
+        item.levelDb,
+        item.labelOffsetOctaves,
+        item.labelOffsetDb,
+        { x, y },
         w,
         h,
-      }
+      )
       placements.push({
         ...base,
         visible: true,

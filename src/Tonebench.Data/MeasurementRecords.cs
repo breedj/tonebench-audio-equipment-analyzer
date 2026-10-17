@@ -232,7 +232,7 @@ public sealed record FftSpectrumParameters(
 /// <param name="Id">Unique within its own list and stable across edits. Not the ordinal a reader
 /// sees: the chart, the panel and the report all number the list left to right at draw time, so a
 /// delete cannot leave a gap in the numbering.</param>
-/// <param name="Style"><c>"point"</c> or <c>"frequency"</c>. A string rather than an enum because
+/// <param name="Style"><c>"point"</c>, <c>"frequency"</c> or <c>"box"</c>. A string rather than an enum because
 /// nothing here reads it -- see the remarks on <see cref="FftSpectrumParameters.ChartAnnotations"/>
 /// about validation.</param>
 /// <param name="LevelDbv">Always dBV, never the value the chart happens to be plotting: the chart's
@@ -245,6 +245,15 @@ public sealed record FftSpectrumParameters(
 /// the screen's is a few hundred pixels tall, and both span the same axis window, so an offset
 /// expressed this way is a fixed fraction of the picture and lands in the same place at either size;
 /// a pixel offset would not.</param>
+/// <param name="FreqHz2">
+/// A <c>"box"</c>'s other two edges; null for every other style. <b><paramref name="FreqHz"/> and
+/// <paramref name="LevelDbv"/> are the box's top-left corner</b> -- lowest frequency, highest level
+/// -- and this pair is its bottom-right. The client normalises that ordering on the way in and on
+/// every edit, so a reader may take it for granted; it is also what lets a reader that only knows
+/// <paramref name="LevelDbv"/> quote the <i>top</i> of the region, which is the informative end.
+/// Two absolute figures rather than an extent, unlike the label offset: a region's meaning is
+/// "these columns, these levels", which is what the panel shows and what the report prints.
+/// </param>
 public sealed record SpectrumAnnotation(
     int Id,
     string Style,
@@ -253,7 +262,9 @@ public sealed record SpectrumAnnotation(
     double? LevelDbv = null,
     int? Channel = null,
     double LabelOffsetOctaves = 0.0,
-    double LabelOffsetDb = 0.0);
+    double LabelOffsetDb = 0.0,
+    double? FreqHz2 = null,
+    double? LevelDbv2 = null);
 
 /// <summary>
 /// Where an imported simulation came from. Kept in full so the result can say what produced it

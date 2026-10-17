@@ -485,6 +485,8 @@ describe('the annotations table', () => {
     text: 'Mains hum',
     freqHz: 50,
     levelDbv: -98.24,
+    freqHz2: null,
+    levelDbv2: null,
     channel: 0,
     labelOffsetOctaves: 0.4,
     labelOffsetDb: 12,
@@ -495,6 +497,8 @@ describe('the annotations table', () => {
     text: 'Bandwidth corner',
     freqHz: 21500,
     levelDbv: null,
+    freqHz2: null,
+    levelDbv2: null,
     channel: null,
     labelOffsetOctaves: 0,
     labelOffsetDb: 0,
@@ -518,6 +522,30 @@ describe('the annotations table', () => {
   it('omits the channel column when no annotation names one', () => {
     const [section] = annotationsSections(annotated([corner]))
     expect(section.headers).toEqual(['#', 'Frequency', 'Level', 'Note'])
+    expect(section.cells).toEqual([['1', '21.50 kHz', '\u2014', 'Bandwidth corner']])
+  })
+
+  const band: SpectrumAnnotation = {
+    id: 3,
+    style: 'box',
+    text: 'Hum band',
+    freqHz: 900,
+    levelDbv: -40,
+    freqHz2: 1200,
+    levelDbv2: -95,
+    channel: null,
+    labelOffsetOctaves: 0.3,
+    labelOffsetDb: 10,
+  }
+
+  it('prints a box as a frequency range and a level range in the same two columns', () => {
+    const [section] = annotationsSections(annotated([band]))
+    expect(section.headers).toEqual(['#', 'Frequency', 'Level', 'Note'])
+    expect(section.cells).toEqual([['1', '0.90 \u2013 1.20 kHz', '-95.0 \u2013 -40.0 dBV', 'Hum band']])
+  })
+
+  it('still prints a stored frequency rule, which the chart no longer offers to add', () => {
+    const [section] = annotationsSections(annotated([corner]))
     expect(section.cells).toEqual([['1', '21.50 kHz', '\u2014', 'Bandwidth corner']])
   })
 

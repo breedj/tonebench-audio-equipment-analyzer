@@ -699,12 +699,31 @@ const { showPage } = useManual()
     </p>
     <p>
       <strong>Point</strong> marks one place on the trace — a dot at its frequency and level, a short
-      line, and the note in a box you can drag clear of the curve. <strong>Frequency</strong> marks a
-      frequency alone, as a dashed rule down the plot with the note at the top; several of those stack
-      into rows so they do not cover each other. The panel lists them in the order they read across
-      the chart, numbered the same way the labels are, and each row can be retyped — the note, the
-      frequency, and a point's level in dBV — or deleted. <strong>Remove all</strong> clears the
+      line, and the note in a box you can drag clear of the curve. <strong>Box</strong> marks a whole
+      region: arm it and <em>drag a rectangle</em> rather than clicking, and you get an outlined area
+      in the annotation's own colour with the note beside it, joined by a connector. A drag smaller
+      than about a dozen pixels in either direction places nothing and leaves the chart armed, so a
+      slip of the hand costs nothing. A box's edges are where you put them — unlike a point, they do
+      not snap to a peak.
+    </p>
+    <p>
+      A drawn box can be <strong>resized</strong> by dragging any of its edges or corners, and
+      <strong>moved</strong> by the small grip just inside its top-left corner. The grips are small on
+      purpose: a region can cover much of the plot, and dragging inside it still zooms the chart, which
+      is usually the next thing you want after marking something. Drag an edge past its opposite and
+      the box simply turns inside out, as in any drawing tool.
+    </p>
+    <p>
+      The panel lists every annotation in the order they read across the chart, numbered and coloured
+      the same way the labels are, and each row can be retyped or deleted: a point's frequency and
+      level, a box's <strong>From</strong>/<strong>To</strong> in hertz and
+      <strong>Top</strong>/<strong>Bottom</strong> in dBV. <strong>Remove all</strong> clears the
       chart. One chart carries up to 24.
+    </p>
+    <p>
+      Measurements annotated with an earlier version may carry a third kind, a dashed rule down the
+      plot at one frequency. Those are still drawn, still listed, still editable and still printed —
+      the style picker simply no longer offers to add new ones.
     </p>
     <p>
       The annotations are saved with the measurement, so they are still there after a restart, and a
@@ -717,6 +736,12 @@ const { showPage } = useManual()
     </p>
 
     <h2>Zooming</h2>
+    <p>
+      One exception to everything below: while the Annotations panel has armed the chart for a
+      <strong>Box</strong>, a drag draws a region instead of zooming. Press <strong>Cancel</strong> in
+      that panel (or Escape) and dragging zooms again. Nothing else about annotations touches the
+      zoom — with the chart unarmed, or armed for a Point, a drag zooms exactly as it always did.
+    </p>
     <p>
       Drag horizontally across the spectrum to zoom the frequency axis; double-click, or press
       <strong>Reset zoom</strong> in the chart header, to go back to the full span. The level axis

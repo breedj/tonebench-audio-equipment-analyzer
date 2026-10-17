@@ -12,7 +12,7 @@ import {
 import { SPECTRUM_UNIT_OPTIONS } from '../spectrumUnits'
 import type { SegmentedOption } from '../panels/segmented'
 import type { HarmonicMarkerUnit } from '../spectrumUnits'
-import { MAX_ANNOTATIONS, type AnnotationStyle } from '../measurements/spectrumAnnotations'
+import { ANNOTATION_STYLE_OPTIONS, MAX_ANNOTATIONS, type AnnotationStyle } from '../measurements/spectrumAnnotations'
 import AnnotationRows from './AnnotationRows.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
@@ -53,11 +53,6 @@ const {
  * nothing is read back from.
  */
 const annotationStyle = ref<AnnotationStyle>('point')
-
-const ANNOTATION_STYLE_OPTIONS: SegmentedOption<AnnotationStyle>[] = [
-  { value: 'point', label: 'Point', title: 'A marker on the trace with a label beside it, which can be dragged clear.' },
-  { value: 'frequency', label: 'Frequency', title: 'A dashed rule at one frequency, labelled at the top of the plot.' },
-]
 
 const annotationsFull = computed(() => annotations.value.length >= MAX_ANNOTATIONS)
 
@@ -289,8 +284,11 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
           {{ annotationArmed === null ? 'Add' : 'Cancel' }}
         </button>
       </div>
-      <p v-if="annotationArmed !== null" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      <p v-if="annotationArmed === 'point'" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
         Click the chart to place it — the click snaps to the nearest peak.
+      </p>
+      <p v-else-if="annotationArmed === 'box'" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+        Drag a rectangle on the chart to mark a region. Dragging zooms again once this is cancelled.
       </p>
       <p
         v-else-if="annotations.length === 0"

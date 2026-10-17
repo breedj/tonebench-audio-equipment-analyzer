@@ -31,16 +31,28 @@ function onText(id: number, event: Event) {
   emit('update:modelValue', updateAnnotation(props.modelValue, id, { text: (event.target as HTMLInputElement).value }))
 }
 
+/**
+ * Puts the stored figure back in the box after a retype was refused.
+ *
+ * <p>Needed because these inputs are bound with `:value` rather than `v-model`: when a change is
+ * rejected the model does not move, so Vue never re-renders the input and the refused number simply
+ * stays on screen, where it reads as having been accepted. The row would then be showing something
+ * the chart is not drawing.</p>
+ */
+function restore(event: Event, value: number | null, decimals: number) {
+  ;(event.target as HTMLInputElement).value = shown(value, decimals)
+}
+
 /** A retyped number is ignored unless it is usable: the rail's own leniency, and a log axis has no place for a zero. */
-function onFreq(id: number, event: Event) {
+function onFreq(id: number, current: number, event: Event) {
   const value = Number.parseFloat((event.target as HTMLInputElement).value)
-  if (!Number.isFinite(value) || value <= 0) return
+  if (!Number.isFinite(value) || value <= 0) return restore(event, current, 2)
   emit('update:modelValue', updateAnnotation(props.modelValue, id, { freqHz: value }))
 }
 
-function onLevel(id: number, event: Event) {
+function onLevel(id: number, current: number | null, event: Event) {
   const value = Number.parseFloat((event.target as HTMLInputElement).value)
-  if (!Number.isFinite(value)) return
+  if (!Number.isFinite(value)) return restore(event, current, 1)
   emit('update:modelValue', updateAnnotation(props.modelValue, id, { levelDbv: value }))
 }
 
@@ -52,6 +64,23 @@ function onLevel(id: number, event: Event) {
  */
 function shown(value: number | null, decimals: number): string {
   return value === null || !Number.isFinite(value) ? '' : value.toFixed(decimals)
+}
+
+/**
+ * A box's other two edges. An inverting retype is <b>ignored</b> rather than normalised: the
+ * mutators would happily sort it out, but swapping the two boxes under the user's cursor as they
+ * type is worse than doing nothing. Same leniency as the frequency box above.
+ */
+function onFreqTo(id: number, from: number, current: number | null, event: Event) {
+  const value = Number.parseFloat((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(value) || value <= from) return restore(event, current, 2)
+  emit('update:modelValue', updateAnnotation(props.modelValue, id, { freqHz2: value }))
+}
+
+function onLevelBottom(id: number, top: number | null, current: number | null, event: Event) {
+  const value = Number.parseFloat((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(value) || (top !== null && value >= top)) return restore(event, current, 1)
+  emit('update:modelValue', updateAnnotation(props.modelValue, id, { levelDbv2: value }))
 }
 
 function onRemove(id: number) {
@@ -76,7 +105,13 @@ function onRemove(id: number) {
             borderColor: annotationColor(annotation.number),
             backgroundColor: `${annotationColor(annotation.number)}26`,
           }"
-          :title="annotation.style === 'point' ? 'A labelled point of the trace' : 'A rule at this frequency'"
+          :title="
+            annotation.style === 'point'
+              ? 'A labelled point of the trace'
+              : annotation.style === 'box'
+                ? 'A marked region of the plot'
+                : 'A rule at this frequency'
+          "
         >
           {{ annotation.number }}
         </span>
@@ -98,9 +133,11 @@ function onRemove(id: number) {
           ✕
         </button>
       </div>
+      <!-- A box's four numbers flow into the same two columns as a point's two: From/To over
+           Top/Bottom. "Frequency" alone would be wrong once there are two of them. -->
       <div class="grid grid-cols-2 gap-2.5 pl-7">
         <label class="tb-field">
-          Frequency (Hz)
+          {{ annotation.style === 'box' ? 'From (Hz)' : 'Frequency (Hz)' }}
           <input
             :value="shown(annotation.freqHz, 2)"
             type="number"
@@ -108,12 +145,24 @@ function onRemove(id: number) {
             min="0"
             class="tb-input h-8 text-xs"
             :disabled="props.disabled"
-            @change="onFreq(annotation.id, $event)"
+            @change="onFreq(annotation.id, annotation.freqHz, $event)"
           />
         </label>
-        <label v-if="annotation.style === 'point'" class="tb-field">
+        <label v-if="annotation.style === 'box'" class="tb-field">
+          To (Hz)
+          <input
+            :value="shown(annotation.freqHz2, 2)"
+            type="number"
+            step="1"
+            min="0"
+            class="tb-input h-8 text-xs"
+            :disabled="props.disabled"
+            @change="onFreqTo(annotation.id, annotation.freqHz, annotation.freqHz2, $event)"
+          />
+        </label>
+        <label v-if="annotation.style !== 'frequency'" class="tb-field">
           <span>
-            Level (dBV)
+            {{ annotation.style === 'box' ? 'Top (dBV)' : 'Level (dBV)' }}
             <span
               v-if="annotation.channel !== null"
               class="font-normal text-neutral-400 dark:text-neutral-500"
@@ -128,7 +177,18 @@ function onRemove(id: number) {
             step="1"
             class="tb-input h-8 text-xs"
             :disabled="props.disabled"
-            @change="onLevel(annotation.id, $event)"
+            @change="onLevel(annotation.id, annotation.levelDbv, $event)"
+          />
+        </label>
+        <label v-if="annotation.style === 'box'" class="tb-field">
+          Bottom (dBV)
+          <input
+            :value="shown(annotation.levelDbv2, 1)"
+            type="number"
+            step="1"
+            class="tb-input h-8 text-xs"
+            :disabled="props.disabled"
+            @change="onLevelBottom(annotation.id, annotation.levelDbv, annotation.levelDbv2, $event)"
           />
         </label>
       </div>

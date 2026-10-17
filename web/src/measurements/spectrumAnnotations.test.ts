@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   ANNOTATION_COLORS,
+  ANNOTATION_STYLE_OPTIONS,
   MAX_ANNOTATIONS,
   MAX_ANNOTATION_TEXT,
   addAnnotation,
   annotationColor,
   annotationReading,
+  formatAnnotationHzRange,
+  normalizeAnnotationBox,
   numberedAnnotations,
   parseAnnotations,
   removeAnnotation,
@@ -26,9 +29,27 @@ function point(id: number, freqHz: number, text = 'note'): SpectrumAnnotation {
     text,
     freqHz,
     levelDbv: -80,
+    freqHz2: null,
+    levelDbv2: null,
     channel: 0,
     labelOffsetOctaves: 0.4,
     labelOffsetDb: 12,
+  }
+}
+
+/** A region from 1 to 3 kHz between -20 and -60 dBV, stored top-left first. */
+function box(id: number, loHz = 1000, hiHz = 3000, text = 'region'): SpectrumAnnotation {
+  return {
+    id,
+    style: 'box',
+    text,
+    freqHz: loHz,
+    levelDbv: -20,
+    freqHz2: hiHz,
+    levelDbv2: -60,
+    channel: null,
+    labelOffsetOctaves: 0.3,
+    labelOffsetDb: 10,
   }
 }
 
@@ -172,5 +193,101 @@ describe('annotationColor', () => {
     for (const ordinal of [0, -4, Number.NaN]) {
       expect(ANNOTATION_COLORS).toContain(annotationColor(ordinal))
     }
+  })
+})
+
+describe('a box annotation', () => {
+  it('reads a box back with both of the corners it wrote', () => {
+    // The trap: written `style === 'point' ? levelDbv : null`, every box loses its top edge here.
+    const parsed = parseAnnotations(JSON.parse(JSON.stringify([box(1)])))
+    expect(parsed).toEqual([box(1)])
+    expect(parsed[0].levelDbv).toBe(-20)
+    expect(parsed[0].levelDbv2).toBe(-60)
+  })
+
+  it('normalises a box stored with its corners the wrong way round', () => {
+    const inverted = { ...box(1), freqHz: 3000, freqHz2: 1000, levelDbv: -60, levelDbv2: -20 }
+    expect(parseAnnotations([inverted])[0]).toMatchObject({
+      freqHz: 1000,
+      freqHz2: 3000,
+      levelDbv: -20,
+      levelDbv2: -60,
+    })
+  })
+
+  it('reads a box whose second corner is missing as the point it still describes, keeping the note', () => {
+    const parsed = parseAnnotations([{ ...box(1, 1000, 3000, 'kept'), freqHz2: null, levelDbv2: null }])
+    expect(parsed[0]).toMatchObject({ style: 'point', freqHz: 1000, levelDbv: -20, text: 'kept' })
+  })
+
+  it('reads a box that has lost its levels as a frequency rule rather than dropping it', () => {
+    const parsed = parseAnnotations([
+      { id: 1, style: 'box', text: 'kept', freqHz: 1000, freqHz2: 3000 },
+    ])
+    expect(parsed[0]).toMatchObject({ style: 'frequency', freqHz: 1000, text: 'kept' })
+  })
+
+  it('reads an unknown style carrying two corners as a box', () => {
+    const parsed = parseAnnotations([
+      { id: 1, style: 'region', text: 'a', freqHz: 1000, levelDbv: -20, freqHz2: 3000, levelDbv2: -60 },
+    ])
+    expect(parsed[0].style).toBe('box')
+  })
+
+  it('keeps a stored frequency rule exactly as it always read it, although the picker no longer offers one', () => {
+    // Removing Frequency from ANNOTATION_STYLE_OPTIONS must not touch what is already stored: an
+    // annotation the app quietly stopped drawing is the user's own words lost.
+    const rule = {
+      id: 4,
+      style: 'frequency' as const,
+      text: 'Bandwidth corner',
+      freqHz: 21500,
+      levelDbv: null,
+      freqHz2: null,
+      levelDbv2: null,
+      channel: null,
+      labelOffsetOctaves: 0,
+      labelOffsetDb: 0,
+    }
+    expect(parseAnnotations([rule])).toEqual([rule])
+  })
+
+  it('nulls a box channel, because a region names no trace', () => {
+    expect(parseAnnotations([{ ...box(1), channel: 1 }])[0].channel).toBeNull()
+  })
+
+  it('numbers a box by its low-frequency edge, which is where a reader enters it', () => {
+    const numbered = numberedAnnotations([box(1, 5000, 9000), point(2, 2000)])
+    expect(numbered.map((a) => [a.number, a.id])).toEqual([
+      [1, 2],
+      [2, 1],
+    ])
+  })
+
+  it('normalises a box whose corners a patch inverted', () => {
+    const patched = updateAnnotation([box(1)], 1, { freqHz2: 400 })
+    expect(patched[0]).toMatchObject({ freqHz: 400, freqHz2: 1000 })
+  })
+
+  it('leaves every other style alone', () => {
+    const list = [point(1, 50)]
+    expect(normalizeAnnotationBox(list[0])).toBe(list[0])
+  })
+
+  it('reads a box as its frequency range and its level range', () => {
+    expect(annotationReading(box(1))).toBe('1.00 – 3.00 kHz \u00b7 -60.0 … -20.0 dBV')
+  })
+})
+
+describe('formatAnnotationHzRange', () => {
+  it('prints both ends in the unit the high end asks for', () => {
+    expect(formatAnnotationHzRange(900, 1200)).toBe('0.90 – 1.20 kHz')
+    expect(formatAnnotationHzRange(40, 120)).toBe('40.0 – 120.0 Hz')
+  })
+})
+
+describe('ANNOTATION_STYLE_OPTIONS', () => {
+  it('offers Point and Box, and not Frequency, which only stored annotations still use', () => {
+    expect(ANNOTATION_STYLE_OPTIONS.map((o) => o.value)).toEqual(['point', 'box'])
   })
 })

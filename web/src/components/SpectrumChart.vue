@@ -41,11 +41,17 @@ import {
   type AnnotationStyle,
 } from '../measurements/spectrumAnnotations'
 import {
+  annotationMetrics,
+  boxFromDrag,
+  boxHandles,
+  clampBoxToWindow,
   clampLabelOffset,
   layoutAnnotations,
   type AnnotationLayoutItem,
   type AnnotationPlacement,
   type AnnotationPlot,
+  type BoxHandleKind,
+  type DataBox,
 } from '../charts/annotationLayout'
 import { peakSnapIndex } from '../measurements/spectrumPeakSnap'
 
@@ -575,7 +581,11 @@ function annotationItems(): AnnotationLayoutItem[] {
     style: a.style,
     text: a.text,
     freqHz: a.freqHz,
-    levelDb: a.style === 'point' && a.levelDbv !== null && offset !== null ? a.levelDbv + offset : null,
+    // A point's marker and a box's top edge are both levels; a frequency rule has none, and under
+    // a density unit with no ENBW nothing can be converted and the layout draws no level at all.
+    levelDb: a.style !== 'frequency' && a.levelDbv !== null && offset !== null ? a.levelDbv + offset : null,
+    freqHz2: a.style === 'box' ? a.freqHz2 : null,
+    levelDb2: a.style === 'box' && a.levelDbv2 !== null && offset !== null ? a.levelDbv2 + offset : null,
     labelOffsetOctaves: a.labelOffsetOctaves,
     labelOffsetDb: a.labelOffsetDb,
   }))
@@ -665,6 +675,25 @@ function annotationsPlugin(theme: Theme): uPlot.Plugin {
           ctx.beginPath()
           ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height)
           ctx.clip()
+
+          // Pass one: every region. Drawn before any label so one annotation's translucent fill can
+          // never bury another's note, and never as uPlot's own `.u-select` div — the report, the
+          // Screenshot dialog and the black-and-white print only ever see exportPng's canvas.
+          for (const p of placements) {
+            if (!p.visible || !p.box) continue
+            const colour = annotationColor(p.number)
+            roundedRectPath(ctx, p.box.x, p.box.y, p.box.w, p.box.h, p.fontPx * 0.25)
+            ctx.fillStyle = colour + '1a'
+            ctx.fill()
+            // Solid, not dashed: the dash belongs to the frequency rule, which still exists on
+            // measurements saved before the picker stopped offering it. Set explicitly rather than
+            // assumed -- this is the first stroke the plugin makes, so it inherits whatever dash the
+            // plugin drawn before it left on the context, and it came out dotted until it said so.
+            ctx.setLineDash([])
+            ctx.strokeStyle = colour
+            ctx.lineWidth = 1.5 * adapter.scale
+            ctx.stroke()
+          }
 
           for (const p of placements) {
             if (!p.visible) continue
@@ -953,7 +982,18 @@ function buildOptions(
       },
     ],
     series,
-    cursor: interactive ? { points: { show: false } } : { show: false },
+    cursor: interactive
+      ? {
+          points: { show: false },
+          // uPlot's own defaults already give exactly this, but the box gesture *depends* on the
+          // resting state being x-only -- syncBoxDragMode flips `y` and `setScale` and must have
+          // something known to flip back to. A silent dependence on a vendored library's defaults
+          // is what these comments exist to prevent. `uni` is deliberately left unset: its default
+          // is null, which is what makes an armed drag sweep a true rectangle rather than
+          // collapsing to one axis the way the response and impedance charts' `uni: 12` does.
+          drag: { x: true, y: false },
+        }
+      : { show: false },
     // uPlot's built-in legend doubles as a click-to-hide-series control — that's what caused a
     // channel's band to keep drawing after its line was hidden (the band plugin didn't know about
     // uPlot's internal per-series `show`). Visibility is now this component's own checkboxes
@@ -1087,6 +1127,10 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   plot.over.addEventListener('mousedown', notePressOrigin)
   plot.over.addEventListener('click', onPlotClick)
 
+  // A rebuild (theme, overlay count, style key) hands back a fresh instance carrying uPlot's own
+  // defaults, so an armed chart would silently go back to zooming on the next drag.
+  syncBoxDragMode()
+
   pendingZoomRestore = savedScale && savedScale.min != null && savedScale.max != null ? { min: savedScale.min, max: savedScale.max } : null
 
   plotNyquistHz = nyquistHz
@@ -1130,6 +1174,7 @@ let pressOrigin: { x: number; y: number } | null = null
 
 function notePressOrigin(event: MouseEvent) {
   pressOrigin = { x: event.clientX, y: event.clientY }
+  if (annotationArmed.value === 'box') boxGesture = true
 }
 
 /**
@@ -1144,6 +1189,9 @@ function onPlotClick(event: MouseEvent) {
   const style = annotationArmed.value
   const u = plot
   if (!u || style === null) return
+  // A box is drawn by dragging, finished on the window mouseup above. A still press would otherwise
+  // reach placeAnnotation and store a region of no size.
+  if (style === 'box') return
   // A double-click fires two `click` events, so without this the reset gesture would place two
   // labels on top of one another while armed.
   if (event.detail !== 1) return
@@ -1196,12 +1244,122 @@ function placeAnnotation(u: uPlot, style: AnnotationStyle) {
     text: '',
     freqHz,
     levelDbv,
+    freqHz2: null,
+    levelDbv2: null,
     channel,
     labelOffsetOctaves: style === 'point' ? DEFAULT_POINT_OFFSET.labelOffsetOctaves : 0,
     labelOffsetDb: style === 'point' ? DEFAULT_POINT_OFFSET.labelOffsetDb : 0,
   })
   // The chart is full — addAnnotation hands the list straight back. Say nothing here: the panel's
   // Add button is already disabled with the reason on it.
+  if (next.length === annotations.value.length) return
+
+  annotations.value = next
+  annotationArmed.value = null
+  annotationEditing.value = id
+}
+
+
+/**
+ * Arming for a Box turns uPlot's own drag-selection into the region gesture, by mutating the live
+ * cursor rather than adding an input layer of our own.
+ *
+ * <p>Three facts about uPlot 1.6.32 make this work, and all three are worth knowing before touching
+ * it. It keeps <b>one reference</b> to `cursor.drag` for the instance's life, so mutating fields
+ * works and replacing the object does not. It re-reads `drag.y` on every mousemove and
+ * `drag.setScale` at mouseup, so both can be flipped per gesture. And `mouseUp` fires the
+ * `setSelect` hook <i>before</i> it tests `setScale` to zoom — which is the other way this could
+ * have been built, and is the way it is not: a flag that is a pure function of the armed state
+ * cannot be left half-restored, whereas cancelling from inside the hook zooms to the half-drawn
+ * rectangle if Escape lands mid-drag.</p>
+ */
+function syncBoxDragMode() {
+  const u = plot
+  // uPlot always merges its own defaults, so `drag` is there at runtime; the typings say it may not
+  // be, and mutating the object it hands back is the whole mechanism -- see above.
+  const drag = u?.cursor.drag
+  if (!u || !drag) return
+  const armedForBox = annotationArmed.value === 'box'
+  drag.y = armedForBox
+  drag.setScale = !armedForBox
+  // With setScale off uPlot never calls its own hideSelect(), so the rubber band stays painted
+  // until someone clears it.
+  if (!armedForBox) u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
+}
+
+watch(annotationArmed, () => {
+  syncBoxDragMode()
+  plot?.redraw()
+})
+
+/**
+ * How big a drag has to be, in CSS pixels, to mean a region — on <b>both</b> axes.
+ *
+ * <p>It cannot be uPlot's own `drag.dist`: with `uni == null` uPlot promotes a pass on one axis to
+ * both, so a 300 x 2 px drag clears `dist` and yields a hairline box. Twelve is the figure `uni`
+ * already uses on the four two-axis charts here. Under it nothing is placed and <b>the chart stays
+ * armed</b> — a slip of the hand should not cost a trip back to the panel.</p>
+ */
+const MIN_BOX_DRAG_PX = 12
+
+/** True between mousedown and mouseup of a gesture that began while armed for a box. */
+let boxGesture = false
+
+/**
+ * Finishes a box gesture.
+ *
+ * <p>Bound on <b>window, bubble phase</b>, and neither half of that is incidental. uPlot's own
+ * `drag.click` is registered capture-phase on an ancestor and calls `stopImmediatePropagation()`
+ * whenever the pointer moved at all, so nothing drag-shaped can be driven off a `click`; and a
+ * window listener is the one place that runs after uPlot's own document-level `mouseUp`, so
+ * `u.select` is still readable and the restore cannot race the zoom test. It also fires when the
+ * button comes up outside the plot, which a listener on `over` would miss.</p>
+ */
+function onWindowMouseUp() {
+  if (!boxGesture) return
+  boxGesture = false
+  const u = plot
+  if (!u) return
+  if (annotationArmed.value === 'box') placeBoxFromSelection(u)
+  u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
+  syncBoxDragMode()
+}
+
+/**
+ * The region the drag just swept, as an annotation. `u.select` is in CSS pixels relative to the
+ * plotting area — the same space the label handles already work in.
+ */
+function placeBoxFromSelection(u: uPlot) {
+  const sel = u.select
+  if (sel.width < MIN_BOX_DRAG_PX || sel.height < MIN_BOX_DRAG_PX) return
+
+  const offset = annotationLevelOffsetDb()
+  // Both of a box's levels are stored in dBV like every other annotation level; under a density
+  // unit with no ENBW there is no honest figure to store, so leave the chart armed.
+  if (offset === null) return
+
+  // No peak snapping, deliberately, where a point and a rule both snap: a region's edges are where
+  // the hand put them, and jumping one to the nearest bin could move it by an arbitrary amount.
+  const loHz = u.posToVal(sel.left, 'x')
+  const hiHz = u.posToVal(sel.left + sel.width, 'x')
+  const topDb = u.posToVal(sel.top, 'y')
+  const bottomDb = u.posToVal(sel.top + sel.height, 'y')
+  if (!(loHz > 0) || !(hiHz > loHz) || !Number.isFinite(topDb) || !Number.isFinite(bottomDb)) return
+
+  const id = nextAnnotationId(annotations.value)
+  const next = addAnnotation(annotations.value, {
+    style: 'box',
+    text: '',
+    freqHz: loHz,
+    levelDbv: topDb - offset,
+    freqHz2: hiHz,
+    levelDbv2: bottomDb - offset,
+    channel: null,
+    // Above the region and centred on it, which works precisely because the stored anchor is the
+    // box's top-left corner.
+    labelOffsetOctaves: Math.log2(hiHz / loHz) / 2,
+    labelOffsetDb: 10,
+  })
   if (next.length === annotations.value.length) return
 
   annotations.value = next
@@ -1241,7 +1399,9 @@ const annotationOverlayStyle = computed(() => {
  */
 const annotationHandles = computed(() =>
   annotationPlacements.value
-    .filter((p) => p.visible && p.style === 'point')
+    // A box's label drags exactly like a point's, because a box's stored anchor is its top-left
+    // corner — onHandleMove's maths needs no branch.
+    .filter((p) => p.visible && (p.style === 'point' || p.style === 'box'))
     .map((p) => {
       const annotation = annotations.value.find((a) => a.id === p.id)
       return {
@@ -1256,6 +1416,149 @@ const annotationHandles = computed(() =>
       }
     }),
 )
+
+
+/**
+ * How small a box may be dragged, in CSS pixels, before the floor in clampBoxToWindow stops it.
+ *
+ * <p>A <i>UI-integrity</i> floor rather than a measurement one: at about a grip's width the nine
+ * grips can no longer collapse into each other and strand the region. Deliberately a different
+ * number, and a different reason, from MIN_BOX_DRAG_PX, which is how big a *gesture* has to be to
+ * mean a region at all.</p>
+ */
+const MIN_BOX_SPAN_PX = 10
+
+/** The size floor in the data units clampBoxToWindow works in, for the window now on screen. */
+function minBoxSpan(u: uPlot): { octaves: number; db: number } {
+  const width = u.over.clientWidth || 1
+  const height = u.over.clientHeight || 1
+  const loHz = u.scales.x.min ?? 1
+  const hiHz = u.scales.x.max ?? 1
+  const bottomDb = u.scales.y.min ?? 0
+  const topDb = u.scales.y.max ?? 0
+  return {
+    octaves: hiHz > loHz && loHz > 0 ? (MIN_BOX_SPAN_PX / width) * Math.log2(hiHz / loHz) : 0,
+    db: (MIN_BOX_SPAN_PX / height) * (topDb - bottomDb),
+  }
+}
+
+const GRIP_CURSOR: Record<BoxHandleKind, string> = {
+  move: 'cursor-move',
+  n: 'cursor-ns-resize',
+  s: 'cursor-ns-resize',
+  e: 'cursor-ew-resize',
+  w: 'cursor-ew-resize',
+  nw: 'cursor-nwse-resize',
+  se: 'cursor-nwse-resize',
+  ne: 'cursor-nesw-resize',
+  sw: 'cursor-nesw-resize',
+}
+
+/**
+ * The move and resize grips of every drawn box, in the same CSS pixels the label handles use.
+ *
+ * <p>Move is a <b>grip</b> and not the box's interior, which is the one thing to understand here: a
+ * region can cover the plot, and its interior is where drag-zoom lives — marking a region and then
+ * zooming into it is the obvious next thing a user does. The same judgement keeps the label's own
+ * handle small. The cost is that a drag-zoom begun exactly on a box's border resizes it instead;
+ * that is a few pixels per edge and the cursor says so on hover.</p>
+ */
+const boxGrips = computed(() => {
+  void plotGeometryTick.value
+  const u = plot
+  if (!u) return []
+  const m = annotationMetrics(cssAnnotationPlot(u))
+  return annotationPlacements.value
+    .filter((p) => p.visible && p.box)
+    .flatMap((p) =>
+      boxHandles(p.box as { x: number; y: number; w: number; h: number }, m).map((handle) => ({
+        key: `${p.id}:${handle.kind}`,
+        id: p.id,
+        kind: handle.kind,
+        cursor: GRIP_CURSOR[handle.kind],
+        title: handle.kind === 'move' ? 'Drag to move this region.' : 'Drag to resize this region.',
+        style: {
+          left: `${handle.rect.x}px`,
+          top: `${handle.rect.y}px`,
+          width: `${handle.rect.w}px`,
+          height: `${handle.rect.h}px`,
+        },
+      })),
+    )
+})
+
+let boxDrag: { id: number; kind: BoxHandleKind; grabOctaves: number; grabDb: number; start: DataBox } | null = null
+
+/** The box an annotation describes, in the unit the chart is plotting, or null when it is not one. */
+function plottedBox(id: number, offset: number | null): DataBox | null {
+  const a = annotations.value.find((x) => x.id === id)
+  if (!a || a.style !== 'box' || offset === null) return null
+  if (a.freqHz2 === null || a.levelDbv === null || a.levelDbv2 === null) return null
+  return { freqHz: a.freqHz, freqHz2: a.freqHz2, levelDb: a.levelDbv + offset, levelDb2: a.levelDbv2 + offset }
+}
+
+function onBoxGripDown(id: number, kind: BoxHandleKind, event: PointerEvent) {
+  const u = plot
+  const offset = annotationLevelOffsetDb()
+  const start = plottedBox(id, offset)
+  if (!u || !start) return
+
+  const rect = u.over.getBoundingClientRect()
+  const pointerHz = u.posToVal(event.clientX - rect.left, 'x')
+  const pointerDb = u.posToVal(event.clientY - rect.top, 'y')
+  if (!(pointerHz > 0) || !Number.isFinite(pointerDb)) return
+
+  // Where the pointer sits relative to the thing it grabbed, so the edge (or the corner, or the
+  // whole region for a move) does not jump under the cursor on the first move.
+  const anchorHz = kind === 'move' || kind.includes('w') ? start.freqHz : kind.includes('e') ? start.freqHz2 : pointerHz
+  const anchorDb = kind === 'move' || kind.includes('n') ? start.levelDb : kind.includes('s') ? start.levelDb2 : pointerDb
+  boxDrag = {
+    id,
+    kind,
+    grabOctaves: Math.log2(pointerHz / anchorHz),
+    grabDb: pointerDb - anchorDb,
+    start,
+  }
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  event.preventDefault()
+}
+
+function onBoxGripMove(event: PointerEvent) {
+  const u = plot
+  const drag = boxDrag
+  if (!u || !drag) return
+  const offset = annotationLevelOffsetDb()
+  if (offset === null) return
+
+  const rect = u.over.getBoundingClientRect()
+  const freqHz = u.posToVal(event.clientX - rect.left, 'x') * Math.pow(2, -drag.grabOctaves)
+  const levelDb = u.posToVal(event.clientY - rect.top, 'y') - drag.grabDb
+  if (!(freqHz > 0) || !Number.isFinite(levelDb)) return
+
+  // Always from the box the gesture *started* on, so a resize that crosses its opposite edge keeps
+  // tracking the pointer rather than fighting its own normalised result.
+  const proposed = boxFromDrag(drag.kind, drag.start, { freqHz, levelDb })
+  const clamped = clampBoxToWindow(
+    proposed,
+    {
+      loHz: u.scales.x.min ?? 0,
+      hiHz: u.scales.x.max ?? 0,
+      bottomDb: u.scales.y.min ?? 0,
+      topDb: u.scales.y.max ?? 0,
+    },
+    minBoxSpan(u),
+  )
+  annotations.value = updateAnnotation(annotations.value, drag.id, {
+    freqHz: clamped.freqHz,
+    freqHz2: clamped.freqHz2,
+    levelDbv: clamped.levelDb - offset,
+    levelDbv2: clamped.levelDb2 - offset,
+  })
+}
+
+function onBoxGripUp() {
+  boxDrag = null
+}
 
 let dragging: { id: number; grabDx: number; grabDy: number } | null = null
 
@@ -1356,7 +1659,10 @@ function cancelAnnotationEdit() {
   const id = annotationEditing.value
   if (id === null) return
   cancellingEdit = true
-  if (annotations.value.find((a) => a.id === id)?.text.length === 0) {
+  // A box is exempt: it took a deliberate drag of at least MIN_BOX_DRAG_PX to make, and a region
+  // with no note still says "look here". Only a click-placed marker is thrown away unnamed.
+  const existing = annotations.value.find((a) => a.id === id)
+  if (existing && existing.style !== 'box' && existing.text.length === 0) {
     annotations.value = removeAnnotation(annotations.value, id)
   }
   annotationEditing.value = null
@@ -1830,7 +2136,16 @@ function handleThemeChange() {
 }
 watch(isDark, handleThemeChange)
 
+/** Escape disarms, which is what a hand reaches for mid-gesture; the panel's Cancel does the same. */
+function onWindowKeyDown(event: KeyboardEvent) {
+  // Gated on the inline editor being closed, or this would fight its own Escape handler.
+  if (event.key !== 'Escape' || annotationArmed.value === null || annotationEditing.value !== null) return
+  annotationArmed.value = null
+}
+
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
   void refreshWeightingCurve()
@@ -1840,6 +2155,8 @@ onMounted(() => {
   update()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   resizeObserver?.disconnect()
   clearTimeout(viewportTimer)
   plot?.destroy()
@@ -1913,6 +2230,18 @@ onBeforeUnmount(() => {
           @pointerup="onHandleUp"
           @pointercancel="onHandleUp"
           @dblclick="annotationEditing = handle.id"
+        ></div>
+        <div
+          v-for="grip in boxGrips"
+          :key="grip.key"
+          class="pointer-events-auto absolute rounded-sm hover:bg-neutral-500/20"
+          :class="grip.cursor"
+          :style="grip.style"
+          :title="grip.title"
+          @pointerdown="onBoxGripDown(grip.id, grip.kind, $event)"
+          @pointermove="onBoxGripMove"
+          @pointerup="onBoxGripUp"
+          @pointercancel="onBoxGripUp"
         ></div>
         <input
           v-if="editingPlacement"

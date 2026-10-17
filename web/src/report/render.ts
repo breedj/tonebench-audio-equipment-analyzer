@@ -112,7 +112,17 @@ export async function renderExtraCharts(
   const options = exportOptions(null, monochrome)
 
   if (elements.includes('oscilloscope') && Object.keys(data.scope).length > 0) {
-    const png = await renderChartPng(OscilloscopeChart, { scope: data.scope, residual: data.scopeResidual ?? {}, status: data.status }, options)
+    const png = await renderChartPng(
+      OscilloscopeChart,
+      {
+        scope: data.scope,
+        residual: data.scopeResidual ?? {},
+        status: data.status,
+        annotations: data.display.annotations.value,
+        annotationNumbers: elements.includes('annotations'),
+      },
+      options,
+    )
     charts.push({ png, caption: 'Oscilloscope' })
   }
 

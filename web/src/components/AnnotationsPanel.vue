@@ -35,8 +35,13 @@ const props = withDefaults(
     styles?: readonly AnnotationStyle[]
     /** What a click on this chart does, for the hint line. */
     pointHint?: string
+    /**
+     * The section heading. Defaults to "Annotations", which is right where a rail carries one of
+     * these; the FFT rail carries three, one per chart it stacks, and they have to be told apart.
+     */
+    title?: string
   }>(),
-  { styles: () => DEFAULT_ANNOTATION_STYLES, pointHint: 'Click the chart to place it.' },
+  { styles: () => DEFAULT_ANNOTATION_STYLES, pointHint: 'Click the chart to place it.', title: 'Annotations' },
 )
 
 const { annotations, armed, arm } = useAnnotations()
@@ -63,7 +68,7 @@ function removeAll() {
        what the chart carries rather than how it is drawn, and because it is reached while reading
        the chart. The icon and tone are passed explicitly, which is what a new panel does -- the
        title table in panels/panelIcons.ts exists for the panels that predate it. -->
-  <CollapsibleSection title="Annotations" size="xs" icon="notes" tone="violet" :default-open="false">
+  <CollapsibleSection :title="props.title" size="xs" icon="notes" tone="violet" :default-open="false">
     <!-- The style picker takes whatever the button leaves, rather than the two splitting the row
          evenly: half a rail is not enough for a two-word label and the word was clipped (Joost,
          2026-10-17). The button is a fixed width rather than sized to its own label, or the picker

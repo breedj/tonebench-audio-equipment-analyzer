@@ -14,7 +14,27 @@ import { exportGridTheme } from '../charts/palette'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import ExpandToggle from './ExpandToggle.vue'
 
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
+
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the spectrogram's. See FrequencyResponseChart. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   spectrum: Record<number, SpectrumFrame>
 }>()
 
@@ -95,6 +115,44 @@ const THEME = {
   light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1, empty: [245, 245, 245] as const },
 } as const
 type SpectrogramTheme = (typeof THEME)[keyof typeof THEME]
+/**
+ * What this chart's two axes are: a log frequency against an <b>age in seconds</b>, negative so
+ * that now is at the top.
+ *
+ * <p>Which is why this chart offers the <b>rule</b> style and nothing else (see the panel). Its x is
+ * a stable quantity, but a point stored at −4 s names a different moment one second later, and the
+ * window moves on every tick as the history fills. A dashed rule at a frequency is the one honest
+ * thing to mark here, and the model has had it all along.</p>
+ */
+const ANNOTATION_AXES: UplotAnnotationAxes = { x: { quantity: 'hz' }, y: { quantity: 'secondsAgo' } }
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => 'Spectrogram',
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot ? cssAnnotationPlot(plot, ANNOTATION_AXES) : null),
+  surface: () => plot?.over ?? null,
+  overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
+  redraw: () => plot?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+})
+
+function onWindowMouseUp() {
+  finishBoxGesture(plot, annotationOverlay)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+// A redraw, never a rebuild: annotations are draw-hook state.
+watch(
+  () => [annotationList.value, props.annotationNumbers] as const,
+  () => plot?.redraw(),
+  { deep: true },
+)
+
 function currentTheme(): SpectrogramTheme {
   return isDark.value ? THEME.dark : THEME.light
 }
@@ -225,7 +283,12 @@ function buildOptions(
     series: [{}, { stroke: 'transparent', points: { show: false } }],
     cursor: { show: false },
     legend: { show: false },
-    plugins: [spectrogramPlugin(theme)],
+    // After the spectrogram's own plugin, which blits an image over the whole plotting box --
+    // drawn before it, every label would be painted over.
+    plugins: [
+      spectrogramPlugin(theme),
+      annotationsPlugin(annotationOverlay, ANNOTATION_AXES, () => annotationTheme(theme === THEME.dark)),
+    ],
   }
 }
 
@@ -345,6 +408,12 @@ function ensurePlot(span: { min: number; max: number }) {
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
   plot = new uPlot(buildOptions(width, chartHeight.value, span, currentTheme(), true), [[span.min, span.max], [null, null]], el)
+
+  // Click-to-annotate. This chart runs with no cursor at all, so a click is placed from the
+  // pointer rather than from a cursor index -- which the composable's readAt being optional is
+  // exactly for.
+  attachAnnotationListeners(plot, annotationOverlay)
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
   plotIsDark = isDark.value
   lastYSpanS = -1
   lastXSpan = { min: span.min, max: span.max }
@@ -578,6 +647,8 @@ watch(isDark, () => {
 })
 
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
   // Draws whatever the store already holds, and the empty axes when it holds nothing. Every other
@@ -586,6 +657,8 @@ onMounted(() => {
   update()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   resizeObserver?.disconnect()
   plot?.destroy()
   plot = null
@@ -656,6 +729,9 @@ onBeforeUnmount(() => {
       <span v-if="rowCount === 0">Waiting for data…</span>
       <span v-else class="font-mono">s ago ↓</span>
     </div>
-    <div ref="containerRef" class="w-full"></div>
+    <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
+      <div ref="containerRef" class="w-full"></div>
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
+    </div>
   </section>
 </template>

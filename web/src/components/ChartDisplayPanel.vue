@@ -12,7 +12,12 @@ import {
 import { SPECTRUM_UNIT_OPTIONS } from '../spectrumUnits'
 import type { SegmentedOption } from '../panels/segmented'
 import type { HarmonicMarkerUnit } from '../spectrumUnits'
-import { SPECTRUM_ANNOTATION_VIEW } from '../charts/annotationViews'
+import {
+  OSCILLOSCOPE_ANNOTATION_VIEW,
+  SPECTROGRAM_ANNOTATION_VIEW,
+  SPECTRUM_ANNOTATION_VIEW,
+} from '../charts/annotationViews'
+import type { AnnotationStyle } from '../measurements/chartAnnotations'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
@@ -51,6 +56,16 @@ const {
  */
 /** This chart's click snaps, which no other chart's does -- see SpectrumChart's readAnnotationAt. */
 const POINT_HINT = 'Click the chart to place it \u2014 the click snaps to the nearest peak.'
+
+/**
+ * The spectrogram offers the rule and nothing else.
+ *
+ * <p>Its y axis is an <b>age</b> in a rolling buffer: a point stored at -4 s names a different
+ * moment one second later, and the window moves on every tick as the history fills. A dashed
+ * rule at a frequency is the one honest thing to mark there, which is also why that style
+ * stayed in the model after this chart's own picker stopped offering it.</p>
+ */
+const SPECTROGRAM_STYLES: readonly AnnotationStyle[] = ['frequency']
 
 // FFT settings' L/R checkboxes (SpectrumConfigPanel.vue) are the source of truth for whether a
 // channel is processed at all — a channel turned off there has no data to show, so its own
@@ -243,6 +258,22 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
     </CollapsibleSection>
 
     <AnnotationsPanel :view="SPECTRUM_ANNOTATION_VIEW" :point-hint="POINT_HINT" />
+
+    <!-- This screen stacks up to three charts, and annotations belong to one chart each, so each
+         gets its own section -- shown only while its chart is, or the rail would carry two headings
+         for pictures that are not on screen. -->
+    <AnnotationsPanel
+      v-if="showSpectrogram"
+      :view="SPECTROGRAM_ANNOTATION_VIEW"
+      title="Spectrogram notes"
+      :styles="SPECTROGRAM_STYLES"
+      point-hint="Click the spectrogram to rule a line at that frequency."
+    />
+    <AnnotationsPanel
+      v-if="showOscilloscope"
+      :view="OSCILLOSCOPE_ANNOTATION_VIEW"
+      title="Oscilloscope notes"
+    />
 
     <!-- text-xs throughout, the same size SweepDisplayPanel uses, so the two screens' display
          rails read alike; the Channels row is that panel's too (caption, then Left/Right side by side). -->

@@ -5574,8 +5574,23 @@ onBeforeUnmount(() => stopLoadPolling?.())
                    and the oscilloscope's period count and channel are its own state. Unchecking
                    the panel hides it; unmounting it would throw all of that away. Both charts
                    skip a zero-width resize while hidden and refit when shown again. -->
-              <SpectrogramChart v-show="chartShowSpectrogram" ref="spectrogramChart" class="mt-3" :spectrum="spectrum" />
-              <OscilloscopeChart v-show="chartShowOscilloscope" class="mt-3" :scope="scope" :residual="scopeResidual" :status="status" />
+              <SpectrogramChart
+                v-show="chartShowSpectrogram"
+                ref="spectrogramChart"
+                v-model:annotations="annotations"
+                v-model:annotation-armed="annotationArmed"
+                class="mt-3"
+                :spectrum="spectrum"
+              />
+              <OscilloscopeChart
+                v-show="chartShowOscilloscope"
+                v-model:annotations="annotations"
+                v-model:annotation-armed="annotationArmed"
+                class="mt-3"
+                :scope="scope"
+                :residual="scopeResidual"
+                :status="status"
+              />
 
               <!-- Notes sits here, under the charts, and is the one screen where it is NOT directly
                    above History details. On the other six screens the two are adjacent because both

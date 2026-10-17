@@ -691,48 +691,28 @@ const { showPage } = useManual()
 
     <h2>Annotations</h2>
     <p>
-      A note drawn on the spectrum itself, for the thing you want a reader — or yourself next month —
-      to look at. Pick a style in the <strong>Annotations</strong> panel and press
-      <strong>Add</strong>: the chart arms, and the next click on it places the annotation. The click
-      snaps to the nearest peak, so clicking near the third harmonic rules exactly on it. Type the
-      note and press Enter; Escape leaves a note you have not typed anything into out altogether.
+      Notes drawn on a chart work the same way everywhere in the app, and the
+      <button type="button" class="manual-link" @click="showPage('charts')">Charts</button> page
+      describes them: the styles, the per-chart lists, and what a saved result keeps. Three things
+      are this screen's own.
     </p>
     <p>
-      <strong>Point</strong> marks one place on the trace — a dot at its frequency and level, a short
-      line, and the note in a box you can drag clear of the curve. <strong>Box</strong> marks a whole
-      region: arm it and <em>drag a rectangle</em> rather than clicking, and you get an outlined area
-      in the annotation's own colour with the note beside it, joined by a connector. A drag smaller
-      than about a dozen pixels in either direction places nothing and leaves the chart armed, so a
-      slip of the hand costs nothing. A box's edges are where you put them — unlike a point, they do
-      not snap to a peak.
+      A click on the <strong>spectrum</strong> snaps to the nearest peak, so clicking near the third
+      harmonic marks exactly it, and the note records the level the cursor readout was showing at
+      that moment. No other chart snaps, and a box's edges never do — they are where you put them.
     </p>
     <p>
-      A drawn box can be <strong>resized</strong> by dragging any of its edges or corners, and
-      <strong>moved</strong> by the small grip just inside its top-left corner. The grips are small on
-      purpose: a region can cover much of the plot, and dragging inside it still zooms the chart, which
-      is usually the next thing you want after marking something. Drag an edge past its opposite and
-      the box simply turns inside out, as in any drawing tool.
+      This screen stacks up to three charts, and each keeps its own notes: the rail carries an
+      <strong>Annotations</strong> panel for the spectrum and, while they are shown,
+      <strong>Spectrogram notes</strong> and <strong>Oscilloscope notes</strong> beneath it. The
+      spectrogram offers only a rule down the plot at one frequency; the oscilloscope takes points
+      and regions, with the caveat that it refits its axes to every incoming frame, so a note there
+      is worth more on a saved capture than on a live one.
     </p>
     <p>
-      The panel lists every annotation in the order they read across the chart, numbered and coloured
-      the same way the labels are, and each row can be retyped or deleted: a point's frequency and
-      level, a box's <strong>From</strong>/<strong>To</strong> in hertz and
-      <strong>Top</strong>/<strong>Bottom</strong> in dBV. <strong>Remove all</strong> clears the
-      chart. One chart carries up to 24.
-    </p>
-    <p>
-      Measurements annotated with an earlier version may carry a third kind, a dashed rule down the
-      plot at one frequency. Those are still drawn, still listed, still editable and still printed —
-      the style picker simply no longer offers to add new ones.
-    </p>
-    <p>
-      The annotations are saved with the measurement, so they are still there after a restart, and a
-      <em>result</em> keeps the ones that were on the chart when it was saved: changing the
-      measurement's annotations later does not rewrite what a result was saved with. To correct a
-      saved result's notes, open <strong>Edit</strong> on its history row — the list there is the same
-      one, without the chart to click on. They are drawn on screenshots and on the report's chart, and
-      the report's <strong>Annotations</strong> element lists them in a table whose numbers are the
-      labels on the picture.
+      Measurements annotated with an earlier version may carry a dashed rule down the plot at one
+      frequency on the spectrum itself. Those are still drawn, still listed, still editable and
+      still printed — the spectrum's own style picker simply no longer offers to add new ones.
     </p>
 
     <h2>Zooming</h2>

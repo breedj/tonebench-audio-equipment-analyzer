@@ -209,6 +209,62 @@ import SettingsTable from '../components/SettingsTable.vue'
       that changes the measurement — only how many bins are being summarised per pixel.
     </p>
 
+    <h2>Annotations</h2>
+    <p>
+      A note drawn on a chart itself, for the thing you want a reader — or yourself next month — to
+      look at. Every chart in the app takes them: the spectrum, the spectrogram, the oscilloscope,
+      the Bode plots, the distortion sweeps, the impedance curve and its locus, the impulse response
+      and its harmonics, and the Nyquist, Nichols, pole–zero and |H(s)| heat-map planes.
+    </p>
+    <p>
+      Pick a style in the <strong>Annotations</strong> panel and press <strong>Add</strong>: the
+      chart arms, and the next click on it places the note. Type it and press Enter; Escape leaves a
+      marker you have typed nothing into out altogether. <strong>Point</strong> marks one place — a
+      dot, a short line, and the note in a box you can drag clear of the curve.
+      <strong>Box</strong> marks a region: arm it and <em>drag a rectangle</em> rather than clicking.
+      A drag smaller than about a dozen pixels in either direction places nothing and leaves the
+      chart armed, so a slip of the hand costs nothing. A drawn box is resized by its edges and
+      corners and moved by the small grip inside its top-left; the grips are small on purpose,
+      because dragging inside a region still zooms the chart, which is usually the next thing you
+      want after marking something.
+    </p>
+    <p>
+      <strong>Notes belong to the chart they were drawn on.</strong> A measurement with several
+      charts — a frequency response has a Bode plot and four plane views, the impulse screen has
+      five — keeps a separate set for each, numbered from 1 on each, and the panel shows the one you
+      are looking at and says how many are on the others. Switching the projection switches the
+      list with it.
+    </p>
+    <p>
+      They also remember what their numbers <em>mean</em>. A note on a distortion sweep's output-watts
+      axis is stored in watts, so switching that axis to volts takes it off the picture rather than
+      redrawing it at the same number in another unit — switch back and it returns, untouched. The
+      same happens between a frequency response's level and gain views, and between the impulse
+      response's volts and dB views. Nothing is ever moved or deleted by a display change; it is only
+      not drawn where it would not mean anything. The panel's number boxes name the unit each note
+      was stored in.
+    </p>
+    <p>
+      The panel lists them in the order they read across the chart, numbered and coloured the way the
+      labels are, and each row can be retyped or deleted. <strong>Remove all</strong> clears that
+      chart. One measurement carries up to 24 notes across all of its charts.
+    </p>
+    <p>
+      Notes are saved with the measurement, so they survive a restart, and a <em>result</em> keeps
+      what was on the chart when it was saved. To correct a saved result's notes, open
+      <strong>Edit</strong> on its history row — the list there is the same one, without a chart to
+      click on, and it groups the notes by the chart each was drawn on. They are drawn on
+      screenshots and on the report's charts, and the report's <strong>Annotations</strong> element
+      prints a numbered table per chart, whose numbers are the labels on the picture.
+    </p>
+    <p>
+      Two charts are exceptions worth knowing. The <strong>spectrogram</strong> offers only a rule
+      down the plot at one frequency, because its other axis is how long ago a row was measured and
+      that keeps moving. The <strong>decay surfaces</strong> take no notes at all, and the |H(s)|
+      <strong>relief</strong> and <strong>slice</strong> views do not draw them either: a point on a
+      three-dimensional picture has a height as well as a position, which two numbers cannot name.
+    </p>
+
     <h2>Comparing runs</h2>
     <p>
       The <strong>History</strong> checklist in the display rail (right of the chart, or under it on

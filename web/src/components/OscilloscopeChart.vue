@@ -21,7 +21,27 @@ import {
   type ExportLegendEntry,
 } from '../charts/exportChart'
 
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
+
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes, across its charts; this one draws the waveform's. See FrequencyResponseChart. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   scope: Record<number, ScopeFrame>
   /**
    * The same tick's frames with the fundamental fitted and subtracted (the THD residual), present
@@ -112,8 +132,48 @@ function buildOptions(width: number, height: number, theme: (typeof THEME)[keyof
     ],
     cursor: { points: { show: false } },
     legend: { show: false },
+    // Last: whatever draws after the annotations paints over their labels.
+    plugins: [annotationsPlugin(annotationOverlay, ANNOTATION_AXES, () => annotationTheme(theme === THEME.dark))],
   }
 }
+
+/**
+ * What this chart's two axes are: a linear time in milliseconds against volts.
+ *
+ * <p>Both are stable quantities and both are deliberately <b>auto-ranged per frame</b> — every
+ * incoming frame is a fresh self-contained snapshot — so a note here is worth writing down with one
+ * caveat, which the manual states: a retrigger can move the picture under it, and a note outside
+ * the window the next frame fits is skipped until it comes back. Annotating a waveform in a report
+ * is a real want; a live scope is a poor place to keep one.</p>
+ */
+const ANNOTATION_AXES: UplotAnnotationAxes = { x: { quantity: 'ms' }, y: { quantity: 'volt' } }
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => 'Oscilloscope',
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot ? cssAnnotationPlot(plot, ANNOTATION_AXES) : null),
+  surface: () => plot?.over ?? null,
+  overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
+  redraw: () => plot?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+})
+
+function onWindowMouseUp() {
+  finishBoxGesture(plot, annotationOverlay)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+// A redraw, never a rebuild: annotations are draw-hook state.
+watch(
+  () => [annotationList.value, props.annotationNumbers] as const,
+  () => plot?.redraw(),
+  { deep: true },
+)
 
 // The axis label is baked into the plot's options, so a mode change rebuilds it.
 let plotIsResidual = false
@@ -125,6 +185,10 @@ function ensurePlot() {
   plot?.destroy()
   const width = el.getBoundingClientRect().width || 800
   plot = new uPlot(buildOptions(width, chartHeight.value, currentTheme(), true), [[], [], []], el)
+
+  // Click-to-annotate, and the drag mode an armed Box needs -- re-applied on every rebuild.
+  attachAnnotationListeners(plot, annotationOverlay)
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
   plotIsDark = darkQuery.matches
   plotIsResidual = residualMode.value
 }
@@ -451,6 +515,8 @@ function handleThemeChange() {
 }
 
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   resizeObserver = new ResizeObserver(handleResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
   darkQuery.addEventListener('change', handleThemeChange)
@@ -460,6 +526,8 @@ onMounted(() => {
   update()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   clearTimeout(liveCommitTimer)
   resizeObserver?.disconnect()
   darkQuery.removeEventListener('change', handleThemeChange)
@@ -505,6 +573,9 @@ onBeforeUnmount(() => {
       <span class="flex-1"></span>
       <span v-if="!scope[0] && !scope[1]">Waiting for data…</span>
     </div>
-    <div ref="containerRef" class="w-full"></div>
+    <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
+      <div ref="containerRef" class="w-full"></div>
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
+    </div>
   </section>
 </template>

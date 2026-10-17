@@ -95,9 +95,9 @@ public static class SweepEndpoints
         // sweeps are one screen to the user. Posted when a sweep screen is arrived at; nothing but
         // a sweep writes these runners, so the owner can be left alone while the user is elsewhere.
         // Both statuses come back, so the switch and the redraw are one round trip.
-        group.MapPost("/owner", (SweepOwnerRequest request, ThdSweepRunner thd, ImdSweepRunner imd) =>
+        group.MapPost("/owner", (RunOwnerRequest request, ThdSweepRunner thd, ImdSweepRunner imd) =>
         {
-            string? owner = string.IsNullOrWhiteSpace(request.Owner) ? null : request.Owner;
+            string? owner = request.Normalized;
             return Results.Ok(new SweepOwnerResponse(thd.SwitchOwner(owner), imd.SwitchOwner(owner)));
         });
 
@@ -228,13 +228,11 @@ public sealed record ThdAmplitudeSweepStartRequest(
 public sealed record SaveSweepRequest(long MeasurementTypeId, string Name, string? Notes);
 
 /// <summary>
-/// Which measurement the sweep runners' points belong to — the client's own "projectId:typeId"
-/// string, which this code never parses. Blank or absent means nobody, the state a fresh process
-/// is in. See <see cref="ThdSweepRunner.SwitchOwner"/>.
+/// Both sweep runners as the switch left them, so the caller redraws without a second round trip.
+/// The one owner endpoint that answers with two statuses: the THD and IMD sweeps are one screen to
+/// the user, so arriving at it switches both. The other six runners each have a screen of their own
+/// and answer with their own status alone.
 /// </summary>
-public sealed record SweepOwnerRequest(string? Owner);
-
-/// <summary>Both sweep runners as the switch left them, so the caller redraws without a second round trip.</summary>
 public sealed record SweepOwnerResponse(ThdSweepStatus Thd, ImdSweepStatus Imd);
 
 /// <summary>A stored sweep's points, ascending by frequency, each carrying its per-channel metrics.</summary>

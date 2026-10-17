@@ -261,5 +261,15 @@ export function useOutputImpedance() {
     async clear() {
       applyStatus(await api.clearOutputImpedance())
     },
+
+    /**
+     * Hands this runner the measurement now on screen and applies the status it answers with: the
+     * run it was holding is parked under the measurement that made it, and whatever the arriving
+     * one had parked comes back. Posted on arrival at this screen only — see
+     * OutputImpedanceRunner.SwitchOwner and RunParking.
+     */
+    async switchOwner(owner: string | null) {
+      applyStatus(await api.setOutputImpedanceOwner(owner))
+    },
   }
 }

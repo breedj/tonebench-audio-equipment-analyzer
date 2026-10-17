@@ -90,6 +90,14 @@ public static class FrequencyResponseEndpoints
             }
         });
 
+        // Points the runner at the measurement now on screen, parking the one being left — see
+        // FrequencyResponseRunner.SwitchOwner, and RunParking for the reasoning. Posted on arrival
+        // at a chirp screen only: nothing but a chirp writes this runner, so the owner can be left
+        // alone while the user is elsewhere. The answer is the status to redraw, so the switch and
+        // the redraw are one round trip.
+        group.MapPost("/owner", (RunOwnerRequest request, FrequencyResponseRunner runner) =>
+            Results.Ok(runner.SwitchOwner(request.Normalized)));
+
         group.MapPost("/save", async (
             SaveFrequencyResponseRequest request, MeasurementSaveService saveService, CancellationToken ct) =>
         {

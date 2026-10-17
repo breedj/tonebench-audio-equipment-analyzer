@@ -997,4 +997,90 @@ public class SteppedResponseRunnerTests
 
         Assert.All(status.PointPreviews!, p => Assert.True(p.FreqHz > 1500.0, $"{p.FreqHz:F1} Hz is from the first run"));
     }
+
+    [Fact]
+    public async Task ARunSwitchedAwayFromAndBackTo_IsStillThere()
+    {
+        // The sweep report of 2026-10-17 in this runner: one stepped runner serves every
+        // stepped-response measurement, so selecting a second one and coming back used to find an
+        // empty chart. See ThdSweepRunner.SwitchOwner.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        var measured = harness.Runner.Status;
+        Assert.NotEmpty(measured.Traces);
+        Assert.NotEmpty(measured.PointPreviews!);
+
+        // A different stepped measurement: this one has never run, so it gets an empty chart.
+        var other = harness.Runner.SwitchOwner("1:2");
+        Assert.Empty(other.Traces);
+        Assert.Equal(FrequencyResponsePhase.Idle, other.Phase);
+        Assert.Equal(0, other.PointCount);
+        Assert.Empty(harness.Runner.Status.Traces);
+
+        var back = harness.Runner.SwitchOwner("1:1");
+
+        Assert.Equal(measured.Traces.Count, back.Traces.Count);
+        Assert.Equal(measured.Phase, back.Phase);
+        Assert.Equal(measured.PointCount, back.PointCount);
+        // The preview rail belongs to the run, not to the screen.
+        Assert.Equal(measured.PointPreviews!.Count, back.PointPreviews!.Count);
+        Assert.Equal(back.Traces.Count, harness.Runner.Status.Traces.Count);
+        // And the as-run request with it, or the restored run could be looked at and not saved.
+        Assert.NotNull(harness.Runner.LastRequest);
+    }
+
+    [Fact]
+    public async Task SwitchingOwnerWhileARunIsGoing_IsIgnoredRatherThanRacingTheWriter()
+    {
+        // Unreachable from the app -- a measurement switch is refused while anything runs -- but a
+        // park that lifted the list the sweep is appending to would be far worse than a no-op.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(
+            Request(startFreqHz: 200.0, endFreqHz: 12000.0, stepsPerOctave: 6), CancellationToken.None);
+        try
+        {
+            harness.Runner.SwitchOwner("1:2");
+            Assert.Equal("1:1", harness.Runner.Owner);
+            Assert.True(harness.Runner.Running);
+        }
+        finally
+        {
+            await harness.Runner.CancelAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ARunThatWasCleared_StaysCleared_AcrossASwitchAwayAndBack()
+    {
+        // Clear is a deliberate "throw this away"; parking must not quietly undo it.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        harness.Runner.Clear();
+
+        harness.Runner.SwitchOwner("1:2");
+
+        Assert.Empty(harness.Runner.SwitchOwner("1:1").Traces);
+    }
+
+    [Fact]
+    public async Task ARunMadeBeforeAnyMeasurementClaimedTheRunner_IsAdoptedRatherThanThrownAway()
+    {
+        // A page that reloaded mid-run: nobody owns it, and the first measurement to arrive keeps
+        // it -- the same rule the FFT display's owner follows.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        int measured = harness.Runner.Status.Traces.Count;
+
+        Assert.Equal(measured, harness.Runner.SwitchOwner("1:1").Traces.Count);
+    }
 }

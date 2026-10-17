@@ -80,6 +80,13 @@ public sealed class OutputImpedanceRunner(
     private double? _secondGainAt1kDb;
     private OutputImpedanceRequest? _lastRequest;
 
+    /// <summary>
+    /// The runs of the measurements switched away from — see <see cref="SwitchOwner"/>, and
+    /// <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning. Four, the same bound every
+    /// one of these uses.
+    /// </summary>
+    private readonly RunParking<ParkedRun> _parking = new(capacity: 4);
+
     /// <summary>The request the most recent run used — saving needs the as-run configuration.</summary>
     public OutputImpedanceRequest? LastRequest => _lastRequest;
 
@@ -258,6 +265,116 @@ public sealed class OutputImpedanceRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen — the output-impedance screen's
+    /// counterpart of <see cref="FrequencyResponseRunner.SwitchOwner"/>, following
+    /// <see cref="ThdSweepRunner.SwitchOwner"/>'s six rules unchanged. The two gain passes are
+    /// parked with the Zout curve, because
+    /// <see cref="MeasurementSaveService.SaveOutputImpedanceAsync"/> stores them beside it so a
+    /// result keeps what it was derived from.
+    ///
+    /// <para>Ignoring the switch while <see cref="Running"/> covers one case the other five do not:
+    /// <see cref="FrequencyResponsePhase.WaitingForLoadChange"/> is a busy phase, so a run paused
+    /// for the user to move the load cannot be parked out from under its own CONTINUE.</para>
+    /// </summary>
+    public OutputImpedanceStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            var current = _trace is null
+                ? null
+                : new ParkedRun(
+                    _phase, _passesCompleted, _pointsMeasured, _pointCount, _averageCount,
+                    _generatorAmpDbv, _inputRangeDbv, _binHz, _sampleRateHz, _fftSize, _loadOhms,
+                    _secondLoadOhms, _nominalOhms, _rightChannelIsReference, _error, _warning,
+                    _trace, _firstGainTrace, _secondGainTrace, _medianOhms, _zoutAt1kOhms,
+                    _dampingFactorAt1k, _firstGainAt1kDb, _secondGainAt1kDb, _lastRequest);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _passesCompleted = parked.PassesCompleted;
+                _pointsMeasured = parked.PointsMeasured;
+                _pointCount = parked.PointCount;
+                _averageCount = parked.AverageCount;
+                _generatorAmpDbv = parked.GeneratorAmpDbv;
+                _inputRangeDbv = parked.InputRangeDbv;
+                _binHz = parked.BinHz;
+                _sampleRateHz = parked.SampleRateHz;
+                _fftSize = parked.FftSize;
+                _loadOhms = parked.LoadOhms;
+                _secondLoadOhms = parked.SecondLoadOhms;
+                _nominalOhms = parked.NominalOhms;
+                _rightChannelIsReference = parked.RightChannelIsReference;
+                _error = parked.Error;
+                _warning = parked.Warning;
+                _trace = parked.Trace;
+                _firstGainTrace = parked.FirstGainTrace;
+                _secondGainTrace = parked.SecondGainTrace;
+                _medianOhms = parked.MedianOhms;
+                _zoutAt1kOhms = parked.ZoutAt1kOhms;
+                _dampingFactorAt1k = parked.DampingFactorAt1k;
+                _firstGainAt1kDb = parked.FirstGainAt1kDb;
+                _secondGainAt1kDb = parked.SecondGainAt1kDb;
+                _lastRequest = parked.LastRequest;
+            }
+            else if (outcome.Cleared)
+            {
+                _trace = null;
+                _firstGainTrace = null;
+                _secondGainTrace = null;
+                _phase = FrequencyResponsePhase.Idle;
+                _passesCompleted = 0;
+                _pointsMeasured = 0;
+                _pointCount = 0;
+                _averageCount = 0;
+                _generatorAmpDbv = 0.0;
+                _inputRangeDbv = null;
+                _binHz = 0.0;
+                _sampleRateHz = 0.0;
+                _fftSize = 0;
+                _loadOhms = 0.0;
+                _secondLoadOhms = null;
+                _nominalOhms = 0.0;
+                _rightChannelIsReference = false;
+                _error = null;
+                _warning = null;
+                _medianOhms = null;
+                _zoutAt1kOhms = null;
+                _dampingFactorAt1k = null;
+                _firstGainAt1kDb = null;
+                _secondGainAt1kDb = null;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the run on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus the two gain passes and the as-run request the save path reads.</summary>
+    private sealed record ParkedRun(
+        FrequencyResponsePhase Phase, int PassesCompleted, int PointsMeasured, int PointCount,
+        int AverageCount, double GeneratorAmpDbv, double? InputRangeDbv, double BinHz,
+        double SampleRateHz, int FftSize, double LoadOhms, double? SecondLoadOhms,
+        double NominalOhms, bool RightChannelIsReference, string? Error, string? Warning,
+        ImpedanceTrace? Trace, FrequencyResponseTrace? FirstGainTrace,
+        FrequencyResponseTrace? SecondGainTrace, double? MedianOhms, double? ZoutAt1kOhms,
+        double? DampingFactorAt1k, double? FirstGainAt1kDb, double? SecondGainAt1kDb,
+        OutputImpedanceRequest? LastRequest);
 
     private bool WillOwnInputRange() =>
         session.RunnerOwnsInputRange;

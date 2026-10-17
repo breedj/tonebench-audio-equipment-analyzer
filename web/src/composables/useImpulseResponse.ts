@@ -104,6 +104,20 @@ export function useImpulseResponse() {
   }
 
   /**
+   * Hands the runner the measurement now on screen: the run it was holding is parked under the
+   * measurement that made it, and whatever the arriving one had parked comes back. Posted on
+   * arrival at this screen only — see ImpulseResponseRunner.SwitchOwner and RunParking.
+   *
+   * <p>The decay surfaces are dropped with the switch rather than kept per owner: they are
+   * analyses of whichever impulse was on screen, each is far larger than the status, and the panel
+   * recomputes one as soon as it is asked for.</p>
+   */
+  async function switchOwner(owner: string | null): Promise<void> {
+    invalidateDecay()
+    status.value = await api.setImpulseResponseOwner(owner)
+  }
+
+  /**
    * Recomputes one decay surface from the impulse response already measured. Both of these share
    * one in-flight slot and one error line: only one is on screen at a time, and a failed request is
    * almost always a settings problem whose message is the useful part of the response.
@@ -281,6 +295,7 @@ export function useImpulseResponse() {
     start,
     cancel,
     clear,
+    switchOwner,
     refreshReferences,
     captureReference,
     deleteReference,

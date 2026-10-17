@@ -73,6 +73,14 @@ public sealed class SteppedResponseRunner(
     private BandwidthReferenceSpec? _bandwidthOverride;
 
     /// <summary>
+    /// The runs of the measurements switched away from — see <see cref="SwitchOwner"/>, and
+    /// <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning. Four, the same bound as the
+    /// sweep runners': a parked run holds a preview per point per input, which is the same order of
+    /// megabytes a parked sweep is.
+    /// </summary>
+    private readonly RunParking<ParkedRun> _parking = new(capacity: 4);
+
+    /// <summary>
     /// The request the most recent run used. Saving needs the as-run configuration, not whatever the
     /// panel happens to show by the time Save is pressed.
     /// </summary>
@@ -230,6 +238,91 @@ public sealed class SteppedResponseRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen — the stepped sweep's counterpart of
+    /// <see cref="FrequencyResponseRunner.SwitchOwner"/>, following
+    /// <see cref="ThdSweepRunner.SwitchOwner"/>'s six rules unchanged. The point previews are parked
+    /// with the traces: the rail they fill belongs to the run, and a restored run showing the
+    /// previous measurement's captures would be the 2026-09-27 fault with a different store.
+    /// </summary>
+    public FrequencyResponseStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            var current = _traces.Count == 0
+                ? null
+                : new ParkedRun(
+                    _phase, _pointsMeasured, _pointCount, _averageCount, _generatorAmpDbv, _binHz,
+                    _sampleRateHz, _fftSize, _error, _phaseKind, _rightChannelIsReference, _traces,
+                    _pointPreviews, _lastRequest, _lastPoints, _bandwidthOverride);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _pointsMeasured = parked.PointsMeasured;
+                _pointCount = parked.PointCount;
+                _averageCount = parked.AverageCount;
+                _generatorAmpDbv = parked.GeneratorAmpDbv;
+                _binHz = parked.BinHz;
+                _sampleRateHz = parked.SampleRateHz;
+                _fftSize = parked.FftSize;
+                _error = parked.Error;
+                _phaseKind = parked.PhaseKind;
+                _rightChannelIsReference = parked.RightChannelIsReference;
+                _traces = parked.Traces;
+                _pointPreviews = parked.PointPreviews;
+                _lastRequest = parked.LastRequest;
+                _lastPoints = parked.LastPoints;
+                _bandwidthOverride = parked.BandwidthOverride;
+            }
+            else if (outcome.Cleared)
+            {
+                // Fresh lists, never the parked ones emptied: the park holds these very references.
+                _traces = [];
+                _pointPreviews = [];
+                _lastPoints = null;
+                _bandwidthOverride = null;
+                _phase = FrequencyResponsePhase.Idle;
+                _pointsMeasured = 0;
+                _pointCount = 0;
+                _averageCount = 0;
+                _generatorAmpDbv = 0.0;
+                _binHz = 0.0;
+                _sampleRateHz = 0.0;
+                _fftSize = 0;
+                _error = null;
+                _phaseKind = ResponsePhaseKind.None;
+                _rightChannelIsReference = false;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the run on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields, the as-run request, and what a post-run bandwidth change reads.</summary>
+    private sealed record ParkedRun(
+        FrequencyResponsePhase Phase, int PointsMeasured, int PointCount, int AverageCount,
+        double GeneratorAmpDbv, double BinHz, double SampleRateHz, int FftSize, string? Error,
+        ResponsePhaseKind PhaseKind, bool RightChannelIsReference,
+        List<FrequencyResponseTrace> Traces, List<ResponsePointPreview> PointPreviews,
+        SteppedResponseRequest? LastRequest,
+        (double GeneratorAmpDbv, List<SteppedPoint> Points)? LastPoints,
+        BandwidthReferenceSpec? BandwidthOverride);
 
     /// <summary>
     /// Re-finds the bandwidth corners of the traces on screen against a new reference, without

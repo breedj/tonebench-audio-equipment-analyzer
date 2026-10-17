@@ -73,7 +73,8 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(ThdSweepStarted))]
 [JsonSerializable(typeof(ThdSweepStatus))]
 [JsonSerializable(typeof(SaveSweepRequest))]
-[JsonSerializable(typeof(SweepOwnerRequest))]
+// The body of every POST .../owner — one record for all eight runners, see RunOwnerRequest.
+[JsonSerializable(typeof(RunOwnerRequest))]
 [JsonSerializable(typeof(SweepOwnerResponse))]
 [JsonSerializable(typeof(StoredSweepResponse))]
 [JsonSerializable(typeof(ThdVsFrequencyParameters))]

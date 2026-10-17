@@ -657,6 +657,26 @@ export function useFrequencyResponse() {
     async clearTarget(t: ResponseTarget) {
       applyStatus(states[t], await clearFor(t))
     },
+
+    /**
+     * Hands one named runner the measurement now on screen, and applies the status it answers with
+     * — the run it was holding is parked under the measurement that made it, and whatever the
+     * arriving one had parked comes back. Named rather than acting on `target` for the same reason
+     * `clearTarget` is: App.vue's `discardForeignLiveState` runs *before* the selection (and
+     * therefore `target`) moves. See FrequencyResponseRunner.SwitchOwner.
+     */
+    async switchOwner(t: ResponseTarget, owner: string | null) {
+      applyStatus(states[t], await ownerFor(t, owner))
+    },
+
+    /**
+     * Re-reads one named runner's status. The fallback when the owner call itself failed: the park
+     * did not happen, so what the runner holds is still the outgoing measurement's, and showing it
+     * is exactly what this screen did before parking existed.
+     */
+    async refreshTarget(t: ResponseTarget) {
+      applyStatus(states[t], await statusFor(t))
+    },
   }
 }
 
@@ -690,5 +710,16 @@ function clearFor(t: ResponseTarget) {
       return api.clearCrosstalk()
     default:
       return api.clearFrequencyResponse()
+  }
+}
+
+function ownerFor(t: ResponseTarget, owner: string | null) {
+  switch (t) {
+    case 'Stepped':
+      return api.setSteppedResponseOwner(owner)
+    case 'Crosstalk':
+      return api.setCrosstalkOwner(owner)
+    default:
+      return api.setFrequencyResponseOwner(owner)
   }
 }

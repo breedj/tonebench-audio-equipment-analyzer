@@ -68,6 +68,12 @@ public static class ImpulseResponseEndpoints
             }
         });
 
+        // Points the runner at the measurement now on screen, parking the one being left — see
+        // ImpulseResponseRunner.SwitchOwner, and POST /api/frequency-response/owner for what this
+        // family of endpoints is and when the client posts to one.
+        group.MapPost("/owner", (RunOwnerRequest request, ImpulseResponseRunner runner) =>
+            Results.Ok(runner.SwitchOwner(request.Normalized)));
+
         group.MapPost("/save", async (
             SaveImpulseResponseRequest request, MeasurementSaveService saveService, CancellationToken ct) =>
         {

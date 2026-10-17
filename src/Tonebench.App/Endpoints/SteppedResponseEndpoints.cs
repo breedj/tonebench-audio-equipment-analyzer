@@ -99,6 +99,12 @@ public static class SteppedResponseEndpoints
             }
         });
 
+        // Points the runner at the measurement now on screen, parking the one being left — see
+        // SteppedResponseRunner.SwitchOwner, and POST /api/frequency-response/owner for what this
+        // family of endpoints is and when the client posts to one.
+        group.MapPost("/owner", (RunOwnerRequest request, SteppedResponseRunner runner) =>
+            Results.Ok(runner.SwitchOwner(request.Normalized)));
+
         group.MapPost("/save", async (
             SaveFrequencyResponseRequest request, MeasurementSaveService saveService, CancellationToken ct) =>
         {

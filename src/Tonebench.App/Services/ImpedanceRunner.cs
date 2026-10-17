@@ -104,6 +104,13 @@ public sealed class ImpedanceRunner(
     private List<ImpedanceTrace> _traces = [];
     private ImpedanceRequest? _lastRequest;
 
+    /// <summary>
+    /// The runs of the measurements switched away from — see <see cref="SwitchOwner"/>, and
+    /// <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning. Four, the same bound every
+    /// one of these uses.
+    /// </summary>
+    private readonly RunParking<ParkedRun> _parking = new(capacity: 4);
+
     /// <summary>The request the most recent run used. Saving needs the as-run configuration, not whatever the panel shows by then.</summary>
     public ImpedanceRequest? LastRequest => _lastRequest;
 
@@ -271,6 +278,109 @@ public sealed class ImpedanceRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen — the impedance screen's counterpart of
+    /// <see cref="FrequencyResponseRunner.SwitchOwner"/>, following
+    /// <see cref="ThdSweepRunner.SwitchOwner"/>'s six rules unchanged.
+    ///
+    /// <para>A calibration capture writes <see cref="_traces"/> too (one standard curve), so the
+    /// emptiness test covers both kinds of run — and the captured standard is parked with it, or
+    /// switching away between capturing an open and capturing a short would lose the first one.</para>
+    /// </summary>
+    public ImpedanceStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            var current = _traces.Count == 0
+                ? null
+                : new ParkedRun(
+                    _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
+                    _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _referenceOhms,
+                    _rightChannelIsReference, _calTarget, _stimulus, _pointsMeasured, _pointCount,
+                    _capturedCalibration, _medianOhms, _warning, _standingWarning,
+                    _driveCurrentAmps, _error, _traces, _lastRequest);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _continuous = parked.Continuous;
+                _passesCompleted = parked.PassesCompleted;
+                _averagesTaken = parked.AveragesTaken;
+                _averageCount = parked.AverageCount;
+                _generatorAmpDbv = parked.GeneratorAmpDbv;
+                _binHz = parked.BinHz;
+                _sampleRateHz = parked.SampleRateHz;
+                _fftSize = parked.FftSize;
+                _referenceOhms = parked.ReferenceOhms;
+                _rightChannelIsReference = parked.RightChannelIsReference;
+                _calTarget = parked.CalTarget;
+                _stimulus = parked.Stimulus;
+                _pointsMeasured = parked.PointsMeasured;
+                _pointCount = parked.PointCount;
+                _capturedCalibration = parked.CapturedCalibration;
+                _medianOhms = parked.MedianOhms;
+                _warning = parked.Warning;
+                _standingWarning = parked.StandingWarning;
+                _driveCurrentAmps = parked.DriveCurrentAmps;
+                _error = parked.Error;
+                _traces = parked.Traces;
+                _lastRequest = parked.LastRequest;
+            }
+            else if (outcome.Cleared)
+            {
+                // A fresh list, never the parked one emptied: the park holds this very reference.
+                _traces = [];
+                _phase = FrequencyResponsePhase.Idle;
+                _continuous = false;
+                _passesCompleted = 0;
+                _averagesTaken = 0;
+                _averageCount = 0;
+                _generatorAmpDbv = 0.0;
+                _binHz = 0.0;
+                _sampleRateHz = 0.0;
+                _fftSize = 0;
+                _referenceOhms = 0.0;
+                _rightChannelIsReference = false;
+                _calTarget = ImpedanceCalTarget.None;
+                _stimulus = ImpedanceStimulus.Chirp;
+                _pointsMeasured = null;
+                _pointCount = null;
+                _capturedCalibration = null;
+                _medianOhms = null;
+                _driveCurrentAmps = null;
+                _standingWarning = null;
+                _warning = null;
+                _error = null;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the run on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus the as-run request and the standing warning behind it.</summary>
+    private sealed record ParkedRun(
+        FrequencyResponsePhase Phase, bool Continuous, int PassesCompleted, int AveragesTaken,
+        int AverageCount, double GeneratorAmpDbv, double BinHz, double SampleRateHz, int FftSize,
+        double ReferenceOhms, bool RightChannelIsReference, ImpedanceCalTarget CalTarget,
+        ImpedanceStimulus Stimulus, int? PointsMeasured, int? PointCount,
+        ImpedanceCalibration? CapturedCalibration, double? MedianOhms, string? Warning,
+        string? StandingWarning, double? DriveCurrentAmps, string? Error,
+        List<ImpedanceTrace> Traces, ImpedanceRequest? LastRequest);
 
     private async Task RunAsync(ImpedanceRequest request, ImpedanceStepPlan[]? steps, CancellationToken ct)
     {

@@ -643,6 +643,8 @@ const {
   clear: clearResponseRun,
   clearTarget: clearResponseTarget,
   refresh: refreshResponse,
+  refreshTarget: refreshResponseTarget,
+  switchOwner: switchResponseOwner,
   setTarget: setResponseTarget,
   phaseKind: responsePhaseKind,
   rightChannelIsReference: responseRightChannelIsReference,
@@ -711,6 +713,7 @@ const {
   cancel: cancelImpedanceRun,
   clear: clearImpedanceRun,
   refresh: refreshImpedance,
+  switchOwner: switchImpedanceOwner,
 } = useImpedance()
 
 const {
@@ -730,6 +733,7 @@ const {
   start: startImpulse,
   cancel: cancelImpulse,
   clear: clearImpulse,
+  switchOwner: switchImpulseOwner,
   refreshReferences: refreshLoopbackReferences,
   csdSurface: impulseCsdSurface,
   burstSurface: impulseBurstSurface,
@@ -889,6 +893,7 @@ const {
   cancel: cancelOutputImpedanceRun,
   clear: clearOutputImpedanceRun,
   refresh: refreshOutputImpedance,
+  switchOwner: switchOutputImpedanceOwner,
 } = useOutputImpedance()
 
 /**
@@ -2967,6 +2972,32 @@ async function discardForeignLiveState(nextTypeId: number) {
     return
   }
 
+  // Every other runner is parked exactly the same way, by the same reasoning and against the same
+  // six rules -- see RunParking. The six were still being *cleared* here until 2026-10-17, which is
+  // the sweep report's own bug in six more places: measure a frequency response, select another
+  // frequency-response measurement, come back, and the curves were gone. Each screen switches its
+  // own runner and no other, because nothing but that screen writes it.
+  const parked = PARKED_LIVE_STORES[nextStore]
+  if (parked) {
+    const [, switched] = await Promise.all([
+      retention,
+      parked.switch(nextOwner).then(() => true).catch(() => false),
+    ])
+    // A failure leaves whatever the runner holds on screen and the owner where it was -- the same
+    // trade the sweep branch above makes, and the same one selectType makes about this whole
+    // function. Re-read only then: a switch that went through has already applied the status it
+    // answered with, so re-reading would be a second round trip for a figure in hand.
+    if (!switched) await parked.reread().catch(() => undefined)
+    // Nothing left for foreignLiveStores to discard, and the owner map is what tells the *next*
+    // switch that this store is spoken for -- which the server now tracks itself.
+    liveOwners.value = releaseLive(liveOwners.value, [nextStore])
+    return
+  }
+
+  // The fallback, and nothing reaches it today: every store a measurement kind can arrive at is
+  // either swapped (fft), parked by the sweep call, or parked by the table below. That is what
+  // `PARKED_LIVE_STORES` being Partial is for -- a store added later with no park of its own gets
+  // this, the old behaviour, rather than silently showing another measurement's run.
   const stale = foreignLiveStores(liveOwners.value, nextOwner, [nextStore])
   if (stale.length === 0) {
     await retention
@@ -2978,6 +3009,37 @@ async function discardForeignLiveState(nextTypeId: number) {
   liveOwners.value = releaseLive(liveOwners.value, stale)
 
   await Promise.all([retention, ...stale.map((store) => discardLiveStore(store).catch(() => undefined))])
+}
+
+/**
+ * The six runners that park per measurement on arrival at their own screen: how to hand each one
+ * the arriving owner, and how to re-read it if that call failed. The switch applies the status it
+ * answers with itself, inside the store, the way `clear` and `cancel` already do there.
+ *
+ * <p>A table rather than six branches, so the set is one thing to read against `LiveStore` and a
+ * screen cannot be wired to another screen's runner. `fft`, `sweep` and `imdSweep` are deliberately
+ * absent and handled above — the FFT display is swapped client-side, and the two sweep runners
+ * share one endpoint because they share one screen. A store missing from here is still *cleared*
+ * on a switch, which is what every one of these did before 2026-10-17.</p>
+ */
+const PARKED_LIVE_STORES: Partial<
+  Record<LiveStore, { switch: (owner: string | null) => Promise<void>; reread: () => Promise<void> }>
+> = {
+  chirp: {
+    switch: (owner) => switchResponseOwner('Chirp', owner),
+    reread: () => refreshResponseTarget('Chirp'),
+  },
+  stepped: {
+    switch: (owner) => switchResponseOwner('Stepped', owner),
+    reread: () => refreshResponseTarget('Stepped'),
+  },
+  crosstalk: {
+    switch: (owner) => switchResponseOwner('Crosstalk', owner),
+    reread: () => refreshResponseTarget('Crosstalk'),
+  },
+  impedance: { switch: switchImpedanceOwner, reread: refreshImpedance },
+  impulse: { switch: switchImpulseOwner, reread: refreshImpulse },
+  outputImpedance: { switch: switchOutputImpedanceOwner, reread: refreshOutputImpedance },
 }
 
 /**
@@ -3034,12 +3096,15 @@ function swapFftDisplay(nextOwner: string | null): boolean {
   return true
 }
 
+/**
+ * Throws one live store away. The fallback path of `discardForeignLiveState` above, which no store
+ * reaches today — every one of them is swapped or parked instead. Kept whole because `LiveStore`
+ * is exhaustive here: a store added later with no park gets this rather than falling through.
+ */
 function discardLiveStore(store: LiveStore): Promise<unknown> {
   switch (store) {
     case 'fft':
-      // Unreachable from discardForeignLiveState, which swaps the FFT display rather than
-      // discarding it (see swapFftDisplay). Kept because `LiveStore` includes it and a kind added
-      // later must not fall through this switch silently.
+      // The FFT display is swapped rather than discarded (see swapFftDisplay).
       restoreFftDisplay(null)
       requestChartResetPeakHold()
       spectrogramChart.value?.clearHistory()

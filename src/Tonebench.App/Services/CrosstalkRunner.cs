@@ -56,6 +56,13 @@ public sealed class CrosstalkRunner(
     private Dictionary<FrequencyResponseTraceKind, double> _generatorAmpDbvByKind = [];
     private CrosstalkRequest? _lastRequest;
 
+    /// <summary>
+    /// The runs of the measurements switched away from — see <see cref="SwitchOwner"/>, and
+    /// <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning. Four, the same bound every
+    /// one of these uses.
+    /// </summary>
+    private readonly RunParking<ParkedRun> _parking = new(capacity: 4);
+
     /// <summary>The request the most recent run used — saving needs the as-run configuration.</summary>
     public CrosstalkRequest? LastRequest => _lastRequest;
 
@@ -197,6 +204,85 @@ public sealed class CrosstalkRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen — crosstalk's counterpart of
+    /// <see cref="FrequencyResponseRunner.SwitchOwner"/>, following
+    /// <see cref="ThdSweepRunner.SwitchOwner"/>'s six rules unchanged. The per-pass generator levels
+    /// are parked with the traces: <see cref="MeasurementSaveService.SaveCrosstalkAsync"/> reads
+    /// them beside the status, so a restored run without them saves a result that cannot say what
+    /// drove it.
+    /// </summary>
+    public FrequencyResponseStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            var current = _traces.Count == 0
+                ? null
+                : new ParkedRun(
+                    _phase, _passesCompleted, _pointsMeasured, _pointCount, _averageCount,
+                    _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _error, _traces,
+                    _generatorAmpDbvByKind, _lastRequest);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _passesCompleted = parked.PassesCompleted;
+                _pointsMeasured = parked.PointsMeasured;
+                _pointCount = parked.PointCount;
+                _averageCount = parked.AverageCount;
+                _generatorAmpDbv = parked.GeneratorAmpDbv;
+                _binHz = parked.BinHz;
+                _sampleRateHz = parked.SampleRateHz;
+                _fftSize = parked.FftSize;
+                _error = parked.Error;
+                _traces = parked.Traces;
+                _generatorAmpDbvByKind = parked.GeneratorAmpDbvByKind;
+                _lastRequest = parked.LastRequest;
+            }
+            else if (outcome.Cleared)
+            {
+                // Fresh collections, never the parked ones emptied: the park holds these very
+                // references.
+                _traces = [];
+                _generatorAmpDbvByKind = [];
+                _phase = FrequencyResponsePhase.Idle;
+                _passesCompleted = 0;
+                _pointsMeasured = 0;
+                _pointCount = 0;
+                _averageCount = 0;
+                _generatorAmpDbv = 0.0;
+                _binHz = 0.0;
+                _sampleRateHz = 0.0;
+                _fftSize = 0;
+                _error = null;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the run on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus what the save path reads beside them.</summary>
+    private sealed record ParkedRun(
+        FrequencyResponsePhase Phase, int PassesCompleted, int PointsMeasured, int PointCount,
+        int AverageCount, double GeneratorAmpDbv, double BinHz, double SampleRateHz, int FftSize,
+        string? Error, List<FrequencyResponseTrace> Traces,
+        Dictionary<FrequencyResponseTraceKind, double> GeneratorAmpDbvByKind,
+        CrosstalkRequest? LastRequest);
 
     private bool WillOwnInputRange() =>
         session.RunnerOwnsInputRange;

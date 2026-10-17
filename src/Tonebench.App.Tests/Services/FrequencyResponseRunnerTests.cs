@@ -1257,6 +1257,93 @@ public class FrequencyResponseRunnerTests
         Assert.Null(harness.Runner.LastRequest);
     }
 
+    [Fact]
+    public async Task ARunSwitchedAwayFromAndBackTo_IsStillThere()
+    {
+        // The sweep report of 2026-10-17 in this runner: one chirp runner serves every
+        // frequency-response measurement, so selecting a second one and coming back used to find an
+        // empty chart. See ThdSweepRunner.SwitchOwner.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        var measured = harness.Runner.Status;
+        Assert.NotEmpty(measured.Traces);
+
+        // A different response measurement: this one has never run, so it gets an empty chart.
+        var other = harness.Runner.SwitchOwner("1:2");
+        Assert.Empty(other.Traces);
+        Assert.Equal(FrequencyResponsePhase.Idle, other.Phase);
+        Assert.Empty(harness.Runner.Status.Traces);
+
+        var back = harness.Runner.SwitchOwner("1:1");
+
+        Assert.Equal(measured.Traces.Count, back.Traces.Count);
+        Assert.Equal(measured.Phase, back.Phase);
+        Assert.Equal(measured.FftSize, back.FftSize);
+        // The returned status and the runner's own must agree -- the browser applies the response
+        // directly rather than polling again.
+        Assert.Equal(back.Traces.Count, harness.Runner.Status.Traces.Count);
+        // And the as-run request with it, or the restored run could be looked at and not saved:
+        // MeasurementSaveService.SaveFrequencyResponseAsync refuses without one.
+        Assert.NotNull(harness.Runner.LastRequest);
+        // The full-resolution estimates too, or a restored run's bandwidth reference could be
+        // changed and quietly do nothing.
+        Assert.NotEmpty(harness.Runner.ApplyBandwidthReference(BandwidthReferenceSpec.Peak).Traces);
+    }
+
+    [Fact]
+    public async Task SwitchingOwnerWhileARunIsGoing_IsIgnoredRatherThanRacingTheWriter()
+    {
+        // Unreachable from the app -- a measurement switch is refused while anything runs -- but a
+        // park that lifted the traces a pass is about to replace would be far worse than a no-op.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(continuous: true), CancellationToken.None);
+        try
+        {
+            harness.Runner.SwitchOwner("1:2");
+            Assert.Equal("1:1", harness.Runner.Owner);
+            Assert.True(harness.Runner.Running);
+        }
+        finally
+        {
+            await harness.Runner.CancelAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ARunThatWasCleared_StaysCleared_AcrossASwitchAwayAndBack()
+    {
+        // Clear is a deliberate "throw this away"; parking must not quietly undo it.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        harness.Runner.Clear();
+
+        harness.Runner.SwitchOwner("1:2");
+
+        Assert.Empty(harness.Runner.SwitchOwner("1:1").Traces);
+    }
+
+    [Fact]
+    public async Task ARunMadeBeforeAnyMeasurementClaimedTheRunner_IsAdoptedRatherThanThrownAway()
+    {
+        // A page that reloaded mid-run, or a run started from a script: nobody owns it, and the
+        // first measurement to arrive keeps it -- the same rule the FFT display's owner follows.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        int measured = harness.Runner.Status.Traces.Count;
+
+        Assert.Equal(measured, harness.Runner.SwitchOwner("1:1").Traces.Count);
+    }
+
     /// <summary>
     /// Wraps a simulated device and low-passes its left channel, so a test has a DUT with a corner
     /// the measurement is supposed to find. Only the left input is filtered — the right stays the

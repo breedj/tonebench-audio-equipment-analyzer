@@ -105,6 +105,15 @@ public sealed class FrequencyResponseRunner(
     private BandwidthReferenceSpec? _bandwidthOverride;
 
     /// <summary>
+    /// The runs of the measurements switched away from, so clicking one away and back does not throw
+    /// a chirp away — see <see cref="SwitchOwner"/>, and <see cref="ThdSweepRunner.SwitchOwner"/> for
+    /// the whole reasoning. Four, the sweep runners' bound and the retained spectrum's: a parked run
+    /// holds <see cref="_lastResults"/>, which is three arrays of <c>FftSize/2</c> doubles, so an
+    /// unbounded map would keep every chirp any measurement had ever run.
+    /// </summary>
+    private readonly RunParking<ParkedRun> _parking = new(capacity: 4);
+
+    /// <summary>
     /// The request the most recent run used. Saving needs the as-run configuration, not whatever the
     /// panel happens to show by the time Save is pressed.
     /// </summary>
@@ -257,6 +266,106 @@ public sealed class FrequencyResponseRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen: the run it holds is parked under the
+    /// measurement it belongs to, and whatever that one had parked becomes the live run. Returns the
+    /// status the caller should now show.
+    ///
+    /// <para><see cref="ThdSweepRunner.SwitchOwner"/> states the six rules all of these follow, and
+    /// this one follows them unchanged — the park is the server's because <b>Save</b> reads
+    /// <see cref="Status"/> and <see cref="LastRequest"/> here too, it is posted on arrival at a
+    /// chirp screen only, a null snapshot drops the outgoing owner's entry so a Clear is not undone,
+    /// an unowned run is adopted rather than parked, and a switch while a run is going is ignored
+    /// rather than racing the pass still writing <see cref="_traces"/>.</para>
+    ///
+    /// <para>What is parked beyond the status: the as-run request (without it a restored run could
+    /// be looked at and not saved), <see cref="_lastResults"/> and <see cref="_bandwidthOverride"/>
+    /// (without them <see cref="ApplyBandwidthReference"/> would answer for a restored run by
+    /// quietly doing nothing), and the warning line, which belongs to the run that earned it.</para>
+    /// </summary>
+    public FrequencyResponseStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            var current = _traces.Count == 0
+                ? null
+                : new ParkedRun(
+                    _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
+                    _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
+                    _rightChannelIsReference, _traces, _lastRequest, _warning, _lastResults,
+                    _bandwidthOverride);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _continuous = parked.Continuous;
+                _passesCompleted = parked.PassesCompleted;
+                _averagesTaken = parked.AveragesTaken;
+                _averageCount = parked.AverageCount;
+                _generatorAmpDbv = parked.GeneratorAmpDbv;
+                _binHz = parked.BinHz;
+                _sampleRateHz = parked.SampleRateHz;
+                _fftSize = parked.FftSize;
+                _latencySamples = parked.LatencySamples;
+                _error = parked.Error;
+                _rightChannelIsReference = parked.RightChannelIsReference;
+                _traces = parked.Traces;
+                _lastRequest = parked.LastRequest;
+                _warning = parked.Warning;
+                _lastResults = parked.LastResults;
+                _bandwidthOverride = parked.BandwidthOverride;
+            }
+            else if (outcome.Cleared)
+            {
+                // A fresh list, never the parked one emptied: the park holds this very reference.
+                // Everything the park carries is reset, which is a little more than Clear() empties
+                // — a measurement that has never run must not read back the previous one's record
+                // length on its status line.
+                _traces = [];
+                _lastResults = null;
+                _bandwidthOverride = null;
+                _phase = FrequencyResponsePhase.Idle;
+                _continuous = false;
+                _passesCompleted = 0;
+                _averagesTaken = 0;
+                _averageCount = 0;
+                _generatorAmpDbv = 0.0;
+                _binHz = 0.0;
+                _sampleRateHz = 0.0;
+                _fftSize = 0;
+                _latencySamples = null;
+                _error = null;
+                _warning = null;
+                _rightChannelIsReference = false;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the run on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields, the as-run request, and what a post-run bandwidth change reads.</summary>
+    private sealed record ParkedRun(
+        FrequencyResponsePhase Phase, bool Continuous, int PassesCompleted, int AveragesTaken,
+        int AverageCount, double GeneratorAmpDbv, double BinHz, double SampleRateHz, int FftSize,
+        double? LatencySamples, string? Error, bool RightChannelIsReference,
+        List<FrequencyResponseTrace> Traces, FrequencyResponseRequest? LastRequest, string? Warning,
+        (double GeneratorAmpDbv, FrequencyResponseResult Left, FrequencyResponseResult Right, FrequencyResponseResult? Gain)? LastResults,
+        BandwidthReferenceSpec? BandwidthOverride);
 
     /// <summary>
     /// Re-finds the bandwidth corners of the traces on screen against a new reference, without

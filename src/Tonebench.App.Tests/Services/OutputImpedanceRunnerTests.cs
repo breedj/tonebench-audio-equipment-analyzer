@@ -560,4 +560,95 @@ public class OutputImpedanceRunnerTests
         // 800 and 1300 straddle 1 kHz; 800 is nearer in log frequency though 1300 is nearer in hertz.
         Assert.Equal(1, OutputImpedanceRunner.NearestInLogFrequency([20.0, 800.0, 1300.0, 20_000.0], 1000.0));
     }
+
+    [Fact]
+    public async Task ARunSwitchedAwayFromAndBackTo_IsStillThere()
+    {
+        // The sweep report of 2026-10-17 in this runner: one output-impedance runner serves every
+        // output-impedance measurement, so selecting a second one and coming back used to find an
+        // empty chart. See ThdSweepRunner.SwitchOwner.
+        var device = new OutputStageDevice(CleanDevice(), outputOhms: 0.5) { LoadOhms = 8.0 };
+        var harness = await CreateAsync(device);
+        harness.Runner.SwitchOwner("1:1");
+
+        var measured = await RunBothPassesAsync(harness, Request(), () => device.LoadOhms = null);
+        AssertFinished(measured);
+        Assert.NotNull(measured.Trace);
+
+        // A different output-impedance measurement: it has never run, so it gets an empty chart.
+        var other = harness.Runner.SwitchOwner("1:2");
+        Assert.Null(other.Trace);
+        Assert.Equal(FrequencyResponsePhase.Idle, other.Phase);
+        Assert.Null(other.MedianOhms);
+        Assert.Equal((null, null), harness.Runner.GainTraces);
+
+        var back = harness.Runner.SwitchOwner("1:1");
+
+        Assert.NotNull(back.Trace);
+        Assert.Equal(measured.Phase, back.Phase);
+        Assert.Equal(measured.PointCount, back.PointCount);
+        Assert.Equal(measured.MedianOhms, back.MedianOhms);
+        Assert.NotNull(harness.Runner.Status.Trace);
+        // The as-run request and the two gain passes both: SaveOutputImpedanceAsync stores them
+        // beside the Zout curve so a result keeps what it was derived from.
+        Assert.NotNull(harness.Runner.LastRequest);
+        var (first, second) = harness.Runner.GainTraces;
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+    }
+
+    [Fact]
+    public async Task SwitchingOwnerWhileARunWaitsForTheLoadChange_IsIgnored()
+    {
+        // WaitingForLoadChange is a busy phase -- the run still owns the session, the pipeline
+        // options and the input range -- so a run paused for the user to move the load must not be
+        // parked out from under its own CONTINUE.
+        var device = new OutputStageDevice(CleanDevice(), outputOhms: 0.5) { LoadOhms = 8.0 };
+        var harness = await CreateAsync(device);
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        try
+        {
+            await AwaitPhaseAsync(harness.Runner, FrequencyResponsePhase.WaitingForLoadChange);
+
+            harness.Runner.SwitchOwner("1:2");
+            Assert.Equal("1:1", harness.Runner.Owner);
+            Assert.True(harness.Runner.Running);
+            Assert.Equal(FrequencyResponsePhase.WaitingForLoadChange, harness.Runner.Status.Phase);
+        }
+        finally
+        {
+            await harness.Runner.CancelAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ARunThatWasCleared_StaysCleared_AcrossASwitchAwayAndBack()
+    {
+        // Clear is a deliberate "throw this away"; parking must not quietly undo it.
+        var device = new OutputStageDevice(CleanDevice(), outputOhms: 0.5) { LoadOhms = 8.0 };
+        var harness = await CreateAsync(device);
+        harness.Runner.SwitchOwner("1:1");
+
+        AssertFinished(await RunBothPassesAsync(harness, Request(), () => device.LoadOhms = null));
+        harness.Runner.Clear();
+
+        harness.Runner.SwitchOwner("1:2");
+
+        Assert.Null(harness.Runner.SwitchOwner("1:1").Trace);
+    }
+
+    [Fact]
+    public async Task ARunMadeBeforeAnyMeasurementClaimedTheRunner_IsAdoptedRatherThanThrownAway()
+    {
+        // A page that reloaded mid-run: nobody owns it, and the first measurement to arrive keeps
+        // it -- the same rule the FFT display's owner follows.
+        var device = new OutputStageDevice(CleanDevice(), outputOhms: 0.5) { LoadOhms = 8.0 };
+        var harness = await CreateAsync(device);
+
+        AssertFinished(await RunBothPassesAsync(harness, Request(), () => device.LoadOhms = null));
+
+        Assert.NotNull(harness.Runner.SwitchOwner("1:1").Trace);
+    }
 }

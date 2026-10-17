@@ -17,8 +17,18 @@
  *
  * <p>The fix is an owner per live store rather than a blanket clear on every switch: a blanket clear
  * would throw away a five-minute sweep the moment its own measurement was clicked away from and
- * back, which is the far more common thing to do. A store is discarded only when the measurement now
+ * back, which is the far more common thing to do. A store is touched only when the measurement now
  * on screen is not the one that filled it.</p>
+ *
+ * <p><b>Touched, not discarded — every store is now <i>parked</i> under the measurement it belongs
+ * to and handed back on return.</b> Discarding was the first answer and it was half right: the two
+ * must not show each other's run, but throwing the first one's away to achieve that is the same
+ * loss by another route, reported twice (the FFT display 2026-10-16, the sweeps 2026-10-17). The
+ * FFT display is parked in App.vue's own `fftDisplays`; all eight runners are parked on the
+ * <i>server</i>, because Save reads the runner and not the browser — see RunParking and
+ * ThdSweepRunner.SwitchOwner. What is left here is the bookkeeping that decides when a switch has
+ * to happen at all, plus the clear path, which no store reaches today and which a store added
+ * later with no park of its own still gets.</p>
  *
  * <p>Pure, and therefore tested — nothing in App.vue is.</p>
  */

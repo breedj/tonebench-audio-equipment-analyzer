@@ -3869,6 +3869,10 @@ export const api = {
 
   clearImpedance: () => request<ImpedanceStatus>('/impedance/clear', { method: 'POST' }),
 
+  /** Parks this runner's curves under the measurement being left and hands back the arriving one's — see `setFrequencyResponseOwner`. */
+  setImpedanceOwner: (owner: string | null) =>
+    request<ImpedanceStatus>('/impedance/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
+
   getImpedanceStatus: () => request<ImpedanceStatus>('/impedance/status'),
 
   saveImpedance: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
@@ -3884,6 +3888,10 @@ export const api = {
   cancelOutputImpedance: () => request<OutputImpedanceStatus>('/output-impedance/cancel', { method: 'POST' }),
 
   clearOutputImpedance: () => request<OutputImpedanceStatus>('/output-impedance/clear', { method: 'POST' }),
+
+  /** Parks this runner's curve under the measurement being left and hands back the arriving one's — see `setFrequencyResponseOwner`. */
+  setOutputImpedanceOwner: (owner: string | null) =>
+    request<OutputImpedanceStatus>('/output-impedance/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
   getOutputImpedanceStatus: () => request<OutputImpedanceStatus>('/output-impedance/status'),
 
@@ -3902,6 +3910,16 @@ export const api = {
   // Carries the finished curves, not just a counter — how a browser that reloaded mid-measurement
   // redraws what was measured instead of having to run it again.
   getFrequencyResponseStatus: () => request<FrequencyResponseStatus>('/frequency-response/status'),
+
+  /**
+   * Hands this runner the measurement its curves belong to — the liveOwner key, or null for none.
+   * Posted when the screen that draws it is arrived at: the runner parks the run it holds under the
+   * measurement that made it and hands back whatever the arriving one had parked, which is what
+   * makes clicking a measurement away and back non-destructive. The answer is the status to redraw.
+   * Every runner has one of these; see FrequencyResponseRunner.SwitchOwner and RunParking.
+   */
+  setFrequencyResponseOwner: (owner: string | null) =>
+    request<FrequencyResponseStatus>('/frequency-response/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
   saveFrequencyResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/frequency-response/save', { method: 'POST', body: JSON.stringify(req) }),
@@ -3924,6 +3942,10 @@ export const api = {
 
   getSteppedResponseStatus: () => request<FrequencyResponseStatus>('/stepped-response/status'),
 
+  /** Parks this runner's curves under the measurement being left and hands back the arriving one's — see `setFrequencyResponseOwner`. */
+  setSteppedResponseOwner: (owner: string | null) =>
+    request<FrequencyResponseStatus>('/stepped-response/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
+
   saveSteppedResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/stepped-response/save', { method: 'POST', body: JSON.stringify(req) }),
 
@@ -3941,6 +3963,10 @@ export const api = {
 
   getCrosstalkStatus: () => request<FrequencyResponseStatus>('/crosstalk/status'),
 
+  /** Parks this runner's curves under the measurement being left and hands back the arriving one's — see `setFrequencyResponseOwner`. */
+  setCrosstalkOwner: (owner: string | null) =>
+    request<FrequencyResponseStatus>('/crosstalk/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
+
   saveCrosstalk: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/crosstalk/save', { method: 'POST', body: JSON.stringify(req) }),
 
@@ -3957,6 +3983,10 @@ export const api = {
     request<ImpulseResponseStatus>('/impulse-response/clear', { method: 'POST' }),
 
   getImpulseResponseStatus: () => request<ImpulseResponseStatus>('/impulse-response/status'),
+
+  /** Parks this runner's impulse under the measurement being left and hands back the arriving one's — see `setFrequencyResponseOwner`. */
+  setImpulseResponseOwner: (owner: string | null) =>
+    request<ImpulseResponseStatus>('/impulse-response/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
   saveImpulseResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/impulse-response/save', { method: 'POST', body: JSON.stringify(req) }),

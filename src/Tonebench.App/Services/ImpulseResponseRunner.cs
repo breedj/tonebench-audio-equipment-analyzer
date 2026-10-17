@@ -119,6 +119,14 @@ public sealed class ImpulseResponseRunner(
 
     private ImpulseResponseResult? _lastLeftImpulse;
 
+    /// <summary>
+    /// The runs of the measurements switched away from — see <see cref="SwitchOwner"/>, and
+    /// <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning. Four, and the bound matters
+    /// most here: a parked run holds a whole impulse response, which is an <c>FftSize</c> array of
+    /// doubles and up to a megabyte on its own.
+    /// </summary>
+    private readonly RunParking<ParkedRun> _parking = new(capacity: 4);
+
     /// <summary>The request the most recent run used. Saving needs the as-run configuration, not whatever the panel shows now.</summary>
     public ImpulseResponseRequest? LastRequest => _lastRequest;
 
@@ -379,6 +387,108 @@ public sealed class ImpulseResponseRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen — the impulse screen's counterpart of
+    /// <see cref="FrequencyResponseRunner.SwitchOwner"/>, following
+    /// <see cref="ThdSweepRunner.SwitchOwner"/>'s six rules unchanged.
+    ///
+    /// <para>The gated impulse goes with the traces, and it is the half that is easy to miss:
+    /// <see cref="MeasurementSaveService.SaveImpulseResponseAsync"/> reads
+    /// <see cref="LastImpulse"/> beside the status, and both decay surfaces are computed from it on
+    /// demand — so a restored run without it would draw its curves and then refuse to save or to
+    /// analyse, which is worse than the empty chart this replaces.</para>
+    /// </summary>
+    public ImpulseResponseStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            var current = _traces.Count == 0 && _impulses.Count == 0
+                ? null
+                : new ParkedRun(
+                    _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
+                    _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
+                    _referenceMode, _referenceName, _gatePreMs, _gatePostMs, _gateResolutionHz,
+                    _traces, _impulses, _harmonics, _lastLeftResult, _lastLeftImpulse, _lastRequest);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _continuous = parked.Continuous;
+                _passesCompleted = parked.PassesCompleted;
+                _averagesTaken = parked.AveragesTaken;
+                _averageCount = parked.AverageCount;
+                _generatorAmpDbv = parked.GeneratorAmpDbv;
+                _binHz = parked.BinHz;
+                _sampleRateHz = parked.SampleRateHz;
+                _fftSize = parked.FftSize;
+                _latencySamples = parked.LatencySamples;
+                _error = parked.Error;
+                _referenceMode = parked.ReferenceMode;
+                _referenceName = parked.ReferenceName;
+                _gatePreMs = parked.GatePreMs;
+                _gatePostMs = parked.GatePostMs;
+                _gateResolutionHz = parked.GateResolutionHz;
+                _traces = parked.Traces;
+                _impulses = parked.Impulses;
+                _harmonics = parked.Harmonics;
+                _lastLeftResult = parked.LastLeftResult;
+                _lastLeftImpulse = parked.LastLeftImpulse;
+                _lastRequest = parked.LastRequest;
+            }
+            else if (outcome.Cleared)
+            {
+                // Fresh lists, never the parked ones emptied: the park holds these very references.
+                _traces = [];
+                _impulses = [];
+                _harmonics = [];
+                _lastLeftResult = null;
+                _lastLeftImpulse = null;
+                _phase = FrequencyResponsePhase.Idle;
+                _continuous = false;
+                _passesCompleted = 0;
+                _averagesTaken = 0;
+                _averageCount = 0;
+                _generatorAmpDbv = 0.0;
+                _binHz = 0.0;
+                _sampleRateHz = 0.0;
+                _fftSize = 0;
+                _latencySamples = null;
+                _error = null;
+                _referenceMode = ImpulseReferenceMode.None;
+                _referenceName = null;
+                _gatePreMs = 0.0;
+                _gatePostMs = 0.0;
+                _gateResolutionHz = 0.0;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the run on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields, the as-run request, and the impulse the save path and both decay surfaces read.</summary>
+    private sealed record ParkedRun(
+        FrequencyResponsePhase Phase, bool Continuous, int PassesCompleted, int AveragesTaken,
+        int AverageCount, double GeneratorAmpDbv, double BinHz, double SampleRateHz, int FftSize,
+        double? LatencySamples, string? Error, ImpulseReferenceMode ReferenceMode,
+        string? ReferenceName, double GatePreMs, double GatePostMs, double GateResolutionHz,
+        List<FrequencyResponseTrace> Traces, List<ImpulseTrace> Impulses,
+        List<HarmonicCurve> Harmonics, FrequencyResponseResult? LastLeftResult,
+        ImpulseResponseResult? LastLeftImpulse, ImpulseResponseRequest? LastRequest);
 
     /// <summary>
     /// Captures the analyzer's own impulse response, for later division out of a measurement.

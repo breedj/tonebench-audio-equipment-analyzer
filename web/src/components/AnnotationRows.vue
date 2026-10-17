@@ -12,6 +12,7 @@
  * in — see annotationReading.</p>
  */
 import {
+  annotationColor,
   numberedAnnotations,
   removeAnnotation,
   updateAnnotation,
@@ -66,8 +67,15 @@ function onRemove(id: number) {
       class="flex flex-col gap-1.5 border-t border-neutral-200 pt-2 first:border-t-0 first:pt-0 dark:border-neutral-800"
     >
       <div class="flex items-center gap-2">
+        <!-- The ordinal in its own colour, the same one the chart draws on that label's badge, so a
+             row and a label on the picture can be tied together without reading either number. -->
         <span
-          class="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-neutral-300 text-[10px] tabular-nums text-neutral-500 dark:border-neutral-600 dark:text-neutral-400"
+          class="inline-flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-medium tabular-nums"
+          :style="{
+            color: annotationColor(annotation.number),
+            borderColor: annotationColor(annotation.number),
+            backgroundColor: `${annotationColor(annotation.number)}26`,
+          }"
           :title="annotation.style === 'point' ? 'A labelled point of the trace' : 'A rule at this frequency'"
         >
           {{ annotation.number }}

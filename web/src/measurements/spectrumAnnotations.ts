@@ -224,3 +224,27 @@ export function annotationReading(annotation: SpectrumAnnotation): string {
   if (annotation.style !== 'point' || annotation.levelDbv === null) return hz
   return `${hz} · ${annotation.levelDbv.toFixed(1)} dBV`
 }
+
+/**
+ * The colour an annotation's ordinal is drawn in — on the chart's badge and on the matching badge in
+ * the display rail's list, so a label on the picture can be tied to its row at a glance without
+ * reading either number (Joost, 2026-10-17).
+ *
+ * <p>Keyed on the <b>ordinal</b> rather than the id, so the number and the colour are one identity:
+ * delete the first of three and the remaining two renumber, and their colours move with their
+ * numbers rather than leaving a gap in the sequence. It also guarantees the first six on a chart are
+ * all different, which keying on an id could not.</p>
+ *
+ * <p>Six hues, spaced around the wheel and readable on both the light plot and the dark theme's
+ * near-black well, and deliberately not the trace blue (FFT_LIVE_COLOR) or the harmonic markers'
+ * amber: an annotation is a note *about* the picture, not another curve in it. They cycle past six,
+ * by which point the numbers are doing the work anyway. A black-and-white report desaturates them
+ * with everything else, which is why the ordinal is drawn as well as coloured.</p>
+ */
+export const ANNOTATION_COLORS = ['#7C5CD6', '#0E9A8A', '#C2458F', '#E07B16', '#4C9A2A', '#D14545'] as const
+
+/** The colour for the annotation numbered `ordinal` (1-based, as {@link numberedAnnotations} hands them out). */
+export function annotationColor(ordinal: number): string {
+  const index = Number.isFinite(ordinal) ? Math.max(0, Math.round(ordinal) - 1) : 0
+  return ANNOTATION_COLORS[index % ANNOTATION_COLORS.length]
+}

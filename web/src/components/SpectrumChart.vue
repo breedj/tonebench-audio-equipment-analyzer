@@ -32,6 +32,7 @@ import {
   DEFAULT_POINT_OFFSET,
   MAX_ANNOTATION_TEXT,
   addAnnotation,
+  annotationColor,
   annotationReading,
   nextAnnotationId,
   numberedAnnotations,
@@ -297,6 +298,7 @@ const THEME = {
     annotationText: '#e5e5e5',
     annotationFill: 'rgba(27, 30, 35, 0.92)',
     annotationBorder: '#525252',
+    annotationShadow: 'rgba(0, 0, 0, 0.55)',
   },
   light: {
     axis: '#525252',
@@ -308,6 +310,7 @@ const THEME = {
     annotationText: '#171717',
     annotationFill: 'rgba(255, 255, 255, 0.93)',
     annotationBorder: '#d4d4d4',
+    annotationShadow: 'rgba(15, 23, 42, 0.3)',
   },
 } as const
 
@@ -695,19 +698,34 @@ function annotationsPlugin(theme: Theme): uPlot.Plugin {
               ctx.fill()
             }
 
+            // The box carries a small drop shadow, so a label over a dense trace reads as sitting
+            // above the picture rather than being part of it. Only the fill: the shadow is cleared
+            // before the border, or every stroke after it would trail one too.
             roundedRectPath(ctx, p.label.x, p.label.y, p.label.w, p.label.h, p.fontPx * 0.35)
+            ctx.shadowColor = theme.annotationShadow
+            ctx.shadowBlur = 4 * adapter.scale
+            ctx.shadowOffsetY = adapter.scale
             ctx.fillStyle = theme.annotationFill
             ctx.fill()
+            ctx.shadowColor = 'transparent'
+            ctx.shadowBlur = 0
+            ctx.shadowOffsetY = 0
             ctx.strokeStyle = theme.annotationBorder
             ctx.lineWidth = adapter.scale
             ctx.stroke()
 
             if (p.badge) {
-              ctx.strokeStyle = theme.annotationLine
+              // The ordinal's own colour, matching its row in the Annotations panel -- see
+              // annotationColor. A tinted disc rather than a ring alone: at this size a 1 px
+              // coloured outline is nearly invisible over a busy trace.
+              const colour = annotationColor(p.number)
+              ctx.fillStyle = colour + '26'
               ctx.beginPath()
               ctx.arc(p.badge.x, p.badge.y, p.badge.r, 0, Math.PI * 2)
+              ctx.fill()
+              ctx.strokeStyle = colour
               ctx.stroke()
-              ctx.fillStyle = theme.annotationText
+              ctx.fillStyle = colour
               ctx.font = annotationFont(p.fontPx * 0.78)
               ctx.textAlign = 'center'
               ctx.textBaseline = 'middle'

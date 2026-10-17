@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ANNOTATION_COLORS,
   MAX_ANNOTATIONS,
   MAX_ANNOTATION_TEXT,
   addAnnotation,
+  annotationColor,
   annotationReading,
   numberedAnnotations,
   parseAnnotations,
@@ -146,5 +148,29 @@ describe('annotationReading', () => {
 
   it('leaves the level out of a frequency rule, which has none', () => {
     expect(annotationReading({ ...point(1, 1000), style: 'frequency', levelDbv: null })).toBe('1.000 kHz')
+  })
+})
+
+describe('annotationColor', () => {
+  it('gives the first six annotations a colour each', () => {
+    const used = [1, 2, 3, 4, 5, 6].map(annotationColor)
+    expect(new Set(used).size).toBe(6)
+  })
+
+  it('cycles past the end of the palette rather than running out', () => {
+    expect(annotationColor(ANNOTATION_COLORS.length + 1)).toBe(annotationColor(1))
+  })
+
+  it('follows the ordinal, so a colour moves with the number a reader sees', () => {
+    // Delete the first of three and the rest renumber (numberedAnnotations); their badges take the
+    // colours of their new numbers rather than leaving a gap in the sequence.
+    expect(annotationColor(2)).not.toBe(annotationColor(1))
+    expect(annotationColor(1)).toBe(ANNOTATION_COLORS[0])
+  })
+
+  it('answers something drawable for a number nothing should ever pass', () => {
+    for (const ordinal of [0, -4, Number.NaN]) {
+      expect(ANNOTATION_COLORS).toContain(annotationColor(ordinal))
+    }
   })
 })

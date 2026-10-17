@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -500,7 +501,7 @@ public sealed class MeasurementSaveService(
         long measurementTypeId,
         string name,
         string? notes,
-        IReadOnlyList<SpectrumAnnotation>? annotations,
+        IReadOnlyList<JsonElement>? annotations,
         CancellationToken ct)
     {
         if (session.Acquiring)
@@ -1651,7 +1652,7 @@ public sealed class MeasurementSaveService(
     /// <exception cref="InvalidOperationException">Not an FFT result, or its stored parameters cannot be read.</exception>
     public async Task SetResultAnnotationsAsync(
         long resultId,
-        IReadOnlyList<SpectrumAnnotation> annotations,
+        IReadOnlyList<JsonElement> annotations,
         CancellationToken ct)
     {
         var detail = await measurementRepository.GetResultAsync(resultId, ct)

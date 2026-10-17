@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Tonebench.App.Services;
 using Tonebench.Data;
@@ -214,7 +215,7 @@ public sealed record StagedMeasurementConfig(
     /// A field missing from this DTO is not an error, it is a silent default: left off, the notes a
     /// user placed would quietly fail to survive a measurement switch.
     /// </summary>
-    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 public sealed record MeasurementTypeResponse(
     long Id, long ProjectId, string Kind, string Name, string? Notes, string ParamsJson, int SortOrder, DateTimeOffset CreatedUtc);
@@ -278,4 +279,4 @@ public sealed record MeasurementTypeAppliedResponse(
     /// <summary>The Generator panel's Load field — see <see cref="Tonebench.Data.FftSpectrumParameters.LoadOhms"/>.</summary>
     double? LoadOhms = null,
     /// <summary>The chart's annotations, so selecting a measurement puts the notes it was saved with back on the chart — see <see cref="Tonebench.Data.FftSpectrumParameters.ChartAnnotations"/>.</summary>
-    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);

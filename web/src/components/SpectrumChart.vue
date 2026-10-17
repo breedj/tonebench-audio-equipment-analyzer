@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, toRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { STREAM_FLAG_ZOOMED, type MetersFrame, type MultitoneFrame, type SpectrumFrame } from '../streaming/protocol'
@@ -28,31 +28,19 @@ import { api, type MeasurementChannel, type WeightingCurveResponse } from '../ap
 import { harmonicMarkerLabel, unitAxisLabel, unitOffsetDb, unitSuffix } from '../spectrumUnits'
 import { useUserWeighting } from '../composables/useUserWeighting'
 import { exportGridTheme } from '../charts/palette'
+import type { AnnotationStyle } from '../measurements/chartAnnotations'
+import { SPECTRUM_ANNOTATION_VIEW } from '../charts/annotationViews'
+import { useAnnotationOverlay, type AnnotationReadAt } from '../charts/useAnnotationOverlay'
 import {
-  DEFAULT_POINT_OFFSET,
-  MAX_ANNOTATION_TEXT,
-  addAnnotation,
-  annotationColor,
-  annotationReading,
-  nextAnnotationId,
-  numberedAnnotations,
-  removeAnnotation,
-  updateAnnotation,
-  type AnnotationStyle,
-} from '../measurements/spectrumAnnotations'
-import {
-  annotationMetrics,
-  boxFromDrag,
-  boxHandles,
-  clampBoxToWindow,
-  clampLabelOffset,
-  layoutAnnotations,
-  type AnnotationLayoutItem,
-  type AnnotationPlacement,
-  type AnnotationPlot,
-  type BoxHandleKind,
-  type DataBox,
-} from '../charts/annotationLayout'
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 import { peakSnapIndex } from '../measurements/spectrumPeakSnap'
 
 const props = defineProps<{
@@ -108,7 +96,6 @@ const display: SpectrumDisplaySource = injectedDisplay ?? useChartDisplay()
 // report render has no mouse, and the same guard as refreshWeightingCurve below says so.
 const screenState = injectedDisplay === null ? useChartDisplay() : null
 const annotationArmed = screenState?.annotationArmed ?? ref<AnnotationStyle | null>(null)
-const annotationEditing = screenState?.annotationEditing ?? ref<number | null>(null)
 const {
   yTop,
   yBottom,
@@ -540,26 +527,11 @@ function drawMultitoneMarkers(u: uPlot, theme: Theme) {
 }
 
 /**
- * The annotations the user has drawn on this chart — see measurements/spectrumAnnotations.ts for the
- * model and charts/annotationLayout.ts for the geometry. This is only the painting and the mouse.
- *
- * <p>Drawn in `draw`, i.e. over the series: a label under a dense trace cannot be read. Unlike its
- * sibling plugins this one takes no `interactive` flag, and that is deliberate — it registers no
- * hook an export would not want, because everything a mouse touches is a DOM handle above the
- * canvas (see annotationPlacements below). So the offscreen export plot gets exactly this plugin,
- * whole, and the labels land in the report's PNG, the Screenshot dialog and the black-and-white
- * print with no further code.</p>
- */
-function annotationFont(px: number): string {
-  return `${px}px ui-sans-serif, system-ui, sans-serif`
-}
-
-/**
  * The constant this chart is adding to every dBV value right now, which is what converts a stored
  * annotation's level to the one on screen: the live frame's, an overlay's where there is no live
  * frame, and the unit's own answer where there is neither. Null when the unit cannot be converted at
- * all, which the layout reads as "do not draw this point" — exactly as computeFrame skips a frame it
- * cannot convert, rather than drawing it in the wrong unit.
+ * all — which the axis spec below turns into a non-finite position, i.e. "do not draw this", exactly
+ * as computeFrame skips a frame it cannot convert rather than drawing it in the wrong unit.
  */
 function annotationLevelOffsetDb(): number | null {
   const live = props.spectrum[0] ?? props.spectrum[1]
@@ -572,210 +544,70 @@ function annotationLevelOffsetDb(): number | null {
   return unitOffsetDb(spectrumUnit.value, undefined, dutGainDb.value)
 }
 
-/** The annotations with their levels in the unit the chart is plotting, ready to be laid out. */
-function annotationItems(): AnnotationLayoutItem[] {
-  const offset = annotationLevelOffsetDb()
-  return numberedAnnotations(annotations.value).map((a) => ({
-    id: a.id,
-    number: a.number,
-    style: a.style,
-    text: a.text,
-    freqHz: a.freqHz,
-    // A point's marker and a box's top edge are both levels; a frequency rule has none, and under
-    // a density unit with no ENBW nothing can be converted and the layout draws no level at all.
-    levelDb: a.style !== 'frequency' && a.levelDbv !== null && offset !== null ? a.levelDbv + offset : null,
-    freqHz2: a.style === 'box' ? a.freqHz2 : null,
-    levelDb2: a.style === 'box' && a.levelDbv2 !== null && offset !== null ? a.levelDbv2 + offset : null,
-    labelOffsetOctaves: a.labelOffsetOctaves,
-    labelOffsetDb: a.labelOffsetDb,
-  }))
-}
-
-/** This plot's pixels per CSS pixel — uPlot draws in device pixels, the DOM handles live in CSS ones. */
-function plotPixelScale(u: uPlot): number {
-  const css = u.over.clientWidth
-  return css > 0 ? u.bbox.width / css : 1
-}
-
-function measureAnnotationText(u: uPlot): (text: string, fontPx: number) => number {
-  return (text, fontPx) => {
-    u.ctx.font = annotationFont(fontPx)
-    return u.ctx.measureText(text).width
-  }
-}
-
-/** The adapter the canvas draws through: device pixels, positions including the plot's own offset. */
-function canvasAnnotationPlot(u: uPlot): AnnotationPlot {
-  return {
-    left: u.bbox.left,
-    top: u.bbox.top,
-    width: u.bbox.width,
-    height: u.bbox.height,
-    xToPos: (freqHz) => u.valToPos(freqHz, 'x', true),
-    yToPos: (levelDb) => u.valToPos(levelDb, 'y', true),
-    scale: plotPixelScale(u),
-    measureText: measureAnnotationText(u),
-  }
-}
-
 /**
- * The adapter the DOM handles use: CSS pixels relative to the plotting area's own top-left, which is
- * where the overlay div is positioned — so a handle lands exactly on the label the canvas drew.
+ * What this chart's two axes are, in annotation terms: a log frequency against a level stored in
+ * <b>dBV</b> whatever the axis is showing.
+ *
+ * <p>The y conversion is the whole reason an axis can declare one: the chart's unit is a per-frame
+ * constant add (spectrumUnits.ts), so a stored annotation stays glued to its spot on the trace
+ * across a unit switch and a DUT-gain edit. Under a density unit with no ENBW to convert by there is
+ * no honest figure either way, and a non-finite answer is how that is said.</p>
  */
-function cssAnnotationPlot(u: uPlot): AnnotationPlot {
-  const scale = plotPixelScale(u)
-  return {
-    left: 0,
-    top: 0,
-    width: u.bbox.width / scale,
-    height: u.bbox.height / scale,
-    xToPos: (freqHz) => u.valToPos(freqHz, 'x', false),
-    yToPos: (levelDb) => u.valToPos(levelDb, 'y', false),
-    scale: 1,
-    measureText: measureAnnotationText(u),
-  }
-}
-
-function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath()
-  // roundRect is Chromium 99+; the plain rect is the same fallback bandwidthPlugin carries.
-  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r)
-  else ctx.rect(x, y, w, h)
-}
-
-/**
- * Bumped whenever the plot's geometry or its window changes, so the DOM handles follow a zoom, a pan
- * and a resize. Written from the draw hook below, which is the one place that runs on every commit —
- * and gated on an actual change, so a streaming tick does not re-render the handles twenty times a
- * second. Writing a counter from `draw` and reading it in a render schedules a re-render, not
- * another draw, so there is no loop here however much it looks like one.
- */
-const plotGeometryTick = ref(0)
-let lastPlotGeometry = ''
-function noteGeometry(u: uPlot) {
-  const key = `${u.bbox.left},${u.bbox.top},${u.bbox.width},${u.bbox.height},${u.scales.x.min},${u.scales.x.max},${u.scales.y.min},${u.scales.y.max}`
-  if (key === lastPlotGeometry) return
-  lastPlotGeometry = key
-  plotGeometryTick.value++
-}
-
-function annotationsPlugin(theme: Theme): uPlot.Plugin {
-  return {
-    hooks: {
-      draw: [
-        (u) => {
-          noteGeometry(u)
-          const items = annotationItems()
-          if (items.length === 0) return
-
-          const adapter = canvasAnnotationPlot(u)
-          const placements = layoutAnnotations(items, adapter, annotationNumbers.value)
-          const ctx = u.ctx
-          ctx.save()
-          ctx.beginPath()
-          ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height)
-          ctx.clip()
-
-          // Pass one: every region. Drawn before any label so one annotation's translucent fill can
-          // never bury another's note, and never as uPlot's own `.u-select` div — the report, the
-          // Screenshot dialog and the black-and-white print only ever see exportPng's canvas.
-          for (const p of placements) {
-            if (!p.visible || !p.box) continue
-            const colour = annotationColor(p.number)
-            roundedRectPath(ctx, p.box.x, p.box.y, p.box.w, p.box.h, p.fontPx * 0.25)
-            ctx.fillStyle = colour + '1a'
-            ctx.fill()
-            // Solid, not dashed: the dash belongs to the frequency rule, which still exists on
-            // measurements saved before the picker stopped offering it. Set explicitly rather than
-            // assumed -- this is the first stroke the plugin makes, so it inherits whatever dash the
-            // plugin drawn before it left on the context, and it came out dotted until it said so.
-            ctx.setLineDash([])
-            ctx.strokeStyle = colour
-            ctx.lineWidth = 1.5 * adapter.scale
-            ctx.stroke()
-          }
-
-          for (const p of placements) {
-            if (!p.visible) continue
-
-            // A frequency annotation's rule, in the response chart's pinned-cursor dash so the two
-            // read as one family of "someone marked this".
-            if (p.rule) {
-              ctx.setLineDash([5, 4])
-              ctx.strokeStyle = theme.annotationLine
-              ctx.lineWidth = 1.5 * adapter.scale
-              ctx.beginPath()
-              ctx.moveTo(p.rule.x, p.rule.y1)
-              ctx.lineTo(p.rule.x, p.rule.y2)
-              ctx.stroke()
-              ctx.setLineDash([])
-            }
-
-            if (p.leader) {
-              ctx.strokeStyle = theme.annotationLine
-              ctx.lineWidth = adapter.scale
-              ctx.beginPath()
-              ctx.moveTo(p.leader.x1, p.leader.y1)
-              ctx.lineTo(p.leader.x2, p.leader.y2)
-              ctx.stroke()
-            }
-
-            if (p.anchor) {
-              ctx.fillStyle = theme.annotationLine
-              ctx.beginPath()
-              ctx.arc(p.anchor.x, p.anchor.y, p.anchor.r, 0, Math.PI * 2)
-              ctx.fill()
-            }
-
-            // The box carries a small drop shadow, so a label over a dense trace reads as sitting
-            // above the picture rather than being part of it. Only the fill: the shadow is cleared
-            // before the border, or every stroke after it would trail one too.
-            roundedRectPath(ctx, p.label.x, p.label.y, p.label.w, p.label.h, p.fontPx * 0.35)
-            ctx.shadowColor = theme.annotationShadow
-            ctx.shadowBlur = 4 * adapter.scale
-            ctx.shadowOffsetY = adapter.scale
-            ctx.fillStyle = theme.annotationFill
-            ctx.fill()
-            ctx.shadowColor = 'transparent'
-            ctx.shadowBlur = 0
-            ctx.shadowOffsetY = 0
-            ctx.strokeStyle = theme.annotationBorder
-            ctx.lineWidth = adapter.scale
-            ctx.stroke()
-
-            if (p.badge) {
-              // The ordinal's own colour, matching its row in the Annotations panel -- see
-              // annotationColor. A tinted disc rather than a ring alone: at this size a 1 px
-              // coloured outline is nearly invisible over a busy trace.
-              const colour = annotationColor(p.number)
-              ctx.fillStyle = colour + '26'
-              ctx.beginPath()
-              ctx.arc(p.badge.x, p.badge.y, p.badge.r, 0, Math.PI * 2)
-              ctx.fill()
-              ctx.strokeStyle = colour
-              ctx.stroke()
-              ctx.fillStyle = colour
-              ctx.font = annotationFont(p.fontPx * 0.78)
-              ctx.textAlign = 'center'
-              ctx.textBaseline = 'middle'
-              ctx.fillText(`${p.number}`, p.badge.x, p.badge.y)
-            }
-
-            if (p.text) {
-              ctx.fillStyle = theme.annotationText
-              ctx.font = annotationFont(p.fontPx)
-              ctx.textAlign = 'left'
-              ctx.textBaseline = 'middle'
-              ctx.fillText(p.text, p.textX, p.textY)
-            }
-          }
-
-          ctx.restore()
-        },
-      ],
+const ANNOTATION_AXES: UplotAnnotationAxes = {
+  x: { quantity: 'hz' },
+  y: {
+    quantity: 'dbv',
+    toDisplay: (dbv) => {
+      const offset = annotationLevelOffsetDb()
+      return offset === null ? Number.NaN : dbv + offset
     },
-  }
+    fromDisplay: (plotted) => {
+      const offset = annotationLevelOffsetDb()
+      return offset === null ? Number.NaN : plotted - offset
+    },
+  },
 }
+
+/**
+ * What a click records: the peak it was obviously aimed at — the same snap the cursor readout uses,
+ * so the label quotes the figure the readout was showing at that moment — and the level of the trace
+ * under it.
+ *
+ * <p>A null level means "no trace here", which the composable answers by taking the pointer's own
+ * level instead; the frequency is still snapped, because clicking near the third harmonic should
+ * rule exactly on it. The pointer position is unused: `cursor.idx` is where the readout is, and
+ * those two must agree.</p>
+ */
+function readAnnotationAt(): AnnotationReadAt | null {
+  const u = plot
+  if (!u) return null
+  const xs = u.data[0]
+  const idx = u.cursor.idx
+  if (idx == null || xs?.[idx] == null) return null
+
+  const snapped = snapToPeak(u, idx)
+  const freqHz = xs[snapped] as number
+  const read = readoutSeries(u)
+  const plotted = read?.values[snapped]
+  const offset = annotationLevelOffsetDb()
+  if (plotted != null && offset !== null) {
+    return { x: freqHz, y: plotted - offset, channel: read?.channel ?? null }
+  }
+  return { x: freqHz, y: null, channel: null }
+}
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => SPECTRUM_ANNOTATION_VIEW,
+  list: annotations,
+  armed: annotationArmed,
+  numbers: () => annotationNumbers.value,
+  cssPlot: () => (plot ? cssAnnotationPlot(plot, ANNOTATION_AXES) : null),
+  surface: () => plot?.over ?? null,
+  overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
+  redraw: () => plot?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+  readAt: () => readAnnotationAt(),
+})
 
 /**
  * Which live series the cursor readout and a click both read: the channel that is drawn, and its
@@ -1004,7 +836,7 @@ function buildOptions(
       minMaxBandPlugin(() => props.spectrum, () => props.overlays),
       harmonicMarkersPlugin(theme, interactive),
       weightingCurvePlugin(),
-      annotationsPlugin(theme),
+      annotationsPlugin(annotationOverlay, ANNOTATION_AXES, () => theme),
     ],
   }
 }
@@ -1124,12 +956,11 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
   // Click-to-annotate. Both listeners are no-ops unless the Annotations panel has armed the chart
   // (see onPlotClick), so an unarmed plot behaves exactly as it did before they existed — uPlot's
   // own cursor drag and the reset above are untouched.
-  plot.over.addEventListener('mousedown', notePressOrigin)
-  plot.over.addEventListener('click', onPlotClick)
+  attachAnnotationListeners(plot, annotationOverlay)
 
   // A rebuild (theme, overlay count, style key) hands back a fresh instance carrying uPlot's own
   // defaults, so an armed chart would silently go back to zooming on the next drag.
-  syncBoxDragMode()
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
 
   pendingZoomRestore = savedScale && savedScale.min != null && savedScale.max != null ? { min: savedScale.min, max: savedScale.max } : null
 
@@ -1160,521 +991,18 @@ function noteScaleIfReady(u: uPlot) {
 }
 
 
-// --- Annotations: placing by clicking, dragging a label, editing its text -------------------
+// Annotations: placing, dragging, resizing and editing all live in
+// charts/useAnnotationOverlay.ts, which every annotated chart shares. What stays here is the two
+// things only this chart can answer -- its axis spec and what a click reads off its traces, both
+// above -- plus the window listener below, which needs this plot's own `select` rectangle.
 
 /**
- * Where the button went down, so a drag-zoom can be told from a click: a zoom gesture ends with a
- * `click` on the same element, and without this every zoom while armed would also drop a label. The
- * threshold is in CSS pixels and deliberately small — a hand is never perfectly still on a press,
- * and anything larger would swallow a very short drag. Same figure and reasoning as
- * FrequencyResponseChart's, which pins its cursor the same way.
- */
-const CLICK_SLOP_PX = 4
-let pressOrigin: { x: number; y: number } | null = null
-
-function notePressOrigin(event: MouseEvent) {
-  pressOrigin = { x: event.clientX, y: event.clientY }
-  if (annotationArmed.value === 'box') boxGesture = true
-}
-
-/**
- * A click places an annotation — but only while the Annotations panel has armed the chart. Unarmed,
- * this returns at once and the plot behaves exactly as it always has: uPlot's own cursor drag still
- * zooms and the double-click still resets.
- */
-function onPlotClick(event: MouseEvent) {
-  const origin = pressOrigin
-  pressOrigin = null
-
-  const style = annotationArmed.value
-  const u = plot
-  if (!u || style === null) return
-  // A box is drawn by dragging, finished on the window mouseup above. A still press would otherwise
-  // reach placeAnnotation and store a region of no size.
-  if (style === 'box') return
-  // A double-click fires two `click` events, so without this the reset gesture would place two
-  // labels on top of one another while armed.
-  if (event.detail !== 1) return
-  if (origin && (Math.abs(event.clientX - origin.x) > CLICK_SLOP_PX || Math.abs(event.clientY - origin.y) > CLICK_SLOP_PX)) {
-    return
-  }
-  placeAnnotation(u, style)
-}
-
-/**
- * Places an annotation where the cursor is: on the peak the click was obviously aimed at — the same
- * snap the readout uses, so the label records the figure the readout was showing at that moment —
- * and at the level of the trace under it, or simply where the click landed when there is no trace
- * there, so a note can be dropped on an empty chart or beside a hidden channel.
- *
- * <p>The frequency style snaps too, deliberately: clicking "near the third harmonic" should rule
- * exactly on it.</p>
- */
-function placeAnnotation(u: uPlot, style: AnnotationStyle) {
-  const xs = u.data[0]
-  const idx = u.cursor.idx
-  if (idx == null || xs?.[idx] == null) return
-
-  const offset = annotationLevelOffsetDb()
-  // Under a density unit with no ENBW to convert by there is no honest dBV to record, and the chart
-  // is not drawing a trace either; leave the chart armed rather than storing a wrong level.
-  if (style === 'point' && offset === null) return
-
-  const snapped = snapToPeak(u, idx)
-  const freqHz = xs[snapped] as number
-  const read = readoutSeries(u)
-  const plotted = read?.values[snapped]
-
-  let levelDbv: number | null = null
-  let channel: number | null = null
-  if (style === 'point') {
-    if (plotted != null) {
-      levelDbv = plotted - (offset as number)
-      channel = read?.channel ?? null
-    } else {
-      const top = u.cursor.top
-      if (top == null || top < 0) return
-      levelDbv = u.posToVal(top, 'y') - (offset as number)
-    }
-  }
-
-  const id = nextAnnotationId(annotations.value)
-  const next = addAnnotation(annotations.value, {
-    style,
-    text: '',
-    freqHz,
-    levelDbv,
-    freqHz2: null,
-    levelDbv2: null,
-    channel,
-    labelOffsetOctaves: style === 'point' ? DEFAULT_POINT_OFFSET.labelOffsetOctaves : 0,
-    labelOffsetDb: style === 'point' ? DEFAULT_POINT_OFFSET.labelOffsetDb : 0,
-  })
-  // The chart is full — addAnnotation hands the list straight back. Say nothing here: the panel's
-  // Add button is already disabled with the reason on it.
-  if (next.length === annotations.value.length) return
-
-  annotations.value = next
-  annotationArmed.value = null
-  annotationEditing.value = id
-}
-
-
-/**
- * Arming for a Box turns uPlot's own drag-selection into the region gesture, by mutating the live
- * cursor rather than adding an input layer of our own.
- *
- * <p>Three facts about uPlot 1.6.32 make this work, and all three are worth knowing before touching
- * it. It keeps <b>one reference</b> to `cursor.drag` for the instance's life, so mutating fields
- * works and replacing the object does not. It re-reads `drag.y` on every mousemove and
- * `drag.setScale` at mouseup, so both can be flipped per gesture. And `mouseUp` fires the
- * `setSelect` hook <i>before</i> it tests `setScale` to zoom — which is the other way this could
- * have been built, and is the way it is not: a flag that is a pure function of the armed state
- * cannot be left half-restored, whereas cancelling from inside the hook zooms to the half-drawn
- * rectangle if Escape lands mid-drag.</p>
- */
-function syncBoxDragMode() {
-  const u = plot
-  // uPlot always merges its own defaults, so `drag` is there at runtime; the typings say it may not
-  // be, and mutating the object it hands back is the whole mechanism -- see above.
-  const drag = u?.cursor.drag
-  if (!u || !drag) return
-  const armedForBox = annotationArmed.value === 'box'
-  drag.y = armedForBox
-  drag.setScale = !armedForBox
-  // With setScale off uPlot never calls its own hideSelect(), so the rubber band stays painted
-  // until someone clears it.
-  if (!armedForBox) u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
-}
-
-watch(annotationArmed, () => {
-  syncBoxDragMode()
-  plot?.redraw()
-})
-
-/**
- * How big a drag has to be, in CSS pixels, to mean a region — on <b>both</b> axes.
- *
- * <p>It cannot be uPlot's own `drag.dist`: with `uni == null` uPlot promotes a pass on one axis to
- * both, so a 300 x 2 px drag clears `dist` and yields a hairline box. Twelve is the figure `uni`
- * already uses on the four two-axis charts here. Under it nothing is placed and <b>the chart stays
- * armed</b> — a slip of the hand should not cost a trip back to the panel.</p>
- */
-const MIN_BOX_DRAG_PX = 12
-
-/** True between mousedown and mouseup of a gesture that began while armed for a box. */
-let boxGesture = false
-
-/**
- * Finishes a box gesture.
- *
- * <p>Bound on <b>window, bubble phase</b>, and neither half of that is incidental. uPlot's own
- * `drag.click` is registered capture-phase on an ancestor and calls `stopImmediatePropagation()`
- * whenever the pointer moved at all, so nothing drag-shaped can be driven off a `click`; and a
- * window listener is the one place that runs after uPlot's own document-level `mouseUp`, so
- * `u.select` is still readable and the restore cannot race the zoom test. It also fires when the
- * button comes up outside the plot, which a listener on `over` would miss.</p>
+ * Finishes a box gesture on a bubble-phase `mouseup` on `window`. Both halves of that are
+ * load-bearing and the reasons are in finishBoxGesture; the listener is bound here because it is
+ * this component that owns the uPlot instance.
  */
 function onWindowMouseUp() {
-  if (!boxGesture) return
-  boxGesture = false
-  const u = plot
-  if (!u) return
-  if (annotationArmed.value === 'box') placeBoxFromSelection(u)
-  u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
-  syncBoxDragMode()
-}
-
-/**
- * The region the drag just swept, as an annotation. `u.select` is in CSS pixels relative to the
- * plotting area — the same space the label handles already work in.
- */
-function placeBoxFromSelection(u: uPlot) {
-  const sel = u.select
-  if (sel.width < MIN_BOX_DRAG_PX || sel.height < MIN_BOX_DRAG_PX) return
-
-  const offset = annotationLevelOffsetDb()
-  // Both of a box's levels are stored in dBV like every other annotation level; under a density
-  // unit with no ENBW there is no honest figure to store, so leave the chart armed.
-  if (offset === null) return
-
-  // No peak snapping, deliberately, where a point and a rule both snap: a region's edges are where
-  // the hand put them, and jumping one to the nearest bin could move it by an arbitrary amount.
-  const loHz = u.posToVal(sel.left, 'x')
-  const hiHz = u.posToVal(sel.left + sel.width, 'x')
-  const topDb = u.posToVal(sel.top, 'y')
-  const bottomDb = u.posToVal(sel.top + sel.height, 'y')
-  if (!(loHz > 0) || !(hiHz > loHz) || !Number.isFinite(topDb) || !Number.isFinite(bottomDb)) return
-
-  const id = nextAnnotationId(annotations.value)
-  const next = addAnnotation(annotations.value, {
-    style: 'box',
-    text: '',
-    freqHz: loHz,
-    levelDbv: topDb - offset,
-    freqHz2: hiHz,
-    levelDbv2: bottomDb - offset,
-    channel: null,
-    // Above the region and centred on it, which works precisely because the stored anchor is the
-    // box's top-left corner.
-    labelOffsetOctaves: Math.log2(hiHz / loHz) / 2,
-    labelOffsetDb: 10,
-  })
-  if (next.length === annotations.value.length) return
-
-  annotations.value = next
-  annotationArmed.value = null
-  annotationEditing.value = id
-}
-
-/**
- * Every annotation's geometry in CSS pixels, from the same layout the canvas drew with — which is
- * what makes a handle land exactly on its label. Re-runs when the list changes and when the plot's
- * geometry or window does (see plotGeometryTick).
- */
-const annotationPlacements = computed<AnnotationPlacement[]>(() => {
-  void plotGeometryTick.value
-  const u = plot
-  if (!u || annotations.value.length === 0) return []
-  return layoutAnnotations(annotationItems(), cssAnnotationPlot(u), annotationNumbers.value)
-})
-
-/** The overlay sits exactly over the plotting area, so a placement's coordinates are its own. */
-const annotationOverlayStyle = computed(() => {
-  void plotGeometryTick.value
-  const u = plot
-  if (!u) return { display: 'none', left: '0px', top: '0px', width: '0px', height: '0px' }
-  const scale = plotPixelScale(u)
-  return {
-    left: `${u.bbox.left / scale}px`,
-    top: `${u.bbox.top / scale}px`,
-    width: `${u.bbox.width / scale}px`,
-    height: `${u.bbox.height / scale}px`,
-  }
-})
-
-/**
- * One transparent handle per *point* label. A frequency rule's label is stacked at the top of the
- * plot out of its neighbours' way, which a manual nudge would fight, so it has nothing to drag.
- */
-const annotationHandles = computed(() =>
-  annotationPlacements.value
-    // A box's label drags exactly like a point's, because a box's stored anchor is its top-left
-    // corner — onHandleMove's maths needs no branch.
-    .filter((p) => p.visible && (p.style === 'point' || p.style === 'box'))
-    .map((p) => {
-      const annotation = annotations.value.find((a) => a.id === p.id)
-      return {
-        id: p.id,
-        title: annotation ? `${annotation.text || 'Annotation'} — ${annotationReading(annotation)}. Drag to move the label, double-click to edit.` : '',
-        style: {
-          left: `${p.label.x}px`,
-          top: `${p.label.y}px`,
-          width: `${p.label.w}px`,
-          height: `${p.label.h}px`,
-        },
-      }
-    }),
-)
-
-
-/**
- * How small a box may be dragged, in CSS pixels, before the floor in clampBoxToWindow stops it.
- *
- * <p>A <i>UI-integrity</i> floor rather than a measurement one: at about a grip's width the nine
- * grips can no longer collapse into each other and strand the region. Deliberately a different
- * number, and a different reason, from MIN_BOX_DRAG_PX, which is how big a *gesture* has to be to
- * mean a region at all.</p>
- */
-const MIN_BOX_SPAN_PX = 10
-
-/** The size floor in the data units clampBoxToWindow works in, for the window now on screen. */
-function minBoxSpan(u: uPlot): { octaves: number; db: number } {
-  const width = u.over.clientWidth || 1
-  const height = u.over.clientHeight || 1
-  const loHz = u.scales.x.min ?? 1
-  const hiHz = u.scales.x.max ?? 1
-  const bottomDb = u.scales.y.min ?? 0
-  const topDb = u.scales.y.max ?? 0
-  return {
-    octaves: hiHz > loHz && loHz > 0 ? (MIN_BOX_SPAN_PX / width) * Math.log2(hiHz / loHz) : 0,
-    db: (MIN_BOX_SPAN_PX / height) * (topDb - bottomDb),
-  }
-}
-
-const GRIP_CURSOR: Record<BoxHandleKind, string> = {
-  move: 'cursor-move',
-  n: 'cursor-ns-resize',
-  s: 'cursor-ns-resize',
-  e: 'cursor-ew-resize',
-  w: 'cursor-ew-resize',
-  nw: 'cursor-nwse-resize',
-  se: 'cursor-nwse-resize',
-  ne: 'cursor-nesw-resize',
-  sw: 'cursor-nesw-resize',
-}
-
-/**
- * The move and resize grips of every drawn box, in the same CSS pixels the label handles use.
- *
- * <p>Move is a <b>grip</b> and not the box's interior, which is the one thing to understand here: a
- * region can cover the plot, and its interior is where drag-zoom lives — marking a region and then
- * zooming into it is the obvious next thing a user does. The same judgement keeps the label's own
- * handle small. The cost is that a drag-zoom begun exactly on a box's border resizes it instead;
- * that is a few pixels per edge and the cursor says so on hover.</p>
- */
-const boxGrips = computed(() => {
-  void plotGeometryTick.value
-  const u = plot
-  if (!u) return []
-  const m = annotationMetrics(cssAnnotationPlot(u))
-  return annotationPlacements.value
-    .filter((p) => p.visible && p.box)
-    .flatMap((p) =>
-      boxHandles(p.box as { x: number; y: number; w: number; h: number }, m).map((handle) => ({
-        key: `${p.id}:${handle.kind}`,
-        id: p.id,
-        kind: handle.kind,
-        cursor: GRIP_CURSOR[handle.kind],
-        title: handle.kind === 'move' ? 'Drag to move this region.' : 'Drag to resize this region.',
-        style: {
-          left: `${handle.rect.x}px`,
-          top: `${handle.rect.y}px`,
-          width: `${handle.rect.w}px`,
-          height: `${handle.rect.h}px`,
-        },
-      })),
-    )
-})
-
-let boxDrag: { id: number; kind: BoxHandleKind; grabOctaves: number; grabDb: number; start: DataBox } | null = null
-
-/** The box an annotation describes, in the unit the chart is plotting, or null when it is not one. */
-function plottedBox(id: number, offset: number | null): DataBox | null {
-  const a = annotations.value.find((x) => x.id === id)
-  if (!a || a.style !== 'box' || offset === null) return null
-  if (a.freqHz2 === null || a.levelDbv === null || a.levelDbv2 === null) return null
-  return { freqHz: a.freqHz, freqHz2: a.freqHz2, levelDb: a.levelDbv + offset, levelDb2: a.levelDbv2 + offset }
-}
-
-function onBoxGripDown(id: number, kind: BoxHandleKind, event: PointerEvent) {
-  const u = plot
-  const offset = annotationLevelOffsetDb()
-  const start = plottedBox(id, offset)
-  if (!u || !start) return
-
-  const rect = u.over.getBoundingClientRect()
-  const pointerHz = u.posToVal(event.clientX - rect.left, 'x')
-  const pointerDb = u.posToVal(event.clientY - rect.top, 'y')
-  if (!(pointerHz > 0) || !Number.isFinite(pointerDb)) return
-
-  // Where the pointer sits relative to the thing it grabbed, so the edge (or the corner, or the
-  // whole region for a move) does not jump under the cursor on the first move.
-  const anchorHz = kind === 'move' || kind.includes('w') ? start.freqHz : kind.includes('e') ? start.freqHz2 : pointerHz
-  const anchorDb = kind === 'move' || kind.includes('n') ? start.levelDb : kind.includes('s') ? start.levelDb2 : pointerDb
-  boxDrag = {
-    id,
-    kind,
-    grabOctaves: Math.log2(pointerHz / anchorHz),
-    grabDb: pointerDb - anchorDb,
-    start,
-  }
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.preventDefault()
-}
-
-function onBoxGripMove(event: PointerEvent) {
-  const u = plot
-  const drag = boxDrag
-  if (!u || !drag) return
-  const offset = annotationLevelOffsetDb()
-  if (offset === null) return
-
-  const rect = u.over.getBoundingClientRect()
-  const freqHz = u.posToVal(event.clientX - rect.left, 'x') * Math.pow(2, -drag.grabOctaves)
-  const levelDb = u.posToVal(event.clientY - rect.top, 'y') - drag.grabDb
-  if (!(freqHz > 0) || !Number.isFinite(levelDb)) return
-
-  // Always from the box the gesture *started* on, so a resize that crosses its opposite edge keeps
-  // tracking the pointer rather than fighting its own normalised result.
-  const proposed = boxFromDrag(drag.kind, drag.start, { freqHz, levelDb })
-  const clamped = clampBoxToWindow(
-    proposed,
-    {
-      loHz: u.scales.x.min ?? 0,
-      hiHz: u.scales.x.max ?? 0,
-      bottomDb: u.scales.y.min ?? 0,
-      topDb: u.scales.y.max ?? 0,
-    },
-    minBoxSpan(u),
-  )
-  annotations.value = updateAnnotation(annotations.value, drag.id, {
-    freqHz: clamped.freqHz,
-    freqHz2: clamped.freqHz2,
-    levelDbv: clamped.levelDb - offset,
-    levelDbv2: clamped.levelDb2 - offset,
-  })
-}
-
-function onBoxGripUp() {
-  boxDrag = null
-}
-
-let dragging: { id: number; grabDx: number; grabDy: number } | null = null
-
-function onHandleDown(id: number, event: PointerEvent) {
-  const u = plot
-  const placement = annotationPlacements.value.find((p) => p.id === id)
-  if (!u || !placement) return
-  const rect = u.over.getBoundingClientRect()
-  dragging = {
-    id,
-    grabDx: event.clientX - rect.left - (placement.label.x + placement.label.w / 2),
-    grabDy: event.clientY - rect.top - (placement.label.y + placement.label.h / 2),
-  }
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.preventDefault()
-}
-
-function onHandleMove(event: PointerEvent) {
-  const u = plot
-  const drag = dragging
-  if (!u || !drag) return
-  const annotation = annotations.value.find((a) => a.id === drag.id)
-  const placement = annotationPlacements.value.find((p) => p.id === drag.id)
-  const offset = annotationLevelOffsetDb()
-  if (!annotation || !placement || annotation.levelDbv === null || offset === null) return
-
-  const rect = u.over.getBoundingClientRect()
-  // posToVal is the one place this file goes from pixels back to values. The x scale is log
-  // (distr: 3), so what comes back is a frequency and the stored offset is the log2 of its ratio to
-  // the marker's own — see SpectrumAnnotation.labelOffsetOctaves for why the offset is in data units.
-  const freqHz = u.posToVal(event.clientX - rect.left - drag.grabDx, 'x')
-  const levelDb = u.posToVal(event.clientY - rect.top - drag.grabDy, 'y')
-  if (!(freqHz > 0) || !Number.isFinite(levelDb)) return
-
-  const anchorDb = annotation.levelDbv + offset
-  const clamped = clampLabelOffset({
-    freqHz: annotation.freqHz,
-    levelDb: anchorDb,
-    octaves: Math.log2(freqHz / annotation.freqHz),
-    db: levelDb - anchorDb,
-    window: {
-      loHz: u.scales.x.min ?? 0,
-      hiHz: u.scales.x.max ?? 0,
-      bottomDb: u.scales.y.min ?? 0,
-      topDb: u.scales.y.max ?? 0,
-    },
-    label: placement.label,
-    plot: { width: u.over.clientWidth, height: u.over.clientHeight },
-  })
-  annotations.value = updateAnnotation(annotations.value, drag.id, {
-    labelOffsetOctaves: clamped.octaves,
-    labelOffsetDb: clamped.db,
-  })
-}
-
-function onHandleUp() {
-  dragging = null
-}
-
-/** The label whose text box is open, and where to put it. */
-const editingPlacement = computed(
-  () => annotationPlacements.value.find((p) => p.id === annotationEditing.value && p.visible) ?? null,
-)
-const annotationEditorStyle = computed(() => {
-  const placement = editingPlacement.value
-  if (!placement) return { display: 'none', left: '0px', top: '0px', width: '0px' }
-  return {
-    left: `${placement.label.x}px`,
-    top: `${placement.label.y}px`,
-    width: `${Math.max(160, placement.label.w)}px`,
-  }
-})
-
-const annotationEditorRef = ref<HTMLInputElement | null>(null)
-const editingText = ref('')
-let cancellingEdit = false
-
-watch(annotationEditing, async (id) => {
-  editingText.value = id === null ? '' : annotations.value.find((a) => a.id === id)?.text ?? ''
-  if (id === null) return
-  await nextTick()
-  annotationEditorRef.value?.focus()
-  annotationEditorRef.value?.select()
-})
-
-function commitAnnotationEdit() {
-  const id = annotationEditing.value
-  if (id === null) return
-  annotations.value = updateAnnotation(annotations.value, id, { text: editingText.value.trim() })
-  annotationEditing.value = null
-}
-
-/**
- * Escape leaves the text as it was — and removes the annotation outright when it was only just
- * placed and still says nothing, so a stray click leaves nothing behind.
- */
-function cancelAnnotationEdit() {
-  const id = annotationEditing.value
-  if (id === null) return
-  cancellingEdit = true
-  // A box is exempt: it took a deliberate drag of at least MIN_BOX_DRAG_PX to make, and a region
-  // with no note still says "look here". Only a click-placed marker is thrown away unnamed.
-  const existing = annotations.value.find((a) => a.id === id)
-  if (existing && existing.style !== 'box' && existing.text.length === 0) {
-    annotations.value = removeAnnotation(annotations.value, id)
-  }
-  annotationEditing.value = null
-}
-
-/** Clicking away commits, which is what a text box on a chart has to mean — unless Escape did it. */
-function onAnnotationEditorBlur() {
-  if (cancellingEdit) {
-    cancellingEdit = false
-    return
-  }
-  commitAnnotationEdit()
+  finishBoxGesture(plot, annotationOverlay)
 }
 
 function nullFill(n: number): (number | null)[] {
@@ -2139,8 +1467,7 @@ watch(isDark, handleThemeChange)
 /** Escape disarms, which is what a hand reaches for mid-gesture; the panel's Cancel does the same. */
 function onWindowKeyDown(event: KeyboardEvent) {
   // Gated on the inline editor being closed, or this would fight its own Escape handler.
-  if (event.key !== 'Escape' || annotationArmed.value === null || annotationEditing.value !== null) return
-  annotationArmed.value = null
+  annotationOverlay.onWindowKeyDown(event)
 }
 
 onMounted(() => {
@@ -2212,51 +1539,7 @@ onBeforeUnmount(() => {
          writing the same useChartDisplay() state this component reacts to. -->
     <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
       <div ref="containerRef" class="w-full"></div>
-      <!-- The annotations' drag handles and inline text box: DOM elements over the canvas-drawn
-           labels, laid out by the same layoutAnnotations call the plugin draws with. They are a
-           sibling of the plot's own container, so a pointerdown on a handle never reaches uPlot's
-           `over` element and a label drag can therefore never start a drag-zoom — which is the
-           whole reason the hit-testing is not done on the canvas. The labels themselves stay
-           canvas-drawn, because the report only ever sees exportPng's canvas. -->
-      <div class="pointer-events-none absolute" :style="annotationOverlayStyle">
-        <div
-          v-for="handle in annotationHandles"
-          :key="handle.id"
-          class="pointer-events-auto absolute cursor-move rounded hover:bg-neutral-500/10"
-          :style="handle.style"
-          :title="handle.title"
-          @pointerdown="onHandleDown(handle.id, $event)"
-          @pointermove="onHandleMove"
-          @pointerup="onHandleUp"
-          @pointercancel="onHandleUp"
-          @dblclick="annotationEditing = handle.id"
-        ></div>
-        <div
-          v-for="grip in boxGrips"
-          :key="grip.key"
-          class="pointer-events-auto absolute rounded-sm hover:bg-neutral-500/20"
-          :class="grip.cursor"
-          :style="grip.style"
-          :title="grip.title"
-          @pointerdown="onBoxGripDown(grip.id, grip.kind, $event)"
-          @pointermove="onBoxGripMove"
-          @pointerup="onBoxGripUp"
-          @pointercancel="onBoxGripUp"
-        ></div>
-        <input
-          v-if="editingPlacement"
-          ref="annotationEditorRef"
-          v-model="editingText"
-          type="text"
-          :maxlength="MAX_ANNOTATION_TEXT"
-          placeholder="What is this?"
-          class="tb-input pointer-events-auto absolute h-7 text-xs"
-          :style="annotationEditorStyle"
-          @keydown.enter.prevent="commitAnnotationEdit"
-          @keydown.esc.prevent="cancelAnnotationEdit"
-          @blur="onAnnotationEditorBlur"
-        />
-      </div>
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
       <!-- Off-scale cue: a visible channel or overlay has a value above/below the current dBV window. -->
       <div
         v-if="outOfRange.above"

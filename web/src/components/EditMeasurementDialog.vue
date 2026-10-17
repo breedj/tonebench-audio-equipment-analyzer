@@ -6,7 +6,8 @@ import MeasurementKindChip from './MeasurementKindChip.vue'
 import { useMeasurements } from '../composables/useMeasurements'
 import { useProjects } from '../composables/useProjects'
 import { FFT_SPECTRUM_KIND } from '../measurements/kinds'
-import { parseAnnotations, type SpectrumAnnotation } from '../measurements/spectrumAnnotations'
+import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
+import { storedAnnotationFrame } from '../charts/annotationViews'
 import { api, type MeasurementSummary } from '../api/client'
 
 const props = defineProps<{ open: boolean; item: MeasurementSummary | null }>()
@@ -38,7 +39,7 @@ const form = reactive({
  * <p><b>Null means they could not be read</b>, which is what keeps a failed fetch from wiping them:
  * onSave then sends nothing for the field, and the server leaves the stored list alone.</p>
  */
-const annotations = ref<SpectrumAnnotation[] | null>(null)
+const annotations = ref<ChartAnnotation[] | null>(null)
 const annotationsUnreadable = ref(false)
 const isFft = computed(() => kind.value === FFT_SPECTRUM_KIND)
 
@@ -47,7 +48,10 @@ async function loadAnnotations(resultId: number) {
   annotationsUnreadable.value = false
   try {
     const detail = await api.getMeasurement(resultId)
-    annotations.value = parseAnnotations((JSON.parse(detail.paramsJson) as { chartAnnotations?: unknown }).chartAnnotations)
+    annotations.value = parseAnnotations(
+      (JSON.parse(detail.paramsJson) as { chartAnnotations?: unknown }).chartAnnotations,
+      storedAnnotationFrame(detail.kind),
+    )
   } catch {
     annotationsUnreadable.value = true
   }

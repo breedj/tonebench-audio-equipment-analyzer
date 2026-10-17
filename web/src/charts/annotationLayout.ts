@@ -2,20 +2,47 @@
  * Where an annotation's marker, leader, label box and ordinal badge go on a plot.
  *
  * <p>Deliberately knows nothing about uPlot: it takes an {@link AnnotationPlot} adapter, so the same
- * arithmetic serves the <b>canvas</b> (device pixels, `valToPos(..., true)`, which is what the
- * report's PNG is made of) and the <b>DOM overlay</b> (CSS pixels, `valToPos(..., false)`, which is
- * what a mouse can grab). Those two have to agree to the pixel or a label would be drawn in one
- * place and dragged from another — one function for both is how that is guaranteed. It is also the
- * only way to test any of this, nothing in a `.vue` being testable here.</p>
+ * arithmetic serves the <b>canvas</b> (device pixels, which is what the report's PNG is made of), the
+ * <b>DOM overlay</b> (CSS pixels, which is what a mouse can grab) and the four hand-drawn plane
+ * charts, which have no uPlot instance at all. Those have to agree to the pixel or a label would be
+ * drawn in one place and dragged from another — one function for all of them is how that is
+ * guaranteed. It is also the only way to test any of this, nothing in a `.vue` being testable here.</p>
  *
- * <p>The sizes are all expressed in units of the font, and the font is a fixed fraction of the
- * plot's width ({@link annotationFontPx}). That is what makes the 1600 px export label read the
- * same on the page as the ~700 px screen label does on screen: `composeChartPng` draws the plot
- * canvas scaled onto the requested size, so anything that is a fixed fraction of the plot survives
- * the rescale and anything measured in absolute pixels does not.</p>
+ * <p>The sizes are all expressed in units of the font, and the font is a fixed fraction of the plot's
+ * width ({@link annotationFontPx}). That is what makes the 1600 px export label read the same on the
+ * page as the ~700 px screen label does on screen: `composeChartPng` draws the plot canvas scaled
+ * onto the requested size, so anything that is a fixed fraction of the plot survives the rescale and
+ * anything measured in absolute pixels does not.</p>
+ *
+ * <p>Nothing here knows what a frequency is. An axis declares which <b>quantity</b> it plots and
+ * answers positions for it; an annotation stored in some other quantity is skipped, the same way one
+ * outside the plotted window is. All the offset and extent arithmetic goes through that quantity's
+ * own {@link AnnotationSpace}, so one set of functions serves a log-frequency axis, a linear time
+ * axis that crosses zero, and an impedance axis that switches between the two at runtime.</p>
  */
 
-import type { AnnotationStyle } from '../measurements/spectrumAnnotations'
+import type { AnnotationStyle } from '../measurements/chartAnnotations'
+import { annotationQuantity, type AnnotationSpace } from './annotationQuantities'
+
+/** One axis of a plot annotations can be laid out on. */
+export interface AnnotationAxis {
+  /**
+   * The annotation quantity this axis can draw — a key of annotationQuantities.ts. An annotation
+   * stored in anything else is skipped rather than converted: see the module remarks there.
+   */
+  quantity: string
+  /**
+   * A stored value in {@link quantity} → a position in this adapter's pixels, including whatever
+   * display transform the axis is applying (the spectrum's unit offset, the sweep's %→dB, the
+   * impulse's volts→dB re peak). Non-finite where the value has no position at all, which a log axis
+   * answers for anything at or below zero.
+   */
+  posOf(value: number): number
+  /** A position in this adapter's pixels → a value in {@link quantity}. */
+  valOf(pos: number): number
+  /** The window on screen, in {@link quantity}, `lo < hi`. */
+  window: { lo: number; hi: number }
+}
 
 /** A plot to lay annotations out on, in whatever pixel space the caller works in. */
 export interface AnnotationPlot {
@@ -24,34 +51,36 @@ export interface AnnotationPlot {
   top: number
   width: number
   height: number
-  xToPos(freqHz: number): number
-  yToPos(levelDb: number): number
+  x: AnnotationAxis
+  y: AnnotationAxis
   /**
-   * This adapter's pixels per CSS pixel — 1 for the DOM overlay, the device pixel ratio for the
-   * canvas (uPlot draws in device pixels). The font is chosen from the CSS width and then scaled by
-   * this, so a hidpi screen does not get half-size labels.
+   * This adapter's pixels per CSS pixel — 1 for the DOM overlay and for the hand-drawn charts (which
+   * draw in CSS pixels throughout), the device pixel ratio for a uPlot canvas. The font is chosen
+   * from the CSS width and then scaled by this, so a hidpi screen does not get half-size labels.
    */
   scale: number
   measureText(text: string, fontPx: number): number
 }
 
-/** One annotation, with its level already converted to whatever the chart is plotting. */
+/**
+ * One annotation to lay out: its <b>stored</b> values and the quantities they are in. The adapter
+ * does the converting, so nothing upstream of here has to know what the axis is currently plotting.
+ */
 export interface AnnotationLayoutItem {
   id: number
   number: number
   style: AnnotationStyle
   text: string
-  freqHz: number
-  /**
-   * The plotted level: a point's marker, or a <b>box</b>'s top edge. Null for a frequency rule, or
-   * when the unit cannot be converted.
-   */
-  levelDb: number | null
-  /** A box's other two edges, already in the plotted unit. Null for every other style. */
-  freqHz2: number | null
-  levelDb2: number | null
-  labelOffsetOctaves: number
-  labelOffsetDb: number
+  x: number
+  /** A point's level, or a <b>box</b>'s top edge. Null for a rule. */
+  y: number | null
+  /** A box's other two edges. Null for every other style. */
+  x2: number | null
+  y2: number | null
+  xQuantity: string
+  yQuantity: string
+  labelOffsetX: number
+  labelOffsetY: number
 }
 
 /** A rectangle in plot pixels. */
@@ -67,12 +96,15 @@ export interface AnnotationPlacement {
   number: number
   style: AnnotationStyle
   text: string
-  /** False when there is nothing to draw: off the frequency window, no level, or no room to stack. */
+  /**
+   * False when there is nothing to draw: outside the plotted window, no level, no room to stack, or
+   * stored in a quantity this axis is not plotting.
+   */
   visible: boolean
   fontPx: number
   /** The marker dot, for a point. */
   anchor: { x: number; y: number; r: number } | null
-  /** The vertical rule, for a frequency annotation. */
+  /** The vertical rule, for a rule annotation. */
   rule: { x: number; y1: number; y2: number } | null
   /** The marked region, for a box — already clamped to the plotting area. */
   box: Rect | null
@@ -92,9 +124,9 @@ const MIN_FONT_PX = 10
 const MAX_FONT_PX = 26
 
 /**
- * The label font for a plot this wide, in CSS pixels. Proportional, so the label is the same
- * fraction of the picture on screen and in the 1600 px export; bounded, so a chart squeezed into a
- * narrow column still has readable labels and a very wide one does not get a headline.
+ * The label font for a plot this wide, in CSS pixels. Proportional, so the label is the same fraction
+ * of the picture on screen and in the 1600 px export; bounded, so a chart squeezed into a narrow
+ * column still has readable labels and a very wide one does not get a headline.
  */
 export function annotationFontPx(plotCssWidthPx: number): number {
   const proportional = (REFERENCE_FONT_PX * plotCssWidthPx) / REFERENCE_WIDTH_PX
@@ -133,24 +165,63 @@ function clamp(value: number, lo: number, hi: number): number {
   return hi < lo ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, value))
 }
 
+function spaceOf(quantity: string): AnnotationSpace {
+  return annotationQuantity(quantity).space
+}
+
+/**
+ * Whether this plot is the one that annotation belongs on: the axes have to be plotting the
+ * quantities it was stored in.
+ *
+ * <p>A rule is judged on x alone — it has no level, so the y axis could be plotting anything. That
+ * is what lets one rule survive the frequency-response chart's level/gain switch, which a point at a
+ * level cannot.</p>
+ */
+export function drawsAnnotation(item: AnnotationLayoutItem, plot: AnnotationPlot): boolean {
+  if (item.xQuantity !== plot.x.quantity) return false
+  return item.style === 'frequency' || item.yQuantity === plot.y.quantity
+}
+
+/**
+ * Where a label starts on a freshly placed annotation, in the stored quantities' own spaces: a fixed
+ * fraction of the plot up and to the right (see DEFAULT_LABEL_OFFSET_FRACTION).
+ *
+ * <p>Derived from the window rather than being a constant, because the offset's units are the
+ * quantity's: 0.45 "of x" is 0.45 of an octave on a frequency axis and 0.45 of a millisecond on a
+ * time one, which are not the same gesture at all.</p>
+ */
+export function defaultLabelOffset(
+  plot: AnnotationPlot,
+  fraction: { x: number; y: number },
+): { labelOffsetX: number; labelOffsetY: number } {
+  const sx = spaceOf(plot.x.quantity)
+  const sy = spaceOf(plot.y.quantity)
+  const xSpan = sx.toSpace(plot.x.window.hi) - sx.toSpace(plot.x.window.lo)
+  const ySpan = sy.toSpace(plot.y.window.hi) - sy.toSpace(plot.y.window.lo)
+  return {
+    labelOffsetX: Number.isFinite(xSpan) ? xSpan * fraction.x : 0,
+    labelOffsetY: Number.isFinite(ySpan) ? ySpan * fraction.y : 0,
+  }
+}
+
 /**
  * A box's region in plot pixels, <b>clamped</b> to the plotting area — or null when it does not
  * overlap the window at all.
  *
  * <p>Clamped, where a point outside the window is skipped, and the difference is the point of both
- * rules: a marker pressed against the axis claims a column that is not there, while a region
- * clipped at the axis claims exactly the columns that <i>are</i> there. Clamping here rather than
- * leaving it to the canvas clip is what puts the stroke <b>on</b> the plot edge, which is the
- * visible statement "this continues past here".</p>
+ * rules: a marker pressed against the axis claims a column that is not there, while a region clipped
+ * at the axis claims exactly the columns that <i>are</i> there. Clamping here rather than leaving it
+ * to the canvas clip is what puts the stroke <b>on</b> the plot edge, which is the visible statement
+ * "this continues past here".</p>
  */
 export function boxRect(item: AnnotationLayoutItem, plot: AnnotationPlot): Rect | null {
-  if (item.levelDb === null || item.freqHz2 === null || item.levelDb2 === null) return null
-  if (!(item.freqHz > 0) || !(item.freqHz2 > 0)) return null
+  if (item.y === null || item.x2 === null || item.y2 === null) return null
+  if (!drawsAnnotation(item, plot)) return null
 
-  const x1 = plot.xToPos(item.freqHz)
-  const x2 = plot.xToPos(item.freqHz2)
-  const y1 = plot.yToPos(item.levelDb)
-  const y2 = plot.yToPos(item.levelDb2)
+  const x1 = plot.x.posOf(item.x)
+  const x2 = plot.x.posOf(item.x2)
+  const y1 = plot.y.posOf(item.y)
+  const y2 = plot.y.posOf(item.y2)
   if (![x1, x2, y1, y2].every(Number.isFinite)) return null
 
   const right = plot.left + plot.width
@@ -198,8 +269,8 @@ export interface BoxHandle {
  *
  * <p><b>Move is a grip and not the box's interior</b>, which is the whole reason this list looks the
  * way it does: a region can cover the plot, and the interior is where drag-zoom lives — marking a
- * region and then zooming into it is the obvious next thing a user does. The same judgement keeps
- * the label's own handle small.</p>
+ * region and then zooming into it is the obvious next thing a user does. The same judgement keeps the
+ * label's own handle small.</p>
  *
  * <p>A box too small to carry them keeps only its corners, so the grips can never overlap each other
  * and strand the region.</p>
@@ -226,47 +297,74 @@ export function boxHandles(box: Rect, m: AnnotationMetrics): BoxHandle[] {
   ]
 }
 
-/** A box in data units — the shape the drag maths works in. */
+/** A box in stored values — the shape the drag maths works in. */
 export interface DataBox {
-  freqHz: number
-  freqHz2: number
-  levelDb: number
-  levelDb2: number
+  x: number
+  x2: number
+  y: number
+  y2: number
+}
+
+/** A plotted window in stored values, and the two spaces its axes measure offsets in. */
+export interface AnnotationWindow {
+  xLo: number
+  xHi: number
+  yLo: number
+  yHi: number
+}
+
+/** The spaces a box's own two quantities measure extents in. */
+export interface BoxSpaces {
+  x: AnnotationSpace
+  y: AnnotationSpace
+}
+
+export function boxSpaces(xQuantity: string, yQuantity: string): BoxSpaces {
+  return { x: spaceOf(xQuantity), y: spaceOf(yQuantity) }
 }
 
 /**
- * The box a grip drag proposes, from the box it started on and where the pointer is now (in data
- * units).
+ * The box a grip drag proposes, from the box it started on and where the pointer is now (in stored
+ * values).
  *
- * <p><b>Move keeps the region's extent in octaves and dB, never in pixels</b>: a region dragged
- * along a log axis keeps the octave width it was drawn with rather than stretching as it travels.
- * Resize touches only the edges its kind names, and an edge dragged past its opposite simply
- * crosses it — the caller normalises on the way to storage, which is what every resize tool does.</p>
+ * <p><b>Move keeps the region's extent in the axes' own spaces, never in pixels</b>: a region dragged
+ * along a log axis keeps the octave width it was drawn with rather than stretching as it travels, and
+ * one on a linear axis keeps its width in that axis's units. Resize touches only the edges its kind
+ * names, and an edge dragged past its opposite simply crosses it — the caller normalises on the way
+ * to storage, which is what every resize tool does.</p>
  */
-export function boxFromDrag(kind: BoxHandleKind, start: DataBox, pointer: { freqHz: number; levelDb: number }): DataBox {
-  if (!(pointer.freqHz > 0) || !Number.isFinite(pointer.levelDb)) return start
+export function boxFromDrag(
+  kind: BoxHandleKind,
+  start: DataBox,
+  pointer: { x: number; y: number },
+  spaces: BoxSpaces,
+): DataBox {
+  if (!Number.isFinite(pointer.x) || !Number.isFinite(pointer.y)) return start
 
   if (kind === 'move') {
-    const octaves = Math.log2(start.freqHz2 / start.freqHz)
-    const height = start.levelDb - start.levelDb2
+    const width = spaces.x.toSpace(start.x2) - spaces.x.toSpace(start.x)
+    const height = spaces.y.toSpace(start.y) - spaces.y.toSpace(start.y2)
+    const pointerX = spaces.x.toSpace(pointer.x)
+    const pointerY = spaces.y.toSpace(pointer.y)
+    if (![width, height, pointerX, pointerY].every(Number.isFinite)) return start
     return {
-      freqHz: pointer.freqHz,
-      freqHz2: pointer.freqHz * Math.pow(2, octaves),
-      levelDb: pointer.levelDb,
-      levelDb2: pointer.levelDb - height,
+      x: pointer.x,
+      x2: spaces.x.fromSpace(pointerX + width),
+      y: pointer.y,
+      y2: spaces.y.fromSpace(pointerY - height),
     }
   }
 
   const next = { ...start }
-  if (kind.includes('w')) next.freqHz = pointer.freqHz
-  if (kind.includes('e')) next.freqHz2 = pointer.freqHz
-  if (kind.includes('n')) next.levelDb = pointer.levelDb
-  if (kind.includes('s')) next.levelDb2 = pointer.levelDb
+  if (kind.includes('w')) next.x = pointer.x
+  if (kind.includes('e')) next.x2 = pointer.x
+  if (kind.includes('n')) next.y = pointer.y
+  if (kind.includes('s')) next.y2 = pointer.y
   return next
 }
 
 /**
- * A dragged box kept inside the window and no smaller than `minSpan`.
+ * A dragged box kept inside the window and no smaller than `minSpan` (in each axis's own space).
  *
  * <p>A box that would leave the window is <b>translated</b> back in rather than squashed, so a move
  * never silently resizes. The size floor is a UI-integrity one — about a grip's width — so the grips
@@ -275,46 +373,54 @@ export function boxFromDrag(kind: BoxHandleKind, start: DataBox, pointer: { freq
  */
 export function clampBoxToWindow(
   box: DataBox,
-  window: { loHz: number; hiHz: number; bottomDb: number; topDb: number },
-  minSpan: { octaves: number; db: number },
+  window: AnnotationWindow,
+  minSpan: { x: number; y: number },
+  spaces: BoxSpaces,
 ): DataBox {
-  if (!(box.freqHz > 0) || !(box.freqHz2 > 0) || !(window.loHz > 0) || !(window.hiHz > window.loHz)) return box
-  if (!Number.isFinite(box.levelDb) || !Number.isFinite(box.levelDb2)) return box
+  const sx = spaces.x
+  const sy = spaces.y
+  const winXLo = sx.toSpace(window.xLo)
+  const winXHi = sx.toSpace(window.xHi)
+  const winYLo = sy.toSpace(window.yLo)
+  const winYHi = sy.toSpace(window.yHi)
+  if (![winXLo, winXHi, winYLo, winYHi].every(Number.isFinite)) return box
+  if (!(winXHi > winXLo) || !(winYHi > winYLo)) return box
 
-  let loHz = Math.min(box.freqHz, box.freqHz2)
-  let hiHz = Math.max(box.freqHz, box.freqHz2)
-  let top = Math.max(box.levelDb, box.levelDb2)
-  let bottom = Math.min(box.levelDb, box.levelDb2)
+  let lo = sx.toSpace(Math.min(box.x, box.x2))
+  let hi = sx.toSpace(Math.max(box.x, box.x2))
+  let top = sy.toSpace(Math.max(box.y, box.y2))
+  let bottom = sy.toSpace(Math.min(box.y, box.y2))
+  if (![lo, hi, top, bottom].every(Number.isFinite)) return box
 
   // The floor first, so a box squeezed to nothing against an edge still has grips to grab.
-  if (Math.log2(hiHz / loHz) < minSpan.octaves) hiHz = loHz * Math.pow(2, minSpan.octaves)
-  if (top - bottom < minSpan.db) top = bottom + minSpan.db
+  if (hi - lo < minSpan.x) hi = lo + minSpan.x
+  if (top - bottom < minSpan.y) top = bottom + minSpan.y
 
-  const widthOctaves = Math.log2(hiHz / loHz)
-  const heightDb = top - bottom
-  if (loHz < window.loHz) {
-    loHz = window.loHz
-    hiHz = loHz * Math.pow(2, widthOctaves)
+  const width = hi - lo
+  const height = top - bottom
+  if (lo < winXLo) {
+    lo = winXLo
+    hi = lo + width
   }
-  if (hiHz > window.hiHz) {
-    hiHz = window.hiHz
-    loHz = Math.max(window.loHz, hiHz * Math.pow(2, -widthOctaves))
+  if (hi > winXHi) {
+    hi = winXHi
+    lo = Math.max(winXLo, hi - width)
   }
-  if (top > window.topDb) {
-    top = window.topDb
-    bottom = top - heightDb
+  if (top > winYHi) {
+    top = winYHi
+    bottom = top - height
   }
-  if (bottom < window.bottomDb) {
-    bottom = window.bottomDb
-    top = Math.min(window.topDb, bottom + heightDb)
+  if (bottom < winYLo) {
+    bottom = winYLo
+    top = Math.min(winYHi, bottom + height)
   }
 
-  return { freqHz: loHz, freqHz2: hiHz, levelDb: top, levelDb2: bottom }
+  return { x: sx.fromSpace(lo), x2: sx.fromSpace(hi), y: sy.fromSpace(top), y2: sy.fromSpace(bottom) }
 }
 
 /**
- * The leader line from a marker to the nearest edge of its label box — so a label dragged to the
- * left of its peak gets a line out of the dot's left side rather than one crossing the box.
+ * The leader line from a marker to the nearest edge of its label box — so a label dragged to the left
+ * of its peak gets a line out of the dot's left side rather than one crossing the box.
  */
 function leaderTo(
   anchor: { x: number; y: number; r: number },
@@ -335,24 +441,29 @@ function leaderTo(
 }
 
 /**
- * Where a label sits for an annotation anchored at `(anchorHz, anchorDb)`: its stored offset applied
- * in data units, then clamped inside the plot. Shared by the point and the box so the two cannot
- * drift — a box's anchor is its top-left corner, which is exactly why it needs no second rule.
+ * Where a label sits for an annotation anchored at `(anchorX, anchorY)`: its stored offset applied in
+ * the <b>stored quantity's own space</b>, then projected. Shared by the point and the box so the two
+ * cannot drift — a box's anchor is its top-left corner, which is exactly why it needs no second rule.
+ *
+ * <p>Applying the offset before the projection rather than after is what keeps a label still when the
+ * axis changes what it displays: an offset that is a ratio in percent is a constant difference in dB,
+ * so a distortion label stays beside its point across the chart's %/dB switch.</p>
  */
 function labelBoxAt(
   plot: AnnotationPlot,
-  anchorHz: number,
-  anchorDb: number,
-  offsetOctaves: number,
-  offsetDb: number,
+  item: AnnotationLayoutItem,
+  anchorX: number,
+  anchorY: number,
   fallback: { x: number; y: number },
   w: number,
   h: number,
 ): Rect {
   const right = plot.left + plot.width
   const bottom = plot.top + plot.height
-  const cx = plot.xToPos(anchorHz * Math.pow(2, offsetOctaves))
-  const cy = plot.yToPos(anchorDb + offsetDb)
+  const sx = spaceOf(item.xQuantity)
+  const sy = spaceOf(item.yQuantity)
+  const cx = plot.x.posOf(sx.fromSpace(sx.toSpace(anchorX) + item.labelOffsetX))
+  const cy = plot.y.posOf(sy.fromSpace(sy.toSpace(anchorY) + item.labelOffsetY))
   return {
     x: clamp((Number.isFinite(cx) ? cx : fallback.x) - w / 2, plot.left, right - w),
     y: clamp((Number.isFinite(cy) ? cy : fallback.y) - h / 2, plot.top, bottom - h),
@@ -364,17 +475,18 @@ function labelBoxAt(
 /**
  * Every annotation's geometry, in the adapter's own pixels.
  *
- * <p>Two rules worth knowing. An annotation whose frequency is outside the plotted window is
- * <b>skipped, not clamped to the edge</b> — the same judgement the response chart's pinned cursor
- * makes, since a label pressed against the axis claims a column that is not there. And frequency
- * labels <b>stack</b> into rows at the top of the plot, dropping a row when they would overlap a
- * neighbour and giving up (invisible) past the rows that fit, which is the "labels only where they
- * fit" call the multitone markers already make.</p>
+ * <p>Three rules worth knowing. An annotation stored in a quantity this plot is not showing is
+ * <b>skipped</b> — not converted, not moved, not dropped from the model — so switching a sweep's x
+ * axis from hertz to watts hides the hertz notes and switching back brings them out again. An
+ * annotation whose x is outside the plotted window is skipped rather than clamped to the edge, the
+ * same judgement the response chart's pinned cursor makes, since a label pressed against the axis
+ * claims a column that is not there. And rule labels <b>stack</b> into rows at the top of the plot,
+ * dropping a row when they would overlap a neighbour and giving up (invisible) past the rows that
+ * fit, which is the "labels only where they fit" call the multitone markers already make.</p>
  *
  * @param numbers Whether the ordinal badge is drawn. It changes the box's width, so it belongs here
- *   rather than being painted over the top afterwards — the report turns it off when its
- *   Annotations table is not included, and a box sized for a badge that is not drawn reads as a
- *   typo.
+ *   rather than being painted over the top afterwards — the report turns it off when its Annotations
+ *   table is not included, and a box sized for a badge that is not drawn reads as a typo.
  */
 export function layoutAnnotations(
   items: readonly AnnotationLayoutItem[],
@@ -407,30 +519,28 @@ export function layoutAnnotations(
       textY: 0,
     }
 
+    // This plot is not the one that annotation was drawn against -- a different x quantity, or a y
+    // axis showing something else. Nothing is drawn and nothing is changed.
+    if (!drawsAnnotation(item, plot)) {
+      placements.push(base)
+      continue
+    }
+
     const textWidth = item.text ? plot.measureText(item.text, m.fontPx) : 0
     const badgeWidth = numbers ? 2 * m.badgeR + m.badgeGap : 0
     const w = m.padX * 2 + badgeWidth + textWidth
     const h = m.boxHeight
 
-    // The box is laid out *before* the off-window test below, which looks at `item.freqHz` alone: a
-    // region whose low edge is left of the window is still mostly on screen, and testing its left
-    // edge the way a point's position is tested would make it vanish on the first zoom.
+    // The box is laid out *before* the off-window test below, which looks at `item.x` alone: a region
+    // whose low edge is left of the window is still mostly on screen, and testing its left edge the
+    // way a point's position is tested would make it vanish on the first zoom.
     if (item.style === 'box') {
       const rect = boxRect(item, plot)
-      if (rect === null || item.levelDb === null) {
+      if (rect === null || item.y === null) {
         placements.push(base)
         continue
       }
-      const label = labelBoxAt(
-        plot,
-        item.freqHz,
-        item.levelDb,
-        item.labelOffsetOctaves,
-        item.labelOffsetDb,
-        { x: rect.x + rect.w / 2, y: rect.y },
-        w,
-        h,
-      )
+      const label = labelBoxAt(plot, item, item.x, item.y, { x: rect.x + rect.w / 2, y: rect.y }, w, h)
       placements.push({
         ...base,
         visible: true,
@@ -442,33 +552,24 @@ export function layoutAnnotations(
       continue
     }
 
-    const x = plot.xToPos(item.freqHz)
+    const x = plot.x.posOf(item.x)
     if (!Number.isFinite(x) || x < plot.left || x > right) {
       placements.push(base)
       continue
     }
 
     if (item.style === 'point') {
-      if (item.levelDb === null || !Number.isFinite(item.levelDb)) {
+      if (item.y === null || !Number.isFinite(item.y)) {
         placements.push(base)
         continue
       }
-      const y = plot.yToPos(item.levelDb)
+      const y = plot.y.posOf(item.y)
       if (!Number.isFinite(y)) {
         placements.push(base)
         continue
       }
       const anchor = { x, y: clamp(y, plot.top, bottom), r: m.markerR }
-      const label = labelBoxAt(
-        plot,
-        item.freqHz,
-        item.levelDb,
-        item.labelOffsetOctaves,
-        item.labelOffsetDb,
-        { x, y },
-        w,
-        h,
-      )
+      const label = labelBoxAt(plot, item, item.x, item.y, { x, y }, w, h)
       placements.push({
         ...base,
         visible: true,
@@ -480,8 +581,8 @@ export function layoutAnnotations(
       continue
     }
 
-    // A frequency rule: the label goes to the right of the line, or to its left where there is no
-    // room, in the first row at the top of the plot that nothing else has taken.
+    // A rule: the label goes to the right of the line, or to its left where there is no room, in the
+    // first row at the top of the plot that nothing else has taken.
     let row = -1
     let labelX = x + m.gap
     if (labelX + w > right) labelX = x - m.gap - w
@@ -527,41 +628,44 @@ function labelContents(
 }
 
 /**
- * A dragged label's offset, clamped so the box stays on the plot — in <b>data units</b>, which is
- * the form the offset is stored in (see SpectrumAnnotation.labelOffsetOctaves).
+ * A dragged label's offset, clamped so the box stays on the plot — in the <b>stored quantities' own
+ * spaces</b>, which is the form the offset is stored in (see ChartAnnotation.labelOffsetX).
  *
- * <p>Done in data space rather than by clamping pixels and converting back, because the stored
- * value has to be sane in its own terms: the same annotation is drawn on a 1600 px export and
- * re-laid-out after a zoom, and an offset that was only ever valid for the pixels it was dragged on
- * would wander. `levelDb` and the window are in whatever unit the chart is plotting; the returned
- * dB offset is a difference, so it is unit-free either way.</p>
+ * <p>Done in that space rather than by clamping pixels and converting back, because the stored value
+ * has to be sane in its own terms: the same annotation is drawn on a 1600 px export and re-laid-out
+ * after a zoom, and an offset that was only ever valid for the pixels it was dragged on would wander.
+ * Clamping in the stored quantity rather than in the plotted one is also what keeps a unit switch
+ * from moving a label that was already near an edge.</p>
  */
 export function clampLabelOffset(args: {
-  freqHz: number
-  levelDb: number
-  octaves: number
-  db: number
-  window: { loHz: number; hiHz: number; bottomDb: number; topDb: number }
+  x: number
+  y: number
+  offsetX: number
+  offsetY: number
+  window: AnnotationWindow
+  spaces: BoxSpaces
   /** The label box, in plot pixels. */
   label: { w: number; h: number }
   plot: { width: number; height: number }
-}): { octaves: number; db: number } {
-  const { freqHz, levelDb, window: win, label, plot } = args
-  if (!(freqHz > 0) || !(win.loHz > 0) || !(win.hiHz > win.loHz) || !(plot.width > 0) || !(plot.height > 0)) {
-    return { octaves: args.octaves, db: args.db }
-  }
+}): { offsetX: number; offsetY: number } {
+  const { x, y, window: win, spaces, label, plot } = args
+  const fallback = { offsetX: args.offsetX, offsetY: args.offsetY }
+  if (!(plot.width > 0) || !(plot.height > 0)) return fallback
 
-  const spanOctaves = Math.log2(win.hiHz / win.loHz)
-  const spanDb = win.topDb - win.bottomDb
-  const marginOctaves = ((label.w / 2) / plot.width) * spanOctaves
-  const marginDb = ((label.h / 2) / plot.height) * spanDb
+  const anchorX = spaces.x.toSpace(x)
+  const anchorY = spaces.y.toSpace(y)
+  const xLo = spaces.x.toSpace(win.xLo)
+  const xHi = spaces.x.toSpace(win.xHi)
+  const yLo = spaces.y.toSpace(win.yLo)
+  const yHi = spaces.y.toSpace(win.yHi)
+  if (![anchorX, anchorY, xLo, xHi, yLo, yHi].every(Number.isFinite)) return fallback
+  if (!(xHi > xLo) || !(yHi > yLo)) return fallback
 
-  const targetHz = clamp(
-    freqHz * Math.pow(2, args.octaves),
-    win.loHz * Math.pow(2, marginOctaves),
-    win.hiHz * Math.pow(2, -marginOctaves),
-  )
-  const targetDb = clamp(levelDb + args.db, win.bottomDb + marginDb, win.topDb - marginDb)
+  const marginX = (label.w / 2 / plot.width) * (xHi - xLo)
+  const marginY = (label.h / 2 / plot.height) * (yHi - yLo)
 
-  return { octaves: Math.log2(targetHz / freqHz), db: targetDb - levelDb }
+  const targetX = clamp(anchorX + args.offsetX, xLo + marginX, xHi - marginX)
+  const targetY = clamp(anchorY + args.offsetY, yLo + marginY, yHi - marginY)
+
+  return { offsetX: targetX - anchorX, offsetY: targetY - anchorY }
 }

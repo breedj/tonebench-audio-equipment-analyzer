@@ -1,4 +1,5 @@
 ﻿using Tonebench.App.Services;
+using System.Text.Json;
 using Tonebench.App.Streaming;
 using Tonebench.Data;
 using Tonebench.Dsp;
@@ -433,7 +434,7 @@ public sealed record SaveMeasurementRequest(
     long MeasurementTypeId,
     string Name,
     string? Notes,
-    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <param name="ChartAnnotations">
 /// This result's own annotations. <b>Null means do not touch them</b> and an <b>empty list
@@ -444,7 +445,7 @@ public sealed record SaveMeasurementRequest(
 public sealed record UpdateMeasurementRequest(
     string Name,
     string? Notes,
-    IReadOnlyList<SpectrumAnnotation>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 public sealed record MeasurementListResponse(MeasurementSummaryResponse[] Items);
 

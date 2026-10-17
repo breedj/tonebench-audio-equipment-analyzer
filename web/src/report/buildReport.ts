@@ -9,7 +9,7 @@ import {
   type ReportSection,
 } from '../api/client'
 import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../composables/useChartDisplay'
-import { parseAnnotations } from '../measurements/spectrumAnnotations'
+import { LEGACY_SPECTRUM_FRAME, parseAnnotations } from '../measurements/chartAnnotations'
 import { formatWithPreference } from '../composables/useDateTimeFormat'
 import { splitVersion } from '../about/version'
 import { useLoadOhms } from '../composables/useLoadOhms'
@@ -177,7 +177,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       display: createSpectrumDisplaySource(
         stored,
         detail.channelsData.map((c) => c.channel),
-        parseAnnotations(parseStoredDisplay(detail.paramsJson)?.chartAnnotations),
+        parseAnnotations(parseStoredDisplay(detail.paramsJson)?.chartAnnotations, LEGACY_SPECTRUM_FRAME),
       ),
       selectedMetrics:
         Array.isArray(selected) && selected.length > 0

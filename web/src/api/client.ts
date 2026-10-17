@@ -4,9 +4,9 @@
 import { apiErrorMessage } from './errorMessage'
 // The wire shape of an annotation is the module's own, re-exported here rather than redeclared, so
 // the chart, the panel, the report and the four requests below cannot drift into two ideas of one.
-import type { SpectrumAnnotation } from '../measurements/spectrumAnnotations'
+import type { ChartAnnotation } from '../measurements/chartAnnotations'
 
-export type { SpectrumAnnotation }
+export type { ChartAnnotation }
 
 export interface DeviceStatus {
   connected: boolean
@@ -2368,8 +2368,8 @@ export interface MeasurementTypeAppliedResponse {
   chartHarmonicMarkerUnit?: string | null
   /** The Generator panel's Load field, for the power tiles — see useLoadOhms.ts. Null means its 8 Ω default. */
   loadOhms?: number | null
-  /** The notes drawn on the chart — see measurements/spectrumAnnotations.ts. Null means none. */
-  chartAnnotations?: SpectrumAnnotation[] | null
+  /** The notes drawn on the chart — see measurements/chartAnnotations.ts. Null means none. */
+  chartAnnotations?: ChartAnnotation[] | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
@@ -2432,8 +2432,8 @@ export interface StagedMeasurementConfig {
   chartHarmonicMarkerUnit?: string | null
   /** The Generator panel's Load field, for the power tiles — see useLoadOhms.ts. Null means its 8 Ω default. */
   loadOhms?: number | null
-  /** The notes drawn on the chart — see measurements/spectrumAnnotations.ts. Null means none. */
-  chartAnnotations?: SpectrumAnnotation[] | null
+  /** The notes drawn on the chart — see measurements/chartAnnotations.ts. Null means none. */
+  chartAnnotations?: ChartAnnotation[] | null
   /** Off (null/false) unless the user opts in — see ChartDisplayPanel.vue's "Autofit when measurement done" checkbox. */
   chartAutofitOnDone?: boolean | null
   /** Which of the FFT screen's secondary panels are drawn — null (a type saved before these existed) means the Oscilloscope and Harmonics shown, the Spectrogram and Other peaks hidden. */
@@ -2745,7 +2745,7 @@ export interface SaveMeasurementRequest {
    * annotates a trace in order to save it and the type's stored copy would routinely be one edit
    * stale. Omitted means none were sent, and the result then takes the type's.
    */
-  chartAnnotations?: SpectrumAnnotation[] | null
+  chartAnnotations?: ChartAnnotation[] | null
 }
 
 export interface UpdateMeasurementRequest {
@@ -2757,7 +2757,7 @@ export interface UpdateMeasurementRequest {
    * carry this field must not wipe what the result was saved with. The server refuses it on any
    * kind but an FFT spectrum.
    */
-  chartAnnotations?: SpectrumAnnotation[] | null
+  chartAnnotations?: ChartAnnotation[] | null
 }
 
 /**

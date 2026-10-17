@@ -2,11 +2,9 @@ import type { ReportRow, ReportSection } from '../../api/client'
 import { channelTiles, GEN_METRIC_LABEL, NOT_APPLICABLE } from '../../metrics'
 import type { IntermodulationFrame, MetersFrame, MultitoneFrame } from '../../streaming/protocol'
 import { imdProductLabel } from '../../imd/products'
-import {
-  formatAnnotationHz,
-  formatAnnotationHzRange,
-  numberedAnnotations,
-} from '../../measurements/spectrumAnnotations'
+import { numberedAnnotations } from '../../measurements/chartAnnotations'
+import { annotationQuantity } from '../../charts/annotationQuantities'
+import { SPECTRUM_ANNOTATION_VIEW } from '../../charts/annotationViews'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { descriptionSections, genericSettingsSection } from './generic'
@@ -214,7 +212,7 @@ export function intermodulationSections(intermodulation: Record<number, Intermod
  */
 export function annotationsSections(subject: ReportSubject): ReportSection[] {
   if (subject.data.kind !== 'spectrum') return []
-  const annotations = numberedAnnotations(subject.data.display.annotations.value)
+  const annotations = numberedAnnotations(subject.data.display.annotations.value, SPECTRUM_ANNOTATION_VIEW)
   if (annotations.length === 0) return []
 
   // The channel column only where some annotation names one: a chart of notes on frequencies alone
@@ -231,14 +229,14 @@ export function annotationsSections(subject: ReportSubject): ReportSection[] {
       // extra columns would widen the table for a few rows and leave every point dashing through them.
       cells: annotations.map((a) => [
         `${a.number}`,
-        a.style === 'box' && a.freqHz2 !== null
-          ? formatAnnotationHzRange(a.freqHz, a.freqHz2)
-          : formatAnnotationHz(a.freqHz),
-        a.levelDbv === null
+        a.style === 'box' && a.x2 !== null
+          ? annotationQuantity(a.xQuantity).formatRange(a.x, a.x2)
+          : annotationQuantity(a.xQuantity).format(a.x),
+        a.y === null
           ? '—'
-          : a.style === 'box' && a.levelDbv2 !== null
-            ? `${a.levelDbv2.toFixed(1)} – ${a.levelDbv.toFixed(1)} dBV`
-            : `${a.levelDbv.toFixed(1)} dBV`,
+          : a.style === 'box' && a.y2 !== null
+            ? annotationQuantity(a.yQuantity).formatRange(a.y2, a.y)
+            : annotationQuantity(a.yQuantity).format(a.y),
         ...(withChannel ? [a.channel === null ? '—' : CHANNEL_LABELS[a.channel]] : []),
         a.text || '—',
       ]),

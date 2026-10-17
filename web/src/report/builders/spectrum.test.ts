@@ -8,7 +8,7 @@ import type { StimulusSummary } from '../../metrics'
 import type { ReportSubject } from '../types'
 import { chapterSections } from './index'
 import { annotationsSections, harmonicsSections, metricsSections, multitoneSections } from './spectrum'
-import type { SpectrumAnnotation } from '../../measurements/spectrumAnnotations'
+import type { ChartAnnotation } from '../../measurements/chartAnnotations'
 
 /** A stored FFT result the way MeasurementSaveService writes one: a metric row per meter and a pair per harmonic. */
 const detail: MeasurementDetail = {
@@ -472,36 +472,42 @@ describe('multitone', () => {
 })
 
 describe('the annotations table', () => {
-  function annotated(annotations: SpectrumAnnotation[]) {
+  function annotated(annotations: ChartAnnotation[]) {
     const subject = subjectOf([])
     if (subject.data.kind !== 'spectrum') throw new Error('not a spectrum subject')
     subject.data.display.annotations.value = annotations
     return subject
   }
 
-  const hum: SpectrumAnnotation = {
+  const hum: ChartAnnotation = {
     id: 2,
     style: 'point',
     text: 'Mains hum',
-    freqHz: 50,
-    levelDbv: -98.24,
-    freqHz2: null,
-    levelDbv2: null,
+    view: 'Spectrum',
+    x: 50,
+    y: -98.24,
+    x2: null,
+    y2: null,
+    xQuantity: 'hz',
+    yQuantity: 'dbv',
     channel: 0,
-    labelOffsetOctaves: 0.4,
-    labelOffsetDb: 12,
+    labelOffsetX: 0.4,
+    labelOffsetY: 12,
   }
-  const corner: SpectrumAnnotation = {
+  const corner: ChartAnnotation = {
     id: 1,
     style: 'frequency',
     text: 'Bandwidth corner',
-    freqHz: 21500,
-    levelDbv: null,
-    freqHz2: null,
-    levelDbv2: null,
+    view: 'Spectrum',
+    x: 21500,
+    y: null,
+    x2: null,
+    y2: null,
+    xQuantity: 'hz',
+    yQuantity: 'dbv',
     channel: null,
-    labelOffsetOctaves: 0,
-    labelOffsetDb: 0,
+    labelOffsetX: 0,
+    labelOffsetY: 0,
   }
 
   it('prints the annotations numbered the way the chart numbers them', () => {
@@ -525,17 +531,20 @@ describe('the annotations table', () => {
     expect(section.cells).toEqual([['1', '21.50 kHz', '\u2014', 'Bandwidth corner']])
   })
 
-  const band: SpectrumAnnotation = {
+  const band: ChartAnnotation = {
     id: 3,
     style: 'box',
     text: 'Hum band',
-    freqHz: 900,
-    levelDbv: -40,
-    freqHz2: 1200,
-    levelDbv2: -95,
+    view: 'Spectrum',
+    x: 900,
+    y: -40,
+    x2: 1200,
+    y2: -95,
+    xQuantity: 'hz',
+    yQuantity: 'dbv',
     channel: null,
-    labelOffsetOctaves: 0.3,
-    labelOffsetDb: 10,
+    labelOffsetX: 0.3,
+    labelOffsetY: 10,
   }
 
   it('prints a box as a frequency range and a level range in the same two columns', () => {

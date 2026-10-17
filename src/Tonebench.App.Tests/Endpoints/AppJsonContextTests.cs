@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Tonebench.App.Endpoints;
@@ -67,13 +68,18 @@ public class AppJsonContextTests
             .GetValue(null)!;
         var options = new JsonSerializerOptions { TypeInfoResolver = context };
 
-        var request = new UpdateMeasurementRequest(
-            "renamed", null, [new Tonebench.Data.SpectrumAnnotation(1, "point", "Mains hum", 50.0, -98.2, 0, 0.45, 14.0)]);
+        // The annotation row travels as a JsonElement -- opaque on this side on purpose, so nothing
+        // here can strip a field -- which is also why this compares its JSON rather than the value:
+        // a JsonElement has no equality of its own.
+        var row = JsonSerializer.Deserialize<JsonElement>(
+            """{"id":1,"style":"point","text":"Mains hum","view":"Spectrum","x":50,"y":-98.2,"xQuantity":"hz","yQuantity":"dbv","channel":0,"labelOffsetX":0.45,"labelOffsetY":14}""");
+        var request = new UpdateMeasurementRequest("renamed", null, [row]);
 
         string json = JsonSerializer.Serialize(request, typeof(UpdateMeasurementRequest), options);
         var back = (UpdateMeasurementRequest?)JsonSerializer.Deserialize(json, typeof(UpdateMeasurementRequest), options);
 
-        Assert.Equal(request.ChartAnnotations, back!.ChartAnnotations);
+        var backRow = Assert.Single(back!.ChartAnnotations!);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(row.GetRawText()), JsonNode.Parse(backRow.GetRawText())));
     }
 
     /// <summary>

@@ -1,6 +1,8 @@
 ﻿using Tonebench.Device;
 using Tonebench.Dsp;
 
+using System.Text.Json;
+
 namespace Tonebench.Data;
 
 /// <summary>
@@ -202,7 +204,7 @@ public sealed record FftSpectrumParameters(
     public SimulationParameters? Simulation { get; init; }
 
     /// <summary>
-    /// The notes drawn on the spectrum chart -- see <see cref="SpectrumAnnotation"/>.
+    /// The notes drawn on this measurement's charts, each row verbatim as the client wrote it.
     ///
     /// <para>Display state like the <c>Chart*</c> toggles, and a body property rather than a
     /// sixtieth positional parameter for the reason <see cref="Simulation"/> is one. Null means
@@ -216,55 +218,31 @@ public sealed record FftSpectrumParameters(
     /// <c>MeasurementSaveService.SaveAsync</c> and re-edited by
     /// <c>PUT /api/measurements/{id}</c>.</para>
     ///
-    /// <para>Never validated here, the <see cref="ChartHarmonicsSort"/> rule: the client's
-    /// <c>parseAnnotations</c> drops what it cannot draw, so a <c>params_json</c> another build
-    /// wrote -- or a hand-edited one -- cannot fail a measurement the user has merely
-    /// selected.</para>
+    /// <para>Never validated here, the <see cref="ChartHarmonicsSort"/> rule, and never even
+    /// deserialized into fields -- a <c>JsonElement</c> per row, for the reasons written out where
+    /// the record used to be. The client's <c>parseAnnotations</c> drops what it cannot draw, so a
+    /// <c>params_json</c> another build wrote -- or a hand-edited one -- cannot fail a measurement
+    /// the user has merely selected.</para>
     /// </summary>
-    public IReadOnlyList<SpectrumAnnotation>? ChartAnnotations { get; init; }
+    public IReadOnlyList<JsonElement>? ChartAnnotations { get; init; }
 }
 
-/// <summary>
-/// One note drawn on the spectrum chart: a marker at a (frequency, level) point of the trace with a
-/// labelled box beside it (<c>"point"</c>), or a dashed rule at a frequency labelled at the top of
-/// the plot (<c>"frequency"</c>).
-/// </summary>
-/// <param name="Id">Unique within its own list and stable across edits. Not the ordinal a reader
-/// sees: the chart, the panel and the report all number the list left to right at draw time, so a
-/// delete cannot leave a gap in the numbering.</param>
-/// <param name="Style"><c>"point"</c>, <c>"frequency"</c> or <c>"box"</c>. A string rather than an enum because
-/// nothing here reads it -- see the remarks on <see cref="FftSpectrumParameters.ChartAnnotations"/>
-/// about validation.</param>
-/// <param name="LevelDbv">Always dBV, never the value the chart happens to be plotting: the chart's
-/// unit is a per-frame constant add, so a level stored this way stays glued to its spot on the trace
-/// across a unit switch and a DUT-gain edit. Null for a frequency rule, which has no level.</param>
-/// <param name="Channel">0 = left, 1 = right; null for a frequency rule, or a point placed where no
-/// trace was identified.</param>
-/// <param name="LabelOffsetOctaves">Where the label sits relative to its marker, in <b>data
-/// units</b> -- x in octaves, y in dB -- and point style only. The report's chart is 1600x900 while
-/// the screen's is a few hundred pixels tall, and both span the same axis window, so an offset
-/// expressed this way is a fixed fraction of the picture and lands in the same place at either size;
-/// a pixel offset would not.</param>
-/// <param name="FreqHz2">
-/// A <c>"box"</c>'s other two edges; null for every other style. <b><paramref name="FreqHz"/> and
-/// <paramref name="LevelDbv"/> are the box's top-left corner</b> -- lowest frequency, highest level
-/// -- and this pair is its bottom-right. The client normalises that ordering on the way in and on
-/// every edit, so a reader may take it for granted; it is also what lets a reader that only knows
-/// <paramref name="LevelDbv"/> quote the <i>top</i> of the region, which is the informative end.
-/// Two absolute figures rather than an extent, unlike the label offset: a region's meaning is
-/// "these columns, these levels", which is what the panel shows and what the report prints.
-/// </param>
-public sealed record SpectrumAnnotation(
-    int Id,
-    string Style,
-    string Text,
-    double FreqHz,
-    double? LevelDbv = null,
-    int? Channel = null,
-    double LabelOffsetOctaves = 0.0,
-    double LabelOffsetDb = 0.0,
-    double? FreqHz2 = null,
-    double? LevelDbv2 = null);
+/*
+ * There is deliberately no record type for one annotation.
+ *
+ * Nothing on this side ever reads a field of one: the server stores the list, hands it back, and
+ * splices it into a result's params_json, while every rule about what an annotation *is* lives in
+ * the client (web/src/measurements/chartAnnotations.ts) and is tested there. A typed record would
+ * add one failure mode and no checking -- System.Text.Json drops any member the record does not
+ * declare, so the Edit-measurement dialog, which round-trips a stored result's annotations through
+ * this layer, would silently strip whatever a newer or older build had written. That is not
+ * hypothetical: the fields were renamed when annotations spread beyond the FFT screen (freqHz ->
+ * x, levelDbv -> y, and two new quantity ids), and a typed record would have thrown away the
+ * position of every annotation already stored on this bench the first time one was read back.
+ *
+ * So a row travels as a JsonElement and is copied verbatim. A future style, quantity or field
+ * needs no change here at all.
+ */
 
 /// <summary>
 /// Where an imported simulation came from. Kept in full so the result can say what produced it

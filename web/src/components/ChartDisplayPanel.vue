@@ -12,7 +12,13 @@ import {
 import { SPECTRUM_UNIT_OPTIONS } from '../spectrumUnits'
 import type { SegmentedOption } from '../panels/segmented'
 import type { HarmonicMarkerUnit } from '../spectrumUnits'
-import { ANNOTATION_STYLE_OPTIONS, MAX_ANNOTATIONS, type AnnotationStyle } from '../measurements/spectrumAnnotations'
+import {
+  DEFAULT_ANNOTATION_STYLES,
+  MAX_ANNOTATIONS,
+  annotationStyleOptions,
+  type AnnotationStyle,
+} from '../measurements/chartAnnotations'
+import { SPECTRUM_ANNOTATION_VIEW } from '../charts/annotationViews'
 import AnnotationRows from './AnnotationRows.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
@@ -267,7 +273,7 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
       <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2.5">
         <SegmentedToggle
           v-model="annotationStyle"
-          :options="ANNOTATION_STYLE_OPTIONS"
+          :options="annotationStyleOptions(DEFAULT_ANNOTATION_STYLES)"
           group-label="Annotation style"
         />
         <button
@@ -297,7 +303,7 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
         No annotations. Add one, then click the chart. They are drawn on screenshots and in the report,
         and a saved result keeps the ones it was saved with.
       </p>
-      <AnnotationRows v-model="annotations" />
+      <AnnotationRows v-model="annotations" :view="SPECTRUM_ANNOTATION_VIEW" />
       <button
         v-if="annotations.length > 0"
         type="button"

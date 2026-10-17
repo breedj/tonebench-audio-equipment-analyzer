@@ -86,6 +86,121 @@ public class ConfigDatabaseTests
     /// moves, everything beside it in the same document survives, and a bench that chose its own
     /// figure is left alone.
     /// </summary>
+    /// <summary>
+    /// The Screenshot dialog kept one caption, as a title plus the measurement name it was typed
+    /// for. It now keeps one per measurement, so the stored pair is lifted into a one-entry list
+    /// rather than dropped: it is a caption the user typed and would otherwise silently lose.
+    ///
+    /// <para>The other answers in that document -- the size, ratio, destination, Add date and
+    /// Black and white -- are the whole point of remembering any of this, so this cannot be a
+    /// DELETE the way 003 is.</para>
+    /// </summary>
+    [Fact]
+    public async Task Migration005_LiftsTheKeptScreenshotCaptionIntoTheList()
+    {
+        string path = TestDb.CreateTempPath();
+        var factory = new ConfigConnectionFactory(new TonebenchConfigDatabaseOptions { Path = path });
+
+        const string stored =
+            "{\"title\":\"Elliptic - Nyquist\",\"titleFor\":\"Bode sweep\",\"saveText\":true,"
+                + "\"addDate\":true,\"widthPx\":1000,\"aspectRatio\":\"2:1\",\"destination\":\"both\","
+                + "\"monochrome\":true}";
+
+        await SeedAsync(factory, "screenshot.settings", stored);
+
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, CancellationToken.None);
+
+        string? after = await new ConfigRepository(factory).GetAsync("screenshot.settings", CancellationToken.None);
+        Assert.NotNull(after);
+
+        var config = System.Text.Json.JsonSerializer.Deserialize<ScreenshotSettingsConfig>(
+            after, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.NotNull(config);
+        Assert.True(config.IsValid);
+
+        var caption = Assert.Single(config.Captions!);
+        Assert.Equal("Bode sweep", caption.Measurement);
+        Assert.Equal("Elliptic - Nyquist", caption.Title);
+
+        // Everything else the dialog remembers survives.
+        Assert.True(config.SaveText);
+        Assert.True(config.AddDate);
+        Assert.Equal(1000, config.WidthPx);
+        Assert.Equal("2:1", config.AspectRatio);
+        Assert.Equal("both", config.Destination);
+        Assert.True(config.Monochrome);
+
+        // The fields it replaced are gone rather than left to rot beside the list. Asked of the
+        // document's root, because each caption entry legitimately has a `title` of its own.
+        Assert.Null(await RootFieldAsync(factory, "screenshot.settings", "$.title"));
+        Assert.Null(await RootFieldAsync(factory, "screenshot.settings", "$.titleFor"));
+
+        TestDb.Cleanup(path);
+    }
+
+    /// <summary>
+    /// A document with no caption to carry: the dead fields go and no empty entry is invented.
+    /// The second case is a build from before <c>titleFor</c> existed, where the title was the last
+    /// one typed anywhere and belongs to no measurement -- which is the very caption the
+    /// 2026-10-16 fix stopped offering, so filing it under a name would put it back.
+    /// </summary>
+    [Theory]
+    [InlineData("{\"title\":null,\"titleFor\":null,\"saveText\":false,\"widthPx\":1500,\"aspectRatio\":\"3:2\",\"destination\":\"file\"}")]
+    [InlineData("{\"title\":\"Elliptic - Nyquist\",\"saveText\":true,\"widthPx\":1500,\"aspectRatio\":\"3:2\",\"destination\":\"file\"}")]
+    [InlineData("{\"title\":\"  \",\"titleFor\":\"  \",\"saveText\":true,\"widthPx\":1500,\"aspectRatio\":\"3:2\",\"destination\":\"file\"}")]
+    public async Task Migration005_WithNoCaptionToCarry_InventsNone(string stored)
+    {
+        string path = TestDb.CreateTempPath();
+        var factory = new ConfigConnectionFactory(new TonebenchConfigDatabaseOptions { Path = path });
+
+        await SeedAsync(factory, "screenshot.settings", stored);
+
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, CancellationToken.None);
+
+        string? after = await new ConfigRepository(factory).GetAsync("screenshot.settings", CancellationToken.None);
+        Assert.NotNull(after);
+        Assert.Null(await RootFieldAsync(factory, "screenshot.settings", "$.titleFor"));
+
+        var config = System.Text.Json.JsonSerializer.Deserialize<ScreenshotSettingsConfig>(
+            after, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.NotNull(config);
+        Assert.True(config.IsValid);
+        Assert.True(config.Captions is null || config.Captions.Count == 0);
+        Assert.Equal("file", config.Destination);
+
+        TestDb.Cleanup(path);
+    }
+
+    /// <summary>One field of a stored document, read at its root rather than by substring.</summary>
+    private static async Task<string?> RootFieldAsync(ConfigConnectionFactory factory, string key, string jsonPath)
+    {
+        await using var connection = await factory.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT json_extract(value, $path) FROM app_setting WHERE key = $key;";
+        command.Parameters.AddWithValue("$path", jsonPath);
+        command.Parameters.AddWithValue("$key", key);
+        object? value = await command.ExecuteScalarAsync();
+        return value is null or DBNull ? null : value.ToString();
+    }
+
+    /// <summary>Seeds a pre-migration configuration database holding one document.</summary>
+    private static async Task SeedAsync(ConfigConnectionFactory factory, string key, string value)
+    {
+        await using var connection = await factory.OpenAsync(CancellationToken.None);
+        await using var create = connection.CreateCommand();
+        create.CommandText =
+            "CREATE TABLE app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_utc TEXT NOT NULL);"
+                + "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_utc TEXT NOT NULL);"
+                + "INSERT INTO schema_version (version, name, applied_utc) "
+                + "VALUES (1, '001_app_setting.sql', '2026-01-01T00:00:00Z');"
+                + "INSERT INTO app_setting (key, value, updated_utc) VALUES ($k, $v, '2026-01-01T00:00:00Z');";
+        create.Parameters.AddWithValue("$k", key);
+        create.Parameters.AddWithValue("$v", value);
+        await create.ExecuteNonQueryAsync();
+    }
+
     [Theory]
     [InlineData(3000, 2000.0)]
     [InlineData(5000, 5000.0)]
@@ -223,7 +338,8 @@ public class ConfigDatabaseTests
 
             Assert.Equal(
                 [(1L, "001_app_setting.sql"), (2L, "002_impulse_reference.sql"),
-                 (3L, "003_detailed_logging_default.sql"), (4L, "004_soundcard_settle_default.sql")],
+                 (3L, "003_detailed_logging_default.sql"), (4L, "004_soundcard_settle_default.sql"),
+                 (5L, "005_screenshot_captions.sql")],
                 rows);
         }
         finally

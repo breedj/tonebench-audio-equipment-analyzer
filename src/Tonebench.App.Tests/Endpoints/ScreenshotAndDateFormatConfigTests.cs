@@ -26,16 +26,55 @@ public class ScreenshotAndDateFormatConfigTests
     [Fact]
     public void ScreenshotSettings_RoundTrip()
     {
-        var settings = new ScreenshotSettingsConfig("Output stage, 8 Ω", SaveText: true, AddDate: true, WidthPx: 1000, AspectRatio: "2:1", Destination: "both", Monochrome: true);
+        var settings = new ScreenshotSettingsConfig(
+            SaveText: true, AddDate: true, WidthPx: 1000, AspectRatio: "2:1", Destination: "both", Monochrome: true,
+            Captions: [new ScreenshotCaption("Output stage", "Output stage, 8 Ω"), new ScreenshotCaption("FFT analysis", "Hum at 100 Hz")]);
 
         string json = JsonSerializer.Serialize(settings, SerializerOptions);
         Assert.Contains("\"widthPx\":1000", json);
         Assert.Contains("\"aspectRatio\":\"2:1\"", json);
+        Assert.Contains("\"measurement\":\"Output stage\"", json);
 
         var back = JsonSerializer.Deserialize<ScreenshotSettingsConfig>(json, SerializerOptions);
         Assert.NotNull(back);
         Assert.True(back.IsValid);
-        Assert.Equal(settings, back);
+
+        // A record's generated equality is reference equality on a list, so the captions are
+        // compared by value here rather than through Assert.Equal(settings, back).
+        Assert.Equal(settings with { Captions = null }, back with { Captions = null });
+        Assert.Equal(settings.Captions, back.Captions);
+    }
+
+    [Fact]
+    public void ScreenshotSettings_KeepsACaptionForEveryMeasurement()
+    {
+        // One slot was the fault this replaced: a screenshot of a second measurement overwrote the
+        // first measurement's caption, so "kept for that measurement" was true of one at a time.
+        var settings = new ScreenshotSettingsConfig(Captions:
+        [
+            new ScreenshotCaption("Amp 1 kHz", "Before the recap"),
+            new ScreenshotCaption("Bode sweep", "Elliptic - Nyquist"),
+        ]);
+
+        Assert.True(settings.IsValid);
+        Assert.Equal(2, settings.Captions!.Count);
+    }
+
+    [Fact]
+    public void ScreenshotSettings_RejectsACaptionListThatCouldNotHaveComeFromTheDialog()
+    {
+        Assert.False(new ScreenshotSettingsConfig(Captions: [new ScreenshotCaption("", "a caption")]).IsValid);
+        Assert.False(new ScreenshotSettingsConfig(Captions: [new ScreenshotCaption("Amp", "   ")]).IsValid);
+        Assert.False(new ScreenshotSettingsConfig(Captions:
+            [new ScreenshotCaption("Amp", new string('x', ScreenshotCaption.MaxLength + 1))]).IsValid);
+
+        // The cap is the backstop for a document that did not come from this client, which caps
+        // the list itself.
+        var tooMany = Enumerable.Range(0, ScreenshotSettingsConfig.MaxCaptions + 1)
+            .Select(i => new ScreenshotCaption($"m{i}", $"t{i}"))
+            .ToList();
+        Assert.False(new ScreenshotSettingsConfig(Captions: tooMany).IsValid);
+        Assert.True(new ScreenshotSettingsConfig(Captions: tooMany.Take(ScreenshotSettingsConfig.MaxCaptions).ToList()).IsValid);
     }
 
     [Fact]
@@ -45,7 +84,7 @@ public class ScreenshotAndDateFormatConfigTests
         Assert.NotNull(back);
         Assert.True(back.IsValid);
         Assert.Equal(ScreenshotSettingsConfig.Default, back);
-        Assert.Null(back.Title);
+        Assert.Null(back.Captions);
         Assert.Equal("file", back.Destination);
     }
 

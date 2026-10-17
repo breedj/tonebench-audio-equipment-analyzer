@@ -54,6 +54,8 @@ watch(
     // of, so a title typed now is offered again here and nowhere else.
     form.titleFor = props.defaultTitle?.trim() ?? ''
     form.title = screenshotTitleFor(stored.value, form.titleFor)
+    // The staged copy carries the whole kept list, because OK files this caption into it.
+    form.captions = stored.value.captions
   },
   { immediate: true },
 )

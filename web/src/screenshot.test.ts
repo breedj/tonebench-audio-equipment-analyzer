@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_SCREENSHOT_CAPTIONS,
   SCREENSHOT_DATE_BAND_PX,
   SCREENSHOT_SIZES,
   SCREENSHOT_TITLE_BAND_PX,
+  rememberScreenshotCaption,
   screenshotFrameLayout,
   screenshotTitleFor,
+  toScreenshotCaptions,
   toScreenshotAspectRatioId,
   toScreenshotDestinationId,
   toScreenshotWidthPx,
@@ -54,10 +57,10 @@ describe('stored answers this build may not know', () => {
 })
 
 describe('screenshotTitleFor', () => {
-  const kept = { title: 'Elliptic - Nyquist', titleFor: 'Bode sweep', saveText: true }
+  const kept = { captions: [{ measurement: 'Bode sweep', title: 'Elliptic - Nyquist' }], saveText: true }
 
   it('opens on the measurement name when nothing is kept', () => {
-    expect(screenshotTitleFor({ title: '', titleFor: '', saveText: false }, 'FFT analysis')).toBe('FFT analysis')
+    expect(screenshotTitleFor({ captions: [], saveText: false }, 'FFT analysis')).toBe('FFT analysis')
   })
 
   // The report, twice over: a bench with Save text ticked saw every screenshot of every
@@ -75,7 +78,26 @@ describe('screenshotTitleFor', () => {
   })
 
   it('falls through a blank kept title rather than opening empty', () => {
-    expect(screenshotTitleFor({ title: '   ', titleFor: 'Bode sweep', saveText: true }, 'Bode sweep')).toBe('Bode sweep')
+    expect(
+      screenshotTitleFor({ captions: [{ measurement: 'Bode sweep', title: '   ' }], saveText: true }, 'Bode sweep'),
+    ).toBe('Bode sweep')
+  })
+
+  // The point of keeping one per measurement: each is offered on its own, and taking a screenshot
+  // of one does not cost another its caption.
+  it('keeps a caption for every measurement at once', () => {
+    const many = {
+      saveText: true,
+      captions: [
+        { measurement: 'Bode sweep', title: 'Elliptic - Nyquist' },
+        { measurement: 'FFT analysis', title: 'Hum at 100 Hz' },
+        { measurement: 'Amp 1 kHz', title: 'Before the recap' },
+      ],
+    }
+    expect(screenshotTitleFor(many, 'Bode sweep')).toBe('Elliptic - Nyquist')
+    expect(screenshotTitleFor(many, 'FFT analysis')).toBe('Hum at 100 Hz')
+    expect(screenshotTitleFor(many, 'Amp 1 kHz')).toBe('Before the recap')
+    expect(screenshotTitleFor(many, 'Crosstalk')).toBe('Crosstalk')
   })
 
   it('compares names trimmed, since that is how both are stored', () => {
@@ -85,5 +107,77 @@ describe('screenshotTitleFor', () => {
   // Nothing open: there is no name to fall back to, and an empty box means no title band.
   it('is empty with no measurement open', () => {
     expect(screenshotTitleFor(kept, '')).toBe('')
+  })
+})
+
+describe('rememberScreenshotCaption', () => {
+  const existing = [
+    { measurement: 'Bode sweep', title: 'Elliptic - Nyquist' },
+    { measurement: 'FFT analysis', title: 'Hum at 100 Hz' },
+  ]
+
+  it('files a new caption under its measurement, most recent first', () => {
+    const next = rememberScreenshotCaption(existing, 'Amp 1 kHz', 'Before the recap', true)
+    expect(next[0]).toEqual({ measurement: 'Amp 1 kHz', title: 'Before the recap' })
+    expect(next).toHaveLength(3)
+  })
+
+  // The fault this replaced: one stored pair, so a screenshot of a second measurement silently
+  // forgot the first measurement\'s caption.
+  it('leaves another measurement\'s caption alone', () => {
+    const next = rememberScreenshotCaption(existing, 'Amp 1 kHz', 'Before the recap', true)
+    expect(screenshotTitleFor({ captions: next, saveText: true }, 'Bode sweep')).toBe('Elliptic - Nyquist')
+    expect(screenshotTitleFor({ captions: next, saveText: true }, 'FFT analysis')).toBe('Hum at 100 Hz')
+  })
+
+  it('replaces a measurement\'s own caption rather than adding a second', () => {
+    const next = rememberScreenshotCaption(existing, 'Bode sweep', 'After the recap', true)
+    expect(next.filter((c) => c.measurement === 'Bode sweep')).toHaveLength(1)
+    expect(next[0]).toEqual({ measurement: 'Bode sweep', title: 'After the recap' })
+    expect(next).toHaveLength(2)
+  })
+
+  it('removes this measurement\'s caption when Save text is off, and leaves the others', () => {
+    const next = rememberScreenshotCaption(existing, 'Bode sweep', 'Elliptic - Nyquist', false)
+    expect(next.map((c) => c.measurement)).toEqual(['FFT analysis'])
+  })
+
+  it('files nothing it could not look up again', () => {
+    expect(rememberScreenshotCaption([], '', 'a caption', true)).toEqual([])
+    expect(rememberScreenshotCaption([], 'Amp 1 kHz', '   ', true)).toEqual([])
+  })
+
+  it('caps the list, dropping the least recently used', () => {
+    let captions: { measurement: string; title: string }[] = []
+    for (let i = 0; i < MAX_SCREENSHOT_CAPTIONS + 10; i++) {
+      captions = rememberScreenshotCaption(captions, `Measurement ${i}`, `caption ${i}`, true)
+    }
+    expect(captions).toHaveLength(MAX_SCREENSHOT_CAPTIONS)
+    expect(captions[0].measurement).toBe(`Measurement ${MAX_SCREENSHOT_CAPTIONS + 9}`)
+    expect(captions.some((c) => c.measurement === 'Measurement 0')).toBe(false)
+  })
+})
+
+describe('toScreenshotCaptions', () => {
+  it('reads a stored list', () => {
+    expect(toScreenshotCaptions([{ measurement: 'Amp', title: 'note' }])).toEqual([
+      { measurement: 'Amp', title: 'note' },
+    ])
+  })
+
+  it('is empty for anything that is not a list of usable pairs', () => {
+    expect(toScreenshotCaptions(undefined)).toEqual([])
+    expect(toScreenshotCaptions(null)).toEqual([])
+    expect(toScreenshotCaptions('nonsense')).toEqual([])
+    expect(toScreenshotCaptions([{ measurement: 'Amp' }, { title: 'note' }, 42, null])).toEqual([])
+    expect(toScreenshotCaptions([{ measurement: '  ', title: 'note' }])).toEqual([])
+  })
+
+  it('caps what it reads, so a hand-edited document cannot grow unbounded', () => {
+    const many = Array.from({ length: MAX_SCREENSHOT_CAPTIONS + 5 }, (_, i) => ({
+      measurement: `m${i}`,
+      title: `t${i}`,
+    }))
+    expect(toScreenshotCaptions(many)).toHaveLength(MAX_SCREENSHOT_CAPTIONS)
   })
 })

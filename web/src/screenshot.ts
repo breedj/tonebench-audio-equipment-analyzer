@@ -49,15 +49,35 @@ export const SCREENSHOT_DESTINATIONS: readonly { id: ScreenshotDestinationId; la
   { id: 'both', label: 'Save to file + copy to clipboard' },
 ]
 
+/** One kept caption and the measurement it was typed for, by name. */
+export interface ScreenshotCaption {
+  measurement: string
+  title: string
+}
+
+/**
+ * How many kept captions are carried. A bench works on tens of measurements, not thousands, and an
+ * entry is two short strings — so this is generous enough never to be met in practice while still
+ * bounding a list that would otherwise grow for ever, including with the names of measurements that
+ * have since been deleted or renamed.
+ */
+export const MAX_SCREENSHOT_CAPTIONS = 50
+
 /** Everything the dialog asks, in the shape the server stores (`screenshot.settings`) and App.vue consumes. */
 export interface ScreenshotSettings {
+  /** The caption for the screenshot being taken now — staged by the dialog, never stored as itself. */
   title: string
   /**
-   * The measurement `title` was typed for, by name — so a kept title is offered again on that
-   * measurement and nowhere else. Set by the dialog from the measurement it was opened on, never
-   * by the user; empty when none was open. See `screenshotTitleFor`.
+   * The measurement this screenshot is of, by name. Set by the dialog from the measurement it was
+   * opened on, never by the user; empty when none was open. It is what `title` is filed under when
+   * **Save text** is on. See `screenshotTitleFor`.
    */
   titleFor: string
+  /**
+   * The kept captions, one per measurement, most recently used first. This is the part that is
+   * stored; `title` and `titleFor` describe only the screenshot in hand.
+   */
+  captions: ScreenshotCaption[]
   saveText: boolean
   addDate: boolean
   widthPx: number
@@ -69,6 +89,7 @@ export interface ScreenshotSettings {
 export const DEFAULT_SCREENSHOT_SETTINGS: ScreenshotSettings = {
   title: '',
   titleFor: '',
+  captions: [],
   saveText: false,
   addDate: false,
   widthPx: 1500,
@@ -110,13 +131,60 @@ export function toScreenshotDestinationId(value: unknown): ScreenshotDestination
  * a name may as well share one.</p>
  */
 export function screenshotTitleFor(
-  stored: Pick<ScreenshotSettings, 'title' | 'titleFor' | 'saveText'>,
+  stored: Pick<ScreenshotSettings, 'captions' | 'saveText'>,
   measurement: string,
 ): string {
   const name = measurement.trim()
-  const kept = stored.title.trim()
-  if (stored.saveText && kept.length > 0 && stored.titleFor.trim() === name) return stored.title
-  return name
+  if (!stored.saveText) return name
+
+  const kept = stored.captions.find((c) => c.measurement.trim() === name)
+  return kept && kept.title.trim().length > 0 ? kept.title : name
+}
+
+/**
+ * The kept captions after this screenshot: the one just taken moved to the front, or dropped.
+ *
+ * <p>One entry per measurement, and <b>a caption for one measurement never displaces another's</b>
+ * — which is the whole of what this replaced. Until 2026-10-17 a single <c>title</c>/<c>titleFor</c>
+ * pair was stored, so the rule "offered again on that same measurement" held only until a
+ * screenshot was taken of a different one, which silently forgot the first caption. Joost asked for
+ * one per measurement.</p>
+ *
+ * <p>Most recently used first, so the cap evicts the caption nobody has touched for longest rather
+ * than an arbitrary one. Unticking <b>Save text</b> <i>removes</i> this measurement's entry rather
+ * than leaving it behind: the tick is the user saying whether to keep the caption, and a stored one
+ * that the checkbox says is not kept would come back the moment it was ticked again.</p>
+ */
+export function rememberScreenshotCaption(
+  captions: readonly ScreenshotCaption[],
+  measurement: string,
+  title: string,
+  saveText: boolean,
+): ScreenshotCaption[] {
+  const name = measurement.trim()
+  const caption = title.trim()
+  const others = captions.filter((c) => c.measurement.trim() !== name)
+
+  // Nothing to file it under, or nothing to file: an unnamed measurement cannot be looked up again.
+  if (!saveText || name.length === 0 || caption.length === 0) return others.slice(0, MAX_SCREENSHOT_CAPTIONS)
+
+  return [{ measurement: name, title: caption }, ...others].slice(0, MAX_SCREENSHOT_CAPTIONS)
+}
+
+/** Drops anything unusable out of a stored list — a document hand-edited, or written by another build. */
+export function toScreenshotCaptions(value: unknown): ScreenshotCaption[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(
+      (c): c is ScreenshotCaption =>
+        typeof c === 'object' && c !== null &&
+        typeof (c as ScreenshotCaption).measurement === 'string' &&
+        typeof (c as ScreenshotCaption).title === 'string' &&
+        (c as ScreenshotCaption).measurement.trim().length > 0 &&
+        (c as ScreenshotCaption).title.trim().length > 0,
+    )
+    .map((c) => ({ measurement: c.measurement, title: c.title }))
+    .slice(0, MAX_SCREENSHOT_CAPTIONS)
 }
 
 /** The title band above the chart, in pixels; zero without a title. */

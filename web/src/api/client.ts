@@ -2186,10 +2186,19 @@ export interface DateTimeFormatConfig {
  * The Screenshot dialog's remembered answers (`screenshot.settings`). `title` is null unless
  * `saveText` was on; the ids are `screenshot.ts`'s and the server only checks they are present.
  */
+/** One kept screenshot caption and the measurement it was typed for, by name. */
+export interface ScreenshotCaptionConfig {
+  measurement: string
+  title: string
+}
+
 export interface ScreenshotSettingsConfig {
-  title: string | null
-  /** The measurement `title` was typed for, by name — a kept title is only offered again on that one. */
-  titleFor: string | null
+  /**
+   * The kept captions, one per measurement, most recently used first. A caption is offered again
+   * only on the measurement it was typed for, and keeping one per measurement is what stops a
+   * screenshot of one costing another its caption.
+   */
+  captions: ScreenshotCaptionConfig[]
   saveText: boolean
   addDate: boolean
   widthPx: number

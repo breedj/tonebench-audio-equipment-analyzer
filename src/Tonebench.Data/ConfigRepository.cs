@@ -226,31 +226,54 @@ public sealed record DateTimeFormatConfig(string Format = "system")
     public bool IsValid => !string.IsNullOrWhiteSpace(Format) && Format.Length <= 64;
 }
 
+/// <summary>One kept screenshot caption and the measurement it was typed for, by name.</summary>
+public sealed record ScreenshotCaption(string Measurement, string Title)
+{
+    public const int MaxLength = 500;
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(Measurement) && Measurement.Length <= MaxLength
+        && !string.IsNullOrWhiteSpace(Title) && Title.Length <= MaxLength;
+}
+
 /// <summary>
 /// The Screenshot dialog's answers, kept so the next screenshot needs none of them asked again.
-/// The title rides along only while <paramref name="SaveText"/> is on -- unticked, the client
-/// sends it as null. The size is a pixel width, the aspect
-/// ratio and destination are the client's own ids (<c>web/src/screenshot.ts</c>), validated no
-/// further than "present", for the same reason as <see cref="DateTimeFormatConfig"/>.
+/// The size is a pixel width, the aspect ratio and destination are the client's own ids
+/// (<c>web/src/screenshot.ts</c>), validated no further than "present", for the same reason as
+/// <see cref="DateTimeFormatConfig"/>.
 /// </summary>
-/// <param name="TitleFor">
-/// The measurement <paramref name="Title"/> was typed for, by name, or null for none. A kept title
-/// is only offered again on that same measurement -- every other one opens on its own name (see
-/// ScreenshotDialog.vue). Null on a document an older build wrote, which therefore offers its
-/// stored title nowhere, which is the behaviour being corrected.
+/// <param name="Captions">
+/// The kept captions, one per measurement, most recently used first. A caption is offered again
+/// only on the measurement it was typed for; every other screenshot opens on its own name (see
+/// ScreenshotDialog.vue).
+///
+/// <para>It was a single title plus the one measurement name it belonged to. That held the rule it
+/// was written for, but only until a screenshot was taken of a different measurement, which
+/// overwrote the slot and silently forgot the first caption — so "kept for that measurement" was
+/// true of whichever one you had photographed last, and no other. One per measurement was asked for
+/// on 2026-10-17; config migration 005 carries an existing pair into the list.</para>
+///
+/// <para>Capped at <see cref="MaxCaptions"/>, oldest dropped, because the list is keyed by a name
+/// that is never cleaned up: a measurement renamed or deleted leaves its caption behind, and
+/// nothing would ever shorten the list again. The client caps it identically
+/// (<c>MAX_SCREENSHOT_CAPTIONS</c>); this is the backstop for a document that arrived some other
+/// way.</para>
 /// </param>
 public sealed record ScreenshotSettingsConfig(
-    string? Title = null,
     bool SaveText = false,
     bool AddDate = false,
     int WidthPx = 1500,
     string AspectRatio = "3:2",
     string Destination = "file",
     bool Monochrome = false,
-    string? TitleFor = null)
+    IReadOnlyList<ScreenshotCaption>? Captions = null)
 {
     public const int MinWidthPx = 500;
     public const int MaxWidthPx = 2000;
+
+    /// <summary>Matches <c>MAX_SCREENSHOT_CAPTIONS</c> in <c>web/src/screenshot.ts</c>.</summary>
+    public const int MaxCaptions = 50;
 
     public static ScreenshotSettingsConfig Default { get; } = new();
 
@@ -259,8 +282,7 @@ public sealed record ScreenshotSettingsConfig(
         WidthPx >= MinWidthPx && WidthPx <= MaxWidthPx
         && !string.IsNullOrWhiteSpace(AspectRatio) && AspectRatio.Length <= 16
         && !string.IsNullOrWhiteSpace(Destination) && Destination.Length <= 32
-        && (Title is null || Title.Length <= 500)
-        && (TitleFor is null || TitleFor.Length <= 500);
+        && (Captions is null || (Captions.Count <= MaxCaptions && Captions.All(c => c is { IsValid: true })));
 }
 
 /// <summary>

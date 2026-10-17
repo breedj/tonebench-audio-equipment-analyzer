@@ -471,7 +471,7 @@ function run() {
       v-model:lo-hz="form.measurementLoFreqHz"
       v-model:hi-hz="form.measurementHiFreqHz"
       :disabled="running"
-      hint="The band the noise floor, THD+N and SNR traces are read over. It does NOT bound the harmonics: a sweep measures those up to Nyquist, or every point above about 7 kHz would read THD 0, so THD and D2-D5 do not move when you change this."
+      hint="The band the noise floor, THD+N and SNR traces are read over. It does NOT bound the harmonics: a sweep measures those up to Nyquist, or every point above about 7 kHz would read THD 0, so THD and D2-D5 do not move when you change this. The other side of that: THD+N stops counting a harmonic once it leaves the band, so on 20 Hz - 20 kHz the trace steps down at 6.7 kHz (no more H3) and at 10 kHz (no more H2) and runs on at the noise floor, below THD. Widen this to 20 Hz - 80 kHz to keep them in."
     />
 
     <label

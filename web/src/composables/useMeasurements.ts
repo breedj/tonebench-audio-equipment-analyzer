@@ -661,6 +661,32 @@ export function useMeasurements() {
   }
 
   /**
+   * Drops every loaded overlay whose measurement is not in `typeIds` — called by `loadTypes` with
+   * the open project's own list, so the chart can never draw a run from a measurement that is not
+   * there any more.
+   *
+   * <p>Overlays deliberately outlive a measurement <i>switch</i> (that is the comparison the list
+   * is most useful for, see measurements/overlayScope.ts), and until now they outlived the
+   * measurement itself: delete a measurement with one of its results checked on, make a new one of
+   * the same kind, and that result was still on the chart — of the same kind, so nothing filtered
+   * it out, and with no History row to uncheck it from, since the measurement it belonged to was
+   * gone (reported 2026-10-17).</p>
+   *
+   * <p>Keyed on the measurement rather than on the result, and run from the type list rather than
+   * from the delete, so one rule covers every way a measurement can stop being there: deleted,
+   * purged from the trash, or simply belonging to the project that was just closed. A measurement
+   * restored from the trash comes back unchecked, which is right — it is a result nobody asked for
+   * twice.</p>
+   */
+  function pruneOverlaysToTypes(typeIds: readonly number[]) {
+    const known = new Set(typeIds)
+    const kept = overlays.value.filter((o) => known.has(o.detail.measurementTypeId))
+    // Only on a real change: `overlays` is what every chart watches, and replacing the array when
+    // nothing was dropped would redraw each of them on every type list reload.
+    if (kept.length !== overlays.value.length) overlays.value = kept
+  }
+
+  /**
    * Shows or hides an already-loaded overlay. Returns false — leaving the overlay hidden — when
    * showing it would exceed MAX_VISIBLE_OVERLAYS, rather than throwing: this one is called straight
    * from click handlers that have nowhere to put an exception. Hiding always succeeds.
@@ -680,5 +706,6 @@ export function useMeasurements() {
 
   return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOutputImpedance,
     update, remove,
-    addOverlay, reloadOverlay, removeOverlay, setOverlayVisible, setOverlayWindow, visibleOverlayCount, canShowMoreOverlays }
+    addOverlay, reloadOverlay, removeOverlay, pruneOverlaysToTypes, setOverlayVisible, setOverlayWindow,
+    visibleOverlayCount, canShowMoreOverlays }
 }

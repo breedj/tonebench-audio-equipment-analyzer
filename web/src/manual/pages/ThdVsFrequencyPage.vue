@@ -147,6 +147,8 @@ const { showPage } = useManual()
             fundamental. It sits above THD by however much noise the DUT has, and the two converge
             as the distortion rises &mdash; which is the whole reading. It is the figure a
             specification usually means by "THD".
+            <strong>It steps down near the top of the sweep, and that is the band rather than the
+            DUT</strong> &mdash; see <strong>Bandwidth</strong> below.
           </td>
         </tr>
         <tr>
@@ -362,7 +364,21 @@ const { showPage } = useManual()
             the harmonics, unlike the same control on the FFT screen: a sweep measures those up to
             Nyquist, because bounded at 20 kHz every harmonic of a point above about 7 kHz would be
             out of band and THD would read exactly zero from there up. So THD, D2&ndash;D5 and D6+
-            do not move when you widen it, and the three band figures do. The lower edge is also held clear of
+            do not move when you widen it, and the three band figures do.
+            <strong>Which is why THD+N falls off a cliff near the top of a sweep on the 20 kHz
+            band</strong>: a harmonic stops counting toward it the moment it leaves the band, so
+            the second harmonic is gone above 10 kHz and the third above 6.7 kHz, and from there
+            THD+N is running on noise alone &mdash; below THD, which is impossible for a figure
+            that contains it, and the clearest sign that the two are being read over different
+            spans. Measured on a QA403 into a push-pull amplifier at 1 W, a sweep whose distortion
+            is mostly third harmonic: THD 0.046&nbsp;% and THD+N 0.047&nbsp;% together up to
+            5.95&nbsp;kHz, then THD+N straight down to 0.020&nbsp;% at 6.70&nbsp;kHz and to
+            0.015&nbsp;% at 10.9&nbsp;kHz, which is exactly that point's noise floor. The same
+            sweep on <strong>20 Hz &ndash; 80 kHz</strong> has no step at all and THD+N stays above
+            THD the whole way (0.057&nbsp;% to 0.081&nbsp;%), at the price of 7&nbsp;dB of SNR,
+            because the band now integrates four times the noise. Widen it when you care about
+            THD+N above a few kHz; leave it at 20&nbsp;kHz when you want the figure a
+            specification quotes. The lower edge is also held clear of
             DC: a window spreads the input's DC offset over its own main lobe, so a band cannot
             start closer than a few bins from 0 Hz. That costs nothing at a long record &mdash; 20 Hz
             is bin 14 of a 131072-point FFT &mdash; but an adaptive sweep's short records at the top

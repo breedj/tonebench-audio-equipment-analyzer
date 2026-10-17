@@ -10,6 +10,7 @@ import {
 import { stopRun } from '../deviceControl'
 import { deleteTypeConfirmation } from '../measurements/deleteTypePrompt'
 import { useConfirm } from './useConfirm'
+import { useMeasurements } from './useMeasurements'
 import { useTrash } from './useTrash'
 
 // Module-level, not inside the composable function, so every caller (the menu, the sidebar, the
@@ -252,6 +253,10 @@ export function useProjects() {
     try {
       types.value = await api.listMeasurementTypes(projectId)
       typesProjectId.value = projectId
+      // A checked history item outlives a measurement *switch* on purpose, but not the measurement
+      // itself — see useMeasurements.pruneOverlaysToTypes. Here rather than in deleteMeasurementType
+      // because every way a measurement stops existing ends in a reload of this list.
+      useMeasurements().pruneOverlaysToTypes(types.value.map((t) => t.id))
       error.value = null
     } catch (e) {
       error.value = (e as Error).message

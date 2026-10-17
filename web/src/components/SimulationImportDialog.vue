@@ -261,7 +261,7 @@ async function submit() {
           <p class="truncate font-mono text-[11px] text-neutral-500 dark:text-neutral-400" :title="info.path">{{ info.path }}</p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
             <div><dt class="mr-1 inline text-neutral-500">Run</dt><dd class="inline">{{ info.plotname }}</dd></div>
-            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount.toLocaleString() }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount }}</dd></div>
             <div><dt class="mr-1 inline text-neutral-500">Saved</dt><dd class="inline">{{ (info.startTimeS * 1e3).toFixed(2) }}–{{ (info.endTimeS * 1e3).toFixed(2) }} ms</dd></div>
             <div><dt class="mr-1 inline text-neutral-500">Timestep</dt><dd class="inline">{{ fmtStep(info.medianStepS) }} median, {{ fmtStep(info.maxStepS) }} worst</dd></div>
             <div><dt class="mr-1 inline text-neutral-500">Simulator rate</dt><dd class="inline">{{ fmtRate(info.nativeRateHz) }}</dd></div>
@@ -359,7 +359,7 @@ async function submit() {
             FFT size
             <select v-model.number="form.fftSize" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
               <option v-for="n in SIMULATION_FFT_SIZES" :key="n" :value="n" :disabled="n > fit.maxFftSize">
-                {{ n.toLocaleString() }}{{ n === info.suggestedFftSize ? ' (suggested)' : '' }}{{ n > fit.maxFftSize ? ' — too large for this run' : '' }}
+                {{ n }}{{ n === info.suggestedFftSize ? ' (suggested)' : '' }}{{ n > fit.maxFftSize ? ' — too large for this run' : '' }}
               </option>
             </select>
           </label>
@@ -432,8 +432,8 @@ async function submit() {
             below the top of the measurement band. Raise the FFT size.
           </p>
           <p v-if="fit.fftTooLarge" class="mt-1 text-red-700 dark:text-red-400">
-            This run holds {{ Math.floor(fit.usableS * info.nativeRateHz).toLocaleString() }} samples, so
-            {{ fit.maxFftSize.toLocaleString() }} is the largest usable FFT size.
+            This run holds {{ Math.floor(fit.usableS * info.nativeRateHz) }} samples, so
+            {{ fit.maxFftSize }} is the largest usable FFT size.
           </p>
           <p v-if="unitsDiffer" class="mt-1 text-amber-700 dark:text-amber-400">
             The two channels are in different units ({{ leftTrace?.unit }} and {{ rightTrace?.unit }}).

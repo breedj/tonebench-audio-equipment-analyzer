@@ -193,24 +193,24 @@ async function submit() {
           <p class="truncate font-medium" :title="resultName">{{ resultName }}</p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
             <div>
-              <dt class="inline text-neutral-500">Traces</dt>
+              <dt class="mr-1 inline text-neutral-500">Traces</dt>
               <dd class="inline">
                 {{ stored.source.leftTrace }} ({{ stored.source.leftUnit }})<template v-if="stored.source.rightTrace">
                   + {{ stored.source.rightTrace }} ({{ stored.source.rightUnit }})</template>
               </dd>
             </div>
             <div>
-              <dt class="inline text-neutral-500">Samples</dt>
+              <dt class="mr-1 inline text-neutral-500">Samples</dt>
               <dd class="inline">
                 {{ earliestMs.toFixed(2) }}–{{ (stored.source.sourceEndS * 1e3).toFixed(2) }} ms
               </dd>
             </div>
             <div>
-              <dt class="inline text-neutral-500">Simulator rate</dt>
+              <dt class="mr-1 inline text-neutral-500">Simulator rate</dt>
               <dd class="inline">{{ fmtRate(stored.source.nativeRateHz) }}</dd>
             </div>
             <div v-if="stored.removedDcV && stored.removedDcV.length > 0" class="sm:col-span-3">
-              <dt class="inline text-neutral-500">Operating point removed</dt>
+              <dt class="mr-1 inline text-neutral-500">Operating point removed</dt>
               <dd class="inline">
                 {{ stored.removedDcV.map((v) => `${v.toPrecision(6)} ${unit}`).join(' + ') }}
               </dd>
@@ -262,7 +262,7 @@ async function submit() {
             FFT size
             <select v-model.number="form.fftSize" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
               <option v-for="n in SIMULATION_FFT_SIZES" :key="n" :value="n" :disabled="n > fit.maxFftSize">
-                {{ n.toLocaleString() }}{{ n > fit.maxFftSize ? ' — too large for these samples' : '' }}
+                {{ n }}{{ n > fit.maxFftSize ? ' — too large for these samples' : '' }}
               </option>
             </select>
           </label>
@@ -328,8 +328,8 @@ async function submit() {
             below the top of the measurement band. Raise the FFT size.
           </p>
           <p v-if="fit.fftTooLarge" class="mt-1 text-red-700 dark:text-red-400">
-            {{ Math.floor(fit.usableS * stored.source.nativeRateHz).toLocaleString() }} samples are
-            available from here, so {{ fit.maxFftSize.toLocaleString() }} is the largest usable FFT size.
+            {{ Math.floor(fit.usableS * stored.source.nativeRateHz) }} samples are
+            available from here, so {{ fit.maxFftSize }} is the largest usable FFT size.
           </p>
         </div>
       </template>

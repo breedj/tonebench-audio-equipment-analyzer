@@ -181,25 +181,25 @@ async function submit() {
           <p class="truncate font-medium" :title="resultName">{{ resultName }}</p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
             <div>
-              <dt class="inline text-neutral-500">Output</dt>
-              <dd class="inline"> {{ stored.source.outputTrace }} ({{ stored.source.outputUnit }})</dd>
+              <dt class="mr-1 inline text-neutral-500">Output</dt>
+              <dd class="inline">{{ stored.source.outputTrace }} ({{ stored.source.outputUnit }})</dd>
             </div>
             <div>
-              <dt class="inline text-neutral-500">Reference</dt>
+              <dt class="mr-1 inline text-neutral-500">Reference</dt>
               <dd class="inline">
                 {{ stored.source.referenceTrace ? `${stored.source.referenceTrace} (${stored.source.referenceUnit})` : '— none —' }}
               </dd>
             </div>
             <div>
-              <dt class="inline text-neutral-500">Sweep</dt>
+              <dt class="mr-1 inline text-neutral-500">Sweep</dt>
               <dd class="inline">
                 {{ fmtHz(stored.source.startFreqHz) }}–{{ fmtHz(stored.source.endFreqHz) }}
               </dd>
             </div>
             <div>
-              <dt class="inline text-neutral-500">Points</dt>
+              <dt class="mr-1 inline text-neutral-500">Points</dt>
               <dd class="inline">
-                {{ stored.source.pointCount.toLocaleString() }} ({{ stored.source.pointsPerDecade.toFixed(0) }}/decade)
+                {{ stored.source.pointCount }} ({{ stored.source.pointsPerDecade.toFixed(0) }}/decade)
               </dd>
             </div>
           </dl>
@@ -264,7 +264,7 @@ async function submit() {
               <template v-if="bandError">{{ bandError }}</template>
               <template v-else>
                 Put it somewhere the response is flat. Capped at
-                {{ MAX_REFERENCE_HZ.toLocaleString() }} Hz, which is the analyzer's own ceiling — the
+                {{ MAX_REFERENCE_HZ }} Hz, which is the analyzer's own ceiling — the
                 corners themselves are not.
               </template>
             </span>
@@ -285,7 +285,7 @@ async function submit() {
 
         <div class="mt-4 rounded border border-neutral-200 bg-[var(--surface-control)] p-3 text-xs dark:border-neutral-800">
           <p class="text-neutral-500 dark:text-neutral-400">
-            {{ stored.source.pointCount.toLocaleString() }} points over
+            {{ stored.source.pointCount }} points over
             {{ fit.decades.toFixed(2) }} decades — {{ fit.stepPercent.toFixed(2) }} % between them,
             which is as closely as a corner can be located. There is no smoothing setting: a
             simulated curve has no noise to smooth, and leaving it alone is what lets this be

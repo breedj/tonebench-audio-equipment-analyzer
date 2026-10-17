@@ -87,9 +87,9 @@ export function referenceBandError(
 ): string | null {
   if (mode !== 'BandMedian') return null
   if (!(lowHz >= MIN_REFERENCE_HZ) || lowHz > MAX_REFERENCE_HZ)
-    return `The reference band must start between ${MIN_REFERENCE_HZ} and ${MAX_REFERENCE_HZ.toLocaleString()} Hz.`
+    return `The reference band must start between ${MIN_REFERENCE_HZ} and ${MAX_REFERENCE_HZ} Hz.`
   if (!(highHz >= MIN_REFERENCE_HZ) || highHz > MAX_REFERENCE_HZ)
-    return `The reference band must end between ${MIN_REFERENCE_HZ} and ${MAX_REFERENCE_HZ.toLocaleString()} Hz.`
+    return `The reference band must end between ${MIN_REFERENCE_HZ} and ${MAX_REFERENCE_HZ} Hz.`
   if (highHz <= lowHz) return 'The reference band must end above where it starts.'
   return null
 }

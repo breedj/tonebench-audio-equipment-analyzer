@@ -229,7 +229,7 @@ async function submit() {
           <p class="truncate font-mono text-[11px] text-neutral-500 dark:text-neutral-400" :title="info.path">{{ info.path }}</p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
             <div><dt class="mr-1 inline text-neutral-500">Run</dt><dd class="inline">{{ info.plotname }}</dd></div>
-            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount.toLocaleString() }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount }}</dd></div>
             <div>
               <dt class="mr-1 inline text-neutral-500">Sweep</dt>
               <dd class="inline">{{ fmtHz(info.startFreqHz) }}–{{ fmtHz(info.endFreqHz) }}</dd>
@@ -346,7 +346,7 @@ async function submit() {
             </div>
             <span class="text-[11px]" :class="bandError ? 'text-red-700 dark:text-red-400' : 'text-neutral-500 dark:text-neutral-400'">
               <template v-if="bandError">{{ bandError }}</template>
-              <template v-else>Capped at {{ MAX_REFERENCE_HZ.toLocaleString() }} Hz; the corners themselves are not.</template>
+              <template v-else>Capped at {{ MAX_REFERENCE_HZ }} Hz; the corners themselves are not.</template>
             </span>
           </label>
 
@@ -363,7 +363,7 @@ async function submit() {
 
         <div class="mt-4 rounded border border-neutral-200 bg-[var(--surface-control)] p-3 text-xs dark:border-neutral-800">
           <p>
-            <span class="text-neutral-500">{{ info.pointCount.toLocaleString() }} points over {{ fit.decades.toFixed(2) }} decades</span>
+            <span class="text-neutral-500">{{ info.pointCount }} points over {{ fit.decades.toFixed(2) }} decades</span>
             →
             <span class="font-medium">{{ fit.stepPercent.toFixed(2) }} % between points</span>
           </p>

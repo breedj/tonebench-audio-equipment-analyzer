@@ -109,12 +109,12 @@ async function apply() {
           </p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
             <div>
-              <dt class="inline text-neutral-500">Impedance</dt>
-              <dd class="inline"> {{ stored.source.outputTrace }} / {{ stored.source.referenceTrace }}</dd>
+              <dt class="mr-1 inline text-neutral-500">Impedance</dt>
+              <dd class="inline">{{ stored.source.outputTrace }} / {{ stored.source.referenceTrace }}</dd>
             </div>
             <div>
-              <dt class="inline text-neutral-500">Points</dt>
-              <dd class="inline"> {{ stored.source.pointCount.toLocaleString() }}</dd>
+              <dt class="mr-1 inline text-neutral-500">Points</dt>
+              <dd class="inline">{{ stored.source.pointCount }}</dd>
             </div>
           </dl>
         </div>

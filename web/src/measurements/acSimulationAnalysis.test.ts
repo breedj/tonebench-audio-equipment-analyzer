@@ -60,7 +60,7 @@ describe('referenceBandError', () => {
 
   it('caps the band at the analyzer’s own ceiling, which a simulated sweep can run past', () => {
     // The sweep reaches 5 MHz; the band the reference level is taken over cannot.
-    expect(referenceBandError('BandMedian', 200, 5e6)).toContain(MAX_REFERENCE_HZ.toLocaleString())
+    expect(referenceBandError('BandMedian', 200, 5e6)).toContain(String(MAX_REFERENCE_HZ))
     expect(referenceBandError('BandMedian', 200, MAX_REFERENCE_HZ)).toBeNull()
   })
 

@@ -176,7 +176,7 @@ async function submit() {
           <p class="truncate font-mono text-[11px] text-neutral-500 dark:text-neutral-400" :title="info.path">{{ info.path }}</p>
           <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
             <div><dt class="mr-1 inline text-neutral-500">Run</dt><dd class="inline">{{ info.plotname }}</dd></div>
-            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount.toLocaleString() }}</dd></div>
+            <div><dt class="mr-1 inline text-neutral-500">Points</dt><dd class="inline">{{ info.pointCount }}</dd></div>
             <div>
               <dt class="mr-1 inline text-neutral-500">Sweep</dt>
               <dd class="inline">{{ fmtHz(info.startFreqHz) }}–{{ fmtHz(info.endFreqHz) }}</dd>

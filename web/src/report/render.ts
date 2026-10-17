@@ -151,6 +151,13 @@ export async function renderView(
   overlays: readonly ReportSubject[],
   primaryLabel: string | null,
   monochrome = false,
+  /**
+   * Whether the ordinal badges are drawn on the labels. Off when the chapter's Annotations table was
+   * not chosen: a number on the picture would tie a label to a row nobody printed. An argument
+   * rather than a flag written onto the subject's display, because only the FFT's display is a bag
+   * of refs that could carry one.
+   */
+  annotationNumbers = true,
 ): Promise<RenderedChart | null> {
   const data = primary.data
   const overlayEntries = overlays.map(toOverlayEntry).filter((o): o is OverlayEntry => o !== null)
@@ -164,7 +171,7 @@ export async function renderView(
       if (view === 'Bode') {
         const png = await renderChartPng(
           FrequencyResponseChart,
-          { traces, overlays: overlayEntries, ...display, ...flags, phaseKind },
+          { traces, overlays: overlayEntries, ...display, ...flags, phaseKind, annotationView: 'Bode', annotationNumbers },
           options,
         )
         return { png, caption: display.view === 'Gain' ? 'Gain against frequency' : 'Input level against frequency' }
@@ -327,6 +334,9 @@ export async function renderView(
             {
               traces,
               overlays: overlayEntries,
+              annotations: display.annotations,
+              annotationView: 'Response',
+              annotationNumbers,
               view: 'Gain',
               showLeft: true,
               showRight: false,
@@ -472,6 +482,9 @@ export async function renderView(
         {
           traces,
           overlays: overlayEntries,
+          annotations: display.annotations,
+          annotationView: 'Crosstalk',
+          annotationNumbers,
           view: 'Crosstalk',
           showLeft: true,
           showRight: true,

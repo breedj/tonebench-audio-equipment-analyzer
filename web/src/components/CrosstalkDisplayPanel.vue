@@ -2,6 +2,8 @@
 import { computed, watch } from 'vue'
 import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
 import { useMeasurements } from '../composables/useMeasurements'
+import AnnotationsPanel from './AnnotationsPanel.vue'
+import { CROSSTALK_ANNOTATION_VIEW } from '../charts/annotationViews'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -162,4 +164,6 @@ watch(running, (isRunning, wasRunning) => {
       <label class="tb-check-row"><input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points</label>
     </div>
   </CollapsibleSection>
+
+  <AnnotationsPanel :view="CROSSTALK_ANNOTATION_VIEW" />
 </template>

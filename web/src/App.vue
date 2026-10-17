@@ -247,7 +247,7 @@ const {
 // The notes drawn on the open measurement's charts. One list for every kind -- see
 // useAnnotations -- so the six display getters below and every screen's rail read the same
 // state, and a measurement switch clears it exactly once.
-const { annotations, applyLoaded: applyLoadedAnnotations } = useAnnotations()
+const { annotations, armed: annotationArmed, applyLoaded: applyLoadedAnnotations } = useAnnotations()
 
 // The user weighting tables' names, for the chart's annunciator and the report.
 const userWeighting = useUserWeighting()
@@ -4352,6 +4352,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-else-if="impulseView === 'Response'"
                   ref="impulseResponseChart"
                   run-label="Run"
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
+                  :annotation-view="'Response'"
                   :traces="impulseTraces"
                   :overlays="visibleImpulseResponseOverlays"
                   view="Gain"
@@ -4655,6 +4658,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <FrequencyResponseChart
                   v-if="activeResponseProjection === 'Bode'"
                   ref="responseChart"
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
+                  :annotation-view="'Bode'"
                   :run-label="isSteppedResponse ? 'Run sweep' : 'Run'"
                   :traces="responseTraces"
                   :overlays="visibleResponseOverlays"
@@ -4897,6 +4903,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <FrequencyResponseChart
                   ref="responseChart"
                   run-label="Run sweep"
+                  v-model:annotations="annotations"
+                  v-model:annotation-armed="annotationArmed"
+                  :annotation-view="'Crosstalk'"
                   :traces="responseTraces"
                   :overlays="visibleCrosstalkOverlays"
                   view="Crosstalk"

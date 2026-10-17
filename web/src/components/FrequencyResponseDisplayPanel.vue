@@ -25,6 +25,7 @@ import {
   usToUnit,
 } from '../response/delayAxis'
 import { seedNicholsGain, seedPoleZeroWindow, type ResponseAutoWindow } from '../response/autoWindow'
+import AnnotationsPanel from './AnnotationsPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
 import { bandwidthColor, type BandwidthMarker } from '../charts/bandwidthColors'
@@ -1076,5 +1077,9 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
       </label>
     </div>
   </CollapsibleSection>
+
+  <!-- The notes of whichever projection is on screen. `projection`'s values are the annotation view
+       ids, so this follows the Bode/Nyquist/Nichols/pole-zero/s-plane switch with no mapping. -->
+  <AnnotationsPanel :view="projection" />
 
 </template>

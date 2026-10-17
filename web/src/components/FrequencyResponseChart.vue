@@ -1,5 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { OverlayEntry } from '../composables/useMeasurements'
@@ -27,7 +40,19 @@ import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
 import { phaseColumnUsable, phaseFloorDb, phaseSeries } from '../response/phaseCurve'
 
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/**
+ * The whole measurement's annotations, across every one of its charts; this one draws those whose
+ * `view` is `annotationView` below. A model rather than the shared singleton, because a headless
+ * report render draws a *stored* result and must not pick up the screen's own.
+ */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
 const props = defineProps<{
+  /** Which chart of the measurement this instance is -- Bode, Crosstalk, or the impulse screen's Response. */
+  annotationView?: string
+  /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
+  annotationNumbers?: boolean
   traces: ResponseTrace[]
   /** Stored measurements checked on in the History list, drawn dashed behind the live curves. */
   overlays: OverlayEntry[]
@@ -1072,6 +1097,9 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
           // signal. setScale is not: it fires on every setData as well.
           setSelect: [
             (u: uPlot) => {
+              // A box gesture fires this too, and it is not a zoom: without the guard, drawing a
+              // region would offer a Reset zoom button for a chart nobody had zoomed.
+              if (annotationOverlay.armedForBox.value) return
               if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
             },
           ],
@@ -1089,8 +1117,53 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
           ],
         }
       : {},
-    plugins: [minMaxBandPlugin(p), bandwidthPlugin(p), pinnedCursorPlugin(p)],
+    // The annotations go last: whatever draws after them paints over the labels.
+    plugins: [
+      minMaxBandPlugin(p),
+      bandwidthPlugin(p),
+      pinnedCursorPlugin(p),
+      annotationsPlugin(annotationOverlay, ANNOTATION_AXES.value, () => annotationTheme(p.dark)),
+    ],
   }
+}
+
+/**
+ * What this chart's two axes are, in annotation terms.
+ *
+ * <p>The y <b>quantity changes with the view</b>, which is the whole reason an annotation carries
+ * one: a note placed on the level view is stored in dBV and a note on the gain view in dB, and
+ * neither may be redrawn against the other. Switching the view therefore hides the other view's
+ * notes rather than moving them, and switching back brings them out again.</p>
+ *
+ * <p>It binds to the primary magnitude scale and nothing else. The phase, coherence and delay axes
+ * are fitted to their own data or fixed, so they have no stable window to clamp a label or a region
+ * against -- and what a reader wants to mark there ("the phase flips here") is a rule at an x value,
+ * which this chart offers.</p>
+ */
+const ANNOTATION_AXES = computed<UplotAnnotationAxes>(() => ({
+  x: { quantity: 'hz' },
+  y: { quantity: props.view === 'Dbv' ? 'dbv' : 'db' },
+}))
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => props.annotationView ?? 'Bode',
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot.value ? cssAnnotationPlot(plot.value, ANNOTATION_AXES.value) : null),
+  surface: () => plot.value?.over ?? null,
+  overlayRect: () => (plot.value ? annotationOverlayRect(plot.value) : null),
+  redraw: () => plot.value?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value),
+})
+
+/** Finishes a box gesture -- window, bubble phase, for the reasons in finishBoxGesture. */
+function onWindowMouseUp() {
+  finishBoxGesture(plot.value, annotationOverlay)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
 }
 
 /** The magnitude axis title, by view. */
@@ -1239,6 +1312,10 @@ function onPlotClick(event: MouseEvent) {
     return
   }
 
+  // Armed, the click places a note instead of pinning the cursor: one click cannot sensibly do
+  // both, and the panel that armed the chart is the one that asked for this one.
+  if (annotationArmed.value !== null) return
+
   const idx = u.cursor.idx
   const xs = u.data[0]
   const freqHz = idx != null && idx >= 0 ? (xs?.[idx] as number | undefined) : undefined
@@ -1284,6 +1361,11 @@ function rebuild() {
   u.over.addEventListener('mousedown', notePressOrigin)
   u.over.addEventListener('click', onPlotClick)
 
+  // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
+  // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
+  attachAnnotationListeners(u, annotationOverlay)
+  syncBoxDragMode(u, annotationOverlay.armedForBox.value)
+
   // Safe here, unlike the sweep chart's deferred restore: the data is passed to the constructor, so
   // no setData follows to clobber the scales.
   if (restore?.x) u.setScale('x', restore.x)
@@ -1292,6 +1374,14 @@ function rebuild() {
   // The rebuild above cleared the readout; a pin outlives a rebuild, so put its row back.
   refreshPinnedReadout()
 }
+
+// Annotations are draw-hook state: a *redraw*, never a rebuild, or every keystroke in a label
+// would throw the zoom away.
+watch(
+  () => [annotationList.value, props.annotationNumbers, props.annotationView] as const,
+  () => plot.value?.redraw(),
+  { deep: true },
+)
 
 function refresh() {
   if (!plot.value) {
@@ -1310,6 +1400,8 @@ function refresh() {
 let observer: ResizeObserver | null = null
 
 onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
   rebuild()
   observer = new ResizeObserver(() => {
     const el = container.value
@@ -1319,6 +1411,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
   plot.value?.destroy()
   plot.value = null
@@ -1400,8 +1494,14 @@ watch(delayRange, () => refresh())
       <span v-else class="shrink-0">Click to pin · drag to zoom</span>
     </div>
 
-    <div ref="plotBox" class="relative w-full" :style="{ height: `${chartHeight}px` }">
+    <div
+      ref="plotBox"
+      class="relative w-full"
+      :class="annotationArmed ? 'cursor-crosshair' : ''"
+      :style="{ height: `${chartHeight}px` }"
+    >
       <div ref="container" class="h-full w-full" />
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
       <!-- Off-scale cue: real data sits above/below the currently visible dB/dBV window. -->
       <div
         v-if="outOfRange.above"

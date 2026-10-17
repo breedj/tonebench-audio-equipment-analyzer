@@ -429,10 +429,15 @@ async function imageSection(chart: RenderedChart, caption: string): Promise<Repo
 }
 
 /** The chart sections of one subject on its own: one per chosen view it has data for. */
-async function ownChartSections(subject: ReportSubject, views: readonly string[], monochrome: boolean): Promise<ReportSection[]> {
+async function ownChartSections(
+  subject: ReportSubject,
+  views: readonly string[],
+  monochrome: boolean,
+  annotationNumbers: boolean,
+): Promise<ReportSection[]> {
   const sections: ReportSection[] = []
   for (const view of views) {
-    const chart = await renderView(view, subject, [], null, monochrome)
+    const chart = await renderView(view, subject, [], null, monochrome, annotationNumbers)
     if (chart) sections.push(await imageSection(chart, chart.caption))
   }
   return sections
@@ -491,7 +496,8 @@ export async function buildChapter(
     sections.push({ kind: 'callout', title: 'Not measured.', text: 'This chapter carries the settings and notes only.' })
   }
   applyAnnotationNumbers(subject, elements)
-  if (elements.includes('chart')) sections.push(...(await ownChartSections(subject, views, monochrome)))
+  if (elements.includes('chart'))
+    sections.push(...(await ownChartSections(subject, views, monochrome, elements.includes('annotations'))))
   sections.push(...(await extraChartSections(subject, elements, monochrome)))
   sections.push(...chapterSections(subject, elements, elements.includes('chart') ? views : []))
   hoistFigures(sections)

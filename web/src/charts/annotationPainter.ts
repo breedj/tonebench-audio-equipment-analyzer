@@ -159,3 +159,33 @@ export function paintAnnotations(
 
   ctx.restore()
 }
+
+/**
+ * The label colours, light and dark.
+ *
+ * <p>Here rather than in each chart's own THEME table because every annotated chart wants the same
+ * five, and a label that reads differently from one screen to the next is a label a reader has to
+ * learn twice. The FFT screen's table carried them first; these are its values.</p>
+ *
+ * <p>An <b>export</b> is always the light set, whatever the app is showing — the same rule
+ * exportChart's palette already follows, since a report is a light document.</p>
+ */
+const LIGHT: AnnotationTheme = {
+  annotationLine: 'rgba(82, 82, 82, 0.75)',
+  annotationText: '#171717',
+  annotationFill: 'rgba(255, 255, 255, 0.93)',
+  annotationBorder: '#d4d4d4',
+  annotationShadow: 'rgba(15, 23, 42, 0.3)',
+}
+
+const DARK: AnnotationTheme = {
+  annotationLine: 'rgba(148, 163, 184, 0.8)',
+  annotationText: '#e5e5e5',
+  annotationFill: 'rgba(27, 30, 35, 0.92)',
+  annotationBorder: '#525252',
+  annotationShadow: 'rgba(0, 0, 0, 0.55)',
+}
+
+export function annotationTheme(dark: boolean): AnnotationTheme {
+  return dark ? DARK : LIGHT
+}

@@ -266,6 +266,14 @@ export function useSweep() {
     cancel,
     clear,
     refresh,
+
+    /**
+     * Folds in a status the caller already has, instead of fetching one. The measurement switch is
+     * the only caller: POST /api/sweep/owner parks one measurement's sweep and hands back the
+     * arriving one's in the same answer, so re-reading it would be a second round trip for a
+     * figure already in hand.
+     */
+    apply: applyStatus,
     ingestPoint,
     ingestProgress,
   }

@@ -679,8 +679,8 @@ const { showPage } = useManual()
       <strong>Ext. gain</strong> on the status bar, which describes an attenuator or probe
       <em>between</em> the DUT's output and the analyzer and corrects every measured level. A history overlay converts with its own window, so two results taken at
       different FFT sizes compare correctly on the density axis. Below those: <strong>Thick lines</strong>,
-      <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (on for a
-      newly created measurement), the <strong>Channels</strong> row, the FFT data, Min/max,
+      <strong>Show data points</strong>, <strong>Autofit when measurement done</strong> (off
+      unless you tick it), the <strong>Channels</strong> row, the FFT data, Min/max,
       Peak-hold, Harmonic markers and Weighting curve toggles, and finally four checkboxes that show or hide the
       Spectrogram, Oscilloscope, Harmonics and Other peaks panels — so a measurement that only needs
       the spectrum does not have to scroll past the rest. A new measurement starts with the

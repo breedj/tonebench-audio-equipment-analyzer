@@ -35,7 +35,8 @@ export const DEFAULT_OUTPUT_IMPEDANCE_DISPLAY: Readonly<OutputImpedanceDisplay> 
   phaseBottomDeg: -90,
   thickLines: true,
   showDataPoints: true,
-  autofitOnDone: true,
+  // Off, like every other screen's -- see DEFAULT_CROSSTALK_DISPLAY.
+  autofitOnDone: false,
 })
 
 type Stored = Partial<OutputImpedanceParameters>

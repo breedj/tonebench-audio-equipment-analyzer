@@ -741,8 +741,10 @@ const metricGroups = computed(() => {
 
   function add(key: string, name: string | null, method: ThdMethodName, left: ThdSweepPoint | null, right: ThdSweepPoint | null, traceFamily: SweepTraceFamily) {
     const rows = [
-      { key: `${key}-L`, label: 'Left channel', colorClass: 'text-blue-600 dark:text-blue-400', point: left },
-      { key: `${key}-R`, label: 'Right channel', colorClass: 'text-red-600 dark:text-red-400', point: right },
+      // "Left", not "Left channel": the column the dot sits in is the channel column (its header
+      // says so to a screen reader), and the word was 40 px of a readout that already does not fit.
+      { key: `${key}-L`, label: 'Left', colorClass: 'text-blue-600 dark:text-blue-400', point: left },
+      { key: `${key}-R`, label: 'Right', colorClass: 'text-red-600 dark:text-red-400', point: right },
     ]
       .filter((r) => r.point !== null)
       .map((r) => ({ key: r.key, label: r.label, colorClass: r.colorClass, values: metricsFor(r.point!, method) }))
@@ -1212,8 +1214,18 @@ onBeforeUnmount(() => {
          same block again for every history result checked on. Replaces the label-above-value
          columns this used to be, which repeated all ten labels for each channel and again for each
          run — unreadable as a comparison, which is the only reason to show two runs at once. -->
+    <!--
+      Sized to fit the chart column rather than to scroll out of it. Fourteen columns at 12 px with
+      16 px of padding each came to 1010 px in a 693 px column on a 1600 px window: the last two
+      readings were off the end and the only way to them was a horizontal scrollbar nobody looks
+      for (reported 2026-10-17). So 11 px, 8 px of padding, and -- the one that does the work --
+      no `whitespace-nowrap`, which lets "Output voltage", "Noise floor", "1 V (0.00 dBV)" and
+      "498 mW (8 Ω)" break at their spaces and each column fall back to its own widest word. The
+      numbers themselves carry no spaces, so none of them can be broken. `overflow-x-auto` stays as
+      the backstop for a narrow window, where this is taller rather than wider.
+    -->
     <div v-if="metricGroups.length" class="overflow-x-auto border-t border-neutral-200 pt-2 dark:border-neutral-800">
-      <table class="min-w-full text-xs">
+      <table class="min-w-full text-[11px]">
         <!-- One table for every run, a tbody each, rather than a table per run: a browser sizes a
              table's columns across all of its rows, so this is what makes THD sit under THD when
              the live sweep reads 22 Hz and a history result reads 90 kHz. Separate tables each
@@ -1231,11 +1243,11 @@ onBeforeUnmount(() => {
             </td>
           </tr>
           <tr class="text-neutral-400 dark:text-neutral-500">
-            <th class="py-0.5 pr-4 text-left font-normal"><span class="sr-only">Channel</span></th>
+            <th class="py-0.5 pr-2 text-left font-normal"><span class="sr-only">Channel</span></th>
             <th
               v-for="col in group.columns"
               :key="col"
-              class="py-0.5 pr-4 text-left font-normal whitespace-nowrap"
+              class="py-0.5 pr-2 text-left font-normal"
             >
               {{ col }}
             </th>
@@ -1245,14 +1257,14 @@ onBeforeUnmount(() => {
             :key="row.key"
             class="border-t border-neutral-100 dark:border-neutral-800"
           >
-            <td class="py-0.5 pr-4 whitespace-nowrap" :class="row.colorClass">
+            <td class="py-0.5 pr-2 whitespace-nowrap" :class="row.colorClass">
               <span class="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle"></span>
               {{ row.label }}
             </td>
             <td
               v-for="(value, i) in row.values"
               :key="i"
-              class="py-0.5 pr-4 font-mono whitespace-nowrap text-neutral-800 dark:text-neutral-100"
+              class="py-0.5 pr-2 font-mono text-neutral-800 dark:text-neutral-100"
             >
               {{ value }}
             </td>

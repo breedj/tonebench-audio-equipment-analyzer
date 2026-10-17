@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useProjects } from '../composables/useProjects'
+import { RUN_ACTIVE_MESSAGE, useProjects } from '../composables/useProjects'
 import { SIDEBAR_PIN_MIN_WIDTH_PX, useMediaQuery } from '../composables/useMediaQuery'
 import { useUiLayout } from '../composables/useUiLayout'
 import { useTrash } from '../composables/useTrash'
@@ -8,8 +8,21 @@ import { dropIndex, moveItem } from '../measurements/reorder'
 import MeasurementKindChip from './MeasurementKindChip.vue'
 import NewMeasurementDialog from './NewMeasurementDialog.vue'
 
-const { types, currentTypeId, currentProjectId, dirtyTypeIds, selectType, deleteMeasurementType, reorderTypes, error } =
+const { types, currentTypeId, currentProjectId, dirtyTypeIds, selectType, deleteMeasurementType, reorderTypes, error, runActive } =
   useProjects()
+
+/**
+ * Why every row that would open another measurement is disabled, or null while nothing is running.
+ *
+ * <p>Selecting a measurement stops whatever is running (deviceControl's `stopRun`), so until
+ * 2026-10-17 a stray click threw away a sweep minutes into its grid without asking. `selectType`
+ * refuses it now; this is what says so before the click rather than after it, and the row that is
+ * already open stays live, since selecting it changes nothing.</p>
+ */
+const lockedReason = computed(() => (runActive.value ? RUN_ACTIVE_MESSAGE : null))
+function locked(id: number) {
+  return runActive.value && id !== currentTypeId.value
+}
 
 // The badge is the only thing on screen that says the trash holds anything, so it is refreshed
 // whenever the project changes as well as after each delete (useProjects/useMeasurements do that
@@ -153,9 +166,10 @@ async function onDelete(id: number) {
     <div v-if="!pinned" class="flex flex-col items-center gap-2 p-1.5">
       <button
         type="button"
-        class="flex h-8 w-8 items-center justify-center rounded-[10px] bg-neutral-900 text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
-        title="New measurement"
+        class="flex h-8 w-8 items-center justify-center rounded-[10px] bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+        :title="lockedReason ?? 'New measurement'"
         aria-label="New measurement"
+        :disabled="runActive"
         @click="dialogOpen = true"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
@@ -168,13 +182,15 @@ async function onDelete(id: number) {
           :key="t.id"
           type="button"
           class="relative flex h-9 w-9 items-center justify-center rounded-[10px]"
-          :class="
+          :class="[
             t.id === currentTypeId
               ? 'bg-blue-50 dark:bg-blue-900/30'
-              : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-          "
-          :title="t.name"
+              : 'hover:bg-neutral-100 dark:hover:bg-neutral-800',
+            locked(t.id) ? 'opacity-40' : '',
+          ]"
+          :title="locked(t.id) ? `${t.name} — ${lockedReason}` : t.name"
           :aria-label="t.name"
+          :disabled="locked(t.id)"
           @click="onSelect(t.id)"
         >
           <MeasurementKindChip :kind="t.kind" :size="26" />
@@ -226,7 +242,9 @@ async function onDelete(id: number) {
       <div class="flex items-center gap-1">
         <button
           type="button"
-          class="flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[10px] bg-neutral-900 px-2 text-[13px] font-semibold text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+          class="flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[10px] bg-neutral-900 px-2 text-[13px] font-semibold text-white hover:bg-neutral-700 disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+          :title="lockedReason ?? undefined"
+          :disabled="runActive"
           @click="dialogOpen = true"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
@@ -262,7 +280,10 @@ async function onDelete(id: number) {
         </button>
       </div>
 
-      <p v-if="error" class="px-2 text-xs text-red-600 dark:text-red-400">{{ error }}</p>
+      <!-- Amber, not red: a locked sidebar is the run doing its job, where `error` is something
+           that went wrong. Shown without waiting for a click, which is the whole point of it. -->
+      <p v-if="lockedReason" class="px-2 text-xs text-amber-600 dark:text-amber-400">{{ lockedReason }}</p>
+      <p v-else-if="error" class="px-2 text-xs text-red-600 dark:text-red-400">{{ error }}</p>
 
       <nav class="flex flex-col gap-0.5">
         <div
@@ -290,7 +311,14 @@ async function onDelete(id: number) {
             @mousedown="gripHeldIndex = index"
             >⠿</span
           >
-          <button type="button" class="flex min-w-0 flex-1 items-center gap-2.5 py-1 pr-2 text-left text-[13px]" @click="onSelect(t.id)">
+          <button
+            type="button"
+            class="flex min-w-0 flex-1 items-center gap-2.5 py-1 pr-2 text-left text-[13px]"
+            :class="locked(t.id) ? 'opacity-40' : ''"
+            :disabled="locked(t.id)"
+            :title="locked(t.id) ? lockedReason ?? undefined : undefined"
+            @click="onSelect(t.id)"
+          >
             <MeasurementKindChip :kind="t.kind" />
             <span class="min-w-0 flex-1 truncate" :title="t.name">{{ t.name }}</span>
             <span

@@ -181,9 +181,10 @@ public sealed class MeasurementSaveService(
             // a band, and null is reserved for a row that predates the setting.
             MeasurementLoFreqHz: 20.0,
             MeasurementHiFreqHz: 20000.0,
-            // On for a new measurement only: a stored type keeps its own (null reads as off), so
-            // nothing saved earlier starts refitting its axes -- see SweepDisplayPanel.vue.
-            ChartAutofitOnDone: true), SerializerOptions);
+            // Off, and written rather than left null so the stored type says so: a chart that
+            // refits its own axes the moment a run ends moves the window out from under whoever
+            // set it, which is Joost's call, 2026-10-17. The checkbox is still there.
+            ChartAutofitOnDone: false), SerializerOptions);
 
     /// <summary>
     /// A brand-new THD-vs-amplitude type's <c>params_json</c>, on the same terms as
@@ -209,7 +210,7 @@ public sealed class MeasurementSaveService(
             // a band, and null is reserved for a row that predates the setting.
             MeasurementLoFreqHz: 20.0,
             MeasurementHiFreqHz: 20000.0,
-            ChartAutofitOnDone: true), SerializerOptions);
+            ChartAutofitOnDone: false), SerializerOptions);
 
     /// <summary>
     /// A brand-new IMD-vs-amplitude type's <c>params_json</c>, on the same terms as
@@ -242,7 +243,7 @@ public sealed class MeasurementSaveService(
             // a band, and null is reserved for a row that predates the setting.
             MeasurementLoFreqHz: 20.0,
             MeasurementHiFreqHz: 20000.0,
-            ChartAutofitOnDone: true), SerializerOptions);
+            ChartAutofitOnDone: false), SerializerOptions);
     }
 
     /// <summary>
@@ -1851,8 +1852,9 @@ public sealed class MeasurementSaveService(
     /// actually had configured — and a brand-new type needs something to Run rather than two
     /// disabled channels.</para>
     ///
-    /// <para>Autofit-when-done is switched on for the same reason SnapToBin is: it is the default a
-    /// fresh measurement should start from, and the live session carries no value for it at all.</para>
+    /// <para>Autofit-when-done used to be switched on here as well. It is not any more — see the
+    /// body — and the two are not alike: a silent generator has nothing to Run, where a chart that
+    /// does not refit itself simply stays where it was put.</para>
     ///
     /// <para>SnapToBin is unconditional rather than gated like the channel: unlike "silent", "off"
     /// has no fallback state to detect it against — <see cref="GeneratorConfig.SnapToBin"/> is a
@@ -1874,10 +1876,11 @@ public sealed class MeasurementSaveService(
             parameters = parameters with { Generator = parameters.Generator with { Left = parameters.Generator.Left with { Enabled = true } } };
         if (!parameters.Generator.SnapToBin)
             parameters = parameters with { Generator = parameters.Generator with { SnapToBin = true } };
-        // "Autofit when measurement done" starts on for a new type. Only here, never in
-        // BuildParameters: a stored type's null keeps reading as off, so nothing saved before this
-        // default existed starts refitting its axes on the next load.
-        parameters = parameters with { ChartAutofitOnDone = true };
+        // "Autofit when measurement done" is deliberately *not* forced on here, and a stored type's
+        // null already reads as off (useChartDisplay.ts). It was forced on for a new type until
+        // 2026-10-17: a chart that refits itself the moment a run ends moves the window out from
+        // under whoever set it, so it is now an opt-in on every kind, which is also the one answer
+        // the six screens can all give (Joost's call).
         return JsonSerializer.Serialize(parameters, SerializerOptions);
     }
 

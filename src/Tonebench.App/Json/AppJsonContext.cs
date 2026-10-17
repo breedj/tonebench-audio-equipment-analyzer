@@ -73,6 +73,8 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(ThdSweepStarted))]
 [JsonSerializable(typeof(ThdSweepStatus))]
 [JsonSerializable(typeof(SaveSweepRequest))]
+[JsonSerializable(typeof(SweepOwnerRequest))]
+[JsonSerializable(typeof(SweepOwnerResponse))]
 [JsonSerializable(typeof(StoredSweepResponse))]
 [JsonSerializable(typeof(ThdVsFrequencyParameters))]
 [JsonSerializable(typeof(ThdAmplitudeSweepStartRequest))]

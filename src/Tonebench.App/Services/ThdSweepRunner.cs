@@ -86,6 +86,16 @@ public sealed class ThdSweepRunner(
     private ThdSweepRequest? _lastRequest;
 
     /// <summary>
+    /// The sweeps of the measurements switched away from, so clicking one away and back does not
+    /// throw a run away — see <see cref="SwitchOwner"/>. Four rather than all of them, the same
+    /// bound and the same reasoning as the retained spectrum's: a sweep's points carry a decimated
+    /// FFT and oscilloscope preview each, so a long run is megabytes and a project with thirty
+    /// measurements would hold sweeps nobody has asked to see. The fifth measurement back shows an
+    /// empty chart on return, which is what every one of them did before this existed.
+    /// </summary>
+    private readonly RunParking<ParkedSweep> _parking = new(capacity: 4);
+
+    /// <summary>
     /// The frequency-normalized method's working state: every point's located harmonics, kept
     /// past <see cref="BuildPoints"/>, and each channel's fundamental response as measured so far.
     /// Only the sweep task touches these — they are not under <see cref="_stateLock"/>, since
@@ -240,6 +250,90 @@ public sealed class ThdSweepRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen: the sweep it holds is parked under the
+    /// measurement it belongs to, and whatever that one had parked becomes the live sweep. Returns
+    /// the status the caller should now show.
+    ///
+    /// <para>See <see cref="RunParking{TState}"/> for why the server has to know this at all —
+    /// in short, <b>Save sweep result</b> reads <see cref="Status"/>, so the points on screen and
+    /// the points that would be saved have to be the same measurement's. Called when a sweep
+    /// screen is <i>arrived at</i>, not on every switch: nothing but a sweep writes this runner, so
+    /// leaving the owner alone while the user is on an unrelated measurement is what keeps a
+    /// reload mid-sweep re-attaching exactly as it did before this existed.</para>
+    ///
+    /// <para>Ignored while a sweep is running, rather than throwing: a measurement switch is
+    /// refused client-side while anything runs, and a park that raced the writer appending to
+    /// <see cref="_points"/> would be worse than a no-op.</para>
+    /// </summary>
+    public ThdSweepStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            // Null means "nothing worth parking" -- an empty runner, or one just cleared. See
+            // RunParking.Switch: that drops the outgoing owner's entry rather than leaving a stale
+            // one, so a Clear cannot be undone by switching away and back.
+            var current = _points.Count == 0
+                ? null
+                : new ParkedSweep(
+                    _phase, _axis, _index, _total, _currentFreqHz, _currentAmplitudeVolt,
+                    _generatorAmpDbv, _error, _stopReason, _points, _thdMethod, _lastRequest);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _axis = parked.Axis;
+                _index = parked.Index;
+                _total = parked.Total;
+                _currentFreqHz = parked.CurrentFreqHz;
+                _currentAmplitudeVolt = parked.CurrentAmplitudeVolt;
+                _generatorAmpDbv = parked.GeneratorAmpDbv;
+                _error = parked.Error;
+                _stopReason = parked.StopReason;
+                _points = parked.Points;
+                _thdMethod = parked.ThdMethod;
+                _lastRequest = parked.LastRequest;
+            }
+            else if (outcome.Cleared)
+            {
+                // A fresh list, never the parked one emptied: the park holds this very reference,
+                // and AddPoint mutates in place.
+                _points = [];
+                _phase = ThdSweepPhase.Idle;
+                _index = 0;
+                _total = 0;
+                _currentFreqHz = 0;
+                _currentAmplitudeVolt = 0;
+                _generatorAmpDbv = 0;
+                _error = null;
+                _stopReason = null;
+                _thdMethod = ThdMethod.Conventional;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the sweep on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus the as-run request.</summary>
+    private sealed record ParkedSweep(
+        ThdSweepPhase Phase, SweepAxis Axis, int Index, int Total, double CurrentFreqHz,
+        double CurrentAmplitudeVolt, double GeneratorAmpDbv, string? Error, string? StopReason,
+        List<ThdSweepPoint> Points, ThdMethod ThdMethod, ThdSweepRequest? LastRequest);
 
     private async Task RunAsync(ThdSweepRequest request, SweepStepPlan[] steps, CancellationToken ct)
     {

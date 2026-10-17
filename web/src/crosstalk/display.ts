@@ -24,7 +24,9 @@ export const DEFAULT_CROSSTALK_DISPLAY: Readonly<CrosstalkDisplay> = Object.free
   yBottomDb: -120,
   xFromHz: 10,
   xToHz: 100000,
-  autofitOnDone: true,
+  // Off, like every other screen's: a chart that refits its own axes the moment a run ends
+  // moves the window out from under whoever set it (Joost, 2026-10-17). The checkbox is still there.
+  autofitOnDone: false,
 })
 
 type Stored = Partial<CrosstalkParameters>

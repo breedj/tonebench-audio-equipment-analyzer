@@ -24,6 +24,26 @@ const currentProject = ref<Project | null>(null)
 const types = ref<MeasurementType[]>([])
 const typesProjectId = ref<number | null>(null)
 const error = ref<string | null>(null)
+
+/**
+ * Whether anything is measuring right now — an acquisition, or any of the sweep/response/impedance
+ * runners. Set by App.vue, which is the only place that can see all of them (see `setRunActive`),
+ * and read here to refuse a measurement switch and by the sidebar to disable the rows that would
+ * make one.
+ *
+ * <p>Until 2026-10-17 a switch mid-run was allowed and simply <b>stopped</b> the run: `selectType`
+ * calls `stopRun`, which cancels every runner. That is a sweep minutes into its grid thrown away on
+ * a stray click, with nothing asked and nothing said — Joost's call is that the run wins and the
+ * click does not. The way out is the screen's own Stop/Cancel, which is where the user is looking
+ * anyway while a run is live.</p>
+ */
+const runActive = ref(false)
+
+/**
+ * What a refused switch says, in one place: `selectType` sets it as the error, and the sidebar
+ * shows it on the rows it has already disabled. Two spellings of the same sentence would drift.
+ */
+export const RUN_ACTIVE_MESSAGE = 'A measurement is running — stop it before opening another measurement.'
 /** False until the first GET /api/project has answered, so the shell does not flash the welcome screen on a reload of an open project. */
 const sessionLoaded = ref(false)
 let refreshPromise: Promise<void> | null = null
@@ -155,6 +175,13 @@ export function useProjects() {
    * generator/acquisition staged into loadedParams for the Run button. See SpectrumConfigPanel.vue and App.vue's runFromCurrentSettings.
    */
   async function selectType(id: number) {
+    if (id !== currentTypeId.value && runActive.value) {
+      // The sidebar disables its rows while this is true, so reaching here means a path that does
+      // not go through them -- the history list, a dialog, a keyboard shortcut. Named rather than
+      // silent: a click that does nothing reads as a broken sidebar.
+      error.value = RUN_ACTIVE_MESSAGE
+      return
+    }
     if (id !== currentTypeId.value && !(await confirmDiscardCurrentIfDirty())) return
     await stopRun()
     // After the stop and before the selection moves — see `liveStateReset`. A failure here is not
@@ -202,6 +229,13 @@ export function useProjects() {
   /** Registers the autosave flush — see `autosaveFlush`. App.vue calls this once. */
   function setAutosaveFlush(flush: (() => Promise<void>) | null) {
     autosaveFlush = flush
+  }
+
+  /** Reports whether anything is measuring — see `runActive`. App.vue keeps this in step. */
+  function setRunActive(active: boolean) {
+    runActive.value = active
+    // The refusal above describes a state that has just ended, so it must not outlive it.
+    if (!active && error.value === RUN_ACTIVE_MESSAGE) error.value = null
   }
 
   /** Registers the foreign-live-state discard — see `liveStateReset`. App.vue calls this once. */
@@ -433,6 +467,8 @@ export function useProjects() {
     dirtyTypeIds,
     hasDirty,
     error,
+    runActive,
+    setRunActive,
     refreshSession,
     confirmDiscardCurrentIfDirty,
     loadTypes,

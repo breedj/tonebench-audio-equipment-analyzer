@@ -68,15 +68,19 @@ public class MeasurementSaveServiceTests
 
             Assert.True(doc.RootElement.GetProperty("generator").GetProperty("snapToBin").GetBoolean());
 
-            // "Autofit when measurement done" is the other default a new type starts with, on every
-            // kind that has the checkbox -- and only a *new* one: BuildCurrentParametersJson, which
-            // a save of an existing type goes through, must keep reporting whatever was staged (null
-            // here), so a type stored before the default existed keeps reading as off.
-            Assert.True(doc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
+            // "Autofit when measurement done" is *off* for a new type, on every kind that has the
+            // checkbox (Joost, 2026-10-17): a chart that refits its own axes the moment a run ends
+            // moves the window out from under whoever set it. The FFT kind says so by leaving the
+            // field null, which useChartDisplay.ts reads as off; the three sweep kinds write false,
+            // because their panels restore the field they find and a configured type should say
+            // what it does.
+            Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("chartAutofitOnDone").ValueKind);
             using var sweepDoc = JsonDocument.Parse(saveService.DefaultSweepParametersJson());
-            Assert.True(sweepDoc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
+            Assert.False(sweepDoc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
             using var amplitudeDoc = JsonDocument.Parse(saveService.DefaultAmplitudeSweepParametersJson());
-            Assert.True(amplitudeDoc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
+            Assert.False(amplitudeDoc.RootElement.GetProperty("chartAutofitOnDone").GetBoolean());
+            // BuildCurrentParametersJson, which a save of an existing type goes through, still
+            // reports whatever was staged (null here) rather than forcing either answer.
             using var currentDoc = JsonDocument.Parse(saveService.BuildCurrentParametersJson());
             Assert.Equal(JsonValueKind.Null, currentDoc.RootElement.GetProperty("chartAutofitOnDone").ValueKind);
         }

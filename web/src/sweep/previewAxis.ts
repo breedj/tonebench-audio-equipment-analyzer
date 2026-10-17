@@ -216,8 +216,13 @@ export function scopeAxisTickLabels(
 // Two of them, not one: a spectrum and a waveform are read for different things, and holding one
 // axis still is useful without the other. App.vue restores both from the measurement type's
 // params_json and writes them back on save (chartFitPreviewSpectrum / chartFitPreviewScope).
-const fitAllSpectra = ref(false)
-const fitAllScopes = ref(false)
+// On by default (Joost, 2026-10-17): the previews are read against each other -- the live pair
+// against an overlay's, one hovered point against the next -- and a per-chart axis makes every one
+// of those comparisons wrong-footed, since each chart silently rescales to whatever it holds. A
+// type saved before this keeps the toggle it was saved with; App.vue reads the stored value as
+// "not false" so only an explicit off survives.
+const fitAllSpectra = ref(true)
+const fitAllScopes = ref(true)
 
 export function useSweepPreviewFit() {
   return { fitAllSpectra, fitAllScopes }

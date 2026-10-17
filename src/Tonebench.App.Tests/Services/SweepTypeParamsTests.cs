@@ -139,7 +139,7 @@ public class SweepTypeParamsTests
             Assert.Equal(0.001, root.GetProperty("startLevelVolt").GetDouble());
             Assert.Equal(1.0, root.GetProperty("endLevelVolt").GetDouble());
             Assert.Equal("Hann", root.GetProperty("window").GetString());
-            Assert.True(root.GetProperty("chartAutofitOnDone").GetBoolean());
+            Assert.False(root.GetProperty("chartAutofitOnDone").GetBoolean());
             Assert.Equal(JsonValueKind.Null, root.GetProperty("maxProductFreqHz").ValueKind);
 
             Assert.False(root.TryGetProperty("fixedFreqHz", out _), $"IMD params carry a THD amplitude sweep's fields: {resolved}");

@@ -1819,6 +1819,15 @@ export interface StoredResponsePreviewsResponse {
   points: StoredResponsePreviewPoint[]
 }
 
+/**
+ * What `setSweepOwner` answers: both sweep runners as the switch left them, so the two stores
+ * redraw without a second round trip. See ThdSweepRunner.SwitchOwner.
+ */
+export interface SweepOwnerResponse {
+  thd: ThdSweepStatus
+  imd: ImdSweepStatus
+}
+
 /** What `setSpectrumRetentionOwner` answers — see SpectrumPipeline.SwitchRetentionOwner. */
 export interface SpectrumRetentionOwnerResponse {
   /** Whether the measurement now named has a retained capture on the server. */
@@ -3762,6 +3771,15 @@ export const api = {
   // Carries the accumulated points, not just a counter — this is how a browser that reloaded
   // mid-sweep redraws everything measured so far instead of waiting for the next point.
   getSweepStatus: () => request<ThdSweepStatus>('/sweep/status'),
+
+  /**
+   * Hands both sweep runners the measurement their points belong to — the liveOwner key, or null
+   * for none. Posted when a sweep screen is arrived at: the runner parks the sweep it holds under
+   * the measurement that ran it and hands back whatever the arriving one had parked, which is what
+   * makes clicking a sweep measurement away and back non-destructive. See ThdSweepRunner.SwitchOwner.
+   */
+  setSweepOwner: (owner: string | null) =>
+    request<SweepOwnerResponse>('/sweep/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
   saveSweep: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
     request<{ id: number }>('/sweep/save', { method: 'POST', body: JSON.stringify(req) }),

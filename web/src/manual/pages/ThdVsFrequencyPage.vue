@@ -444,7 +444,10 @@ const { showPage } = useManual()
       a grid at a round number of volts. Fixed, a point measured at a tenth of the drive is drawn a
       tenth the height instead of filling the chart like every other point. The two toggles are
       separate — a spectrum and a waveform are read for different things — and both are saved with
-      the measurement, so a screen set up for comparing comes back that way.
+      the measurement, so a screen set up for comparing comes back that way. Both start
+      <em>on</em> for a newly created measurement: reading one point against the next, or a run
+      against a history overlay, is what the previews are for, and an axis that rescales under each
+      of them makes every one of those comparisons wrong-footed.
     </p>
 
     <h2>Display panel</h2>
@@ -490,7 +493,8 @@ const { showPage } = useManual()
       <strong>Distortion range (%)</strong> — <strong>dB range</strong> when the units are dB — is the
       vertical window and <strong>Frequency range (Hz)</strong> the horizontal one. One
       <strong>Autofit</strong>, under the distortion range, fits both to every checked trace: the
-      sweep axis to the measured span, the distortion axis to the values inside it. <strong>Autofit when measurement done</strong> is on for a newly created measurement.
+      sweep axis to the measured span, the distortion axis to the values inside it. <strong>Autofit when measurement done</strong> is off unless you tick it, so a window you set
+      stays where you put it.
     </p>
 
     <h2>Zooming</h2>

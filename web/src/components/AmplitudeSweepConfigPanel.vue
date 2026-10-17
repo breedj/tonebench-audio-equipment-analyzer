@@ -360,20 +360,31 @@ function run() {
     </label>
 
     <label
-      class="tb-check-row"
+      class="tb-check-row flex-wrap"
       title="Ends the sweep as soon as a measured channel's THD exceeds this figure. The point that crossed it is kept — it is the one that says where the DUT gave up — so the DUT is driven one step past the threshold. Off: the sweep runs to its end voltage."
     >
       <input v-model="form.stopOnThd" type="checkbox" :disabled="running" />
-      Stop when THD exceeds
-      <input
-        v-model.number="form.stopThdPercent"
-        type="number"
-        min="0.001"
-        step="0.1"
-        :disabled="running || !form.stopOnThd"
-        class="tb-input"
-      />
-      %
+      <span class="whitespace-nowrap">Stop when THD exceeds</span>
+      <!--
+        The box gets a width of its own and the row is allowed to wrap, because `tb-input` is
+        `w-full`: inside this flex row it took every pixel the label was not already using and broke
+        "Stop when THD exceeds" over three ragged lines in a 226 px settings rail (reported
+        2026-10-17). 4.5 rem holds the widest figure the step allows, spinner and all, and the whole
+        label plus the whole box no longer fit side by side at that width -- so they wrap as two
+        whole things, which reads as a layout rather than as a broken one. On a wider rail they sit
+        on one line.
+      -->
+      <span class="flex items-center gap-2">
+        <input
+          v-model.number="form.stopThdPercent"
+          type="number"
+          min="0.001"
+          step="0.1"
+          :disabled="running || !form.stopOnThd"
+          class="tb-input w-18 shrink-0"
+        />
+        %
+      </span>
     </label>
 
 

@@ -141,6 +141,9 @@ export function useImdSweep() {
     cancel,
     clear,
     refresh,
+
+    /** Folds in a status the caller already has — see useSweep's own `apply`. */
+    apply: applyStatus,
     ingestPoint,
     ingestProgress,
   }

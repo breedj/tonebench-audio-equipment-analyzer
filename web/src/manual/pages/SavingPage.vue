@@ -81,9 +81,13 @@ const { showPage } = useManual()
       flickers.
     </p>
     <p>
-      Selecting another measurement stops whatever is running and silences the generator, restores
-      that measurement's own settings, and puts back whatever <em>that</em> measurement last
-      measured — never what the one you came from did. A measurement's own last run stays: go to
+      Selecting another measurement is refused while one is running: the sidebar's rows go grey
+      and say so, and the way on is the screen's own <strong>Stop</strong> or
+      <strong>Cancel</strong>. That is deliberate — a switch stops the run, and a sweep twenty
+      minutes into its grid is not something a stray click should be able to throw away. With
+      nothing running, selecting another measurement silences the generator, restores that
+      measurement's own settings, and puts back whatever <em>that</em> measurement last measured —
+      never what the one you came from did. A measurement's own last run stays: go to
       something else and come back and your sweep, or your spectrum, is still there. Two FFT
       measurements keep their captures separately, so you can switch between them to compare, and
       <strong>Save measurement result</strong> on each writes the one on its own screen. Nothing is

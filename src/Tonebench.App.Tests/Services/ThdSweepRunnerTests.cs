@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Tonebench.App.Services;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
@@ -381,6 +381,93 @@ public class ThdSweepRunnerTests
 
         // Cancelled is not running, so the same call now goes through.
         Assert.Empty(harness.Runner.Clear().Points);
+    }
+
+    [Fact]
+    public async Task ASweepSwitchedAwayFromAndBackTo_IsStillThere()
+    {
+        // The report, as such: "when doing a THD vs amplitude measurement and after that navigating
+        // to another measurement and then back to the THD vs amplitude the data is not there
+        // anymore" (2026-10-17). There is one runner, so the two sweep screens shared it and the
+        // client answered that by clearing it on every switch between them.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(AmplitudeRequest(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        var measured = harness.Runner.Status;
+        Assert.NotEmpty(measured.Points);
+
+        // A different sweep measurement: this one has never run, so it gets an empty chart.
+        var other = harness.Runner.SwitchOwner("1:2");
+        Assert.Empty(other.Points);
+        Assert.Equal(ThdSweepPhase.Idle, other.Phase);
+        Assert.Equal(0, other.Total);
+        Assert.Empty(harness.Runner.Status.Points);
+
+        var back = harness.Runner.SwitchOwner("1:1");
+
+        Assert.Equal(measured.Points.Count, back.Points.Count);
+        Assert.Equal(measured.Phase, back.Phase);
+        Assert.Equal(measured.Total, back.Total);
+        Assert.Equal(measured.Axis, back.Axis);
+        // The returned status and the runner's own must agree -- the browser applies the response
+        // directly rather than polling again (the same rule Clear's test states).
+        Assert.Equal(back.Points.Count, harness.Runner.Status.Points.Count);
+        // And the as-run request with it, or the restored sweep could be looked at and not saved:
+        // MeasurementSaveService.SaveSweepAsync refuses without one.
+        Assert.NotNull(harness.Runner.LastRequest);
+    }
+
+    [Fact]
+    public async Task SwitchingOwnerWhileASweepRuns_IsIgnoredRatherThanRacingTheWriter()
+    {
+        // Unreachable from the app -- a measurement switch is refused while anything runs -- but a
+        // park that lifted the list AddPoint is appending to would be far worse than a no-op.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(startHz: 200.0, endHz: 12000.0, stepsPerOctave: 6), CancellationToken.None);
+        try
+        {
+            harness.Runner.SwitchOwner("1:2");
+            Assert.Equal("1:1", harness.Runner.Owner);
+            Assert.True(harness.Runner.Running);
+        }
+        finally
+        {
+            await harness.Runner.CancelAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ASweepThatWasCleared_StaysCleared_AcrossASwitchAwayAndBack()
+    {
+        // Clear is a deliberate "throw this away"; parking must not quietly undo it.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(AmplitudeRequest(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        harness.Runner.Clear();
+
+        harness.Runner.SwitchOwner("1:2");
+
+        Assert.Empty(harness.Runner.SwitchOwner("1:1").Points);
+    }
+
+    [Fact]
+    public async Task ASweepRunBeforeAnyMeasurementClaimedTheRunner_IsAdoptedRatherThanThrownAway()
+    {
+        // A page that reloaded mid-sweep, or a sweep started from a script: nobody owns it, and the
+        // first measurement to arrive keeps it -- the same rule the FFT display's owner follows.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(AmplitudeRequest(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        int measured = harness.Runner.Status.Points.Count;
+
+        Assert.Equal(measured, harness.Runner.SwitchOwner("1:1").Points.Count);
     }
 
     [Fact]

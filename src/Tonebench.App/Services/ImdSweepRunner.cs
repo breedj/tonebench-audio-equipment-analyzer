@@ -45,6 +45,9 @@ public sealed class ImdSweepRunner(
     private int _maxOrder = IntermodulationPresets.SmpteDefaultMaxOrder;
     private ImdSweepRequest? _lastRequest;
 
+    /// <summary>The sweeps of the measurements switched away from — see <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning.</summary>
+    private readonly RunParking<ParkedSweep> _parking = new(capacity: 4);
+
     /// <summary>The request the most recent sweep ran with — a save's as-run parameters, not whatever the panel shows by then.</summary>
     public ImdSweepRequest? LastRequest => _lastRequest;
 
@@ -143,6 +146,64 @@ public sealed class ImdSweepRunner(
             return Status;
         }
     }
+
+    /// <summary>
+    /// Points the runner at the measurement now on screen, parking the sweep it holds under the one
+    /// it belongs to — <see cref="ThdSweepRunner.SwitchOwner"/>'s counterpart, and switched by the
+    /// same call, since the two sweep screens are one screen to the user.
+    /// </summary>
+    public ImdSweepStatus SwitchOwner(string? owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running)
+                return Status;
+
+            var current = _points.Count == 0
+                ? null
+                : new ParkedSweep(_phase, _index, _total, _currentLevelVolt, _error, _points, _method, _maxOrder, _lastRequest);
+
+            var outcome = _parking.Switch(owner, current);
+            if (!outcome.Changed)
+                return Status;
+
+            if (outcome.Adopted is { } parked)
+            {
+                _phase = parked.Phase;
+                _index = parked.Index;
+                _total = parked.Total;
+                _currentLevelVolt = parked.CurrentLevelVolt;
+                _error = parked.Error;
+                _points = parked.Points;
+                _method = parked.Method;
+                _maxOrder = parked.MaxOrder;
+                _lastRequest = parked.LastRequest;
+            }
+            else if (outcome.Cleared)
+            {
+                _points = [];
+                _phase = ThdSweepPhase.Idle;
+                _index = 0;
+                _total = 0;
+                _currentLevelVolt = 0.0;
+                _error = null;
+                _lastRequest = null;
+            }
+
+            return Status;
+        }
+    }
+
+    /// <summary>The measurement the sweep on hand belongs to, or null — see <see cref="SwitchOwner"/>.</summary>
+    public string? Owner
+    {
+        get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus the as-run request.</summary>
+    private sealed record ParkedSweep(
+        ThdSweepPhase Phase, int Index, int Total, double CurrentLevelVolt, string? Error,
+        List<ImdSweepPoint> Points, IntermodulationMethod Method, int MaxOrder, ImdSweepRequest? LastRequest);
 
     private async Task RunAsync(ImdSweepRequest request, Step[] steps, CancellationToken ct)
     {

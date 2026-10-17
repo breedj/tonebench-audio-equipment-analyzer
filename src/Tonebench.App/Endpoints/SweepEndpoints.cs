@@ -90,6 +90,17 @@ public static class SweepEndpoints
             }
         });
 
+        // Points both sweep runners at the measurement now on screen -- the sweep counterpart of
+        // /api/acquisition/retention-owner, and one call rather than two because the THD and IMD
+        // sweeps are one screen to the user. Posted when a sweep screen is arrived at; nothing but
+        // a sweep writes these runners, so the owner can be left alone while the user is elsewhere.
+        // Both statuses come back, so the switch and the redraw are one round trip.
+        group.MapPost("/owner", (SweepOwnerRequest request, ThdSweepRunner thd, ImdSweepRunner imd) =>
+        {
+            string? owner = string.IsNullOrWhiteSpace(request.Owner) ? null : request.Owner;
+            return Results.Ok(new SweepOwnerResponse(thd.SwitchOwner(owner), imd.SwitchOwner(owner)));
+        });
+
         // Its own endpoint rather than POST /api/measurements, which saves the spectrum pipeline's
         // retained snapshot — a different source and a different row shape (N captures, not one).
         group.MapPost("/save", async (SaveSweepRequest request, MeasurementSaveService saveService, CancellationToken ct) =>
@@ -215,6 +226,16 @@ public sealed record ThdAmplitudeSweepStartRequest(
 }
 
 public sealed record SaveSweepRequest(long MeasurementTypeId, string Name, string? Notes);
+
+/// <summary>
+/// Which measurement the sweep runners' points belong to — the client's own "projectId:typeId"
+/// string, which this code never parses. Blank or absent means nobody, the state a fresh process
+/// is in. See <see cref="ThdSweepRunner.SwitchOwner"/>.
+/// </summary>
+public sealed record SweepOwnerRequest(string? Owner);
+
+/// <summary>Both sweep runners as the switch left them, so the caller redraws without a second round trip.</summary>
+public sealed record SweepOwnerResponse(ThdSweepStatus Thd, ImdSweepStatus Imd);
 
 /// <summary>A stored sweep's points, ascending by frequency, each carrying its per-channel metrics.</summary>
 public sealed record StoredSweepResponse(IReadOnlyList<StoredSweepPoint> Points);

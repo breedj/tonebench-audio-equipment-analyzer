@@ -115,9 +115,12 @@ import SettingsTable from '../components/SettingsTable.vue'
     </p>
     <p>
       <strong>Autofit when measurement done</strong> does the same thing automatically at the end of
-      each run. A newly created FFT or THD sweep measurement starts with it on; it is worth leaving
-      on while exploring an unfamiliar DUT and worth turning off once you want two runs framed
-      identically.
+      each run. It starts <em>off</em>: a window you set yourself stays where you put it, which is
+      what two runs framed identically needs. Tick it while exploring an unfamiliar DUT, where not
+      knowing where the curve will land is the whole problem. The impedance screen's
+      <strong>Autofit each measurement</strong> is the exception and starts on — an ohm axis has no
+      sensible default window, so a window left over from another DUT can leave a stepped sweep
+      drawing off the chart for minutes.
     </p>
     <p>
       Small amber <strong>▲</strong> and <strong>▼</strong> triangles in the corners of a plot mean a

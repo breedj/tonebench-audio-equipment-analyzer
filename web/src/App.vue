@@ -401,6 +401,7 @@ const {
   markDirty,
   setAutosaveFlush,
   setLiveStateReset,
+  setRunActive,
   saveMeasurementType,
   saveMeasurementTypeAs,
   saveProject,
@@ -587,6 +588,7 @@ const {
   cancel: cancelSweepRun,
   clear: clearSweepRun,
   refresh: refreshSweep,
+  apply: applySweepStatus,
 } = useSweep()
 
 // The IMD sweep: its own runner and store, drawn by the same sweep screen. Everything the screen
@@ -1286,12 +1288,13 @@ function applyStoredSweepDisplay(paramsJson: string) {
   sweepYTopDb.value = display.yTopDb
   sweepYBottomDb.value = display.yBottomDb
   if (typeof stored.chartAutofitOnDone === 'boolean') sweepAutofitOnDone.value = stored.chartAutofitOnDone
-  // Absent on a type saved before the previews had a Fit all button, which is off -- the behaviour
-  // that type was saved with. Written straight rather than through sweepDisplayFromParams: these
-  // belong to the rail's previews, which no report draws, so SweepDisplay has nothing to say about
-  // them.
-  sweepFitPreviewSpectrum.value = stored.chartFitPreviewSpectrum === true
-  sweepFitPreviewScope.value = stored.chartFitPreviewScope === true
+  // Absent on a type saved before the previews had a Fit all button, which now reads as *on* --
+  // the default these toggles took on 2026-10-17 (see sweep/previewAxis.ts). Only an explicit
+  // false survives, which is the toggle a type was deliberately saved with. Written straight
+  // rather than through sweepDisplayFromParams: these belong to the rail's previews, which no
+  // report draws, so SweepDisplay has nothing to say about them.
+  sweepFitPreviewSpectrum.value = stored.chartFitPreviewSpectrum !== false
+  sweepFitPreviewScope.value = stored.chartFitPreviewScope !== false
 
   void nextTick(() => {
     sweepDisplayRestoring = false
@@ -1639,6 +1642,11 @@ const impedanceXFromHz = ref(10)
 const impedanceXToHz = ref(20000)
 const impedancePhaseTopDeg = ref(90)
 const impedancePhaseBottomDeg = ref(-90)
+// The one screen that keeps it on, and deliberately: its control is "Autofit each measurement",
+// not the others' "Autofit when measurement done", and it also fits once as soon as a run produces
+// a curve -- an ohm axis has no sensible default window, so a window left over from another DUT
+// shows nothing at all for the minutes a stepped sweep takes, which is indistinguishable from a
+// run that has hung. See ImpedanceDisplayPanel.vue's own watcher.
 const impedanceAutofitOnDone = ref(true)
 
 /**
@@ -2858,14 +2866,14 @@ const liveOwners = ref<LiveOwners>({})
 const liveOwnerNow = computed(() => liveOwnerKey(currentProjectId.value, currentTypeId.value))
 
 /**
- * Stamps the open measurement as the owner of whatever is now being filled.
+ * Is anything measuring: an acquisition, or any of the six runners.
  *
- * <p>One watcher rather than a line in each of the ten run functions, and it watches "is anything
- * live" rather than `status.acquiring` alone: the status poll is 1 Hz and a short chirp run can
- * start and finish between two polls, so the acquiring transition on its own is missable. Each
- * runner's `running` is set from its start call's own response, which is not.</p>
+ * <p>`status.acquiring` alone will not do, and the two watchers below both depend on that: the
+ * status poll is 1 Hz and a short chirp run can start and finish between two polls, so the
+ * acquiring transition on its own is missable. Each runner's `running` is set from its start
+ * call's own response, which is not.</p>
  */
-watch(
+const anythingLive = computed(
   () =>
     status.value?.acquiring === true ||
     sweepRunning.value ||
@@ -2873,10 +2881,20 @@ watch(
     impedanceRunning.value ||
     impulseRunning.value ||
     outputImpedanceRunning.value,
-  (live) => {
-    if (live) liveOwners.value = claimLive(liveOwners.value, liveStoreForKind(currentType.value?.kind), liveOwnerNow.value)
-  },
 )
+
+// Stamps the open measurement as the owner of whatever is now being filled -- one watcher rather
+// than a line in each of the ten run functions.
+watch(anythingLive, (live) => {
+  if (live) liveOwners.value = claimLive(liveOwners.value, liveStoreForKind(currentType.value?.kind), liveOwnerNow.value)
+})
+
+// The sidebar's rows and its New measurement button are disabled while this is true, and
+// selectType refuses a switch -- see useProjects' `runActive`. This is the one place that can see
+// every runner, which is why the flag is pushed down rather than computed there. `immediate`
+// because a reload lands mid-run often enough to matter: the status poll answers before the user
+// can click, but the first paint should not offer a row it is about to refuse.
+watch(anythingLive, setRunActive, { immediate: true })
 
 /**
  * Discards the live state that belongs to a measurement other than the one about to be selected.
@@ -2920,6 +2938,28 @@ async function discardForeignLiveState(nextTypeId: number) {
       requestChartResetPeakHold()
       spectrogramChart.value?.clearHistory()
     }
+    return
+  }
+
+  // The two sweep screens are parked rather than discarded, the way the FFT display is -- except
+  // that the points live on the *server* (the runner owns them, and Save sweep result reads them
+  // there), so the park is the server's too. One call switches both sweep runners and answers with
+  // both statuses: see ThdSweepRunner.SwitchOwner, and RunParking for the reasoning. Posted on
+  // arrival at a sweep screen only, because nothing but a sweep writes those runners.
+  if (nextStore === 'sweep' || nextStore === 'imdSweep') {
+    const [, owned] = await Promise.all([retention, api.setSweepOwner(nextOwner).catch(() => null)])
+    // A failure leaves whatever the runners hold on screen and the owner where it was -- the same
+    // trade selectType makes about this whole function. Re-read rather than trusted blindly only
+    // when the call itself failed; the answer is the status both stores would have fetched.
+    if (owned) {
+      applySweepStatus(owned.thd)
+      imdSweep.apply(owned.imd)
+    } else {
+      await Promise.all([refreshSweep().catch(() => undefined), imdSweep.refresh().catch(() => undefined)])
+    }
+    // Nothing left for foreignLiveStores to discard here, and the owner map is what tells the
+    // *next* switch that these stores are spoken for -- which the server now tracks itself.
+    liveOwners.value = releaseLive(liveOwners.value, ['sweep', 'imdSweep'])
     return
   }
 

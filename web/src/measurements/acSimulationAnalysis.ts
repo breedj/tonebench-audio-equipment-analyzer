@@ -254,3 +254,52 @@ export function parseStoredAcImpedance(
     currentDirection: direction === 'Inverted' ? 'Inverted' : 'AsStored',
   }
 }
+
+/** One trace of an inspected `.ac` file, as much of it as a default needs to look at. */
+export interface AcTraceChoice {
+  readonly index: number
+  readonly name: string
+  readonly unit: string
+}
+
+/** Which voltage and which current the impedance import should open on. */
+export interface ImpedanceTraceDefaults {
+  readonly voltageIndex: number | null
+  readonly currentIndex: number | null
+}
+
+/**
+ * Picks the pair an impedance sweep is almost always read from: the source's own current, and a
+ * node whose name says the source drives it.
+ *
+ * <p>The dialog used to take the *first* voltage and the *first* current the file listed, which is
+ * whatever the simulator happened to write first -- on the reference amplifier `V(a1)`, an internal
+ * plate node, over `I(C1)`, a coupling capacitor. The field's own help already says what the right
+ * answer normally is ("Normally the source's own current, `I(V1)`"), so the form may as well open on
+ * it; the response dialog has picked an output-shaped and an input-shaped node the same way since it
+ * was written, and this is that rule for a one-port.</p>
+ *
+ * <p><b>`I(V1)` exactly, before any other source current.</b> A circuit routinely has more than one
+ * voltage source -- supplies, bias -- and they are numbered in the order they were drawn, so the
+ * signal source is V1 far more often than it is anything else. `Ix(u1:1)` and the like are
+ * subcircuit pin currents and must never match, which is what anchoring on `i(` does.</p>
+ *
+ * <p>Neither half is a claim, only a starting point: both selects list everything, and a file whose
+ * nodes are named `n001`.. gets the first of each exactly as before.</p>
+ */
+export function preferredImpedanceTraces(traces: readonly AcTraceChoice[]): ImpedanceTraceDefaults {
+  const voltages = traces.filter((t) => t.unit === 'V')
+  const currents = traces.filter((t) => t.unit === 'A')
+
+  const driven = voltages.find((t) =>
+    /^v\((in|input|src|source|vin|dut|load|spk|speaker|z|zin)\d*\)$/i.test(t.name),
+  )
+  const source =
+    currents.find((t) => /^i\(v1\)$/i.test(t.name)) ??
+    currents.find((t) => /^i\(v\d*\)$/i.test(t.name))
+
+  return {
+    voltageIndex: (driven ?? voltages[0])?.index ?? null,
+    currentIndex: (source ?? currents[0])?.index ?? null,
+  }
+}

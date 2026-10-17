@@ -10,7 +10,7 @@
  */
 import { computed, reactive, ref, watch } from 'vue'
 import { api, type AcSimulationFileInfo } from '../api/client'
-import { sweepLabel } from '../measurements/acSimulationAnalysis'
+import { preferredImpedanceTraces, sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 import BusyNote from './BusyNote.vue'
@@ -59,10 +59,12 @@ async function inspect(path: string) {
     const found = await api.inspectAcSimulation(path)
     info.value = found
 
-    // An impedance needs one of each, so default to the first of each rather than to the first two
-    // traces — on the reference amplifier the first listed trace is an internal plate node.
-    form.voltageTraceIndex = found.traces.find((t) => t.unit === 'V')?.index ?? null
-    form.currentTraceIndex = found.traces.find((t) => t.unit === 'A')?.index ?? null
+    // The source's own current and a node named as one the source drives, rather than whichever
+    // two the file happened to list first — on the reference amplifier that is an internal
+    // plate node over a coupling capacitor. See preferredImpedanceTraces.
+    const preferred = preferredImpedanceTraces(found.traces)
+    form.voltageTraceIndex = preferred.voltageIndex
+    form.currentTraceIndex = preferred.currentIndex
     form.currentDirection = 'Auto'
     form.name = ''
     chosenSweeps.value = found.sweeps.map((sw) => sw.index)

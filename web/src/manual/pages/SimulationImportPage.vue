@@ -806,12 +806,18 @@
       <tbody>
         <tr>
           <td>Voltage across it</td>
-          <td>The node the source drives — the top of the thing being measured.</td>
+          <td>
+            The node the source drives — the top of the thing being measured. The form
+            opens on one whose name says so (<code>in</code>, <code>dut</code>,
+            <code>load</code>, <code>spk</code>…), or on the first voltage where nothing is
+            named helpfully.
+          </td>
         </tr>
         <tr>
           <td>Current through it</td>
           <td>
-            Normally the source's own, <code>I(V1)</code>. Both are required, which removes an
+            Normally the source's own, <code>I(V1)</code>, which is what the form opens on.
+            Both are required, which removes an
             assumption rather than adding work: with a 1&nbsp;A source the current column is a
             constant 1, so picking it <em>is</em> the "read the voltage as ohms" shortcut.
           </td>

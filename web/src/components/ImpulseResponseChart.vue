@@ -6,7 +6,8 @@ import type { ImpulseTraceJson } from '../api/client'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
-import ToolbarIcon from './ToolbarIcon.vue'
+import ChartZoomControls from './ChartZoomControls.vue'
+import type { ZoomWindow } from '../charts/zoomHistory'
 import { useAppTheme } from '../composables/useAppTheme'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { useZoomBounds } from '../composables/useZoomBounds'
@@ -281,10 +282,20 @@ function impulseMarkerPlugin(t: Theme): uPlot.Plugin {
  * True while either axis shows something other than the window the display panel asks for. Drives
  * the Reset zoom button, which is the only visible sign the axes are no longer the panel's.
  */
-const { zoomed, noteScale, resetZoom } = useZoomBounds(
+const { zoomed, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
   () => plot.value,
   () => ({ xMin: props.timeFromMs, xMax: props.timeToMs, yMin: yWindow.value.min, yMax: yWindow.value.max }),
 )
+
+/** "Set axis" hands the window on screen up — the display panel's boxes are the parent's. */
+const emit = defineEmits<{ axisWindow: [window: ZoomWindow] }>()
+
+/** "Set axis": hands the window on screen up, for the display panel's own boxes to take it on. */
+function applyZoomToAxis() {
+  const w = currentWindow()
+  if (w) emit('axisWindow', w)
+}
+
 
 /**
  * @param t The theme every colour is taken from.
@@ -351,7 +362,14 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
     legend: { show: false },
     // Fires on setData too (both scales are auto:false, so setData re-applies the same window),
     // hence the change gate inside noteScale.
-    hooks: interactive ? { setScale: [(u: uPlot) => noteScale(u)] } : {},
+    hooks: interactive
+      ? {
+          setScale: [(u: uPlot) => noteScale(u)],
+          // The window each drag leaves behind, for Back: uPlot fires setSelect before it applies
+          // the drag's own scales, so the plot still holds the window to return to.
+          setSelect: [(u: uPlot) => noteZoomGesture(u)],
+        }
+      : {},
   }
 }
 
@@ -551,17 +569,16 @@ watch(
       </span>
       <span v-else>No impulse response measured</span>
 
-      <button
-        v-if="zoomed"
-        type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
-        title="Back to the time and level window set in the display panel."
-        @click="resetZoom"
-      >
-        <ToolbarIcon name="reset-zoom" />
-        Reset zoom
-      </button>
-      <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
+      <ChartZoomControls
+        :zoomed="zoomed"
+        :can-go-back="canGoBack"
+        reset-title="Back to the time and level window set in the display panel."
+        apply-title="Write this window into the display panel's time and level boxes."
+        @back="zoomBack"
+        @apply="applyZoomToAxis"
+        @reset="resetZoom"
+      />
+      <span v-if="!zoomed" class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
     <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
       <div ref="container" class="w-full"></div>

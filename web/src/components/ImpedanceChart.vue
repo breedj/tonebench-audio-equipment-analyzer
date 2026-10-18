@@ -30,7 +30,8 @@ import {
 } from '../charts/exportChart'
 import { makeChartPalette, type ChartPalette } from '../charts/palette'
 import ExpandToggle from './ExpandToggle.vue'
-import ToolbarIcon from './ToolbarIcon.vue'
+import ChartZoomControls from './ChartZoomControls.vue'
+import { useZoomHistory, type ZoomWindow } from '../charts/zoomHistory'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -585,6 +586,12 @@ function formatReading(value: number, series: PlottedSeries): string {
  */
 const zoomed = ref(false)
 
+/** The windows each drag left behind, for the Back button — see charts/zoomHistory.ts. */
+const zoomHistory = useZoomHistory()
+
+/** "Set axis" hands the window on screen up: the display panel's boxes belong to the parent. */
+const emit = defineEmits<{ axisWindow: [window: ZoomWindow] }>()
+
 /**
  * Back to the window the display panel asks for — the Reset zoom button, and a double-click.
  *
@@ -596,8 +603,38 @@ function resetZoom() {
   if (!u) return
 
   zoomed.value = false
+  zoomHistory.clear()
   u.setScale('x', { min: props.xFromHz, max: props.xToHz })
   u.setScale('y', { min: yBottom.value, max: yTop.value })
+}
+
+/**
+ * One step out: the window before the last drag, or — at the bottom of the history, which is the
+ * panel's own window — what Reset zoom does. The flag is cleared before the scales move, for the
+ * reason resetZoom's remarks above give.
+ */
+function zoomBack() {
+  const u = plot.value
+  if (!u) return
+
+  const previous = zoomHistory.back()
+  if (!previous) {
+    resetZoom()
+    return
+  }
+
+  if (!zoomHistory.canGoBack.value) zoomed.value = false
+  u.setScale('x', { min: previous.xMin, max: previous.xMax })
+  u.setScale('y', { min: previous.yMin, max: previous.yMax })
+}
+
+/** "Set axis": the window on screen, for the display panel's own boxes to take on. */
+function applyZoomToAxis() {
+  const u = plot.value
+  if (!u) return
+  const x = windowOf(u.scales.x)
+  const y = windowOf(u.scales.y)
+  if (x && y) emit('axisWindow', { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max })
 }
 
 /** Everything uPlot cannot be told without a new instance. */
@@ -765,7 +802,12 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
             (u: uPlot) => {
               // A box gesture fires this too, and it is not a zoom -- see FrequencyResponseChart.
               if (annotationOverlay.armedForBox.value) return
-              if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
+              if (u.select.width <= 0 && u.select.height <= 0) return
+              // The window being left, for Back: uPlot fires this before the drag's own scales land.
+              const x = windowOf(u.scales.x)
+              const y = windowOf(u.scales.y)
+              if (x && y) zoomHistory.push({ xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max })
+              zoomed.value = true
             },
           ],
           setCursor: [
@@ -859,7 +901,11 @@ function rebuild() {
       : null
   plotXWindowKey = nextX
   plotYWindowKey = nextY
-  if (windowChanged) zoomed.value = false
+  if (windowChanged) {
+    zoomed.value = false
+    // The remembered windows were steps inside a window that no longer exists.
+    zoomHistory.clear()
+  }
 
   plot.value?.destroy()
   cursorReadout.value = null
@@ -1010,17 +1056,16 @@ const outOfRange = computed(() => {
         </span>
       </span>
 
-      <button
-        v-if="zoomed"
-        type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
-        title="Back to the frequency and impedance window set in the display panel."
-        @click="resetZoom"
-      >
-        <ToolbarIcon name="reset-zoom" />
-        Reset zoom
-      </button>
-      <span v-else class="shrink-0">Drag to zoom · double-click to reset</span>
+      <ChartZoomControls
+        :zoomed="zoomed"
+        :can-go-back="zoomHistory.canGoBack.value"
+        reset-title="Back to the frequency and impedance window set in the display panel."
+        apply-title="Write this window into the display panel's frequency and impedance boxes."
+        @back="zoomBack"
+        @apply="applyZoomToAxis"
+        @reset="resetZoom"
+      />
+      <span v-if="!zoomed" class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
 
     <div

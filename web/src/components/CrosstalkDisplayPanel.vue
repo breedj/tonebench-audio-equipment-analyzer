@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
 import { useMeasurements } from '../composables/useMeasurements'
+import { RESPONSE_X_FROM_OPTIONS, RESPONSE_X_TO_OPTIONS, snapResponseXWindow } from '../response/display'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { CROSSTALK_ANNOTATION_VIEW } from '../charts/annotationViews'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -28,8 +29,10 @@ const DB_MAX = 40
 const DB_STEP = 5
 const DB_MIN_SPAN = 10
 
-const X_FROM_OPTIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500]
-const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+// The dropdowns' own values and the outward snap both live in response/display.ts: this panel and
+// the crosstalk one offer the same window, and "Set axis" has to land on a value a select can show.
+const X_FROM_OPTIONS = RESPONSE_X_FROM_OPTIONS
+const X_TO_OPTIONS = RESPONSE_X_TO_OPTIONS
 
 /** See FrequencyResponseDisplayPanel.commitBoundedNumber for why `:value` + `@change`. */
 function commitBoundedNumber(event: Event, current: number, lo: number, hi: number): number {
@@ -82,8 +85,9 @@ function autofitX() {
   if (list.length === 0) return
   const from = Math.min(...list.map((t) => t.startFreqHz))
   const to = Math.max(...list.map((t) => t.endFreqHz))
-  xFromHz.value = [...X_FROM_OPTIONS].reverse().find((v) => v <= from) ?? X_FROM_OPTIONS[0]
-  xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
+  const snapped = snapResponseXWindow(from, to)
+  xFromHz.value = snapped.fromHz
+  xToHz.value = snapped.toHz
 }
 
 /**

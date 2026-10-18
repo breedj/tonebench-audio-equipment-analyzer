@@ -26,7 +26,9 @@ import {
   type ExportLegendEntry,
 } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
+import ChartZoomControls from './ChartZoomControls.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
+import type { ZoomWindow } from '../charts/zoomHistory'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { SWEEP_POINTS_KEY, useSweep } from '../composables/useSweep'
@@ -201,7 +203,14 @@ function familyOf(overlay: OverlayEntry): SweepTraceFamily {
  * nearest x in the data, so a click lands on the nearest measurement by construction and the line
  * below is drawn through a point rather than between two. Null unpins.</p>
  */
-const emit = defineEmits<{ cursorX: [x: number | null]; cursorPin: [x: number | null] }>()
+const emit = defineEmits<{ cursorX: [x: number | null]; cursorPin: [x: number | null]; axisWindow: [window: ZoomWindow] }>()
+
+/** "Set axis": hands the window on screen up, for the display panel's own boxes to take it on. */
+function applyZoomToAxis() {
+  const w = currentWindow()
+  if (w) emit('axisWindow', w)
+}
+
 
 function clearPin() {
   emit('cursorPin', null)
@@ -480,7 +489,7 @@ function yRange(): [number, number] {
  * for — i.e. the user has dragged a zoom. Drives the Reset zoom button, which is the only visible
  * cue that the axes are no longer the ones the dropdowns name.
  */
-const { zoomed, noteScale, resetZoom } = useZoomBounds(
+const { zoomed, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
   () => plot,
   () => {
     const [yMin, yMax] = yRange()
@@ -720,6 +729,9 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
           // noteScale -- writing an unchanged `false` 50 times per sweep would be harmless but
           // pointless.
           setScale: [(u: uPlot) => noteScale(u)],
+          // Remembers the window each drag leaves behind, for the Back button -- uPlot fires this
+          // before it applies the drag's own scales, so the plot still holds the window to return to.
+          setSelect: [(u: uPlot) => noteZoomGesture(u)],
           // u.cursor.idx indexes the shared x array from update() -- not a pixel-derived value, so it
           // always names a value something was actually plotted at. null once the pointer leaves the
           // plot area (uPlot clears idx on mouseleave), which is the "nothing hovered" state the small
@@ -1261,16 +1273,16 @@ onBeforeUnmount(() => {
            dropdowns name — double-clicking the plot does the same thing, but nothing on screen
            would say so. The hint takes its place while unzoomed rather than sitting alongside it,
            so the header never carries two competing messages about the same gesture. -->
-      <button
+      <ChartZoomControls
         v-else-if="zoomed"
-        type="button"
-        class="inline-flex items-center gap-1 rounded border px-2 py-0.5 btn-action"
-        title="Back to the From/To and distortion-range window set in the display panel."
-        @click="resetZoom"
-      >
-        <ToolbarIcon name="reset-zoom" />
-        Reset zoom
-      </button>
+        :zoomed="zoomed"
+        :can-go-back="canGoBack"
+        reset-title="Back to the From/To and distortion-range window set in the display panel."
+        apply-title="Write this window into the display panel's From/To and distortion-range boxes."
+        @back="zoomBack"
+        @apply="applyZoomToAxis"
+        @reset="resetZoom"
+      />
       <span v-else>Click a point to pin · drag to zoom</span>
     </div>
     <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">

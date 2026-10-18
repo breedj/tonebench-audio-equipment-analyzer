@@ -42,11 +42,41 @@ import SettingsTable from '../components/SettingsTable.vue'
       the frequency axis only, since its level axis is set from the display rail.
     </p>
     <p>
-      <strong>Double-click the plot to zoom back out.</strong> While a chart is zoomed, a
-      <strong>Reset zoom</strong> button appears in its header and does the same thing — it is the
-      only visible sign that the axes are no longer the window the display rail names, so if a curve
-      looks cropped, look for that button first.
+      <strong>Double-click the plot to zoom back out.</strong> While a chart is zoomed, three
+      buttons appear in its header, and they are the only visible sign that the axes are no longer
+      the window the display rail names — so if a curve looks cropped, look there first.
     </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Button</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Back</td>
+          <td>
+            One step out: the window before the last drag. Zoom in three times and three presses
+            retrace them, the last landing back at the display rail's own window. Only there when
+            there is a step to go back to.
+          </td>
+        </tr>
+        <tr>
+          <td>Set axis</td>
+          <td>
+            Makes the zoom the window: it writes what is on screen into the display rail's own
+            boxes, so it survives the next pass, is saved with the measurement and is what a report
+            draws. The two Bode screens set their frequency boxes to the nearest offered values
+            <em>outward</em>, those being dropdowns; every other screen takes the window exactly.
+          </td>
+        </tr>
+        <tr>
+          <td>Reset zoom</td>
+          <td>Back to the display rail's window in one press, forgetting the steps — the same thing a double-click does.</td>
+        </tr>
+      </tbody>
+    </table>
     <p>
       Zooming the spectrum chart does more than scale the picture: the server re-sends that
       frequency window at full resolution, so a zoomed spectrum genuinely resolves more than the

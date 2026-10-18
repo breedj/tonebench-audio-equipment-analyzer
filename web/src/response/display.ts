@@ -286,3 +286,23 @@ export function responseChartFlags(
     delayView: phaseAvailable ? display.delayView : 'None',
   }
 }
+
+/**
+ * The frequency window the Bode screens offer, as the dropdowns in `FrequencyResponseDisplayPanel`
+ * and `CrosstalkDisplayPanel` list it. Shared because both panels carried the same two arrays and
+ * the same snapping, and because "Set axis to the zoomed area" has to land on a value the select
+ * can actually show — anything else renders as a blank box.
+ */
+export const RESPONSE_X_FROM_OPTIONS: readonly number[] = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+
+export const RESPONSE_X_TO_OPTIONS: readonly number[] = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+
+/**
+ * The narrowest pair of offered values that still contains `fromHz..toHz` — outward, never inward,
+ * so a window set from a zoom (or from Autofit) shows everything the zoom did and a little more.
+ */
+export function snapResponseXWindow(fromHz: number, toHz: number): { fromHz: number; toHz: number } {
+  const from = [...RESPONSE_X_FROM_OPTIONS].reverse().find((v) => v <= fromHz) ?? RESPONSE_X_FROM_OPTIONS[0]
+  const to = RESPONSE_X_TO_OPTIONS.find((v) => v >= toHz) ?? RESPONSE_X_TO_OPTIONS[RESPONSE_X_TO_OPTIONS.length - 1]
+  return { fromHz: from, toHz: to }
+}

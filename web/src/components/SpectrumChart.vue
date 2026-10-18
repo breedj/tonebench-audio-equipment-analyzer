@@ -18,7 +18,8 @@ import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
 import { useAppTheme } from '../composables/useAppTheme'
 import { fullHeightWithMargin, useResultChartHeight } from '../charts/useResultChartHeight'
 import ExpandToggle from './ExpandToggle.vue'
-import ToolbarIcon from './ToolbarIcon.vue'
+import ChartZoomControls from './ChartZoomControls.vue'
+import type { ZoomWindow } from '../charts/zoomHistory'
 import { freqAxis } from '../freqAxis'
 import { resample } from '../measurements/resample'
 import type { OverlayEntry } from '../composables/useMeasurements'
@@ -67,6 +68,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** The frequency range now on screen, or null when zoomed all the way out. */
   viewportChange: [viewport: { loFreqHz: number; hiFreqHz: number } | null]
+  /** "Set axis": the zoomed window, for the display panel's From/To and dBV boxes to take on. */
+  axisWindow: [window: ZoomWindow]
 }>()
 
 // Shared singleton (see useSpectrumConfig.ts) — reads whatever SpectrumConfigPanel's L/R checkboxes
@@ -688,6 +691,11 @@ function harmonicMarkersPlugin(theme: Theme, interactive: boolean): uPlot.Plugin
   return {
     hooks: {
       draw: [drawHook],
+      setSelect: [
+        // The window each drag leaves behind, for the Back button -- uPlot fires this before it
+        // applies the drag's own scales, so the plot still holds the window to return to.
+        (u) => noteZoomGesture(u),
+      ],
       setScale: [
         (u, key) => {
           if (key === 'x') {
@@ -976,7 +984,7 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
  * actually draggable (no `drag.y` below), so its half of the check is trivially always true; it's
  * still supplied so useZoomBounds has one consistent shape across all three charts.
  */
-const { zoomed, noteScale, resetZoom: resetZoomToFullSpan } = useZoomBounds(
+const { zoomed, noteScale, resetZoom: resetZoomToFullSpan, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
   () => plot,
   () => ({ xMin: fullLoFreqHz, xMax: fullHiFreqHz, yMin: yBottom.value, yMax: yTop.value }),
 )
@@ -984,6 +992,13 @@ const { zoomed, noteScale, resetZoom: resetZoomToFullSpan } = useZoomBounds(
 function resetZoom() {
   if (fullHiFreqHz > 0) resetZoomToFullSpan()
 }
+
+/** "Set axis": hands the window on screen up, for the display panel's own boxes to take it on. */
+function applyZoomToAxis() {
+  const w = currentWindow()
+  if (w) emit('axisWindow', w)
+}
+
 
 /** Guards noteScale the same way resetZoom guards its own reset -- before a real span is known, fullHiFreqHz is a placeholder and would read as a bogus zoom. */
 function noteScaleIfReady(u: uPlot) {
@@ -1523,16 +1538,15 @@ onBeforeUnmount(() => {
       <span v-else class="flex-1"></span>
       <!-- The only visible sign that the frequency axis is no longer showing the full data span —
            double-clicking does the same thing, but nothing else on screen would say so. -->
-      <button
-        v-if="zoomed"
-        type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
-        title="Back to the full frequency span."
-        @click="resetZoom"
-      >
-        <ToolbarIcon name="reset-zoom" />
-        Reset zoom
-      </button>
+      <ChartZoomControls
+        :zoomed="zoomed"
+        :can-go-back="canGoBack"
+        reset-title="Back to the full frequency span."
+        apply-title="Write this window into the display panel's frequency and dBV boxes."
+        @back="zoomBack"
+        @apply="applyZoomToAxis"
+        @reset="resetZoom"
+      />
     </div>
     <!-- L/R/min-max/thick-lines/show-points/dBV-range/frequency-range controls now live in
          ChartDisplayPanel.vue, a sibling column next to the chart — see App.vue — all reading and

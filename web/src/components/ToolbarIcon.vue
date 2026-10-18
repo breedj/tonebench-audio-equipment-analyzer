@@ -17,6 +17,8 @@ export type ToolbarIconName =
   | 'screenshot'
   | 'report'
   | 'reset-zoom'
+  | 'zoom-back'
+  | 'set-axis'
   | 'metrics'
   | 'pin'
 
@@ -50,6 +52,10 @@ const PATHS: Record<ToolbarIconName, string[]> = {
     'M16 17H8',
   ],
   'reset-zoom': ['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z', 'm21 21-4.35-4.35', 'M8 11h6'],
+  // An arrow curving back on itself: one step out of the zoom, not all the way out of it.
+  'zoom-back': ['M3 7v6h6', 'M3.5 13a9 9 0 1 0 2.3-6.4L3 9.5'],
+  // A frame with the two axes picked out: the window being written into the display panel's boxes.
+  'set-axis': ['M4 4v16h16', 'M4 9h16', 'M9 4v16'],
   metrics: ['M11 12H3', 'M16 6H3', 'M16 18H3', 'M18 9v6', 'M21 12h-6'],
   pin: [
     'M12 17v5',

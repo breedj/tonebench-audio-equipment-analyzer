@@ -13,7 +13,7 @@ import { PALETTE_NAMES } from '../measurements/decay'
 import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
 import { useMeasurements, type OverlayEntry } from '../composables/useMeasurements'
 import { autofitRange } from '../measurements/autofitRange'
-import { phaseSeries } from '../response/phaseCurve'
+import { RESPONSE_X_FROM_OPTIONS, RESPONSE_X_TO_OPTIONS, snapResponseXWindow } from '../response/display'
 import {
   DELAY_MAX_US,
   DELAY_MIN_US,
@@ -88,14 +88,12 @@ const yTopDbv = defineModel<number>('yTopDbv', { required: true })
 const yBottomDbv = defineModel<number>('yBottomDbv', { required: true })
 const xFromHz = defineModel<number>('xFromHz', { required: true })
 const xToHz = defineModel<number>('xToHz', { required: true })
-const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
-const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
 const delayView = defineModel<ResponseDelayView>('delayView', { required: true })
 const delayTopUs = defineModel<number>('delayTopUs', { required: true })
 const delayBottomUs = defineModel<number>('delayBottomUs', { required: true })
 const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 
-const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable, running, latencySamples, sampleRateHz } =
+const { traces, averageCount, phaseKind, rightChannelIsReference, phaseAvailable, running, latencySamples } =
   useFrequencyResponse()
 
 /**
@@ -207,18 +205,10 @@ const DB_MAX = 200
 const DB_STEP = 2
 const DB_MIN_SPAN = 4
 
-// Wide enough for several turns of accumulated phase (a DUT with real excess delay runs well past
-// 360°) without being unbounded; matches the chart's own axis-tick increments.
-const PHASE_MIN = -1440
-const PHASE_MAX = 1440
-const PHASE_STEP = 15
-// Two of the chart's own rounding ticks (see PHASE_TICK_DEG below) — narrower than that would
-// magnify a flat phase into noise the way the dB window's own minimum span guards against.
-const PHASE_TICK_DEG = 45
-const PHASE_MIN_SPAN = PHASE_TICK_DEG * 2
-
-const X_FROM_OPTIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500]
-const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+// The dropdowns' own values and the outward snap both live in response/display.ts: this panel and
+// the crosstalk one offer the same window, and "Set axis" has to land on a value a select can show.
+const X_FROM_OPTIONS = RESPONSE_X_FROM_OPTIONS
+const X_TO_OPTIONS = RESPONSE_X_TO_OPTIONS
 
 const DELAY_VIEWS: { value: ResponseDelayView; label: string }[] = [
   { value: 'None', label: 'None' },
@@ -361,14 +351,6 @@ function onPoleZeroAutoChange(event: Event) {
   poleZeroAutoWindow.value = auto
 }
 
-function onTopPhaseChange(event: Event) {
-  phaseTopDeg.value = commitBoundedNumber(event, phaseTopDeg.value, phaseBottomDeg.value + PHASE_MIN_SPAN, PHASE_MAX)
-}
-
-function onBottomPhaseChange(event: Event) {
-  phaseBottomDeg.value = commitBoundedNumber(event, phaseBottomDeg.value, PHASE_MIN, phaseTopDeg.value - PHASE_MIN_SPAN)
-}
-
 // The boxes read and write in the axis' unit; the bounds are converted the other way so the clamp
 // happens in the unit the user typed in.
 function onTopDelayChange(event: Event) {
@@ -426,23 +408,18 @@ const fitTraces = computed<ResponseTrace[]>(() => {
  * is part of the curve, and fitting to the line alone clips the ripple out of view.
  */
 /**
- * Matches the chart's own `phaseTrace` — Autofit has to size the curve that is actually drawn, and
- * the phase curve belongs to the measurement rather than to the view.
+ * Matches the chart's own `phaseTrace` — what the delay fit has to size against, since the delay
+ * curves are drawn from whichever trace carries the phase rather than from the view's own.
  *
  * <p>Under `PerTrace` the chart falls back to the Left curve when no channel is checked, rather
  * than to the right one, which with the right input as the reference is the stimulus leg. This
  * follows it: an empty list here would leave Autofit doing nothing on a chart that is drawing a
- * phase.</p>
+ * delay.</p>
  */
 const phaseTraces = computed<ResponseTrace[]>(() => {
   if (phaseKind.value !== 'PerTrace') return tracesOfKind('Gain')
   return fitTraces.value.length > 0 ? fitTraces.value : tracesOfKind('Left')
 })
-
-/** The three values `phaseSeries` needs to reproduce the chart's curve. */
-function restoreOptions() {
-  return { restoreDelay: restoreDelay.value, latencySamples: latencySamples.value, sampleRateHz: sampleRateHz.value }
-}
 
 function autofitDb() {
   const list = fitTraces.value.filter((t) => t.magnitudeMaxDb.length > 0)
@@ -466,48 +443,6 @@ function autofitDb() {
 
   yTopDb.value = Math.min(DB_MAX, Math.max(top, bottom + DB_MIN_SPAN))
   yBottomDb.value = Math.max(DB_MIN, Math.min(bottom, yTopDb.value - DB_MIN_SPAN))
-}
-
-/**
- * Fits the phase window to the curve, rounded outward to PHASE_TICK_DEG and never tighter than
- * PHASE_MIN_SPAN — the same shape as autofitDb, on the traces' phaseDeg rather than their magnitude.
- *
- * Sized against `phaseTraces`, not `fitTraces`: the phase curve belongs to the measurement rather
- * than to the view, so this has to fit whichever curve(s) the chart is actually drawing.
- */
-function autofitPhase() {
-  const list = phaseTraces.value.filter((t) => t.phaseDeg.length > 0)
-  if (list.length === 0) return
-
-  let lo = Infinity
-  let hi = -Infinity
-  for (const trace of list) {
-    // The chart's own series, not the raw column: a window fitted to the phase the chart blanks
-    // would be sized to a wind-up of hundreds of thousands of degrees, and one fitted without the
-    // restored delay would be a turn or more out from the curve on screen.
-    const curve = phaseSeries(trace, phaseKind.value, restoreOptions(), trace.phaseDeg.length)
-    for (let i = 0; i < curve.length; i++) {
-      const freqHz = trace.freqHz[i]
-      if (freqHz < xFromHz.value || freqHz > xToHz.value) continue
-      const deg = curve[i]
-      if (deg === null || !Number.isFinite(deg)) continue
-      lo = Math.min(lo, deg)
-      hi = Math.max(hi, deg)
-    }
-  }
-
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return
-
-  let bottom = Math.floor(lo / PHASE_TICK_DEG) * PHASE_TICK_DEG
-  let top = Math.ceil(hi / PHASE_TICK_DEG) * PHASE_TICK_DEG
-  if (top - bottom < PHASE_MIN_SPAN) {
-    const mid = (top + bottom) / 2
-    bottom = mid - PHASE_TICK_DEG
-    top = mid + PHASE_TICK_DEG
-  }
-
-  phaseTopDeg.value = Math.min(PHASE_MAX, top)
-  phaseBottomDeg.value = Math.max(PHASE_MIN, bottom)
 }
 
 /**
@@ -544,8 +479,9 @@ function autofitX() {
   const from = Math.min(...list.map((t) => t.startFreqHz))
   const to = Math.max(...list.map((t) => t.endFreqHz))
 
-  xFromHz.value = [...X_FROM_OPTIONS].reverse().find((v) => v <= from) ?? X_FROM_OPTIONS[0]
-  xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
+  const snapped = snapResponseXWindow(from, to)
+  xFromHz.value = snapped.fromHz
+  xToHz.value = snapped.toHz
 }
 
 // "Autofit when measurement done": running is watched here (rather than in App.vue) because the
@@ -576,7 +512,7 @@ function autofitAll() {
   }
   if (!bodeShowing.value) return
   autofitDb()
-  if (showPhase.value && phaseAvailable.value) autofitPhase()
+  // The phase axis is fixed at ±180° and has nothing to fit -- see PHASE_SCALE_RANGE.
   if (delayView.value !== 'None' && phaseAvailable.value) autofitDelay()
 }
 
@@ -1027,32 +963,11 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
 
   <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
        shown-but-inert, since the axis it configures is not drawn otherwise. -->
-  <CollapsibleSection v-if="bodeShowing && showPhase && phaseAvailable" title="Phase range (°)" size="xs">
-    <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        Top
-        <input
-          :value="phaseTopDeg"
-          type="number"
-          :step="PHASE_STEP"
-          class="tb-input"
-          @change="onTopPhaseChange"
-        />
-      </label>
-      <label class="tb-field">
-        Bottom
-        <input
-          :value="phaseBottomDeg"
-          type="number"
-          :step="PHASE_STEP"
-          class="tb-input"
-          @change="onBottomPhaseChange"
-        />
-      </label>
-    </div>
-  </CollapsibleSection>
+  <!-- No "Phase range" section: the phase is wrapped into ±180° and its axis is the bottom half of
+       the plot, fixed (see PHASE_SCALE_RANGE). There is no window to set, so there is no control
+       and nothing for Autofit to fit. -->
 
-  <!-- Same shape as the phase range, in the unit the axis is reading in. -->
+  <!-- The delay axis still has a window of its own, and this is its pair of boxes. -->
   <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">

@@ -31,8 +31,6 @@ const timeFromMs = defineModel<number>('timeFromMs', { required: true })
 const timeToMs = defineModel<number>('timeToMs', { required: true })
 const freqFromHz = defineModel<number>('freqFromHz', { required: true })
 const freqToHz = defineModel<number>('freqToHz', { required: true })
-const phaseTopDeg = defineModel<number>('phaseTopDeg', { required: true })
-const phaseBottomDeg = defineModel<number>('phaseBottomDeg', { required: true })
 const delayView = defineModel<ResponseDelayView>('delayView', { required: true })
 const delayTopUs = defineModel<number>('delayTopUs', { required: true })
 const delayBottomUs = defineModel<number>('delayBottomUs', { required: true })
@@ -236,19 +234,6 @@ function autofit() {
       yBottomDb.value = fitted.bottom
     }
 
-    if (showPhase.value) {
-      // A coarser grid: phase is read in quadrants, and a 5-degree window would be false precision
-      // on a curve that is unwrapped across several turns.
-      const phase = autofitRangeInBand(gain.freqHz, gain.phaseDeg, freqFromHz.value, freqToHz.value, {
-        step: 45,
-        minSpan: 90,
-      })
-      if (phase) {
-        phaseTopDeg.value = phase.top
-        phaseBottomDeg.value = phase.bottom
-      }
-    }
-
     if (delayView.value !== 'None') {
       const curve = delayValuesOf(gain, delayView.value)
       if (curve) {
@@ -357,26 +342,8 @@ const referenceLabel = computed(() => {
         Coherence
       </label>
 
-      <div v-if="showPhase" class="grid grid-cols-2 gap-2.5">
-        <label class="tb-field">
-          Phase top (°)
-          <input
-            v-model.number="phaseTopDeg"
-            type="number"
-            step="45"
-            class="tb-input"
-          />
-        </label>
-        <label class="tb-field">
-          Phase bottom (°)
-          <input
-            v-model.number="phaseBottomDeg"
-            type="number"
-            step="45"
-            class="tb-input"
-          />
-        </label>
-      </div>
+      <!-- No phase window: the curve is wrapped into ±180° and its axis is the bottom half of the
+           plot, fixed — see PHASE_SCALE_RANGE in response/phaseCurve.ts. -->
 
       <!-- The gated response's delay curves, on their own axis: physical delay only with the right
            input as the reference, excess delay against the generated sweep otherwise. -->

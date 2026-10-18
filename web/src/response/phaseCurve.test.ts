@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { ResponseTrace } from '../composables/useFrequencyResponse'
-import { PHASE_FLOOR_BELOW_REFERENCE_DB, delayDegPerHz, phaseFloorDb, phaseSeries } from './phaseCurve'
+import {
+  PHASE_AXIS_SPLITS,
+  PHASE_FLOOR_BELOW_REFERENCE_DB,
+  PHASE_SCALE_RANGE,
+  delayDegPerHz,
+  phaseFloorDb,
+  phaseSeries,
+  wrapPhaseDeg,
+} from './phaseCurve'
 
 /**
  * A trace whose magnitude falls away linearly from its reference, with a phase that reads its own
@@ -77,6 +85,50 @@ describe('the phase series', () => {
 
   it('drops a column whose phase is not a number', () => {
     expect(phaseSeries(trace({ phaseDeg: [0, NaN, 2, 3, 4] }), 'PerTrace', NO_RESTORE, 5)).toEqual([0, null, 2, null, null])
+  })
+})
+
+describe('wrapping', () => {
+  it('brings a phase into (−180°, 180°]', () => {
+    expect(wrapPhaseDeg(181)).toBeCloseTo(-179, 10)
+    expect(wrapPhaseDeg(-181)).toBeCloseTo(179, 10)
+    expect(wrapPhaseDeg(540)).toBeCloseTo(180, 10)
+    expect(wrapPhaseDeg(-540)).toBeCloseTo(180, 10)
+    expect(wrapPhaseDeg(-3600.5)).toBeCloseTo(-0.5, 10)
+  })
+
+  // The boundary belongs to the top, as the server's WholeTurnsDeg has it — one convention, so a
+  // trace anchored there and wrapped here cannot land on opposite edges of the plot.
+  it('keeps ±180 at the top of the window and leaves an in-range phase alone', () => {
+    expect(wrapPhaseDeg(180)).toBe(180)
+    expect(wrapPhaseDeg(-180)).toBe(180)
+    expect(wrapPhaseDeg(-179.999)).toBeCloseTo(-179.999, 10)
+    expect(wrapPhaseDeg(0)).toBe(0)
+  })
+
+  it('is applied to the drawn curve, after the delay is restored', () => {
+    // 360 × 48 / 48000 = 0.36°/Hz: the 20 Hz column's 1° becomes −6.2°, and a phase pushed past the
+    // edge comes back on the other side rather than running off the axis.
+    const restore = { restoreDelay: true, latencySamples: 48, sampleRateHz: 48_000 }
+    const curve = phaseSeries(trace({ phaseDeg: [179, 1, 2, 3, 4] }), 'PerTrace', restore, 5)
+    expect(curve[0]).toBeCloseTo(179 - 3.6, 10)
+    expect(curve[1]).toBeCloseTo(1 - 7.2, 10)
+    const wrapped = phaseSeries(trace({ phaseDeg: [200, 1, 2, 3, 4] }), 'PerTrace', NO_RESTORE, 5)
+    expect(wrapped[0]).toBeCloseTo(-160, 10)
+  })
+})
+
+describe('the fixed axis', () => {
+  // The scale is twice the axis' height, which is what puts the phase in the bottom half of the
+  // plot: +180° lands exactly at mid-height.
+  it('spans twice what it labels, with the labels in the bottom half', () => {
+    const [min, max] = PHASE_SCALE_RANGE
+    expect(min).toBe(-180)
+    expect(max - min).toBe(720)
+    expect((180 - min) / (max - min)).toBe(0.5)
+    expect([...PHASE_AXIS_SPLITS]).toEqual([-180, -90, 0, 90, 180])
+    for (const split of PHASE_AXIS_SPLITS) expect(split).toBeGreaterThanOrEqual(min)
+    for (const split of PHASE_AXIS_SPLITS) expect(split).toBeLessThanOrEqual(180)
   })
 })
 

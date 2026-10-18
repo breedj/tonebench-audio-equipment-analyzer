@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type uPlot from 'uplot'
+import { useZoomHistory, type ZoomWindow } from '../charts/zoomHistory'
 
 /** Tolerant equality: a zoom is compared against bounds that may have been through a log/linear round trip. */
 function sameBound(a: number | null | undefined, b: number): boolean {
@@ -21,6 +22,7 @@ export function useZoomBounds(
   bounds: () => { xMin: number; xMax: number; yMin: number; yMax: number },
 ) {
   const zoomed = ref(false)
+  const history = useZoomHistory()
 
   function isZoomedNow(u: uPlot): boolean {
     const b = bounds()
@@ -41,10 +43,60 @@ export function useZoomBounds(
   function resetZoom() {
     const u = getPlot()
     if (!u) return
-    const b = bounds()
-    u.setScale('x', { min: b.xMin, max: b.xMax })
-    u.setScale('y', { min: b.yMin, max: b.yMax })
+    // All the way out, so the steps on the way in are no longer anywhere to go back to.
+    history.clear()
+    apply(u, bounds())
   }
 
-  return { zoomed, isZoomedNow, noteScale, resetZoom }
+  /**
+   * Remembers the window the chart is about to leave — call from `hooks.setSelect`, which uPlot
+   * fires *before* it applies the drag's own scales, so what the plot still holds is exactly the
+   * window Back has to return to.
+   */
+  function noteZoomGesture(u: uPlot) {
+    if (u.select.width <= 0 && u.select.height <= 0) return
+    history.push(windowOf(u))
+  }
+
+  /** One step out: back to the window before the last drag, or to the panel's own at the bottom of the stack. */
+  function zoomBack() {
+    const u = getPlot()
+    if (!u) return
+    const previous = history.back()
+    apply(u, previous ?? bounds())
+  }
+
+  /** The window on screen now, for the "Set axis" button to write into the display panel's boxes. */
+  function currentWindow(): ZoomWindow | null {
+    const u = getPlot()
+    if (!u) return null
+    const w = windowOf(u)
+    return Number.isFinite(w.xMin) && Number.isFinite(w.yMin) ? w : null
+  }
+
+  return {
+    zoomed,
+    isZoomedNow,
+    noteScale,
+    resetZoom,
+    noteZoomGesture,
+    zoomBack,
+    currentWindow,
+    canGoBack: history.canGoBack,
+    clearZoomHistory: history.clear,
+  }
+}
+
+function windowOf(u: uPlot): ZoomWindow {
+  return {
+    xMin: u.scales.x.min ?? Number.NaN,
+    xMax: u.scales.x.max ?? Number.NaN,
+    yMin: u.scales.y?.min ?? Number.NaN,
+    yMax: u.scales.y?.max ?? Number.NaN,
+  }
+}
+
+function apply(u: uPlot, w: ZoomWindow) {
+  u.setScale('x', { min: w.xMin, max: w.xMax })
+  u.setScale('y', { min: w.yMin, max: w.yMax })
 }

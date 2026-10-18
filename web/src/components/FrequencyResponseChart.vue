@@ -35,10 +35,12 @@ import { BANDWIDTH_COLORS } from '../charts/bandwidthColors'
 import { axisLabel } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
 import ToolbarIcon from './ToolbarIcon.vue'
+import ChartZoomControls from './ChartZoomControls.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
-import { phaseColumnUsable, phaseFloorDb, phaseSeries } from '../response/phaseCurve'
+import { PHASE_AXIS_SPLITS, PHASE_SCALE_RANGE, phaseColumnUsable, phaseFloorDb, phaseSeries } from '../response/phaseCurve'
+import { useZoomHistory, type ZoomWindow } from '../charts/zoomHistory'
 
 const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
 /**
@@ -81,9 +83,6 @@ const props = withDefaults(defineProps<{
   yBottomDbv: number
   xFromHz: number
   xToHz: number
-  /** The phase axis' own window, in degrees — set in the display panel, independent of the dB one because unwrapped phase can run past ±180°. */
-  phaseTopDeg: number
-  phaseBottomDeg: number
   /** What phase this run measured — decides which curve carries it and what it is called. See ResponsePhaseKind. */
   phaseKind: ResponsePhaseKindName
   /**
@@ -142,7 +141,7 @@ const props = withDefaults(defineProps<{
  * reaching for a preview chart's expand button, or simply looking away, no longer takes the reading
  * with it.</p>
  */
-const emit = defineEmits<{ cursorPin: [freqHz: number | null] }>()
+const emit = defineEmits<{ cursorPin: [freqHz: number | null]; axisWindow: [window: ZoomWindow] }>()
 
 function clearPin() {
   emit('cursorPin', null)
@@ -282,15 +281,10 @@ const primaryTrace = computed<ResponseTrace | null>(() => {
  * the only way a phase reading can actually be read off the plot. It was previously squeezed onto
  * the dB window, which put a number next to it that meant nothing.
  *
- * The window is a display-panel setting (props.phaseTopDeg/phaseBottomDeg) rather than fitted to the
- * data, so it stays put while a run comes in instead of rescaling under the curve; the panel's own
- * Autofit button covers the case the old auto-fit did. Independent of the dB window because the
- * phase here is *unwrapped* and the bulk delay already removed: a well-behaved DUT sits inside a few
- * tens of degrees, while a DUT with real excess phase runs well past 180° — the two cannot share one
- * pair of bounds.
+ * <p>The window is <b>fixed</b> and the axis occupies the bottom half of the plot: the curve is
+ * wrapped into ±180°, so there is nothing to set and nothing to fit. See `PHASE_SCALE_RANGE`, which
+ * is where the geometry and the reasoning live.</p>
  */
-const phaseRange = computed<[number, number]>(() => [props.phaseBottomDeg, props.phaseTopDeg])
-
 /**
  * The y window actually in effect — the FR (dBV) pair or the Gain (dB) pair, whichever `view` is
  * showing. The two are independent so switching views never clobbers the other one's range.
@@ -893,17 +887,53 @@ function formatReading(value: number, series: ReadoutSeries): string {
  */
 const zoomed = ref(false)
 
+/** The windows each drag left behind, for the Back button — see charts/zoomHistory.ts. */
+const zoomHistory = useZoomHistory()
+
 /**
  * Back to the window the display panel asks for — the Reset zoom button, and a double-click.
  *
  * <p>Clearing the flag first is not tidying: the range callback reads it, so a `setScale` made while
  * it was still true would be handed straight back out again.</p>
  */
+/**
+ * One step out of the zoom: back to the window before the last drag, or — at the bottom of the
+ * history, which is the window the panel asks for — the same thing Reset zoom does.
+ *
+ * <p>The flag is cleared before the scales move for the reason `resetZoom`'s own remarks give: the
+ * x range callback reads it, so a `setScale` made while it was still true is handed straight back
+ * out again.</p>
+ */
+function zoomBack() {
+  const u = plot.value
+  if (!u) return
+
+  const previous = zoomHistory.back()
+  if (!previous) {
+    resetZoom()
+    return
+  }
+
+  if (!zoomHistory.canGoBack.value) zoomed.value = false
+  u.setScale('x', { min: previous.xMin, max: previous.xMax })
+  u.setScale('y', { min: previous.yMin, max: previous.yMax })
+}
+
+/** "Set axis": hands the window on screen up, for the display panel's own boxes to take it on. */
+function applyZoomToAxis() {
+  const u = plot.value
+  if (!u) return
+  const x = windowOf(u.scales.x)
+  const y = windowOf(u.scales.y)
+  if (x && y) emit('axisWindow', { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max })
+}
+
 function resetZoom() {
   const u = plot.value
   if (!u) return
 
   zoomed.value = false
+  zoomHistory.clear()
   u.setScale('x', { min: props.xFromHz, max: props.xToHz })
   u.setScale('y', { min: activeYBottom.value, max: activeYTop.value })
 }
@@ -1015,7 +1045,7 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
       // zooms (uPlot zooms the scale of the first plotted series, which is a magnitude curve).
       // Phase is already fitted to its own data, and coherence is a 0..1 quantity whose axis means
       // nothing rescaled.
-      phase: { range: () => phaseRange.value },
+      phase: { range: () => [...PHASE_SCALE_RANGE] as [number, number] },
       coh: { range: () => [0, 1] as [number, number] },
       delay: { range: () => delayRange.value },
     },
@@ -1045,7 +1075,9 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
         show: props.showPhase,
         size: 52,
         ...axisLabel(props.axisTitles ?? false, interactive, `${phaseLabel.value} (°)`),
-        incrs: [15, 30, 45, 90, 180, 360, 720, 1440],
+        // Fixed splits rather than `incrs`: the scale is twice the axis' height on purpose, and a
+        // tick generator told only about increments would label the empty top half as well.
+        splits: () => [...PHASE_AXIS_SPLITS],
         values: (_u, vals) => vals.map((v) => `${v}°`),
         stroke: p.color(PHASE_COLOR),
         grid: { show: false },
@@ -1103,7 +1135,13 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
               // A box gesture fires this too, and it is not a zoom: without the guard, drawing a
               // region would offer a Reset zoom button for a chart nobody had zoomed.
               if (annotationOverlay.armedForBox.value) return
-              if (u.select.width > 0 || u.select.height > 0) zoomed.value = true
+              if (u.select.width <= 0 && u.select.height <= 0) return
+              // The window being left, for Back. uPlot fires this before it applies the drag's own
+              // scales, so the plot still holds exactly the window to return to.
+              const x = windowOf(u.scales.x)
+              const y = windowOf(u.scales.y)
+              if (x && y) zoomHistory.push({ xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max })
+              zoomed.value = true
             },
           ],
           // u.cursor.idx indexes the shared x array buildData produced — not a pixel-derived value, so
@@ -1344,7 +1382,11 @@ function rebuild() {
       : null
   plotXWindowKey = nextX
   plotYWindowKey = nextY
-  if (windowChanged) zoomed.value = false
+  if (windowChanged) {
+    zoomed.value = false
+    // The remembered windows were steps inside a window that no longer exists.
+    zoomHistory.clear()
+  }
 
   plot.value?.destroy()
   cursorReadout.value = null
@@ -1439,13 +1481,13 @@ watch([() => props.traces, () => props.overlays], refresh)
 // signature now, for the reason its own remarks give.
 watch(() => [props.showOneDb, props.showThreeDb], () => refresh())
 
-// A settings change, not a data change, but still only a re-range: the phase scale is not part of
-// the drag-zoom (uPlot zooms the first plotted series, which is the dB one), so nothing about the
-// series or their styling needs rebuilding here.
 // Data, not styling: the delay is put back inside the phase series, so a refresh is all it needs.
 watch(() => [props.restoreDelay, props.latencySamples, props.sampleRateHz], () => refresh())
 
-watch(phaseRange, () => refresh())
+// A settings change, not a data change, but still only a re-range: the delay scale is not part of
+// the drag-zoom (uPlot zooms the first plotted series, which is the dB one), so nothing about the
+// series or their styling needs rebuilding here. The phase scale has no watcher of its own because
+// it has no window to change -- see PHASE_SCALE_RANGE.
 watch(delayRange, () => refresh())
 </script>
 
@@ -1484,17 +1526,16 @@ watch(delayRange, () => refresh())
       <!-- The only visible sign that the axes are no longer the window the display panel names —
            double-clicking does the same thing, but nothing on screen would say so. The hint takes
            its place while unzoomed, so the header never carries two messages about one gesture. -->
-      <button
-        v-if="zoomed"
-        type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 btn-action"
-        title="Back to the frequency and dB window set in the display panel."
-        @click="resetZoom"
-      >
-        <ToolbarIcon name="reset-zoom" />
-        Reset zoom
-      </button>
-      <span v-else class="shrink-0">Click to pin · drag to zoom</span>
+      <ChartZoomControls
+        :zoomed="zoomed"
+        :can-go-back="zoomHistory.canGoBack.value"
+        reset-title="Back to the frequency and dB window set in the display panel."
+        apply-title="Write this window into the display panel's frequency and dB boxes."
+        @back="zoomBack"
+        @apply="applyZoomToAxis"
+        @reset="resetZoom"
+      />
+      <span v-if="!zoomed" class="shrink-0">Click to pin · drag to zoom</span>
     </div>
 
     <div

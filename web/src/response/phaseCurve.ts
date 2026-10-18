@@ -49,6 +49,34 @@ export function phaseFloorDb(trace: ResponseTrace | null, phaseKind: ResponsePha
   return Number.isFinite(reference) ? reference + PHASE_FLOOR_BELOW_REFERENCE_DB : Number.NEGATIVE_INFINITY
 }
 
+/**
+ * The phase axis, which is fixed: a wrapped phase cannot leave ±180°, so there is no window to set
+ * and nothing for an Autofit to fit (Joost, 2026-10-18).
+ *
+ * <p>It occupies the <b>bottom half</b> of the plot, which is STEPS' layout and what the ask named:
+ * the magnitude keeps the full height and the phase is read underneath it, so two curves that would
+ * otherwise cross and be confused for each other sit in their own halves. uPlot has no notion of
+ * half a plot, so the trick is the <i>scale</i>: it spans 720° where the axis shows 360, which puts
+ * +180° at mid-height and −180° at the floor, and {@link PHASE_AXIS_SPLITS} is what stops the empty
+ * top half drawing ticks nobody can reach.</p>
+ */
+export const PHASE_SCALE_RANGE: readonly [number, number] = [-180, 540]
+
+/** The ticks the phase axis prints — the bottom half of its scale, and STEPS' own five labels. */
+export const PHASE_AXIS_SPLITS: readonly number[] = [-180, -90, 0, 90, 180]
+
+/**
+ * A phase brought into <c>(−180°, 180°]</c>, the way every analyzer draws one.
+ *
+ * <p>The same arithmetic as `GroupDelay.WholeTurnsDeg` server-side, so the wrap on screen and the
+ * turn the server anchors away are one convention: +181° reads −179°, −181° reads +179°. Note what
+ * it means for a DUT with a restored delay — the phase then runs through many turns, and wrapping
+ * draws them as the classic sawtooth rather than as a line off the top of the plot.</p>
+ */
+export function wrapPhaseDeg(deg: number): number {
+  return deg - 360 * Math.ceil((deg - 180) / 360)
+}
+
 /** What `delayDegPerHz` needs to know: whether to restore, and the delay the estimator removed. */
 export interface PhaseDelayRestore {
   restoreDelay?: boolean
@@ -98,7 +126,9 @@ export function phaseSeries(
   for (let i = 0; i < count; i++) {
     const phase = trace.phaseDeg[i]
     if (!Number.isFinite(phase) || !phaseColumnUsable(trace, i, floorDb)) continue
-    out[i] = phase - derotate * trace.freqHz[i]
+    // Wrapped last, after the delay is back on: restoring it is what puts the turns there, and
+    // wrapping first would then hand them straight back.
+    out[i] = wrapPhaseDeg(phase - derotate * trace.freqHz[i])
   }
   return out
 }

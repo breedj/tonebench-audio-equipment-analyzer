@@ -252,8 +252,17 @@ const { showPage } = useManual()
         transfer function — the measurement relative to its reference.
       </li>
       <li>
-        <strong>Phase</strong>, unwrapped, in degrees, with the bulk delay removed so the curve
-        shows the DUT's own phase behaviour rather than a straight slope from cable length.
+        <strong>Phase</strong>, in degrees, on an axis of its own that occupies the bottom half of
+        the plot — STEPS' layout, so the magnitude keeps the full height and the two curves are
+        read in their own halves. It is wrapped into ±180°: a phase passing −180° comes back at
+        +180° rather than running off the axis, so a DUT with several turns of phase draws the
+        classic sawtooth. The axis is fixed — there is no window to set.
+        <strong>Restore removed delay</strong>, under the checkbox, decides what is drawn: off, the
+        bulk delay the estimator removed is left out, so the curve is excess phase only and a
+        minimum-phase DUT reads a few degrees across its passband; on, the delay is put back and
+        the curve is the physical phase (0 → −450° through a fifth-order corner). Off is the right
+        reading for a DUT whose own delay is the thing being removed — a loudspeaker, a converter,
+        anything behind a buffer.
       </li>
       <li>
         <strong>Delay</strong> — <strong>Group delay</strong> or <strong>Phase delay</strong>, one at
@@ -467,9 +476,10 @@ const { showPage } = useManual()
       of them — it fits every axis the view is showing, frequency first — laid out the way the FFT
       screen's are:
       <strong>Gain range</strong> (or <strong>dBV range</strong>, whichever view is showing — each
-      remembers its own), <strong>Frequency range (Hz)</strong>, <strong>Phase range (°)</strong>
-      while the Phase trace is on, and <strong>Delay range</strong> (in µs or ms, following the
-      window's size) while a delay trace is selected. Under them, <strong>Display</strong>:
+      remembers its own), <strong>Frequency range (Hz)</strong>, and <strong>Delay range</strong>
+      (in µs or ms, following the window's size) while a delay trace is selected. The phase has no
+      window of its own: it is drawn wrapped into ±180° on an axis fixed to the bottom half of the
+      plot, as STEPS draws one, so there is nothing to set and nothing for Autofit to fit. Under them, <strong>Display</strong>:
       <strong>Projection</strong> chooses Bode, Nyquist, Nichols, Poles/zeros or |H(s)|, and under Bode
       <strong>View</strong> switches FR (dBV) against Gain (dB); then the channel checkboxes, the
       bandwidth markers and the extra traces — the Phase and Coherence checkboxes and the

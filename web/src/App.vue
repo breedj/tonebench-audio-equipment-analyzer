@@ -127,7 +127,13 @@ import MeasurementStatusBar from './components/MeasurementStatusBar.vue'
 import ScreenshotDialog from './components/ScreenshotDialog.vue'
 import IssueReportDialog from './components/IssueReportDialog.vue'
 import SplashScreen from './components/SplashScreen.vue'
-import { DEFAULT_RESPONSE_DISPLAY, responseDisplayFromParams, responsePhaseKindFromParams, type ResponseDisplay } from './response/display'
+import {
+  DEFAULT_RESPONSE_DISPLAY,
+  responseDisplayFromParams,
+  responsePhaseKindFromParams,
+  snapResponseXWindow,
+  type ResponseDisplay,
+} from './response/display'
 import { sweepDisplayFromParams, type SweepDisplay } from './sweep/display'
 import { impedanceDisplayFromParams, type ImpedanceDisplay } from './impedance/display'
 import { crosstalkDisplayFromParams, crosstalkDisplayToParams, DEFAULT_CROSSTALK_DISPLAY, type CrosstalkDisplay } from './crosstalk/display'
@@ -3967,6 +3973,81 @@ function onWindowKeydown(event: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onWindowKeydown))
 onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
 
+/**
+ * **Set axis**: a chart's zoomed window written into the display panel's own boxes, so the zoom
+ * stops being a gesture and becomes the measurement's window — kept across a rebuild, saved with
+ * the measurement, and drawn by a report (Joost, 2026-10-18).
+ *
+ * <p>One helper and a handler per screen rather than something generic, because the boxes are not
+ * generic: each screen's pair is in its own unit, two of them switch with the view (dB or dBV,
+ * percent or dB), and the two Bode screens' frequency boxes are <em>dropdowns</em> — an exact
+ * 137.24 Hz there renders as a blank select, so those snap outward to a value the list offers
+ * (`snapResponseXWindow`, the same one Autofit uses).</p>
+ *
+ * <p>Rounded to four figures on the way in: a window typed by a drag is arbitrary to the last
+ * decimal, and a box reading 137.2381 Hz is a box nobody can edit by hand afterwards.</p>
+ */
+function axisNumber(value: number): number {
+  return Number.isFinite(value) ? Number(value.toPrecision(4)) : value
+}
+
+function setAxisWindow(
+  window: import('./charts/zoomHistory').ZoomWindow,
+  x: { from: { value: number }; to: { value: number } },
+  y: { top: { value: number }; bottom: { value: number } },
+) {
+  x.from.value = axisNumber(window.xMin)
+  x.to.value = axisNumber(window.xMax)
+  y.top.value = axisNumber(window.yMax)
+  y.bottom.value = axisNumber(window.yMin)
+}
+
+function onSpectrumAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  setAxisWindow(w, { from: chartXFrom, to: chartXTo }, { top: chartYTop, bottom: chartYBottom })
+}
+
+function onSweepAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  const y = sweepUnit.value === 'db' ? { top: sweepYTopDb, bottom: sweepYBottomDb } : { top: sweepYMaxPercent, bottom: sweepYMinPercent }
+  setAxisWindow(w, { from: sweepXFrom, to: sweepXTo }, y)
+}
+
+function onResponseAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  const snapped = snapResponseXWindow(w.xMin, w.xMax)
+  responseXFromHz.value = snapped.fromHz
+  responseXToHz.value = snapped.toHz
+  const y = responseView.value === 'Dbv' ? { top: responseYTopDbv, bottom: responseYBottomDbv } : { top: responseYTopDb, bottom: responseYBottomDb }
+  y.top.value = axisNumber(w.yMax)
+  y.bottom.value = axisNumber(w.yMin)
+}
+
+function onCrosstalkAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  const snapped = snapResponseXWindow(w.xMin, w.xMax)
+  crosstalkXFromHz.value = snapped.fromHz
+  crosstalkXToHz.value = snapped.toHz
+  crosstalkYTopDb.value = axisNumber(w.yMax)
+  crosstalkYBottomDb.value = axisNumber(w.yMin)
+}
+
+function onImpulseTimeAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  setAxisWindow(w, { from: impulseTimeFromMs, to: impulseTimeToMs }, { top: impulseYTopDb, bottom: impulseYBottomDb })
+}
+
+function onImpulseFreqAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  setAxisWindow(w, { from: impulseFreqFromHz, to: impulseFreqToHz }, { top: impulseYTopDb, bottom: impulseYBottomDb })
+}
+
+function onImpedanceAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  setAxisWindow(w, { from: impedanceXFromHz, to: impedanceXToHz }, { top: impedanceZTopOhms, bottom: impedanceZBottomOhms })
+}
+
+function onOutputImpedanceAxisWindow(w: import('./charts/zoomHistory').ZoomWindow) {
+  setAxisWindow(
+    w,
+    { from: outputImpedanceXFromHz, to: outputImpedanceXToHz },
+    { top: outputImpedanceZTopOhms, bottom: outputImpedanceZBottomOhms },
+  )
+}
+
 // The programmable load's poll, started once from here and stopped with the app. It reads the status
 // once and then only keeps polling if a load is actually selected, so a bench without one pays a
 // single request for the whole session.
@@ -4393,6 +4474,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :normalised="impulseNormalised"
                   :thick-lines="impulseThickLines"
                   :time-from-ms="impulseTimeFromMs"
+                  @axis-window="onImpulseTimeAxisWindow"
                   :time-to-ms="impulseTimeToMs"
                   :y-top-db="impulseYTopDb"
                   :y-bottom-db="impulseYBottomDb"
@@ -4430,9 +4512,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :y-top-dbv="impulseYTopDb"
                   :y-bottom-dbv="impulseYBottomDb"
                   :x-from-hz="impulseFreqFromHz"
+                  @axis-window="onImpulseFreqAxisWindow"
                   :x-to-hz="impulseFreqToHz"
-                  :phase-top-deg="impulsePhaseTopDeg"
-                  :phase-bottom-deg="impulsePhaseBottomDeg"
                   :delay-view="impulseDelayView"
                   :delay-top-us="impulseDelayTopUs"
                   :delay-bottom-us="impulseDelayBottomUs"
@@ -4449,6 +4530,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :thick-lines="impulseThickLines"
                   :show-data-points="impulseShowDataPoints"
                   :freq-from-hz="impulseFreqFromHz"
+                  @axis-window="onImpulseFreqAxisWindow"
                   :freq-to-hz="impulseFreqToHz"
                   :y-top-db="impulseYTopDb"
                   :y-bottom-db="impulseYBottomDb"
@@ -4523,8 +4605,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:time-to-ms="impulseTimeToMs"
                   v-model:freq-from-hz="impulseFreqFromHz"
                   v-model:freq-to-hz="impulseFreqToHz"
-                  v-model:phase-top-deg="impulsePhaseTopDeg"
-                  v-model:phase-bottom-deg="impulsePhaseBottomDeg"
                   v-model:delay-view="impulseDelayView"
                   v-model:delay-top-us="impulseDelayTopUs"
                   v-model:delay-bottom-us="impulseDelayBottomUs"
@@ -4740,9 +4820,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :y-top-dbv="responseYTopDbv"
                   :y-bottom-dbv="responseYBottomDbv"
                   :x-from-hz="responseXFromHz"
+                  @axis-window="onResponseAxisWindow"
                   :x-to-hz="responseXToHz"
-                  :phase-top-deg="responsePhaseTopDeg"
-                  :phase-bottom-deg="responsePhaseBottomDeg"
                   :delay-view="responsePhaseAvailable ? responseDelayView : 'None'"
                   :delay-top-us="responseDelayTopUs"
                   :delay-bottom-us="responseDelayBottomUs"
@@ -4888,8 +4967,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:y-bottom-dbv="responseYBottomDbv"
                   v-model:x-from-hz="responseXFromHz"
                   v-model:x-to-hz="responseXToHz"
-                  v-model:phase-top-deg="responsePhaseTopDeg"
-                  v-model:phase-bottom-deg="responsePhaseBottomDeg"
                   v-model:delay-view="responseDelayView"
                   v-model:delay-top-us="responseDelayTopUs"
                   v-model:delay-bottom-us="responseDelayBottomUs"
@@ -4988,9 +5065,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :y-top-dbv="20"
                   :y-bottom-dbv="-140"
                   :x-from-hz="crosstalkXFromHz"
+                  @axis-window="onCrosstalkAxisWindow"
                   :x-to-hz="crosstalkXToHz"
-                  :phase-top-deg="180"
-                  :phase-bottom-deg="-180"
                   :axis-titles="true"
                   :pinned-x="pinnedResponseHz"
                   @cursor-pin="onResponseCursorPin"
@@ -5136,6 +5212,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :z-bottom-ohms="outputImpedanceZBottomOhms"
                   :z-scale="outputImpedanceZScale"
                   :x-from-hz="outputImpedanceXFromHz"
+                  @axis-window="onOutputImpedanceAxisWindow"
                   :x-to-hz="outputImpedanceXToHz"
                   :phase-top-deg="outputImpedancePhaseTopDeg"
                   :phase-bottom-deg="outputImpedancePhaseBottomDeg"
@@ -5279,6 +5356,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :z-bottom-ohms="impedanceZBottomOhms"
                   :z-scale="impedanceZScale"
                   :x-from-hz="impedanceXFromHz"
+                  @axis-window="onImpedanceAxisWindow"
                   :x-to-hz="impedanceXToHz"
                   :phase-top-deg="impedancePhaseTopDeg"
                   :phase-bottom-deg="impedancePhaseBottomDeg"
@@ -5466,6 +5544,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :y-top-db="sweepYTopDb"
                   :y-bottom-db="sweepYBottomDb"
                   :x-from="sweepXFrom"
+                  @axis-window="onSweepAxisWindow"
                   :x-to="sweepXTo"
                   :x-axis="sweepChartXAxis"
                   :kind="currentType?.kind ?? ''"
@@ -5618,6 +5697,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
               <SpectrumChart
                 ref="spectrumChart"
+                @axis-window="onSpectrumAxisWindow"
                 :fit-above="fftAbove"
                 :spectrum="spectrum"
                 :meters="meters"
@@ -5649,13 +5729,20 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 :status="status"
               />
 
+              <!-- The overlay list, in the chart column and directly above Notes (Joost,
+                   2026-10-18). It used to span the whole view below the layout, which gave the one
+                   panel on this screen that is a list of *curves on the chart* a width it had no
+                   use for and put it on the far side of the tables from the chart it belongs to.
+                   Here it is the chart's own width, which is Notes' width. -->
+              <OverlayList class="mt-3" />
+
               <!-- Notes sits here, under the charts, and is the one screen where it is NOT directly
                    above History details. On the other six screens the two are adjacent because both
                    are in the chart column; here History spans the whole view at the foot of the page,
-                   below the overlay list and the harmonics/other-peaks grids, and a Notes box that
-                   followed it down was three screens of scrolling away — reported as missing
-                   (Joost, 2026-10-14), having last been visible at the foot of the settings rail
-                   before it moved to History's width on 2026-09-19. -->
+                   below the harmonics/other-peaks grids, and a Notes box that followed it down was
+                   three screens of scrolling away — reported as missing (Joost, 2026-10-14), having
+                   last been visible at the foot of the settings rail before it moved to History's
+                   width on 2026-09-19. -->
               <MeasurementNotesPanel class="mt-3" />
             </div>
 
@@ -5665,10 +5752,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
               </ChartDisplayPanel>
             </template>
           </MeasurementLayout>
-
-          <!-- Everything below isn't part of the new FFT Spectrum design — kept here for now, to be
-               repositioned later. -->
-          <OverlayList />
 
           <!-- The multitone table takes the harmonics table's place while a comb plays: it is the
                comb's own distortion reading, and the harmonics grid below is gated off for it.

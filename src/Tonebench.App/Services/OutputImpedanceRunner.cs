@@ -646,7 +646,7 @@ public sealed class OutputImpedanceRunner(
 
         int probeFftSize = request.FftSizeAt(SteppedCaptureSupport.ProbeFrequencyHz);
         var result = await SteppedCaptureSupport.ProbeGeneratorLevelAsync(
-            session, pipeline, StreamChannel.Left, request.LevelDbv, request.EffectiveSampleRateHz, probeFftSize,
+            session, pipeline, StreamChannel.Left, request.LevelDbv, request.LevelUnit, request.LoadOhms, request.EffectiveSampleRateHz, probeFftSize,
             generateLeft: true, generateRight: request.RightChannelIsReference, CaptureTimeout(request, probeFftSize),
             (phase, done, total, genDbv) =>
             {

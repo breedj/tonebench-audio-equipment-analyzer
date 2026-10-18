@@ -1037,6 +1037,49 @@ public class FrequencyResponseRunnerTests
     }
 
     [Fact]
+    public async Task ALevelTheDutCannotReach_StopsTheRunAndSaysSoInTheUnitItWasAskedIn()
+    {
+        // The reported failure: a DUT that is off, muted or patched to the wrong socket cannot be
+        // driven to the level asked for, and the probe used to accept the generator's ceiling and
+        // deconvolve the whole sweep at it -- a complete, plausible curve of the analyzer's own
+        // floor. Reproduced by asking a unity DUT for more than the generator can make, which is
+        // the same dead end: at the ceiling there is nothing left to correct with.
+        //
+        // In watts on purpose, since this is the one runner path a *power* target reaches first:
+        // 80 % of a power is 0.97 dB where 80 % of a voltage is 1.94, and the message has to quote
+        // the quantity the user typed. See OutputLevelReach.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputPower, levelValue: 100.0,
+                levelUnit: ThdSweepLevelUnit.Watt, loadOhms: 8.0),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        Assert.Equal(FrequencyResponsePhase.Failed, status.Phase);
+        Assert.NotNull(status.Error);
+        Assert.Contains("of the 100 W asked for", status.Error);
+        Assert.Contains("18 dBV ceiling", status.Error);
+        Assert.Contains("powered on", status.Error);
+    }
+
+    [Fact]
+    public async Task ALevelTheDutReaches_RunsEvenThoughTheProbeStopsHalfADecibelShort()
+    {
+        // The other side of the same rule, and the regression that would hurt most: every probe
+        // stops correcting at 0.5 dB, which must never be read as a DUT that failed to reach its
+        // level.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -10.0),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+    }
+
+    [Fact]
     public async Task Measurement_DrivingAOnePoleDut_FindsItsCorner()
     {
         // Peak-referenced on purpose. This DUT's corner sits at 2 kHz, i.e. *inside* the default

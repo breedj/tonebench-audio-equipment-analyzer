@@ -245,6 +245,42 @@ public class SteppedResponseRunnerTests
     }
 
     [Fact]
+    public async Task ALevelTheDutCannotReach_StopsTheRunAndSaysWhyRatherThanMeasuringTheCeiling()
+    {
+        // The reported failure: a DUT that is off, muted or patched to the wrong socket cannot be
+        // driven to the level asked for, and the probe used to accept the generator's ceiling and
+        // measure the whole run at it. Reproduced here by asking a unity DUT for more output than
+        // the generator can make, which is the same dead end: at the ceiling there is nothing left
+        // to correct with. See OutputLevelReach.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: 100.0, levelUnit: ThdSweepLevelUnit.Volt),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        Assert.Equal(FrequencyResponsePhase.Failed, status.Phase);
+        Assert.NotNull(status.Error);
+        Assert.Contains("of the 100 V asked for", status.Error);
+        Assert.Contains("powered on", status.Error);
+    }
+
+    [Fact]
+    public async Task ALevelTheDutReaches_RunsEvenThoughItIsNotExact()
+    {
+        // The other side of the same rule: the probes stop correcting at 0.5 dB, which must never
+        // be read as a DUT that failed to reach its level.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: 0.0),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+    }
+
+    [Fact]
     public async Task TheLevelProbe_ReadsTheLeftChannelRatherThanTheLouderOne()
     {
         // The right input carries the reference at the *generator's* level. Taking the louder of the

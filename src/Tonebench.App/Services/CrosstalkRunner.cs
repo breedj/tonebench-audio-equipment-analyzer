@@ -549,7 +549,7 @@ public sealed class CrosstalkRunner(
 
         int probeFftSize = request.FftSizeAt(SteppedCaptureSupport.ProbeFrequencyHz);
         var result = await SteppedCaptureSupport.ProbeGeneratorLevelAsync(
-            session, pipeline, pass.Aggressor, request.LevelDbv, request.EffectiveSampleRateHz, probeFftSize,
+            session, pipeline, pass.Aggressor, request.LevelDbv, request.LevelUnit, request.LoadOhms, request.EffectiveSampleRateHz, probeFftSize,
             pass.GenerateLeft, pass.GenerateRight, CaptureTimeout(request, probeFftSize),
             (phase, done, total, genDbv) =>
             {

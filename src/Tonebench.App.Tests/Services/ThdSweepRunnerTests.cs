@@ -1120,6 +1120,44 @@ public class ThdSweepRunnerTests
             dividedDevice.InputRangeWrites.Where(dbv => dbv != widestRungDbv),
             dbv => Assert.True(dbv <= 6.0, $"the divided run ranged to {dbv} dBV"));
     }
+    [Fact]
+    public async Task ALevelTheDutCannotReach_StopsTheSweepAndSaysWhyRatherThanSweepingAtTheCeiling()
+    {
+        // The reported failure: a DUT that is off, muted or patched to the wrong socket cannot be
+        // driven to the level asked for, and the probe used to accept the generator's ceiling and
+        // sweep every point at it -- a complete run, at some level other than the one set, with
+        // nothing on screen saying so. At the ceiling there are no corrections left, so a shortfall
+        // past 80 % is a fact about the DUT. See OutputLevelReach.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputPower, levelValue: 100.0,
+                levelUnit: ThdSweepLevelUnit.Watt, loadOhms: 8.0),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        Assert.Equal(ThdSweepPhase.Failed, status.Phase);
+        Assert.NotNull(status.Error);
+        Assert.Contains("of the 100 W asked for", status.Error);
+        Assert.Contains("powered on", status.Error);
+        Assert.Empty(status.Points);
+    }
+
+    [Fact]
+    public async Task ALevelTheDutReaches_SweepsEvenThoughTheProbeStopsHalfADecibelShort()
+    {
+        // The other side of the same rule: the probe stops correcting at 0.5 dB, which must never
+        // be read as a DUT that failed to reach its level.
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(
+            Request(levelMode: ThdSweepLevelMode.OutputVoltage, levelValue: -6.0),
+            CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+    }
+
     /// <summary>
     /// The range an output-referred sweep runs on is <em>measured</em>, and measured from the least
     /// sensitive rung. The target-derived prediction still goes in first — the level probe needs a

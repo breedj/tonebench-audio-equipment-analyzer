@@ -699,7 +699,7 @@ public sealed class SteppedResponseRunner(
 
         int probeFftSize = request.FftSizeAt(SteppedCaptureSupport.ProbeFrequencyHz);
         var result = await SteppedCaptureSupport.ProbeGeneratorLevelAsync(
-            session, pipeline, StreamChannel.Left, request.LevelDbv, request.EffectiveSampleRateHz, probeFftSize,
+            session, pipeline, StreamChannel.Left, request.LevelDbv, request.LevelUnit, request.LoadOhms, request.EffectiveSampleRateHz, probeFftSize,
             request.GenerateLeft, request.GenerateRight, CaptureTimeout(request, probeFftSize),
             (phase, done, total, genDbv) =>
             {

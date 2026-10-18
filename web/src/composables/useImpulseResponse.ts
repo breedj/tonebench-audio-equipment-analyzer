@@ -291,6 +291,14 @@ export function useImpulseResponse() {
     references,
     capturingReference,
     error,
+    /**
+     * Why the *run* stopped, as the runner put it — distinct from `error`, which belongs to the
+     * reference-capture requests this composable also makes. The status has always carried it and
+     * nothing read it, so a failed impulse run showed the bare word "Failed" where the other five
+     * output-referred screens print the reason underneath their chart. Noticed while adding the
+     * 80 %-of-level stop (OutputLevelReach), whose whole purpose is the message.
+     */
+    runError: computed(() => status.value?.error ?? null),
     refresh,
     start,
     cancel,

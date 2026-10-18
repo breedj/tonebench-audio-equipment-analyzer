@@ -1218,6 +1218,15 @@ public sealed class ImpulseResponseRunner(
 
             if (outcome == ResponseCaptureSupport.ProbeCorrection.AcceptCeiling)
             {
+                // At the ceiling with nothing left to correct with, so the shortfall is a fact
+                // about the DUT: short of 80 % of what was asked for, the run stops rather than
+                // measuring something other than the level requested. See OutputLevelReach.
+                if (!OutputLevelReach.Reached(target, measuredDbv, request.LevelUnit))
+                {
+                    throw new InvalidOperationException(
+                        OutputLevelReach.Message(target, measuredDbv, request.LevelUnit, request.LoadOhms, MaxGeneratorDbv));
+                }
+
                 logger.LogWarning(
                     "The requested output level of {Target:0.##} dBV needs more than the {Max:0.##} dBV the generator can produce; "
                         + "measuring at {Max:0.##} dBV instead",

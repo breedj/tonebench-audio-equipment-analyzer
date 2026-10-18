@@ -923,9 +923,18 @@ public sealed class ThdSweepRunner(
             if (Math.Abs(errorDb) <= ProbeToleranceDb)
                 break;
 
-            // Already at the DAC's ceiling and still short — another pass would only re-clamp.
+            // Already at the DAC's ceiling and still short — another pass would only re-clamp. The
+            // sweep stops here when what came back is not within 80 % of the level asked for: at
+            // the ceiling there are no corrections left, so the shortfall is a fact about the DUT
+            // and every point after it would be measured at something other than the level set.
+            // See OutputLevelReach.
             if (genDbv >= maxGenDbv && errorDb > 0.0)
+            {
+                if (!OutputLevelReach.Reached(wantedOutDbv, measuredDbv, request.LevelUnit))
+                    throw new InvalidOperationException(OutputLevelReach.Message(wantedOutDbv, measuredDbv, request.LevelUnit, request.LoadOhms, maxGenDbv));
+
                 break;
+            }
 
             genDbv += errorDb;
 

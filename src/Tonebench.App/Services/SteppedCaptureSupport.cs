@@ -299,6 +299,8 @@ internal static class SteppedCaptureSupport
         SpectrumPipeline pipeline,
         StreamChannel measuredChannel,
         double wantedOutDbv,
+        ThdSweepLevelUnit levelUnit,
+        double loadOhms,
         double sampleRateHz,
         int probeFftSize,
         bool generateLeft,
@@ -353,9 +355,17 @@ internal static class SteppedCaptureSupport
             if (Math.Abs(errorDb) <= ProbeToleranceDb)
                 break;
 
-            // Already at the DAC's ceiling and still short — another pass would only re-clamp.
+            // Already at the DAC's ceiling and still short — another pass would only re-clamp. The
+            // run stops here when what came back is not within 80 % of the level asked for: at the
+            // ceiling there are no corrections left, so the shortfall is a fact about the DUT and
+            // every point measured after it would be of something other than what was asked for.
             if (genDbv >= maxGenDbv && errorDb > 0.0)
+            {
+                if (!OutputLevelReach.Reached(wantedOutDbv, measuredDbv, levelUnit))
+                    throw new InvalidOperationException(OutputLevelReach.Message(wantedOutDbv, measuredDbv, levelUnit, loadOhms, maxGenDbv));
+
                 break;
+            }
 
             genDbv += errorDb;
 

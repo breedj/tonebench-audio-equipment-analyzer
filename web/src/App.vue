@@ -803,6 +803,7 @@ const {
   refreshReferences: refreshLoopbackReferences,
   csdSurface: impulseCsdSurface,
   burstSurface: impulseBurstSurface,
+  runError: impulseError,
   decayError: impulseDecayError,
   decayComputing: impulseDecayComputing,
   computeCsd: computeImpulseCsd,
@@ -4464,6 +4465,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
               </template>
 
               <template #default>
+                <p v-if="impulseError" class="text-xs text-red-600 dark:text-red-400">{{ impulseError }}</p>
+
                 <ImpulseResponseChart
                   v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"

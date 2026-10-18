@@ -508,7 +508,7 @@ const { showPage } = useManual()
       Above Display sit two sections of their own, the way the FFT screen has them:
       <strong>Distortion range (%)</strong> — <strong>dB range</strong> when the units are dB — is the
       vertical window and <strong>Frequency range (Hz)</strong> the horizontal one. One
-      <strong>Autofit</strong>, under the distortion range, fits both to every checked trace: the
+      <strong>Autofit</strong>, at the top of the rail above both, fits both to every checked trace: the
       sweep axis to the measured span, the distortion axis to the values inside it. <strong>Autofit when measurement done</strong> is off unless you tick it, so a window you set
       stays where you put it.
     </p>

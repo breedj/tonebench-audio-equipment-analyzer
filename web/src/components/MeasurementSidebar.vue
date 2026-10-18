@@ -343,9 +343,13 @@ async function onDelete(id: number) {
            been thrown away; `mt-auto` on *it* is what puts the pair at the bottom of the pinned column, which is
            `h-full flex flex-col`; in the floating menu the container is `inset-y-0` and already
            scrolls, so the same rule applies there. -->
+      <!-- Exactly a measurement row's height, and built the same way so it stays that way: the same
+           `py-1` around the same 30 px glyph, plus the transparent `border-y` those rows carry for
+           the drag-drop indicator. It was `py-2`, i.e. 46 px against their 40, which made the
+           footer read as a heavier thing than the list above it (Joost, 2026-10-18). -->
       <button
         type="button"
-        class="flex shrink-0 items-center gap-2.5 rounded-[10px] px-2 py-2 text-left text-[13px]"
+        class="flex shrink-0 items-center gap-2.5 rounded-[10px] border-y border-transparent px-2 py-1 text-left text-[13px]"
         :class="
           trashOpen
             ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'

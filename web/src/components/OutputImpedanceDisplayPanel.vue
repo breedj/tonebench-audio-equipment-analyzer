@@ -166,6 +166,20 @@ watch(running, (isRunning, wasRunning) => {
 </script>
 
 <template>
+  <!-- The chart's one Autofit, at the top of the rail and in no section at all. It used to sit
+       inside the first axis section, which read as if it belonged to that one axis (Joost,
+       2026-10-18) — it has always fitted every axis the chart is showing, and now it looks like a
+       chart action rather than a range control. Above the sections rather than between them so it
+       is in the same place on every screen. -->
+  <button
+    type="button"
+    class="btn-panel-accent"
+    title="Fits every axis to what is drawn, live and history: the frequency window to the measured band, then the ohms and phase axes to the curves inside it. The damping-factor axis follows the ohms one — it is that window inverted."
+    @click="autofitAll"
+  >
+    Autofit
+  </button>
+
   <CollapsibleSection title="Impedance axis" size="xs">
     <label
       class="tb-field"
@@ -189,14 +203,6 @@ watch(running, (isRunning, wasRunning) => {
     </div>
     <!-- The chart's one Autofit, in the first axis section rather than a scroll below the fields
          it overwrites. -->
-    <button
-      type="button"
-      class="btn-panel-accent"
-      title="Fits every axis to what is drawn, live and history: the frequency window to the measured band, then the ohms and phase axes to the curves inside it. The damping-factor axis follows the ohms one — it is that window inverted."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
     <label class="tb-check-row" title="The damping factor — nominal over |Zout| — on a right-hand axis that mirrors the ohms axis.">
       <input v-model="showDampingFactor" type="checkbox" class="tb-check" />
       Show damping factor

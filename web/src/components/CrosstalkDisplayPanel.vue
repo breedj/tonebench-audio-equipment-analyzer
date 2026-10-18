@@ -106,6 +106,20 @@ watch(running, (isRunning, wasRunning) => {
 </script>
 
 <template>
+  <!-- The chart's one Autofit, at the top of the rail and in no section at all. It used to sit
+       inside the first axis section, which read as if it belonged to that one axis (Joost,
+       2026-10-18) — it has always fitted every axis the chart is showing, and now it looks like a
+       chart action rather than a range control. Above the sections rather than between them so it
+       is in the same place on every screen. -->
+  <button
+    type="button"
+    class="btn-panel-accent"
+    title="Fits both axes to every crosstalk curve on the chart, live and history: the frequency range to the measured span, the dB window to the curves inside it."
+    @click="autofitAll"
+  >
+    Autofit
+  </button>
+
   <CollapsibleSection title="Crosstalk range (dB)" size="xs">
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
@@ -129,16 +143,6 @@ watch(running, (isRunning, wasRunning) => {
         />
       </label>
     </div>
-    <!-- The chart's one Autofit, in the first section rather than a scroll below the fields it
-         overwrites. -->
-    <button
-      type="button"
-      class="btn-panel-accent"
-      title="Fits both axes to every crosstalk curve on the chart, live and history: the frequency range to the measured span, the dB window to the curves inside it."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency range (Hz)" size="xs">

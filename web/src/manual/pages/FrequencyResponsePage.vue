@@ -472,9 +472,9 @@ const { showPage } = useManual()
 
     <h2>Display panels</h2>
     <p>
-      The axis windows come first, with one <strong>Autofit</strong> for the chart under the first
-      of them — it fits every axis the view is showing, frequency first — laid out the way the FFT
-      screen's are:
+      One <strong>Autofit</strong> for the chart sits at the top of the rail, above everything it
+      acts on: it fits every axis the view is showing, frequency first. The axis windows follow,
+      laid out the way the FFT screen's are:
       <strong>Gain range</strong> (or <strong>dBV range</strong>, whichever view is showing — each
       remembers its own), <strong>Frequency range (Hz)</strong>, and <strong>Delay range</strong>
       (in µs or ms, following the window's size) while a delay trace is selected. The phase has no

@@ -176,6 +176,20 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
        by MeasurementLayout's aside grid, so under the chart they flow two-wide like every other
        screen's display panel. The width is the shell's xl column, the same 16rem as every other screen. -->
   <div class="contents">
+    <!-- The chart's one Autofit, at the top of the rail and in no section at all. It used to sit
+         inside the first axis section, which read as if it belonged to that one axis (Joost,
+         2026-10-18) — it has always fitted every axis the chart is showing, and now it looks like a
+         chart action rather than a range control. Above the sections rather than between them so it
+         is in the same place on every screen. -->
+    <button
+      type="button"
+      class="btn-panel-accent"
+      title="Fits both axes to everything currently plotted: the level range to the highest and lowest point with 10 dB of headroom, and the frequency range to the full measured span."
+      @click="autofitAll"
+    >
+      Autofit
+    </button>
+
     <CollapsibleSection title="Level range" size="xs">
       <label class="tb-field" title="dBV per bin, or a noise density in dBV/√Hz (the bin's power spread over the window's noise bandwidth), optionally referred to the DUT's input by its gain. Picking the input-referred unit reveals the DUT gain field below, which also divides the Noise in nV/√Hz tile. See the manual's FFT analysis page.">
         Units
@@ -220,16 +234,6 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
           />
         </label>
       </div>
-      <!-- The chart's one Autofit. It sits in the first section rather than in Display below,
-           where it would be a scroll away from the fields it overwrites. -->
-      <button
-        type="button"
-        class="btn-panel-accent"
-        title="Fits both axes to everything currently plotted: the level range to the highest and lowest point with 10 dB of headroom, and the frequency range to the full measured span."
-        @click="autofitAll"
-      >
-        Autofit
-      </button>
     </CollapsibleSection>
 
     <CollapsibleSection title="Frequency range" size="xs">

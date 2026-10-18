@@ -531,6 +531,21 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
 </script>
 
 <template>
+  <!-- The chart's one Autofit, at the top of the rail and in no section at all. It used to sit
+       inside the first axis section, which read as if it belonged to that one axis (Joost,
+       2026-10-18) — it has always fitted every axis the chart is showing, and now it looks like a
+       chart action rather than a range control. Above the sections rather than between them so it
+       is in the same place on every screen. It also replaced four copies of itself, one
+       per projection, each in whichever section happened to come first there. -->
+  <button
+    type="button"
+    class="btn-panel-accent"
+    title="Fits every axis the chart is showing to what is drawn: the frequency window to the measured band, and then whichever value axes the projection has — the level or gain window, the plane's window, and the phase and delay windows when those curves are on."
+    @click="autofitAll"
+  >
+    Autofit
+  </button>
+
   <!-- Display first: it is the section a reader reaches for on every visit, and the axis
        ranges below it are set once and then left alone. Joost's request, 2026-09-27. -->
   <CollapsibleSection title="Display">
@@ -799,17 +814,6 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
         />
       </label>
     </div>
-    <!-- The chart's one Autofit, in the first axis section rather than a scroll below the fields
-         it overwrites. Under a projection that has no dB window this section is hidden, and the
-         same button appears in Frequency range below instead. -->
-    <button
-      type="button"
-      class="btn-panel-accent"
-      title="Fits every axis the chart is showing to what is drawn: the frequency window to the measured band, then the level window, and the phase and delay windows when those curves are on."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <!-- Nichols' own value axis. Its *phase* axis has no section, and that is deliberate: unwrapped
@@ -851,14 +855,6 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
         then sit off the plot.
       </p>
     </template>
-    <button
-      type="button"
-      class="btn-panel-accent"
-      title="Fits the frequency window to the measured band, and the gain window to the curve inside it."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <!-- The map's own window, in hertz on both axes like the chart's labels: σ/2π across, jω/2π up. -->
@@ -916,14 +912,6 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
         damping is read from. Keep them equal, or use Auto, when reading ζ off the picture.
       </p>
     </template>
-    <button
-      type="button"
-      class="btn-panel-accent"
-      title="Fits the frequency window to the measured band, and the plane's window to the fitted roots."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection title="Frequency range (Hz)" size="xs">
@@ -950,15 +938,6 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
     <!-- The chart's one Autofit lives in its first axis section; under Bode, Nichols and the
          pole-zero map that is a section above this one, and this is where the projections with no
          value axis of their own (Nyquist, |H(s)|) get it. -->
-    <button
-      v-if="!bodeShowing && !nicholsShowing && !poleZeroShowing"
-      type="button"
-      class="btn-panel-accent"
-      title="Fits the frequency window to the measured band. This projection has no other axis to fit."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than

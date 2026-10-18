@@ -284,6 +284,23 @@ const referenceLabel = computed(() => {
 </script>
 
 <template>
+  <!-- The chart's one Autofit, at the top of the rail and in no section at all. It used to sit
+       inside the first axis section, which read as if it belonged to that one axis (Joost,
+       2026-10-18) — it has always fitted every axis the chart is showing, and now it looks like a
+       chart action rather than a range control. Above the sections rather than between them so it
+       is in the same place on every screen. Hidden under the two decay surfaces, which have no axis of
+       their own to fit. -->
+  <button
+    v-if="!isDecayView"
+    type="button"
+    class="btn-panel-accent"
+    :disabled="!canAutofit"
+    :title="autofitTitle"
+    @click="autofit"
+  >
+    Autofit
+  </button>
+
   <CollapsibleSection title="Display">
     <label class="tb-field">
       View
@@ -585,16 +602,6 @@ const referenceLabel = computed(() => {
       </template>
     </template>
 
-    <button
-      v-if="!isDecayView"
-      type="button"
-      :disabled="!canAutofit"
-      :title="autofitTitle"
-      class="rounded border px-2 py-1 text-xs disabled:opacity-50 btn-action"
-      @click="autofit"
-    >
-      Autofit
-    </button>
 
     <div v-if="!isDecayView && (view !== 'Impulse' || normalisedImpulse)" class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">

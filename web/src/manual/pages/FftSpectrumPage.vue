@@ -653,7 +653,7 @@ const { showPage } = useManual()
     <h2>Display panel</h2>
     <p>
       <strong>Level range</strong> and <strong>Frequency range</strong> set the spectrum's window.
-      One <strong>Autofit</strong>, under the level range, fits both: the frequency axis to 10 Hz and
+      One <strong>Autofit</strong>, at the top of the rail above both, fits both: the frequency axis to 10 Hz and
       just past Nyquist for the current sample rate, and the level axis to the highest and lowest
       point plotted with 10 dB of headroom. The two frequency lists overlap across the whole band —
       <strong>From</strong> runs 5 Hz to 50 kHz and <strong>To</strong> 10 Hz to 100 kHz — so a

@@ -398,6 +398,20 @@ function swatch(key: SweepTraceColorKey): string {
 </script>
 
 <template>
+  <!-- The chart's one Autofit, at the top of the rail and in no section at all. It used to sit
+       inside the first axis section, which read as if it belonged to that one axis (Joost,
+       2026-10-18) — it has always fitted every axis the chart is showing, and now it looks like a
+       chart action rather than a range control. Above the sections rather than between them so it
+       is in the same place on every screen. -->
+  <button
+    type="button"
+    class="btn-panel-accent"
+    title="Fits both axes to every currently-checked trace: the sweep axis to the measured span, and the distortion axis to the highest and lowest value in it. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
+    @click="autofitAll"
+  >
+    Autofit
+  </button>
+
   <CollapsibleSection
     :title="unit === 'db' ? 'dB range' : 'Distortion range'"
     :suffix="unit === 'db' ? undefined : '(%)'"
@@ -446,16 +460,6 @@ function swatch(key: SweepTraceColorKey): string {
         </label>
       </div>
     </template>
-    <!-- The chart's one Autofit, in the first section rather than a scroll below the fields it
-         overwrites. -->
-    <button
-      type="button"
-      class="btn-panel-accent"
-      title="Fits both axes to every currently-checked trace: the sweep axis to the measured span, and the distortion axis to the highest and lowest value in it. Percent snaps to the enclosing dropdown preset; dB rounds out to the nearest 10 dB."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection :title="`${sweepXLabel(xAxis)} range`" :suffix="`(${sweepXUnit(xAxis)})`">

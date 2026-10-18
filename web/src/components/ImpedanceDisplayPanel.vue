@@ -283,6 +283,20 @@ watch(
 </script>
 
 <template>
+  <!-- The chart's one Autofit, at the top of the rail and in no section at all. It used to sit
+       inside the first axis section, which read as if it belonged to that one axis (Joost,
+       2026-10-18) — it has always fitted every axis the chart is showing, and now it looks like a
+       chart action rather than a range control. Above the sections rather than between them so it
+       is in the same place on every screen. -->
+  <button
+    type="button"
+    class="btn-panel-accent"
+    title="Fits every axis to what is drawn: the frequency window to the measured band, then the impedance and phase axes to the curves inside it (including the short standard when it is shown)."
+    @click="autofitAll"
+  >
+    Autofit
+  </button>
+
   <CollapsibleSection title="Display" size="xs">
     <label class="tb-field">
       Chart
@@ -364,14 +378,6 @@ watch(
     </div>
     <!-- The chart's one Autofit: impedance, phase and the frequency window together. It sits in
          the first axis section rather than a scroll below the fields it overwrites. -->
-    <button
-      type="button"
-      class="rounded border px-2 py-1 text-xs btn-action"
-      title="Fits every axis to what is drawn: the frequency window to the measured band, then the impedance and phase axes to the curves inside it (including the short standard when it is shown)."
-      @click="autofitAll"
-    >
-      Autofit
-    </button>
   </CollapsibleSection>
 
   <CollapsibleSection v-if="view === 'Bode' && showPhase" title="Phase axis" size="xs">

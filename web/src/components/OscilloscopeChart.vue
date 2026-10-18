@@ -31,6 +31,7 @@ import {
   cssAnnotationPlot,
   finishBoxGesture,
   syncBoxDragMode,
+  X_ONLY_DRAG,
   type UplotAnnotationAxes,
 } from '../charts/uplotAnnotations'
 import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
@@ -160,11 +161,11 @@ const annotationOverlay = useAnnotationOverlay({
   surface: () => plot?.over ?? null,
   overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
   redraw: () => plot?.redraw(),
-  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value, X_ONLY_DRAG),
 })
 
 function onWindowMouseUp() {
-  finishBoxGesture(plot, annotationOverlay)
+  finishBoxGesture(plot, annotationOverlay, X_ONLY_DRAG)
 }
 
 function onWindowKeyDown(event: KeyboardEvent) {
@@ -191,7 +192,7 @@ function ensurePlot() {
 
   // Click-to-annotate, and the drag mode an armed Box needs -- re-applied on every rebuild.
   attachAnnotationListeners(plot, annotationOverlay)
-  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value, X_ONLY_DRAG)
   plotIsDark = darkQuery.matches
   plotIsResidual = residualMode.value
 }

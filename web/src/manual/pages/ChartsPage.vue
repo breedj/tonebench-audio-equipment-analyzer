@@ -37,9 +37,10 @@ import SettingsTable from '../components/SettingsTable.vue'
 
     <h2>Zooming</h2>
     <p>
-      <strong>Drag a box across the plot to zoom into it.</strong> On the distortion, frequency
-      response and Nyquist/Nichols charts the box zooms both axes; on the spectrum chart it zooms
-      the frequency axis only, since its level axis is set from the display rail.
+      <strong>Drag a box across the plot to zoom into it</strong> — both axes, on every chart that
+      zooms. A drag that stays within about a dozen pixels of vertical is read as a frequency-only
+      zoom and keeps the whole level axis, and one within a dozen pixels of horizontal zooms the
+      level axis alone; anything wider than that is a box and zooms both.
     </p>
     <p>
       <strong>Double-click the plot to zoom back out.</strong> While a chart is zoomed, three

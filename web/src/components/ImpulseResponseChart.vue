@@ -23,6 +23,7 @@ import {
   cssAnnotationPlot,
   finishBoxGesture,
   syncBoxDragMode,
+  type BoxDragResting,
   type UplotAnnotationAxes,
 } from '../charts/uplotAnnotations'
 import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
@@ -288,6 +289,12 @@ const { zoomed, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, 
 )
 
 /** "Set axis" hands the window on screen up — the display panel's boxes are the parent's. */
+/**
+ * This chart's own drag-zoom, and what the Box gesture puts back when it is disarmed — one constant
+ * so `cursor.drag` and `syncBoxDragMode` cannot disagree. See BoxDragResting.
+ */
+const DRAG_RESTING: BoxDragResting = { y: true, uni: 12 }
+
 const emit = defineEmits<{ axisWindow: [window: ZoomWindow] }>()
 
 /** "Set axis": hands the window on screen up, for the display panel's own boxes to take it on. */
@@ -358,7 +365,7 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
     ],
     // Both axes, because a reflection is read off the time axis and its level off the other, and
     // demanding a pixel-accurate one-axis drag to get either would make both awkward.
-    cursor: interactive ? { drag: { x: true, y: true, uni: 12 } } : { show: false },
+    cursor: interactive ? { drag: { x: true, ...DRAG_RESTING } } : { show: false },
     legend: { show: false },
     // Fires on setData too (both scales are auto:false, so setData re-applies the same window),
     // hence the change gate inside noteScale.
@@ -443,7 +450,7 @@ function rebuild() {
   // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
   // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
   attachAnnotationListeners(plot.value, annotationOverlay)
-  syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value)
+  syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value, DRAG_RESTING)
   // uPlot has no double-click-to-reset of its own once drag zoom is on.
   plot.value.over.addEventListener('dblclick', resetZoom)
   refresh()
@@ -503,11 +510,11 @@ const annotationOverlay = useAnnotationOverlay({
   surface: () => plot.value?.over ?? null,
   overlayRect: () => (plot.value ? annotationOverlayRect(plot.value) : null),
   redraw: () => plot.value?.redraw(),
-  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value),
+  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value, DRAG_RESTING),
 })
 
 function onWindowMouseUp() {
-  finishBoxGesture(plot.value, annotationOverlay)
+  finishBoxGesture(plot.value, annotationOverlay, DRAG_RESTING)
 }
 
 function onWindowKeyDown(event: KeyboardEvent) {

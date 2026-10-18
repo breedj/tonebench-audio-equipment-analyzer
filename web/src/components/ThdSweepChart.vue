@@ -11,6 +11,7 @@ import {
   cssAnnotationPlot,
   finishBoxGesture,
   syncBoxDragMode,
+  type BoxDragResting,
   type UplotAnnotationAxes,
 } from '../charts/uplotAnnotations'
 import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
@@ -203,6 +204,12 @@ function familyOf(overlay: OverlayEntry): SweepTraceFamily {
  * nearest x in the data, so a click lands on the nearest measurement by construction and the line
  * below is drawn through a point rather than between two. Null unpins.</p>
  */
+/**
+ * This chart's own drag-zoom, and what the Box gesture puts back when it is disarmed — one constant
+ * so `cursor.drag` and `syncBoxDragMode` cannot disagree. See BoxDragResting.
+ */
+const DRAG_RESTING: BoxDragResting = { y: true, uni: 12 }
+
 const emit = defineEmits<{ cursorX: [x: number | null]; cursorPin: [x: number | null]; axisWindow: [window: ZoomWindow] }>()
 
 /** "Set axis": hands the window on screen up, for the display panel's own boxes to take it on. */
@@ -713,7 +720,7 @@ function buildOptions(width: number, height: number, dark: boolean, interactive:
           // around a rise in THD), but a distortion window matters just as much when four harmonic
           // traces sit within a few dB of each other, and demanding a pixel-accurate horizontal drag
           // to get one without the other would make both awkward.
-          drag: { x: true, y: true, uni: 12 },
+          drag: { x: true, ...DRAG_RESTING },
         }
       : { show: false },
     // Replaced by the SVG legend in this component's own template. uPlot's marker is a CSS border
@@ -966,7 +973,7 @@ function ensurePlot() {
   // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
   // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
   attachAnnotationListeners(plot, annotationOverlay)
-  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value, DRAG_RESTING)
 }
 
 /**
@@ -1004,11 +1011,11 @@ const annotationOverlay = useAnnotationOverlay({
   surface: () => plot?.over ?? null,
   overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
   redraw: () => plot?.redraw(),
-  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value, DRAG_RESTING),
 })
 
 function onWindowMouseUp() {
-  finishBoxGesture(plot, annotationOverlay)
+  finishBoxGesture(plot, annotationOverlay, DRAG_RESTING)
 }
 
 function onWindowKeyDown(event: KeyboardEvent) {

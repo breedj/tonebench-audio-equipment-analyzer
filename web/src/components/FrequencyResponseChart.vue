@@ -10,6 +10,7 @@ import {
   cssAnnotationPlot,
   finishBoxGesture,
   syncBoxDragMode,
+  type BoxDragResting,
   type UplotAnnotationAxes,
 } from '../charts/uplotAnnotations'
 import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
@@ -141,6 +142,12 @@ const props = withDefaults(defineProps<{
  * reaching for a preview chart's expand button, or simply looking away, no longer takes the reading
  * with it.</p>
  */
+/**
+ * This chart's own drag-zoom, and what the Box gesture puts back when it is disarmed — one constant
+ * so `cursor.drag` and `syncBoxDragMode` cannot disagree. See BoxDragResting.
+ */
+const DRAG_RESTING: BoxDragResting = { y: true, uni: 12 }
+
 const emit = defineEmits<{ cursorPin: [freqHz: number | null]; axisWindow: [window: ZoomWindow] }>()
 
 function clearPin() {
@@ -1119,7 +1126,7 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
           // Frequency-only is the common gesture (narrowing onto a corner), but a dB window matters
           // just as much on a response that is flat to a fraction of a dB, and demanding a
           // pixel-accurate horizontal drag to get one without the other would make both awkward.
-          drag: { x: true, y: true, uni: 12 },
+          drag: { x: true, ...DRAG_RESTING },
         }
       : { show: false },
     // Same reason as the other charts: uPlot's own legend doubles as a click-to-hide control, which
@@ -1195,12 +1202,12 @@ const annotationOverlay = useAnnotationOverlay({
   surface: () => plot.value?.over ?? null,
   overlayRect: () => (plot.value ? annotationOverlayRect(plot.value) : null),
   redraw: () => plot.value?.redraw(),
-  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value),
+  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value, DRAG_RESTING),
 })
 
 /** Finishes a box gesture -- window, bubble phase, for the reasons in finishBoxGesture. */
 function onWindowMouseUp() {
-  finishBoxGesture(plot.value, annotationOverlay)
+  finishBoxGesture(plot.value, annotationOverlay, DRAG_RESTING)
 }
 
 function onWindowKeyDown(event: KeyboardEvent) {
@@ -1409,7 +1416,7 @@ function rebuild() {
   // Click-to-annotate, and the drag mode an armed Box needs. Re-applied on every rebuild: a fresh
   // instance carries uPlot's own defaults, so an armed chart would silently go back to zooming.
   attachAnnotationListeners(u, annotationOverlay)
-  syncBoxDragMode(u, annotationOverlay.armedForBox.value)
+  syncBoxDragMode(u, annotationOverlay.armedForBox.value, DRAG_RESTING)
 
   // Safe here, unlike the sweep chart's deferred restore: the data is passed to the constructor, so
   // no setData follows to clobber the scales.

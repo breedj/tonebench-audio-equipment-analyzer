@@ -24,6 +24,7 @@ import {
   cssAnnotationPlot,
   finishBoxGesture,
   syncBoxDragMode,
+  X_ONLY_DRAG,
   type UplotAnnotationAxes,
 } from '../charts/uplotAnnotations'
 import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
@@ -138,11 +139,11 @@ const annotationOverlay = useAnnotationOverlay({
   surface: () => plot?.over ?? null,
   overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
   redraw: () => plot?.redraw(),
-  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value, X_ONLY_DRAG),
 })
 
 function onWindowMouseUp() {
-  finishBoxGesture(plot, annotationOverlay)
+  finishBoxGesture(plot, annotationOverlay, X_ONLY_DRAG)
 }
 
 function onWindowKeyDown(event: KeyboardEvent) {
@@ -416,7 +417,7 @@ function ensurePlot(span: { min: number; max: number }) {
   // pointer rather than from a cursor index -- which the composable's readAt being optional is
   // exactly for.
   attachAnnotationListeners(plot, annotationOverlay)
-  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value, X_ONLY_DRAG)
   plotIsDark = isDark.value
   lastYSpanS = -1
   lastXSpan = { min: span.min, max: span.max }

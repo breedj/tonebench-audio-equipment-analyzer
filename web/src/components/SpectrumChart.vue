@@ -39,6 +39,7 @@ import {
   cssAnnotationPlot,
   finishBoxGesture,
   syncBoxDragMode,
+  type BoxDragResting,
   type UplotAnnotationAxes,
 } from '../charts/uplotAnnotations'
 import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
@@ -64,6 +65,12 @@ const props = defineProps<{
    */
   weightingLabel?: string | null
 }>()
+
+/**
+ * This chart's own drag-zoom, and what the Box gesture puts back when it is disarmed — one constant
+ * so `cursor.drag` and `syncBoxDragMode` cannot disagree. See BoxDragResting.
+ */
+const DRAG_RESTING: BoxDragResting = { y: true, uni: 12 }
 
 const emit = defineEmits<{
   /** The frequency range now on screen, or null when zoomed all the way out. */
@@ -608,7 +615,7 @@ const annotationOverlay = useAnnotationOverlay({
   surface: () => plot?.over ?? null,
   overlayRect: () => (plot ? annotationOverlayRect(plot) : null),
   redraw: () => plot?.redraw(),
-  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value),
+  onArmedChange: () => syncBoxDragMode(plot, annotationOverlay.armedForBox.value, DRAG_RESTING),
   readAt: () => readAnnotationAt(),
 })
 
@@ -799,7 +806,12 @@ function buildOptions(
       x: { time: false, distr: 3, log: 10, auto: false, range: (_u, dataMin, dataMax) => [dataMin ?? xFrom.value, dataMax ?? xTo.value] },
       // Initial range only — the dBV range fields in the display-options column (ChartDisplayPanel)
       // adjust it live afterward via the watcher below, without rebuilding the plot.
-      y: { range: [yBottom.value, yTop.value] },
+      // The arguments are passed through rather than the panel's window always handed back, which
+      // is what lets a drag-zoom of the level axis survive: uPlot re-derives the scale through this
+      // callback on the very commit carrying the drag's own window, so a callback that ignored them
+      // fed the request back in and undid the zoom as it was made. They are null only when nothing
+      // is pending, which is where the panel's dBV boxes seed the axis.
+      y: { auto: false, range: (_u, min, max) => [min ?? yBottom.value, max ?? yTop.value] },
     },
     axes: [
       {
@@ -825,13 +837,14 @@ function buildOptions(
     cursor: interactive
       ? {
           points: { show: false },
-          // uPlot's own defaults already give exactly this, but the box gesture *depends* on the
-          // resting state being x-only -- syncBoxDragMode flips `y` and `setScale` and must have
-          // something known to flip back to. A silent dependence on a vendored library's defaults
-          // is what these comments exist to prevent. `uni` is deliberately left unset: its default
-          // is null, which is what makes an armed drag sweep a true rectangle rather than
-          // collapsing to one axis the way the response and impedance charts' `uni: 12` does.
-          drag: { x: true, y: false },
+          // Both axes since 2026-10-18 (Joost: "make the level axis draggable too"): a spectrum is
+          // read as much down the level axis as along the frequency one, and the dBV boxes in the
+          // rail were the only way to narrow it. `uni` makes a drag unidirectional unless it is a
+          // real box -- under 12 px in one direction zooms the other across its full span -- so the
+          // frequency-only gesture this chart has always had still costs nothing. The armed box
+          // gesture is unaffected: syncBoxDragMode turns `uni` off while it is armed, so a region
+          // still sweeps a true rectangle, and puts DRAG_RESTING back afterwards.
+          drag: { x: true, ...DRAG_RESTING },
         }
       : { show: false },
     // uPlot's built-in legend doubles as a click-to-hide-series control — that's what caused a
@@ -968,7 +981,7 @@ function ensurePlot(nyquistHz: number, overlays: OverlayEntry[]) {
 
   // A rebuild (theme, overlay count, style key) hands back a fresh instance carrying uPlot's own
   // defaults, so an armed chart would silently go back to zooming on the next drag.
-  syncBoxDragMode(plot, annotationOverlay.armedForBox.value)
+  syncBoxDragMode(plot, annotationOverlay.armedForBox.value, DRAG_RESTING)
 
   pendingZoomRestore = savedScale && savedScale.min != null && savedScale.max != null ? { min: savedScale.min, max: savedScale.max } : null
 
@@ -1017,7 +1030,7 @@ function noteScaleIfReady(u: uPlot) {
  * this component that owns the uPlot instance.
  */
 function onWindowMouseUp() {
-  finishBoxGesture(plot, annotationOverlay)
+  finishBoxGesture(plot, annotationOverlay, DRAG_RESTING)
 }
 
 function nullFill(n: number): (number | null)[] {

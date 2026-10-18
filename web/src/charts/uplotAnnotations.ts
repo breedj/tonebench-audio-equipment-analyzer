@@ -160,19 +160,52 @@ export function annotationsPlugin(
 }
 
 /**
+ * A chart's own drag-zoom, as it is when no Box is armed — what {@link syncBoxDragMode} puts back.
+ *
+ * <p>Every chart that both annotates and zooms declares one of these and spreads it into its
+ * `cursor.drag`, so the two can only ever say the same thing. That matters because the switch below
+ * mutates the live cursor: anything it does not restore stays as the gesture left it, for the life
+ * of the plot.</p>
+ */
+export interface BoxDragResting {
+  /** Whether a drag zooms the value axis as well as the x one. */
+  y: boolean
+  /**
+   * uPlot's unidirectional threshold in pixels: under it in one direction, the drag zooms the other
+   * axis across its full span. Absent makes every drag a true rectangle (uPlot's own default).
+   */
+  uni?: number
+}
+
+/** x only, which is uPlot's own default — the resting state for a chart that does not zoom its value axis. */
+export const X_ONLY_DRAG: BoxDragResting = { y: false }
+
+/**
  * Turns uPlot's own drag-selection into the region gesture while a Box is armed, by mutating the live
  * cursor rather than adding an input layer of our own. See the module remarks for why it is safe and
  * why it is not done from the `setSelect` hook.
  *
  * <p><b>Must be re-applied after every rebuild</b> — a new instance carries uPlot's defaults, so
  * arming and then switching theme would silently turn the gesture back into a zoom.</p>
+ *
+ * <p><b>`resting` is not optional, and the bug it exists for is instructive</b> (found 2026-10-18,
+ * chasing "the level axis does not zoom"): this used to write `drag.y = armedForBox`, i.e. **false**
+ * whenever nothing was armed. That is right for a chart whose resting state is x-only, which is
+ * what it was written for — and it silently turned the value axis off on the five charts that
+ * declare `y: true`, at mount and again at every rebuild. They had been drag-zoomable on one axis
+ * ever since, with their own `drag: { y: true }` reading as if they were not.</p>
+ *
+ * <p>While armed the gesture is a true rectangle: `y` on and `uni` off, whatever the chart rests
+ * at — a `uni` left in place collapses a nearly-straight box drag onto one axis, which is exactly
+ * what a region must not do.</p>
  */
-export function syncBoxDragMode(u: uPlot | null | undefined, armedForBox: boolean) {
+export function syncBoxDragMode(u: uPlot | null | undefined, armedForBox: boolean, resting: BoxDragResting) {
   // uPlot always merges its own defaults, so `drag` is there at runtime; the typings say it may not
   // be, and mutating the object it hands back is the whole mechanism -- see above.
   const drag = u?.cursor.drag
   if (!u || !drag) return
-  drag.y = armedForBox
+  drag.y = armedForBox ? true : resting.y
+  drag.uni = armedForBox ? undefined : resting.uni
   drag.setScale = !armedForBox
   // With setScale off uPlot never calls its own hideSelect(), so the rubber band stays painted until
   // someone clears it.
@@ -188,7 +221,11 @@ export function syncBoxDragMode(u: uPlot | null | undefined, armedForBox: boolea
  * test. It also fires when the button comes up outside the plot, which a listener on `over` would
  * miss.
  */
-export function finishBoxGesture(u: uPlot | null | undefined, controller: AnnotationController) {
+export function finishBoxGesture(
+  u: uPlot | null | undefined,
+  controller: AnnotationController,
+  resting: BoxDragResting,
+) {
   if (!controller.inBoxGesture()) return
   controller.endBoxGesture()
   if (!u) return
@@ -197,7 +234,7 @@ export function finishBoxGesture(u: uPlot | null | undefined, controller: Annota
     controller.placeBoxFrom({ left: sel.left, top: sel.top, width: sel.width, height: sel.height })
   }
   u.setSelect(ZERO_SELECT, false)
-  syncBoxDragMode(u, controller.armedForBox.value)
+  syncBoxDragMode(u, controller.armedForBox.value, resting)
 }
 
 /**

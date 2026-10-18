@@ -186,14 +186,7 @@ public sealed class ImdSweepRunner(
             }
             else if (outcome.Cleared)
             {
-                _points = [];
-                _phase = ThdSweepPhase.Idle;
-                _index = 0;
-                _total = 0;
-                _currentLevelVolt = 0.0;
-                _error = null;
-                _stopReason = null;
-                _lastRequest = null;
+                ResetLiveState();
             }
 
             return Status;
@@ -204,6 +197,48 @@ public sealed class ImdSweepRunner(
     public string? Owner
     {
         get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>
+    /// Drops everything this runner holds for <paramref name="owner"/>, because that measurement
+    /// has stopped existing — the trash's permanent delete and Empty trash. See
+    /// <see cref="RunParking{TState}.Forget"/> for why the live slot is released too and not just
+    /// the parked entry.
+    ///
+    /// <para>A run still going is left alone, owner and all. Nothing is parked under the live
+    /// owner — <see cref="RunParking{TState}.Switch"/> takes the arriving entry out as it installs
+    /// it — so there is nothing to drop, and pulling the state out from under the pass still
+    /// writing it would be worse than an owner the next switch replaces anyway.</para>
+    /// </summary>
+    public void ForgetOwner(string owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running && _parking.Owner == owner)
+                return;
+
+            if (_parking.Forget(owner))
+                ResetLiveState();
+        }
+    }
+
+    /// <summary>
+    /// Empties the live slot: what <see cref="SwitchOwner"/> leaves behind for a measurement that
+    /// has nothing parked, and what <see cref="ForgetOwner"/> leaves behind for one that has been
+    /// destroyed. Everything the park carries is reset, which is a little more than
+    /// <see cref="Clear"/> empties — a measurement that has never run must not read back the
+    /// previous one's record length on its status line. Call under <c>_stateLock</c>.
+    /// </summary>
+    private void ResetLiveState()
+    {
+        _points = [];
+        _phase = ThdSweepPhase.Idle;
+        _index = 0;
+        _total = 0;
+        _currentLevelVolt = 0.0;
+        _error = null;
+        _stopReason = null;
+        _lastRequest = null;
     }
 
     /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus the as-run request.</summary>

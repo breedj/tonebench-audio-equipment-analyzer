@@ -1344,6 +1344,66 @@ public class FrequencyResponseRunnerTests
         Assert.Equal(measured, harness.Runner.SwitchOwner("1:1").Traces.Count);
     }
 
+    [Fact]
+    public async Task ADestroyedMeasurementsParkedRun_IsForgotten()
+    {
+        // A permanent delete from the trash: nothing can select 1:1 again, so holding its run is
+        // holding three arrays of FftSize/2 doubles for nobody.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        harness.Runner.SwitchOwner("1:2");
+
+        harness.Runner.ForgetOwner("1:1");
+
+        Assert.Empty(harness.Runner.SwitchOwner("1:1").Traces);
+    }
+
+    [Fact]
+    public async Task ForgettingTheMeasurementThatOwnsTheRun_EmptiesIt_SoTheNextOneCannotAdoptIt()
+    {
+        // The half that is about correctness rather than memory: an unowned run is adopted by the
+        // next measurement to arrive, so a destroyed measurement's curves left in place would be
+        // handed to whoever was selected next -- and Save would store them there.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        AssertFinished(await AwaitCompletionAsync(harness.Runner));
+        Assert.NotEmpty(harness.Runner.Status.Traces);
+
+        harness.Runner.ForgetOwner("1:1");
+
+        Assert.Null(harness.Runner.Owner);
+        Assert.Empty(harness.Runner.Status.Traces);
+        Assert.Null(harness.Runner.LastRequest);
+        Assert.Empty(harness.Runner.SwitchOwner("1:2").Traces);
+    }
+
+    [Fact]
+    public async Task ForgettingAMeasurementWhoseRunIsStillGoing_LeavesTheRunAlone()
+    {
+        // Unreachable from the app -- a measurement has to be trashed before it can be destroyed,
+        // and the run would have been cancelled -- but pulling the state out from under the pass
+        // still writing it is the one thing worse than a stale owner.
+        var harness = await CreateAsync();
+        harness.Runner.SwitchOwner("1:1");
+
+        await harness.Runner.StartAsync(Request(continuous: true), CancellationToken.None);
+        try
+        {
+            harness.Runner.ForgetOwner("1:1");
+            Assert.Equal("1:1", harness.Runner.Owner);
+            Assert.True(harness.Runner.Running);
+        }
+        finally
+        {
+            await harness.Runner.CancelAsync();
+        }
+    }
+
     /// <summary>
     /// Wraps a simulated device and low-passes its left channel, so a test has a DUT with a corner
     /// the measurement is supposed to find. Only the left input is filtered — the right stays the

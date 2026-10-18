@@ -181,6 +181,7 @@ import {
   liveScreenStore,
   liveStoreForKind,
   releaseLive,
+  releaseOwners,
   type LiveOwners,
   type LiveStore,
 } from './measurements/liveOwner'
@@ -447,6 +448,39 @@ watch(currentTypeId, (id) => {
 async function onTrashRestored() {
   if (currentProjectId.value !== null) await loadTypes(currentProjectId.value)
   await loadMeasurements()
+}
+
+/**
+ * A permanent delete destroyed these measurements, so nothing may go on holding a run for them.
+ *
+ * <p>Two places hold one: the <b>server</b> parks a run per measurement in each of the eight
+ * runners and a retained snapshot beside them (see RunParking), and this file keeps each
+ * measurement's live FFT display in {@link fftDisplays}. Both are keyed by the owner, which is why
+ * this is App.vue's job and not the trash view's — the key needs the project id, and `fftDisplays`
+ * lives here.</p>
+ *
+ * <p>The park is the smaller half of the reason. The larger one is that a destroyed measurement
+ * may still <i>own</i> a live slot, and an owned slot is left alone while an <b>unowned</b> one is
+ * adopted by the next measurement to arrive: left as it was, the run of a measurement that no
+ * longer exists would be handed to whichever measurement was selected next, and Save would store
+ * it there. See RunParking.Forget.</p>
+ *
+ * <p>No reload follows, unlike a restore: these rows left the sidebar and the history when they
+ * were trashed, and destroying them changes nothing either list is showing. A failure is
+ * swallowed — the measurements are gone whatever this call did, and a stale park costs memory and
+ * an adoption the next switch corrects, which is not worth an error banner over a delete that
+ * worked.</p>
+ */
+async function onTrashPurged(measurementTypeIds: number[]) {
+  const owners = measurementTypeIds
+    .map((id) => liveOwnerKey(currentProjectId.value, id))
+    .filter((key): key is string => key !== null)
+  if (owners.length === 0) return
+
+  for (const owner of owners) fftDisplays.delete(owner)
+  liveOwners.value = releaseOwners(liveOwners.value, owners)
+
+  await api.forgetRunOwners(owners).catch(() => undefined)
 }
 // Configuration ▸ General ▸ Autosave — see the isCurrentTypeDirty watcher further down.
 const { autosaveEnabled, load: loadAutosave } = useAutosave()
@@ -4032,7 +4066,12 @@ onBeforeUnmount(() => stopLoadPolling?.())
              replaces both. It deliberately does *not* change the selection: no selectType, so none
              of the live-state machinery below runs, and Close lands back on the same measurement
              with its curves and staged settings intact. -->
-        <TrashView v-if="trashOpen" @close="closeTrash" @restored="onTrashRestored" />
+        <TrashView
+          v-if="trashOpen"
+          @close="closeTrash"
+          @restored="onTrashRestored"
+          @purged="onTrashPurged"
+        />
 
         <template v-else-if="currentTypeId !== null">
           <!-- THE MEASUREMENT BAR: the name of what is selected, everything that can be done to it,

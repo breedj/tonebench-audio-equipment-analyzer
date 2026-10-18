@@ -224,4 +224,57 @@ public class SpectrumRetentionOwnerTests
             Assert.Equal(1000.0 * i, RetainedToneHz(pipeline), BinHz);
         }
     }
+
+    [Fact]
+    public async Task ADestroyedMeasurementsParkedCapture_IsForgotten()
+    {
+        // A permanent delete from the trash. The capture is parked under a measurement nothing can
+        // select again, and a parked snapshot is the whole full-resolution record -- see
+        // MaxParkedRetention for what that costs.
+        var pipeline = NewPipeline();
+        pipeline.SwitchRetentionOwner("1:1");
+        await CaptureAsync(pipeline, 1000.0);
+        pipeline.SwitchRetentionOwner("1:2");
+
+        Assert.False(pipeline.ForgetRetentionOwner("1:1"));
+
+        // Back to 1:1 and there is nothing of its own to adopt -- whatever is in the slot now is
+        // 1:2's, which is empty.
+        pipeline.SwitchRetentionOwner("1:1");
+        Assert.Empty(pipeline.LatestSnapshots());
+    }
+
+    [Fact]
+    public async Task ForgettingTheLiveOwner_EmptiesTheSlot_SoTheNextMeasurementCannotAdoptIt()
+    {
+        // The half that is about correctness rather than memory: an unowned slot is adopted by the
+        // next measurement to arrive, and Save writes this snapshot -- so a destroyed
+        // measurement's capture left in place would be saved under whoever was selected next.
+        var pipeline = NewPipeline();
+        pipeline.SwitchRetentionOwner("1:1");
+        await CaptureAsync(pipeline, 1000.0);
+        Assert.NotEmpty(pipeline.LatestSnapshots());
+
+        Assert.True(pipeline.ForgetRetentionOwner("1:1"));
+
+        Assert.Null(pipeline.RetentionOwner);
+        Assert.Empty(pipeline.LatestSnapshots());
+
+        pipeline.SwitchRetentionOwner("1:2");
+        Assert.Empty(pipeline.LatestSnapshots());
+    }
+
+    [Fact]
+    public async Task ForgettingAMeasurementThatWasNeverOnScreen_LeavesEverythingAlone()
+    {
+        // The trash sends every measurement it destroyed, and most will never have been run.
+        var pipeline = NewPipeline();
+        pipeline.SwitchRetentionOwner("1:1");
+        await CaptureAsync(pipeline, 1000.0);
+
+        Assert.False(pipeline.ForgetRetentionOwner("1:99"));
+
+        Assert.Equal("1:1", pipeline.RetentionOwner);
+        Assert.Equal(1000.0, RetainedToneHz(pipeline), BinHz);
+    }
 }

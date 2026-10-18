@@ -5,6 +5,7 @@ import {
   emptyTrashConfirmation,
   toTrashGroups,
   trashCount,
+  trashedMeasurementTypeIds,
 } from './trash'
 
 function type(over: Partial<TrashTypeEntry> = {}): TrashTypeEntry {
@@ -156,5 +157,40 @@ describe('the permanent-delete confirmations', () => {
     expect(single.message).toContain('"run 3"')
     expect(single.message).not.toContain('Every result saved under it')
     expect(single.message).toContain('cannot be undone')
+  })
+})
+
+describe('trashedMeasurementTypeIds', () => {
+  it('names the measurements an empty would destroy, so their parked runs can be dropped', () => {
+    const groups = toTrashGroups({
+      types: [type({ measurementTypeId: 4 }), type({ measurementTypeId: 7, name: 'Resp' })],
+      totalCount: 2,
+    })
+
+    expect(trashedMeasurementTypeIds(groups)).toEqual([4, 7])
+  })
+
+  it('leaves out a measurement that is still there and only has trashed results', () => {
+    // The whole rule. That group is a header, not an item: emptying takes its results and leaves
+    // the measurement, so naming it would throw away the live run of a measurement the user can
+    // still select.
+    const groups = toTrashGroups({
+      types: [
+        type({ measurementTypeId: 4, deletedUtc: null, results: [result(1)] }),
+        type({ measurementTypeId: 7 }),
+      ],
+      totalCount: 2,
+    })
+
+    expect(trashedMeasurementTypeIds(groups)).toEqual([7])
+  })
+
+  it('is empty for a trash holding nothing but results', () => {
+    const groups = toTrashGroups({
+      types: [type({ measurementTypeId: 4, deletedUtc: null, results: [result(1)] })],
+      totalCount: 1,
+    })
+
+    expect(trashedMeasurementTypeIds(groups)).toEqual([])
   })
 })

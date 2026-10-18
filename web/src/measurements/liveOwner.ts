@@ -150,6 +150,23 @@ export function foreignLiveStores(
   return out
 }
 
+/**
+ * Forgets every store held by one of `destroyed` — measurements that have stopped existing, which
+ * today means a permanent delete from the trash.
+ *
+ * <p>By owner rather than by store, which is the difference from {@link releaseLive}: there a
+ * known store is released whoever holds it, and here a known owner is released from whichever
+ * stores hold it. A destroyed measurement may be in any of them, or in none.</p>
+ */
+export function releaseOwners(owners: LiveOwners, destroyed: readonly string[]): LiveOwners {
+  const gone = new Set(destroyed)
+  const next: LiveOwners = {}
+  for (const [store, owner] of Object.entries(owners) as [LiveStore, string][]) {
+    if (!gone.has(owner)) next[store] = owner
+  }
+  return next
+}
+
 /** Forgets the owners of the stores just discarded, so the next switch does not discard them twice. */
 export function releaseLive(owners: LiveOwners, stores: readonly LiveStore[]): LiveOwners {
   if (stores.length === 0) return owners

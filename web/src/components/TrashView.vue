@@ -3,7 +3,13 @@ import { onMounted, ref, watch } from 'vue'
 import { useTrash } from '../composables/useTrash'
 import { useConfirm } from '../composables/useConfirm'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
-import { deletePermanentlyConfirmation, emptyTrashConfirmation, type TrashGroup, type TrashItem } from '../measurements/trash'
+import {
+  deletePermanentlyConfirmation,
+  emptyTrashConfirmation,
+  trashedMeasurementTypeIds,
+  type TrashGroup,
+  type TrashItem,
+} from '../measurements/trash'
 import {
   commitRetentionDays,
   TRASH_RETENTION_MAX_DAYS,
@@ -13,7 +19,12 @@ import MeasurementKindIcon from './MeasurementKindIcon.vue'
 
 // Restoring a measurement puts it back in the sidebar, and restoring a result puts it back in the
 // history list — neither of which this component owns. App.vue listens for this and reloads them.
-const emit = defineEmits<{ close: []; restored: [] }>()
+//
+// `purged` carries the measurement type ids a permanent delete has just destroyed, for the same
+// division of labour: the runs parked under them have to be dropped (api.forgetRunOwners), and the
+// owner key those are held by needs the project id, which App.vue has and this component does not.
+// Only measurements, never results: a result is a stored row and no runner holds one.
+const emit = defineEmits<{ close: []; restored: []; purged: [measurementTypeIds: number[]] }>()
 
 const {
   listing,
@@ -63,7 +74,7 @@ async function onRestoreResult(item: TrashItem) {
 
 async function onPurgeType(group: TrashGroup) {
   if (!(await useConfirm().confirm(deletePermanentlyConfirmation(group.name, 'measurement')))) return
-  await purgeType(group.measurementTypeId)
+  if (await purgeType(group.measurementTypeId)) emit('purged', [group.measurementTypeId])
 }
 
 async function onPurgeResult(item: TrashItem) {
@@ -74,7 +85,11 @@ async function onPurgeResult(item: TrashItem) {
 async function onEmpty() {
   if (listing.value === null) return
   if (!(await useConfirm().confirm(emptyTrashConfirmation(listing.value)))) return
-  await empty()
+
+  // Read before the empty, not after: afterwards the listing is gone and there is nothing left to
+  // ask which measurements it took. See trashedMeasurementTypeIds for why it is not every group.
+  const destroyed = trashedMeasurementTypeIds(groups.value)
+  if (await empty()) emit('purged', destroyed)
 }
 
 function when(iso: string): string {

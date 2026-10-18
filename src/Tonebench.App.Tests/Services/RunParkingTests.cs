@@ -129,4 +129,73 @@ public class RunParkingTests
         Assert.Null(parking.Owner);
         Assert.Equal("a", parking.Switch("p:1", null).Adopted?.Name);
     }
+
+    [Fact]
+    public void ForgettingADestroyedMeasurement_DropsWhatItHadParked()
+    {
+        // A permanent delete from the trash: the measurement cannot be selected again, so its
+        // parked run is a run nothing can ever ask for -- and a parked impulse is megabytes.
+        var parking = new RunParking<Run>(capacity: 4);
+        parking.Switch("p:1", null);
+        parking.Switch("p:2", new Run("p1's run"));
+
+        Assert.False(parking.Forget("p:1"));
+
+        // Back to p:1 and there is nothing of its own left to adopt.
+        Assert.Null(parking.Switch("p:1", null).Adopted);
+    }
+
+    [Fact]
+    public void ForgettingTheLiveOwner_ReleasesTheSlot_SoNothingAdoptsItsRun()
+    {
+        // The half that is about correctness rather than memory. An owned slot is its owner's
+        // business; an unowned one is adopted by the next measurement to arrive. So a destroyed
+        // measurement that still owned the slot would hand its run to whoever was selected next --
+        // and Save would store it there.
+        var parking = new RunParking<Run>(capacity: 4);
+        parking.Switch("p:1", null);
+
+        Assert.True(parking.Forget("p:1"));
+        Assert.Null(parking.Owner);
+
+        // The caller empties the live state on that `true`; the point here is that the next
+        // measurement arrives at a slot nobody owns and parks nothing of p:1's.
+        var arriving = parking.Switch("p:2", null);
+        Assert.False(arriving.Cleared);
+        Assert.Null(arriving.Adopted);
+        Assert.Null(parking.Switch("p:1", null).Adopted);
+    }
+
+    [Fact]
+    public void ForgettingAnOwnerThatWasNeverSeen_DoesNothing()
+    {
+        // The trash sends every measurement it destroyed, and most will never have been run in
+        // this process.
+        var parking = new RunParking<Run>(capacity: 4);
+        parking.Switch("p:1", null);
+        parking.Switch("p:2", new Run("p1's run"));
+
+        Assert.False(parking.Forget("p:99"));
+
+        Assert.Equal("p:2", parking.Owner);
+        Assert.Equal("p1's run", parking.Switch("p:1", null).Adopted?.Name);
+    }
+
+    [Fact]
+    public void ForgettingFreesTheSlotItHeld_RatherThanLeavingACappedMapFull()
+    {
+        // Capacity is the whole reason the parks are bounded, so a forget has to give its slot
+        // back -- otherwise destroying four measurements leaves no room for the live ones.
+        var parking = new RunParking<Run>(capacity: 2);
+        parking.Switch("a", null);
+        parking.Switch("b", new Run("a's run"));
+        parking.Switch("c", new Run("b's run"));
+
+        parking.Forget("a");
+
+        // With a's slot freed, parking c's run still leaves b's in place.
+        parking.Switch("d", new Run("c's run"));
+        Assert.Equal("b's run", parking.Switch("b", null).Adopted?.Name);
+        Assert.Equal("c's run", parking.Switch("c", null).Adopted?.Name);
+    }
 }

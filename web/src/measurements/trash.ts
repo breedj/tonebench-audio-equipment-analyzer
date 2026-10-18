@@ -82,6 +82,21 @@ export function trashCount(listing: TrashListing | null): number {
 }
 
 /**
+ * Which measurements an Empty trash is about to destroy, so the runners can be told to forget what
+ * they have parked for them (see api.forgetRunOwners).
+ *
+ * <p>Read from the listing the view is showing, and read <i>before</i> the empty runs — afterwards
+ * there is nothing left to ask. The filter is the whole of the rule: a group whose `deletedUtc` is
+ * null is a measurement that is <b>still there</b>, listed only as the parent of trashed results
+ * (see {@link TrashGroup}). Emptying destroys those results and leaves the measurement, so naming
+ * it here would throw away the live run of a measurement the user can still select — the opposite
+ * of what this exists for.</p>
+ */
+export function trashedMeasurementTypeIds(groups: readonly TrashGroup[]): number[] {
+  return groups.filter((g) => g.deletedUtc !== null).map((g) => g.measurementTypeId)
+}
+
+/**
  * Empty Trashcan. This is one of the two places in the app where "This cannot be undone." is still
  * true, so it is still said — and the counts are named, because the view is a list of rows and
  * nothing in it adds up the measurements and the results for you.

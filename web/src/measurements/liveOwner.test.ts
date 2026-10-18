@@ -6,6 +6,7 @@ import {
   liveScreenStore,
   liveStoreForKind,
   releaseLive,
+  releaseOwners,
   type LiveOwners,
 } from './liveOwner'
 import { MEASUREMENT_KINDS } from './kinds'
@@ -107,6 +108,26 @@ describe('foreignLiveStores', () => {
   it('reports a store once even when the same one is asked for twice', () => {
     const owners = claimLive({}, 'chirp', A)
     expect(foreignLiveStores(owners, B, ['fft', 'fft'])).toEqual(['fft'])
+  })
+})
+
+describe('releaseOwners', () => {
+  it('forgets every store a destroyed measurement held', () => {
+    // A permanent delete from the trash: A is gone, so nothing may go on recording that it owns
+    // anything -- in the client's map or, through api.forgetRunOwners, on the server.
+    const owners = claimLive(claimLive({}, 'chirp', A), 'sweep', B)
+
+    expect(releaseOwners(owners, [A])).toEqual({ fft: B, sweep: B })
+  })
+
+  it('leaves the stores of the measurements that still exist', () => {
+    const owners = claimLive({}, 'impedance', B)
+
+    expect(releaseOwners(owners, [A])).toEqual({ fft: B, impedance: B })
+  })
+
+  it('is by owner, not by store -- a destroyed measurement may be in any of them or in none', () => {
+    expect(releaseOwners({}, [A, B])).toEqual({})
   })
 })
 

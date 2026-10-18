@@ -3740,6 +3740,16 @@ export const api = {
   /** Empty Trashcan: permanently deletes everything in it, and says how much that was. */
   emptyTrash: () => request<TrashEmptied>('/trash', { method: 'DELETE' }),
 
+  /**
+   * Tells every runner and the retained snapshot that these measurements have stopped existing, so
+   * a run parked under one is dropped rather than held for a measurement nobody can select again —
+   * and, if one of them still owns a live slot, so that the next measurement to arrive does not
+   * *adopt* its run. The keys are liveOwner.ts's own, which the server never parses. One call for
+   * all nine stores: a destroyed measurement may be held in any of them. See RunParking.Forget.
+   */
+  forgetRunOwners: (owners: string[]) =>
+    request<void>('/runs/forget', { method: 'POST', body: JSON.stringify({ owners }) }),
+
   getTrashRetention: () => request<TrashRetentionConfig>('/config/trash-retention'),
   setTrashRetention: (config: TrashRetentionConfig) =>
     request<TrashRetentionConfig>('/config/trash-retention', { method: 'PUT', body: JSON.stringify(config) }),

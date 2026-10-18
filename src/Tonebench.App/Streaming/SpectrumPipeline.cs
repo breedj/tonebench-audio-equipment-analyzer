@@ -476,6 +476,42 @@ public sealed class SpectrumPipeline(
     }
 
     /// <summary>
+    /// Drops the retained capture held for <paramref name="owner"/>, because that measurement has
+    /// stopped existing — the trash's permanent delete and Empty trash, through
+    /// <c>POST /api/runs/forget</c>. The runners' <c>ForgetOwner</c> is the same step for a run;
+    /// this is the snapshot, and it is the larger of the two by an order of magnitude (see
+    /// <see cref="MaxParkedRetention"/> for the arithmetic).
+    ///
+    /// <para>The <b>live</b> slot is emptied as well when it is that owner's, and that half is
+    /// about correctness rather than memory: an owned slot is nobody's business but its owner's,
+    /// while an unowned one is adopted by the next measurement to arrive
+    /// (<see cref="SwitchRetentionOwner"/>). Left in place, a destroyed measurement's capture
+    /// would be handed to whichever measurement was selected next — and <b>Save measurement
+    /// result</b> writes this snapshot, so it would be stored there. That is the 2026-09-27 fault
+    /// by a new route.</para>
+    /// </summary>
+    /// <returns>True when the live slot was emptied, so a caller can tell the client to redraw.</returns>
+    public bool ForgetRetentionOwner(string owner)
+    {
+        lock (_retainedLock)
+        {
+            if (_parkedRetention.Remove(owner))
+                _parkedOrder.Remove(owner);
+
+            if (_retentionOwner != owner)
+                return false;
+
+            // Fresh instances rather than emptying these, for SwitchRetentionOwner's own reason:
+            // UpdateRetainedSnapshot mutates the slot it finds and reuses its arrays.
+            for (int ch = 0; ch < MaxChannels; ch++)
+                _retained[ch] = new RetainedSpectrum();
+
+            _retentionOwner = null;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Rebuilds one client's spectrum frames from the retained snapshot and sends them, so that
     /// zooming a <b>stopped</b> capture resolves more of it instead of showing the same columns
     /// larger.

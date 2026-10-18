@@ -90,4 +90,31 @@ public sealed class RunParking<TState>(int capacity) where TState : class
         Owner = owner;
         return new Outcome(Changed: true, cleared, adopted);
     }
+
+    /// <summary>
+    /// Drops everything held for <paramref name="owner"/>, for a measurement that has stopped
+    /// existing — the trash's permanent delete, Empty trash, and the retention purge.
+    ///
+    /// <para>Two things go, and the second is the one that is about correctness rather than
+    /// memory. The <b>parked</b> entry would otherwise sit here until it was evicted or the
+    /// process ended, holding a run nothing can ever ask for again (a parked impulse response is
+    /// an <c>FftSize</c> array of doubles, so this is megabytes, not bookkeeping). And if the
+    /// destroyed measurement is the <b>live</b> owner, the slot is released: an owned slot is
+    /// nobody's business but its owner's, while an <i>unowned</i> one is adopted by the next
+    /// measurement to arrive (see <see cref="Switch"/>) — so leaving a destroyed measurement's run
+    /// in place with its owner still attached would hand it to whichever measurement was selected
+    /// next, and Save would store it there. That is the 2026-09-27 fault by a new route.</para>
+    /// </summary>
+    /// <returns>True when the live slot belonged to <paramref name="owner"/> and must now be emptied.</returns>
+    public bool Forget(string owner)
+    {
+        if (_parked.Remove(owner))
+            _order.Remove(owner);
+
+        if (Owner != owner)
+            return false;
+
+        Owner = null;
+        return true;
+    }
 }

@@ -445,29 +445,7 @@ public sealed class ImpulseResponseRunner(
             }
             else if (outcome.Cleared)
             {
-                // Fresh lists, never the parked ones emptied: the park holds these very references.
-                _traces = [];
-                _impulses = [];
-                _harmonics = [];
-                _lastLeftResult = null;
-                _lastLeftImpulse = null;
-                _phase = FrequencyResponsePhase.Idle;
-                _continuous = false;
-                _passesCompleted = 0;
-                _averagesTaken = 0;
-                _averageCount = 0;
-                _generatorAmpDbv = 0.0;
-                _binHz = 0.0;
-                _sampleRateHz = 0.0;
-                _fftSize = 0;
-                _latencySamples = null;
-                _error = null;
-                _referenceMode = ImpulseReferenceMode.None;
-                _referenceName = null;
-                _gatePreMs = 0.0;
-                _gatePostMs = 0.0;
-                _gateResolutionHz = 0.0;
-                _lastRequest = null;
+                ResetLiveState();
             }
 
             return Status;
@@ -478,6 +456,63 @@ public sealed class ImpulseResponseRunner(
     public string? Owner
     {
         get { lock (_stateLock) return _parking.Owner; }
+    }
+
+    /// <summary>
+    /// Drops everything this runner holds for <paramref name="owner"/>, because that measurement
+    /// has stopped existing — the trash's permanent delete and Empty trash. See
+    /// <see cref="RunParking{TState}.Forget"/> for why the live slot is released too and not just
+    /// the parked entry.
+    ///
+    /// <para>A run still going is left alone, owner and all. Nothing is parked under the live
+    /// owner — <see cref="RunParking{TState}.Switch"/> takes the arriving entry out as it installs
+    /// it — so there is nothing to drop, and pulling the state out from under the pass still
+    /// writing it would be worse than an owner the next switch replaces anyway.</para>
+    /// </summary>
+    public void ForgetOwner(string owner)
+    {
+        lock (_stateLock)
+        {
+            if (Running && _parking.Owner == owner)
+                return;
+
+            if (_parking.Forget(owner))
+                ResetLiveState();
+        }
+    }
+
+    /// <summary>
+    /// Empties the live slot: what <see cref="SwitchOwner"/> leaves behind for a measurement that
+    /// has nothing parked, and what <see cref="ForgetOwner"/> leaves behind for one that has been
+    /// destroyed. Everything the park carries is reset, which is a little more than
+    /// <see cref="Clear"/> empties — a measurement that has never run must not read back the
+    /// previous one's record length on its status line. Call under <c>_stateLock</c>.
+    /// </summary>
+    private void ResetLiveState()
+    {
+        // Fresh lists, never the parked ones emptied: the park holds these very references.
+        _traces = [];
+        _impulses = [];
+        _harmonics = [];
+        _lastLeftResult = null;
+        _lastLeftImpulse = null;
+        _phase = FrequencyResponsePhase.Idle;
+        _continuous = false;
+        _passesCompleted = 0;
+        _averagesTaken = 0;
+        _averageCount = 0;
+        _generatorAmpDbv = 0.0;
+        _binHz = 0.0;
+        _sampleRateHz = 0.0;
+        _fftSize = 0;
+        _latencySamples = null;
+        _error = null;
+        _referenceMode = ImpulseReferenceMode.None;
+        _referenceName = null;
+        _gatePreMs = 0.0;
+        _gatePostMs = 0.0;
+        _gateResolutionHz = 0.0;
+        _lastRequest = null;
     }
 
     /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields, the as-run request, and the impulse the save path and both decay surfaces read.</summary>

@@ -334,6 +334,7 @@ try
     app.MapCrosstalkEndpoints();
     app.MapOutputImpedanceEndpoints();
     app.MapImpedanceEndpoints();
+    app.MapRunOwnerEndpoints();
     app.MapConfigEndpoints();
     app.MapSoundCardEndpoints();
     app.MapLoadEndpoints();

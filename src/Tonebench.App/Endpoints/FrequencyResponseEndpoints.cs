@@ -1,4 +1,5 @@
-﻿using Tonebench.App.Services;
+﻿using System.Text.Json;
+using Tonebench.App.Services;
 using Tonebench.Data;
 using Tonebench.Dsp;
 
@@ -103,7 +104,8 @@ public static class FrequencyResponseEndpoints
         {
             try
             {
-                long id = await saveService.SaveFrequencyResponseAsync(request.MeasurementTypeId, request.Name, request.Notes, ct);
+                long id = await saveService.SaveFrequencyResponseAsync(
+                    request.MeasurementTypeId, request.Name, request.Notes, request.ChartAnnotations, ct);
                 return Results.Ok(new IdResponse(id));
             }
             catch (InvalidOperationException ex)
@@ -207,7 +209,14 @@ public sealed record FrequencyResponseStartRequest(
             BandwidthReferenceHighHz);
 }
 
-public sealed record SaveFrequencyResponseRequest(long MeasurementTypeId, string Name, string? Notes);
+/// <param name="ChartAnnotations">
+/// The notes on this measurement's charts at the moment of the save, which the result keeps as its
+/// own frozen copy -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartAnnotations"/>.
+/// An empty list is a result with none; null is a caller that sent none at all, which stores
+/// nothing rather than reaching for the measurement type's.
+/// </param>
+public sealed record SaveFrequencyResponseRequest(long MeasurementTypeId, string Name, string? Notes,
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 public sealed record StoredResponseTracesResponse(IReadOnlyList<StoredResponseTrace> Traces);
 

@@ -236,7 +236,6 @@ const {
   showWeightingCurve: chartShowWeightingCurve,
   showHarmonicMarkers: chartShowHarmonicMarkers,
   harmonicMarkerUnit: chartHarmonicMarkerUnit,
-  annotations: chartAnnotations,
   storedHarmonicsSort: chartStoredHarmonicsSort,
   storedOtherPeaksSort: chartStoredOtherPeaksSort,
   applyLoaded: applyLoadedChartDisplay,
@@ -245,10 +244,20 @@ const {
   requestResetPeakHold: requestChartResetPeakHold,
 } = useChartDisplay()
 
-// The notes drawn on the open measurement's charts. One list for every kind -- see
-// useAnnotations -- so the six display getters below and every screen's rail read the same
-// state, and a measurement switch clears it exactly once.
-const { annotations, armed: annotationArmed, applyLoaded: applyLoadedAnnotations } = useAnnotations()
+// The notes on the open measurement's charts. One store for every kind -- see useAnnotations -- so
+// the six display getters below and every screen's rail read the same state, and a measurement
+// switch resets it exactly once.
+//
+// `liveAnnotations` is this measurement's own set, which is what a save writes to its type;
+// `shownAnnotations` is whichever set is being *drawn*, which may be a stored result's instead, and
+// is what every chart binds. Saving the drawn one would write a result's frozen notes onto the
+// measurement that produced it.
+const {
+  shown: shownAnnotations,
+  live: liveAnnotations,
+  armed: annotationArmed,
+  applyLoadedLive: applyLoadedAnnotations,
+} = useAnnotations()
 
 // The user weighting tables' names, for the chart's annunciator and the report.
 const userWeighting = useUserWeighting()
@@ -1275,7 +1284,7 @@ function currentSweepDisplay(): SweepDisplay {
     // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
     // so a note placed or edited marks the measurement dirty like every other display change, and so
     // a live report renders the chart with what is on it.
-    annotations: annotations.value,
+    annotations: liveAnnotations.value,
     unit: sweepUnit.value,
     showNoiseFloor: sweepShowNoiseFloor.value,
     showMagnitude: sweepShowMagnitude.value,
@@ -1534,7 +1543,7 @@ function currentResponseDisplay(): ResponseDisplay {
     // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
     // so a note placed or edited marks the measurement dirty like every other display change, and so
     // a live report renders the chart with what is on it.
-    annotations: annotations.value,
+    annotations: liveAnnotations.value,
     view: responseView.value,
     showLeft: responseShowLeft.value,
     showRight: responseShowRight.value,
@@ -1745,7 +1754,7 @@ function currentImpedanceDisplay(): ImpedanceDisplay {
     // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
     // so a note placed or edited marks the measurement dirty like every other display change, and so
     // a live report renders the chart with what is on it.
-    annotations: annotations.value,
+    annotations: liveAnnotations.value,
     view: impedanceView.value,
     showPhase: impedanceShowPhase.value,
     showCoherence: impedanceShowCoherence.value,
@@ -1849,7 +1858,7 @@ function currentCrosstalkDisplay(): CrosstalkDisplay {
     // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
     // so a note placed or edited marks the measurement dirty like every other display change, and so
     // a live report renders the chart with what is on it.
-    annotations: annotations.value,
+    annotations: liveAnnotations.value,
     thickLines: crosstalkThickLines.value,
     showDataPoints: crosstalkShowDataPoints.value,
     yTopDb: crosstalkYTopDb.value,
@@ -1946,7 +1955,7 @@ function currentOutputImpedanceDisplay(): OutputImpedanceDisplay {
     // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
     // so a note placed or edited marks the measurement dirty like every other display change, and so
     // a live report renders the chart with what is on it.
-    annotations: annotations.value,
+    annotations: liveAnnotations.value,
     zTopOhms: outputImpedanceZTopOhms.value,
     zBottomOhms: outputImpedanceZBottomOhms.value,
     zScale: outputImpedanceZScale.value,
@@ -3248,7 +3257,7 @@ function buildStagedConfig(): StagedMeasurementConfig | undefined {
     chartShowFftTrace: chartShowFftTrace.value,
     chartShowHarmonicMarkers: chartShowHarmonicMarkers.value,
     chartHarmonicMarkerUnit: chartHarmonicMarkerUnit.value,
-    chartAnnotations: chartAnnotations.value,
+    chartAnnotations: liveAnnotations.value,
     // The Generator panel's Load field. Shared with every sweep panel (useLoadOhms), but stored
     // per measurement like every other setting on screen -- until 2026-10-16 the FFT screen was
     // the one screen that read it and never wrote it, so the figure a measurement's power tiles
@@ -3416,7 +3425,7 @@ function currentImpulseDisplay(): ImpulseDisplay {
     // useAnnotations singleton, because a measurement keeps one list across all of its charts. Here
     // so a note placed or edited marks the measurement dirty like every other display change, and so
     // a live report renders the chart with what is on it.
-    annotations: annotations.value,
+    annotations: liveAnnotations.value,
     normalised: impulseNormalised.value,
     thickLines: impulseThickLines.value,
     showDataPoints: impulseShowDataPoints.value,
@@ -3674,7 +3683,7 @@ function onLoopbackCaptured(id: number) {
 function buildTypeParamsJson(): string | undefined {
   const json = buildTypeParamsJsonCore()
   if (json === undefined) return undefined
-  return JSON.stringify({ ...JSON.parse(json), chartAnnotations: annotations.value })
+  return JSON.stringify({ ...JSON.parse(json), chartAnnotations: liveAnnotations.value })
 }
 
 function buildTypeParamsJsonCore(): string | undefined {
@@ -4366,7 +4375,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
               <template #default>
                 <ImpulseResponseChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   v-if="impulseView === 'Impulse'"
                   ref="impulseChart"
@@ -4393,7 +4402,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-else-if="impulseView === 'Response'"
                   ref="impulseResponseChart"
                   run-label="Run"
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   :annotation-view="'Response'"
                   :traces="impulseTraces"
@@ -4422,7 +4431,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :axis-titles="true"
                 />
                 <ImpulseHarmonicsChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   v-else-if="impulseView === 'Harmonics'"
                   ref="impulseHarmonicsChart"
@@ -4701,7 +4710,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <FrequencyResponseChart
                   v-if="activeResponseProjection === 'Bode'"
                   ref="responseChart"
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   :annotation-view="'Bode'"
                   :run-label="isSteppedResponse ? 'Run sweep' : 'Run'"
@@ -4736,7 +4745,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   @cursor-pin="onResponseCursorPin"
                 />
                 <ResponseSPlaneChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   v-else-if="activeResponseProjection === 'SPlane'"
                   ref="responseSPlaneChart"
@@ -4761,7 +4770,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :x-to-hz="responseXToHz"
                 />
                 <ResponsePolarChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   v-else
                   ref="responsePolarChart"
@@ -4950,7 +4959,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <FrequencyResponseChart
                   ref="responseChart"
                   run-label="Run sweep"
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   :annotation-view="'Crosstalk'"
                   :traces="responseTraces"
@@ -5103,7 +5112,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <!-- The impedance chart with its damping-factor axis: Zout is an impedance curve in
                      every respect, so the ohms axis, the log scale and the phase axis are its. -->
                 <ImpedanceChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   annotation-view="Bode"
                   ref="outputImpedanceChart"
@@ -5245,7 +5254,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <p v-if="impedanceWarning" class="text-xs text-amber-700 dark:text-amber-400">{{ impedanceWarning }}</p>
 
                 <ImpedanceChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   annotation-view="Bode"
                   v-if="impedanceView === 'Bode'"
@@ -5266,7 +5275,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :phase-bottom-deg="impedancePhaseBottomDeg"
                 />
                 <ImpedancePlaneChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   v-else
                   ref="impedancePlaneChart"
@@ -5425,7 +5434,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 </p>
 
                 <ThdSweepChart
-                  v-model:annotations="annotations"
+                  v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   ref="sweepChart"
                   :unit="sweepUnit"
@@ -5616,14 +5625,14 @@ onBeforeUnmount(() => stopLoadPolling?.())
               <SpectrogramChart
                 v-show="chartShowSpectrogram"
                 ref="spectrogramChart"
-                v-model:annotations="annotations"
+                v-model:annotations="shownAnnotations"
                 v-model:annotation-armed="annotationArmed"
                 class="mt-3"
                 :spectrum="spectrum"
               />
               <OscilloscopeChart
                 v-show="chartShowOscilloscope"
-                v-model:annotations="annotations"
+                v-model:annotations="shownAnnotations"
                 v-model:annotation-armed="annotationArmed"
                 class="mt-3"
                 :scope="scope"

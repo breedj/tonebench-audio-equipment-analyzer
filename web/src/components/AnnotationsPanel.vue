@@ -5,12 +5,18 @@
  *
  * <p>One component for every measurement screen. It reads the shared {@link useAnnotations}
  * singleton rather than taking the list as a prop, which is what lets a display panel mount it with
- * nothing but the view it is for — exactly one measurement is on screen at a time, so one list is
+ * nothing but the view it is for — exactly one measurement is on screen at a time, so one store is
  * the truth for all of them.</p>
  *
  * <p>It shows and clears <b>this view's</b> rows only. A measurement keeps one list across its
  * charts, and a user looking at a Nyquist plot should not be editing, or accidentally removing, a
  * note they put on the Bode plot; the count of the rest is said in a line instead.</p>
+ *
+ * <p><b>And it shows whichever set is on the charts</b>, which need not be the open measurement's —
+ * a lit icon on a History row puts that saved result's own notes here instead, and then the rows
+ * edited here are that result's and are written back to it. The caption says which, because the one
+ * thing a user must not be able to do by accident is annotate a stored result while believing they
+ * are annotating the measurement.</p>
  */
 import { computed, ref } from 'vue'
 import {
@@ -24,6 +30,7 @@ import {
 } from '../measurements/chartAnnotations'
 import { useAnnotations } from '../composables/useAnnotations'
 import AnnotationRows from './AnnotationRows.vue'
+import AnnotationToggle from './AnnotationToggle.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
 
@@ -44,21 +51,28 @@ const props = withDefaults(
   { styles: () => DEFAULT_ANNOTATION_STYLES, pointHint: 'Click the chart to place it.', title: 'Annotations' },
 )
 
-const { annotations, armed, arm } = useAnnotations()
+const { shown, live, source, sourceName, error, armed, arm, show } = useAnnotations()
 
 const options = computed(() => annotationStyleOptions(props.styles))
 const style = ref<AnnotationStyle>(props.styles[0] ?? 'point')
 
-const mine = computed(() => numberedAnnotations(annotations.value, props.view).length)
-const elsewhere = computed(() => annotationsElsewhere(annotations.value, props.view))
-const full = computed(() => annotations.value.length >= MAX_ANNOTATIONS)
+const mine = computed(() => numberedAnnotations(shown.value, props.view).length)
+const elsewhere = computed(() => annotationsElsewhere(shown.value, props.view))
+const full = computed(() => shown.value.length >= MAX_ANNOTATIONS)
+
+/** Whether this measurement's own notes are the ones on the charts — the toggle's lit state. */
+const liveShown = computed(() => source.value === 'live')
+/** The name of the stored result whose notes are here instead, or null. */
+const resultShown = computed(() => (typeof source.value === 'number' ? sourceName.value : null))
 
 function onAdd() {
+  // arm() lights this measurement's own notes when nothing is lit, so a press of Add can never
+  // place a note onto a list the chart is not drawing -- see useAnnotations.arm.
   arm(armed.value === null ? style.value : null)
 }
 
 function removeAll() {
-  annotations.value = removeAnnotationsOfView(annotations.value, props.view)
+  shown.value = removeAnnotationsOfView(shown.value, props.view)
   arm(null)
 }
 </script>
@@ -69,6 +83,35 @@ function removeAll() {
        the chart. The icon and tone are passed explicitly, which is what a new panel does -- the
        title table in panels/panelIcons.ts exists for the panels that predate it. -->
   <CollapsibleSection :title="props.title" size="xs" icon="notes" tone="violet" :default-open="false">
+    <template #header-right>
+      <!-- This measurement's own member of the group, so the rail can show and hide its notes from
+           the panel that lists them. One per Annotations panel, which on the FFT rail means up to
+           three showing the same state: the alternative is a single toggle two sections away from
+           the list it governs. -->
+      <AnnotationToggle
+        :active="liveShown"
+        :empty="live.length === 0"
+        :title="
+          liveShown
+            ? 'This measurement\'s annotations are on the charts. Click to hide them.'
+            : 'Show this measurement\'s own annotations on the charts.'
+        "
+        @click="show('live')"
+      />
+    </template>
+
+    <!-- Which set is being edited, where that is not the obvious one. Said before the controls
+         rather than after the list, because it changes what pressing Add means. -->
+    <p v-if="resultShown !== null" class="text-[11px] leading-snug text-violet-700 dark:text-violet-300">
+      The saved result <strong>{{ resultShown }}</strong
+      >. Anything changed here is saved to that result, not to this measurement.
+    </p>
+    <p v-else-if="source === null" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      No annotations are shown. The icon above puts this measurement's own back on the charts.
+    </p>
+
+    <p v-if="error !== null" class="text-[11px] leading-snug text-red-600 dark:text-red-400">{{ error }}</p>
+
     <!-- The style picker takes whatever the button leaves, rather than the two splitting the row
          evenly: half a rail is not enough for a two-word label and the word was clipped (Joost,
          2026-10-17). The button is a fixed width rather than sized to its own label, or the picker
@@ -111,17 +154,18 @@ function removeAll() {
     <p v-else-if="armed !== null" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
       {{ props.pointHint }}
     </p>
-    <p v-else-if="mine === 0" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+    <p v-else-if="mine === 0 && source !== null" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
       No annotations on this chart. Add one, then click it. They are drawn on screenshots and in the
       report, and a saved result keeps the ones it was saved with.
     </p>
 
-    <AnnotationRows v-model="annotations" :view="props.view" />
+    <AnnotationRows v-model="shown" :view="props.view" />
 
-    <!-- A measurement's other charts' notes are neither shown nor removable here, so say they exist
-         rather than leaving the count in the panel disagreeing with what a report prints. -->
+    <!-- The other charts' notes are neither shown nor removable here, so say they exist rather
+         than leaving the count in the panel disagreeing with what a report prints. Deliberately not
+         "this measurement's", since the set on screen may be a stored result's. -->
     <p v-if="elsewhere > 0" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      {{ elsewhere }} more on this measurement's other charts.
+      {{ elsewhere }} more on the other charts.
     </p>
 
     <button

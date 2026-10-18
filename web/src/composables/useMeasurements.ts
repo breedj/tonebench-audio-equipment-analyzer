@@ -7,6 +7,7 @@ import {
   type MeasurementFilter,
   type MeasurementSummary,
   type SaveMeasurementRequest,
+  type SaveRunRequest,
   type StoredResponsePreviewPoint,
   type StoredResponseTrace,
   type StoredSweepPoint,
@@ -361,7 +362,7 @@ export function useMeasurements() {
    * different source (the sweep runner's points, not the spectrum pipeline's retained trace) and
    * writes a different row shape — but it lands in the same result list, so it reloads it too.
    */
-  async function saveSweep(req: { measurementTypeId: number; name: string; notes: string | null }) {
+  async function saveSweep(req: SaveRunRequest) {
     try {
       const result = await api.saveSweep(req)
       await load()
@@ -374,7 +375,7 @@ export function useMeasurements() {
   }
 
   /** The IMD sweep's counterpart of saveSweep — its own runner, so its own endpoint; the same result list. */
-  async function saveImdSweep(req: { measurementTypeId: number; name: string; notes: string | null }) {
+  async function saveImdSweep(req: SaveRunRequest) {
     try {
       const result = await api.saveImdSweep(req)
       await load()
@@ -396,7 +397,7 @@ export function useMeasurements() {
    * which is why `isFrequencyResponseKind` covers both everywhere else.
    */
   async function saveResponse(
-    req: { measurementTypeId: number; name: string; notes: string | null },
+    req: SaveRunRequest,
     kind?: string | null,
   ) {
     try {
@@ -418,7 +419,7 @@ export function useMeasurements() {
    * own, so it goes through its own endpoint even though the curves are identical.
    */
   /** Saves the output-impedance run on screen — its Zout row and the two gain rows, through its own endpoint. */
-  async function saveOutputImpedance(req: { measurementTypeId: number; name: string; notes: string | null }) {
+  async function saveOutputImpedance(req: SaveRunRequest) {
     try {
       const result = await api.saveOutputImpedance(req)
       await load()
@@ -431,7 +432,7 @@ export function useMeasurements() {
   }
 
   /** Saves the crosstalk curves on screen — the crosstalk runner's own rows, through its own endpoint. */
-  async function saveCrosstalk(req: { measurementTypeId: number; name: string; notes: string | null }) {
+  async function saveCrosstalk(req: SaveRunRequest) {
     try {
       const result = await api.saveCrosstalk(req)
       await load()
@@ -443,7 +444,7 @@ export function useMeasurements() {
     }
   }
 
-  async function saveImpedance(req: { measurementTypeId: number; name: string; notes: string | null }) {
+  async function saveImpedance(req: SaveRunRequest) {
     try {
       const result = await api.saveImpedance(req)
       await load()
@@ -455,7 +456,7 @@ export function useMeasurements() {
     }
   }
 
-  async function saveImpulse(req: { measurementTypeId: number; name: string; notes: string | null }) {
+  async function saveImpulse(req: SaveRunRequest) {
     try {
       const result = await api.saveImpulseResponse(req)
       await load()

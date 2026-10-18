@@ -15,6 +15,7 @@ function item(resultId: number, source: string | null, name = `r${resultId}`): M
     channels: 1,
     channelHeadlines: {},
     source,
+    annotationCount: 0,
   }
 }
 

@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Tonebench.App.Services;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
@@ -405,7 +405,12 @@ public class CrosstalkRunnerTests
                 projectId, MeasurementSaveService.CrosstalkKind, "crosstalk", null,
                 saveService.DefaultCrosstalkParametersJson(), CancellationToken.None);
 
-            long resultId = await saveService.SaveCrosstalkAsync(typeId, "both ways", null, CancellationToken.None);
+            // Every kind's save carries the notes on its charts now, so the result keeps its own
+            // frozen copy and goes on printing them however the measurement's own list changes
+            // afterwards -- see ChartAnnotationParamsTests for the rule and the FFT's own cases.
+            var note = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+                """{"id":1,"style":"point","text":"this point","view":"Crosstalk","x":1000,"y":0.01}""");
+            long resultId = await saveService.SaveCrosstalkAsync(typeId, "both ways", null, [note], CancellationToken.None);
             var traces = await measurements.GetResponseTracesAsync(resultId, CancellationToken.None);
             var detail = await measurements.GetResultAsync(resultId, CancellationToken.None);
 
@@ -417,6 +422,9 @@ public class CrosstalkRunnerTests
             Assert.NotNull(detail);
             var parameters = System.Text.Json.JsonSerializer.Deserialize<Tonebench.Data.CrosstalkParameters>(detail.ParamsJson, jsonOptions.SerializerOptions);
             Assert.NotNull(parameters);
+            Assert.Equal(
+                "this point",
+                parameters.ChartAnnotations!.Single().GetProperty("text").GetString());
             Assert.Equal("Both", parameters.Direction);
             Assert.Equal(-20.0, parameters.GeneratorAmpDbvLeftToRight);
             Assert.Equal(-20.0, parameters.GeneratorAmpDbvRightToLeft);

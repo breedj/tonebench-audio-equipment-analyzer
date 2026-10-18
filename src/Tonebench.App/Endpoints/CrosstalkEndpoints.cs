@@ -1,4 +1,4 @@
-using Tonebench.App.Services;
+﻿using Tonebench.App.Services;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Endpoints;
@@ -76,7 +76,8 @@ public static class CrosstalkEndpoints
         {
             try
             {
-                long id = await saveService.SaveCrosstalkAsync(request.MeasurementTypeId, request.Name, request.Notes, ct);
+                long id = await saveService.SaveCrosstalkAsync(
+                    request.MeasurementTypeId, request.Name, request.Notes, request.ChartAnnotations, ct);
                 return Results.Ok(new IdResponse(id));
             }
             catch (InvalidOperationException ex)

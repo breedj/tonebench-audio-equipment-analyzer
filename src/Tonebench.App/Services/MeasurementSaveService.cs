@@ -636,7 +636,7 @@ public sealed class MeasurementSaveService(
     /// saved must be exactly what is on screen, not a separately-supplied copy that could differ.
     /// A cancelled sweep is saveable -- a partial sweep still measured the part it covered.
     /// </summary>
-    public async Task<long> SaveSweepAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveSweepAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = sweepRunner.Status;
         if (status.Running)
@@ -661,7 +661,8 @@ public sealed class MeasurementSaveService(
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
                     StopThdPercent: request.StopThdPercent,
                     MeasurementLoFreqHz: request.MeasurementLoFreqHz,
-                    MeasurementHiFreqHz: request.MeasurementHiFreqHz),
+                    MeasurementHiFreqHz: request.MeasurementHiFreqHz,
+                    ChartAnnotations: annotations),
                 SerializerOptions)
             : JsonSerializer.Serialize(
                 new ThdVsFrequencyParameters(
@@ -675,7 +676,8 @@ public sealed class MeasurementSaveService(
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
                     MeasurementLoFreqHz: request.MeasurementLoFreqHz,
-                    MeasurementHiFreqHz: request.MeasurementHiFreqHz),
+                    MeasurementHiFreqHz: request.MeasurementHiFreqHz,
+                    ChartAnnotations: annotations),
                 SerializerOptions);
 
         // One capture per sweep point, in sweep order. Points arrive per channel, so group them back
@@ -715,7 +717,7 @@ public sealed class MeasurementSaveService(
     /// back through the same <c>GetSweepPointsAsync</c> path. Reads <see cref="ImdSweepRunner.Status"/>
     /// for the same reason that method reads its runner's.
     /// </summary>
-    public async Task<long> SaveImdSweepAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveImdSweepAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = imdSweepRunner.Status;
         if (status.Running)
@@ -739,7 +741,8 @@ public sealed class MeasurementSaveService(
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
                 StopImdPercent: request.StopImdPercent,
                 MeasurementLoFreqHz: request.MeasurementLoFreqHz,
-                MeasurementHiFreqHz: request.MeasurementHiFreqHz),
+                MeasurementHiFreqHz: request.MeasurementHiFreqHz,
+                ChartAnnotations: annotations),
             SerializerOptions);
 
         // Grouped by the level, which is the axis; capture.freq_hz carries the low tone, which is
@@ -835,7 +838,7 @@ public sealed class MeasurementSaveService(
     /// argument, for the same reason <see cref="SaveSweepAsync"/> reads the runner's: what is saved
     /// must be exactly what is displayed, not a separately-supplied copy that could differ.</para>
     /// </summary>
-    public async Task<long> SaveFrequencyResponseAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveFrequencyResponseAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = responseRunner.Status;
         if (status.Running)
@@ -859,7 +862,8 @@ public sealed class MeasurementSaveService(
                 BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
-                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                ChartAnnotations: annotations),
             SerializerOptions);
 
         var info = session.Info;
@@ -915,7 +919,7 @@ public sealed class MeasurementSaveService(
     /// Saves the crosstalk traces the runner holds — one <c>response_trace</c> row per direction
     /// measured, with the as-run generator level of each pass in <c>params_json</c>.
     /// </summary>
-    public async Task<long> SaveCrosstalkAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveCrosstalkAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = crosstalkRunner.Status;
         if (status.Running)
@@ -939,7 +943,8 @@ public sealed class MeasurementSaveService(
                 GeneratorAmpDbvRightToLeft: levels.TryGetValue(FrequencyResponseTraceKind.CrosstalkRightToLeft, out double r2l) ? r2l : null,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
-                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                ChartAnnotations: annotations),
             SerializerOptions);
 
         var info = session.Info;
@@ -961,7 +966,7 @@ public sealed class MeasurementSaveService(
     /// <c>gain_load1</c> / <c>gain_load2</c> rows in plain dB — so a stored result can still say what
     /// the two gains were, and the range both were read at is on its parameters.
     /// </summary>
-    public async Task<long> SaveOutputImpedanceAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveOutputImpedanceAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = outputImpedanceRunner.Status;
         if (status.Running)
@@ -984,7 +989,8 @@ public sealed class MeasurementSaveService(
                 InputRangeDbv: status.InputRangeDbv,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
-                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                ChartAnnotations: annotations),
             SerializerOptions);
 
         var traces = new List<ResponseTraceInput> { ToImpedanceTraceInput(status.Trace, ResponseTraceKind.OutputImpedance) };
@@ -1018,7 +1024,7 @@ public sealed class MeasurementSaveService(
     /// argument, for the same reason the other two save methods read their runner's: what is saved
     /// must be exactly what is displayed, not a separately-supplied copy that could differ.</para>
     /// </summary>
-    public async Task<long> SaveSteppedResponseAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveSteppedResponseAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = steppedResponseRunner.Status;
         if (status.Running)
@@ -1042,7 +1048,8 @@ public sealed class MeasurementSaveService(
                 BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
-                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                ChartAnnotations: annotations),
             SerializerOptions);
 
         var info = session.Info;
@@ -1076,7 +1083,7 @@ public sealed class MeasurementSaveService(
     /// is the only reason to keep one. It is truncated around the peak to
     /// <see cref="MaxStoredIrSamples"/> so a row is bounded at every sample rate.</para>
     /// </summary>
-    public async Task<long> SaveImpulseResponseAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveImpulseResponseAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = impulseRunner.Status;
         if (status.Running)
@@ -1101,7 +1108,8 @@ public sealed class MeasurementSaveService(
                 status.GeneratorAmpDbv, request.ChirpStartHz, request.LoadOhms,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
-                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                ChartAnnotations: annotations),
             SerializerOptions);
 
         var info = session.Info;
@@ -1167,7 +1175,7 @@ public sealed class MeasurementSaveService(
     /// Saves the impedance curves currently on screen. Reads the runner's own status rather than
     /// taking the data as an argument, so what is stored is exactly what is displayed.
     /// </summary>
-    public async Task<long> SaveImpedanceAsync(long measurementTypeId, string name, string? notes, CancellationToken ct)
+    public async Task<long> SaveImpedanceAsync(long measurementTypeId, string name, string? notes, IReadOnlyList<JsonElement>? annotations, CancellationToken ct)
     {
         var status = impedanceRunner.Status;
         if (status.Running)
@@ -1211,7 +1219,8 @@ public sealed class MeasurementSaveService(
                 AdaptiveResolution: request.AdaptiveResolution,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
-                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp),
+                ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
+                ChartAnnotations: annotations),
             SerializerOptions);
 
         var info = session.Info;

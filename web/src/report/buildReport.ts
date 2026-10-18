@@ -12,7 +12,6 @@ import { createSpectrumDisplaySource, type StoredSpectrumDisplay } from '../comp
 import {
   LEGACY_SPECTRUM_FRAME,
   parseAnnotations,
-  readStoredAnnotations,
   type ChartAnnotation,
 } from '../measurements/chartAnnotations'
 import { storedAnnotationFrame } from '../charts/annotationViews'
@@ -154,26 +153,29 @@ function parseStoredDisplay(paramsJson: string | null | undefined): StoredSpectr
  * re-edited through PUT /api/measurements/{id} (the Edit measurement dialog's list).</p>
  */
 /**
- * A display with the result's <b>own</b> annotations where it has any, and the measurement type's
- * otherwise.
+ * A display carrying the result's <b>own</b> annotations, and nothing else's.
  *
- * <p>The asymmetry with the FFT arm below is deliberate and is the price of adding no save plumbing.
- * The FFT's save <i>copies</i> the list onto the result, so its annotations are always the result's
- * own and a fallback there would make a result saved before the feature existed inherit the
- * measurement's current notes — exactly what a frozen copy exists to prevent. No other kind's save
- * copies anything, so until a stored result is given its own set in the Edit dialog, its report
- * prints the measurement's. `readStoredAnnotations` answering <b>null</b> for a document with no
- * list is what tells the two apart: an empty list is a result somebody cleared, and stays empty.</p>
+ * <p>No fallback to the measurement type's, on any kind. Every kind's save copies the list onto the
+ * result it writes, so a result saved by this build has its own set — including an empty one, which
+ * means a measurement that had no notes when it was saved and not a result waiting to inherit some.
+ * A result saved <i>before</i> that was true has no list at all and prints none, which is the
+ * honest answer: back-filling would give every old result today's notes, which is the one thing a
+ * frozen copy exists to prevent. The measurement's own are still a click away on screen.</p>
+ *
+ * <p>This is the same reading the FFT arm below has always used; it was the odd one out only because
+ * its save was the only one that copied.</p>
  */
 function withResultAnnotations<T extends { annotations: ChartAnnotation[] }>(
   display: T,
   detail: MeasurementDetail,
 ): T {
-  const own = readStoredAnnotations(
-    parseStoredDisplay(detail.paramsJson)?.chartAnnotations,
-    storedAnnotationFrame(detail.kind),
-  )
-  return own === null ? display : { ...display, annotations: own }
+  return {
+    ...display,
+    annotations: parseAnnotations(
+      parseStoredDisplay(detail.paramsJson)?.chartAnnotations,
+      storedAnnotationFrame(detail.kind),
+    ),
+  }
 }
 
 async function loadStoredData(detail: MeasurementDetail, type: MeasurementType | null): Promise<ReportSubjectData> {

@@ -2484,6 +2484,12 @@ export interface MeasurementSummary {
    * summary so the history list can group by it without a fetch per row.
    */
   source: string | null
+  /**
+   * How many annotations this result carries, over all of its charts. Here for the same reason
+   * `source` is: the history list draws a notes icon per row and dims the ones with nothing to
+   * show, which a fetch per row could not pay for. 0 on a result saved before annotations existed.
+   */
+  annotationCount: number
 }
 
 export const SIMULATION_SOURCE = 'simulation'
@@ -2735,6 +2741,27 @@ export interface MeasurementDetail {
   pcmSampleRateHz?: number | null
 }
 
+/**
+ * What every runner-backed save takes -- the sweeps, the two frequency responses, crosstalk, output
+ * impedance, impedance and the impulse response.
+ *
+ * <p>One shape for all eight rather than an inline type each, which is what they were: a field
+ * added to one copy and missed on the other seven is a silent default rather than an error, and
+ * that is exactly how annotations came to be stored by the FFT save alone for a day. The FFT has
+ * its own request (SaveMeasurementRequest) because it carries no runner and saves the pipeline's
+ * retained spectrum instead.</p>
+ */
+export interface SaveRunRequest {
+  measurementTypeId: number
+  name: string
+  notes: string | null
+  /**
+   * The notes on this measurement's charts, which the result keeps as its own frozen copy.
+   * Omitted stores none -- it does not fall back to the measurement type's.
+   */
+  chartAnnotations?: readonly ChartAnnotation[]
+}
+
 export interface SaveMeasurementRequest {
   measurementTypeId: number
   name: string
@@ -2754,8 +2781,10 @@ export interface UpdateMeasurementRequest {
   /**
    * This result's own annotations. **Omitted (or null) means leave them alone** and an empty array
    * means cleared — the dialog saves a name and notes for every kind, and a request that does not
-   * carry this field must not wipe what the result was saved with. The server refuses it on any
-   * kind but an FFT spectrum.
+   * carry this field must not wipe what the result was saved with. Accepted on every kind.
+   *
+   * <p>To change <i>only</i> the annotations, use `setMeasurementAnnotations`: this request's `name`
+   * is required, so sending it to carry a label edit would rewrite the name and notes too.</p>
    */
   chartAnnotations?: ChartAnnotation[] | null
 }
@@ -3715,6 +3744,19 @@ export const api = {
   updateMeasurement: (id: number, req: UpdateMeasurementRequest) =>
     request<void>(`/measurements/${id}`, { method: 'PUT', body: JSON.stringify(req) }),
 
+  /**
+   * Replaces one stored result's annotations and touches nothing else.
+   *
+   * <p>Its own route rather than `updateMeasurement`, whose `name` is required: the display rail
+   * writes a result's notes as they are edited, so every label keystroke would otherwise rewrite
+   * that result's name and notes as a side effect of adding a note about it.</p>
+   */
+  setMeasurementAnnotations: (id: number, chartAnnotations: readonly ChartAnnotation[]) =>
+    request<void>(`/measurements/${id}/annotations`, {
+      method: 'PUT',
+      body: JSON.stringify({ chartAnnotations }),
+    }),
+
   /** Moves the result to the trash. Nothing is destroyed; `restoreTrashedMeasurement` brings it back. */
   deleteMeasurement: (id: number) => request<void>(`/measurements/${id}`, { method: 'DELETE' }),
 
@@ -3791,7 +3833,7 @@ export const api = {
   setSweepOwner: (owner: string | null) =>
     request<SweepOwnerResponse>('/sweep/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
-  saveSweep: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveSweep: (req: SaveRunRequest) =>
     request<{ id: number }>('/sweep/save', { method: 'POST', body: JSON.stringify(req) }),
 
   getStoredSweep: (measurementId: number) => request<StoredSweepResponse>(`/measurements/${measurementId}/sweep-points`),
@@ -3803,7 +3845,7 @@ export const api = {
   cancelImdSweep: () => request<ImdSweepStatus>('/imd-sweep/cancel', { method: 'POST' }),
   clearImdSweep: () => request<ImdSweepStatus>('/imd-sweep/clear', { method: 'POST' }),
   getImdSweepStatus: () => request<ImdSweepStatus>('/imd-sweep/status'),
-  saveImdSweep: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveImdSweep: (req: SaveRunRequest) =>
     request<{ id: number }>('/imd-sweep/save', { method: 'POST', body: JSON.stringify(req) }),
 
   // The impedance measurement. The same five verbs as every other runner; a stored result is read
@@ -3885,7 +3927,7 @@ export const api = {
 
   getImpedanceStatus: () => request<ImpedanceStatus>('/impedance/status'),
 
-  saveImpedance: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveImpedance: (req: SaveRunRequest) =>
     request<{ id: number }>('/impedance/save', { method: 'POST', body: JSON.stringify(req) }),
 
   // Output impedance / damping factor — mirrors Tonebench.App/Endpoints/OutputImpedanceEndpoints.cs.
@@ -3905,7 +3947,7 @@ export const api = {
 
   getOutputImpedanceStatus: () => request<OutputImpedanceStatus>('/output-impedance/status'),
 
-  saveOutputImpedance: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveOutputImpedance: (req: SaveRunRequest) =>
     request<{ id: number }>('/output-impedance/save', { method: 'POST', body: JSON.stringify(req) }),
 
   startFrequencyResponse: (req: FrequencyResponseStartRequest) =>
@@ -3931,7 +3973,7 @@ export const api = {
   setFrequencyResponseOwner: (owner: string | null) =>
     request<FrequencyResponseStatus>('/frequency-response/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
-  saveFrequencyResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveFrequencyResponse: (req: SaveRunRequest) =>
     request<{ id: number }>('/frequency-response/save', { method: 'POST', body: JSON.stringify(req) }),
 
   // Re-finds the corners of the traces on screen against a new reference; the rebuilt traces
@@ -3956,7 +3998,7 @@ export const api = {
   setSteppedResponseOwner: (owner: string | null) =>
     request<FrequencyResponseStatus>('/stepped-response/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
-  saveSteppedResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveSteppedResponse: (req: SaveRunRequest) =>
     request<{ id: number }>('/stepped-response/save', { method: 'POST', body: JSON.stringify(req) }),
 
   setSteppedResponseBandwidthReference: (req: BandwidthReferenceRequest) =>
@@ -3977,7 +4019,7 @@ export const api = {
   setCrosstalkOwner: (owner: string | null) =>
     request<FrequencyResponseStatus>('/crosstalk/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
-  saveCrosstalk: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveCrosstalk: (req: SaveRunRequest) =>
     request<{ id: number }>('/crosstalk/save', { method: 'POST', body: JSON.stringify(req) }),
 
   // The impulse response. The same five verbs as the two response measurements above, plus the
@@ -3998,7 +4040,7 @@ export const api = {
   setImpulseResponseOwner: (owner: string | null) =>
     request<ImpulseResponseStatus>('/impulse-response/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
 
-  saveImpulseResponse: (req: { measurementTypeId: number; name: string; notes: string | null }) =>
+  saveImpulseResponse: (req: SaveRunRequest) =>
     request<{ id: number }>('/impulse-response/save', { method: 'POST', body: JSON.stringify(req) }),
 
   listLoopbackReferences: () =>

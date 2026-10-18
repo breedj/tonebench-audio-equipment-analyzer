@@ -79,7 +79,8 @@ public static class ImpulseResponseEndpoints
         {
             try
             {
-                long id = await saveService.SaveImpulseResponseAsync(request.MeasurementTypeId, request.Name, request.Notes, ct);
+                long id = await saveService.SaveImpulseResponseAsync(
+                    request.MeasurementTypeId, request.Name, request.Notes, request.ChartAnnotations, ct);
                 return Results.Ok(new IdResponse(id));
             }
             catch (InvalidOperationException ex)
@@ -394,6 +395,13 @@ public sealed record ImpulseBurstDecayRequest(
         new(LowHz, HighHz, MaxPeriods, PointsPerPeriod, resolution, FrequencyColumns);
 }
 
-public sealed record SaveImpulseResponseRequest(long MeasurementTypeId, string Name, string? Notes);
+/// <param name="ChartAnnotations">
+/// The notes on this measurement's charts at the moment of the save, which the result keeps as its
+/// own frozen copy -- see <see cref="Tonebench.Data.FftSpectrumParameters.ChartAnnotations"/>.
+/// An empty list is a result with none; null is a caller that sent none at all, which stores
+/// nothing rather than reaching for the measurement type's.
+/// </param>
+public sealed record SaveImpulseResponseRequest(long MeasurementTypeId, string Name, string? Notes,
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 public sealed record LoopbackReferencesResponse(IReadOnlyList<LoopbackReferenceInfo> References);

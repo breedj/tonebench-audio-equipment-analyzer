@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Data.Sqlite;
@@ -74,13 +74,21 @@ public class ImdSweepSaveTests
             long projectId = await projects.CreateProjectAsync("p", null, CancellationToken.None);
             long typeId = await projects.CreateTypeAsync(
                 projectId, MeasurementSaveService.ImdVsAmplitudeKind, "t", null, saveService.DefaultImdSweepParametersJson(), CancellationToken.None);
-            long resultId = await saveService.SaveImdSweepAsync(typeId, "imd", null, CancellationToken.None);
+            // Every kind's save carries the notes on its charts now, so the result keeps its own
+            // frozen copy and goes on printing them however the measurement's own list changes
+            // afterwards -- see ChartAnnotationParamsTests for the rule and the FFT's own cases.
+            var note = JsonSerializer.Deserialize<JsonElement>(
+                """{"id":1,"style":"point","text":"this point","view":"Sweep","x":1000,"y":0.01}""");
+            long resultId = await saveService.SaveImdSweepAsync(typeId, "imd", null, [note], CancellationToken.None);
 
             var detail = await measurements.GetResultAsync(resultId, CancellationToken.None);
             Assert.NotNull(detail);
             var parameters = JsonSerializer.Deserialize<ImdVsAmplitudeParameters>(detail!.ParamsJson, jsonOptions.SerializerOptions);
             Assert.NotNull(parameters);
             Assert.Equal("Smpte", parameters!.Method);
+            Assert.Equal(
+                "this point",
+                parameters.ChartAnnotations!.Single().GetProperty("text").GetString());
             Assert.Equal("Custom", parameters.Preset);
             Assert.Equal(request.ToneLowHz, parameters.ToneLowHz);
             Assert.Equal(4.0, parameters.LowToHighRatio);

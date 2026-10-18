@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { MeasurementSummary } from '../api/client'
 import { useProjects } from '../composables/useProjects'
 import { MAX_VISIBLE_OVERLAYS, useMeasurements } from '../composables/useMeasurements'
 import { useSweep } from '../composables/useSweep'
@@ -13,9 +14,11 @@ import {
   THD_VS_FREQUENCY_KIND,
 } from '../measurements/kinds'
 import { groupHistory, isSimulation, showsGroupHeaders } from '../measurements/historyGroups'
+import { useAnnotations } from '../composables/useAnnotations'
 // A module store rather than an emit, because every screen mounts its own checklist and the
 // handler was forgotten twice -- see simulationImport.ts.
 import { openSimulationImport } from '../measurements/simulationImport'
+import AnnotationToggle from './AnnotationToggle.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 const emit = defineEmits<{ error: [message: string] }>()
@@ -28,6 +31,10 @@ const { items, overlays, addOverlay, setOverlayVisible, visibleOverlayCount, can
 // checked history item when there is not (see runDash). The swatch has to make the same call, or a
 // row promises a pattern the chart is not drawing.
 const { points: sweepPoints } = useSweep()
+
+// Whose annotations are on the charts. A row's icon is one member of that group -- see
+// useAnnotations -- so lighting one here darkens this measurement's own and every other row's.
+const { source: annotationSource, show: showAnnotations } = useAnnotations()
 
 // The open type's kind — every item in `items` is server-filtered to currentTypeId, so they all
 // share this same kind. Needed to scope the MAX_VISIBLE_OVERLAYS cap per kind (see the constant's
@@ -104,6 +111,26 @@ function sweepDashFor(resultId: number): string | undefined {
 // splitting it would stop someone comparing three simulations against the measurement itself.
 function isDisabled(resultId: number): boolean {
   return currentKind.value !== null && !canShowMoreOverlays(currentKind.value) && !isChecked(resultId)
+}
+
+/**
+ * What the notes icon says it will do, which has to name the result: this is the one control in the
+ * rail that can point the Annotations panel at something other than the open measurement.
+ */
+function annotationTitle(item: MeasurementSummary): string {
+  if (annotationSource.value === item.resultId) return "This result's annotations are on the charts. Click to hide them."
+  const count = item.annotationCount
+  return count === 0
+    ? `"${item.name}" has no annotations. Showing it lets you add some, which are saved to that result.`
+    : `Show the ${count} annotation${count === 1 ? '' : 's'} saved with "${item.name}".`
+}
+
+async function onAnnotationToggle(resultId: number) {
+  try {
+    await showAnnotations(resultId)
+  } catch (e) {
+    emit('error', (e as Error).message)
+  }
 }
 
 async function onToggle(resultId: number, event: Event) {
@@ -191,7 +218,10 @@ async function onToggle(resultId: number, event: Event) {
                 :stroke-dasharray="sweepDashFor(item.resultId)"
               />
             </svg>
-            <span class="truncate" :class="{ 'text-neutral-400 dark:text-neutral-600': isDisabled(item.resultId) }">
+            <span
+              class="min-w-0 truncate"
+              :class="{ 'text-neutral-400 dark:text-neutral-600': isDisabled(item.resultId) }"
+            >
               {{ item.name }}
             </span>
             <!-- Colour identifies the run and dash identifies the channel, both already spoken
@@ -204,6 +234,18 @@ async function onToggle(resultId: number, event: Event) {
             >
               sim
             </span>
+            <!-- Its own notes, on the charts. Independent of the checkbox on purpose: an annotation
+                 is stored in data coordinates and draws perfectly well without its curve, and
+                 coupling the two would spend one of the three plotting slots just to read a note
+                 (Joost, 2026-10-18). Last in the row and pushed right, so the icons line up down
+                 the list however long the names are. -->
+            <AnnotationToggle
+              class="ml-auto"
+              :active="annotationSource === item.resultId"
+              :empty="item.annotationCount === 0"
+              :title="annotationTitle(item)"
+              @click="onAnnotationToggle(item.resultId)"
+            />
           </li>
         </ul>
       </div>

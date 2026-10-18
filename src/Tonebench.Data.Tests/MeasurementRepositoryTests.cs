@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 using Tonebench.Dsp;
 
 namespace Tonebench.Data.Tests;
@@ -380,6 +380,110 @@ public class MeasurementRepositoryTests
         }
     }
 
+    /// <summary>
+    /// The notes icon on each History row is dimmed where its result has nothing to show, so the
+    /// count rides on the summary rather than costing a fetch per row — the same call
+    /// <see cref="MeasurementSummary.Source"/> made for grouping.
+    /// </summary>
+    [Fact]
+    public async Task ListResults_CountsTheAnnotationsOnEachResult()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var (measurementRepo, typeId, _) = await SetUpAsync(path);
+
+            // Three states, and they are three different things: notes, notes that were cleared,
+            // and a result saved before annotations existed at all.
+            await measurementRepo.SaveResultAsync(
+                BuildSaveRequest(typeId, 1, 10, seed: 1, name: "two",
+                    paramsJson: """{"fftSize":65536,"chartAnnotations":[{"x":1000,"text":"hum"},{"x":3000,"text":"h3"}]}"""),
+                CancellationToken.None);
+            await measurementRepo.SaveResultAsync(
+                BuildSaveRequest(typeId, 1, 10, seed: 2, name: "cleared",
+                    paramsJson: """{"fftSize":65536,"chartAnnotations":[]}"""),
+                CancellationToken.None);
+            await measurementRepo.SaveResultAsync(
+                BuildSaveRequest(typeId, 1, 10, seed: 3, name: "older"),
+                CancellationToken.None);
+
+            var rows = await measurementRepo.ListResultsAsync(
+                new MeasurementFilter(MeasurementTypeId: typeId), CancellationToken.None);
+
+            Assert.Equal(2, rows.Single(r => r.Name == "two").AnnotationCount);
+            Assert.Equal(0, rows.Single(r => r.Name == "cleared").AnnotationCount);
+            Assert.Equal(0, rows.Single(r => r.Name == "older").AnnotationCount);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The regression the annotation count walked straight into: a <b>computed</b> column is typed
+    /// by SQLite from the values it returns, so on an empty result set there is nothing to infer
+    /// from, Dapper materializes it as <c>byte[]</c>, and binding the row record fails with
+    /// <i>"a parameterless default constructor ... is required"</i> — naming nothing that is wrong.
+    /// An <c>IFNULL</c> cannot reach it, because the fault is the absent row and not a NULL in one.
+    /// Hence the count being its own query, which runs only once there is a row.
+    /// </summary>
+    [Fact]
+    public async Task ListResults_WithNothingToList_StillAnswers()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var (measurementRepo, typeId, _) = await SetUpAsync(path);
+
+            var rows = await measurementRepo.ListResultsAsync(
+                new MeasurementFilter(MeasurementTypeId: typeId), CancellationToken.None);
+
+            Assert.Empty(rows);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// <c>json_array_length</c> <i>raises</i> "malformed JSON" rather than answering NULL, so one
+    /// hand-edited <c>params_json</c> would take the whole History list down instead of costing its
+    /// own row a badge. The <c>json_valid</c> guard is what keeps that local.
+    /// </summary>
+    [Fact]
+    public async Task ListResults_WithAParamsJsonThatIsNotJson_StillAnswersAndCountsNone()
+    {
+        string path = TestDb.CreateTempPath();
+        try
+        {
+            var (measurementRepo, typeId, _) = await SetUpAsync(path);
+            var factory = new SqliteConnectionFactory(new TonebenchDatabaseOptions { Path = path });
+
+            long resultId = await measurementRepo.SaveResultAsync(
+                BuildSaveRequest(typeId, 1, 10, seed: 1, name: "hand edited"), CancellationToken.None);
+
+            await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "UPDATE measurement_result SET params_json = @json WHERE id = @id;";
+                command.Parameters.AddWithValue("@json", "{not json at all");
+                command.Parameters.AddWithValue("@id", resultId);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var rows = await measurementRepo.ListResultsAsync(
+                new MeasurementFilter(MeasurementTypeId: typeId), CancellationToken.None);
+
+            Assert.Equal(0, Assert.Single(rows).AnnotationCount);
+        }
+        finally
+        {
+            TestDb.Cleanup(path);
+        }
+    }
+
     private static async Task<(MeasurementRepository MeasurementRepo, long TypeId, ProjectRepository ProjectRepo)> SetUpAsync(
         string path, string typeParamsJson = "{}")
     {
@@ -393,7 +497,8 @@ public class MeasurementRepositoryTests
         return (measurementRepo, typeId, projectRepo);
     }
 
-    private static MeasurementSaveRequest BuildSaveRequest(long typeId, int channels, int binCount, int seed, string name = "result")
+    private static MeasurementSaveRequest BuildSaveRequest(
+        long typeId, int channels, int binCount, int seed, string name = "result", string? paramsJson = null)
     {
         var random = new Random(seed);
         var spectra = new List<StoredSpectrumInput>();
@@ -416,7 +521,7 @@ public class MeasurementRepositoryTests
         }
 
         return new MeasurementSaveRequest(
-            typeId, name, "notes", """{"fftSize":65536}""",
+            typeId, name, "notes", paramsJson ?? """{"fftSize":65536}""",
             "QA403 (Sim)", "SIM-001", "1.0.0", IsSimulated: true,
             SampleRateHz: 48000.0, FftSize: 65536, Channels: channels,
             InRangeDbv: 12.0, OutRangeDbv: 8.0, GenJson: """{"left":{"enabled":true}}""",

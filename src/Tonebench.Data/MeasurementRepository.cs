@@ -1125,6 +1125,33 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         // SelectHeadlineCapture); a single-capture result is unaffected, since its one capture is
         // the only candidate whatever its frequency.
         long[] resultIds = rows.Select(r => r.ResultId).ToArray();
+
+        // How many notes each row's icon has to offer. A second query rather than a column of the
+        // one above, and that is the whole point: a *computed* column is typed by SQLite from the
+        // values it returns, so on an empty result set there is nothing to infer from, Dapper
+        // materializes it as byte[] and binding the row record fails with "a parameterless default
+        // constructor ... is required" -- naming nothing that is wrong, on the commonest state a
+        // project has (a measurement whose history is empty, or whose type was just trashed). An
+        // IFNULL cannot reach that: the fault is the absent row and not a NULL in one, which is the
+        // same lesson ListContentsAsync learned from the Export dialog. This query runs only once
+        // `rows` is known non-empty, which is exactly what makes the two IFNULLs below safe too.
+        //
+        // IFNULL, because json_array_length answers NULL for a document with no such key -- every
+        // result saved before annotations existed -- and json_valid, because it *raises* "malformed
+        // JSON" rather than answering NULL, so one hand-edited params_json would take the whole
+        // History list down instead of costing its own row a badge.
+        var annotationRows = await connection.QueryAsync<AnnotationCountRowRaw>(
+            """
+            SELECT mr.id AS ResultId,
+                   IFNULL(json_array_length(
+                            CASE WHEN json_valid(mr.params_json) THEN mr.params_json END,
+                            '$.chartAnnotations'), 0) AS AnnotationCount
+            FROM measurement_result mr
+            WHERE mr.id IN @resultIds;
+            """,
+            new { resultIds });
+        var annotationCounts = annotationRows.ToDictionary(a => a.ResultId, a => a.AnnotationCount);
+
         var captureRows = await connection.QueryAsync<HeadlineCaptureRowRaw>(
             """
             -- IFNULL, not a bare subquery and not CAST(... AS REAL): SQLite types a column from the
@@ -1183,7 +1210,7 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
             return new MeasurementSummary(
                 r.ResultId, r.ProjectName, r.MeasurementTypeName, r.Name, r.Notes,
                 TonebenchTimestamp.Parse(r.TimestampUtc), r.SampleRateHz, (int)r.FftSize, (int)r.Channels, channels,
-                r.Source);
+                r.Source, annotationCounts.GetValueOrDefault(r.ResultId));
         }).ToList();
     }
 
@@ -1417,6 +1444,8 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
         long ResultId, string ProjectName, string MeasurementTypeName, string Name, string? Notes,
         string TimestampUtc, long CaptureId, long SampleRateHz, long FftSize, long Channels,
         string? Source);
+
+    private sealed record AnnotationCountRowRaw(long ResultId, long AnnotationCount);
 
     private sealed record ResultDetailRowRaw(
         long ResultId, long MeasurementTypeId, string ProjectName, string MeasurementTypeName, string Kind,

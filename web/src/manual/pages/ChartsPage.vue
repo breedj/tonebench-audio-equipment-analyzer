@@ -250,12 +250,35 @@ import SettingsTable from '../components/SettingsTable.vue'
       chart. One measurement carries up to 24 notes across all of its charts.
     </p>
     <p>
-      Notes are saved with the measurement, so they survive a restart, and a <em>result</em> keeps
-      what was on the chart when it was saved. To correct a saved result's notes, open
-      <strong>Edit</strong> on its history row — the list there is the same one, without a chart to
-      click on, and it groups the notes by the chart each was drawn on. They are drawn on
-      screenshots and on the report's charts, and the report's <strong>Annotations</strong> element
-      prints a numbered table per chart, whose numbers are the labels on the picture.
+      <strong>Every saved result keeps its own set.</strong> Saving a result copies the notes that
+      were on the charts into it, frozen: change the measurement's notes next week and that result
+      still prints what it was saved with. A result saved before this was true has none of its own,
+      and shows none.
+    </p>
+    <p>
+      So there is usually more than one set to look at, and a chart can only carry one legibly.
+      The small note icon decides which — one in each <strong>Annotations</strong> panel's header for
+      the measurement's own, and one on every <strong>History</strong> row for that result's. They
+      are one group: lighting any of them darkens the rest, and clicking the lit one puts the charts
+      back to no notes at all. The panel then lists whichever set is lit, and says so above the
+      controls when it is a result's.
+    </p>
+    <p>
+      A history row's icon works whether or not the row is ticked for plotting — a note is stored at
+      a frequency and a level, so it draws perfectly well without its curve — and a row with nothing
+      to show has a faint icon rather than none, because selecting it is how you add the first note
+      to a stored result. Anything you change while a result's set is lit is saved to that result
+      straight away; there is no Save to press. Pressing <strong>Add</strong> while nothing is lit
+      turns the measurement's own back on first, so a note can never be placed onto a list the chart
+      is not drawing.
+    </p>
+    <p>
+      The measurement's own notes are saved with the measurement, so they survive a restart. A saved
+      result's can also be corrected from <strong>Edit</strong> on its history row, which lists the
+      whole set grouped by the chart each note was drawn on — useful when the result is not the one
+      on screen. Notes are drawn on screenshots and on the report's charts, and the report's
+      <strong>Annotations</strong> element prints a numbered table per chart, whose numbers are the
+      labels on the picture.
     </p>
     <p>
       Two charts are exceptions worth knowing. The <strong>spectrogram</strong> offers only a rule

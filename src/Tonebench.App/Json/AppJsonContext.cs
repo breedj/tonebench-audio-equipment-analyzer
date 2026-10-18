@@ -48,6 +48,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(GeneratorRequest))]
 [JsonSerializable(typeof(SaveMeasurementRequest))]
 [JsonSerializable(typeof(UpdateMeasurementRequest))]
+[JsonSerializable(typeof(SetMeasurementAnnotationsRequest))]
 [JsonSerializable(typeof(MeasurementListResponse))]
 [JsonSerializable(typeof(MeasurementDetailResponse))]
 [JsonSerializable(typeof(MeasurementSpectrumResponse))]

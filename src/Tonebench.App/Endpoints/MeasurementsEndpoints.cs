@@ -118,6 +118,33 @@ public static class MeasurementsEndpoints
             return Results.Ok();
         });
 
+        // The annotations alone. Its own route rather than a field of the PUT above, whose Name is
+        // required: the display rail writes a shown result's notes as they are edited, so routing a
+        // label keystroke through that request would rewrite the result's name and notes as a side
+        // effect of adding a note about it. Nothing here is optional -- an empty list clears them,
+        // which is what a Remove all on a stored result means.
+        group.MapPut("/{id:long}/annotations", async (
+            long id,
+            SetMeasurementAnnotationsRequest request,
+            MeasurementSaveService saveService,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await saveService.SetResultAnnotationsAsync(id, request.ChartAnnotations, ct);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+
+            return Results.Ok();
+        });
+
         // Moves the result to the trash — see MeasurementRepository.TrashResultAsync, and
         // TrashEndpoints for what lists and restores it. Nothing is destroyed here; the permanent
         // delete is DELETE /api/trash/measurements/{id}, and the retention purge.
@@ -421,7 +448,7 @@ public static class MeasurementsEndpoints
     private static MeasurementSummaryResponse ToSummaryResponse(MeasurementSummary summary) => new(
         summary.ResultId, summary.ProjectName, summary.MeasurementTypeName, summary.Name, summary.Notes,
         summary.TimestampUtc, summary.SampleRateHz, summary.FftSize, summary.Channels, summary.ChannelHeadlines,
-        summary.Source);
+        summary.Source, summary.AnnotationCount);
 }
 
 /// <param name="ChartAnnotations">
@@ -448,6 +475,14 @@ public sealed record UpdateMeasurementRequest(
     string? Notes,
     IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
+/// <param name="ChartAnnotations">
+/// What this result's annotations become. <b>Not optional and not nullable</b>, unlike
+/// <see cref="UpdateMeasurementRequest.ChartAnnotations"/>: this route exists only to set them, so
+/// an empty list is the honest way to say "none" and there is no second field for an absent one to
+/// leave alone.
+/// </param>
+public sealed record SetMeasurementAnnotationsRequest(IReadOnlyList<JsonElement> ChartAnnotations);
+
 public sealed record MeasurementListResponse(MeasurementSummaryResponse[] Items);
 
 public sealed record MeasurementSummaryResponse(
@@ -461,7 +496,14 @@ public sealed record MeasurementSummaryResponse(
     /// rather than an error, and it showed up as every imported simulation rendering in the
     /// history list as though it had been measured.
     /// </summary>
-    string? Source = null);
+    string? Source = null,
+    /// <summary>
+    /// How many annotations this result carries — see
+    /// <see cref="Tonebench.Data.MeasurementSummary.AnnotationCount"/>. On the summary so the
+    /// history list can dim the rows with nothing to show without a fetch per row, and
+    /// <b>on this DTO as well as the domain record</b> for the reason <see cref="Source"/> gives.
+    /// </summary>
+    long AnnotationCount = 0);
 
 public sealed record MeasurementDetailResponse(
     long ResultId, long MeasurementTypeId, string ProjectName, string MeasurementTypeName,

@@ -99,7 +99,18 @@ const otherPeaksSort = ref<PeakSort | null>(null)
 // measurement keeps one list across all of its charts, and only one measurement is on screen at a
 // time. They are re-exported here so the FFT screen's own panels and SpectrumDisplaySource keep
 // their shape.
-const { annotations, armed: annotationArmed, numbers: annotationNumbers } = useAnnotations()
+//
+// Two of them, deliberately: `live` is this measurement's own working set -- what the staged config
+// writes to its type, and what the dirty watcher below has to watch -- while `annotations` is
+// whatever is being *drawn*, which may be a saved result's frozen set instead. Watching the drawn
+// one would mark the measurement dirty because somebody looked at a result's notes.
+const {
+  shown: annotations,
+  live: liveAnnotations,
+  armed: annotationArmed,
+  numbers: annotationNumbers,
+  applyLoadedLive: applyLoadedAnnotations,
+} = useAnnotations()
 
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
 // stored params — loading is the opposite of an unsaved edit. Same pattern as
@@ -116,7 +127,7 @@ watch([
   autofitOnDone,
   showSpectrogram, showOscilloscope, showHarmonics, showOtherPeaks, spectrumUnit, dutGainDb, showWeightingCurve,
   showHarmonicMarkers, harmonicMarkerUnit,
-  harmonicsSort, otherPeaksSort, annotations,
+  harmonicsSort, otherPeaksSort, liveAnnotations,
 ], () => {
   if (!restoring) useProjects().markDirty()
 })
@@ -341,8 +352,10 @@ export function useChartDisplay() {
     harmonicMarkerUnit.value = parseHarmonicMarkerUnit(loaded?.chartHarmonicMarkerUnit)
     harmonicsSort.value = parsePeakSort(loaded?.chartHarmonicsSort)
     otherPeaksSort.value = parsePeakSort(loaded?.chartOtherPeaksSort)
-    annotations.value = parseAnnotations(loaded?.chartAnnotations, LEGACY_SPECTRUM_FRAME)
-    annotationArmed.value = null
+    // Through useAnnotations rather than by writing the ref, because loading a measurement also
+    // puts the selection back on it: a result of the measurement being left behind must not stay
+    // lit over a different measurement's curves.
+    applyLoadedAnnotations(parseAnnotations(loaded?.chartAnnotations, LEGACY_SPECTRUM_FRAME))
     void nextTick(() => {
       restoring = false
     })

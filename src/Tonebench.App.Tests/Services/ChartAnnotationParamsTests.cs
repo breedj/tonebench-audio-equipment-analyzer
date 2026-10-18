@@ -1,3 +1,4 @@
+﻿using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -47,6 +48,35 @@ public class ChartAnnotationParamsTests
         """);
 
     private static JsonElement Row(string json) => JsonSerializer.Deserialize<JsonElement>(json);
+
+    /// <summary>
+    /// Every kind that records bench provenance with a result must be able to record that result's
+    /// own annotations.
+    ///
+    /// <para>A reflection test rather than a list of ten names, for the reason
+    /// <c>ProgrammableLoadParamsTests</c> gives about its own first case: a field missing from one
+    /// of these records is a silent default and not an error, which is precisely how annotations
+    /// came to be stored by the FFT save alone. An eleventh measurement kind must not be able to
+    /// forget — and the type has to be the opaque list, since a typed row would strip every field
+    /// this build does not declare.</para>
+    /// </summary>
+    [Fact]
+    public void EveryKindThatRecordsTheExternalGain_CanAlsoRecordItsOwnAnnotations()
+    {
+        var carrying = typeof(FftSpectrumParameters).Assembly
+            .GetTypes()
+            .Where(t => t.GetProperty("ExternalGainLeftDb") is not null)
+            .ToList();
+
+        Assert.NotEmpty(carrying);
+
+        foreach (Type type in carrying)
+        {
+            PropertyInfo? annotations = type.GetProperty("ChartAnnotations");
+            Assert.True(annotations is not null, $"{type.Name} records a result but cannot record its annotations.");
+            Assert.Equal(typeof(IReadOnlyList<JsonElement>), annotations!.PropertyType);
+        }
+    }
 
     /// <summary>
     /// Two rows are the same annotation when their JSON is. A <see cref="JsonElement"/> has no value

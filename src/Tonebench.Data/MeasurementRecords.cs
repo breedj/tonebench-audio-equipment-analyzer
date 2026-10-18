@@ -488,7 +488,23 @@ public sealed record ThdVsFrequencyParameters(
     /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
     /// Null on a result and on a type stored before it existed.
     /// </summary>
-    PerModeLevels? LevelByMode = null)
+    PerModeLevels? LevelByMode = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null)
 {
     /// <summary>
     /// Present when this sweep was imported from a <c>.step</c>ped transient run rather than
@@ -674,7 +690,23 @@ public sealed record ThdVsAmplitudeParameters(
     /// does not say.
     /// </summary>
     double? MeasurementLoFreqHz = null,
-    double? MeasurementHiFreqHz = null);
+    double? MeasurementHiFreqHz = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <summary>
 /// Configured or as-run parameters for the 'ImdVsAmplitude' measurement kind: a two-tone pair
@@ -780,7 +812,23 @@ public sealed record ImdVsAmplitudeParameters(
     /// does not say.
     /// </summary>
     double? MeasurementLoFreqHz = null,
-    double? MeasurementHiFreqHz = null);
+    double? MeasurementHiFreqHz = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <summary>Which normalisation produced a stored trace -- 'amplitude' | 'psd' in <c>spectrum.norm</c>.</summary>
 public enum SpectrumNorm
@@ -921,7 +969,23 @@ public sealed record MeasurementSummary(
     /// imported from an LTspice <c>.raw</c>. On the summary rather than only the detail because the
     /// history list groups by it, and a second fetch per row to find out would be absurd.
     /// </summary>
-    string? Source = null);
+    string? Source = null,
+    /// <summary>
+    /// How many annotations this result carries, over all of its charts — the length of
+    /// <c>params_json</c>'s <c>chartAnnotations</c>, or 0 where it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>Here for exactly the reason <see cref="Source"/> is: the history list draws a notes
+    /// icon per row, dimmed where there is nothing to show, and a fetch per row to discover that
+    /// would be absurd. A count rather than the list itself, because the list is only ever wanted
+    /// for the one result whose notes are being shown — and that one is read through
+    /// <see cref="MeasurementDetail.ParamsJson"/>, which carries the whole document.</para>
+    ///
+    /// <para>Not nullable, and the query must keep its <c>IFNULL</c>: see
+    /// <c>MeasurementRepository.ListResultsAsync</c> for why a column that is NULL on every row of
+    /// a result set takes the whole list down.</para>
+    /// </remarks>
+    long AnnotationCount = 0);
 
 public sealed record StoredSpectrum(
     int Channel, WindowType Window, double S1, double S2, double EnbwHz, double BinSizeHz,
@@ -1117,7 +1181,23 @@ public sealed record CrosstalkParameters(
     /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
     /// Null on a result and on a type stored before it existed.
     /// </summary>
-    PerModeLevels? LevelByMode = null);
+    PerModeLevels? LevelByMode = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the
@@ -1185,7 +1265,23 @@ public sealed record OutputImpedanceParameters(
     /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
     /// Null on a result and on a type stored before it existed.
     /// </summary>
-    PerModeLevels? LevelByMode = null);
+    PerModeLevels? LevelByMode = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <summary>
 /// An impedance measurement type's <c>params_json</c>.
@@ -1291,7 +1387,23 @@ public sealed record ImpedanceParameters(
     /// the figure typed for power arithmetic and can legitimately disagree with it.
     /// </summary>
     string? ProgrammableLoadKind = null,
-    int? ProgrammableLoadOhms = null)
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null)
 {
     /// <summary>
     /// Present when this result was imported from a simulator's <c>.ac</c> run rather than
@@ -1580,7 +1692,23 @@ public sealed record FrequencyResponseParameters(
     /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
     /// Null on a result and on a type stored before it existed.
     /// </summary>
-    PerModeLevels? LevelByMode = null)
+    PerModeLevels? LevelByMode = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null)
 {
     /// <summary>
     /// Set only on a result imported from a simulator's <c>.ac</c> run — the frequency-domain
@@ -1873,7 +2001,23 @@ public sealed record SteppedResponseParameters(
     /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
     /// Null on a result and on a type stored before it existed.
     /// </summary>
-    PerModeLevels? LevelByMode = null);
+    PerModeLevels? LevelByMode = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <summary>The <c>impulse_result.kind</c> values — mirrors the subset of FrequencyResponseTraceKind an impulse response has.</summary>
 public static class ImpulseTraceKind
@@ -2085,7 +2229,23 @@ public sealed record ImpulseResponseParameters(
     /// What each level mode's own value and unit were last set to — see <see cref="PerModeLevels"/>.
     /// Null on a result and on a type stored before it existed.
     /// </summary>
-    PerModeLevels? LevelByMode = null);
+    PerModeLevels? LevelByMode = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>, which carries the whole of why a row
+    /// is an opaque <c>JsonElement</c> and why there is no record type for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Declared on every kind's record rather than spliced into the stored document after
+    /// the fact, so that any path which deserialises one of these and writes it back carries the
+    /// notes with it. A round trip through a record that does not declare a field drops it
+    /// silently, which is how a re-analysis would have thrown away the notes on the result it was
+    /// derived from.</para>
+    ///
+    /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
+    /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
+    /// </remarks>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <summary>
 /// The values <c>measurement_result.source</c> takes. Null in the database means a measured run --

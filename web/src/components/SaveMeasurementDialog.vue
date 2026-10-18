@@ -3,7 +3,7 @@ import { computed, reactive, watch } from 'vue'
 import Modal from './Modal.vue'
 import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
-import { useChartDisplay } from '../composables/useChartDisplay'
+import { useAnnotations } from '../composables/useAnnotations'
 import { isCrosstalkKind, isFrequencyResponseKind, isImpedanceKind, isOutputImpedanceKind,
   isImpulseResponseKind, isImdSweepKind, isSweepKind } from '../measurements/kinds'
 
@@ -20,8 +20,10 @@ const { save, saveSweep, saveImdSweep, saveResponse, saveImpulse,
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 
-// The spectrum chart's annotations, for the FFT arm of onSave below.
-const { annotations: chartAnnotations } = useChartDisplay()
+// The notes on this measurement's own charts, which every kind's result keeps as its own frozen
+// copy. `live` and not `shown`: the set on the charts may be a stored result's, and saving that
+// would write another result's notes onto this one.
+const { live: liveAnnotations } = useAnnotations()
 
 const form = reactive({
   name: '',
@@ -53,7 +55,15 @@ watch(
 
 async function onSave() {
   if (!canSave.value || currentType.value === null) return
-  const req = { measurementTypeId: currentType.value.id, name: form.name.trim(), notes: form.notes.trim() || null }
+  // The annotations travel with every kind's save, from this one place -- see SaveRunRequest for
+  // why there is one request shape and not eight. A result keeps what was on the charts when it was
+  // saved, and goes on printing that however the measurement's own notes change afterwards.
+  const req = {
+    measurementTypeId: currentType.value.id,
+    name: form.name.trim(),
+    notes: form.notes.trim() || null,
+    chartAnnotations: liveAnnotations.value,
+  }
   // Which endpoint depends on the kind: a sweep's result is N captures built from the runner's
   // points, a response's is its runner's curves, an FFT's is the pipeline's single retained
   // spectrum. Same dialog either way — the name/notes it collects are all the difference the user
@@ -66,11 +76,10 @@ async function onSave() {
   // The IMD sweep before the generic sweep arm: it is a sweep kind, but its own runner holds the points.
   else if (isImdSweepKind(currentType.value.kind)) await saveImdSweep(req)
   else if (isSweepKind(currentType.value.kind)) await saveSweep(req)
-  // The FFT arm is the only one that carries annotations: they are drawn on the spectrum chart, and
-  // this is where a result takes its own frozen copy of them. Sent with the save rather than read
-  // back off the measurement type afterwards, because the type's copy is only as fresh as the last
-  // time the measurement itself was saved -- see SaveMeasurementRequest.chartAnnotations.
-  else await save({ ...req, chartAnnotations: chartAnnotations.value })
+  // Sent with the save rather than read back off the measurement type afterwards, because the
+  // type's copy is only as fresh as the last time the measurement itself was saved -- see
+  // SaveMeasurementRequest.chartAnnotations.
+  else await save(req)
   emit('saved')
   emit('close')
 }

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Data.Sqlite;
@@ -69,7 +69,12 @@ public class NormalizedSweepSaveTests
             long projectId = await projects.CreateProjectAsync("p", null, CancellationToken.None);
             long typeId = await projects.CreateTypeAsync(
                 projectId, MeasurementSaveService.ThdVsFrequencyKind, "t", null, saveService.DefaultSweepParametersJson(), CancellationToken.None);
-            long resultId = await saveService.SaveSweepAsync(typeId, "normalized", null, CancellationToken.None);
+            // Every kind's save carries the notes on its charts now, so the result keeps its own
+            // frozen copy and goes on printing them however the measurement's own list changes
+            // afterwards -- see ChartAnnotationParamsTests for the rule and the FFT's own cases.
+            var note = JsonSerializer.Deserialize<JsonElement>(
+                """{"id":1,"style":"point","text":"this point","view":"Sweep","x":1000,"y":0.01}""");
+            long resultId = await saveService.SaveSweepAsync(typeId, "normalized", null, [note], CancellationToken.None);
 
             var detail = await measurements.GetResultAsync(resultId, CancellationToken.None);
             Assert.NotNull(detail);
@@ -77,6 +82,9 @@ public class NormalizedSweepSaveTests
             Assert.NotNull(parameters);
             Assert.Equal("FrequencyNormalized", parameters!.ThdMethod);
             Assert.False(parameters.AdaptiveResolution);
+            Assert.Equal(
+                "this point",
+                parameters.ChartAnnotations!.Single().GetProperty("text").GetString());
 
             var stored = await measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
             Assert.Equal(sweepRunner.Status.Points.Count, stored.Count);

@@ -52,8 +52,16 @@ const PATHS: Record<ToolbarIconName, string[]> = {
     'M16 17H8',
   ],
   'reset-zoom': ['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z', 'm21 21-4.35-4.35', 'M8 11h6'],
-  // An arrow curving back on itself: one step out of the zoom, not all the way out of it.
-  'zoom-back': ['M3 7v6h6', 'M3.5 13a9 9 0 1 0 2.3-6.4L3 9.5'],
+  // One step out of the zoom, not all the way out of it: an arrow running counter-clockwise around
+  // an arc that stops short of its own head. The gap is deliberate and it is the whole of what
+  // makes the glyph read as an arrow -- the first cut swept 300-odd degrees and butted the head
+  // against the tail, which at 14 px is a closed circle with a kink in it (Joost, 2026-10-18).
+  //
+  // Geometry, so it can be adjusted rather than re-guessed: centre (12,12), radius 7, drawn
+  // anticlockwise from 190 degrees to 260 degrees the long way round, i.e. 290 degrees of arc and
+  // a 70 degree gap at the upper left. The head sits at the 260 degree end, pointing along the
+  // tangent there, with 3.2-long legs at +/-35 degrees.
+  'zoom-back': ['M5.1 10.8A7 7 0 1 0 10.8 5.1', 'M13.7 6.5 10.8 5.1 13 2.8'],
   // A frame with the two axes picked out: the window being written into the display panel's boxes.
   'set-axis': ['M4 4v16h16', 'M4 9h16', 'M9 4v16'],
   metrics: ['M11 12H3', 'M16 6H3', 'M16 18H3', 'M18 9v6', 'M21 12h-6'],

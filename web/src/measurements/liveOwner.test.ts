@@ -4,6 +4,7 @@ import {
   foreignLiveStores,
   liveOwnerKey,
   liveScreenStore,
+  projectOwnerKey,
   liveStoreForKind,
   releaseLive,
   releaseOwners,
@@ -11,18 +12,52 @@ import {
 } from './liveOwner'
 import { MEASUREMENT_KINDS } from './kinds'
 
-// Two measurements of one project. Non-null by construction — both ids are given.
-const A = liveOwnerKey(1, 4)!
-const B = liveOwnerKey(1, 5)!
+/** A project as the server hands it over. Every .tbench has one row, and its id is always 1. */
+function project(createdUtc: string, id = 1) {
+  return { id, name: 'Bench', notes: null, createdUtc }
+}
+
+const ONE = projectOwnerKey(project('2026-10-18T09:00:00.000Z'))
+const OTHER = projectOwnerKey(project('2026-10-18T11:30:00.000Z'))
+
+// Two measurements of one project. Non-null by construction — both halves are given.
+const A = liveOwnerKey(ONE, 4)!
+const B = liveOwnerKey(ONE, 5)!
+
+describe('projectOwnerKey', () => {
+  it('tells two project files apart although both say id 1', () => {
+    // The bug this replaced, as the app actually produces it. `project.id` is 1 in every .tbench
+    // ever created, so the first measurement of every project was "1:1": measured 2026-10-18, a
+    // chirp run in project A came back on project B's first measurement and saved into B.
+    expect(ONE).not.toBe(OTHER)
+    expect(liveOwnerKey(ONE, 1)).not.toBe(liveOwnerKey(OTHER, 1))
+  })
+
+  it('is the same project after a Save As with results, which page-copies the row', () => {
+    // A path would change here and the copy would lose the runs on screen; created_utc travels
+    // with the row, and the copy is the same measurements under the same ids. (Save As *without*
+    // results writes a fresh row and fresh type ids, so it is rightly a different project.)
+    expect(projectOwnerKey(project('2026-10-18T09:00:00.000Z'))).toBe(ONE)
+  })
+
+  it('is null when nothing is open', () => {
+    expect(projectOwnerKey(null)).toBeNull()
+    expect(projectOwnerKey(undefined)).toBeNull()
+  })
+})
 
 describe('liveOwnerKey', () => {
   it('carries the project, so the first measurement of two projects are two owners', () => {
-    expect(liveOwnerKey(1, 1)).not.toBe(liveOwnerKey(2, 1))
+    expect(liveOwnerKey(ONE, 1)).not.toBe(liveOwnerKey(OTHER, 1))
+  })
+
+  it('tells two measurements of one project apart', () => {
+    expect(A).not.toBe(B)
   })
 
   it('is null when nothing is open', () => {
     expect(liveOwnerKey(null, 1)).toBeNull()
-    expect(liveOwnerKey(1, null)).toBeNull()
+    expect(liveOwnerKey(ONE, null)).toBeNull()
   })
 })
 

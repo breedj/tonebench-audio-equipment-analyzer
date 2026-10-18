@@ -185,6 +185,7 @@ import {
   claimLive,
   foreignLiveStores,
   liveOwnerKey,
+  projectOwnerKey,
   liveScreenStore,
   liveStoreForKind,
   releaseLive,
@@ -489,7 +490,7 @@ async function onTrashRestored() {
  */
 async function onTrashPurged(measurementTypeIds: number[]) {
   const owners = measurementTypeIds
-    .map((id) => liveOwnerKey(currentProjectId.value, id))
+    .map((id) => liveOwnerKey(currentProjectKey.value, id))
     .filter((key): key is string => key !== null)
   if (owners.length === 0) return
 
@@ -2983,8 +2984,14 @@ function clearMeasurement() {
 // then drew that record inside its own axis ranges. Reported 2026-09-27.
 const liveOwners = ref<LiveOwners>({})
 
+/**
+ * Which project file the owner keys below name. Not `currentProjectId`, which is 1 in every
+ * project ever created — see projectOwnerKey for what that cost.
+ */
+const currentProjectKey = computed(() => projectOwnerKey(currentProject.value))
+
 /** Who the live state on screen belongs to right now — project *and* type, see liveOwnerKey. */
-const liveOwnerNow = computed(() => liveOwnerKey(currentProjectId.value, currentTypeId.value))
+const liveOwnerNow = computed(() => liveOwnerKey(currentProjectKey.value, currentTypeId.value))
 
 /**
  * Is anything measuring: an acquisition, or any of the six runners.
@@ -3031,7 +3038,7 @@ watch(anythingLive, setRunActive, { immediate: true })
  * clear.</p>
  */
 async function discardForeignLiveState(nextTypeId: number) {
-  const nextOwner = liveOwnerKey(currentProjectId.value, nextTypeId)
+  const nextOwner = liveOwnerKey(currentProjectKey.value, nextTypeId)
   const nextStore = liveScreenStore(types.value.find((t) => t.id === nextTypeId)?.kind)
 
   // The server's retained snapshot follows the measurement on screen whatever kind it is, and that

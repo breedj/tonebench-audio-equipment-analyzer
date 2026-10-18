@@ -53,14 +53,44 @@ export type LiveStore =
   | 'outputImpedance'
 
 /**
- * Who a store's contents belong to: the project and the measurement type together, never the type id
- * alone. Type ids are per project (`AUTOINCREMENT` inside one `.tbench` file), so the first
- * measurement of every project is id 1 — and an owner recorded as "1" would make the previous
- * project's spectrum look like the new project's own, which is the one case this whole module exists
- * to stop.
+ * A project as the first half of an owner key: <b>which project file</b>, not which row.
+ *
+ * <p>The project <i>id</i> cannot do this job and quietly looked as though it could. A `.tbench`
+ * holds exactly one `project` row and `project.id` is a plain `INTEGER PRIMARY KEY`, so in every
+ * file ever created by this app it is <b>1</b> — which made "1:1" the first measurement of *every*
+ * project. Measured 2026-10-18: run a chirp in project A's first measurement, open project B,
+ * select its first measurement, and A's run came back and <b>saved into B</b>. That is precisely
+ * the fault the owner key exists to stop, arriving through the key itself. (useProjects'
+ * `refreshSession` had already met this: it compares the path as well as the id to decide whether
+ * the project changed.)</p>
+ *
+ * <p><b>`createdUtc` rather than the path</b>, and that is a choice about what "the same project"
+ * means. **Save As with results** is `BackupDatabase` plus a name/notes update
+ * (`ProjectSessionService.SaveAsAsync`), so the `project` row — `created_utc` and all — survives
+ * into the copy: the same measurements under the same ids, which should keep the runs they have on
+ * screen, and with a path for a key they would not. Save As <i>without</i> results writes a fresh
+ * row and fresh type ids, so it is a different project here too, which is what it is. Two projects
+ * created in the same millisecond would collide — `TonebenchTimestamp` is `.fff` — and the only
+ * consequence is the behaviour of the day before this, so it is not worth a stronger identity than
+ * the data already carries.</p>
  */
-export function liveOwnerKey(projectId: number | null, typeId: number | null): string | null {
-  return projectId === null || typeId === null ? null : `${projectId}:${typeId}`
+export function projectOwnerKey(project: { id: number; createdUtc: string } | null | undefined): string | null {
+  return project ? `${project.id}@${project.createdUtc}` : null
+}
+
+/**
+ * Who a store's contents belong to: the project and the measurement type together, never the type
+ * id alone. Type ids are per project (`measurement_type.id` is per `.tbench` file), so the first
+ * measurement of every project is id 1 — and an owner recorded as "1" would make the previous
+ * project's spectrum look like the new project's own, which is the one case this whole module
+ * exists to stop.
+ *
+ * <p>The project half is {@link projectOwnerKey}'s string and not the row id, for the reason given
+ * there. Nothing parses what comes out: the server holds it as an opaque label (see
+ * `RunOwnerRequest`) and this module only ever compares two of them.</p>
+ */
+export function liveOwnerKey(projectKey: string | null, typeId: number | null): string | null {
+  return projectKey === null || typeId === null ? null : `${projectKey}:${typeId}`
 }
 
 /** Owner key per store, or absent for a store nothing has filled since the app started. */

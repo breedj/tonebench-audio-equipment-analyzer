@@ -42,7 +42,10 @@ const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', {
 /** The measurement's notes, across its charts; this one draws the harmonic curves'. See FrequencyResponseChart. */
 const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
 
-const props = defineProps<{
+// `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop
+// with no default to `false`, which silently turned the ordinal badges off on every chart but
+// the FFT's -- see AnnotationOverlayOptions.numbers for the whole of it.
+const props = withDefaults(defineProps<{
   /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
   annotationNumbers?: boolean
   harmonics: HarmonicCurveJson[]
@@ -57,7 +60,7 @@ const props = defineProps<{
   freqToHz: number
   yTopDb: number
   yBottomDb: number
-}>()
+}>(), { annotationNumbers: true })
 
 const { isDark } = useAppTheme()
 

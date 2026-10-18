@@ -257,24 +257,6 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
       </div>
     </CollapsibleSection>
 
-    <AnnotationsPanel :view="SPECTRUM_ANNOTATION_VIEW" :point-hint="POINT_HINT" />
-
-    <!-- This screen stacks up to three charts, and annotations belong to one chart each, so each
-         gets its own section -- shown only while its chart is, or the rail would carry two headings
-         for pictures that are not on screen. -->
-    <AnnotationsPanel
-      v-if="showSpectrogram"
-      :view="SPECTROGRAM_ANNOTATION_VIEW"
-      title="Spectrogram notes"
-      :styles="SPECTROGRAM_STYLES"
-      point-hint="Click the spectrogram to rule a line at that frequency."
-    />
-    <AnnotationsPanel
-      v-if="showOscilloscope"
-      :view="OSCILLOSCOPE_ANNOTATION_VIEW"
-      title="Oscilloscope notes"
-    />
-
     <!-- text-xs throughout, the same size SweepDisplayPanel uses, so the two screens' display
          rails read alike; the Channels row is that panel's too (caption, then Left/Right side by side). -->
     <CollapsibleSection title="Display">
@@ -379,6 +361,29 @@ const showDutGain = computed(() => spectrumUnit.value === 'dBVPerRootHzInput' ||
         </label>
       </section>
     </CollapsibleSection>
+
+    <!-- Under Display and above History, which is where the other six screens' rails already put
+         their notes, so one rule holds everywhere: display sections, then the notes, then History
+         (Joost, 2026-10-18). It also puts these three after the checkboxes that summon two of them,
+         which live in Display -- a panel appearing above the box that turns its chart on reads
+         backwards. -->
+    <AnnotationsPanel :view="SPECTRUM_ANNOTATION_VIEW" :point-hint="POINT_HINT" />
+
+    <!-- This screen stacks up to three charts, and annotations belong to one chart each, so each
+         gets its own section -- shown only while its chart is, or the rail would carry two headings
+         for pictures that are not on screen. -->
+    <AnnotationsPanel
+      v-if="showSpectrogram"
+      :view="SPECTROGRAM_ANNOTATION_VIEW"
+      title="Spectrogram notes"
+      :styles="SPECTROGRAM_STYLES"
+      point-hint="Click the spectrogram to rule a line at that frequency."
+    />
+    <AnnotationsPanel
+      v-if="showOscilloscope"
+      :view="OSCILLOSCOPE_ANNOTATION_VIEW"
+      title="Oscilloscope notes"
+    />
 
     <!-- Measurements checklist + history, injected here by App.vue so they sit underneath Display
          at the same column width, for both the FFT and sweep screens. -->

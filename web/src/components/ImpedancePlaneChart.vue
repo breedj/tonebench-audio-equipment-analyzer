@@ -33,7 +33,10 @@ const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', {
 /** The measurement's notes, across its charts; this one draws the locus'. See FrequencyResponseChart. */
 const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
 
-const props = defineProps<{
+// `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop
+// with no default to `false`, which silently turned the ordinal badges off on every chart but
+// the FFT's -- see AnnotationOverlayOptions.numbers for the whole of it.
+const props = withDefaults(defineProps<{
   /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
   annotationNumbers?: boolean
   traces: ImpedanceTrace[]
@@ -41,7 +44,7 @@ const props = defineProps<{
   xFromHz: number
   xToHz: number
   thickLines: boolean
-}>()
+}>(), { annotationNumbers: true })
 
 import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
 import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'

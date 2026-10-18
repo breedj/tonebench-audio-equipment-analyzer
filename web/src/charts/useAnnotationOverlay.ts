@@ -104,6 +104,26 @@ export interface AnnotationOverlayOptions {
   list: Ref<ChartAnnotation[]>
   /** The style the panel has armed, or null. Cleared by this composable once something is placed. */
   armed: Ref<AnnotationStyle | null>
+  /**
+   * Whether each label carries its ordinal badge — the coloured circle that ties a label on the
+   * picture to its row in the panel and in the report's table. Off only in a report whose
+   * Annotations table was not included.
+   *
+   * <p><b>A chart that feeds this from a prop must give that prop a `withDefaults` default of
+   * `true`.</b> Vue casts an absent prop declared `boolean` with <i>no</i> default to `false`
+   * rather than to undefined, so the natural-looking guard `props.annotationNumbers !== false`
+   * reads `false !== false` and the badge comes back null from {@link layoutAnnotations}. That is
+   * exactly what happened: ten of the eleven annotated charts drew no badge at all, while the FFT
+   * screen's — the one chart that reads the shared `useAnnotations().numbers` ref instead of a prop
+   * — was right, which is why it looked like a feature only the spectrum had (Joost, 2026-10-18).
+   * The secondary tell was that those ten charts' label boxes were also narrower by the badge's
+   * own width, since `numbers` sizes the box as well as filling it.</p>
+   *
+   * <p>Falling back to the shared ref inside a chart cannot fix it: after the cast an absent prop
+   * is indistinguishable from an explicit `false`, which the report really does pass. The default
+   * is the only place the distinction can be restored, and
+   * `charts/annotationNumbersDefault.test.ts` pins it.</p>
+   */
   numbers: () => boolean
   /**
    * The CSS-pixel adapter, whose coordinate origin is {@link surface}'s own top-left — so a pointer

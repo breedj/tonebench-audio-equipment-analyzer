@@ -39,7 +39,10 @@ const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', {
 /** The measurement's notes, across its charts; this one draws the waveform's. See FrequencyResponseChart. */
 const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
 
-const props = defineProps<{
+// `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop
+// with no default to `false`, which silently turned the ordinal badges off on every chart but
+// the FFT's -- see AnnotationOverlayOptions.numbers for the whole of it.
+const props = withDefaults(defineProps<{
   /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
   annotationNumbers?: boolean
   scope: Record<number, ScopeFrame>
@@ -51,7 +54,7 @@ const props = defineProps<{
    */
   residual?: Record<number, ScopeFrame>
   status: DeviceStatus | null
-}>()
+}>(), { annotationNumbers: true })
 
 // Same shared config SpectrumChart reads — a channel the Acquisition panel has turned off must
 // not keep showing its last waveform forever (the stream only ever adds entries per channel,

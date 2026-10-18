@@ -87,7 +87,10 @@ const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', {
 /** The measurement's notes, across its charts; this one draws the sweep's. See FrequencyResponseChart. */
 const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
 
-const props = defineProps<{
+// `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop
+// with no default to `false`, which silently turned the ordinal badges off on every chart but
+// the FFT's -- see AnnotationOverlayOptions.numbers for the whole of it.
+const props = withDefaults(defineProps<{
   /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
   annotationNumbers?: boolean
   /** Per-trace visibility. Every trace is individually switchable from the display panel. */
@@ -168,7 +171,7 @@ const props = defineProps<{
    * Absent on the report's headless render, which has no cursor and draws no line.
    */
   pinnedX?: number | null
-}>()
+}>(), { annotationNumbers: true })
 
 const family = computed(() => props.traceFamily ?? 'thd')
 

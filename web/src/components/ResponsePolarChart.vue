@@ -73,7 +73,10 @@ const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', {
 /** The measurement's notes, across its charts; this one draws the open projection's. */
 const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
 
-const props = defineProps<{
+// `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop
+// with no default to `false`, which silently turned the ordinal badges off on every chart but
+// the FFT's -- see AnnotationOverlayOptions.numbers for the whole of it.
+const props = withDefaults(defineProps<{
   /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
   annotationNumbers?: boolean
   traces: ResponseTrace[]
@@ -139,7 +142,7 @@ const props = defineProps<{
    * panel is mounted (a report render); the map then fits its own, see `effectiveFit`.
    */
   fit?: FitResult | null
-}>()
+}>(), { annotationNumbers: true })
 
 const { isDark } = useAppTheme()
 

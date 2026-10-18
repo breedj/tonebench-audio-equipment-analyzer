@@ -32,11 +32,14 @@ const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', {
 /** The measurement's notes, across its charts; this one draws the spectrogram's. See FrequencyResponseChart. */
 const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
 
-const props = defineProps<{
+// `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop
+// with no default to `false`, which silently turned the ordinal badges off on every chart but
+// the FFT's -- see AnnotationOverlayOptions.numbers for the whole of it.
+const props = withDefaults(defineProps<{
   /** Whether the ordinal badges are drawn; off in a report whose Annotations table was not included. */
   annotationNumbers?: boolean
   spectrum: Record<number, SpectrumFrame>
-}>()
+}>(), { annotationNumbers: true })
 
 // Same shared config the other two charts read — a channel the FFT settings panel has turned off
 // must not keep feeding rows forever (the stream only ever adds per-channel entries, never removes

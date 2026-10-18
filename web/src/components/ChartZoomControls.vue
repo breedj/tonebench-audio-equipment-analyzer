@@ -25,10 +25,14 @@ defineEmits<{ back: []; apply: []; reset: [] }>()
 </script>
 
 <template>
-  <!-- `contents`, so the three buttons are laid out by the header row they sit in rather than by a
-       wrapper of their own: every one of these headers is a flex row with a readout that has to
-       keep the space between. -->
-  <span v-if="zoomed" class="contents">
+  <!-- One group, pushed to the right end by `ml-auto`, and both halves of that are the fix for
+       what `contents` did (reported 2026-10-18 from the IMD sweep, and true of every chart whose
+       header is a plain `justify-between` row). Laid out as `contents` the three buttons became
+       three flex children of that row, so it spread them evenly across the header — Back in the
+       middle, Set axis two thirds along — instead of keeping them together. The FFT screen was the
+       exception only because its header has a `flex-1` readout that absorbs the free space, which
+       is exactly the arrangement this makes unnecessary. -->
+  <span v-if="zoomed" class="ml-auto flex shrink-0 items-center gap-2">
     <button
       v-if="canGoBack"
       type="button"

@@ -546,8 +546,196 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
     Autofit
   </button>
 
-  <!-- Display first: it is the section a reader reaches for on every visit, and the axis
-       ranges below it are set once and then left alone. Joost's request, 2026-09-27. -->
+
+  <!-- The axis windows, first in the rail and laid out the way the FFT screen's Level range /
+       Frequency range are (ChartDisplayPanel.vue): label over a full-width field. Multi-root, so
+       they flow into MeasurementLayout's aside grid one by one like SweepDisplayPanel's. -->
+  <CollapsibleSection v-if="bodeShowing" :title="view === 'Dbv' ? 'dBV range' : 'Gain range'" size="xs">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Top
+        <input
+          :value="yTopDb"
+          type="number"
+          :step="DB_STEP"
+          class="tb-input"
+          @change="onTopDbChange"
+        />
+      </label>
+      <label class="tb-field">
+        Bottom
+        <input
+          :value="yBottomDb"
+          type="number"
+          :step="DB_STEP"
+          class="tb-input"
+          @change="onBottomDbChange"
+        />
+      </label>
+    </div>
+  </CollapsibleSection>
+
+  <!-- Nichols' own value axis. Its *phase* axis has no section, and that is deliberate: unwrapped
+       degrees make its span a property of the DUT rather than a preference (see
+       response/projection.ts), and the frequency window below is what narrows it. -->
+  <CollapsibleSection v-if="nicholsShowing" title="Gain range (dB)" size="xs">
+    <label
+      class="tb-check-row"
+      title="Fits the gain axis to the curve on every pass, and always keeps 0 dB and the −180° marker in view. Untick to set the window yourself — the boxes start from the window that was on screen, so unticking changes nothing until you edit them."
+    >
+      <input type="checkbox" :checked="nicholsAutoGain" @change="onNicholsAutoChange" />
+      Auto
+    </label>
+    <template v-if="!nicholsAutoGain">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          Top
+          <input
+            :value="nicholsTopDb"
+            type="number"
+            :step="DB_STEP"
+            class="tb-input"
+            @change="onNicholsTopChange"
+          />
+        </label>
+        <label class="tb-field">
+          Bottom
+          <input
+            :value="nicholsBottomDb"
+            type="number"
+            :step="DB_STEP"
+            class="tb-input"
+            @change="onNicholsBottomChange"
+          />
+        </label>
+      </div>
+      <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
+        A window that leaves 0 dB out is drawn as asked — the gain crossover and the −180° markers
+        then sit off the plot.
+      </p>
+    </template>
+  </CollapsibleSection>
+
+  <!-- The map's own window, in hertz on both axes like the chart's labels: σ/2π across, jω/2π up. -->
+  <CollapsibleSection v-if="poleZeroShowing" title="Pole/zero range (Hz)" size="xs">
+    <label
+      class="tb-check-row"
+      title="Fits the window to the fitted roots, square, so damping still reads as an angle from the origin. Untick to set the four bounds yourself — the boxes start from the window that was on screen."
+    >
+      <input type="checkbox" :checked="poleZeroAutoWindow" @change="onPoleZeroAutoChange" />
+      Auto
+    </label>
+    <template v-if="!poleZeroAutoWindow">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          σ/2π from
+          <input
+            :value="poleZeroXMinHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'xMin')"
+          />
+        </label>
+        <label class="tb-field">
+          σ/2π to
+          <input
+            :value="poleZeroXMaxHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'xMax')"
+          />
+        </label>
+      </div>
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          jω/2π from
+          <input
+            :value="poleZeroYMinHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'yMin')"
+          />
+        </label>
+        <label class="tb-field">
+          jω/2π to
+          <input
+            :value="poleZeroYMaxHz"
+            type="number"
+            class="tb-input"
+            @change="onPoleZeroBoundChange($event, 'yMax')"
+          />
+        </label>
+      </div>
+      <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
+        A hand-set window is drawn exactly as given, so two axes of different spans tilt the angles
+        damping is read from. Keep them equal, or use Auto, when reading ζ off the picture.
+      </p>
+    </template>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Frequency range (Hz)" size="xs">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        From
+        <select
+          v-model.number="xFromHz"
+          class="tb-input"
+        >
+          <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+      <label class="tb-field">
+        To
+        <select
+          v-model.number="xToHz"
+          class="tb-input"
+        >
+          <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
+        </select>
+      </label>
+    </div>
+    <!-- The chart's one Autofit lives in its first axis section; under Bode, Nichols and the
+         pole-zero map that is a section above this one, and this is where the projections with no
+         value axis of their own (Nyquist, |H(s)|) get it. -->
+  </CollapsibleSection>
+
+  <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
+       shown-but-inert, since the axis it configures is not drawn otherwise. -->
+  <!-- No "Phase range" section: the phase is wrapped into ±180° and its axis is the bottom half of
+       the plot, fixed (see PHASE_SCALE_RANGE). There is no window to set, so there is no control
+       and nothing for Autofit to fit. -->
+
+  <!-- The delay axis still has a window of its own, and this is its pair of boxes. -->
+  <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Top
+        <input
+          :value="usToUnit(delayTopUs, delayUnit)"
+          type="number"
+          :step="usToUnit(delayStepUs, delayUnit)"
+          class="tb-input"
+          @change="onTopDelayChange"
+        />
+      </label>
+      <label class="tb-field">
+        Bottom
+        <input
+          :value="usToUnit(delayBottomUs, delayUnit)"
+          type="number"
+          :step="usToUnit(delayStepUs, delayUnit)"
+          class="tb-input"
+          @change="onBottomDelayChange"
+        />
+      </label>
+    </div>
+  </CollapsibleSection>
+
+  <!-- Display *under* the axis windows, which is the FFT rail's order and what this screen was
+       asked for (Joost, 2026-10-18); it was above them from 2026-09-27 until then. It sits after
+       the delay range as well as the frequency one, so every axis window stays together — with no
+       delay curve selected, which is the default, that section is not rendered and Display is
+       directly below Frequency range. -->
   <CollapsibleSection title="Display">
     <!-- Every "which one of these is on" control in this rail is a SegmentedToggle, so one look
          answers it on every display rail in the app. -->
@@ -783,191 +971,6 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
       <label class="tb-check-row"><input v-model="thickLines" type="checkbox" class="tb-check" /> Thick lines</label>
       <label class="tb-check-row">
         <input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points
-      </label>
-    </div>
-  </CollapsibleSection>
-
-  <!-- The axis windows are their own sections ahead of Display, laid out the way the FFT screen's
-       dBV range / Frequency range are (ChartDisplayPanel.vue): label over a full-width field,
-       Autofit under. Multi-root, so they flow into MeasurementLayout's aside grid one by one like
-       SweepDisplayPanel's. -->
-  <CollapsibleSection v-if="bodeShowing" :title="view === 'Dbv' ? 'dBV range' : 'Gain range'" size="xs">
-    <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        Top
-        <input
-          :value="yTopDb"
-          type="number"
-          :step="DB_STEP"
-          class="tb-input"
-          @change="onTopDbChange"
-        />
-      </label>
-      <label class="tb-field">
-        Bottom
-        <input
-          :value="yBottomDb"
-          type="number"
-          :step="DB_STEP"
-          class="tb-input"
-          @change="onBottomDbChange"
-        />
-      </label>
-    </div>
-  </CollapsibleSection>
-
-  <!-- Nichols' own value axis. Its *phase* axis has no section, and that is deliberate: unwrapped
-       degrees make its span a property of the DUT rather than a preference (see
-       response/projection.ts), and the frequency window below is what narrows it. -->
-  <CollapsibleSection v-if="nicholsShowing" title="Gain range (dB)" size="xs">
-    <label
-      class="tb-check-row"
-      title="Fits the gain axis to the curve on every pass, and always keeps 0 dB and the −180° marker in view. Untick to set the window yourself — the boxes start from the window that was on screen, so unticking changes nothing until you edit them."
-    >
-      <input type="checkbox" :checked="nicholsAutoGain" @change="onNicholsAutoChange" />
-      Auto
-    </label>
-    <template v-if="!nicholsAutoGain">
-      <div class="grid grid-cols-2 gap-2.5">
-        <label class="tb-field">
-          Top
-          <input
-            :value="nicholsTopDb"
-            type="number"
-            :step="DB_STEP"
-            class="tb-input"
-            @change="onNicholsTopChange"
-          />
-        </label>
-        <label class="tb-field">
-          Bottom
-          <input
-            :value="nicholsBottomDb"
-            type="number"
-            :step="DB_STEP"
-            class="tb-input"
-            @change="onNicholsBottomChange"
-          />
-        </label>
-      </div>
-      <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
-        A window that leaves 0 dB out is drawn as asked — the gain crossover and the −180° markers
-        then sit off the plot.
-      </p>
-    </template>
-  </CollapsibleSection>
-
-  <!-- The map's own window, in hertz on both axes like the chart's labels: σ/2π across, jω/2π up. -->
-  <CollapsibleSection v-if="poleZeroShowing" title="Pole/zero range (Hz)" size="xs">
-    <label
-      class="tb-check-row"
-      title="Fits the window to the fitted roots, square, so damping still reads as an angle from the origin. Untick to set the four bounds yourself — the boxes start from the window that was on screen."
-    >
-      <input type="checkbox" :checked="poleZeroAutoWindow" @change="onPoleZeroAutoChange" />
-      Auto
-    </label>
-    <template v-if="!poleZeroAutoWindow">
-      <div class="grid grid-cols-2 gap-2.5">
-        <label class="tb-field">
-          σ/2π from
-          <input
-            :value="poleZeroXMinHz"
-            type="number"
-            class="tb-input"
-            @change="onPoleZeroBoundChange($event, 'xMin')"
-          />
-        </label>
-        <label class="tb-field">
-          σ/2π to
-          <input
-            :value="poleZeroXMaxHz"
-            type="number"
-            class="tb-input"
-            @change="onPoleZeroBoundChange($event, 'xMax')"
-          />
-        </label>
-      </div>
-      <div class="grid grid-cols-2 gap-2.5">
-        <label class="tb-field">
-          jω/2π from
-          <input
-            :value="poleZeroYMinHz"
-            type="number"
-            class="tb-input"
-            @change="onPoleZeroBoundChange($event, 'yMin')"
-          />
-        </label>
-        <label class="tb-field">
-          jω/2π to
-          <input
-            :value="poleZeroYMaxHz"
-            type="number"
-            class="tb-input"
-            @change="onPoleZeroBoundChange($event, 'yMax')"
-          />
-        </label>
-      </div>
-      <p class="text-[11px] text-neutral-500 dark:text-neutral-400">
-        A hand-set window is drawn exactly as given, so two axes of different spans tilt the angles
-        damping is read from. Keep them equal, or use Auto, when reading ζ off the picture.
-      </p>
-    </template>
-  </CollapsibleSection>
-
-  <CollapsibleSection title="Frequency range (Hz)" size="xs">
-    <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        From
-        <select
-          v-model.number="xFromHz"
-          class="tb-input"
-        >
-          <option v-for="hz in X_FROM_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-        </select>
-      </label>
-      <label class="tb-field">
-        To
-        <select
-          v-model.number="xToHz"
-          class="tb-input"
-        >
-          <option v-for="hz in X_TO_OPTIONS" :key="hz" :value="hz">{{ hz }}</option>
-        </select>
-      </label>
-    </div>
-    <!-- The chart's one Autofit lives in its first axis section; under Bode, Nichols and the
-         pole-zero map that is a section above this one, and this is where the projections with no
-         value axis of their own (Nyquist, |H(s)|) get it. -->
-  </CollapsibleSection>
-
-  <!-- Only meaningful while the Phase trace is on and there is one to draw -- hidden rather than
-       shown-but-inert, since the axis it configures is not drawn otherwise. -->
-  <!-- No "Phase range" section: the phase is wrapped into ±180° and its axis is the bottom half of
-       the plot, fixed (see PHASE_SCALE_RANGE). There is no window to set, so there is no control
-       and nothing for Autofit to fit. -->
-
-  <!-- The delay axis still has a window of its own, and this is its pair of boxes. -->
-  <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
-    <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        Top
-        <input
-          :value="usToUnit(delayTopUs, delayUnit)"
-          type="number"
-          :step="usToUnit(delayStepUs, delayUnit)"
-          class="tb-input"
-          @change="onTopDelayChange"
-        />
-      </label>
-      <label class="tb-field">
-        Bottom
-        <input
-          :value="usToUnit(delayBottomUs, delayUnit)"
-          type="number"
-          :step="usToUnit(delayStepUs, delayUnit)"
-          class="tb-input"
-          @change="onBottomDelayChange"
-        />
       </label>
     </div>
   </CollapsibleSection>

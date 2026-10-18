@@ -462,7 +462,16 @@ function swatch(key: SweepTraceColorKey): string {
     </template>
   </CollapsibleSection>
 
-  <CollapsibleSection :title="`${sweepXLabel(xAxis)} range`" :suffix="`(${sweepXUnit(xAxis)})`">
+  <!-- The icon is set here rather than left to the title, because the title is the *name of the
+       swept quantity* and the panel is the x axis whatever that name is: "Frequency range" found
+       the horizontal glyph by pattern, while "Output voltage range" and the other two fell through
+       to the vertical one and so looked like a level window (Joost, 2026-10-18). -->
+  <CollapsibleSection
+    :title="`${sweepXLabel(xAxis)} range`"
+    :suffix="`(${sweepXUnit(xAxis)})`"
+    icon="rangeX"
+    tone="cyan"
+  >
     <!-- Only the amplitude screen has a choice to make: output voltage and output power are what
          the DUT delivered, input voltage is what it was driven with. -->
     <label v-if="!isFrequencyAxis" class="tb-field">

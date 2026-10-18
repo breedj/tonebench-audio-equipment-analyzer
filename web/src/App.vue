@@ -19,6 +19,7 @@ import { DEFAULT_LOAD_OHMS, useLoadOhms } from './composables/useLoadOhms'
 import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useChartDisplay } from './composables/useChartDisplay'
 import { useAnnotations } from './composables/useAnnotations'
+import { LEGACY_SPECTRUM_FRAME, parseAnnotations } from './measurements/chartAnnotations'
 import { useUserWeighting } from './composables/useUserWeighting'
 import { weightingLabel } from './weighting'
 import { useGeneratorStimulus } from './composables/useGeneratorStimulus'
@@ -529,6 +530,14 @@ watch(
     // temporal dead zone.
     const kind = types.value.find((t) => t.id === currentTypeId.value)?.kind
     if (params && kind === FFT_SPECTRUM_KIND) loadOhms.value = params.loadOhms ?? DEFAULT_LOAD_OHMS
+    // The annotations, for the same reason and with the same gate -- and this one is not a figure
+    // on one panel but the whole shared store, so writing it for every kind took every non-FFT
+    // measurement's notes off the chart the moment it was opened. Each other kind restores its own
+    // in its `applyStoredXDisplay`, from the type's params_json where they are actually stored;
+    // ApplyAsync hands back null for those kinds, which is what used to land here instead.
+    if (kind === FFT_SPECTRUM_KIND) {
+      applyLoadedAnnotations(parseAnnotations(params?.chartAnnotations, LEGACY_SPECTRUM_FRAME))
+    }
     if (fftViewNeedsReset) {
       fftViewNeedsReset = false
       void nextTick(() => spectrumChart.value?.resetToPanelWindow())

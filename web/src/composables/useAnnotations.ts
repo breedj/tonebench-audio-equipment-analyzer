@@ -26,7 +26,7 @@
  * direction between the stores; a third edge from here would make a cycle out of it.</p>
  */
 
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { api } from '../api/client'
 import { storedAnnotationFrame } from '../charts/annotationViews'
 import { parseAnnotations, type AnnotationStyle, type ChartAnnotation } from '../measurements/chartAnnotations'
@@ -90,6 +90,17 @@ const WRITE_DELAY_MS = 400
 
 let writeTimer: ReturnType<typeof setTimeout> | null = null
 let writeForResultId: number | null = null
+
+/**
+ * Suppresses the dirty watcher while {@link useAnnotations.applyLoadedLive} writes a measurement's
+ * stored list back in — loading is the opposite of an unsaved edit.
+ *
+ * <p>Here rather than in the caller, which is the correction this needed: the flag used to be the
+ * caller's own `restoring`, on the reasoning that every caller was already inside its kind's
+ * `applyStoredXDisplay`. That stopped being true the moment one kind-gated seam became the single
+ * writer, and a flag that lives with the write cannot be forgotten by the next caller.</p>
+ */
+let restoringLive = false
 
 const EMPTY: readonly ChartAnnotation[] = Object.freeze([])
 
@@ -206,6 +217,10 @@ export function useAnnotations() {
     // Fire-and-forget rather than awaited: this is called from synchronous restore paths, and what
     // is owed belongs to the result being left, not to the measurement arriving.
     void flushPendingWrite()
+    restoringLive = true
+    void nextTick(() => {
+      restoringLive = false
+    })
     live.value = [...loaded]
     resultAnnotations.value = []
     source.value = 'live'
@@ -227,6 +242,8 @@ export function useAnnotations() {
     arm,
     show,
     applyLoadedLive,
+    /** Whether a stored list is being applied right now — see {@link restoringLive}. */
+    isRestoringLive: () => restoringLive,
     flushPendingWrite,
   }
 }

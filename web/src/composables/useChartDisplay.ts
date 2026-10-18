@@ -8,12 +8,7 @@ import {
   type SpectrumUnit,
 } from '../spectrumUnits'
 import { formatPeakSort, parsePeakSort, type PeakSort } from '../measurements/peakSort'
-import {
-  LEGACY_SPECTRUM_FRAME,
-  parseAnnotations,
-  type AnnotationStyle,
-  type ChartAnnotation,
-} from '../measurements/chartAnnotations'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
 import { useProjects } from './useProjects'
 import { useAnnotations } from './useAnnotations'
 
@@ -109,7 +104,7 @@ const {
   live: liveAnnotations,
   armed: annotationArmed,
   numbers: annotationNumbers,
-  applyLoadedLive: applyLoadedAnnotations,
+  isRestoringLive: annotationsRestoring,
 } = useAnnotations()
 
 // Suppresses the dirty watcher below while applyLoaded writes these refs from a loaded type's
@@ -129,7 +124,10 @@ watch([
   showHarmonicMarkers, harmonicMarkerUnit,
   harmonicsSort, otherPeaksSort, liveAnnotations,
 ], () => {
-  if (!restoring) useProjects().markDirty()
+  // `annotationsRestoring` as well as this module's own flag, because the annotations are not this
+  // module's to restore: they belong to whichever measurement is open, of whatever kind, and are
+  // written back by the one kind-gated seam in App.vue -- outside the window `restoring` covers.
+  if (!restoring && !annotationsRestoring()) useProjects().markDirty()
 })
 
 // Unchecking `FFT data` takes Min/max with it, and re-checking gives it back (Joost, 2026-09-30).
@@ -352,10 +350,15 @@ export function useChartDisplay() {
     harmonicMarkerUnit.value = parseHarmonicMarkerUnit(loaded?.chartHarmonicMarkerUnit)
     harmonicsSort.value = parsePeakSort(loaded?.chartHarmonicsSort)
     otherPeaksSort.value = parsePeakSort(loaded?.chartOtherPeaksSort)
-    // Through useAnnotations rather than by writing the ref, because loading a measurement also
-    // puts the selection back on it: a result of the measurement being left behind must not stay
-    // lit over a different measurement's curves.
-    applyLoadedAnnotations(parseAnnotations(loaded?.chartAnnotations, LEGACY_SPECTRUM_FRAME))
+    // The annotations are deliberately NOT restored here, although this is the FFT screen's own
+    // display state and they are stored beside it. `applyLoaded` runs for *every* kind -- App.vue
+    // calls it from the `loadedParams` watcher unconditionally -- while the shared annotation store
+    // holds whichever measurement is open. Writing it here therefore overwrote what a response,
+    // sweep or impedance screen had just restored from its own params_json, with the empty list
+    // ApplyAsync hands back for those kinds (its HasNoLiveConfiguration arm returns live state, and
+    // a non-FFT measurement's notes live only on its type). That is the same hazard the Load field
+    // beside the call site already carries a comment about, and it cost every non-FFT measurement
+    // its notes on reload. The restore is now one kind-gated line in that watcher.
     void nextTick(() => {
       restoring = false
     })

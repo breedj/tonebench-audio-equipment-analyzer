@@ -60,6 +60,24 @@
           </td>
         </tr>
         <tr>
+          <td><strong>THD vs amplitude</strong></td>
+          <td>
+            A <strong>level-stepped</strong> transient run — <code>.tran</code> +
+            <code>.step</code>. One <strong>sweep</strong>, each run a point at its own measured
+            level.
+          </td>
+          <td>
+            As above. Save the drive node as well as the output if you want the
+            <strong>Input voltage</strong> axis.
+          </td>
+          <td>
+            <strong>The source's amplitude</strong> —
+            <code>.step oct param amplitude 1m 500m 5</code>, with the source written as
+            <code>SINE(0 {amplitude} 1k)</code>. Runs that all sit at the same level are refused
+            and pointed at the FFT screen.
+          </td>
+        </tr>
+        <tr>
           <td><strong>Frequency response</strong></td>
           <td>
             An AC sweep — <code>.ac</code>. A <strong>Bode curve</strong> with phase, group and
@@ -112,12 +130,10 @@
     </p>
 
     <p>
-      Two things the table says by omission. <strong>There is no import on THD vs amplitude</strong>
-      — a level axis needs a drive level the simulation knows nothing about on this side of the
-      schematic, so step the source's amplitude and read the results as a stack of spectra on the
-      FFT screen instead. And <strong>an AC sweep says nothing about distortion</strong>: it is a
-      small-signal linearisation about the operating point, so a circuit that sounds dreadful at
-      real levels still draws a clean response. The transient import is what answers that.
+      One thing the table says by omission: <strong>an AC sweep says nothing about
+      distortion</strong>. It is a small-signal linearisation about the operating point, so a
+      circuit that sounds dreadful at real levels still draws a clean response. The transient
+      import is what answers that.
     </p>
 
     <p>
@@ -652,12 +668,13 @@
       </tbody>
     </table>
 
-    <h3>A stepped transient is read two ways</h3>
+    <h3>A stepped transient is read three ways</h3>
 
     <p>
       <code>.step param freq 1k 10k 1k</code> beside a <code>.tran</code> runs the whole transient
-      once per tone. What that <em>is</em> depends on what you want from it, so the measurement you
-      import it on decides:
+      once per tone, and <code>.step oct param amplitude 1m 500m 5</code> runs it once per drive
+      level. What either <em>is</em> depends on what you want from it, so the measurement you
+      import it on decides — and a step the screen cannot use is refused rather than drawn:
     </p>
 
     <table class="manual-wrap">
@@ -677,6 +694,18 @@
             <strong>Each point sits at the fundamental its own run's analysis located</strong>, so
             the step does not have to say what frequency it was — which is also why a QSpice run,
             which records its steps nowhere on disk, works exactly as well.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>THD vs amplitude</strong></td>
+          <td>
+            <strong>One sweep</strong> again, but along the level axis: each run is a point at the
+            level <em>it</em> measured, which is what a <code>.step</code> over the source's
+            amplitude produces. Pick the drive node as the second trace and it is read as the
+            <strong>Input voltage</strong> axis rather than as a second channel — an amplitude
+            sweep's x is the level going in. Without it the <strong>Output voltage</strong> and
+            <strong>Output power</strong> axes still work (power needs the Load on that screen),
+            and the input axis repeats the output rather than inventing a drive.
           </td>
         </tr>
         <tr>
@@ -753,6 +782,15 @@
             Refused <em>here</em>, and the message says where it belongs: it is a frequency response
             rather than a waveform, so it imports on a <strong>Frequency response</strong>
             measurement instead. See below.
+          </td>
+        </tr>
+        <tr>
+          <td>Runs that all sit at one level, on <strong>THD vs amplitude</strong></td>
+          <td>
+            Refused: a <code>.step</code> over a component value plays every run at the same drive,
+            so the points would stack on one x. The span has to be at least a decibel over the whole
+            set — which an amplifier compressing at the top of its range still clears, so the most
+            interesting point of the curve is never thrown away.
           </td>
         </tr>
         <tr>

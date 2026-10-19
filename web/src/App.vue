@@ -54,6 +54,7 @@ import MeasurementHistoryPanel from './components/MeasurementHistoryPanel.vue'
 import MeasurementNotesPanel from './components/MeasurementNotesPanel.vue'
 import MeasurementChecklist from './components/MeasurementChecklist.vue'
 import { closeSimulationImport, simulationImportOpen } from './measurements/simulationImport'
+import type { SimulationSweepAxis } from './measurements/simulationAnalysis'
 import SimulationImportDialog from './components/SimulationImportDialog.vue'
 import AcSimulationImportDialog from './components/AcSimulationImportDialog.vue'
 import AcImpedanceImportDialog from './components/AcImpedanceImportDialog.vue'
@@ -179,6 +180,7 @@ import {
   isImpedanceKind,
   isCrosstalkKind,
   isOutputImpedanceKind,
+  THD_VS_AMPLITUDE_KIND,
   THD_VS_FREQUENCY_KIND,
 } from './measurements/kinds'
 import {
@@ -1515,6 +1517,18 @@ const effectiveResponsePhaseKind = computed<ResponsePhaseKindName>(() => {
   const first = visibleResponseOverlays.value[0]
   if (!first) return responsePhaseKind.value
   return responsePhaseKindFromParams(first.detail.kind, first.detail.paramsJson)
+})
+
+/**
+ * Which axis a stepped transient's runs become points on, or null where they are not a sweep at
+ * all. The same stepped file is a frequency sweep on one screen and a level sweep on another, and
+ * the `.raw` cannot say which — so the open measurement's kind decides it here, once, rather than
+ * in the dialog.
+ */
+const simulationSweepAxis = computed<SimulationSweepAxis | null>(() => {
+  if (currentType.value?.kind === THD_VS_FREQUENCY_KIND) return 'frequency'
+  if (currentType.value?.kind === THD_VS_AMPLITUDE_KIND) return 'amplitude'
+  return null
 })
 
 const responseHasComplexResponse = computed(
@@ -5856,7 +5870,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
         !isImpedanceKind(currentType?.kind)
       "
       :measurement-type-id="currentTypeId"
-      :sweep-target="currentType?.kind === THD_VS_FREQUENCY_KIND"
+      :sweep-axis="simulationSweepAxis"
+      :load-ohms="loadOhms"
       @close="closeSimulationImport()"
       @imported="onSimulationImported"
     />

@@ -337,6 +337,133 @@ public class SimulationImportServiceTests : IDisposable
     }
 
     /// <summary>
+    /// The level axis: a `.step` over the source's amplitude is a THD-vs-amplitude measurement
+    /// written in another form, exactly as a tone step is a THD-vs-frequency one. Asked for
+    /// 2026-10-19 with a real 46-step EL84 run in hand.
+    ///
+    /// <para>Each point sits at its own measured level, and <b>the drive trace is the x axis
+    /// rather than a second channel</b>: an amplitude sweep's x is the level going in, so a second
+    /// trace is read as that and no right-hand curve is stored. Here the fixture's drive is half
+    /// the output, so a point's gain reads 6.02 dB and the points march up the ladder they were
+    /// stepped along.</para>
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_AlongTheLevelAxis_IsOnePointPerRunAtItsOwnDriveLevel()
+    {
+        // Four octaves of drive, which is a span no component step could counterfeit.
+        string raw = WriteSteppedAmplitude("levels.raw", [0.05, 0.1, 0.2, 0.4]);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync("ThdVsAmplitude");
+            long resultId = await h.Import.ImportSweepAsync(
+                typeId, Request(raw, rightTraceIndex: 2, name: "level sweep") with
+                {
+                    SweepAxis = SimulationSweepAxis.Amplitude,
+                    LoadOhms = 8.0,
+                },
+                CancellationToken.None);
+
+            var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
+            Assert.Equal(4, points.Count);
+
+            // One channel: the drive trace was read as the x axis, not stored as a curve.
+            Assert.All(points, p => Assert.Single(p.MetricsByChannel));
+
+            double[] generator = [.. points.Select(p => p.MetricsByChannel[0]["generator_dbv"])];
+            double[] measured = [.. points.Select(p => p.MetricsByChannel[0]["fundamental_dbv"])];
+
+            // The drive ladder, in order, read off the drive node itself: 0.05 V peak is
+            // -29.03 dBV rms, and each step doubles it.
+            Assert.Equal(-29.03, generator[0], 0.05);
+            for (int i = 1; i < generator.Length; i++)
+                Assert.Equal(6.02, generator[i] - generator[i - 1], 0.05);
+
+            // The DUT's own gain, which is what makes the two ladders different curves.
+            for (int i = 0; i < measured.Length; i++)
+                Assert.Equal(6.02, measured[i] - generator[i], 0.05);
+
+            // Distortion that grows with level is the whole point of the measurement: the fixture's
+            // second harmonic is proportional to the output, so each doubling doubles the THD.
+            double[] thd = [.. points.Select(p => p.MetricsByChannel[0]["thd_percent"])];
+            for (int i = 1; i < thd.Length; i++)
+                Assert.Equal(2.0, thd[i] / thd[i - 1], 0.05);
+
+            // The power axis needs the load the screen was set to; without it the chart drops the
+            // points on a log scale rather than drawing them at zero watts.
+            double[] watts = [.. points.Select(p => p.MetricsByChannel[0]["power_watt"])];
+            Assert.All(watts, w => Assert.True(w > 0.0));
+            // Power goes as the square, so a doubled level is four times the watts.
+            Assert.Equal(4.0, watts[^1] / watts[^2], 0.1);
+
+            var stored = JsonSerializer.Deserialize<ThdVsAmplitudeParameters>(
+                (await h.Measurements.GetResultAsync(resultId, CancellationToken.None))!.ParamsJson!,
+                SerializerOptionsForTest)!;
+            Assert.Equal(8.0, stored.LoadOhms);
+            Assert.False(stored.ProcessRight);
+            Assert.Equal(FundamentalHz, stored.FixedFreqHz, 1.0);
+            Assert.NotNull(stored.Simulation);
+            Assert.Equal(raw, stored.Simulation!.Source.Path);
+        });
+    }
+
+    /// <summary>
+    /// The level axis' own counterpart of the "no sweep here" refusal: a `.step` over a component
+    /// value plays every run at the same drive, so the points would stack on one x.
+    ///
+    /// <para>The <i>span</i> rather than pairwise distinctness, deliberately — an amplifier
+    /// compressing at the top of its range really does deliver two steps at nearly the same level,
+    /// and refusing that would throw away the most interesting point of the curve.</para>
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_AlongTheLevelAxis_WhenNothingSteppedTheLevel_SaysSoRatherThanStoringIt()
+    {
+        string raw = WriteSteppedAmplitude("flat.raw", [0.2, 0.2, 0.2]);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync("ThdVsAmplitude");
+            var ex = await Assert.ThrowsAsync<FormatException>(
+                () => h.Import.ImportSweepAsync(
+                    typeId,
+                    Request(raw, rightTraceIndex: 2) with { SweepAxis = SimulationSweepAxis.Amplitude },
+                    CancellationToken.None));
+
+            Assert.Contains("same level", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("FFT analysis measurement", ex.Message, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// Without a drive trace the output axes still work — which is the common case, since a power
+    /// amplifier's distortion is quoted against its output — and the input-voltage axis repeats
+    /// the output rather than claiming a drive level the file does not hold.
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_AlongTheLevelAxis_WithNoDriveTrace_StillStepsTheOutput()
+    {
+        string raw = WriteSteppedAmplitude("noDrive.raw", [0.05, 0.1, 0.2, 0.4]);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync("ThdVsAmplitude");
+            long resultId = await h.Import.ImportSweepAsync(
+                typeId, Request(raw) with { SweepAxis = SimulationSweepAxis.Amplitude }, CancellationToken.None);
+
+            var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
+            Assert.Equal(4, points.Count);
+
+            double[] measured = [.. points.Select(p => p.MetricsByChannel[0]["fundamental_dbv"])];
+            for (int i = 1; i < measured.Length; i++)
+                Assert.Equal(6.02, measured[i] - measured[i - 1], 0.05);
+
+            // Gain 0 dB: the generator level is the measured one, so the input-voltage axis is the
+            // output axis over again rather than a fabricated drive.
+            Assert.All(points, p => Assert.Equal(0.0, p.MetricsByChannel[0]["gain_db"], 0.01));
+        });
+    }
+
+    /// <summary>
     /// <b>A run is a sweep point by construction; the frequency is a reading.</b> Two runs can read
     /// the same one, and grouping the points by frequency then builds a capture holding two points
     /// per channel — which surfaces as "UNIQUE constraint failed: capture_preview" from the save,
@@ -966,6 +1093,36 @@ public class SimulationImportServiceTests : IDisposable
     /// restarting at each — which is what both simulators do, measured. Every run carries the same
     /// 1 % second harmonic, so each becomes a sweep point whose THD is known in advance.
     /// </summary>
+    /// <summary>
+    /// A `.step`ped run over the source's <i>amplitude</i>: one tone throughout, a ladder of
+    /// levels, and a second harmonic that grows with drive — which is what an amplifier does and
+    /// what makes the resulting curve a THD-vs-amplitude one. The drive node is written as a
+    /// second trace so the import can read the level going in as well as the one coming out.
+    /// </summary>
+    private string WriteSteppedAmplitude(
+        string name, double[] amplitudes, double gain = 2.0, double h2PerVolt = 0.01, int pointsPerRun = 30_000)
+    {
+        var time = new List<double>(amplitudes.Length * pointsPerRun);
+        var output = new List<double>(amplitudes.Length * pointsPerRun);
+        var drive = new List<double>(amplitudes.Length * pointsPerRun);
+
+        foreach (double amplitude in amplitudes)
+        {
+            double outAmplitude = amplitude * gain;
+            for (int n = 0; n < pointsPerRun; n++)
+            {
+                double t = n / NativeRateHz;
+                time.Add(t);
+                drive.Add(amplitude * Math.Sin(2 * Math.PI * FundamentalHz * t));
+                output.Add(
+                    (outAmplitude * Math.Sin(2 * Math.PI * FundamentalHz * t))
+                    + (outAmplitude * h2PerVolt * outAmplitude * Math.Sin(2 * Math.PI * 2 * FundamentalHz * t)));
+            }
+        }
+
+        return WriteTransient(name, [.. output], right: [.. drive], timeAxis: [.. time], stepped: true);
+    }
+
     private string WriteSteppedTransient(string name, double[] toneHz, double h2, int pointsPerRun = 30_000)
     {
         var time = new List<double>(toneHz.Length * pointsPerRun);
@@ -1003,11 +1160,17 @@ public class SimulationImportServiceTests : IDisposable
         return spectrum!.Dbv;
     }
 
-    private static FftSpectrumParameters Deserialize(string json)
+    private static FftSpectrumParameters Deserialize(string json) =>
+        JsonSerializer.Deserialize<FftSpectrumParameters>(json, SerializerOptionsForTest)!;
+
+    /// <summary>The options the service itself writes with, so a stored document reads back the same way.</summary>
+    private static JsonSerializerOptions SerializerOptionsForTest { get; } = BuildSerializerOptions();
+
+    private static JsonSerializerOptions BuildSerializerOptions()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         options.Converters.Add(new JsonStringEnumConverter());
-        return JsonSerializer.Deserialize<FftSpectrumParameters>(json, options)!;
+        return options;
     }
 
     /// <summary>
@@ -1155,11 +1318,11 @@ public class SimulationImportServiceTests : IDisposable
                 _projectId.Value, "FFTSpectrum", "fft", null, "{}", CancellationToken.None);
         }
 
-        public async Task<long> CreateSweepTypeAsync()
+        public async Task<long> CreateSweepTypeAsync(string kind = "ThdVsFrequency")
         {
             _projectId ??= await Projects.CreateProjectAsync("sim", null, CancellationToken.None);
             return await Projects.CreateTypeAsync(
-                _projectId.Value, "ThdVsFrequency", "sweep", null, "{}", CancellationToken.None);
+                _projectId.Value, kind, $"sweep {Guid.NewGuid():N}", null, "{}", CancellationToken.None);
         }
     }
 

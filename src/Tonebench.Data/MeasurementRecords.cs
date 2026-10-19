@@ -706,7 +706,16 @@ public sealed record ThdVsAmplitudeParameters(
     /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
     /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
     /// </remarks>
-    IReadOnlyList<JsonElement>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null)
+{
+    /// <summary>
+    /// Present when this sweep was imported from a <c>.step</c>ped transient run rather than
+    /// measured — a <c>.step</c> over the source's amplitude, where each run is one point of the
+    /// level ladder. The same block <see cref="ThdVsFrequencyParameters.Simulation"/> carries, and
+    /// provenance for the same reason: a sweep stores no samples, so it cannot be re-analysed.
+    /// </summary>
+    public SimulationParameters? Simulation { get; init; }
+}
 
 /// <summary>
 /// Configured or as-run parameters for the 'ImdVsAmplitude' measurement kind: a two-tone pair

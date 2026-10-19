@@ -6,6 +6,7 @@ import {
   sweepImportBlocker,
   SIMULATION_FFT_SIZES,
   SIMULATION_WINDOWS,
+  type SimulationSweepAxis,
 } from '../measurements/simulationAnalysis'
 import { sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
@@ -14,16 +15,23 @@ import BusyNote from './BusyNote.vue'
 import InlineCodeText from './InlineCodeText.vue'
 
 /**
- * `sweepTarget` is set when the open measurement is a THD-vs-frequency one, where a `.step`ped run
- * becomes a single sweep rather than a result per step. Passed in rather than worked out here,
- * because which dialog opens is already decided from the kind in App.vue and two places deciding
- * it is one too many.
+ * `sweepAxis` is set when the open measurement turns a `.step`ped run into a single sweep rather
+ * than a result per step — `frequency` on a THD-vs-frequency measurement, `amplitude` on a
+ * THD-vs-amplitude one. Passed in rather than worked out here, because which dialog opens is
+ * already decided from the kind in App.vue and two places deciding it is one too many.
+ *
+ * `loadOhms` rides with it for the amplitude axis alone: the output-power axis is the measured
+ * level into the load the user typed on that screen, and the dialog has no load field of its own.
  */
 const props = defineProps<{
   open: boolean
   measurementTypeId: number | null
-  sweepTarget?: boolean
+  sweepAxis?: SimulationSweepAxis | null
+  loadOhms?: number
 }>()
+
+const sweepAxis = computed<SimulationSweepAxis | null>(() => props.sweepAxis ?? null)
+const amplitudeSweep = computed(() => sweepAxis.value === 'amplitude')
 const emit = defineEmits<{ close: []; imported: [resultIds: number[]] }>()
 
 // The manual page is the long form of the help block below -- the directives and what each does to
@@ -165,7 +173,7 @@ const sweepBlocker = computed(() =>
   // transient" said about a file that was never opened is noise beside it.
   info.value === null
     ? null
-    : sweepImportBlocker(props.sweepTarget === true, sweeps.value.length, chosenSweeps.value.length),
+    : sweepImportBlocker(sweepAxis.value, sweeps.value.length, chosenSweeps.value.length),
 )
 
 const canImport = computed(
@@ -199,7 +207,7 @@ const busyLabel = computed(() => {
   if (info.value === null) return 'Reading the file…'
   const runs = chosenSweeps.value.length
   if (!isStepped.value) return 'Importing…'
-  return props.sweepTarget
+  return sweepAxis.value
     ? `Analysing ${runs} run${runs === 1 ? '' : 's'} into one sweep…`
     : `Importing ${runs} run${runs === 1 ? '' : 's'}…`
 })
@@ -223,8 +231,9 @@ async function submit() {
       notes: form.notes.trim() || null,
       periodicRecord: form.periodicRecord,
       ...(isStepped.value ? { sweepIndices: chosenSweeps.value } : {}),
+      ...(sweepAxis.value ? { sweepAxis: sweepAxis.value, loadOhms: props.loadOhms ?? 0 } : {}),
     }
-    const resultIds = props.sweepTarget
+    const resultIds = sweepAxis.value
       ? [(await api.importSimulationSweep(props.measurementTypeId, body)).resultId]
       : (await api.importSimulation(props.measurementTypeId, body)).resultIds
     emit('imported', resultIds)
@@ -293,7 +302,7 @@ async function submit() {
         -->
         <fieldset v-if="isStepped" class="mb-3 rounded border border-neutral-200 p-2 dark:border-neutral-700">
           <legend class="px-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {{ sweepTarget ? 'Runs to use as points' : 'Runs to import' }}
+            {{ sweepAxis ? 'Runs to use as points' : 'Runs to import' }}
           </legend>
           <div class="flex flex-wrap gap-x-4 gap-y-1">
             <label v-for="sweep in sweeps" :key="sweep.index" class="flex items-center gap-1.5 text-sm">
@@ -306,7 +315,11 @@ async function submit() {
             </label>
           </div>
           <p class="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
-            <template v-if="sweepTarget">
+            <template v-if="amplitudeSweep">
+              Each becomes one point of a single sweep, at the level its own analysis measures — so
+              the step does not have to say what amplitude it was.
+            </template>
+            <template v-else-if="sweepAxis">
               Each becomes one point of a single sweep, at the fundamental its own analysis finds —
               so the step does not have to say what frequency it was.
             </template>
@@ -334,13 +347,21 @@ async function submit() {
           </label>
 
           <label class="flex flex-col gap-1 text-sm">
-            Right channel
+            {{ amplitudeSweep ? 'Drive node' : 'Right channel' }}
             <select v-model="form.rightTraceIndex" class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700">
               <option :value="null">— none —</option>
               <option v-for="t in info.traces" :key="t.index" :value="t.index">{{ t.name }} ({{ t.unit }})</option>
             </select>
             <span class="text-[11px] text-neutral-500 dark:text-neutral-400">
-              A second trace, drawn like the right input — a stage's input beside its output, say.
+              <template v-if="amplitudeSweep">
+                The node the source drives, which gives this sweep its <strong>Input voltage</strong>
+                axis — each point sits at the level measured there. Without it the output axes still
+                work and that one repeats the output. It is read as the drive rather than as a
+                second channel, so no right-hand curve is stored.
+              </template>
+              <template v-else>
+                A second trace, drawn like the right input — a stage's input beside its output, say.
+              </template>
             </span>
           </label>
 

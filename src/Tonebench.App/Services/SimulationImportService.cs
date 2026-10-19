@@ -65,6 +65,21 @@ public sealed record SimulationFileInfo(
 }
 
 /// <summary>What to import, and how to analyse it. Every field here is re-appliable afterwards.</summary>
+/// <summary>
+/// What the points of an imported sweep are stepped <i>along</i>, which the open measurement
+/// decides rather than the file: a <c>.step</c> is a parameter list and the <c>.raw</c> says
+/// nothing about what the parameter meant. A tone stepped across the band is a THD-vs-frequency
+/// curve; a drive level stepped up is a THD-vs-amplitude one; the same reader builds both.
+/// </summary>
+public enum SimulationSweepAxis
+{
+    /// <summary>Each run is a point at the tone its own analysis located.</summary>
+    Frequency,
+
+    /// <summary>Each run is a point at its own level — the drive trace's where one was picked.</summary>
+    Amplitude,
+}
+
 public sealed record SimulationImportRequest(
     string Path,
     int LeftTraceIndex,
@@ -83,7 +98,18 @@ public sealed record SimulationImportRequest(
     /// measurement each becomes a result of its own; on a THD-vs-frequency measurement they become
     /// the points of one sweep.
     /// </summary>
-    IReadOnlyList<int>? SweepIndices = null);
+    IReadOnlyList<int>? SweepIndices = null,
+    /// <summary>
+    /// Which axis the runs are points on, when they are imported as a sweep at all. Read only by
+    /// <see cref="SimulationImportService.ImportSweepAsync"/>.
+    /// </summary>
+    SimulationSweepAxis SweepAxis = SimulationSweepAxis.Frequency,
+    /// <summary>
+    /// The load the DUT drives, for the amplitude sweep's output-power axis. Zero — the default —
+    /// leaves <c>PowerWatt</c> at zero, which the chart drops on a log axis, so the watt axis is
+    /// simply empty rather than wrong.
+    /// </summary>
+    double LoadOhms = 0.0);
 
 /// <summary>
 /// Imports an LTspice transient run as a measurement result, and re-analyses one that is already
@@ -438,18 +464,25 @@ public sealed class SimulationImportService(
         var header = LtspiceRawFile.ReadHeader(request.Path);
         var chosen = ResolveSweeps(info, request.SweepIndices);
 
+        bool amplitude = request.SweepAxis == SimulationSweepAxis.Amplitude;
+
         if (chosen.Count < 2)
         {
+            string example = amplitude
+                ? "the drive level — e.g. `.step oct param amplitude 1m 500m 5` beside a `.tran`, with the " +
+                  "source's amplitude written as `{amplitude}`"
+                : "the tone frequency — e.g. `.step param freq 1k 10k 1k` beside a `.tran`";
             throw new ArgumentException(
                 $"A sweep needs more than one point, and this file holds {chosen.Count} run" +
-                $"{(chosen.Count == 1 ? "" : "s")}. A `.step` over the tone frequency is what makes a transient " +
-                "run into a sweep — e.g. `.step param freq 1k 10k 1k` beside a `.tran`. Import it on an FFT " +
-                "analysis measurement instead to read it as a spectrum.");
+                $"{(chosen.Count == 1 ? "" : "s")}. A `.step` over {example} is what makes a transient run into " +
+                "a sweep. Import it on an FFT analysis measurement instead to read it as a spectrum.");
         }
 
         var indices = new List<int> { header.TimeVariable!.Index, request.LeftTraceIndex };
         if (request.RightTraceIndex is { } right && right != request.LeftTraceIndex)
             indices.Add(right);
+
+        bool driveFromRight = amplitude && indices.Count > 2;
 
         double[][] wholeColumns = LtspiceRawFile.ReadColumns(request.Path, header, indices, ct);
         var traceNames = indices.Skip(1).Select(i => header.Variables[i].Name).ToList();
@@ -478,11 +511,22 @@ public sealed class SimulationImportService(
                 fftSize = spec.FftSize;
             }
 
-            var runPoints = new List<ThdSweepPoint>(samples.Count);
+            // Every trace is checked for its tone, including the drive, because a drive whose tone
+            // the analysis could not find is a run that cannot be placed on the level axis at all.
             for (int channel = 0; channel < samples.Count; channel++)
+                RequireLocatedTone(rendered.Meters[channel], sweep, chosen.Count, request, channel);
+
+            // On the amplitude axis a second trace is the *drive node*, not a second measured
+            // channel: the x of such a sweep is the level going in, so that is what the trace is
+            // for, and reading it as another output would put the source's own (flat, distortion-
+            // free) curve on the chart instead of giving the points somewhere to sit.
+            double driveDbv = driveFromRight ? rendered.Meters[1]!.FundamentalDbv : double.NaN;
+            int channelCount = driveFromRight ? 1 : samples.Count;
+
+            var runPoints = new List<ThdSweepPoint>(channelCount);
+            for (int channel = 0; channel < channelCount; channel++)
             {
-                var meters = rendered.Meters[channel];
-                RequireLocatedTone(meters, sweep, chosen.Count, request, channel);
+                var meters = rendered.Meters[channel]!;
 
                 runPoints.Add(SweepCaptureSupport.PointFromMeters(
                     // The located fundamental is the point's own frequency as well as its reading:
@@ -491,12 +535,12 @@ public sealed class SimulationImportService(
                     freqHz: meters.FundamentalFreqHz,
                     channel: channel,
                     meters: meters,
-                    // An AC-coupled simulated source has no generator level this side of the
-                    // schematic, so gain is relative to the fundamental itself -- i.e. 0 dB -- and
-                    // the chart's "input voltage" axis has nothing to show. Said once here rather
-                    // than invented per point.
-                    generatorAmpDbv: meters.FundamentalDbv,
-                    loadOhms: 0.0,
+                    // The drive node's own measured level where one was picked. Without it there is
+                    // no generator level this side of the schematic, so gain is relative to the
+                    // fundamental itself -- i.e. 0 dB -- and the chart's "input voltage" axis
+                    // repeats the output one. Said once here rather than invented per point.
+                    generatorAmpDbv: driveFromRight ? driveDbv : meters.FundamentalDbv,
+                    loadOhms: request.LoadOhms,
                     noiseVrms: 0.0,
                     previewFft: rendered.Previews[channel],
                     previewScope: null));
@@ -506,7 +550,10 @@ public sealed class SimulationImportService(
             points.AddRange(runPoints);
         }
 
-        RequireDistinctTones(runs, chosen);
+        if (amplitude)
+            RequireLevelSpan(runs);
+        else
+            RequireDistinctTones(runs, chosen);
 
         // One capture per *run*, not per measured frequency. A run is a sweep point by
         // construction, where the frequency is a reading -- and two runs can read the same one,
@@ -514,9 +561,16 @@ public sealed class SimulationImportService(
         // "UNIQUE constraint failed: capture_preview" long after the import. Reported 2026-10-12 as
         // a 500 naming two 'fft' previews at 250 Hz, from a run whose tone sat below the
         // fundamental search floor and locked onto the next run's frequency.
-        var ordered = runs.OrderBy(run => run[0].FreqHz).ToList();
+        // Ordered by the x the chart will read: the tone on a frequency sweep, the level on an
+        // amplitude one, so the stored points run along their own axis rather than along the order
+        // the steps happened to be written in.
+        var ordered = amplitude
+            ? runs.OrderBy(run => run[0].GeneratorDbv).ToList()
+            : runs.OrderBy(run => run[0].FreqHz).ToList();
         var spec0 = firstSpec!;
-        string paramsJson = SweepParamsJson(spec0, points.OrderBy(p => p.FreqHz).ToList(), traceNames, analysisRateHz, fftSize);
+        string paramsJson = amplitude
+            ? AmplitudeSweepParamsJson(spec0, ordered, driveFromRight, request.LoadOhms, analysisRateHz, fftSize)
+            : SweepParamsJson(spec0, points.OrderBy(p => p.FreqHz).ToList(), traceNames, analysisRateHz, fftSize);
 
         var captures = ordered
             .Select((run, index) => new SweepCaptureInput(
@@ -535,17 +589,21 @@ public sealed class SimulationImportService(
                 measurementTypeId, name, request.Notes, paramsJson,
                 DeviceName: null, Serial: null, FwVer: null, IsSimulated: true,
                 analysisRateHz, fftSize,
-                Channels: traceNames.Count,
+                Channels: ordered[0].Count,
                 InRangeDbv: null, OutRangeDbv: null,
                 Captures: captures,
                 Source: MeasurementSource.Simulation),
             ct);
 
         logger.LogInformation(
-            "Imported stepped simulation {Name} from {Path} as a sweep: {Traces}, {Points} points over " +
-            "{LowHz:F1}-{HighHz:F1} Hz, analysed at {AnalysisKHz:F1} kHz / {FftSize} points",
-            name, request.Path, string.Join(" + ", traceNames), captures.Count,
-            captures[0].FreqHz, captures[^1].FreqHz, analysisRateHz / 1e3, fftSize);
+            "Imported stepped simulation {Name} from {Path} as a {Axis} sweep: {Traces}, {Points} points over " +
+            "{Low:F2}-{High:F2} {Unit}, analysed at {AnalysisKHz:F1} kHz / {FftSize} points",
+            name, request.Path, amplitude ? "THD-vs-amplitude" : "THD-vs-frequency",
+            string.Join(" + ", traceNames), captures.Count,
+            amplitude ? ordered[0][0].GeneratorDbv : captures[0].FreqHz,
+            amplitude ? ordered[^1][0].GeneratorDbv : captures[^1].FreqHz,
+            amplitude ? "dBV" : "Hz",
+            analysisRateHz / 1e3, fftSize);
 
         return resultId;
     }
@@ -593,6 +651,84 @@ public sealed class SimulationImportService(
             },
             SerializerOptions);
     }
+
+    /// <summary>
+    /// The settings document for a sweep imported along the <b>level</b> axis.
+    ///
+    /// <para>The same shape a measured THD-vs-amplitude run writes, filled from what the runs
+    /// turned out to be rather than from a ladder anyone asked for: a <c>.step</c> is a parameter
+    /// list, so its levels need not be octave-spaced at all, and the step count per octave is
+    /// reported as what they came out as. The fields describing a generator say
+    /// <c>NotApplicable</c> by being zero/absent the way the frequency sweep's do.</para>
+    /// </summary>
+    private string AmplitudeSweepParamsJson(
+        SimulationAnalysis spec,
+        IReadOnlyList<List<ThdSweepPoint>> ordered,
+        bool driveFromRight,
+        double loadOhms,
+        double analysisRateHz,
+        int fftSize)
+    {
+        double startVolt = DbvToVolt(ordered[0][0].GeneratorDbv);
+        double endVolt = DbvToVolt(ordered[^1][0].GeneratorDbv);
+        double octaves = startVolt > 0.0 && endVolt > startVolt ? Math.Log2(endVolt / startVolt) : 0.0;
+        int stepsPerOctave = octaves > 0.0 ? (int)Math.Round((ordered.Count - 1) / octaves) : 0;
+
+        return JsonSerializer.Serialize(
+            new ThdVsAmplitudeParameters(
+                // Every run plays the same tone -- that is what makes this a level sweep -- so the
+                // first run's measured fundamental is the sweep's frequency.
+                FixedFreqHz: ordered[0][0].MeasuredFreqHz,
+                StartAmplitudeVolt: startVolt,
+                EndAmplitudeVolt: endVolt,
+                StepsPerOctave: Math.Max(stepsPerOctave, 1),
+                LoadOhms: loadOhms,
+                ProcessLeft: true,
+                // A drive trace is the x axis rather than a second channel, so it is not processed
+                // as one -- see the point loop.
+                ProcessRight: !driveFromRight && ordered[0].Count > 1,
+                FftSize: fftSize,
+                Window: spec.Window,
+                AverageCount: 1,
+                SampleRateHz: analysisRateHz,
+                MeasureNoiseFloor: false)
+            {
+                Simulation = spec.ToParameters(analysisRateHz).Simulation,
+            },
+            SerializerOptions);
+    }
+
+    private static double DbvToVolt(double dbv) =>
+        double.IsFinite(dbv) ? Math.Pow(10.0, dbv / 20.0) : 0.0;
+
+    /// <summary>
+    /// Refuses a set of runs that do not step the level, which on this axis is the counterpart of
+    /// <see cref="RequireDistinctTones"/>: a <c>.step</c> over a component value plays every run at
+    /// the same drive, and the points would then stack on one x.
+    ///
+    /// <para>The <i>span</i> rather than pairwise distinctness, and that is deliberate — an
+    /// amplifier compressing at the top of its range genuinely delivers two steps at almost the
+    /// same level, and refusing that would throw away the most interesting point of the curve. A
+    /// decibel over the whole set is far below any real amplitude sweep (the reference run spans
+    /// 54 dB) and far above the fraction of a decibel a non-level step can produce through a
+    /// component's own effect on gain.</para>
+    /// </summary>
+    private static void RequireLevelSpan(IReadOnlyList<List<ThdSweepPoint>> runs)
+    {
+        double lowest = runs.Min(run => run[0].GeneratorDbv);
+        double highest = runs.Max(run => run[0].GeneratorDbv);
+        if (highest - lowest >= MinimumLevelSpanDb)
+            return;
+
+        throw new FormatException(
+            $"These {runs.Count} runs all measure about the same level — {lowest:F2} to {highest:F2} dBV, " +
+            $"a span of {highest - lowest:F2} dB — so there is no amplitude sweep here; a point per level is " +
+            "what makes one. If the `.step` changes something other than the drive, import this on an FFT " +
+            "analysis measurement instead, where each run becomes its own spectrum.");
+    }
+
+    /// <summary>How much level a set of runs has to span before it is a sweep at all. See <see cref="RequireLevelSpan"/>.</summary>
+    private const double MinimumLevelSpanDb = 1.0;
 
     /// <summary>
     /// Refuses a run whose tone the analysis could not find, rather than storing what it found

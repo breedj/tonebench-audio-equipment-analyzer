@@ -167,22 +167,32 @@ describe('sweepImportBlocker', () => {
   // the Import button and said nothing. One run cannot be a curve, and the dialog draws no list of
   // runs for a file with no `.step`, so a sentence is the only place the reason can go.
   it('says why a file with no steps cannot be a sweep, and names the screen that takes it', () => {
-    const why = sweepImportBlocker(true, 1, 1)
+    const why = sweepImportBlocker('frequency', 1, 1)
     expect(why).not.toBeNull()
     expect(why).toContain('.step')
     expect(why).toContain('FFT analysis')
   })
 
+  // The same refusal on the level axis has to name the step that *would* make one, and a tone
+  // step is not it: `.step param freq` on a THD-vs-amplitude measurement produces a file whose
+  // runs all sit on one x.
+  it('names the amplitude step on the amplitude axis', () => {
+    const why = sweepImportBlocker('amplitude', 1, 1)
+    expect(why).toContain('THD-vs-amplitude')
+    expect(why).toContain('amplitude')
+    expect(why).not.toContain('{freq}')
+  })
+
   it('asks for two ticks once the file does hold steps', () => {
-    expect(sweepImportBlocker(true, 51, 1)).toContain('at least two')
-    expect(sweepImportBlocker(true, 51, 0)).toContain('at least two')
-    expect(sweepImportBlocker(true, 51, 2)).toBeNull()
+    expect(sweepImportBlocker('frequency', 51, 1)).toContain('at least two')
+    expect(sweepImportBlocker('amplitude', 51, 0)).toContain('at least two')
+    expect(sweepImportBlocker('frequency', 51, 2)).toBeNull()
   })
 
   // Every other screen that takes a transient makes one spectrum per run, so one run is the
   // ordinary case there and nothing is refused.
   it('blocks nothing where the runs are not being made into a sweep', () => {
-    expect(sweepImportBlocker(false, 1, 1)).toBeNull()
-    expect(sweepImportBlocker(false, 51, 0)).toBeNull()
+    expect(sweepImportBlocker(null, 1, 1)).toBeNull()
+    expect(sweepImportBlocker(null, 51, 0)).toBeNull()
   })
 })

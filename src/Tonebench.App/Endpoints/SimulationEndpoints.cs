@@ -57,7 +57,17 @@ public static class SimulationEndpoints
             CancellationToken ct) =>
             await GuardAsync(async () =>
             {
-                long resultId = await import.ImportSweepAsync(measurementTypeId, request.ToRequest(), ct);
+                // Which axis the runs are points on is the open measurement's business, so it is
+                // sent rather than guessed: the same stepped file is a frequency sweep on one
+                // screen and a level sweep on another, and the `.raw` cannot say which.
+                if (!EnumParsing.TryParse(
+                        request.SweepAxis, SimulationSweepAxis.Frequency,
+                        out SimulationSweepAxis axis, out var axisError))
+                {
+                    return Results.BadRequest(axisError);
+                }
+
+                long resultId = await import.ImportSweepAsync(measurementTypeId, request.ToRequest(axis), ct);
                 return Results.Ok(new ImportedSimulationResponse(resultId));
             }));
 
@@ -443,11 +453,16 @@ public sealed record ImportSimulationRequest(
     string? Name = null,
     string? Notes = null,
     bool PeriodicRecord = true,
-    IReadOnlyList<int>? SweepIndices = null)
+    IReadOnlyList<int>? SweepIndices = null,
+    /// <summary>`Frequency` or `Amplitude`; only `/import-sweep` reads it. Absent means frequency.</summary>
+    string? SweepAxis = null,
+    /// <summary>The DUT's load, for the amplitude sweep's output-power axis. Zero leaves it empty.</summary>
+    double LoadOhms = 0.0)
 {
-    internal SimulationImportRequest ToRequest() => new(
+    internal SimulationImportRequest ToRequest(SimulationSweepAxis axis = SimulationSweepAxis.Frequency) => new(
         Path, LeftTraceIndex, RightTraceIndex, StartTimeS, LevelOffsetDb, FftSize, Window,
-        MeasurementLoFreqHz, MeasurementHiFreqHz, Name, Notes, PeriodicRecord, SweepIndices);
+        MeasurementLoFreqHz, MeasurementHiFreqHz, Name, Notes, PeriodicRecord, SweepIndices,
+        axis, LoadOhms);
 }
 
 public sealed record ReanalyzeSimulationRequest(

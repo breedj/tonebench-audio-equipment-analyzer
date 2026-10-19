@@ -490,7 +490,47 @@ public class SimulationImportServiceTests : IDisposable
             // the database and failing on a constraint.
             Assert.Contains("no sweep here", ex.Message, StringComparison.Ordinal);
             Assert.Contains("FFT analysis measurement", ex.Message, StringComparison.Ordinal);
+            // The resolution limit is named first, because two *different* steps landing on one
+            // bin is the commoner reason and "the step changes something else" is then the wrong
+            // thing to go and check -- reported 2026-10-19 from a 1.5 Hz step spacing read at
+            // 5 Hz bins.
+            Assert.Contains("bins are", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("simulate for longer", ex.Message, StringComparison.Ordinal);
             Assert.DoesNotContain("UNIQUE", ex.Message, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    /// <summary>
+    /// The commonest reason that refusal fires, and the one thing the user cannot see from where
+    /// they are standing: a <c>.step</c> that runs past the top of the measurement band. Reported
+    /// 2026-10-19 from <c>.step oct param freq 10 40k 5</c> against the default 20 kHz band, where
+    /// six of the 61 runs sit above it — "I can see the data in LTspice", which is true, and the
+    /// message said only that the band was 20–2E+04 Hz.
+    ///
+    /// <para>So the refusal re-reads that one run with the band opened to everything the analysis
+    /// can see, and names where the tone actually is. It costs a second analysis of a run that was
+    /// about to be refused anyway.</para>
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_WithARunAboveTheBand_SaysWhereTheToneIs()
+    {
+        // 30 kHz is past the 20 kHz band this imports with, and well inside the analysis rate.
+        string raw = WriteSteppedTransient("above.raw", [1_000.0, 2_000.0, 30_000.0], h2: 0.01);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            var ex = await Assert.ThrowsAsync<FormatException>(
+                () => h.Import.ImportSweepAsync(typeId, Request(raw, fftSize: 16_384), CancellationToken.None));
+
+            Assert.Contains("step 3 of 3", ex.Message, StringComparison.Ordinal);
+            // The tone itself, to the bin it landed on -- 30.001 kHz here, which is the analysis
+            // grid rather than a rounding of the step.
+            Assert.Matches(@"30\.\d+ kHz", ex.Message);
+            Assert.Contains("above", ex.Message, StringComparison.Ordinal);
+            // The band, in figures a reader writes rather than G4's "2E+04".
+            Assert.Contains("20 kHz", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("E+0", ex.Message, StringComparison.Ordinal);
         });
     }
 

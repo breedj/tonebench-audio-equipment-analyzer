@@ -514,7 +514,13 @@ public sealed class SimulationImportService(
             // Every trace is checked for its tone, including the drive, because a drive whose tone
             // the analysis could not find is a run that cannot be placed on the level axis at all.
             for (int channel = 0; channel < samples.Count; channel++)
-                RequireLocatedTone(rendered.Meters[channel], sweep, chosen.Count, request, channel);
+            {
+                int which = channel;
+                RequireLocatedTone(
+                    rendered.Meters[which], sweep, chosen.Count, request, which,
+                    () => LoudestLineHz(
+                        request, info, header, indices, wholeColumns, sweep, rendered.AnalysisRateHz, which, ct));
+            }
 
             // On the amplitude axis a second trace is the *drive node*, not a second measured
             // channel: the x of such a sweep is the level going in, so that is what the trace is
@@ -550,10 +556,7 @@ public sealed class SimulationImportService(
             points.AddRange(runPoints);
         }
 
-        if (amplitude)
-            RequireLevelSpan(runs);
-        else
-            RequireDistinctTones(runs, chosen);
+
 
         // One capture per *run*, not per measured frequency. A run is a sweep point by
         // construction, where the frequency is a reading -- and two runs can read the same one,
@@ -568,6 +571,11 @@ public sealed class SimulationImportService(
             ? runs.OrderBy(run => run[0].GeneratorDbv).ToList()
             : runs.OrderBy(run => run[0].FreqHz).ToList();
         var spec0 = firstSpec!;
+
+        if (amplitude)
+            RequireLevelSpan(runs);
+        else
+            RequireDistinctTones(runs, chosen, analysisRateHz / fftSize, spec0.UsableS);
         string paramsJson = amplitude
             ? AmplitudeSweepParamsJson(spec0, ordered, driveFromRight, request.LoadOhms, analysisRateHz, fftSize)
             : SweepParamsJson(spec0, points.OrderBy(p => p.FreqHz).ToList(), traceNames, analysisRateHz, fftSize);
@@ -744,17 +752,85 @@ public sealed class SimulationImportService(
     private static void RequireLocatedTone(
         // [NotNull] so the caller may read the meters straight afterwards: this method either
         // returns with them non-null or throws, which the compiler cannot see through the pattern.
-        [NotNull] SpectrumMeters? meters, SimulationSweep sweep, int runCount, SimulationImportRequest request, int channel)
+        [NotNull] SpectrumMeters? meters,
+        SimulationSweep sweep,
+        int runCount,
+        SimulationImportRequest request,
+        int channel,
+        Func<double?> loudestLineHz)
     {
         if (meters is { SnrDb: > 0.0f })
             return;
 
         string where = $"{StepName(sweep, runCount)}{(channel == 0 ? "" : " (right trace)")}";
+        string band = $"{FormatHz(request.MeasurementLoFreqHz)} – {FormatHz(request.MeasurementHiFreqHzOrDefault())}";
+
+        // Where the tone really is, which is the one thing the user cannot see from here and the
+        // commonest reason this fires: a `.step` that runs past the band's top (reported
+        // 2026-10-19 from `.step oct param freq 10 40k 5` against a 20 kHz band, where six of the
+        // 61 runs are above it). Looked for only now, on the way to throwing, since it costs a
+        // second analysis of that run.
+        double? tone = loudestLineHz();
+        if (tone is { } hz)
+        {
+            throw new FormatException(
+                $"No tone was found in {where} inside the measurement band ({band}): the loudest line in that " +
+                $"run is at {FormatHz(hz)}, {(hz > request.MeasurementHiFreqHzOrDefault() ? "above" : "below")} " +
+                "it. Raise the measurement band to take it in — and the FFT size with it, if the band then " +
+                "passes half the analysis rate — or untick that run and import the rest.");
+        }
+
         throw new FormatException(
-            $"No tone was found in {where}: either that run produced nothing, or the loudest thing in the " +
-            "analysed band is quieter than the rest of it, which no tone is. The band is " +
-            $"{request.MeasurementLoFreqHz:G4}-{request.MeasurementHiFreqHzOrDefault():G4} Hz, and a tone " +
-            "outside it cannot be measured — widen the band, or untick that run and import the rest.");
+            $"No tone was found in {where}: either that run produced nothing, or the loudest thing in it is " +
+            $"quieter than the rest of the record, which no tone is. The band is {band}, and a tone outside " +
+            "it cannot be measured — widen the band, or untick that run and import the rest.");
+    }
+
+    /// <summary>A frequency as a reader writes one — <c>20 Hz</c>, <c>20.5 kHz</c>.</summary>
+    private static string FormatHz(double hz) =>
+        hz >= 1_000.0
+            ? $"{hz / 1_000.0:0.###} kHz"
+            : $"{hz:0.###} Hz";
+
+    /// <summary>
+    /// The loudest line in one run with the band opened to everything the analysis can see, or
+    /// null when there is no tone there either.
+    ///
+    /// <para>Only ever called on the way to refusing a run, which is what makes a second analysis
+    /// of it affordable: the band is the only thing changed, so the record, the window and the
+    /// analysis rate are the ones the import was already using and the answer is about the run
+    /// rather than about a different reading of it.</para>
+    /// </summary>
+    private double? LoudestLineHz(
+        SimulationImportRequest request,
+        SimulationFileInfo info,
+        LtspiceRawHeader header,
+        IReadOnlyList<int> indices,
+        double[][] wholeColumns,
+        SimulationSweep sweep,
+        double analysisRateHz,
+        int channel,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Half the analysis rate is everything there is; a hair under it, because the band's
+            // top has to sit inside the spectrum rather than on its last bin.
+            double nyquist = analysisRateHz / 2.0 * 0.999;
+            if (!(nyquist > request.MeasurementHiFreqHzOrDefault()))
+                return null;
+
+            var wide = request with { MeasurementHiFreqHz = nyquist };
+            var (_, rendered, _) = AnalyseRun(wide, info, header, indices, wholeColumns, sweep, ct);
+            var meters = rendered.Meters.ElementAtOrDefault(channel);
+            return meters is { SnrDb: > 0.0f } ? meters.FundamentalFreqHz : null;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // A diagnosis is a nicety; the refusal it decorates is not. Anything that goes wrong
+            // here leaves the plain message rather than replacing one failure with another.
+            return null;
+        }
     }
 
     /// <summary>
@@ -763,7 +839,10 @@ public sealed class SimulationImportService(
     /// Those are a perfectly good set of spectra, so the message says where to take them.
     /// </summary>
     private static void RequireDistinctTones(
-        IReadOnlyList<List<ThdSweepPoint>> runs, IReadOnlyList<SimulationSweep> sweeps)
+        IReadOnlyList<List<ThdSweepPoint>> runs,
+        IReadOnlyList<SimulationSweep> sweeps,
+        double binWidthHz,
+        double usableS)
     {
         for (int i = 1; i < runs.Count; i++)
         {
@@ -774,11 +853,20 @@ public sealed class SimulationImportService(
                 if (Math.Abs(runs[i][0].FreqHz - runs[j][0].FreqHz) > runs[i][0].FreqHz * 1e-6)
                     continue;
 
+                // Two *different* steps reading one frequency is the commoner cause, and it is a
+                // resolution limit rather than a mistake: a `.step oct param freq 10 40k 5` is
+                // 1.5 Hz apart at the bottom, which a 200 ms run's 5 Hz bins cannot separate.
+                // Reported 2026-10-19. Named first, because "the step changes something other than
+                // the tone" is the wrong thing to go and check in that case.
                 throw new FormatException(
                     $"{StepName(sweeps[j], runs.Count)} and {StepName(sweeps[i], runs.Count)} both measure " +
-                    $"{runs[i][0].FreqHz:G6} Hz, so there is no sweep here — a point per frequency is what makes " +
-                    "one. If the step changes something other than the tone, import this on an FFT analysis " +
-                    "measurement instead, where each run becomes its own spectrum.");
+                    $"{FormatHz(runs[i][0].FreqHz)}, so there is no sweep here — a point per frequency is what " +
+                    $"makes one. The record is {usableS * 1e3:0.##} ms, so the bins are " +
+                    $"{FormatHz(binWidthHz)} and two steps closer together than that land on the same one: " +
+                    "simulate for longer (one second of saved run per hertz of spacing), or space the steps " +
+                    "more widely at the bottom of the sweep, or untick the ones that collide. If the step " +
+                    "changes something other than the tone, import this on an FFT analysis measurement " +
+                    "instead, where each run becomes its own spectrum.");
             }
         }
     }

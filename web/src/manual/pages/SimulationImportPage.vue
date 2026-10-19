@@ -756,6 +756,15 @@
           </td>
         </tr>
         <tr>
+          <td>A transient with no <code>.step</code>, on <strong>THD vs frequency</strong></td>
+          <td>
+            Refused: one run is one point, and a curve needs at least two. The dialog says so and
+            names the screen that does take it — import it on an <strong>FFT analysis</strong>
+            measurement, where it becomes one spectrum, or add
+            <code>.step param freq 50 5050 100</code> to the schematic and sweep the tone.
+          </td>
+        </tr>
+        <tr>
           <td>LTspice's own FFT export</td>
           <td>
             Refused: it is already a spectrum, windowed by LTspice. Import the transient run itself

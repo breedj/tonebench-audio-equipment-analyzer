@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api, type SimulationFileInfo } from '../api/client'
 import {
   simulationFit,
+  sweepImportBlocker,
   SIMULATION_FFT_SIZES,
   SIMULATION_WINDOWS,
 } from '../measurements/simulationAnalysis'
@@ -153,9 +154,18 @@ function toggleSweep(index: number, on: boolean) {
     : chosenSweeps.value.filter((i) => i !== index)
 }
 
-/** A sweep needs points: one run makes a one-point chart, which the server refuses outright. */
-const tooFewForASweep = computed(
-  () => props.sweepTarget === true && chosenSweeps.value.length < 2,
+/**
+ * Why this file cannot become a sweep on the measurement it was opened from, or null. The rule is
+ * in `simulationAnalysis.ts` because nothing in a `.vue` is testable here; the message is rendered
+ * beside the Import button rather than inside the runs fieldset, since the case it is written for
+ * draws no fieldset at all.
+ */
+const sweepBlocker = computed(() =>
+  // Null with no file read: a refused file has its own red line, and "this run holds one
+  // transient" said about a file that was never opened is noise beside it.
+  info.value === null
+    ? null
+    : sweepImportBlocker(props.sweepTarget === true, sweeps.value.length, chosenSweeps.value.length),
 )
 
 const canImport = computed(
@@ -166,7 +176,7 @@ const canImport = computed(
     fit.value.usableS > 0 &&
     !fit.value.fftTooLarge &&
     (!isStepped.value || chosenSweeps.value.length > 0) &&
-    !tooFewForASweep.value &&
+    sweepBlocker.value === null &&
     !busy.value,
 )
 
@@ -303,9 +313,6 @@ async function submit() {
             <template v-else>
               Each is stored as its own result, named after the step.
             </template>
-          </p>
-          <p v-if="tooFewForASweep" class="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
-            A sweep needs at least two points.
           </p>
         </fieldset>
 
@@ -501,6 +508,13 @@ async function submit() {
       <BusyNote v-else-if="!error" :label="busyLabel" class="py-1" />
 
       <BusyNote v-if="busy && info" :label="busyLabel" class="mt-4" />
+
+      <p
+        v-if="sweepBlocker"
+        class="mt-4 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
+      >
+        <InlineCodeText :text="sweepBlocker" />
+      </p>
 
       <div class="mt-5 flex justify-between gap-2">
         <div class="flex gap-2">

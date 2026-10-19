@@ -121,6 +121,40 @@ export function simulationFit(input: SimulationFitInput): SimulationFit {
   }
 }
 
+/**
+ * Why a transient file cannot become a sweep on the measurement it was opened from, or null when
+ * it can.
+ *
+ * <p>Only a THD-vs-frequency measurement makes a sweep out of a `.tran`, and a sweep needs points:
+ * one run is a one-point curve, which the server refuses outright. The reason has to be a sentence
+ * rather than a greyed button, and that is what this exists for — the case that bites is a file
+ * with <em>no</em> `.step` at all, which draws no list of runs, so the dialog had nothing on screen
+ * to say why Import was dead (reported 2026-10-19 against a single 245 ms EL84 transient; the same
+ * file imports normally on an FFT analysis measurement).</p>
+ *
+ * @param sweepTarget whether the open measurement turns the runs into one sweep.
+ * @param sweepCount how many runs the file holds — one unless it carries a `.step`.
+ * @param chosenCount how many of them are ticked.
+ */
+export function sweepImportBlocker(
+  sweepTarget: boolean,
+  sweepCount: number,
+  chosenCount: number,
+): string | null {
+  if (!sweepTarget) return null
+  if (sweepCount < 2)
+    return (
+      // No suffix glued to a code span: `.step`ped renders as ".step ped", the span carrying
+      // padding of its own.
+      'This run holds one transient and a sweep needs at least two points. A THD-vs-frequency ' +
+      "sweep comes from a run with a `.step` in it — `.step param freq 50 5050 100`, with the " +
+      "source's frequency written as `{freq}` — so import this file on an FFT analysis " +
+      'measurement instead, where it becomes one spectrum.'
+    )
+  if (chosenCount < 2) return 'A sweep needs at least two points, so tick at least two runs.'
+  return null
+}
+
 /** Where an imported simulation came from — `SimulationSource`, as params_json carries it. */
 export interface StoredSimulationSource {
   path: string

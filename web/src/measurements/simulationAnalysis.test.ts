@@ -4,6 +4,7 @@ import {
   parseStoredSimulation,
   samplesStartS,
   simulationFit,
+  sweepImportBlocker,
 } from './simulationAnalysis'
 
 const EL84 = {
@@ -158,5 +159,30 @@ describe('parseStoredSimulation', () => {
       expect(stored.pcmStartS).toBeNull()
       expect(samplesStartS(stored)).toBeCloseTo(0.02, 9)
     })
+  })
+})
+
+describe('sweepImportBlocker', () => {
+  // The report: a single 245 ms EL84 transient, opened on a THD-vs-frequency measurement, greyed
+  // the Import button and said nothing. One run cannot be a curve, and the dialog draws no list of
+  // runs for a file with no `.step`, so a sentence is the only place the reason can go.
+  it('says why a file with no steps cannot be a sweep, and names the screen that takes it', () => {
+    const why = sweepImportBlocker(true, 1, 1)
+    expect(why).not.toBeNull()
+    expect(why).toContain('.step')
+    expect(why).toContain('FFT analysis')
+  })
+
+  it('asks for two ticks once the file does hold steps', () => {
+    expect(sweepImportBlocker(true, 51, 1)).toContain('at least two')
+    expect(sweepImportBlocker(true, 51, 0)).toContain('at least two')
+    expect(sweepImportBlocker(true, 51, 2)).toBeNull()
+  })
+
+  // Every other screen that takes a transient makes one spectrum per run, so one run is the
+  // ordinary case there and nothing is refused.
+  it('blocks nothing where the runs are not being made into a sweep', () => {
+    expect(sweepImportBlocker(false, 1, 1)).toBeNull()
+    expect(sweepImportBlocker(false, 51, 0)).toBeNull()
   })
 })

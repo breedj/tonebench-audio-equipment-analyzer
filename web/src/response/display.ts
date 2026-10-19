@@ -258,6 +258,22 @@ export function responsePhaseKindFromParams(kind: string, paramsJson: string | n
   return stored.rightChannelIsReference === true ? 'DutResponse' : 'ChannelDifference'
 }
 
+/**
+ * The bulk delay a stored run's estimator removed, in samples, or null where the row records none —
+ * a stepped sweep removes nothing, and a chirp run saved before the figure was stored has no
+ * answer. What **Restore removed delay** puts back on a stored curve, so an overlay is restored by
+ * its own delay rather than by whatever the live run removed.
+ */
+export function responseLatencySamplesFromParams(paramsJson: string | null | undefined): number | null {
+  try {
+    const stored = paramsJson ? (JSON.parse(paramsJson) as { latencySamples?: unknown }) : null
+    const value = stored?.latencySamples
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
 /** Whether a run's settings made the right input the reference — which hides the right curve, since it is then the stimulus. */
 export function responseRightChannelIsReferenceFromParams(paramsJson: string | null | undefined): boolean {
   try {

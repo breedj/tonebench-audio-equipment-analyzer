@@ -3,6 +3,7 @@ import {
   DEFAULT_RESPONSE_DISPLAY,
   responseChartFlags,
   responseDisplayFromParams,
+  responseLatencySamplesFromParams,
   responsePhaseKindFromParams,
   responseRightChannelIsReferenceFromParams,
 } from './display'
@@ -263,5 +264,21 @@ describe('responseChartFlags', () => {
 
   it('never draws coherence for a stepped run', () => {
     expect(responseChartFlags(display, { kind: 'SteppedResponse', phaseKind: 'DutResponse', rightChannelIsReference: false, hasTraces: true }).showCoherence).toBe(false)
+  })
+})
+
+describe("a stored run's removed delay", () => {
+  // What Restore removed delay puts back on an *overlay*: its own figure, not the live run's.
+  // Two runs of the same DUT remove different amounts, and the checkbox means "put back what was
+  // taken off this curve".
+  it('is read from the row that recorded one', () => {
+    expect(responseLatencySamplesFromParams(JSON.stringify({ latencySamples: 14.25 }))).toBe(14.25)
+  })
+
+  it('is null for a run that removed nothing, an unreadable document, or no document at all', () => {
+    expect(responseLatencySamplesFromParams(JSON.stringify({ latencySamples: null }))).toBeNull()
+    expect(responseLatencySamplesFromParams(JSON.stringify({}))).toBeNull()
+    expect(responseLatencySamplesFromParams('not json')).toBeNull()
+    expect(responseLatencySamplesFromParams(null)).toBeNull()
   })
 })

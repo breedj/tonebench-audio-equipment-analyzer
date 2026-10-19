@@ -108,10 +108,15 @@ export function phaseColumnUsable(trace: ResponseTrace, index: number, floorDb: 
 }
 
 /**
- * The phase series for a trace, in degrees, with `null` — a gap, never a zero — on every column
- * below the floor. `length` is the shared x grid's, so a trace shorter than it simply runs out.
+ * The phase series for a trace, in degrees, with the delay restored where asked and `null` — a gap,
+ * never a zero — on every column below the floor, but <b>not yet wrapped</b>.
+ *
+ * <p>Separate from {@link phaseSeries} for the one caller that must interpolate before it wraps: a
+ * stored result is drawn on the live curve's grid, and interpolating an already-wrapped phase
+ * across its own ±180° step puts a column in the middle of the jump — a phase the DUT never
+ * had.</p>
  */
-export function phaseSeries(
+export function phaseSeriesUnwrapped(
   trace: ResponseTrace | null,
   phaseKind: ResponsePhaseKindName,
   restore: PhaseDelayRestore,
@@ -126,9 +131,22 @@ export function phaseSeries(
   for (let i = 0; i < count; i++) {
     const phase = trace.phaseDeg[i]
     if (!Number.isFinite(phase) || !phaseColumnUsable(trace, i, floorDb)) continue
-    // Wrapped last, after the delay is back on: restoring it is what puts the turns there, and
-    // wrapping first would then hand them straight back.
-    out[i] = wrapPhaseDeg(phase - derotate * trace.freqHz[i])
+    out[i] = phase - derotate * trace.freqHz[i]
   }
   return out
+}
+
+/**
+ * The phase series for a trace, in degrees, with `null` — a gap, never a zero — on every column
+ * below the floor. `length` is the shared x grid's, so a trace shorter than it simply runs out.
+ */
+export function phaseSeries(
+  trace: ResponseTrace | null,
+  phaseKind: ResponsePhaseKindName,
+  restore: PhaseDelayRestore,
+  length: number,
+): (number | null)[] {
+  // Wrapped last, after the delay is back on: restoring it is what puts the turns there, and
+  // wrapping first would then hand them straight back.
+  return phaseSeriesUnwrapped(trace, phaseKind, restore, length).map((v) => (v === null ? null : wrapPhaseDeg(v)))
 }

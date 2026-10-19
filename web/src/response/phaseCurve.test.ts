@@ -7,6 +7,7 @@ import {
   delayDegPerHz,
   phaseFloorDb,
   phaseSeries,
+  phaseSeriesUnwrapped,
   wrapPhaseDeg,
 } from './phaseCurve'
 
@@ -142,5 +143,28 @@ describe('the restored delay', () => {
 
   it('is 360·τ/fs', () => {
     expect(delayDegPerHz({ restoreDelay: true, latencySamples: 48, sampleRateHz: 48_000 })).toBeCloseTo(0.36, 12)
+  })
+})
+
+describe('the unwrapped series', () => {
+  // What a stored curve is drawn from: it is resampled onto the live curve's grid, and
+  // interpolating an already-wrapped phase across its own ±180° step would put a column in the
+  // middle of the jump -- a phase the DUT never had. So the wrap is the last step, after the
+  // interpolation, and this is the series that goes into it.
+  it('leaves the turns on, where the wrapped one takes them off', () => {
+    const subject = trace({ phaseDeg: [-200, -400, 0, 0, 0] })
+    const raw = phaseSeriesUnwrapped(subject, 'PerTrace', NO_RESTORE, 5)
+    const wrapped = phaseSeries(subject, 'PerTrace', NO_RESTORE, 5)
+
+    expect(raw[0]).toBe(-200)
+    expect(raw[1]).toBe(-400)
+    expect(wrapped[0]).toBe(160)
+    expect(wrapped[1]).toBe(-40)
+  })
+
+  it('blanks the same columns the wrapped one blanks', () => {
+    const raw = phaseSeriesUnwrapped(trace(), 'PerTrace', NO_RESTORE, 5)
+    const wrapped = phaseSeries(trace(), 'PerTrace', NO_RESTORE, 5)
+    expect(raw.map((v) => v === null)).toEqual(wrapped.map((v) => v === null))
   })
 })

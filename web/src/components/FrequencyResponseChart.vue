@@ -40,7 +40,16 @@ import ChartZoomControls from './ChartZoomControls.vue'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
-import { PHASE_AXIS_SPLITS, PHASE_SCALE_RANGE, phaseColumnUsable, phaseFloorDb, phaseSeries } from '../response/phaseCurve'
+import {
+  PHASE_AXIS_SPLITS,
+  PHASE_SCALE_RANGE,
+  phaseColumnUsable,
+  phaseFloorDb,
+  phaseSeries,
+  phaseSeriesUnwrapped,
+  wrapPhaseDeg,
+} from '../response/phaseCurve'
+import { responseLatencySamplesFromParams } from '../response/display'
 import { useZoomHistory, type ZoomWindow } from '../charts/zoomHistory'
 
 const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
@@ -409,6 +418,44 @@ function overlayDelaySeries(overlayId: number, shownKind: ResponseTrace['kind'],
 }
 
 /**
+ * A stored result's phase curve, from whichever of its traces carries one under this run's phase
+ * kind — the same choice its delay curve makes, since a delay is that phase's own derivative.
+ *
+ * <p>It is drawn for the same reason the magnitude and the delay are: a stored run carries a phase
+ * column and comparing it against the live one, or against another stored run, is what the overlay
+ * list is for. Until 2026-10-19 the chart drew the phase of the <i>live</i> traces only, so an
+ * imported <c>.ac</c> sweep — which is a history item the moment it arrives, with nothing live
+ * beside it — showed a magnitude, a phase axis and no phase curve at all.</p>
+ *
+ * <p>Interpolated <b>before</b> it is wrapped: putting a column half way across a ±180° step is a
+ * phase the DUT never had. The gaps travel too — a column whose neighbours are below the floor
+ * interpolates to NaN, which is drawn as a gap rather than as a zero.</p>
+ */
+function overlayPhaseSeries(overlayId: number, shownKind: ResponseTrace['kind'], grid: Float64Array): (number | null)[] {
+  const overlay = props.overlays.find((o) => o.id === overlayId)
+  const wanted: ResponseTrace['kind'] = props.phaseKind === 'PerTrace' ? shownKind : 'Gain'
+  const source = overlay?.responseTraces?.find((t) => t.kind === wanted) ?? null
+  if (!overlay || !source) return new Array<number | null>(grid.length).fill(null)
+
+  // Restored by the overlay's own removed delay, never by the live run's: the two measurements
+  // removed different amounts, and the checkbox means "put back what was taken off this curve".
+  const own = phaseSeriesUnwrapped(
+    source,
+    props.phaseKind,
+    {
+      restoreDelay: props.restoreDelay,
+      latencySamples: responseLatencySamplesFromParams(overlay.detail.paramsJson),
+      sampleRateHz: overlay.detail.sampleRateHz,
+    },
+    source.freqHz.length,
+  )
+  const values = own.map((v) => (v === null ? Number.NaN : v))
+  return interpolateOnto(source.freqHz, values, grid).map((v) =>
+    v === null || !Number.isFinite(v) ? null : wrapPhaseDeg(v),
+  )
+}
+
+/**
  * Draws the min of each column as a vertical stroke under its max, exactly as the spectrum chart's
  * band does. Both bounds must be drawn: the line alone is the max over the bins in that column, so
  * a rippled response would be redrawn riding along the top of its own ripple rather than through
@@ -589,6 +636,9 @@ function buildData(): uPlot.AlignedData {
   // optional phase/coherence/delay traces above. An overlay's delay curve follows its magnitude,
   // so the two lists stay in the same order buildSeries and buildReadoutSeries walk them.
   for (const overlay of overlayCurves.value) series.push(resampleOnto(overlay.trace, x))
+  if (props.showPhase) {
+    for (const overlay of overlayCurves.value) series.push(overlayPhaseSeries(overlay.id, overlay.trace.kind, x))
+  }
   if (delayShown.value) {
     for (const overlay of overlayCurves.value) series.push(overlayDelaySeries(overlay.id, overlay.trace.kind, x))
   }
@@ -715,6 +765,22 @@ function buildSeries(p: Palette): uPlot.Series[] {
     })
   }
 
+  if (props.showPhase) {
+    for (const overlay of overlayCurves.value) {
+      series.push({
+        label: `${overlay.name} ${phaseLabel.value.toLowerCase()}`,
+        scale: 'phase',
+        stroke: p.color(PHASE_COLOR),
+        width,
+        // The overlay's own dash, so a stored phase is told from the live one the way its
+        // magnitude is; markers off, as on the live phase curve.
+        dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value, null) ?? undefined,
+        points: { show: false },
+        alpha: liveDrawn.value ? 0.7 : 1,
+      })
+    }
+  }
+
   if (delayShown.value) {
     for (const overlay of overlayCurves.value) {
       series.push({
@@ -791,6 +857,18 @@ function buildReadoutSeries(p: Palette): ReadoutSeries[] {
       unit: magnitudeUnit,
       digits: 2,
     })
+  }
+
+  if (props.showPhase) {
+    for (const overlay of overlayCurves.value) {
+      entries.push({
+        key: `overlay-phase-${overlay.id}-${overlay.trace.kind}`,
+        label: `${overlay.name} ${phaseLabel.value.toLowerCase()}`,
+        color: p.color(PHASE_COLOR),
+        unit: '°',
+        digits: 1,
+      })
+    }
   }
 
   if (delayShown.value) {

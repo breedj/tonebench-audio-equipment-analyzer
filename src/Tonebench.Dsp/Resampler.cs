@@ -19,11 +19,28 @@ namespace Tonebench.Dsp;
 public static class Resampler
 {
     /// <summary>
-    /// Stopband attenuation the decimation filter is designed for, in dB. 100 dB sits far below
-    /// anything an audio measurement reads: the quietest harmonic in the reference simulation is
-    /// −110 dBc, and out-of-band energy suppressed by 100 dB cannot reach it.
+    /// Stopband attenuation the decimation filter is designed for, in dB — and what it really buys
+    /// is not the stopband but the kernel's <i>sidelobe floor</i>, which is where the image of the
+    /// source grid ends up.
+    ///
+    /// <para>It was 100, on the reasoning that the quietest harmonic worth reading is −110 dBc. The
+    /// number that matters is a different one: decimating replicates the input about the source
+    /// <i>grid</i> rate, so a tone at <c>f</c> leaves a line at <c>|m·f_source ± k·f|</c> folded
+    /// into the new band — a frequency that is a harmonic of nothing, and therefore the one thing
+    /// on a spectrum that cannot be explained away. Reported 2026-10-19 from a real LTspice run
+    /// (1 MHz grid, 245 ms, a 16384-point record, so the grid folds to 3102.04 Hz): a line at
+    /// 4102.04 Hz at <b>−163 dBc</b> beside a 1 kHz tone, with the rest of the family under it,
+    /// and the same file analysed at its native rate putting those frequencies at −193 dBV, i.e.
+    /// the simulator's own floor.</para>
+    ///
+    /// <para>160 dB puts them at <b>−216 dBc</b> — below anything a simulation can show, so the
+    /// imported spectrum and the simulator's own agree line for line — and costs about a third
+    /// more time in the one place this runs (779 → 1030 ms for 245 k samples, Debug; the 276 MB
+    /// file it came from takes several seconds to read). Going further is invisible, and going
+    /// back is caught by
+    /// <c>Decimate_LeavesTheSourceGridsImage_BelowWhatASimulationCanShow</c>.</para>
     /// </summary>
-    public const double StopbandDb = 100.0;
+    public const double StopbandDb = 160.0;
 
     /// <summary>
     /// Where the filter's passband ends, as a fraction of the new Nyquist. The gap between this and

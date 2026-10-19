@@ -209,6 +209,49 @@ public class ResamplerTests
         Assert.Equal(16_384, Resampler.SampleCount(16_384 / 172_505.0, 172_505.0));
     }
 
+    /// <summary>
+    /// The image of the source grid, which is what a simulation import shows on screen as lines
+    /// that are harmonics of nothing.
+    ///
+    /// <para>Decimating is a resampling, so the output carries a replica of the input modulated by
+    /// the source <i>grid</i> rate: a component at <c>|m·f_source ± k·f_tone|</c> folded into the
+    /// new band, whose level is the kernel's own sidelobe floor rather than its design stopband
+    /// edge. Reported 2026-10-19 from a real LTspice run: a 1 MHz grid, 245 ms of it, analysed as
+    /// a 16384-point record — so the grid folded to 3102.04 Hz and put a line beside the 1 kHz
+    /// tone at <b>4102.04 Hz, −163 dBc</b>, with the whole family at k·1 kHz ± m·3102 Hz under it.
+    /// Analysing the same file at its native rate with no resampling puts those frequencies at
+    /// −193 dBV, the simulator's own numerical floor: the lines were ours.</para>
+    ///
+    /// <para>Raising <see cref="Resampler.StopbandDb"/> from 100 to 160 is what removed them —
+    /// −163 → −216 dBc at the reported run's ratio, −159 → −210 at this test's, and −145 → −188 at
+    /// the tightest ratio an importable file can have — for about a third more time in the one
+    /// place this runs (779 → 1030 ms for 245 k samples, Debug). That is what the constant buys,
+    /// and this test is what stops it being shortened again.</para>
+    /// </summary>
+    [Fact]
+    public void Decimate_LeavesTheSourceGridsImage_BelowWhatASimulationCanShow()
+    {
+        double f0 = CoherentHz(245);
+        double[] source = Sine(SourceSamples, f0, SourceRateHz, amplitude: 1.0);
+        var destination = new double[TargetSamples];
+
+        Resampler.Decimate(source, SourceRateHz, TargetRateHz, destination);
+
+        // Where the source grid folds to: |f_source − f0|, brought into the new band.
+        double image = Math.Abs(SourceRateHz - f0);
+        while (image > TargetRateHz / 2.0)
+            image = Math.Abs(image - TargetRateHz);
+        Assert.InRange(image, 1_000.0, TargetRateHz / 2.0); // it really does land in the band
+
+        // Windowed, because the tone beside it is 160 dB louder and a rectangular projection
+        // would read its leakage instead of the image. Kaiser7's sidelobes are −171 dB.
+        double tone = WindowedBin(destination, f0, TargetRateHz);
+        double imageLevel = WindowedBin(destination, image, TargetRateHz);
+        double dbc = 20.0 * Math.Log10(imageLevel / tone);
+
+        Assert.True(dbc < -200.0, $"image at {image:F1} Hz is {dbc:F1} dBc, which a chart would show");
+    }
+
     // ---- helpers ----
 
     private static double[] Sine(int count, double freqHz, double sampleRateHz, double amplitude)
@@ -230,5 +273,25 @@ public class ResamplerTests
             im -= x[n] * Math.Sin(w * n);
         }
         return 2.0 * Math.Sqrt((re * re) + (im * im)) / x.Length;
+    }
+
+    /// <summary>
+    /// Peak amplitude at <paramref name="freqHz"/> read through a Kaiser7 window, so a line far
+    /// below a tone nearby is measured rather than that tone's leakage.
+    /// </summary>
+    private static double WindowedBin(ReadOnlySpan<double> x, double freqHz, double sampleRateHz)
+    {
+        var window = Window.Get(WindowType.Kaiser7, x.Length);
+        var windowed = new double[x.Length];
+        Window.Apply(x, window, windowed);
+
+        double w = 2 * Math.PI * freqHz / sampleRateHz;
+        double re = 0.0, im = 0.0;
+        for (int n = 0; n < windowed.Length; n++)
+        {
+            re += windowed[n] * Math.Cos(w * n);
+            im -= windowed[n] * Math.Sin(w * n);
+        }
+        return 2.0 * Math.Sqrt((re * re) + (im * im)) / window.Sums.S1;
     }
 }

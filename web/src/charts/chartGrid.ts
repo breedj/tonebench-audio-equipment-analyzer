@@ -1,10 +1,11 @@
-// The impedance chart's shared x grid.
+// The shared x grid behind the impedance and frequency-response charts.
 //
 // uPlot's AlignedData gives every series one x array, so a curve is drawn only where that array
 // reaches and only as finely as it is spaced there. With a live measurement and a handful of checked
 // history items on one chart, those are three or four curves decimated independently — a different
 // span, resolution or stimulus puts their columns in different places — so the array has to be the
-// union of all of them, and each curve is then interpolated onto it (ImpedanceChart.vue).
+// union of all of them, and each curve is then interpolated onto it (ImpedanceChart.vue,
+// FrequencyResponseChart.vue).
 //
 // It lives here rather than in the chart because nothing in a `.vue` is testable under the node
 // environment vitest runs in, and the two faults this fixes were both invisible by eye: a stored

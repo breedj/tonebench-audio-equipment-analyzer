@@ -36,7 +36,7 @@ import { useZoomHistory, type ZoomWindow } from '../charts/zoomHistory'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
-import { measuredColumns, mergeGrids } from '../impedance/chartGrid'
+import { measuredColumns, mergeGrids } from '../charts/chartGrid'
 import { ohmAxis } from '../impedance/ohmAxis'
 import { dampingFactorTicks, formatDampingFactor } from '../impedance/dampingFactorAxis'
 import { dbOhmsToOhms, formatOhms } from '../impedance/equivalent'
@@ -142,7 +142,7 @@ const { storedShortCal, referenceOhms } = useImpedance()
 
 /**
  * The x grid: the DUT's when there is one, otherwise a standard's own so it can be seen alone,
- * merged with every overlay's columns — see `impedance/chartGrid.ts`, which holds the merge and its
+ * merged with every overlay's columns — see `charts/chartGrid.ts`, which holds the merge and its
  * tests.
  *
  * <p><b>Why the live grid alone will not do.</b> uPlot's AlignedData gives every series one shared x

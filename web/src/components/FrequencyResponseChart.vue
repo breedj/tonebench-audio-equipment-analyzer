@@ -45,10 +45,11 @@ import {
   PHASE_SCALE_RANGE,
   phaseColumnUsable,
   phaseFloorDb,
-  phaseSeries,
   phaseSeriesUnwrapped,
   wrapPhaseDeg,
+  type PhaseDelayRestore,
 } from '../response/phaseCurve'
+import { measuredColumns, mergeGrids } from '../charts/chartGrid'
 import { responseLatencySamplesFromParams } from '../response/display'
 import { useZoomHistory, type ZoomWindow } from '../charts/zoomHistory'
 
@@ -351,13 +352,87 @@ const phaseTrace = computed<ResponseTrace | null>(() => {
 })
 
 /**
+ * Every trace that contributes a column to the shared x grid: the curves on screen, the one the
+ * phase and the bandwidth markers are read from, and each checked-on history item's.
+ */
+const gridSources = computed<ResponseTrace[]>(() => {
+  const sources = [...visibleTraces.value]
+  for (const trace of [phaseTrace.value, primaryTrace.value]) {
+    if (trace && !sources.includes(trace)) sources.push(trace)
+  }
+  for (const overlay of overlayCurves.value) sources.push(overlay.trace)
+  return sources.filter((t) => t.freqHz.length > 0)
+})
+
+/**
+ * The shared x grid: every frequency any curve on the chart has a sample at — see
+ * `charts/chartGrid.ts`, which holds the merge and its tests, and the impedance chart, which had
+ * this reported first.
+ *
+ * <p>uPlot's AlignedData gives every series one x array, so a curve is drawn only where that array
+ * reaches and only as finely as it is spaced there. This used to be the <b>first live trace's grid,
+ * verbatim</b>, which made an overlay two things it is not. It was <b>clipped</b> to the live run's
+ * band — a stepped sine runs 20 Hz to 20 kHz, so a chirp overlay spanning 2 Hz to 90 kHz simply
+ * stopped at both ends — and it was <b>subsampled</b> to the live run's resolution, so the same
+ * ~1600-column stored curve was drawn as a smooth line through whichever twenty of its columns a
+ * stepped sweep happened to land on. Neither announces itself: the overlay looks like a tidier
+ * measurement than it is, which is the opposite of what it is on the chart for.</p>
+ *
+ * <p>Curves of one measurement share their column boundaries, so for a live run alone this is the
+ * grid it always was. What it costs is that the live series are interpolated at an overlay's
+ * columns like the overlays are at theirs — the segment uPlot would draw between two measured
+ * points either way — so the Data points markers go through `markerColumns` to stay on columns that
+ * were actually measured.</p>
+ */
+const gridHz = computed<Float64Array>(() => {
+  const sources = gridSources.value
+  if (sources.length === 0) return new Float64Array()
+  return mergeGrids(
+    sources[0].freqHz,
+    sources.slice(1).map((t) => t.freqHz),
+  )
+})
+
+/**
+ * Which columns of the grid each trace was actually measured at, for its Data points markers. One
+ * map rather than a filter per draw: uPlot calls `points.filter` on every redraw, and a continuous
+ * run redraws several times a second.
+ */
+const markerColumns = computed(() => {
+  const grid = gridHz.value
+  const columns = new Map<ResponseTrace, number[]>()
+  for (const trace of gridSources.value) {
+    if (!columns.has(trace)) columns.set(trace, measuredColumns(grid, trace.freqHz))
+  }
+  return columns
+})
+
+/**
  * The phase series the chart draws: the trace's own phase, the removed delay back on it when the
  * display panel asks for that, and a gap wherever the response is into the noise. The rule lives in
  * `response/phaseCurve.ts` because the panel's Autofit has to size the axis to the very same curve
  * — and because nothing in a `.vue` is testable here.
+ *
+ * <p>One function for the live curve and for an overlay's, because the order of the three steps is
+ * the whole of it: unwrap on the trace's <b>own</b> columns, interpolate onto the shared grid, and
+ * only then wrap. Putting a column half way across a ±180° step is a phase the DUT never had, and
+ * the gaps have to travel too — a column whose neighbours are below the floor interpolates to NaN,
+ * which is drawn as a gap rather than as a zero. `restore` differs between the two: an overlay is
+ * restored by its <i>own</i> removed delay, since the two measurements removed different amounts.
+ * </p>
  */
-function phaseSeriesOf(trace: ResponseTrace | null, length: number): (number | null)[] {
-  return phaseSeries(trace, props.phaseKind, restoreOptions(), length)
+function phaseOnGrid(
+  trace: ResponseTrace | null,
+  restore: PhaseDelayRestore,
+  grid: Float64Array,
+): (number | null)[] {
+  if (!trace) return new Array<number | null>(grid.length).fill(null)
+
+  const own = phaseSeriesUnwrapped(trace, props.phaseKind, restore, trace.freqHz.length)
+  const values = own.map((v) => (v === null ? Number.NaN : v))
+  return interpolateOnto(trace.freqHz, values, grid).map((v) =>
+    v === null || !Number.isFinite(v) ? null : wrapPhaseDeg(v),
+  )
 }
 
 /** The three props `delayDegPerHz` reads, as one object. */
@@ -388,33 +463,39 @@ const delayRange = computed<[number, number]>(() => [
 const delayLabelText = computed(() => delayLabel(delayView.value, props.phaseKind === 'ChannelDifference'))
 
 /**
- * The selected delay curve of a trace in the axis' unit; all-null (a gap, not a zero line) when the
- * trace never recorded one. Blanked column for column with the phase it is the derivative of —
- * where the phase is noise the delay is its slope, which is noise multiplied by the bin spacing.
+ * The selected delay curve of a trace, on the shared grid, in the axis' unit; all-null (a gap, not
+ * a zero line) when the trace never recorded one. Blanked column for column with the phase it is
+ * the derivative of — where the phase is noise the delay is its slope, which is noise multiplied by
+ * the bin spacing.
+ *
+ * <p>One function for the live curve and for an overlay's, as with the phase. The blanking used to
+ * apply to the live curve only, so a stored run's delay was drawn confidently across the very
+ * columns where its own phase was a gap; a delay is read off the phase either way.</p>
  */
-function delaySeriesOf(trace: ResponseTrace | null, length: number): (number | null)[] {
+function delayOnGrid(trace: ResponseTrace | null, grid: Float64Array): (number | null)[] {
   const values = delayValuesOf(trace, delayView.value)
-  if (!trace || !values || values.length !== length) return new Array<number | null>(length).fill(null)
+  if (!trace || !values || values.length !== trace.freqHz.length)
+    return new Array<number | null>(grid.length).fill(null)
+
   const floorDb = phaseFloorDb(trace, props.phaseKind)
   const scale = delayScale(delayUnit.value)
-  return Array.from(values, (v, i) =>
-    Number.isFinite(v) && phaseColumnUsable(trace, i, floorDb) ? v * scale : null,
+  const usable = Array.from(values, (v, i) =>
+    Number.isFinite(v) && phaseColumnUsable(trace, i, floorDb) ? v : Number.NaN,
+  )
+  return interpolateOnto(trace.freqHz, usable, grid).map((v) =>
+    v === null || !Number.isFinite(v) ? null : v * scale,
   )
 }
 
 /**
- * A stored result's delay curve, from whichever of its traces carries a phase under this run's
- * phase kind (the trace on screen under PerTrace, the gain curve otherwise), resampled onto the
- * live grid like its magnitude. Null throughout when the result predates the delay curves.
+ * Whichever of a stored result's traces carries a phase under this run's phase kind — the trace on
+ * screen under PerTrace, the gain curve otherwise. Its magnitude, phase and delay all come from
+ * this one choice, since a delay is that phase's own derivative.
  */
-function overlayDelaySeries(overlayId: number, shownKind: ResponseTrace['kind'], grid: Float64Array): (number | null)[] {
+function overlayPhaseSource(overlayId: number, shownKind: ResponseTrace['kind']): ResponseTrace | null {
   const traces = props.overlays.find((o) => o.id === overlayId)?.responseTraces ?? []
   const wanted: ResponseTrace['kind'] = props.phaseKind === 'PerTrace' ? shownKind : 'Gain'
-  const source = traces.find((t) => t.kind === wanted) ?? null
-  const values = delayValuesOf(source, delayView.value)
-  if (!source || !values || values.length !== source.freqHz.length) return new Array<number | null>(grid.length).fill(null)
-  const scale = delayScale(delayUnit.value)
-  return interpolateOnto(source.freqHz, values, grid).map((v) => (v === null ? null : v * scale))
+  return traces.find((t) => t.kind === wanted) ?? null
 }
 
 /**
@@ -433,25 +514,19 @@ function overlayDelaySeries(overlayId: number, shownKind: ResponseTrace['kind'],
  */
 function overlayPhaseSeries(overlayId: number, shownKind: ResponseTrace['kind'], grid: Float64Array): (number | null)[] {
   const overlay = props.overlays.find((o) => o.id === overlayId)
-  const wanted: ResponseTrace['kind'] = props.phaseKind === 'PerTrace' ? shownKind : 'Gain'
-  const source = overlay?.responseTraces?.find((t) => t.kind === wanted) ?? null
+  const source = overlayPhaseSource(overlayId, shownKind)
   if (!overlay || !source) return new Array<number | null>(grid.length).fill(null)
 
   // Restored by the overlay's own removed delay, never by the live run's: the two measurements
   // removed different amounts, and the checkbox means "put back what was taken off this curve".
-  const own = phaseSeriesUnwrapped(
+  return phaseOnGrid(
     source,
-    props.phaseKind,
     {
       restoreDelay: props.restoreDelay,
       latencySamples: responseLatencySamplesFromParams(overlay.detail.paramsJson),
       sampleRateHz: overlay.detail.sampleRateHz,
     },
-    source.freqHz.length,
-  )
-  const values = own.map((v) => (v === null ? Number.NaN : v))
-  return interpolateOnto(source.freqHz, values, grid).map((v) =>
-    v === null || !Number.isFinite(v) ? null : wrapPhaseDeg(v),
+    grid,
   )
 }
 
@@ -604,33 +679,32 @@ function bandwidthPlugin(p: Palette): uPlot.Plugin {
   }
 }
 
-/**
- * The shared x grid. Every curve of one measurement was decimated on the same column boundaries, so
- * the first one's frequencies serve for all of them — but they are read from the data rather than
- * rebuilt from a log-spacing formula, for the reason streaming/protocol.ts documents.
- */
 function buildData(): uPlot.AlignedData {
-  // Falls back to an overlay's own grid when nothing has been measured yet: checking a stored
-  // result on before running anything is a normal thing to do, and without this the chart has no x
-  // axis to resample onto and silently draws nothing.
-  const grid = visibleTraces.value[0] ?? primaryTrace.value ?? overlayCurves.value[0]?.trace
-  if (!grid || grid.freqHz.length === 0) return [[], []]
+  const x = gridHz.value
+  if (x.length === 0) return [[], []]
 
-  const x = Float64Array.from(grid.freqHz)
   const series: (Float64Array | (number | null)[])[] = []
 
-  for (const trace of visibleTraces.value) series.push(Float64Array.from(trace.magnitudeMaxDb))
+  // Through the resampler the overlays use, because `x` now carries their columns too. At a measured
+  // frequency this returns that column exactly (the interpolation lands on t = 0), between two of
+  // them it interpolates — which is the segment uPlot would draw anyway — and outside the measured
+  // band, null, so a 24 kHz run is not drawn as a flat line across a 96 kHz one.
+  for (const trace of visibleTraces.value) series.push(resampleOnto(trace, x))
 
   // Both go out in their own units now that each has its own scale — degrees and 0..1 — so the
   // cursor and the axis agree with each other.
-  if (props.showPhase) series.push(phaseSeriesOf(phaseTrace.value, x.length))
+  if (props.showPhase) series.push(phaseOnGrid(phaseTrace.value, restoreOptions(), x))
 
   if (props.showCoherence) {
     const source = primaryTrace.value
-    series.push(source ? Float64Array.from(source.coherence) : new Float64Array(x.length))
+    series.push(
+      source
+        ? interpolateOnto(source.freqHz, source.coherence, x)
+        : new Array<number | null>(x.length).fill(null),
+    )
   }
 
-  if (delayShown.value) series.push(delaySeriesOf(phaseTrace.value, x.length))
+  if (delayShown.value) series.push(delayOnGrid(phaseTrace.value, x))
 
   // Overlays last, so they draw behind nothing and their series indices are stable against the
   // optional phase/coherence/delay traces above. An overlay's delay curve follows its magnitude,
@@ -640,7 +714,7 @@ function buildData(): uPlot.AlignedData {
     for (const overlay of overlayCurves.value) series.push(overlayPhaseSeries(overlay.id, overlay.trace.kind, x))
   }
   if (delayShown.value) {
-    for (const overlay of overlayCurves.value) series.push(overlayDelaySeries(overlay.id, overlay.trace.kind, x))
+    for (const overlay of overlayCurves.value) series.push(delayOnGrid(overlayPhaseSource(overlay.id, overlay.trace.kind), x))
   }
 
   return [x, ...series] as uPlot.AlignedData
@@ -699,9 +773,25 @@ function resampleOnto(trace: ResponseTrace, grid: Float64Array): (number | null)
   return out
 }
 
+/**
+ * A curve's Data points markers: shown at the columns that curve was measured at and nowhere else.
+ *
+ * <p>The grid carries every other curve's columns too (see `gridHz`), where this one is an
+ * interpolation between two of its own samples rather than a sample — and a marker there would
+ * claim a measurement that was never taken, which is the whole thing this option is asked for. A
+ * function rather than the array uPlot also accepts, because a stepped sweep's grid grows between
+ * rebuilds and a baked array would go stale.</p>
+ */
+function markerPoints(trace: ResponseTrace): uPlot.Series.Points {
+  return {
+    show: props.showDataPoints,
+    size: 3,
+    filter: () => markerColumns.value.get(trace) ?? null,
+  }
+}
+
 function buildSeries(p: Palette): uPlot.Series[] {
   const width = props.thickLines ? 2 : 1
-  const points = { show: props.showDataPoints, size: 3 }
 
   const series: uPlot.Series[] = [{}]
 
@@ -710,7 +800,7 @@ function buildSeries(p: Palette): uPlot.Series[] {
       label: traceLabel(trace.kind),
       stroke: p.color(TRACE_COLORS[trace.kind]),
       width,
-      points,
+      points: markerPoints(trace),
     })
   }
 
@@ -760,7 +850,7 @@ function buildSeries(p: Palette): uPlot.Series[] {
       // Null screen: these overlays carry curves, not sweep points, so this is always undefined --
       // a Bode plot tells its curves apart by position. The polar chart uses responseOverlayDash.
       dash: sweepOverlayDash(props.overlays, overlay.id, liveDrawn.value, null) ?? undefined,
-      points,
+      points: markerPoints(overlay.trace),
       alpha: liveDrawn.value ? 0.7 : 1,
     })
   }

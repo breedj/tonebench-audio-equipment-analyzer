@@ -67,8 +67,8 @@ public static class SimulationEndpoints
                     return Results.BadRequest(axisError);
                 }
 
-                long resultId = await import.ImportSweepAsync(measurementTypeId, request.ToRequest(axis), ct);
-                return Results.Ok(new ImportedSimulationResponse(resultId));
+                var imported = await import.ImportSweepAsync(measurementTypeId, request.ToRequest(axis), ct);
+                return Results.Ok(new ImportedSweepResponse(imported.ResultId, imported.Note));
             }));
 
         // ---- the .ac sweeps, which become frequency-response results rather than spectra ----
@@ -439,6 +439,9 @@ public sealed record SimulationSweepResponse(
     double StartTimeS,
     double EndTimeS,
     string? Label);
+
+/// <summary>An imported sweep, and one sentence naming the runs that were left out — empty when none were.</summary>
+public sealed record ImportedSweepResponse(long ResultId, string Note);
 
 public sealed record ImportSimulationRequest(
     string Path,

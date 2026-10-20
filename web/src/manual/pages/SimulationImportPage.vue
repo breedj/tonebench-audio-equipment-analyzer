@@ -745,6 +745,16 @@
     </p>
 
     <p>
+      <strong>A sweep sets its own measurement band.</strong> The x of these points is each run's
+      own tone, so the band is the window those tones have to fall inside rather than a preference —
+      and the bench's 20 Hz – 20 kHz is the wrong window for a <code>.step</code> list that runs
+      from 10 Hz to 40 kHz. Pick a stepped file on a sweep measurement and the band comes up as
+      wide as the file can carry: from one bin (never below 1 Hz) up to 100 kHz, or to whatever the
+      longest FFT the run supports can reach. The FFT size moves with it, because a higher analysis
+      rate is the only thing a larger FFT buys. Both are still yours to change.
+    </p>
+
+    <p>
       One thing worth knowing if you sweep the bottom of the band: the fundamental search normally
       starts at 200&nbsp;Hz, to stop mains hum at 50 or 100&nbsp;Hz being mistaken for the signal.
       A simulation has no hum, so an import lowers that to the bottom of the analysed band — which
@@ -782,6 +792,16 @@
             Refused <em>here</em>, and the message says where it belongs: it is a frequency response
             rather than a waveform, so it imports on a <strong>Frequency response</strong>
             measurement instead. See below.
+          </td>
+        </tr>
+        <tr>
+          <td>A run whose tone is outside the band, or on a frequency another run already read</td>
+          <td>
+            <strong>Left out, not refused.</strong> A <code>.step</code> that runs past the band
+            takes every run up there with it, and one bad step must not throw away fifty good ones.
+            The dialog stays open afterwards and names what it dropped — and so does the stored
+            result, so a sweep that is not the whole file can say which runs are missing. Only a
+            file with fewer than two usable runs is refused.
           </td>
         </tr>
         <tr>

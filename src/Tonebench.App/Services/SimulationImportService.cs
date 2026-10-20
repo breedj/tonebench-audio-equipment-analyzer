@@ -66,6 +66,15 @@ public sealed record SimulationFileInfo(
 
 /// <summary>What to import, and how to analyse it. Every field here is re-appliable afterwards.</summary>
 /// <summary>
+/// An imported sweep: the result, and what was left out of it.
+///
+/// <para><see cref="Note"/> is empty when every run became a point. It is not an error — the import
+/// succeeded — but a sweep that is not the whole file has to say so, so it travels back to the
+/// dialog as well as onto the stored result's own source notes.</para>
+/// </summary>
+public sealed record SweepImportResult(long ResultId, string Note);
+
+/// <summary>
 /// What the points of an imported sweep are stepped <i>along</i>, which the open measurement
 /// decides rather than the file: a <c>.step</c> is a parameter list and the <c>.raw</c> says
 /// nothing about what the parameter meant. A tone stepped across the band is a THD-vs-frequency
@@ -456,7 +465,7 @@ public sealed class SimulationImportService(
     /// arithmetic over the same metric names — and read back, exported and reported by code that
     /// cannot tell them apart.</para>
     /// </summary>
-    public async Task<long> ImportSweepAsync(
+    public async Task<SweepImportResult> ImportSweepAsync(
         long measurementTypeId, SimulationImportRequest request, CancellationToken ct)
     {
         var info = Inspect(
@@ -489,8 +498,8 @@ public sealed class SimulationImportService(
         var traceUnits = indices.Skip(1).Select(i => header.Variables[i].Unit).ToList();
 
         SimulationAnalysis? firstSpec = null;
-        var points = new List<ThdSweepPoint>();
-        var runs = new List<List<ThdSweepPoint>>(chosen.Count);
+        var skipped = new List<SkippedRun>();
+        var runs = new List<(SimulationSweep Sweep, List<ThdSweepPoint> Points)>(chosen.Count);
         double analysisRateHz = 0.0;
         int fftSize = 0;
 
@@ -511,16 +520,24 @@ public sealed class SimulationImportService(
                 fftSize = spec.FftSize;
             }
 
-            // Every trace is checked for its tone, including the drive, because a drive whose tone
-            // the analysis could not find is a run that cannot be placed on the level axis at all.
+            // A run whose tone the analysis cannot find is left out rather than refusing the
+            // import. A `.step` that runs past the band's top takes every run up there with it --
+            // six of the reported file's sixty-one -- and refusing over them threw away the
+            // fifty-five that were good, with a message the user never saw because it rendered
+            // above the fold. Reported 2026-10-19. Each one is named in the summary the dialog
+            // prints afterwards, so nothing goes quietly.
+            //
+            // Every trace is checked, including the drive: one whose tone is missing cannot place
+            // its run on the level axis either.
+            int before = skipped.Count;
             for (int channel = 0; channel < samples.Count; channel++)
             {
-                int which = channel;
-                RequireLocatedTone(
-                    rendered.Meters[which], sweep, chosen.Count, request, which,
-                    () => LoudestLineHz(
-                        request, info, header, indices, wholeColumns, sweep, rendered.AnalysisRateHz, which, ct));
+                if (rendered.Meters[channel] is not { SnrDb: > 0.0f })
+                    skipped.Add(new SkippedRun(sweep, channel, rendered.AnalysisRateHz, SkipReason.NoTone));
             }
+
+            if (skipped.Count > before)
+                continue;
 
             // On the amplitude axis a second trace is the *drive node*, not a second measured
             // channel: the x of such a sweep is the level going in, so that is what the trace is
@@ -552,40 +569,67 @@ public sealed class SimulationImportService(
                     previewScope: null));
             }
 
-            runs.Add(runPoints);
-            points.AddRange(runPoints);
+            runs.Add((sweep, runPoints));
         }
 
+        // Two runs reading one frequency are one point on the axis, so the later is left out the
+        // same way. It is a resolution limit rather than a mistake -- `.step oct param freq 10 40k
+        // 5` is 1.5 Hz apart at the bottom, which a 200 ms run's 5 Hz bins cannot separate -- and
+        // the summary says so.
+        if (!amplitude)
+            DropRepeatedTones(runs, skipped);
 
+        if (runs.Count < 2)
+        {
+            // The one refusal left, and the only place the extra analysis is worth its cost: with
+            // nothing to import, where the tones actually are is the whole of what the user needs
+            // to know.
+            double? tone = skipped.Count > 0 && skipped[0].Reason == SkipReason.NoTone
+                ? LoudestLineHz(
+                    request, info, header, indices, wholeColumns,
+                    skipped[0].Sweep, skipped[0].AnalysisRateHz, skipped[0].Channel, ct)
+                : null;
 
-        // One capture per *run*, not per measured frequency. A run is a sweep point by
-        // construction, where the frequency is a reading -- and two runs can read the same one,
-        // which grouping by it turns into a capture holding two points per channel and a
-        // "UNIQUE constraint failed: capture_preview" long after the import. Reported 2026-10-12 as
-        // a 500 naming two 'fft' previews at 250 Hz, from a run whose tone sat below the
-        // fundamental search floor and locked onto the next run's frequency.
+            string found = tone is { } hz
+                ? $" The loudest line in {StepName(skipped[0].Sweep, chosen.Count)} is at {FormatHz(hz)}."
+                : "";
+
+            throw new FormatException(
+                $"Only {runs.Count} of the {chosen.Count} runs could be placed on this sweep's axis, and a sweep " +
+                $"needs at least two points. {SkippedSentence(skipped, chosen.Count, request, analysisRateHz / Math.Max(fftSize, 1))}{found} Widen the " +
+                "measurement band, lengthen the simulation so the steps fall on separate bins, or import this " +
+                "on an FFT analysis measurement instead, where each run becomes its own spectrum.");
+        }
+
+        var spec0 = firstSpec!;
+
+        if (amplitude)
+            RequireLevelSpan([.. runs.Select(run => run.Points)]);
+
         // Ordered by the x the chart will read: the tone on a frequency sweep, the level on an
         // amplitude one, so the stored points run along their own axis rather than along the order
         // the steps happened to be written in.
         var ordered = amplitude
-            ? runs.OrderBy(run => run[0].GeneratorDbv).ToList()
-            : runs.OrderBy(run => run[0].FreqHz).ToList();
-        var spec0 = firstSpec!;
+            ? runs.OrderBy(run => run.Points[0].GeneratorDbv).ToList()
+            : runs.OrderBy(run => run.Points[0].FreqHz).ToList();
+        var points = ordered.SelectMany(run => run.Points).ToList();
 
-        if (amplitude)
-            RequireLevelSpan(runs);
-        else
-            RequireDistinctTones(runs, chosen, analysisRateHz / fftSize, spec0.UsableS);
+        // The runs that were left out travel with the result as well as back to the dialog: a
+        // stored sweep has to be able to say it is not the whole file.
+        var notes = skipped.Count == 0
+            ? info.Warnings
+            : (IReadOnlyList<string>)[.. info.Warnings, SkippedSentence(skipped, chosen.Count, request, analysisRateHz / fftSize)];
+
         string paramsJson = amplitude
-            ? AmplitudeSweepParamsJson(spec0, ordered, driveFromRight, request.LoadOhms, analysisRateHz, fftSize)
-            : SweepParamsJson(spec0, points.OrderBy(p => p.FreqHz).ToList(), traceNames, analysisRateHz, fftSize);
+            ? AmplitudeSweepParamsJson(spec0, [.. ordered.Select(run => run.Points)], driveFromRight, request.LoadOhms, analysisRateHz, fftSize, notes)
+            : SweepParamsJson(spec0, points, traceNames, analysisRateHz, fftSize, notes);
 
         var captures = ordered
             .Select((run, index) => new SweepCaptureInput(
                 index,
-                run[0].FreqHz,
-                MeasurementSaveService.BuildSweepMetrics(run),
-                MeasurementSaveService.BuildSweepPreviews(run)))
+                run.Points[0].FreqHz,
+                MeasurementSaveService.BuildSweepMetrics(run.Points),
+                MeasurementSaveService.BuildSweepPreviews(run.Points)))
             .ToList();
 
         string name = string.IsNullOrWhiteSpace(request.Name)
@@ -597,7 +641,7 @@ public sealed class SimulationImportService(
                 measurementTypeId, name, request.Notes, paramsJson,
                 DeviceName: null, Serial: null, FwVer: null, IsSimulated: true,
                 analysisRateHz, fftSize,
-                Channels: ordered[0].Count,
+                Channels: ordered[0].Points.Count,
                 InRangeDbv: null, OutRangeDbv: null,
                 Captures: captures,
                 Source: MeasurementSource.Simulation),
@@ -608,12 +652,16 @@ public sealed class SimulationImportService(
             "{Low:F2}-{High:F2} {Unit}, analysed at {AnalysisKHz:F1} kHz / {FftSize} points",
             name, request.Path, amplitude ? "THD-vs-amplitude" : "THD-vs-frequency",
             string.Join(" + ", traceNames), captures.Count,
-            amplitude ? ordered[0][0].GeneratorDbv : captures[0].FreqHz,
-            amplitude ? ordered[^1][0].GeneratorDbv : captures[^1].FreqHz,
+            amplitude ? ordered[0].Points[0].GeneratorDbv : captures[0].FreqHz,
+            amplitude ? ordered[^1].Points[0].GeneratorDbv : captures[^1].FreqHz,
             amplitude ? "dBV" : "Hz",
             analysisRateHz / 1e3, fftSize);
 
-        return resultId;
+        string note = SkippedSentence(skipped, chosen.Count, request, analysisRateHz / fftSize);
+        if (note.Length > 0)
+            logger.LogInformation("Imported sweep {Name}: {Skipped}", name, note);
+
+        return new SweepImportResult(resultId, note);
     }
 
     /// <summary>
@@ -627,7 +675,8 @@ public sealed class SimulationImportService(
         IReadOnlyList<ThdSweepPoint> points,
         IReadOnlyList<string> traceNames,
         double analysisRateHz,
-        int fftSize)
+        int fftSize,
+        IReadOnlyList<string> notes)
     {
         double lowHz = points[0].FreqHz;
         double highHz = points[^1].FreqHz;
@@ -655,10 +704,17 @@ public sealed class SimulationImportService(
                 SampleRateHz: analysisRateHz,
                 MeasureNoiseFloor: false)
             {
-                Simulation = spec.ToParameters(analysisRateHz).Simulation,
+                Simulation = WithNotes(spec.ToParameters(analysisRateHz).Simulation, notes),
             },
             SerializerOptions);
     }
+
+    /// <summary>
+    /// The simulation block with the import's own notes on its source — the runs that were left
+    /// out, which is the one thing a stored sweep cannot otherwise say about itself.
+    /// </summary>
+    private static SimulationParameters? WithNotes(SimulationParameters? simulation, IReadOnlyList<string> notes) =>
+        simulation is null ? null : simulation with { Source = simulation.Source with { Warnings = notes } };
 
     /// <summary>
     /// The settings document for a sweep imported along the <b>level</b> axis.
@@ -675,7 +731,8 @@ public sealed class SimulationImportService(
         bool driveFromRight,
         double loadOhms,
         double analysisRateHz,
-        int fftSize)
+        int fftSize,
+        IReadOnlyList<string> notes)
     {
         double startVolt = DbvToVolt(ordered[0][0].GeneratorDbv);
         double endVolt = DbvToVolt(ordered[^1][0].GeneratorDbv);
@@ -701,7 +758,7 @@ public sealed class SimulationImportService(
                 SampleRateHz: analysisRateHz,
                 MeasureNoiseFloor: false)
             {
-                Simulation = spec.ToParameters(analysisRateHz).Simulation,
+                Simulation = WithNotes(spec.ToParameters(analysisRateHz).Simulation, notes),
             },
             SerializerOptions);
     }
@@ -738,53 +795,97 @@ public sealed class SimulationImportService(
     /// <summary>How much level a set of runs has to span before it is a sweep at all. See <see cref="RequireLevelSpan"/>.</summary>
     private const double MinimumLevelSpanDb = 1.0;
 
-    /// <summary>
-    /// Refuses a run whose tone the analysis could not find, rather than storing what it found
-    /// instead.
-    ///
-    /// <para><b>A negative SNR is the whole test</b>, and it is exact rather than a heuristic: SNR
-    /// here is the located fundamental against everything else in the band, so at or below 0 dB the
-    /// thing being called the fundamental is quieter than the rest of the record — which no tone
-    /// is. Measured on the case that prompted this: a 50 Hz step analysed with a 200 Hz search
-    /// floor read <c>-86.07 dBV, SNR -95.4 dB</c> at 250 Hz, against <c>9.36 dBV, SNR +57 dB</c>
-    /// for the steps that were found.</para>
-    /// </summary>
-    private static void RequireLocatedTone(
-        // [NotNull] so the caller may read the meters straight afterwards: this method either
-        // returns with them non-null or throws, which the compiler cannot see through the pattern.
-        [NotNull] SpectrumMeters? meters,
-        SimulationSweep sweep,
-        int runCount,
-        SimulationImportRequest request,
-        int channel,
-        Func<double?> loudestLineHz)
+    private enum SkipReason
     {
-        if (meters is { SnrDb: > 0.0f })
-            return;
+        /// <summary>No tone inside the measurement band — almost always a step past its top or bottom.</summary>
+        NoTone,
 
-        string where = $"{StepName(sweep, runCount)}{(channel == 0 ? "" : " (right trace)")}";
-        string band = $"{FormatHz(request.MeasurementLoFreqHz)} – {FormatHz(request.MeasurementHiFreqHzOrDefault())}";
+        /// <summary>The same frequency an earlier run read, which at this resolution is the same point.</summary>
+        RepeatedTone,
+    }
 
-        // Where the tone really is, which is the one thing the user cannot see from here and the
-        // commonest reason this fires: a `.step` that runs past the band's top (reported
-        // 2026-10-19 from `.step oct param freq 10 40k 5` against a 20 kHz band, where six of the
-        // 61 runs are above it). Looked for only now, on the way to throwing, since it costs a
-        // second analysis of that run.
-        double? tone = loudestLineHz();
-        if (tone is { } hz)
+    /// <summary>One run that could not be placed on the sweep's axis, and what it would take to say why.</summary>
+    private readonly record struct SkippedRun(
+        SimulationSweep Sweep, int Channel, double AnalysisRateHz, SkipReason Reason, double RepeatedHz = 0.0);
+
+    /// <summary>
+    /// Leaves out every run after the first that reads a frequency an earlier one already read.
+    ///
+    /// <para>Two runs on one x are one point, and the later of them has nothing to add. It is a
+    /// resolution limit rather than a mistake — `.step oct param freq 10 40k 5` is 1.5 Hz apart at
+    /// the bottom of its range, which a 200 ms run's 5 Hz bins cannot separate — so it is reported
+    /// with the record length rather than refused.</para>
+    /// </summary>
+    private static void DropRepeatedTones(
+        List<(SimulationSweep Sweep, List<ThdSweepPoint> Points)> runs, List<SkippedRun> skipped)
+    {
+        for (int i = runs.Count - 1; i >= 0; i--)
         {
-            throw new FormatException(
-                $"No tone was found in {where} inside the measurement band ({band}): the loudest line in that " +
-                $"run is at {FormatHz(hz)}, {(hz > request.MeasurementHiFreqHzOrDefault() ? "above" : "below")} " +
-                "it. Raise the measurement band to take it in — and the FFT size with it, if the band then " +
-                "passes half the analysis rate — or untick that run and import the rest.");
+            // Walked backwards so a removal cannot renumber the runs still to be looked at; the
+            // *earliest* run at a frequency is the one kept, which is why the match is against the
+            // runs before it rather than against what survives.
+            double hz = runs[i].Points[0].FreqHz;
+            bool repeat = runs
+                .Take(i)
+                .Any(earlier => Math.Abs(earlier.Points[0].FreqHz - hz) <= hz * 1e-6);
+
+            if (!repeat)
+                continue;
+
+            skipped.Add(new SkippedRun(runs[i].Sweep, 0, 0.0, SkipReason.RepeatedTone, hz));
+            runs.RemoveAt(i);
+        }
+    }
+
+    /// <summary>
+    /// What was left out, as one sentence for the dialog and for the stored result. Empty when
+    /// nothing was.
+    /// </summary>
+    private static string SkippedSentence(
+        IReadOnlyList<SkippedRun> skipped, int runCount, SimulationImportRequest request, double binWidthHz)
+    {
+        if (skipped.Count == 0)
+            return "";
+
+        string band = $"{FormatHz(request.MeasurementLoFreqHz)} – {FormatHz(request.MeasurementHiFreqHzOrDefault())}";
+        var parts = new List<string>(2);
+
+        // In step order, whatever order they were found in -- DropRepeatedTones walks backwards so
+        // a removal cannot renumber what it has yet to look at, and a list that reads 26, 17, 15,
+        // 11 Hz looks like a different fault from one that reads 11, 15, 17, 26.
+        var noTone = Ordered(skipped, SkipReason.NoTone);
+        if (noTone.Count > 0)
+            parts.Add($"{NameRuns(noTone, runCount)} — no tone inside the measurement band ({band})");
+
+        var repeated = Ordered(skipped, SkipReason.RepeatedTone);
+        if (repeated.Count > 0)
+        {
+            string bins = binWidthHz > 0.0 ? $", which {FormatHz(binWidthHz)} bins cannot tell apart" : "";
+            parts.Add($"{NameRuns(repeated, runCount)} — the same frequency as an earlier run{bins}");
         }
 
-        throw new FormatException(
-            $"No tone was found in {where}: either that run produced nothing, or the loudest thing in it is " +
-            $"quieter than the rest of the record, which no tone is. The band is {band}, and a tone outside " +
-            "it cannot be measured — widen the band, or untick that run and import the rest.");
+        return $"Left out {skipped.Count} of the {runCount} runs: {string.Join("; ", parts)}.";
     }
+
+    private static List<SkippedRun> Ordered(IReadOnlyList<SkippedRun> skipped, SkipReason reason) =>
+        [.. skipped.Where(run => run.Reason == reason).OrderBy(run => run.Sweep.Index)];
+
+    /// <summary>
+    /// The runs by name, cut off at <see cref="NamedRunLimit"/> so a file where most of the steps
+    /// are out of band does not answer with a wall of them.
+    /// </summary>
+    private static string NameRuns(IReadOnlyList<SkippedRun> skipped, int runCount)
+    {
+        var named = skipped
+            .Take(NamedRunLimit)
+            .Select(run => $"{StepName(run.Sweep, runCount)}{(run.Channel == 0 ? "" : " (right trace)")}");
+
+        string list = string.Join(", ", named);
+        int rest = skipped.Count - NamedRunLimit;
+        return rest > 0 ? $"{list} and {rest} more" : list;
+    }
+
+    private const int NamedRunLimit = 6;
 
     /// <summary>A frequency as a reader writes one — <c>20 Hz</c>, <c>20.5 kHz</c>.</summary>
     private static string FormatHz(double hz) =>

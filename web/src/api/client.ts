@@ -2574,6 +2574,16 @@ export interface ImportedSimulation {
 }
 
 /**
+ * An imported sweep, and one sentence naming the runs that were left out — empty when every run
+ * became a point. Not an error: the import succeeded, and a sweep that is not the whole file has
+ * to be able to say so.
+ */
+export interface ImportedSweep {
+  resultId: number
+  note: string
+}
+
+/**
  * What an `.ac` sweep holds. A separate shape from `SimulationFileInfo`, not an extension of it:
  * a transient run is described by a duration and a timestep and a sweep by a range and a point
  * density, and neither set means anything to the other.
@@ -3673,7 +3683,7 @@ export const api = {
    * point of a THD-vs-frequency result, at the fundamental that run's own analysis located.
    */
   importSimulationSweep: (measurementTypeId: number, body: ImportSimulationRequest) =>
-    request<ImportedSimulation>(`/simulations/${measurementTypeId}/import-sweep`, {
+    request<ImportedSweep>(`/simulations/${measurementTypeId}/import-sweep`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

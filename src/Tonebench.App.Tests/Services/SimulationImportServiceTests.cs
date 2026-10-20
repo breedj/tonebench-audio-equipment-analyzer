@@ -306,8 +306,8 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateSweepTypeAsync();
-            long resultId = await h.Import.ImportSweepAsync(
-                typeId, Request(raw, name: "simulated sweep"), CancellationToken.None);
+            long resultId = (await h.Import.ImportSweepAsync(
+                typeId, Request(raw, name: "simulated sweep"), CancellationToken.None)).ResultId;
 
             var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
 
@@ -356,13 +356,13 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateSweepTypeAsync("ThdVsAmplitude");
-            long resultId = await h.Import.ImportSweepAsync(
+            long resultId = (await h.Import.ImportSweepAsync(
                 typeId, Request(raw, rightTraceIndex: 2, name: "level sweep") with
                 {
                     SweepAxis = SimulationSweepAxis.Amplitude,
                     LoadOhms = 8.0,
                 },
-                CancellationToken.None);
+                CancellationToken.None)).ResultId;
 
             var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
             Assert.Equal(4, points.Count);
@@ -447,8 +447,8 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateSweepTypeAsync("ThdVsAmplitude");
-            long resultId = await h.Import.ImportSweepAsync(
-                typeId, Request(raw) with { SweepAxis = SimulationSweepAxis.Amplitude }, CancellationToken.None);
+            long resultId = (await h.Import.ImportSweepAsync(
+                typeId, Request(raw) with { SweepAxis = SimulationSweepAxis.Amplitude }, CancellationToken.None)).ResultId;
 
             var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
             Assert.Equal(4, points.Count);
@@ -464,55 +464,86 @@ public class SimulationImportServiceTests : IDisposable
     }
 
     /// <summary>
-    /// <b>A run is a sweep point by construction; the frequency is a reading.</b> Two runs can read
-    /// the same one, and grouping the points by frequency then builds a capture holding two points
-    /// per channel — which surfaces as "UNIQUE constraint failed: capture_preview" from the save,
-    /// long after the import, naming nothing the user did.
+    /// <b>A run is a sweep point by construction; the frequency is a reading.</b> Two runs can
+    /// read the same one, and grouping the points by frequency then builds a capture holding two
+    /// points per channel — which surfaces as "UNIQUE constraint failed: capture_preview" from the
+    /// save, long after the import, naming nothing the user did.
     ///
-    /// <para>Reported 2026-10-12 as a 500 on a <c>.step param freq 50 5050 100</c> run: the 50 Hz
-    /// step sat below the fundamental search floor, locked onto noise at 250 Hz, and collided with
-    /// the step that really was 250 Hz. Grouping by run is what makes that a shape the import
-    /// cannot produce; the two refusals below are what stop it being stored as nonsense.</para>
+    /// <para>Grouping by run is what makes that shape impossible. The later of the two is then
+    /// <i>left out</i> rather than the import refused: two runs on one x are one point, and at the
+    /// bottom of a `.step oct param freq 10 40k 5` the steps are 1.5 Hz apart where a 200 ms run's
+    /// bins are 5 Hz — a resolution limit, not a mistake (Joost, 2026-10-19). What was dropped
+    /// comes back with the result.</para>
     /// </summary>
     [Fact]
-    public async Task ImportSweep_WhereTwoRunsWouldReadTheSameFrequency_DoesNotCollide()
+    public async Task ImportSweep_WhereTwoRunsReadTheSameFrequency_LeavesTheLaterOneOut()
     {
-        // Three runs, two of them genuinely at the same tone: the shape that used to crash.
+        // Three runs, two of them genuinely at the same tone: the shape that used to crash, and
+        // then refused.
         string raw = WriteSteppedTransient("collide.raw", [1_000.0, 2_000.0, 1_000.0], h2: 0.01);
 
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateSweepTypeAsync();
-            var ex = await Assert.ThrowsAsync<FormatException>(
-                () => h.Import.ImportSweepAsync(typeId, Request(raw), CancellationToken.None));
+            var imported = await h.Import.ImportSweepAsync(typeId, Request(raw), CancellationToken.None);
 
-            // Refused for what is actually wrong -- there is no sweep axis -- rather than reaching
-            // the database and failing on a constraint.
-            Assert.Contains("no sweep here", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("FFT analysis measurement", ex.Message, StringComparison.Ordinal);
-            // The resolution limit is named first, because two *different* steps landing on one
-            // bin is the commoner reason and "the step changes something else" is then the wrong
-            // thing to go and check -- reported 2026-10-19 from a 1.5 Hz step spacing read at
-            // 5 Hz bins.
-            Assert.Contains("bins are", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("simulate for longer", ex.Message, StringComparison.Ordinal);
-            Assert.DoesNotContain("UNIQUE", ex.Message, StringComparison.OrdinalIgnoreCase);
+            var points = await h.Measurements.GetSweepPointsAsync(imported.ResultId, CancellationToken.None);
+            Assert.Equal(2, points.Count);
+            Assert.Equal([1_000.0, 2_000.0], points.Select(p => Math.Round(p.FreqHz / 100.0) * 100.0));
+
+            Assert.Contains("step 3 of 3", imported.Note, StringComparison.Ordinal);
+            Assert.Contains("same frequency", imported.Note, StringComparison.Ordinal);
         });
     }
 
     /// <summary>
-    /// The commonest reason that refusal fires, and the one thing the user cannot see from where
-    /// they are standing: a <c>.step</c> that runs past the top of the measurement band. Reported
-    /// 2026-10-19 from <c>.step oct param freq 10 40k 5</c> against the default 20 kHz band, where
-    /// six of the 61 runs sit above it — "I can see the data in LTspice", which is true, and the
-    /// message said only that the band was 20–2E+04 Hz.
+    /// A run with no tone in it cannot be a sweep point, and is <i>left out</i> rather than
+    /// refusing the whole import — with every one of them named afterwards, not just the first the
+    /// loop reached.
     ///
-    /// <para>So the refusal re-reads that one run with the band opened to everything the analysis
-    /// can see, and names where the tone actually is. It costs a second analysis of a run that was
-    /// about to be refused anyway.</para>
+    /// <para>A silent run is the unambiguous case — a step where the circuit produced nothing. The
+    /// subtler one is a tone the analysis could not lock onto: SNR is the located fundamental
+    /// against everything else in the band, so at or below 0 dB something louder is in there and
+    /// the wrong thing was picked. Measured on the run that prompted that check, a 50 Hz step read
+    /// at a 200 Hz search floor: <c>-86.07 dBV, SNR -95.4 dB</c> at 250 Hz.</para>
+    ///
+    /// <para>Refusing over them was reported 2026-10-19: a `.step` past the band's top takes every
+    /// run up there with it — six of the reported file's sixty-one — and the import threw away the
+    /// fifty-five that were good, naming one of the six, in a message that rendered above the fold
+    /// of a dialog 1300 px tall.</para>
     /// </summary>
     [Fact]
-    public async Task ImportSweep_WithARunAboveTheBand_SaysWhereTheToneIs()
+    public async Task ImportSweep_WithRunsThatHaveNoTone_LeavesThemOutAndNamesThemAll()
+    {
+        // Two silent steps, not adjacent, so "all of them" cannot be mistaken for "the first two".
+        string raw = WriteSteppedTransient("silent-two.raw", [1_000.0, 0.0, 3_000.0, 0.0], h2: 0.01);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            var imported = await h.Import.ImportSweepAsync(typeId, Request(raw), CancellationToken.None);
+
+            var points = await h.Measurements.GetSweepPointsAsync(imported.ResultId, CancellationToken.None);
+            Assert.Equal(2, points.Count);
+            Assert.Equal([1_000.0, 3_000.0], points.Select(p => Math.Round(p.FreqHz / 100.0) * 100.0));
+
+            Assert.Contains("Left out 2 of the 4 runs", imported.Note, StringComparison.Ordinal);
+            Assert.Contains("step 2 of 4", imported.Note, StringComparison.Ordinal);
+            Assert.Contains("step 4 of 4", imported.Note, StringComparison.Ordinal);
+            Assert.Contains("no tone inside the measurement band", imported.Note, StringComparison.Ordinal);
+            // The band it means, in figures a reader writes rather than G4's "2E+04".
+            Assert.Contains("20 kHz", imported.Note, StringComparison.Ordinal);
+            Assert.DoesNotContain("E+0", imported.Note, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// A run whose tone is above the band is the commonest case of that, and the note travels with
+    /// the result as well as back to the dialog: a stored sweep that is not the whole file has to
+    /// be able to say which runs are missing.
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_WithARunAboveTheBand_RecordsWhatItLeftOut()
     {
         // 30 kHz is past the 20 kHz band this imports with, and well inside the analysis rate.
         string raw = WriteSteppedTransient("above.raw", [1_000.0, 2_000.0, 30_000.0], h2: 0.01);
@@ -520,44 +551,41 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateSweepTypeAsync();
-            var ex = await Assert.ThrowsAsync<FormatException>(
-                () => h.Import.ImportSweepAsync(typeId, Request(raw, fftSize: 16_384), CancellationToken.None));
+            var imported = await h.Import.ImportSweepAsync(
+                typeId, Request(raw, fftSize: 16_384), CancellationToken.None);
 
-            Assert.Contains("step 3 of 3", ex.Message, StringComparison.Ordinal);
-            // The tone itself, to the bin it landed on -- 30.001 kHz here, which is the analysis
-            // grid rather than a rounding of the step.
-            Assert.Matches(@"30\.\d+ kHz", ex.Message);
-            Assert.Contains("above", ex.Message, StringComparison.Ordinal);
-            // The band, in figures a reader writes rather than G4's "2E+04".
-            Assert.Contains("20 kHz", ex.Message, StringComparison.Ordinal);
-            Assert.DoesNotContain("E+0", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("step 3 of 3", imported.Note, StringComparison.Ordinal);
+
+            var stored = JsonSerializer.Deserialize<ThdVsFrequencyParameters>(
+                (await h.Measurements.GetResultAsync(imported.ResultId, CancellationToken.None))!.ParamsJson!,
+                SerializerOptionsForTest)!;
+            Assert.Contains(
+                stored.Simulation!.Source.Warnings,
+                warning => warning.Contains("step 3 of 3", StringComparison.Ordinal));
         });
     }
 
     /// <summary>
-    /// A run with no tone in it is not a sweep point, and is refused by name rather than stored as
-    /// whatever the peak search settled on.
-    ///
-    /// <para>A silent run is the unambiguous case — a step where the circuit produced nothing. The
-    /// subtler one the guard also catches is a tone the analysis could not lock onto: SNR is the
-    /// located fundamental against everything else in the band, so at or below 0 dB something
-    /// louder is in there and the wrong thing was picked. Measured on the run that prompted this, a
-    /// 50 Hz step read at a 200 Hz search floor: <c>-86.07 dBV, SNR -95.4 dB</c> at 250 Hz.</para>
+    /// What is left when nothing can be placed on the axis: a refusal, because there is no sweep
+    /// to import — and there the second analysis is worth its cost, since where the tones actually
+    /// are is the whole of what the user needs to know.
     /// </summary>
     [Fact]
-    public async Task ImportSweep_WithARunThatHasNoTone_IsRefusedAndNamesTheRun()
+    public async Task ImportSweep_WhereNothingCanBePlacedOnTheAxis_IsRefusedAndSaysWhereTheTonesAre()
     {
-        // The middle step is silent: sin(2*pi*0*t) is zero everywhere.
-        string raw = WriteSteppedTransient("silent.raw", [1_000.0, 0.0, 3_000.0], h2: 0.01);
+        // Both runs above the 20 kHz band: nothing is left to sweep.
+        string raw = WriteSteppedTransient("all-above.raw", [30_000.0, 35_000.0], h2: 0.01);
 
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateSweepTypeAsync();
             var ex = await Assert.ThrowsAsync<FormatException>(
-                () => h.Import.ImportSweepAsync(typeId, Request(raw), CancellationToken.None));
+                () => h.Import.ImportSweepAsync(typeId, Request(raw, fftSize: 16_384), CancellationToken.None));
 
-            Assert.Contains("No tone was found", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("step 2 of 3", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("Only 0 of the 2 runs", ex.Message, StringComparison.Ordinal);
+            // The tone itself, to the bin it landed on -- the analysis grid rather than a rounding
+            // of the step.
+            Assert.Matches(@"30\.\d+ kHz", ex.Message);
         });
     }
 
@@ -577,8 +605,8 @@ public class SimulationImportServiceTests : IDisposable
         await WithHarnessAsync(async h =>
         {
             long typeId = await h.CreateSweepTypeAsync();
-            long resultId = await h.Import.ImportSweepAsync(
-                typeId, Request(raw, fftSize: 16384), CancellationToken.None);
+            long resultId = (await h.Import.ImportSweepAsync(
+                typeId, Request(raw, fftSize: 16384), CancellationToken.None)).ResultId;
 
             var points = await h.Measurements.GetSweepPointsAsync(resultId, CancellationToken.None);
 

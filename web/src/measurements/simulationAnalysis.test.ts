@@ -4,7 +4,9 @@ import {
   parseStoredSimulation,
   samplesStartS,
   simulationFit,
+  sweepImportBand,
   sweepImportBlocker,
+  SWEEP_BAND_CEILING_HZ,
 } from './simulationAnalysis'
 
 const EL84 = {
@@ -194,5 +196,44 @@ describe('sweepImportBlocker', () => {
   it('blocks nothing where the runs are not being made into a sweep', () => {
     expect(sweepImportBlocker(null, 1, 1)).toBeNull()
     expect(sweepImportBlocker(null, 51, 0)).toBeNull()
+  })
+})
+
+describe('sweepImportBand', () => {
+  // The reported file: 200 ms of a 2 us grid, `.step oct param freq 10 40k 5`. The bench's
+  // 20 Hz - 20 kHz refused it at both ends, so the band follows the file instead.
+  const EL84 = { usableS: 0.2, nativeRateHz: 500_000 }
+
+  it('starts at the lowest frequency the record can resolve', () => {
+    // 200 ms is 5 Hz bins, and nothing below one bin exists in the record at all.
+    expect(sweepImportBand(EL84.usableS, EL84.nativeRateHz)!.loHz).toBe(5)
+  })
+
+  it('never goes below 1 Hz, however long the run is', () => {
+    // 4 s would be 0.25 Hz bins; the floor is Joost's, and a band edge below 1 Hz measures
+    // nothing a reader would ask for.
+    expect(sweepImportBand(4, 500_000)!.loHz).toBe(1)
+  })
+
+  it('stops at the ceiling where the run could carry more', () => {
+    const band = sweepImportBand(EL84.usableS, EL84.nativeRateHz)!
+    expect(band.hiHz).toBe(SWEEP_BAND_CEILING_HZ)
+    // And the FFT size that carries it: 100 kHz needs a 240 kHz analysis rate, i.e. 48000 samples
+    // of the 200 ms, so the first power of two past that.
+    expect(band.fftSize).toBe(65536)
+  })
+
+  it('stops at what the run can carry where that is lower than the ceiling', () => {
+    // A 50 kHz simulator grid over 100 ms holds 5000 samples, so the largest FFT is 4096 and the
+    // analysis rate it gives is 40.96 kHz -- a band top of 17.07 kHz with the headroom.
+    const band = sweepImportBand(0.1, 50_000)!
+    expect(band.fftSize).toBe(4096)
+    expect(band.hiHz).toBeCloseTo(17_070, -1)
+    expect(band.hiHz).toBeLessThan(SWEEP_BAND_CEILING_HZ)
+  })
+
+  it('answers nothing for a run with no length or no rate', () => {
+    expect(sweepImportBand(0, 500_000)).toBeNull()
+    expect(sweepImportBand(0.2, 0)).toBeNull()
   })
 })

@@ -167,6 +167,67 @@ export function sweepImportBlocker(
   return null
 }
 
+/**
+ * The widest band a stepped run can be swept over, and the FFT size that carries it.
+ *
+ * <p>A sweep's x is each run's own measured tone, so the band is not a preference here the way it
+ * is on an FFT import — it is the window the tones have to fall inside, and a `.step` list is
+ * whatever the schematic says. Defaulting it to the bench's 20 Hz – 20 kHz refused a
+ * `.step oct param freq 10 40k 5` at both ends (Joost, 2026-10-19: "set the measured band to the
+ * band available, up to 100 kHz ... and the low value to the lowest in the data, but not less than
+ * 1 Hz").</p>
+ *
+ * <ul>
+ *   <li><b>Low</b> — the bin width, which is the lowest frequency the record can resolve at all
+ *     (1 ÷ the saved seconds), floored at 1 Hz.</li>
+ *   <li><b>High</b> — {@link SWEEP_BAND_CEILING_HZ}, or what the run itself can carry when that is
+ *     lower: the largest FFT it can fill sets the analysis rate, and the band's top has to sit
+ *     inside that rate with the same headroom the FFT suggestion uses.</li>
+ * </ul>
+ *
+ * <p>The FFT size comes back with it because the two move together — a wider band needs a higher
+ * analysis rate, which is the only thing a larger FFT buys (never resolution; see this file's own
+ * remarks). Both land in the dialog's fields, where they can still be changed.</p>
+ */
+export const SWEEP_BAND_CEILING_HZ = 100_000
+
+/**
+ * Headroom between the band's top and the analysis rate's Nyquist, mirroring
+ * `SimulationAnalysis.NyquistHeadroom` — which also keeps the top clear of the decimation filter's
+ * own roll-off (`Resampler.PassbandFraction`, 0.9 of Nyquist).
+ */
+const NYQUIST_HEADROOM = 1.2
+
+export interface SweepBand {
+  loHz: number
+  hiHz: number
+  fftSize: number
+}
+
+export function sweepImportBand(usableS: number, nativeRateHz: number): SweepBand | null {
+  if (!(usableS > 0) || !(nativeRateHz > 0)) return null
+
+  const maxFftSize = largestSimulationFftSize(usableS, nativeRateHz)
+  const topTheRunCanCarry = maxFftSize / usableS / (2 * NYQUIST_HEADROOM)
+
+  const hiHz = Math.min(SWEEP_BAND_CEILING_HZ, topTheRunCanCarry)
+  const loHz = Math.max(1, 1 / usableS)
+
+  // The smallest size whose rate clears that top with the headroom, which is the server's own
+  // SuggestedFftSize rule; it cannot exceed maxFftSize, since hiHz was derived from it.
+  let fftSize = MIN_SIMULATION_FFT_SIZE
+  while (fftSize < usableS * 2 * NYQUIST_HEADROOM * hiHz && fftSize < maxFftSize) fftSize *= 2
+
+  return { loHz: round(loHz), hiHz: round(hiHz), fftSize }
+}
+
+/** Four figures is plenty for a band edge, and a field full of decimals reads as a mistake. */
+function round(hz: number): number {
+  if (!(hz > 0)) return 0
+  const digits = Math.max(0, 4 - Math.ceil(Math.log10(hz)))
+  return Number(hz.toFixed(digits))
+}
+
 /** Where an imported simulation came from — `SimulationSource`, as params_json carries it. */
 export interface StoredSimulationSource {
   path: string

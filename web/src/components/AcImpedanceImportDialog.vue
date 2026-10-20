@@ -12,6 +12,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api, type AcSimulationFileInfo } from '../api/client'
 import { preferredImpedanceTraces, sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
+import { useErrorScroll } from '../composables/useErrorScroll'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 import BusyNote from './BusyNote.vue'
 import InlineCodeText from './InlineCodeText.vue'
@@ -26,6 +27,9 @@ const lastPath = ref<string | null>(null)
 const info = ref<AcSimulationFileInfo | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
+
+// A refusal that renders above the fold of a long dialog is a refusal nobody sees.
+useErrorScroll(error)
 const chosenSweeps = ref<number[]>([])
 
 const form = reactive({
@@ -167,7 +171,7 @@ async function submit() {
         current through the source driving it, at every frequency the simulator solved.
       </p>
 
-      <p v-if="error" class="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+      <p v-if="error" ref="errorBox" class="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
         <InlineCodeText :text="error" />
       </p>
 

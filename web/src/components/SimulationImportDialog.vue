@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api, type SimulationFileInfo } from '../api/client'
 import {
   simulationFit,
+  sweepImportBand,
   sweepImportBlocker,
   SIMULATION_FFT_SIZES,
   SIMULATION_WINDOWS,
@@ -10,6 +11,7 @@ import {
 } from '../measurements/simulationAnalysis'
 import { sweepLabel } from '../measurements/acSimulationAnalysis'
 import { useManual } from '../manual/useManual'
+import { useErrorScroll } from '../composables/useErrorScroll'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 import BusyNote from './BusyNote.vue'
 import InlineCodeText from './InlineCodeText.vue'
@@ -47,7 +49,18 @@ const browserOpen = ref(false)
 const lastPath = ref<string | null>(null)
 const info = ref<SimulationFileInfo | null>(null)
 const error = ref<string | null>(null)
+
+// A refusal that renders above the fold of a long dialog is a refusal nobody sees.
+useErrorScroll(error)
 const busy = ref(false)
+
+/**
+ * What the import left out, when it left anything out. The dialog stays open to say so: runs that
+ * could not be placed on the sweep's axis are skipped rather than refused (so one bad step does
+ * not throw away fifty good ones), and a sweep that is not the whole file has to say which runs
+ * are missing before the user reads a curve off it.
+ */
+const importNote = ref<string | null>(null)
 
 const form = reactive({
   leftTraceIndex: null as number | null,
@@ -71,6 +84,7 @@ watch(
     if (!open) return
     info.value = null
     error.value = null
+    importNote.value = null
     browserOpen.value = true
   },
 )
@@ -86,6 +100,7 @@ async function inspect(path: string) {
   browserOpen.value = false
   busy.value = true
   error.value = null
+  importNote.value = null
   try {
     lastPath.value = path
     const found = await api.inspectSimulation(path, form.measurementHiFreqHz, form.measurementLoFreqHz)
@@ -103,6 +118,17 @@ async function inspect(path: string) {
     form.startTimeMs = found.startTimeS * 1e3
     form.fftSize = found.suggestedFftSize
     form.name = ''
+
+    // A sweep's x is each run's own tone, so the band is the window those tones must fall inside
+    // rather than a preference -- and the bench's 20 Hz - 20 kHz is the wrong window for a `.step`
+    // list that runs from 10 Hz to 40 kHz. Widened to what this file can carry (see
+    // sweepImportBand), and still editable.
+    const band = sweepAxis.value ? sweepImportBand(found.endTimeS - found.startTimeS, found.nativeRateHz) : null
+    if (band) {
+      form.measurementLoFreqHz = band.loHz
+      form.measurementHiFreqHz = band.hiHz
+      form.fftSize = band.fftSize
+    }
   } catch (e) {
     info.value = null
     error.value = (e as Error).message
@@ -233,11 +259,19 @@ async function submit() {
       ...(isStepped.value ? { sweepIndices: chosenSweeps.value } : {}),
       ...(sweepAxis.value ? { sweepAxis: sweepAxis.value, loadOhms: props.loadOhms ?? 0 } : {}),
     }
-    const resultIds = sweepAxis.value
-      ? [(await api.importSimulationSweep(props.measurementTypeId, body)).resultId]
-      : (await api.importSimulation(props.measurementTypeId, body)).resultIds
+    let resultIds: number[]
+    if (sweepAxis.value) {
+      const imported = await api.importSimulationSweep(props.measurementTypeId, body)
+      resultIds = [imported.resultId]
+      importNote.value = imported.note || null
+    } else {
+      resultIds = (await api.importSimulation(props.measurementTypeId, body)).resultIds
+    }
+
     emit('imported', resultIds)
-    emit('close')
+    // Closing on the ordinary path, where there is nothing to report; the result is on the chart
+    // behind this dialog either way.
+    if (!importNote.value) emit('close')
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -270,7 +304,7 @@ async function submit() {
         live audio, so its distortion figures mean the same thing.
       </p>
 
-      <p v-if="error" class="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+      <p v-if="error" ref="errorBox" class="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
         <InlineCodeText :text="error" />
       </p>
 
@@ -531,10 +565,21 @@ async function submit() {
       <BusyNote v-if="busy && info" :label="busyLabel" class="mt-4" />
 
       <p
-        v-if="sweepBlocker"
+        v-if="sweepBlocker && !importNote"
         class="mt-4 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
       >
         <InlineCodeText :text="sweepBlocker" />
+      </p>
+
+      <!--
+        The import succeeded; this says what is not in it. Amber rather than red, and beside the
+        button that was pressed rather than at the top of a dialog that can be 1300 px tall.
+      -->
+      <p
+        v-if="importNote"
+        class="mt-4 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
+      >
+        <strong>Imported.</strong> <InlineCodeText :text="importNote" />
       </p>
 
       <div class="mt-5 flex justify-between gap-2">
@@ -556,8 +601,11 @@ async function submit() {
           </button>
         </div>
         <div class="flex gap-2">
-          <button type="button" class="rounded border px-3 py-1.5 text-sm btn-action" @click="emit('close')">Cancel</button>
+          <button type="button" class="rounded border px-3 py-1.5 text-sm btn-action" @click="emit('close')">
+            {{ importNote ? 'Close' : 'Cancel' }}
+          </button>
           <button
+            v-if="!importNote"
             type="button"
             class="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
             :disabled="!canImport"

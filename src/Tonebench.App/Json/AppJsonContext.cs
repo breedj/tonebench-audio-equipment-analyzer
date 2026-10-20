@@ -131,6 +131,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(ImportSimulationRequest))]
 [JsonSerializable(typeof(ReanalyzeSimulationRequest))]
 [JsonSerializable(typeof(ImportedSimulationResponse))]
+[JsonSerializable(typeof(ImportedSweepResponse))]
 [JsonSerializable(typeof(ImportedSimulationsResponse))]
 [JsonSerializable(typeof(SimulationParameters))]
 [JsonSerializable(typeof(SimulationSource))]

@@ -747,6 +747,23 @@ const responseCaptionRight = computed(() => {
 // through, and what the runner has to say — off whichever store owns that screen; they are computed
 // here rather than inside MeasurementStatusBar because every runner counts something different.
 const impedanceTone = computed(() => responseRunTone(impedancePhase.value))
+/**
+ * What the impedance progress bar fills with: a stepped run's points, or a broadband run's records.
+ *
+ * <p>It read `pointsMeasured`/`pointCount` alone, which a chirp or a noise run does not have — those
+ * fold N records into one estimate and report no grid at all, so the bar sat at zero for the whole
+ * run while the line beside it counted "record 7 of 10" correctly. Reported 2026-10-20 as the
+ * progress bar not working at 10 averages; at one average there was nothing to show either way,
+ * which is why it had gone unnoticed.</p>
+ */
+const impedanceProgress = computed(() => {
+  const points = impedancePointCount.value ?? 0
+  if (points > 0) return { done: Math.min(impedancePointsMeasured.value ?? 0, points), total: points }
+
+  const records = impedanceAverageCount.value ?? 0
+  return { done: Math.min(impedanceAveragesTaken.value ?? 0, records), total: records }
+})
+
 const impedanceStatusHeadline = computed(() => statusHeadline(impedanceTone.value, impedanceProgressLabel.value))
 const impedanceStatusDetail = computed(() => statusDetail(impedanceTone.value, impedanceProgressLabel.value))
 
@@ -768,6 +785,8 @@ const {
   phase: impedancePhase,
   pointsMeasured: impedancePointsMeasured,
   pointCount: impedancePointCount,
+  averagesTaken: impedanceAveragesTaken,
+  averageCount: impedanceAverageCount,
   traces: impedanceTraces,
   error: impedanceError,
   warning: impedanceWarning,
@@ -5341,11 +5360,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <MeasurementStatusBar
                   :tone="impedanceTone"
                   :label="impedanceStatusHeadline"
-                  :done="impedancePointsMeasured ?? 0"
-                  :total="impedancePointCount ?? 0"
+                  :done="impedanceProgress.done"
+                  :total="impedanceProgress.total"
                 >
-                  <span v-if="(impedancePointCount ?? 0) > 0" class="font-mono text-neutral-700 dark:text-neutral-200">
-                    {{ Math.min(impedancePointsMeasured ?? 0, impedancePointCount ?? 0) }} / {{ impedancePointCount }}
+                  <span v-if="impedanceProgress.total > 0" class="font-mono text-neutral-700 dark:text-neutral-200">
+                    {{ impedanceProgress.done }} / {{ impedanceProgress.total }}
                   </span>
                   <span v-if="impedanceStatusDetail">{{ impedanceStatusDetail }}</span>
                   <!-- Number.isFinite, not truthiness: 0 dBV is an ordinary drive level. -->

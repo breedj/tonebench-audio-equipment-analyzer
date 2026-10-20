@@ -476,18 +476,21 @@ internal static class ResponseCaptureSupport
         double binHz = request.BinHz;
         int binCount = result.Magnitude.Length;
 
-        var smoothed = FractionalOctaveSmoother.Smooth(result.Magnitude, binHz, request.SmoothingDenominator);
-
-        var traceDb = new double[binCount];
-        for (int k = 0; k < binCount; k++)
-            traceDb[k] = FrequencyResponseEstimator.ToDb(smoothed[k]) + offsetDb;
-
         // Corners are searched only where the stimulus actually put energy. Outside that the
-        // estimate is a ratio of two near-zero numbers and would end every search on its first step.
+        // estimate is a ratio of two near-zero numbers and would end every search on its first step
+        // — and a smoothing band reaching past the top of it lifts the last columns toward that same
+        // nothing, which is why this is computed before the smoothing rather than after.
         int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
         int lastBin = Math.Min(binCount - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
         if (lastBin <= firstBin)
             lastBin = Math.Min(binCount - 1, firstBin + 1);
+
+        var band = new FractionalOctaveSmoother.Band(firstBin, lastBin);
+        var smoothed = FractionalOctaveSmoother.Smooth(result.Magnitude, binHz, request.SmoothingDenominator, band);
+
+        var traceDb = new double[binCount];
+        for (int k = 0; k < binCount; k++)
+            traceDb[k] = FrequencyResponseEstimator.ToDb(smoothed[k]) + offsetDb;
 
         var peak = BandwidthAnalyzer.FindPeak(traceDb, binHz, firstBin, lastBin);
 
@@ -531,7 +534,7 @@ internal static class ResponseCaptureSupport
         // real delay runs through many turns in its passband, which is exactly what anchoring must
         // not delete. Group delay is a derivative and so is immune either way.
         var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothUnwrappedPhaseDeg(
-            result.PhaseDeg, result.Magnitude, binHz, request.SmoothingDenominator);
+            result.PhaseDeg, result.Magnitude, binHz, request.SmoothingDenominator, band);
 
         // Taken from the smoothed curve, because that is the curve the anchor has to land in
         // (-180, 180]; whole turns, so the two agree except within a degree of a turn boundary.

@@ -887,6 +887,15 @@ public class ImpedanceRunnerTests
         {
             CableMode = ImpedanceCableMode.Measured,
             ShortCal = shortCal,
+            // Pinned to the rate the chirp standard was captured at, and that is about the
+            // *simulator* rather than about this measurement. Its fixtures are Biquad.FromAnalog
+            // without prewarping, so a simulated impedance is genuinely a slightly different
+            // impedance at 48 kHz than at 192 kHz -- a few per cent by the top of this grid. A real
+            // fixture has one impedance whatever the analyzer is clocked at, which is the whole
+            // premise of reusing a standard across stimuli; leaving the rates to differ here would
+            // measure the simulator's warping instead of the resample this test is about.
+            AdaptiveResolution = false,
+            SteppedSampleRateHz = ImpedanceRequest.MaxSpanHz * 2.0,
         };
 
         await harness.Runner.StartAsync(request, CancellationToken.None);

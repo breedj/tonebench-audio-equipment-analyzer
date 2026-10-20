@@ -50,7 +50,8 @@ public static class FractionalOctaveSmoother
         ReadOnlySpan<double> magnitude,
         Span<double> destination,
         double binHz,
-        int denominator)
+        int denominator,
+        Band? band = null)
     {
         if (destination.Length != magnitude.Length)
             throw new ArgumentException("Destination must be the same length as the input.", nameof(destination));
@@ -74,13 +75,14 @@ public static class FractionalOctaveSmoother
         double[] blockPower = BlockTotals(power);
 
         double halfWidthRatio = HalfWidthRatio(denominator);
+        var limit = (band ?? Band.Whole(n)).ClampedTo(n);
 
         // DC has no centre frequency to build a relative band around, and the chart skips it anyway.
         destination[0] = magnitude[0];
 
         for (int k = 1; k < n; k++)
         {
-            if (!TryBandBins(k, n, halfWidthRatio, out int low, out int high))
+            if (!TryBandBins(k, limit, halfWidthRatio, out int low, out int high))
             {
                 destination[k] = magnitude[k];
                 continue;
@@ -107,11 +109,43 @@ public static class FractionalOctaveSmoother
     /// caller answers it the same way: fall back to the bin itself, so the low end of the trace keeps
     /// its full resolution instead of blanking.</para>
     /// </summary>
-    private static bool TryBandBins(int k, int binCount, double halfWidthRatio, out int low, out int high)
+    private static bool TryBandBins(int k, Band band, double halfWidthRatio, out int low, out int high)
     {
-        low = Math.Max((int)Math.Ceiling(k / halfWidthRatio), 1);
-        high = Math.Min((int)Math.Floor(k * halfWidthRatio), binCount - 1);
+        low = Math.Max((int)Math.Ceiling(k / halfWidthRatio), band.FirstBin);
+        high = Math.Min((int)Math.Floor(k * halfWidthRatio), band.LastBin);
         return high >= low;
+    }
+
+    /// <summary>
+    /// The bins a smoothing band may reach into: the <b>analysed</b> band, not the whole spectrum.
+    ///
+    /// <para><b>Why a band at all.</b> A 1/3-octave window centred on the top analysed bin reaches
+    /// 12 % past it, and on a swept measurement there is nothing up there: the chirp stops at
+    /// 0.98 of Nyquist and the analysed band at 0.95, so the top of the window is filled with bins
+    /// whose ratio is noise over nothing. For a frequency response that reads as a lifted top
+    /// octave; for an <i>impedance</i> it is far worse, because <c>Z = R·H/(1−H)</c> of a noise
+    /// ratio that wanders near 1 is clamped at <see cref="Tonebench.Dsp"/>'s own ceiling, and an RMS
+    /// that includes one such bin is that bin. Reported 2026-10-20 as a spike at the end of the
+    /// trace at 1/3 octave that is "less high" at 1/12 — which is the arithmetic exactly: 1/12
+    /// reaches 0.978 of Nyquist and stops just short of the dead band, 1/3 reaches past it.</para>
+    ///
+    /// <para><see cref="GroupDelay"/> has clamped its own regression window to this band from the
+    /// start, for the same reason in the phase: out-of-band unwrapped phase is random turns.</para>
+    /// </summary>
+    /// <param name="FirstBin">The lowest bin a band may include; never 0, which has no centre frequency.</param>
+    /// <param name="LastBin">The highest.</param>
+    public readonly record struct Band(int FirstBin, int LastBin)
+    {
+        /// <summary>The whole trace, for a caller with no analysed band of its own.</summary>
+        public static Band Whole(int binCount) => new(1, binCount - 1);
+
+        /// <summary>Clamped into a trace of <paramref name="binCount"/> bins, and never inverted.</summary>
+        public Band ClampedTo(int binCount)
+        {
+            int first = Math.Clamp(FirstBin, 1, Math.Max(1, binCount - 1));
+            int last = Math.Clamp(LastBin, first, Math.Max(1, binCount - 1));
+            return new Band(first, last);
+        }
     }
 
     /// <summary>
@@ -166,10 +200,10 @@ public static class FractionalOctaveSmoother
     }
 
     /// <summary>Allocating convenience overload, for callers that are not reusing a buffer.</summary>
-    public static double[] Smooth(ReadOnlySpan<double> magnitude, double binHz, int denominator)
+    public static double[] Smooth(ReadOnlySpan<double> magnitude, double binHz, int denominator, Band? band = null)
     {
         double[] result = new double[magnitude.Length];
-        Smooth(magnitude, result, binHz, denominator);
+        Smooth(magnitude, result, binHz, denominator, band);
         return result;
     }
 
@@ -202,7 +236,8 @@ public static class FractionalOctaveSmoother
     /// there the mean is the best estimate available and worth having.</para>
     /// </summary>
     /// <param name="values">The complex curve, bin <c>k</c> at <c>k · binHz</c>.</param>
-    public static double[] SmoothPhaseDeg(ReadOnlySpan<Complex> values, double binHz, int denominator)
+    public static double[] SmoothPhaseDeg(
+        ReadOnlySpan<Complex> values, double binHz, int denominator, Band? band = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(denominator);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binHz);
@@ -229,10 +264,11 @@ public static class FractionalOctaveSmoother
         var lengthBlocks = BlockTotals(lengthBins);
 
         double halfWidthRatio = HalfWidthRatio(denominator);
+        var limit = (band ?? Band.Whole(n)).ClampedTo(n);
 
         for (int k = 1; k < n; k++)
         {
-            if (!TryBandBins(k, n, halfWidthRatio, out int low, out int high)) continue;
+            if (!TryBandBins(k, limit, halfWidthRatio, out int low, out int high)) continue;
 
             double sumReal = BandSum(realBins, realBlocks, low, high);
             double sumImaginary = BandSum(imagBins, imagBlocks, low, high);
@@ -272,7 +308,8 @@ public static class FractionalOctaveSmoother
         ReadOnlySpan<double> phaseDeg,
         ReadOnlySpan<double> magnitude,
         double binHz,
-        int denominator)
+        int denominator,
+        Band? band = null)
     {
         if (magnitude.Length != phaseDeg.Length)
             throw new ArgumentException("The magnitude must be the same length as the phase.", nameof(magnitude));
@@ -292,10 +329,11 @@ public static class FractionalOctaveSmoother
         var productBlocks = BlockTotals(productBins);
 
         double halfWidthRatio = HalfWidthRatio(denominator);
+        var limit = (band ?? Band.Whole(n)).ClampedTo(n);
 
         for (int k = 1; k < n; k++)
         {
-            if (!TryBandBins(k, n, halfWidthRatio, out int low, out int high)) continue;
+            if (!TryBandBins(k, limit, halfWidthRatio, out int low, out int high)) continue;
 
             double sumWeight = BandSum(weightBins, weightBlocks, low, high);
             if (!(sumWeight > 0.0)) continue;

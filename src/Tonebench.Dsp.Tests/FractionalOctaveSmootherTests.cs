@@ -211,4 +211,42 @@ public class FractionalOctaveSmootherTests
         Assert.Throws<ArgumentException>(
             () => FractionalOctaveSmoother.Smooth(magnitude, new double[32], BinHz, 3));
     }
+
+    [Fact]
+    public void Smooth_DoesNotReachPastTheAnalysedBand()
+    {
+        // The reported spike. A chirp stops at 0.98 of Nyquist and the analysed band at 0.95, so a
+        // 1/3-octave window centred on the top analysed bin -- which reaches 12% past it -- fills its
+        // upper half with bins that have no stimulus in them at all. On an impedance those invert to
+        // the open-circuit ceiling, and one of them in the band is the whole answer.
+        const int n = 8192;
+        int lastBin = (int)(n * 0.95);
+
+        var magnitude = new double[n];
+        for (int k = 0; k < n; k++)
+            magnitude[k] = k <= lastBin ? 1.0 : 1e9;
+
+        var band = new FractionalOctaveSmoother.Band(1, lastBin);
+        var clamped = FractionalOctaveSmoother.Smooth(magnitude, BinHz, denominator: 3, band);
+        var unclamped = FractionalOctaveSmoother.Smooth(magnitude, BinHz, denominator: 3);
+
+        Assert.Equal(1.0, clamped[lastBin], 9);
+        Assert.Equal(1.0, clamped[lastBin - 100], 9);
+        Assert.True(unclamped[lastBin] > 1e6, $"the test needs the unclamped form to spike: {unclamped[lastBin]}");
+    }
+
+    [Fact]
+    public void Smooth_InsideTheAnalysedBand_IsUnchangedByTheClamp()
+    {
+        // Everything away from the edges has to be bit-for-bit what it always was, or the clamp is a
+        // change to every stored trace rather than a fix to its last columns.
+        var random = new Random(309);
+        var magnitude = Enumerable.Range(0, 8192).Select(_ => 0.5 + random.NextDouble()).ToArray();
+
+        var clamped = FractionalOctaveSmoother.Smooth(
+            magnitude, BinHz, denominator: 6, new FractionalOctaveSmoother.Band(1, 8191));
+        var unclamped = FractionalOctaveSmoother.Smooth(magnitude, BinHz, denominator: 6);
+
+        Assert.Equal(unclamped, clamped);
+    }
 }

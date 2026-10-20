@@ -383,14 +383,24 @@ public sealed class MeasurementSaveService(
     /// reference is how one is normally wired — note that <c>--simulate</c> needs the opposite, since
     /// its fixture models sit on the left channel. The sweep starts at 10 Hz rather than the
     /// frequency response's 2 Hz: a driver's resonance is the point of this measurement and 10 Hz is
-    /// below any of them, while a decade lower costs signal-to-noise for nothing. Smoothing is light
-    /// (1/48 octave) so a high-Q resonance peak is not blunted, and no calibration is stored until
-    /// the user captures one.</para>
+    /// below any of them, while a decade lower costs signal-to-noise for nothing. No calibration is
+    /// stored until the user captures one.</para>
     ///
-    /// <para>The chirp is the default for both the measurement and the calibration. The stepped
-    /// grid's defaults are there so switching the dropdown lands on something sensible rather than on
-    /// zeros — 20 Hz to 20 kHz at 5 points per octave, the same shape the stepped-sine response
-    /// starts from.</para>
+    /// <para><b>Pink noise, ten records, 1/12 octave</b> (Joost, 2026-10-20). Noise is the default
+    /// stimulus because it is the one whose averaging keeps paying: its records are independent
+    /// draws, so the noise in H falls with the count, where a chirp's are repeats of one
+    /// deterministic sweep — and a divider measurement is noise-limited by construction, with the
+    /// DUT channel tens of dB below the reference. The old 2 records at 1/48 octave were chosen so a
+    /// high-Q resonance peak would not be blunted, and they are kept for the <i>stepped</i> stimulus,
+    /// which measures one tone at a time and pays its averages at every point of its grid. The
+    /// per-stimulus map below is what lets the three differ; see
+    /// <c>web/src/impedance/stimulusSettings.ts</c>, which holds the same table.</para>
+    ///
+    /// <para>The calibration stays a <b>chirp</b> whatever the measurement plays: a standard is a
+    /// curve in frequency, so the fast stimulus captures it and the slow one need never be used for
+    /// it. The stepped grid's defaults are there so switching the dropdown lands on something
+    /// sensible rather than on zeros — 20 Hz to 20 kHz at 5 points per octave, the same shape the
+    /// stepped-sine response starts from.</para>
     /// </summary>
     /// <param name="useGlobalFixture">
     /// Whether to start the new measurement on the globally stored fixture calibration. True
@@ -402,7 +412,7 @@ public sealed class MeasurementSaveService(
     public string DefaultImpedanceParametersJson(bool useGlobalFixture = false) =>
         JsonSerializer.Serialize(new ImpedanceParameters(
             Method: nameof(ImpedanceMethod.ReferenceResistor),
-            Stimulus: nameof(ImpedanceStimulus.Chirp),
+            Stimulus: nameof(ImpedanceStimulus.PinkNoise),
             ReferenceOhms: 100.0,
             RightChannelIsReference: false,
             FrequencySpanHz: 24000.0,
@@ -410,8 +420,8 @@ public sealed class MeasurementSaveService(
             ChirpStartHz: 10.0,
             LevelValue: -20.0,
             LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
-            SmoothingDenominator: 48,
-            AverageCount: 2,
+            SmoothingDenominator: ImpedanceStimulusDefaults.PinkNoise.SmoothingDenominator ?? 12,
+            AverageCount: ImpedanceStimulusDefaults.PinkNoise.AverageCount ?? 10,
             CalibrationLevelValue: ImpedanceRequest.DefaultCalibrationLevelDbv,
             CableMode: nameof(ImpedanceCableMode.None),
             FixedCableOhms: 0.0,
@@ -421,7 +431,10 @@ public sealed class MeasurementSaveService(
             EndFreqHz: 20000.0,
             StepsPerOctave: 5,
             AdaptiveResolution: true,
-            UseGlobalFixture: useGlobalFixture), SerializerOptions);
+            UseGlobalFixture: useGlobalFixture)
+        {
+            ByStimulus = ImpedanceStimulusDefaults.All,
+        }, SerializerOptions);
 
     /// <summary>
     /// What a create-or-update of a measurement type should write to <c>params_json</c>.

@@ -19,7 +19,8 @@ import 'uplot/dist/uPlot.min.css'
 import type { ImpedanceZScale } from '../api/client'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
-import { impedanceOverlayDash } from '../measurements/sweepOverlayStyles'
+import { impedanceOverlayDash, impedanceOverlays, overlayRunIndex } from '../measurements/sweepOverlayStyles'
+import { runTint } from '../charts/runTint'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import {
   CHART_EXPORT_HEADER_PX,
@@ -378,9 +379,24 @@ type PlottedSeries = {
   points: boolean
   /** The `[light, dark]` pair `color` was picked from — the export picks again for its own palette. */
   pair: readonly string[]
+  /**
+   * Which drawn run this curve belongs to, for `runTint`. It lives here rather than in the colour
+   * because `buildSeries` re-picks the stroke from `pair` — and the export re-picks it again from a
+   * light palette — so a tint baked only into `color` would reach the legend swatch and not the line.
+   */
+  run?: number
 }
 
 /** Every curve on the chart, in the order buildData stacks their arrays. */
+/**
+ * Which drawn run an overlay is — the same index its dash comes from, so the two cannot disagree
+ * about which curve is which.
+ */
+function runOf(overlayId: number): number {
+  const slot = impedanceOverlays(props.overlays).findIndex((o) => o.id === overlayId)
+  return slot < 0 ? 0 : overlayRunIndex(slot, liveDrawn.value)
+}
+
 const plottedSeries = computed<PlottedSeries[]>(() => {
   const width = props.thickLines ? 2 : 1
 
@@ -396,14 +412,19 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
     },
   ]
 
-  // Overlays share the DUT's colour and are told apart by dash pattern alone, which is exactly why
-  // the legend has to draw the pattern rather than a coloured dot.
+  // Each run keeps the quantity's own colour, pulled a little way toward a tint of its own -- see
+  // charts/runTint.ts. The **dash is still the primary signal**: it is what the legend draws, what
+  // survives a black-and-white report, and what matches a run's |Z| curve to its phase curve across
+  // the two axes. The tint is a second, weaker one on top of it, and it is worth having here where
+  // it is not on the sweep chart (Joost, 2026-10-20): four curves of one near-black are hard to
+  // follow where they cross, which is exactly where two runs are compared.
   for (const overlay of overlayCurves.value) {
     entries.push({
       key: `o${overlay.id}`,
       label: overlay.name,
-      color: color(IMPEDANCE_COLOR),
+      color: runTint(color(IMPEDANCE_COLOR), runOf(overlay.id)),
       pair: IMPEDANCE_COLOR,
+      run: runOf(overlay.id),
       unit: 'ohms',
       // Width and markers follow the live |Z| curve this is drawn to be compared against; a fixed
       // weight here made Thick lines and Data points apply to half the chart only.
@@ -446,8 +467,9 @@ const plottedSeries = computed<PlottedSeries[]>(() => {
       entries.push({
         key: `o${overlay.id}p`,
         label: `${overlay.name} phase`,
-        color: color(PHASE_COLOR),
+        color: runTint(color(PHASE_COLOR), runOf(overlay.id)),
         pair: PHASE_COLOR,
+        run: runOf(overlay.id),
         unit: 'deg',
         // Markers stay off, as they are on the live phase curve: each overlay series follows the
         // live series it mirrors.
@@ -521,7 +543,7 @@ function buildSeries(p: ChartPalette): uPlot.Series[] {
     ...plottedSeries.value.map((s) => ({
       label: s.label,
       scale: s.scale ?? 'y',
-      stroke: p.color(s.pair),
+      stroke: runTint(p.color(s.pair), s.run ?? 0),
       width: s.width,
       dash: s.dash,
       // `filter` keeps a Data points marker on the columns that were actually measured. The grid
@@ -864,7 +886,9 @@ async function exportPng({ width, height, captureZoom = false, primaryLabel }: C
     // history overlays (keys `o<id>`), which already carry theirs.
     const legend: ExportLegendEntry[] = plottedSeries.value.map((s) => ({
       label: primaryLabel && !s.key.startsWith('o') ? `${primaryLabel} — ${s.label}` : s.label,
-      color: light.color(s.pair),
+      // Tinted from the export's own light palette, exactly as buildSeries strokes it, or the
+      // legend swatch and the line it names would disagree about which run is which.
+      color: runTint(light.color(s.pair), s.run ?? 0),
       dash: s.dash,
     }))
 

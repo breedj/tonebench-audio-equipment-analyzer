@@ -119,9 +119,17 @@ const { showPage } = useManual()
       chirp is normally the right answer for it whichever way the DUT is measured. A standard is
       stored as a curve in <em>frequency</em>, and a fixture is a linear passive network, so what it
       presents does not depend on how it was excited — a chirp-captured open corrects a stepped-sine
-      measurement unchanged, and does it in seconds rather than minutes. Capture the standards over
-      at least the band you intend to measure: outside the band a standard was captured over, its
-      curve is held flat rather than measured.
+      measurement unchanged, and does it in seconds rather than minutes.
+    </p>
+    <p>
+      A chirp or noise calibration always runs at the <strong>widest span</strong>, whatever
+      <em>Frequency span</em> is set to for the measurement, so one capture of a fixture serves every
+      span it is later measured at — the standards come out covering roughly 12 Hz to 91 kHz. That is
+      worth knowing because it is the one setting the calibration ignores: outside the band a
+      standard was captured over its curve is held flat rather than measured, and a standard captured
+      at a 24 kHz span would silently stop correcting anything above 22.8 kHz. A
+      <strong>stepped</strong> calibration walks its own grid instead, so there it is <em>Sweep
+      from</em> and <em>To</em> that decide the band.
     </p>
 
     <h3>Open</h3>

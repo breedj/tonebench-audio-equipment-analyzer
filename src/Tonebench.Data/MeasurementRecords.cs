@@ -1314,6 +1314,31 @@ public static class ImpedanceParametersDefaults
     public const double CalibrationLevelDbv = 0.0;
 }
 
+/// <summary>
+/// What each impedance stimulus starts a new measurement at. The same table as
+/// <c>web/src/impedance/stimulusSettings.ts</c>, which is where its reasoning is written down —
+/// a chirp and pink noise fold their records into one estimate and can afford ten of them, while a
+/// stepped sweep pays that count at every point of its grid.
+/// </summary>
+public static class ImpedanceStimulusDefaults
+{
+    public static readonly ImpedanceStimulusSlot Chirp = new(AverageCount: 10, SmoothingDenominator: 12);
+    public static readonly ImpedanceStimulusSlot PinkNoise = new(AverageCount: 10, SmoothingDenominator: 12);
+    public static readonly ImpedanceStimulusSlot SteppedSine = new(AverageCount: 2, SmoothingDenominator: 48);
+
+    /// <summary>All three, as a new type stores them.</summary>
+    public static ImpedanceStimulusSettings All => new(Chirp, PinkNoise, SteppedSine);
+}
+
+/// <summary>One stimulus's remembered averaging and smoothing.</summary>
+public sealed record ImpedanceStimulusSlot(int? AverageCount, int? SmoothingDenominator);
+
+/// <summary>The per-stimulus map; an absent slot means "this build's default".</summary>
+public sealed record ImpedanceStimulusSettings(
+    ImpedanceStimulusSlot? Chirp,
+    ImpedanceStimulusSlot? PinkNoise,
+    ImpedanceStimulusSlot? SteppedSine);
+
 public sealed record ImpedanceParameters(
     string Method,
     string Stimulus,
@@ -1414,6 +1439,18 @@ public sealed record ImpedanceParameters(
     /// </remarks>
     IReadOnlyList<JsonElement>? ChartAnnotations = null)
 {
+
+    /// <summary>
+    /// Averaging and smoothing remembered per stimulus, so switching the dropdown does not carry a
+    /// stepped sweep's settings onto a chirp and back.
+    ///
+    /// <para>An <i>extra</i> rather than a new shape, exactly as <c>PerModeLevels</c> is beside
+    /// <c>LevelValue</c>: <see cref="SmoothingDenominator"/> and <see cref="AverageCount"/> stay
+    /// authoritative — they are what the run used and what every reader already reads — and this is
+    /// the memory behind them. Null on a measurement saved before it existed, and on a result, where
+    /// a run has one stimulus and the others are a property of the configuration.</para>
+    /// </summary>
+    public ImpedanceStimulusSettings? ByStimulus { get; init; }
     /// <summary>
     /// Present when this result was imported from a simulator's <c>.ac</c> run rather than
     /// measured, and null — the default — on every measured one. The same block

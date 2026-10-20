@@ -22,6 +22,7 @@ import {
 } from '../sweep/points'
 import { useProjects } from '../composables/useProjects'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
+import { MAX_AVERAGES, STIMULUS_DEFAULTS, defaultsByStimulus, readSettings, toStored } from '../impedance/stimulusSettings'
 import { useImpedance } from '../composables/useImpedance'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { isPowerUnit } from '../measurements/levelMode'
@@ -105,7 +106,7 @@ const form = reactive({
    * measured one tone at a time, which is the usual pairing. The literal-minded combination is still
    * available; it just is not forced.</p>
    */
-  stimulus: 'Chirp' as ImpedanceStimulusName,
+  stimulus: 'PinkNoise' as ImpedanceStimulusName,
   calibrationStimulus: 'Chirp' as ImpedanceStimulusName,
   startFreqHz: 20,
   endFreqHz: 20000,
@@ -118,8 +119,10 @@ const form = reactive({
   levelValue: -20,
   levelUnit: 'Dbv' as SweepLevelUnit,
   calibrationLevelValue: 0,
-  smoothingDenominator: 48,
-  averageCount: 2,
+  // The selected stimulus's pair, kept authoritative; `byStimulus` below is the memory behind it.
+  smoothingDenominator: STIMULUS_DEFAULTS.PinkNoise.smoothingDenominator,
+  averageCount: STIMULUS_DEFAULTS.PinkNoise.averageCount,
+  byStimulus: defaultsByStimulus(),
   chirpStartHz: 10,
   cableMode: 'None' as ImpedanceCableModeName,
   fixedCableOhms: 0,
@@ -181,6 +184,16 @@ function applyStoredParams(paramsJson: string) {
     STIMULI.some((option) => option.value === value)
   if (known(stored.stimulus)) form.stimulus = stored.stimulus
   if (known(stored.calibrationStimulus)) form.calibrationStimulus = stored.calibrationStimulus
+
+  // After the stimulus, because the active pair is overlaid onto *its* slot. A measurement saved
+  // before this existed has no map and simply keeps the pair it stored, with the other two stimuli
+  // at this build's defaults.
+  form.byStimulus = readSettings(stored.byStimulus, form.stimulus, {
+    averageCount: form.averageCount,
+    smoothingDenominator: form.smoothingDenominator,
+  })
+  form.averageCount = form.byStimulus[form.stimulus].averageCount
+  form.smoothingDenominator = form.byStimulus[form.stimulus].smoothingDenominator
   if (typeof stored.startFreqHz === 'number' && stored.startFreqHz > 0) form.startFreqHz = stored.startFreqHz
   if (typeof stored.endFreqHz === 'number' && stored.endFreqHz > 0) form.endFreqHz = stored.endFreqHz
   if (typeof stored.stepsPerOctave === 'number' && stored.stepsPerOctave > 0) {
@@ -205,6 +218,29 @@ function applyStoredParams(paramsJson: string) {
     restoring = false
   })
 }
+
+/**
+ * Averaging and smoothing follow the stimulus: the pair on screen is parked under the stimulus being
+ * left and the new one's is loaded. See impedance/stimulusSettings.ts for why they cannot be one
+ * shared pair — a stepped sweep pays its averages at every point of its grid, a chirp pays them once.
+ *
+ * <p>Silent while `restoring`, which is what tells a stored measurement being loaded apart from the
+ * user turning the dropdown: `applyStoredParams` sets the stimulus and the pair together, and this
+ * would overwrite the second with the first's slot.</p>
+ */
+watch(
+  () => form.stimulus,
+  (now, before) => {
+    if (restoring || now === before) return
+
+    form.byStimulus[before] = {
+      averageCount: form.averageCount,
+      smoothingDenominator: form.smoothingDenominator,
+    }
+    form.averageCount = form.byStimulus[now].averageCount
+    form.smoothingDenominator = form.byStimulus[now].smoothingDenominator
+  },
+)
 
 watch(
   () => currentType.value?.paramsJson,
@@ -430,7 +466,8 @@ const invalid = computed<string | null>(() => {
   if (!Number.isFinite(form.calibrationLevelValue)) return 'The calibration level must be a number.'
   if (form.levelUnit !== 'Dbv' && form.calibrationLevelValue <= 0)
     return 'A calibration voltage must be positive.'
-  if (form.averageCount < 1 || form.averageCount > 10) return 'Averages must be between 1 and 10.'
+  if (form.averageCount < 1 || form.averageCount > MAX_AVERAGES)
+    return `Averages must be between 1 and ${MAX_AVERAGES}.`
   if (usesChirp.value) {
     if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
       return 'Chirp start must be between 0.5 and 1000 Hz.'
@@ -485,6 +522,7 @@ function buildParamsJson(): string {
     levelUnit: form.levelUnit,
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
+    byStimulus: toStored(form.byStimulus),
     calibrationLevelValue: form.calibrationLevelValue,
     cableMode: form.cableMode,
     fixedCableOhms: form.fixedCableOhms,
@@ -638,6 +676,198 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
 </script>
 
 <template>
+  <CollapsibleSection title="Measurement settings">
+    <label
+      class="tb-field"
+      title="A chirp excites the whole band at once and takes seconds. A stepped sine plays one tone at a time: minutes, but it puts the whole drive on the frequency being read, which is what a high-impedance DUT and the bottom of the band need. Pink noise is as quick as the chirp and keeps improving with every average, and it carries no harmonic packets to gate."
+    >
+      Stimulus
+      <select
+        v-model="form.stimulus"
+        :disabled="running"
+        class="tb-input"
+      >
+        <option v-for="option in STIMULI" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+    </label>
+
+    <div class="grid grid-cols-[2fr_1fr] gap-2.5">
+      <label class="tb-field" title="The generator level. Lower is gentler on a driver; higher buys signal-to-noise.">
+        Drive level
+        <input
+          v-model.number="form.levelValue"
+          type="number"
+          step="any"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+      <label class="tb-field">
+        Unit
+        <select
+          v-model="form.levelUnit"
+          :disabled="running"
+          class="tb-input"
+        >
+          <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
+        </select>
+      </label>
+    </div>
+
+    <!-- Only when the *measurement* is broadband. It used to show whenever either selector asked
+         for a whole-spectrum stimulus, so that a stepped measurement calibrated by chirp could say
+         what that chirp did -- and a broadband calibration now always takes the widest span
+         (ImpedanceRequest.EffectiveSpanHz), so on a stepped measurement this control had nothing
+         left to change. -->
+    <label v-if="measuresBroadband" class="tb-field">
+      <span>Frequency span</span>
+      <select
+        v-model.number="form.frequencySpanHz"
+        :disabled="running"
+        class="tb-input"
+      >
+        <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span / 1000 }} kHz</option>
+      </select>
+    </label>
+
+    <label v-if="usesBroadband" class="tb-field">
+      Resolution
+      <select
+        v-model.number="form.resolutionMultiplier"
+        :disabled="running"
+        class="tb-input"
+      >
+        <option v-for="option in RESPONSE_RESOLUTIONS" :key="option.multiplier" :value="option.multiplier">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
+
+    <label
+      v-if="usesChirp"
+      class="tb-field"
+      title="Where the chirp starts. 10 Hz is below any driver resonance; going lower costs signal-to-noise for nothing unless you are measuring a transformer."
+    >
+      <span>Chirp start (Hz)<span v-if="form.stimulus !== 'Chirp'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
+      <input
+        v-model.number="form.chirpStartHz"
+        type="number"
+        min="0.5"
+        max="1000"
+        step="any"
+        :disabled="running"
+        class="tb-input"
+      />
+    </label>
+
+    <!--
+      Gated on the *measurement's* stimulus, not `usesChirp`, unlike the sweep controls above it.
+      Those genuinely configure a chirp calibration; smoothing does not. It is applied by
+      ImpedanceTraceBuilder.Build when a curve is drawn, and a calibration's stored standard comes
+      from ImpedanceCalibration.Capture, which samples the raw ratio -- so with a stepped measurement
+      and a chirp calibration this control could only restyle the open/short curve while it was on
+      screen, and never touch a measurement. A control that implies more than it does is worse than
+      no control. Noise is smoothed on exactly the same path, so it reads the same control.
+    -->
+    <label
+      v-if="measuresBroadband"
+      class="tb-field"
+      title="Light smoothing keeps a high-Q resonance peak its real height."
+    >
+      Smoothing
+      <select
+        v-model.number="form.smoothingDenominator"
+        :disabled="running"
+        class="tb-input"
+      >
+        <option v-for="option in RESPONSE_SMOOTHING" :key="option.denominator" :value="option.denominator">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
+
+    <div v-if="usesStepped" class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        <span>Sweep from (Hz)<span v-if="form.stimulus !== 'SteppedSine'" class="text-neutral-500 dark:text-neutral-400"> (cal)</span></span>
+        <input
+          v-model.number="form.startFreqHz"
+          type="number"
+          step="any"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+      <label class="tb-field">
+        To (Hz)
+        <input
+          v-model.number="form.endFreqHz"
+          type="number"
+          step="any"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+    </div>
+
+    <label v-if="usesStepped" class="tb-field" title="How densely the band is sampled. Every point is a separate capture, so this is what a run's length is made of.">
+      Steps per octave
+      <input
+        v-model.number="form.stepsPerOctave"
+        type="number"
+        min="1"
+        max="48"
+        :disabled="running"
+        class="tb-input"
+      />
+    </label>
+
+    <label
+      v-if="usesStepped"
+      class="tb-check-row"
+      title="Sizes each point's record for its own frequency rather than for the bottom of the band, which is most of what makes the top of a sweep fast."
+    >
+      <input v-model="form.adaptiveResolution" type="checkbox" :disabled="running" />
+      Adaptive resolution
+    </label>
+
+    <label class="tb-field">
+      Averages
+      <input
+        v-model.number="form.averageCount"
+        type="number"
+        min="1"
+        :max="MAX_AVERAGES"
+        :disabled="running"
+        class="tb-input"
+      />
+    </label>
+
+    <template #footer>
+      <template v-if="measuresBroadband">
+        <span class="leading-snug">
+          Analysis {{ binHz.toFixed(2) }} Hz/bin · {{ recordSeconds.toFixed(2) }} s/record
+        </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <EstimateBadge kind="time" title="Roughly how long one run will take.">≈ {{ estimatedSeconds.toFixed(1) }} s</EstimateBadge>
+        </div>
+      </template>
+      <template v-else>
+        <span class="leading-snug">
+          Analysis {{ steppedSampleRateHz / 1000 }} kHz<template v-if="steppedFftRange">
+            · {{ steppedFftRange.max }}–{{ steppedFftRange.min }} point records</template
+          >
+        </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <EstimateBadge kind="points" title="How many frequencies the sweep will measure.">≈ {{ steppedPointCount }} points</EstimateBadge>
+          <EstimateBadge kind="time" title="Roughly how long the whole sweep will take.">≈ {{ steppedDurationLabel }}</EstimateBadge>
+        </div>
+      </template>
+      <p v-if="form.stimulus === 'SteppedSine' && steppedNyquistWarning" class="text-amber-600 dark:text-amber-500">
+        {{ steppedNyquistWarning }}
+      </p>
+    </template>
+  </CollapsibleSection>
+
   <CollapsibleSection title="Fixture">
     <label
       class="tb-field"
@@ -881,195 +1111,6 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         />
       </label>
     </div>
-  </CollapsibleSection>
-
-  <CollapsibleSection title="Measurement settings">
-    <label
-      class="tb-field"
-      title="A chirp excites the whole band at once and takes seconds. A stepped sine plays one tone at a time: minutes, but it puts the whole drive on the frequency being read, which is what a high-impedance DUT and the bottom of the band need. Pink noise is as quick as the chirp and keeps improving with every average, and it carries no harmonic packets to gate."
-    >
-      Stimulus
-      <select
-        v-model="form.stimulus"
-        :disabled="running"
-        class="tb-input"
-      >
-        <option v-for="option in STIMULI" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
-    </label>
-
-    <div class="grid grid-cols-[2fr_1fr] gap-2.5">
-      <label class="tb-field" title="The generator level. Lower is gentler on a driver; higher buys signal-to-noise.">
-        Drive level
-        <input
-          v-model.number="form.levelValue"
-          type="number"
-          step="any"
-          :disabled="running"
-          class="tb-input"
-        />
-      </label>
-      <label class="tb-field">
-        Unit
-        <select
-          v-model="form.levelUnit"
-          :disabled="running"
-          class="tb-input"
-        >
-          <option v-for="unit in VOLTAGE_UNITS" :key="unit.value" :value="unit.value">{{ unit.label }}</option>
-        </select>
-      </label>
-    </div>
-
-    <!-- Shown whenever *either* selector asks for a whole-spectrum stimulus, so a stepped
-         measurement calibrated by chirp can still say what that chirp does. -->
-    <label v-if="usesBroadband" class="tb-field">
-      <span>Frequency span<span v-if="!measuresBroadband" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
-      <select
-        v-model.number="form.frequencySpanHz"
-        :disabled="running"
-        class="tb-input"
-      >
-        <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span / 1000 }} kHz</option>
-      </select>
-    </label>
-
-    <label v-if="usesBroadband" class="tb-field">
-      Resolution
-      <select
-        v-model.number="form.resolutionMultiplier"
-        :disabled="running"
-        class="tb-input"
-      >
-        <option v-for="option in RESPONSE_RESOLUTIONS" :key="option.multiplier" :value="option.multiplier">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
-
-    <label
-      v-if="usesChirp"
-      class="tb-field"
-      title="Where the chirp starts. 10 Hz is below any driver resonance; going lower costs signal-to-noise for nothing unless you are measuring a transformer."
-    >
-      <span>Chirp start (Hz)<span v-if="form.stimulus !== 'Chirp'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
-      <input
-        v-model.number="form.chirpStartHz"
-        type="number"
-        min="0.5"
-        max="1000"
-        step="any"
-        :disabled="running"
-        class="tb-input"
-      />
-    </label>
-
-    <!--
-      Gated on the *measurement's* stimulus, not `usesChirp`, unlike the sweep controls above it.
-      Those genuinely configure a chirp calibration; smoothing does not. It is applied by
-      ImpedanceTraceBuilder.Build when a curve is drawn, and a calibration's stored standard comes
-      from ImpedanceCalibration.Capture, which samples the raw ratio -- so with a stepped measurement
-      and a chirp calibration this control could only restyle the open/short curve while it was on
-      screen, and never touch a measurement. A control that implies more than it does is worse than
-      no control. Noise is smoothed on exactly the same path, so it reads the same control.
-    -->
-    <label
-      v-if="measuresBroadband"
-      class="tb-field"
-      title="Light smoothing keeps a high-Q resonance peak its real height."
-    >
-      Smoothing
-      <select
-        v-model.number="form.smoothingDenominator"
-        :disabled="running"
-        class="tb-input"
-      >
-        <option v-for="option in RESPONSE_SMOOTHING" :key="option.denominator" :value="option.denominator">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
-
-    <div v-if="usesStepped" class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        <span>Sweep from (Hz)<span v-if="form.stimulus !== 'SteppedSine'" class="text-neutral-500 dark:text-neutral-400"> (cal)</span></span>
-        <input
-          v-model.number="form.startFreqHz"
-          type="number"
-          step="any"
-          :disabled="running"
-          class="tb-input"
-        />
-      </label>
-      <label class="tb-field">
-        To (Hz)
-        <input
-          v-model.number="form.endFreqHz"
-          type="number"
-          step="any"
-          :disabled="running"
-          class="tb-input"
-        />
-      </label>
-    </div>
-
-    <label v-if="usesStepped" class="tb-field" title="How densely the band is sampled. Every point is a separate capture, so this is what a run's length is made of.">
-      Steps per octave
-      <input
-        v-model.number="form.stepsPerOctave"
-        type="number"
-        min="1"
-        max="48"
-        :disabled="running"
-        class="tb-input"
-      />
-    </label>
-
-    <label
-      v-if="usesStepped"
-      class="tb-check-row"
-      title="Sizes each point's record for its own frequency rather than for the bottom of the band, which is most of what makes the top of a sweep fast."
-    >
-      <input v-model="form.adaptiveResolution" type="checkbox" :disabled="running" />
-      Adaptive resolution
-    </label>
-
-    <label class="tb-field">
-      Averages
-      <input
-        v-model.number="form.averageCount"
-        type="number"
-        min="1"
-        max="10"
-        :disabled="running"
-        class="tb-input"
-      />
-    </label>
-
-    <template #footer>
-      <template v-if="measuresBroadband">
-        <span class="leading-snug">
-          Analysis {{ binHz.toFixed(2) }} Hz/bin · {{ recordSeconds.toFixed(2) }} s/record
-        </span>
-        <div class="flex flex-wrap items-center gap-2">
-          <EstimateBadge kind="time" title="Roughly how long one run will take.">≈ {{ estimatedSeconds.toFixed(1) }} s</EstimateBadge>
-        </div>
-      </template>
-      <template v-else>
-        <span class="leading-snug">
-          Analysis {{ steppedSampleRateHz / 1000 }} kHz<template v-if="steppedFftRange">
-            · {{ steppedFftRange.max }}–{{ steppedFftRange.min }} point records</template
-          >
-        </span>
-        <div class="flex flex-wrap items-center gap-2">
-          <EstimateBadge kind="points" title="How many frequencies the sweep will measure.">≈ {{ steppedPointCount }} points</EstimateBadge>
-          <EstimateBadge kind="time" title="Roughly how long the whole sweep will take.">≈ {{ steppedDurationLabel }}</EstimateBadge>
-        </div>
-      </template>
-      <p v-if="form.stimulus === 'SteppedSine' && steppedNyquistWarning" class="text-amber-600 dark:text-amber-500">
-        {{ steppedNyquistWarning }}
-      </p>
-    </template>
   </CollapsibleSection>
 
   <CollapsibleSection title="Advanced" :default-open="false">

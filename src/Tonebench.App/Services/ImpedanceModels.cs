@@ -200,6 +200,22 @@ public sealed record ImpedanceRequest(
     /// </summary>
     public const double DefaultCalibrationLevelDbv = 0.0;
 
+    /// <summary>
+    /// How many records one impedance measurement may fold in — <b>20</b>, where every other kind
+    /// stops at 10 (Joost, 2026-10-20).
+    ///
+    /// <para>This is the measurement that needs them. A divider puts the DUT channel at
+    /// <c>Z/(R + Z)</c> of the reference, which on a sub-ohm part against a 100 ohm resistor is
+    /// 40 dB down, and the chirp spreads what is left over thousands of bins. Pink noise earns the
+    /// count outright: its records are independent draws, so the noise in H keeps falling with the
+    /// count, where a chirp's are repeats of one deterministic sweep.</para>
+    ///
+    /// <para>The other kinds keep <see cref="FrequencyResponseRequest.MaxAverageCount"/>: they
+    /// measure a DUT's own output, which is not 40 dB down, and the stepped ones pay the count at
+    /// every point of a grid.</para>
+    /// </summary>
+    public const int MaxAverageCount = 20;
+
     /// <summary>The smallest reference resistor that is a resistor rather than a wire.</summary>
     public const double MinReferenceOhms = 0.1;
 
@@ -243,7 +259,26 @@ public sealed record ImpedanceRequest(
         ? (AdaptiveResolution
             ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
             : SteppedSampleRateHz)
-        : FrequencySpanHz * 2.0;
+        : EffectiveSpanHz * 2.0;
+
+    /// <summary>
+    /// The span a broadband run actually analyses: the measurement's own, except that a
+    /// <b>calibration</b> captured by chirp or noise always takes the widest one.
+    ///
+    /// <para><b>A standard is a curve in frequency and is meant to be reused.</b> Captured at the
+    /// measurement's 24 kHz span it covers 12.5 Hz–22.8 kHz and nothing above, so the same fixture
+    /// measured at a 96 kHz span later has no correction over three quarters of its band —
+    /// <see cref="ImpedanceCalibration.ResampleAt"/> clamps at the stored edge, silently. Capturing
+    /// at the top rate costs the same handful of records and makes one capture serve every span,
+    /// which is what a fixture calibration is for (Joost, 2026-10-20).</para>
+    ///
+    /// <para>Only for a chirp or noise capture. A stepped standard walks its own grid and takes its
+    /// rate from <see cref="EndFreqHz"/>, where this has no meaning.</para>
+    /// </summary>
+    public double EffectiveSpanHz => IsCalibration && !IsStepped ? MaxSpanHz : FrequencySpanHz;
+
+    /// <summary>The widest span the UI offers, and what every broadband calibration is captured at.</summary>
+    public const double MaxSpanHz = 96_000.0;
 
     /// <summary>
     /// The analysis size. For a stepped run this is the <b>first point's</b> — every point carries its
@@ -441,11 +476,11 @@ public sealed record ImpedanceRequest(
                 nameof(CalibrationLevelValue), CalibrationLevelValue, "A calibration voltage must be positive.");
         }
 
-        if (AverageCount is < FrequencyResponseRequest.MinAverageCount or > FrequencyResponseRequest.MaxAverageCount)
+        if (AverageCount is < FrequencyResponseRequest.MinAverageCount or > MaxAverageCount)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(AverageCount), AverageCount,
-                $"Averages must be between {FrequencyResponseRequest.MinAverageCount} and {FrequencyResponseRequest.MaxAverageCount}.");
+                $"Averages must be between {FrequencyResponseRequest.MinAverageCount} and {MaxAverageCount}.");
         }
 
         if (CableMode == ImpedanceCableMode.Fixed)

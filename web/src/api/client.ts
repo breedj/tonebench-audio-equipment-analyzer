@@ -744,6 +744,23 @@ export interface ImpedanceStartRequest {
  * An impedance measurement type's stored settings. The `chart*` fields are display state and all
  * optional, so a type saved before one of them existed still loads.
  */
+/** One stimulus's remembered averaging and smoothing. */
+export interface ImpedanceStimulusSlot {
+  averageCount?: number
+  smoothingDenominator?: number
+}
+
+/**
+ * The per-stimulus map as `params_json` holds it. Keyed by the serializer's camelCase spelling of
+ * the stimulus names, exactly as `levelByMode`'s slots are — see impedance/stimulusSettings.ts,
+ * which converts to and from the PascalCase names the rest of the client indexes by.
+ */
+export interface ImpedanceSettingsByStimulus {
+  chirp?: ImpedanceStimulusSlot | null
+  pinkNoise?: ImpedanceStimulusSlot | null
+  steppedSine?: ImpedanceStimulusSlot | null
+}
+
 export interface ImpedanceParameters {
   method: ImpedanceMethodName
   stimulus: ImpedanceStimulusName
@@ -756,6 +773,11 @@ export interface ImpedanceParameters {
   levelUnit: SweepLevelUnit
   smoothingDenominator: number
   averageCount: number
+  /**
+   * Averaging and smoothing remembered per stimulus — see impedance/stimulusSettings.ts. An extra
+   * beside the two fields above, which stay authoritative; absent on anything saved before it.
+   */
+  byStimulus?: ImpedanceSettingsByStimulus | null
   /** The drive level calibration runs use, in the same unit as `levelValue`. */
   calibrationLevelValue?: number | null
   cableMode: ImpedanceCableModeName

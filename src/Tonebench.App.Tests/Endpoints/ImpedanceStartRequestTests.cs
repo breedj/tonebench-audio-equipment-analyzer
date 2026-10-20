@@ -177,9 +177,53 @@ public class ImpedanceStartRequestTests
         Assert.Equal(ImpedanceStimulus.Chirp, calibrating.EffectiveStimulus);
         Assert.False(calibrating.IsStepped);
 
-        // And the derived grid follows it: the chirp's span, not the stepped run's chosen rate.
-        Assert.Equal(48_000.0, calibrating.SampleRateHz);
+        // And the derived grid follows it: the chirp's own rate, not the stepped run's chosen one --
+        // and a broadband calibration always takes the widest span, so it is 2 x 96 kHz rather than
+        // twice whatever FrequencySpanHz says. See ImpedanceRequest.EffectiveSpanHz: a standard is
+        // meant to be reused across spans, and one captured at 24 kHz silently has no correction
+        // above 22.8 kHz.
+        Assert.Equal(192_000.0, calibrating.SampleRateHz);
         Assert.Equal(96_000.0, request.SampleRateHz);
+    }
+
+    /// <summary>
+    /// A chirp or noise calibration is captured at the widest span whatever the measurement's own
+    /// is, so one capture of a fixture serves every span it is later measured at. A stepped
+    /// standard walks its own grid and is unaffected.
+    /// </summary>
+    [Fact]
+    public void ABroadbandCalibration_IsAlwaysCapturedAtTheWidestSpan()
+    {
+        foreach (double span in FrequencyResponseRequest.SupportedSpansHz)
+        {
+            var measurement = Measurement() with { FrequencySpanHz = span };
+
+            // The measurement itself still spans what it was asked to.
+            Assert.Equal(span, measurement.EffectiveSpanHz);
+            Assert.Equal(span * 2.0, measurement.SampleRateHz);
+
+            foreach (var stimulus in new[] { ImpedanceStimulus.Chirp, ImpedanceStimulus.PinkNoise })
+            {
+                var calibrating = measurement with
+                {
+                    CalTarget = ImpedanceCalTarget.Open,
+                    CalibrationStimulus = stimulus,
+                };
+
+                Assert.Equal(ImpedanceRequest.MaxSpanHz, calibrating.EffectiveSpanHz);
+                Assert.Equal(ImpedanceRequest.MaxSpanHz * 2.0, calibrating.SampleRateHz);
+            }
+
+            // A stepped standard takes its rate from its own grid, where a span means nothing.
+            var stepped = measurement with
+            {
+                CalTarget = ImpedanceCalTarget.Short,
+                CalibrationStimulus = ImpedanceStimulus.SteppedSine,
+                AdaptiveResolution = false,
+                SteppedSampleRateHz = 48_000.0,
+            };
+            Assert.Equal(48_000.0, stepped.SampleRateHz);
+        }
     }
 
     /// <summary>

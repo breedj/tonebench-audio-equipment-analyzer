@@ -117,6 +117,12 @@ internal static class ImpedanceTraceBuilder
 
         var smoothed = FractionalOctaveSmoother.Smooth(magnitude, binHz, request.SmoothingDenominator);
 
+        // The angle over the same bands, as a vector mean — see FractionalOctaveSmoother.SmoothPhaseDeg.
+        // Smoothed because the magnitude is: a column whose level is an RMS over ten bins and whose
+        // angle is the raw centre bin of those ten draws a readable curve beside an unreadable one,
+        // from one capture.
+        var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothPhaseDeg(values, binHz, request.SmoothingDenominator);
+
         var traceDb = new double[binCount];
         for (int k = 0; k < binCount; k++)
             traceDb[k] = ImpedanceMath.ToDbOhms(smoothed[k]);
@@ -153,14 +159,14 @@ internal static class ImpedanceTraceBuilder
             // frequency-response trace does it: the min/max rule exists so a single-bin spike
             // survives decimation, and neither of these has spikes worth preserving.
             //
-            // Read straight off the complex value with no unwrapping, unlike the frequency response's
-            // -- and that is a property of the quantity rather than an omission. A passive one-port's
-            // impedance angle is bounded to +/-90 degrees, so it can never leave the principal branch
-            // and there are no turns to accumulate. A curve that does run past 90 degrees is not a
-            // wrap: it is a calibration or a fixture that is wrong, and unwrapping would hide exactly
-            // that.
+            // Never unwrapped, unlike the frequency response's -- and that is a property of the
+            // quantity rather than an omission. A passive one-port's impedance angle is bounded to
+            // +/-90 degrees, so it can never leave the principal branch and there are no turns to
+            // accumulate. A curve that does run past 90 degrees is not a wrap: it is a calibration or
+            // a fixture that is wrong, and unwrapping would hide exactly that. The vector mean above
+            // keeps that property, since the argument of a sum of phasors cannot run past 180 either.
             int centre = Math.Clamp((int)Math.Round(centerBins[c]), 0, binCount - 1);
-            phaseDeg[c] = (float)(values[centre].Phase * 180.0 / Math.PI);
+            phaseDeg[c] = (float)smoothedPhaseDeg[centre];
             columnCoherence[c] = (float)coherence[centre];
         }
 

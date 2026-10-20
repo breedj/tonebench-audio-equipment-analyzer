@@ -510,6 +510,14 @@ internal static class ResponseCaptureSupport
         var groupDelayS = GroupDelay.FromUniformPhase(result.PhaseDeg, binHz, request.SmoothingDenominator, firstBin, lastBin);
         var phaseDelayS = GroupDelay.PhaseDelayUniform(result.PhaseDeg, binHz, firstBin, lastBin, anchorBin: reference.Index);
 
+        // The phase column over the same bands the magnitude is smoothed over, weighted by magnitude
+        // -- see FractionalOctaveSmoother.SmoothUnwrappedPhaseDeg, and note it is a weighted mean
+        // rather than the vector mean the impedance chart's phase takes: this one is unwrapped, and
+        // the turns it carries are what the anchor below and the client's restore-delay checkbox act
+        // on. Both delay curves are read off the *unsmoothed* phase above, which is deliberate: the
+        // group delay runs its own least-squares regression over this very window, and smoothing its
+        // input first would apply that window twice.
+
         // The phase curve is anchored at the same bin, for the reason the phase delay is: the
         // unwrapper starts at bin 0 and walks the sub-band junk, so what it hands out carries an
         // arbitrary whole number of turns -- a constant that says nothing about the DUT and that
@@ -522,7 +530,12 @@ internal static class ResponseCaptureSupport
         // Before the add-back, never after: the delay is restored on the client, and a DUT with a
         // real delay runs through many turns in its passband, which is exactly what anchoring must
         // not delete. Group delay is a derivative and so is immune either way.
-        double anchorTurnsDeg = GroupDelay.WholeTurnsDeg(result.PhaseDeg[reference.Index]);
+        var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothUnwrappedPhaseDeg(
+            result.PhaseDeg, result.Magnitude, binHz, request.SmoothingDenominator);
+
+        // Taken from the smoothed curve, because that is the curve the anchor has to land in
+        // (-180, 180]; whole turns, so the two agree except within a degree of a turn boundary.
+        double anchorTurnsDeg = GroupDelay.WholeTurnsDeg(smoothedPhaseDeg[reference.Index]);
         for (int k = firstBin; k <= lastBin; k++)
         {
             groupDelayS[k] += addBackDelayS;
@@ -554,7 +567,7 @@ internal static class ResponseCaptureSupport
             // be the column's slope drawn as noise, and the group delay has already been integrated
             // over its window.
             int centre = Math.Clamp((int)Math.Round(centerBins[c]), 0, result.PhaseDeg.Length - 1);
-            phaseDeg[c] = (float)(result.PhaseDeg[centre] - anchorTurnsDeg);
+            phaseDeg[c] = (float)(smoothedPhaseDeg[centre] - anchorTurnsDeg);
             coherence[c] = (float)result.Coherence[centre];
             groupDelay[c] = (float)groupDelayS[centre];
             phaseDelay[c] = (float)phaseDelayS[centre];

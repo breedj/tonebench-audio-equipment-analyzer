@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Tonebench.Dsp;
 
 /// <summary>
@@ -66,44 +68,50 @@ public static class FractionalOctaveSmoother
         // Per-bin power once, then per block of bins. Deliberately not a running total across the
         // whole trace -- see the remarks above for what that costs on a trace with a deep stopband.
         double[] power = new double[n];
-        int blockCount = ((n - 1) / BlockBins) + 1;
-        double[] blockPower = new double[blockCount];
         for (int i = 0; i < n; i++)
-        {
             power[i] = magnitude[i] * magnitude[i];
-            blockPower[i / BlockBins] += power[i];
-        }
 
-        // Half-width as a frequency ratio: a 1/N-octave band spans 2^(1/N), so each edge sits
-        // 2^(1/2N) away from the centre.
-        double halfWidthRatio = Math.Pow(2.0, 1.0 / (2.0 * denominator));
+        double[] blockPower = BlockTotals(power);
+
+        double halfWidthRatio = HalfWidthRatio(denominator);
 
         // DC has no centre frequency to build a relative band around, and the chart skips it anyway.
         destination[0] = magnitude[0];
 
         for (int k = 1; k < n; k++)
         {
-            // The band edges in bin units. Rounding inward (ceil the low edge, floor the high) is
-            // what makes a band narrower than one bin come out empty rather than silently widening
-            // to two — that case is handled explicitly below.
-            int low = (int)Math.Ceiling(k / halfWidthRatio);
-            int high = (int)Math.Floor(k * halfWidthRatio);
-
-            low = Math.Max(low, 1);
-            high = Math.Min(high, n - 1);
-
-            // Below roughly denominator·1.44 bins the band is narrower than the bin spacing, which
-            // is most of the bottom decade at 1/24 octave. Falling back to the bin itself keeps the
-            // low end of the trace at full resolution instead of blanking it.
-            if (high < low)
+            if (!TryBandBins(k, n, halfWidthRatio, out int low, out int high))
             {
                 destination[k] = magnitude[k];
                 continue;
             }
 
-            double bandPower = BandPower(power, blockPower, low, high);
+            double bandPower = BandSum(power, blockPower, low, high);
             destination[k] = Math.Sqrt(bandPower / (high - low + 1));
         }
+    }
+
+    /// <summary>
+    /// Half-width as a frequency ratio: a 1/N-octave band spans <c>2^(1/N)</c>, so each edge sits
+    /// <c>2^(1/2N)</c> away from the centre.
+    /// </summary>
+    private static double HalfWidthRatio(int denominator) => Math.Pow(2.0, 1.0 / (2.0 * denominator));
+
+    /// <summary>
+    /// The bins a 1/N-octave band centred on bin <paramref name="k"/> covers, or false when the band
+    /// is narrower than one bin.
+    ///
+    /// <para>Rounding inward (ceil the low edge, floor the high) is what makes a band narrower than
+    /// one bin come out empty rather than silently widening to two. That happens below roughly
+    /// <c>denominator · 1.44</c> bins, which is most of the bottom decade at 1/24 octave, and every
+    /// caller answers it the same way: fall back to the bin itself, so the low end of the trace keeps
+    /// its full resolution instead of blanking.</para>
+    /// </summary>
+    private static bool TryBandBins(int k, int binCount, double halfWidthRatio, out int low, out int high)
+    {
+        low = Math.Max((int)Math.Ceiling(k / halfWidthRatio), 1);
+        high = Math.Min((int)Math.Floor(k * halfWidthRatio), binCount - 1);
+        return high >= low;
     }
 
     /// <summary>
@@ -114,37 +122,47 @@ public static class FractionalOctaveSmoother
     private const int BlockBins = 128;
 
     /// <summary>
-    /// The summed power over <c>[low, high]</c>, from those bins and no others: whole blocks
-    /// straight off the table, the partial block at each end bin by bin. A band narrower than the
-    /// blocks it touches is summed directly.
+    /// The sum over <c>[low, high]</c>, from those bins and no others: whole blocks straight off the
+    /// table, the partial block at each end bin by bin. A band narrower than the blocks it touches is
+    /// summed directly.
     /// </summary>
-    private static double BandPower(double[] binPower, double[] blockPower, int low, int high)
+    private static double BandSum(double[] binValue, double[] blockValue, int low, int high)
     {
         // The first bin of the first block the band covers completely, and one past the last bin of
         // the last one. When they cross, no block is fully inside the band.
         int firstWhole = ((low + BlockBins - 1) / BlockBins) * BlockBins;
         int lastWholeEnd = ((high + 1) / BlockBins) * BlockBins;
 
-        double power = 0.0;
+        double sum = 0.0;
 
         if (firstWhole >= lastWholeEnd)
         {
             for (int i = low; i <= high; i++)
-                power += binPower[i];
+                sum += binValue[i];
 
-            return power;
+            return sum;
         }
 
         for (int i = low; i < firstWhole; i++)
-            power += binPower[i];
+            sum += binValue[i];
 
         for (int b = firstWhole / BlockBins; b < lastWholeEnd / BlockBins; b++)
-            power += blockPower[b];
+            sum += blockValue[b];
 
         for (int i = lastWholeEnd; i <= high; i++)
-            power += binPower[i];
+            sum += binValue[i];
 
-        return power;
+        return sum;
+    }
+
+    /// <summary>The block totals of a per-bin series, which is the other half of what <see cref="BandSum"/> reads.</summary>
+    private static double[] BlockTotals(double[] bins)
+    {
+        var blocks = new double[((bins.Length - 1) / BlockBins) + 1];
+        for (int i = 0; i < bins.Length; i++)
+            blocks[i / BlockBins] += bins[i];
+
+        return blocks;
     }
 
     /// <summary>Allocating convenience overload, for callers that are not reusing a buffer.</summary>
@@ -152,6 +170,139 @@ public static class FractionalOctaveSmoother
     {
         double[] result = new double[magnitude.Length];
         Smooth(magnitude, result, binHz, denominator);
+        return result;
+    }
+
+    /// <summary>
+    /// The angle of <paramref name="values"/> smoothed over the same bands the magnitude is, in
+    /// degrees in <c>(−180, 180]</c>.
+    ///
+    /// <para><b>A vector mean, not an average of angles.</b> Each output bin is
+    /// <c>arg(Σ z)</c> over its band: the band's phasors are added and the argument of the sum
+    /// taken. Averaging the angles themselves is wrong twice over. It cannot cross the wrap — +179°
+    /// and −179° are 2° apart and average to <b>0°</b>, the opposite direction — and it gives a bin
+    /// carrying no signal the same vote as one carrying all of it, when a bin with nothing in it has
+    /// no angle at all, only noise. Adding the phasors answers both: the wrap is not represented, and
+    /// the weighting by magnitude falls out of the arithmetic rather than being bolted on.</para>
+    ///
+    /// <para><b>Why this is worth doing at all.</b> The magnitude column of a stored trace is an RMS
+    /// over a fractional-octave band and the phase column was the <i>centre bin</i> of that band —
+    /// one bin of the ten or more the band spans, raw. On a measurement whose phase is well
+    /// determined the two agree; on one where it is not, the magnitude is smoothed into a readable
+    /// curve while the phase beside it is drawn as the full-resolution noise it always was, which
+    /// reads as a broken measurement rather than a noisy one. Reported 2026-10-20 against a sub-ohm
+    /// impedance fixture, where the chirp's own coherence falls to 0.07 at some frequencies.</para>
+    ///
+    /// <para>A band whose phasors <b>cancel completely</b> keeps the bin's own angle: the resultant
+    /// is then a rounding error, and its direction says nothing. The test is the resultant against
+    /// the band's own total length (<c>|Σ z| ≤ Σ|z| · 1e-12</c>), not against zero — equal and
+    /// opposite phasors do not sum to exactly zero in floating point, and the residue of a band of
+    /// 1024 of them pointed at <b>90°</b>, a direction not one of its bins had. Deliberately a
+    /// <i>numerical</i> floor rather than a quality one: a noisy band also has a short resultant, and
+    /// there the mean is the best estimate available and worth having.</para>
+    /// </summary>
+    /// <param name="values">The complex curve, bin <c>k</c> at <c>k · binHz</c>.</param>
+    public static double[] SmoothPhaseDeg(ReadOnlySpan<Complex> values, double binHz, int denominator)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(denominator);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binHz);
+
+        int n = values.Length;
+        var result = new double[n];
+        for (int k = 0; k < n; k++)
+            result[k] = values[k].Phase * 180.0 / Math.PI;
+
+        if (denominator == 0 || n < 3) return result;
+
+        var realBins = new double[n];
+        var imagBins = new double[n];
+        var lengthBins = new double[n];
+        for (int k = 0; k < n; k++)
+        {
+            realBins[k] = values[k].Real;
+            imagBins[k] = values[k].Imaginary;
+            lengthBins[k] = values[k].Magnitude;
+        }
+
+        var realBlocks = BlockTotals(realBins);
+        var imagBlocks = BlockTotals(imagBins);
+        var lengthBlocks = BlockTotals(lengthBins);
+
+        double halfWidthRatio = HalfWidthRatio(denominator);
+
+        for (int k = 1; k < n; k++)
+        {
+            if (!TryBandBins(k, n, halfWidthRatio, out int low, out int high)) continue;
+
+            double sumReal = BandSum(realBins, realBlocks, low, high);
+            double sumImaginary = BandSum(imagBins, imagBlocks, low, high);
+            double resultant = Math.Sqrt((sumReal * sumReal) + (sumImaginary * sumImaginary));
+
+            if (resultant <= BandSum(lengthBins, lengthBlocks, low, high) * CancelledResultant) continue;
+
+            result[k] = Math.Atan2(sumImaginary, sumReal) * 180.0 / Math.PI;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// How short a band's resultant may be, against the total length of the phasors that made it,
+    /// before it is read as complete cancellation rather than as a direction.
+    /// </summary>
+    private const double CancelledResultant = 1e-12;
+
+    /// <summary>
+    /// An <b>unwrapped</b> phase smoothed over the same bands, weighted by magnitude, in degrees —
+    /// the frequency response's counterpart to <see cref="SmoothPhaseDeg"/>.
+    ///
+    /// <para><b>A weighted mean of the angles, which is exactly what the phasor sum must not be used
+    /// for here.</b> A frequency-response phase is unwrapped: it carries the whole turns a delayed
+    /// DUT runs through, the bandwidth reference anchors them away, and the client puts a removed
+    /// delay back by adding to them. Taking the argument of a phasor sum would discard every one of
+    /// those turns and hand back a value in <c>(−180, 180]</c>, so a DUT reading −1440° would come
+    /// back reading 0°. Weighting by magnitude buys the other half of what the phasor sum gives for
+    /// free: a notch inside the band, where the phase swings through half a turn over a few bins
+    /// that carry almost nothing, no longer drags the column it sits in.</para>
+    ///
+    /// <para>A band carrying no magnitude at all falls back to the bin's own phase, for the reason
+    /// the phasor version falls back: there is nothing to weight with.</para>
+    /// </summary>
+    public static double[] SmoothUnwrappedPhaseDeg(
+        ReadOnlySpan<double> phaseDeg,
+        ReadOnlySpan<double> magnitude,
+        double binHz,
+        int denominator)
+    {
+        if (magnitude.Length != phaseDeg.Length)
+            throw new ArgumentException("The magnitude must be the same length as the phase.", nameof(magnitude));
+        ArgumentOutOfRangeException.ThrowIfNegative(denominator);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binHz);
+
+        int n = phaseDeg.Length;
+        var result = phaseDeg.ToArray();
+        if (denominator == 0 || n < 3) return result;
+
+        var weightBins = magnitude.ToArray();
+        var productBins = new double[n];
+        for (int k = 0; k < n; k++)
+            productBins[k] = weightBins[k] * phaseDeg[k];
+
+        var weightBlocks = BlockTotals(weightBins);
+        var productBlocks = BlockTotals(productBins);
+
+        double halfWidthRatio = HalfWidthRatio(denominator);
+
+        for (int k = 1; k < n; k++)
+        {
+            if (!TryBandBins(k, n, halfWidthRatio, out int low, out int high)) continue;
+
+            double sumWeight = BandSum(weightBins, weightBlocks, low, high);
+            if (!(sumWeight > 0.0)) continue;
+
+            result[k] = BandSum(productBins, productBlocks, low, high) / sumWeight;
+        }
+
         return result;
     }
 }

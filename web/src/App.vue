@@ -5412,6 +5412,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
               <template #aside>
                 <ImpedanceDisplayPanel
                   :traces="impedanceTraces"
+                  :overlays="visibleImpedanceOverlays"
                   :running="impedanceRunning"
                   v-model:view="impedanceView"
                   v-model:show-phase="impedanceShowPhase"

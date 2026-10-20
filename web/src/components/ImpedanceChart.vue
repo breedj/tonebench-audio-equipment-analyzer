@@ -36,6 +36,7 @@ import { useZoomHistory, type ZoomWindow } from '../charts/zoomHistory'
 import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
+import { measuredColumns, mergeGrids } from '../impedance/chartGrid'
 import { ohmAxis } from '../impedance/ohmAxis'
 import { dampingFactorTicks, formatDampingFactor } from '../impedance/dampingFactorAxis'
 import { dbOhmsToOhms, formatOhms } from '../impedance/equivalent'
@@ -139,60 +140,51 @@ const liveDrawn = computed(() => trace.value !== null)
 
 const { storedShortCal, referenceOhms } = useImpedance()
 
-/** The x grid: the DUT's when there is one, otherwise a standard's own so it can be seen alone. */
+/**
+ * The x grid: the DUT's when there is one, otherwise a standard's own so it can be seen alone,
+ * merged with every overlay's columns — see `impedance/chartGrid.ts`, which holds the merge and its
+ * tests.
+ *
+ * <p><b>Why the live grid alone will not do.</b> uPlot's AlignedData gives every series one shared x
+ * array, so anything the x array does not reach simply is not drawn, and anything it reaches only
+ * coarsely is drawn only coarsely. Two separate faults came out of that, and the second is the one
+ * that misleads.</p>
+ *
+ * <p>Frequencies <b>outside</b> the measured span have to be added or a stored result is clipped to
+ * however far the live sweep has got: a stepped run publishes after every point, so its grid
+ * <i>grows</i>, and an overlay vanished the moment a new run started and then crept back in from the
+ * left over the next few minutes — which reads as the overlay being consumed by the measurement.</p>
+ *
+ * <p>Frequencies <b>inside</b> it have to be added too, and that is not symmetry for its own sake. A
+ * stored chirp or noise curve carries ~1600 display columns; a stepped sweep carries one point per
+ * tone. Resampling the overlay onto the live grid alone therefore <i>point-sampled</i> it at twenty
+ * frequencies inside the span while leaving its full resolution outside, so the same stored curve was
+ * drawn smooth below the sweep's reach and ragged above it, and the boundary walked up the chart as
+ * the sweep advanced. Reported 2026-10-20 as the history items changing while a stepped sine plotted
+ * and "looking better" once it finished: nothing about them had changed except how many of their
+ * columns the x array could hold. The smooth half was the lie — a sub-ohm DUT measured by chirp
+ * really is that ragged, and 1600 columns subsampled to 20 is a random walk through them rather than
+ * an average of them.</p>
+ *
+ * <p>What that costs is that the live series no longer lands only on measured samples: inside the
+ * span it is interpolated at the inserted frequencies, exactly as the overlays are. The Data points
+ * markers are therefore filtered back to `measuredIndices` so they still mark real measurements, and
+ * the cursor reads an interpolated value between two points — the same thing it has always reported
+ * for an overlay.</p>
+ */
 const gridHz = computed<Float64Array>(() => {
   const t = trace.value
   const cal = props.showShortCal ? storedShortCal.value : null
   const base = t ? t.freqHz : (cal?.freqHz ?? [])
 
-  return extendOverBands(
+  return mergeGrids(
     base,
     overlayCurves.value.map((overlay) => overlay.trace.freqHz),
   )
 })
 
-/**
- * The measured grid, widened to cover every overlay's band.
- *
- * <p><b>Why the live grid alone will not do.</b> uPlot's AlignedData gives every series one shared x
- * array, so anything the x array does not reach simply is not drawn. A stepped sweep publishes after
- * every point, so its grid <i>grows</i> — and an overlay resampled onto it was therefore clipped to
- * however far the sweep had got. A stored result put on the chart for comparison vanished the moment
- * a new run started and then crept back in from the left over the next few minutes, which reads as
- * the overlay being consumed by the measurement.</p>
- *
- * <p>Only points <b>outside</b> the measured span are added, never between measured ones. That is
- * what keeps everything else honest: inside the span the x array is still exactly the measured
- * frequencies, so the live series lands on real samples, the Data points markers mark real
- * measurements, and the cursor reads a measured value rather than an interpolated one. Beyond the
- * span the live series is null, so the trace ends where the measurement ends and the cursor says
- * "—" — which is the truth.</p>
- */
-function extendOverBands(base: ArrayLike<number>, extras: ArrayLike<number>[]): Float64Array {
-  if (base.length === 0) {
-    const first = extras.find((e) => e.length > 0)
-    return first ? Float64Array.from(first as ArrayLike<number>) : new Float64Array()
-  }
-
-  const low = base[0]
-  const high = base[base.length - 1]
-
-  const outside: number[] = []
-  for (const extra of extras) {
-    for (let i = 0; i < extra.length; i++) {
-      const f = extra[i]
-      if (f < low || f > high) outside.push(f)
-    }
-  }
-
-  if (outside.length === 0) return Float64Array.from(base as ArrayLike<number>)
-
-  // De-duplicated: two overlays covering the same band contribute the same frequencies, and a
-  // repeated x is a zero-width segment uPlot has to draw for nothing.
-  const merged = [...new Set([...(Array.from(base as ArrayLike<number>) as number[]), ...outside])]
-  merged.sort((a, b) => a - b)
-  return Float64Array.from(merged)
-}
+/** Which columns of the grid were measured — the only ones a Data points marker may sit on. */
+const measuredIndices = computed(() => measuredColumns(gridHz.value, trace.value?.freqHz ?? []))
 
 /** The short standard resolved onto the chart's grid — magnitude and angle from one inversion. */
 const shortCal = computed(() =>
@@ -307,27 +299,23 @@ function interpolateOnto(
 }
 
 /**
- * A per-measured-point array placed onto `grid`, null wherever the grid reaches past the measurement.
+ * The live trace's own phase or coherence on the chart's grid, null wherever the grid reaches past
+ * the measurement.
  *
- * <p>Not interpolated, unlike `resampleOnto`: phase and coherence are read at the point
- * rather than derived from a curve, and inventing values between them would be inventing
- * measurements. The measured frequencies are a prefix-aligned subset of the grid, so a single walk
- * placing each sample at its own frequency is enough.</p>
+ * <p>Interpolated between the measured points, like everything else on this chart. It used to be
+ * placed sample-for-sample on the grid and left null between — which was exact while the grid held
+ * nothing but measured frequencies, and would now draw the live phase as a row of dashes with a gap
+ * at every overlay column. The magnitude has always been interpolated onto this grid by
+ * `resampleOnto`, so the two are consistent rather than one being more honest than the other; the
+ * marker filter is what still says which columns were measured.</p>
  */
-function padToGrid(
+function pointSeriesOnto(
   values: number[] | undefined,
   freqHz: number[] | undefined,
   grid: Float64Array,
 ): (number | null)[] {
-  const out = new Array<number | null>(grid.length).fill(null)
-  if (!values || !freqHz || values.length === 0) return out
-
-  let j = 0
-  for (let i = 0; i < grid.length && j < freqHz.length; i++) {
-    if (grid[i] === freqHz[j]) out[i] = values[j++]
-  }
-
-  return out
+  if (!values || !freqHz || values.length === 0) return new Array<number | null>(grid.length).fill(null)
+  return interpolateOnto(freqHz, values, grid, (v) => v)
 }
 
 function buildData(): uPlot.AlignedData {
@@ -336,10 +324,11 @@ function buildData(): uPlot.AlignedData {
   const series: (Float64Array | (number | null)[])[] = []
 
   if (t) {
-    // Through the same resampler the overlays use, because `x` may now be wider than the measured
-    // grid. Inside the measured span every x value *is* a measured frequency, so this returns the
-    // measured number exactly (the interpolation lands on t = 0); outside it, null, which is what
-    // stops the trace being drawn across frequencies nobody has measured yet.
+    // Through the same resampler the overlays use, because `x` carries their columns as well as the
+    // measured ones. At a measured frequency this returns that number exactly (the interpolation
+    // lands on t = 0); between two of them it interpolates, which is the segment uPlot would draw
+    // anyway; outside the measured span, null, which is what stops the trace being drawn across
+    // frequencies nobody has measured yet.
     series.push(resampleOnto(t, x))
   } else {
     series.push(new Array<number | null>(x.length).fill(null))
@@ -349,15 +338,15 @@ function buildData(): uPlot.AlignedData {
 
   if (shortCalOhms.value) series.push(shortCalOhms.value)
 
-  // Padded to `x` for the same reason the magnitude is: these arrays are indexed by the measured
+  // Resolved onto `x` for the same reason the magnitude is: these arrays are indexed by the measured
   // grid, and uPlot pairs series with x by position, so a short array would shift every phase and
   // coherence sample onto a lower frequency than it was measured at.
   if (props.showPhase) {
-    series.push(padToGrid(t?.phaseDeg, t?.freqHz, x))
+    series.push(pointSeriesOnto(t?.phaseDeg, t?.freqHz, x))
     for (const overlay of overlayCurves.value) series.push(resamplePhaseOnto(overlay.trace, x))
   }
   if (shortCalPhase.value) series.push(shortCalPhase.value)
-  if (props.showCoherence) series.push(padToGrid(t?.coherence, t?.freqHz, x))
+  if (props.showCoherence) series.push(pointSeriesOnto(t?.coherence, t?.freqHz, x))
 
   return [x, ...series] as uPlot.AlignedData
 }
@@ -535,7 +524,11 @@ function buildSeries(p: ChartPalette): uPlot.Series[] {
       stroke: p.color(s.pair),
       width: s.width,
       dash: s.dash,
-      points: { show: s.points, size: 4 },
+      // `filter` keeps a Data points marker on the columns that were actually measured. The grid
+      // also carries every overlay's columns (see mergeGrids), where the live series is an
+      // interpolation between two measurements rather than a measurement — and a marker there would
+      // claim a point that was never taken, which is the whole thing this option is asked for.
+      points: { show: s.points, size: 4, ...(s.points ? { filter: () => measuredIndices.value } : {}) },
     })),
   ]
 }

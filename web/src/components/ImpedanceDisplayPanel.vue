@@ -2,6 +2,7 @@
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { computed, watch } from 'vue'
 import type { ImpedanceView, ImpedanceZScale } from '../api/client'
+import type { OverlayEntry } from '../composables/useMeasurements'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { dbOhmsToOhms } from '../impedance/equivalent'
@@ -9,6 +10,12 @@ import { standardOnGrid } from '../impedance/standard'
 
 const props = defineProps<{
   traces: ImpedanceTrace[]
+  /**
+   * The checked history items the chart is drawing, handed down from App.vue rather than filtered
+   * again here: Autofit has to fit what is drawn, and `visibleImpedanceOverlays` is the one place
+   * that knows which stored results belong on this screen (see measurements/overlayScope.ts).
+   */
+  overlays: OverlayEntry[]
   running: boolean
 }>()
 
@@ -65,6 +72,30 @@ function commitBoundedNumber(event: Event, current: number, lo: number, hi: numb
 
 const trace = computed(() => props.traces.find((t) => t.kind === 'Impedance') ?? null)
 
+/**
+ * Every impedance curve on the chart: the live one, then each checked history item's.
+ *
+ * <p><b>The overlays are half of what Autofit is for.</b> Fitted to the live trace alone, the button
+ * did nothing at all on the commonest use of this screen — check a stored result on with nothing
+ * running, press Autofit, and all three fits returned at their opening guard because there was no
+ * live trace to measure (reported 2026-10-20). With a live run it was worse than nothing: the window
+ * was sized to the live curve and the stored one it is there to be compared against was left
+ * wherever it fell. The sweep and frequency-response panels have fitted their overlays since
+ * 2026-09-30; this one was simply missed.</p>
+ */
+const drawnCurves = computed<ImpedanceTrace[]>(() => {
+  const stored = props.overlays
+    .map((o) => o.impedanceTraces?.find((t) => t.kind === 'Impedance'))
+    .filter((t): t is ImpedanceTrace => t !== undefined)
+
+  return trace.value ? [trace.value, ...stored] : stored
+})
+
+/** The grid the short standard is sampled on for the fits: whatever curve is there to sample it against. */
+function standardGrid(cal: { freqHz: number[] }): number[] {
+  return drawnCurves.value.find((c) => c.freqHz.length > 0)?.freqHz ?? cal.freqHz
+}
+
 // The stored short standard, for the autofit below. Same module-level state the chart reads, so the
 // two cannot disagree about which standard or which reference resistor is in play.
 const { storedShortCal, referenceOhms } = useImpedance()
@@ -115,14 +146,13 @@ function onBottomPhaseChange(event: Event) {
  * matches what is on screen rather than approximating it.</p>
  */
 function autofitZ() {
-  const t = trace.value
   const cal = showShortCal.value ? storedShortCal.value : null
-  if ((!t || t.freqHz.length === 0) && !cal) return
+  if (drawnCurves.value.length === 0 && !cal) return
 
   let min = Infinity
   let max = -Infinity
 
-  if (t) {
+  for (const t of drawnCurves.value) {
     for (let i = 0; i < t.freqHz.length; i++) {
       if (t.freqHz[i] < xFromHz.value || t.freqHz[i] > xToHz.value) continue
       min = Math.min(min, dbOhmsToOhms(t.magnitudeMinDbOhms[i]))
@@ -131,8 +161,8 @@ function autofitZ() {
   }
 
   if (cal) {
-    // The chart's own grid choice, mirrored: the DUT's where there is one, the standard's otherwise.
-    const grid = t && t.freqHz.length > 0 ? t.freqHz : cal.freqHz
+    // The chart's own grid choice, mirrored: a drawn curve's where there is one, the standard's otherwise.
+    const grid = standardGrid(cal)
     const curve = standardOnGrid(cal, grid, referenceOhms.value)
     const ohms = curve?.ohms
 
@@ -161,14 +191,13 @@ function autofitZ() {
  * fixture — so a window fitted to a flat DUT alone would put it off the chart.</p>
  */
 function autofitPhase() {
-  const t = trace.value
   const cal = showShortCal.value ? storedShortCal.value : null
-  if ((!t || t.phaseDeg.length === 0) && !cal) return
+  if (drawnCurves.value.length === 0 && !cal) return
 
   let min = Infinity
   let max = -Infinity
 
-  if (t) {
+  for (const t of drawnCurves.value) {
     for (let i = 0; i < t.phaseDeg.length; i++) {
       if (t.freqHz[i] < xFromHz.value || t.freqHz[i] > xToHz.value) continue
       min = Math.min(min, t.phaseDeg[i])
@@ -177,7 +206,7 @@ function autofitPhase() {
   }
 
   if (cal) {
-    const grid = t && t.freqHz.length > 0 ? t.freqHz : cal.freqHz
+    const grid = standardGrid(cal)
     const phaseDeg = standardOnGrid(cal, grid, referenceOhms.value)?.phaseDeg
 
     for (let i = 0; phaseDeg && i < phaseDeg.length; i++) {
@@ -218,12 +247,17 @@ function roundUp125(v: number): number {
  */
 let fittedThisRun = false
 
-/** The measured band, snapped out to the dropdowns' own presets — the same shape as every other panel's. */
+/**
+ * The measured band, snapped out to the dropdowns' own presets — the same shape as every other
+ * panel's, over every curve on the chart rather than the live one alone. A stored 20 Hz–20 kHz run
+ * checked on under a sweep that has reached 400 Hz is still a curve the window has to hold.
+ */
 function autofitX() {
-  const t = trace.value
-  if (!t || t.freqHz.length === 0) return
-  const from = t.freqHz[0]
-  const to = t.freqHz[t.freqHz.length - 1]
+  const bands = drawnCurves.value.filter((t) => t.freqHz.length > 0)
+  if (bands.length === 0) return
+
+  const from = Math.min(...bands.map((t) => t.freqHz[0]))
+  const to = Math.max(...bands.map((t) => t.freqHz[t.freqHz.length - 1]))
   xFromHz.value = [...X_FROM_OPTIONS].reverse().find((v) => v <= from) ?? X_FROM_OPTIONS[0]
   xToHz.value = X_TO_OPTIONS.find((v) => v >= to) ?? X_TO_OPTIONS[X_TO_OPTIONS.length - 1]
 }

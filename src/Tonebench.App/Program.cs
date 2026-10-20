@@ -240,6 +240,7 @@ try
     builder.Services.AddSingleton<MeasurementRepository>();
     builder.Services.AddSingleton<TrashRepository>();
     builder.Services.AddSingleton<MeasurementSaveService>();
+    builder.Services.AddSingleton<SimulationImportProgress>();
     builder.Services.AddSingleton<SimulationImportService>();
     builder.Services.AddSingleton<SimulationResponseImportService>();
 
@@ -520,7 +521,11 @@ static bool IsSuccessfulPoll(HttpContext httpContext, Exception? exception)
         return false;
 
     PathString path = httpContext.Request.Path;
-    return path == "/api/device" || path == "/api/soundcard/levels" || path == "/api/load";
+    return path == "/api/device"
+        || path == "/api/soundcard/levels"
+        || path == "/api/load"
+        // Polled twice a second for the length of an import, which on a 220 MB file is minutes.
+        || path == "/api/simulations/progress";
 }
 
 /// <summary>The stored detailed-logging switch, or off when nothing is stored or the document is unreadable.</summary>

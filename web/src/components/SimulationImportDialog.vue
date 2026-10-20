@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { api, type SimulationFileInfo } from '../api/client'
 import {
   simulationFit,
@@ -61,6 +61,36 @@ const busy = ref(false)
  * are missing before the user reads a curve off it.
  */
 const importNote = ref<string | null>(null)
+
+/**
+ * How far the server has got, polled while our own POST is in flight — it does not answer until
+ * the whole file is read, so the count cannot come back with it. Twice a second, which is the rate
+ * the run count changes at on the slowest file measured here, and the poll is kept out of the
+ * request log the way every other poll is (`Program.IsSuccessfulPoll`).
+ */
+const progress = ref<{ done: number; total: number } | null>(null)
+let progressTimer: ReturnType<typeof setInterval> | null = null
+
+function watchProgress() {
+  stopWatchingProgress()
+  progress.value = null
+  progressTimer = setInterval(async () => {
+    try {
+      progress.value = await api.simulationProgress()
+    } catch {
+      // A failed poll says nothing about the import, which is still running; the spinner simply
+      // goes back to its plain form.
+      progress.value = null
+    }
+  }, 500)
+}
+
+function stopWatchingProgress() {
+  if (progressTimer !== null) clearInterval(progressTimer)
+  progressTimer = null
+}
+
+onBeforeUnmount(stopWatchingProgress)
 
 const form = reactive({
   leftTraceIndex: null as number | null,
@@ -136,6 +166,8 @@ async function inspect(path: string) {
     // is in, and the first thing anyone does next is pick a different file from it.
   } finally {
     busy.value = false
+    stopWatchingProgress()
+    progress.value = null
   }
 }
 
@@ -233,15 +265,21 @@ const busyLabel = computed(() => {
   if (info.value === null) return 'Reading the file…'
   const runs = chosenSweeps.value.length
   if (!isStepped.value) return 'Importing…'
+
+  // "Analysed 13 of 61" once the server has a count to give, which is the difference between
+  // waiting and wondering whether it has stalled on a file that takes minutes.
+  const done = progress.value?.done
+  const total = progress.value?.total ?? runs
   return sweepAxis.value
-    ? `Analysing ${runs} run${runs === 1 ? '' : 's'} into one sweep…`
-    : `Importing ${runs} run${runs === 1 ? '' : 's'}…`
+    ? `Analys${done === undefined ? 'ing' : 'ed'} ${done === undefined ? '' : `${done} of `}${total} run${total === 1 ? '' : 's'} into one sweep…`
+    : `Import${done === undefined ? 'ing' : 'ed'} ${done === undefined ? '' : `${done} of `}${total} run${total === 1 ? '' : 's'}…`
 })
 
 async function submit() {
   if (!canImport.value || props.measurementTypeId === null || !info.value) return
   busy.value = true
   error.value = null
+  watchProgress()
   try {
     const body = {
       path: info.value.path,
@@ -334,11 +372,18 @@ async function submit() {
           which is the whole reason the same file can be imported two ways: on an FFT measurement
           each is a spectrum of its own, on a THD-vs-frequency one they are the points of a curve.
         -->
-        <fieldset v-if="isStepped" class="mb-3 rounded border border-neutral-200 p-2 dark:border-neutral-700">
-          <legend class="px-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {{ sweepAxis ? 'Runs to use as points' : 'Runs to import' }}
-          </legend>
-          <div class="flex flex-wrap gap-x-4 gap-y-1">
+        <!--
+          Collapsed by default: every run is ticked, which is what anyone wants of a `.step`ped
+          file, and sixty-one checkboxes otherwise push the settings -- and the Import button --
+          off the bottom of the screen (Joost, 2026-10-20). The summary says how many are in and
+          how many there are, so the one case worth opening it for is visible without doing so.
+        -->
+        <details v-if="isStepped" class="mb-3 rounded border border-neutral-200 p-2 dark:border-neutral-700">
+          <summary class="cursor-pointer text-xs text-neutral-500 dark:text-neutral-400">
+            {{ sweepAxis ? 'Runs to use as points' : 'Runs to import' }} —
+            <strong>{{ chosenSweeps.length === sweeps.length ? `all ${sweeps.length}` : `${chosenSweeps.length} of ${sweeps.length}` }}</strong>
+          </summary>
+          <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             <label v-for="sweep in sweeps" :key="sweep.index" class="flex items-center gap-1.5 text-sm">
               <input
                 type="checkbox"
@@ -361,7 +406,7 @@ async function submit() {
               Each is stored as its own result, named after the step.
             </template>
           </p>
-        </fieldset>
+        </details>
 
         <p
           v-for="warning in info.warnings"
@@ -562,7 +607,13 @@ async function submit() {
 
       <BusyNote v-else-if="!error" :label="busyLabel" class="py-1" />
 
-      <BusyNote v-if="busy && info" :label="busyLabel" class="mt-4" />
+      <BusyNote
+        v-if="busy && info"
+        :label="busyLabel"
+        :done="progress?.done"
+        :total="progress?.total"
+        class="mt-4"
+      />
 
       <p
         v-if="sweepBlocker && !importNote"

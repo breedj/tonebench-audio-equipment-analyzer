@@ -136,6 +136,7 @@ public sealed record SimulationImportRequest(
 /// </summary>
 public sealed class SimulationImportService(
     MeasurementRepository measurementRepository,
+    SimulationImportProgress progress,
     IOptions<JsonOptions> jsonOptions,
     ILogger<SimulationImportService> logger)
 {
@@ -379,11 +380,24 @@ public sealed class SimulationImportService(
         // each SimulationSweep is the window into them.
         double[][] columns = LtspiceRawFile.ReadColumns(request.Path, header, indices, ct);
 
-        var resultIds = new List<long>(chosen.Count);
-        foreach (var sweep in chosen)
-            resultIds.Add(await ImportRunAsync(measurementTypeId, request, info, header, indices, columns, sweep, ct));
+        // The dialog's own counter: one step per run, cleared whatever happens -- see
+        // SimulationImportProgress.
+        progress.Begin(chosen.Count);
+        try
+        {
+            var resultIds = new List<long>(chosen.Count);
+            foreach (var sweep in chosen)
+            {
+                resultIds.Add(await ImportRunAsync(measurementTypeId, request, info, header, indices, columns, sweep, ct));
+                progress.Advance();
+            }
 
-        return resultIds;
+            return resultIds;
+        }
+        finally
+        {
+            progress.Clear();
+        }
     }
 
     /// <summary>Which runs an import asked for, refusing an index the file does not have.</summary>
@@ -468,6 +482,21 @@ public sealed class SimulationImportService(
     public async Task<SweepImportResult> ImportSweepAsync(
         long measurementTypeId, SimulationImportRequest request, CancellationToken ct)
     {
+        // The counter is cleared here rather than at the end of the body, so a refusal -- which is
+        // a throw from the middle of it -- does not leave a stale reading for the next dialog.
+        try
+        {
+            return await ImportSweepCoreAsync(measurementTypeId, request, ct);
+        }
+        finally
+        {
+            progress.Clear();
+        }
+    }
+
+    private async Task<SweepImportResult> ImportSweepCoreAsync(
+        long measurementTypeId, SimulationImportRequest request, CancellationToken ct)
+    {
         var info = Inspect(
             request.Path, request.MeasurementHiFreqHzOrDefault(), request.MeasurementLoFreqHz, ct);
         var header = LtspiceRawFile.ReadHeader(request.Path);
@@ -497,6 +526,10 @@ public sealed class SimulationImportService(
         var traceNames = indices.Skip(1).Select(i => header.Variables[i].Name).ToList();
         var traceUnits = indices.Skip(1).Select(i => header.Variables[i].Unit).ToList();
 
+        // What the dialog's spinner counts. Cleared in the finally below, so a refusal leaves no
+        // reading behind.
+        progress.Begin(chosen.Count);
+
         SimulationAnalysis? firstSpec = null;
         var skipped = new List<SkippedRun>();
         var runs = new List<(SimulationSweep Sweep, List<ThdSweepPoint> Points)>(chosen.Count);
@@ -508,6 +541,7 @@ public sealed class SimulationImportService(
             ct.ThrowIfCancellationRequested();
 
             var (spec, rendered, samples) = AnalyseRun(request, info, header, indices, wholeColumns, sweep, ct);
+            progress.Advance();
 
             // The *first* run's, not the last. A periodic record nudges the analysis rate to fit
             // whole cycles of that point's own tone, so every point has a slightly different one and

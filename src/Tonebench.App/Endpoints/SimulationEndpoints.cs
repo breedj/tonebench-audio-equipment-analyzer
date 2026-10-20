@@ -36,6 +36,20 @@ public static class SimulationEndpoints
                 return Results.Ok(ToResponse(info, request.MeasurementHiFreqHz ?? 20_000.0));
             }));
 
+        // How far through a multi-run import the service is. Polled by the dialog that is waiting
+        // on the POST, because that POST does not answer until it is finished -- see
+        // SimulationImportProgress. Never a refusal: nothing running is `null`, which the dialog
+        // reads as "no count yet" and keeps its plain spinner.
+        //
+        // Nothing running is **204**, not a JSON `null`: neither `Results.Ok(null)` nor
+        // `Results.Json<T?>(null)` writes one -- both short-circuit a null value and send a 200 with
+        // an empty body (measured) -- so the route would claim a shape it does not send. The client
+        // reads either as "no count" and keeps its plain spinner; 204 is the one that says so.
+        group.MapGet("/progress", (SimulationImportProgress progress) =>
+            progress.Current is { } now
+                ? Results.Ok(new SimulationProgressResponse(now.Done, now.Total))
+                : Results.NoContent());
+
         group.MapPost("/{measurementTypeId:long}/import", async (
             long measurementTypeId,
             ImportSimulationRequest request,
@@ -439,6 +453,9 @@ public sealed record SimulationSweepResponse(
     double StartTimeS,
     double EndTimeS,
     string? Label);
+
+/// <summary>How many runs of a multi-run import are done, for the dialog waiting on it.</summary>
+public sealed record SimulationProgressResponse(int Done, int Total);
 
 /// <summary>An imported sweep, and one sentence naming the runs that were left out — empty when none were.</summary>
 public sealed record ImportedSweepResponse(long ResultId, string Note);

@@ -274,6 +274,19 @@
           </td>
         </tr>
         <tr>
+          <td><code>.save V(in) V(out)</code></td>
+          <td>
+            <strong>Worth adding.</strong> LTspice saves every node and every device current
+            unless told otherwise, and the import reads two traces at most. Measured on the
+            reference amplifier: 141 variables over 245 004 points is a <strong>276 MB</strong>
+            <code>.raw</code>, where the same run saving only the nodes the import uses is
+            <strong>4 MB</strong> — and its 61-step sweep, <strong>220 MB</strong> with the
+            three traces it saves, would be <strong>7.8 GB</strong> with all of them. It costs
+            nothing in accuracy: what is saved is bit-identical, and what is dropped was never
+            read. It costs reading time too — the import reads the whole file.
+          </td>
+        </tr>
+        <tr>
           <td><code>.options numdgt=7</code></td>
           <td>
             <strong>Not needed.</strong> It writes double-precision data, doubling the file, and

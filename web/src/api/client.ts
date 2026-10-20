@@ -2573,6 +2573,12 @@ export interface ImportedSimulation {
   resultId: number
 }
 
+/** How many runs of a multi-run import are done. */
+export interface SimulationProgress {
+  done: number
+  total: number
+}
+
 /**
  * An imported sweep, and one sentence naming the runs that were left out — empty when every run
  * became a point. Not an error: the import succeeded, and a sweep that is not the whole file has
@@ -3682,6 +3688,17 @@ export const api = {
    * The same stepped file read as a sweep rather than as a stack of spectra: each run becomes one
    * point of a THD-vs-frequency result, at the fundamental that run's own analysis located.
    */
+  /**
+   * How far through a multi-run import the server is, or null when nothing is running. Polled by
+   * the import dialog while its own POST is in flight — that POST does not answer until the whole
+   * file is read, so the count has to come the other way.
+   *
+   * <p>Nothing running is a 204, which `request` turns into `undefined`; `?? null` is what makes
+   * the declared type true rather than nearly true.</p>
+   */
+  simulationProgress: async (): Promise<SimulationProgress | null> =>
+    (await request<SimulationProgress | null>('/simulations/progress')) ?? null,
+
   importSimulationSweep: (measurementTypeId: number, body: ImportSimulationRequest) =>
     request<ImportedSweep>(`/simulations/${measurementTypeId}/import-sweep`, {
       method: 'POST',

@@ -590,6 +590,36 @@ public class SimulationImportServiceTests : IDisposable
     }
 
     /// <summary>
+    /// The progress reading is cleared when the import ends, whichever way it ends.
+    ///
+    /// <para>It is what the dialog polls while its own POST is in flight, so a count left behind by
+    /// a finished import would draw a bar that is already part way along the moment the next one
+    /// starts — and one left behind by a <i>refused</i> import would draw it with no import running
+    /// at all. Hence the <c>finally</c> in <see cref="SimulationImportService.ImportSweepAsync"/>,
+    /// which is the only reason the refusing path is covered here too.</para>
+    /// </summary>
+    [Fact]
+    public async Task ImportSweep_WhenItEnds_LeavesNoProgressReadingBehind()
+    {
+        string good = WriteSteppedTransient("progress-ok.raw", [1_000.0, 2_000.0], h2: 0.01);
+        // Every run above the band, so nothing can be placed and the import refuses.
+        string bad = WriteSteppedTransient("progress-refused.raw", [30_000.0, 35_000.0], h2: 0.01);
+
+        await WithHarnessAsync(async h =>
+        {
+            long typeId = await h.CreateSweepTypeAsync();
+            Assert.Null(h.Progress.Current);
+
+            await h.Import.ImportSweepAsync(typeId, Request(good), CancellationToken.None);
+            Assert.Null(h.Progress.Current);
+
+            await Assert.ThrowsAsync<FormatException>(
+                () => h.Import.ImportSweepAsync(typeId, Request(bad, fftSize: 16_384), CancellationToken.None));
+            Assert.Null(h.Progress.Current);
+        });
+    }
+
+    /// <summary>
     /// The fundamental search floor follows the analysed band, so a tone below 200 Hz is found
     /// rather than mistaken for whatever noise sits above it.
     ///
@@ -1371,11 +1401,15 @@ public class SimulationImportServiceTests : IDisposable
     }
 
     private sealed class Harness(
-        SimulationImportService import, MeasurementRepository measurements, ProjectRepository projects)
+        SimulationImportService import, MeasurementRepository measurements, ProjectRepository projects,
+        SimulationImportProgress progress)
     {
         public SimulationImportService Import { get; } = import;
         public MeasurementRepository Measurements { get; } = measurements;
         public ProjectRepository Projects { get; } = projects;
+
+        /// <summary>The same instance the service writes to, so a test can read what the dialog polls.</summary>
+        public SimulationImportProgress Progress { get; } = progress;
 
         private long? _projectId;
 
@@ -1400,6 +1434,7 @@ public class SimulationImportServiceTests : IDisposable
         jsonOptions.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
         body(new SimulationImportService(
             new MeasurementRepository(new SqliteConnectionFactory(new TonebenchDatabaseOptions { Path = ":memory:" })),
+            new SimulationImportProgress(),
             Options.Create(jsonOptions),
             NullLogger<SimulationImportService>.Instance));
     }
@@ -1417,10 +1452,12 @@ public class SimulationImportServiceTests : IDisposable
             jsonOptions.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 
             var measurements = new MeasurementRepository(factory);
+            var progress = new SimulationImportProgress();
             var import = new SimulationImportService(
-                measurements, Options.Create(jsonOptions), NullLogger<SimulationImportService>.Instance);
+                measurements, progress, Options.Create(jsonOptions),
+                NullLogger<SimulationImportService>.Instance);
 
-            await body(new Harness(import, measurements, new ProjectRepository(factory)));
+            await body(new Harness(import, measurements, new ProjectRepository(factory), progress));
         }
         finally
         {

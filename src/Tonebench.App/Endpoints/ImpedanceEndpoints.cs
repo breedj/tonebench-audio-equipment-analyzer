@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Tonebench.App.Services;
+using Tonebench.Device;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Endpoints;
@@ -155,7 +156,12 @@ public sealed record ImpedanceStartRequest(
     int StepsPerOctave = 5,
     bool AdaptiveResolution = true,
     int SteppedFftSize = SteppedResponseRequest.DefaultFftSize,
-    double SteppedSampleRateHz = SteppedResponseRequest.DefaultSampleRateHz)
+    double SteppedSampleRateHz = SteppedResponseRequest.DefaultSampleRateHz,
+    /// <summary>
+    /// Where the periodic pink stimulus stops being pink: flat below, −3 dB per octave above. Read
+    /// only by a noise run — see <c>Tonebench.Device.PeriodicPinkNoise</c>.
+    /// </summary>
+    double NoiseCutoffHz = PeriodicPinkNoise.DefaultCutoffHz)
 {
     /// <summary>
     /// The measurement this request asks for.
@@ -204,7 +210,8 @@ public sealed record ImpedanceStartRequest(
             AdaptiveResolution,
             SteppedFftSize,
             SteppedSampleRateHz,
-            CalibrationLevelValue);
+            CalibrationLevelValue,
+            NoiseCutoffHz);
 }
 
 /// <param name="ChartAnnotations">

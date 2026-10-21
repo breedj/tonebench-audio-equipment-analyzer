@@ -249,20 +249,34 @@ internal static class ResponseCaptureSupport
     }
 
     /// <summary>
-    /// Pink noise at a broadband RMS, on both channels — the impedance measurement's third stimulus.
+    /// Periodic pink noise at a broadband RMS, on both channels — the impedance measurement's third
+    /// stimulus, and ARTA's "PN Pink".
     ///
-    /// <para>Nothing here is periodic in the record and nothing needs to be: this stimulus is only
-    /// ever analysed against a <i>measured</i> reference channel, so what matters is that every bin
-    /// gets energy, not that the record holds a whole period of anything. That is also why the
-    /// analysis window is Hann rather than the chirp's Rectangular — see
-    /// <c>ImpedanceRunner.BuildOptions</c>.</para>
+    /// <para><b>One whole period per record</b>, which is the chirp's arrangement applied to a noise:
+    /// <paramref name="periodFrames"/> is the analysis length, so every record is excited by the same
+    /// deterministic amplitude at every bin and the analysis window is <b>Rectangular</b> — see
+    /// <c>ImpedanceRunner.BuildOptions</c>. It used to be a continuous random stream, on the
+    /// reasoning that a measurement against a <i>measured</i> reference channel only needs energy in
+    /// every bin and not a whole period of anything. True, and not enough: a random stream's bins are
+    /// Rayleigh distributed about their mean, so one in ten lands 8.8 dB down in any given record and
+    /// one in a hundred 19 dB down, and on a divider — where the DUT channel sits 40 dB below the
+    /// reference — those are the bins that read wrong. Measured on a real fixture 2026-10-21, the
+    /// bins that lost coherence were the ones carrying external interference, and the curve spiked
+    /// wherever a momentarily weak stimulus bin met one.</para>
     /// </summary>
-    public static GeneratorConfig BuildPinkNoiseGenerator(double levelDbv)
+    /// <param name="periodFrames">The analysis record length, so the record holds exactly one period.</param>
+    /// <param name="cutoffHz">Where the sequence stops being pink: flat below, −3 dB per octave above.</param>
+    public static GeneratorConfig BuildPinkNoiseGenerator(double levelDbv, int periodFrames, double cutoffHz)
     {
         var channel = new ChannelGeneratorConfig(Enabled: true, Tones: [])
         {
             Kind = GeneratorKind.PinkNoise,
-            Noise = new WhiteNoiseSettings { LevelDbv = levelDbv },
+            Noise = new WhiteNoiseSettings
+            {
+                LevelDbv = levelDbv,
+                PeriodFrames = periodFrames,
+                CutoffHz = cutoffHz,
+            },
         };
 
         // Nothing to snap: bin snapping moves a tone onto a coherent bin, and noise has no tone.

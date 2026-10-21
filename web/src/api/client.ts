@@ -738,6 +738,8 @@ export interface ImpedanceStartRequest {
   endFreqHz: number
   stepsPerOctave: number
   adaptiveResolution: boolean
+  /** Where the periodic pink stimulus stops being pink: flat below, −3 dB per octave above. */
+  noiseCutoffHz?: number
 }
 
 /**
@@ -778,6 +780,11 @@ export interface ImpedanceParameters {
    * beside the two fields above, which stay authoritative; absent on anything saved before it.
    */
   byStimulus?: ImpedanceSettingsByStimulus | null
+  /**
+   * Where the periodic pink stimulus stops being pink: flat below, −3 dB per octave above. Absent
+   * on anything saved before it existed.
+   */
+  noiseCutoffHz?: number | null
   /** The drive level calibration runs use, in the same unit as `levelValue`. */
   calibrationLevelValue?: number | null
   cableMode: ImpedanceCableModeName

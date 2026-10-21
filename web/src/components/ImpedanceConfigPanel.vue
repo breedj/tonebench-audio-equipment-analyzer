@@ -124,6 +124,9 @@ const form = reactive({
   averageCount: STIMULUS_DEFAULTS.PinkNoise.averageCount,
   byStimulus: defaultsByStimulus(),
   chirpStartHz: 10,
+  // Where the periodic pink stimulus stops being pink. LIMP's own default view of the same control,
+  // and below the 4 Hz the analysis starts at, so it changes nothing in band until it is raised.
+  noiseCutoffHz: 5,
   cableMode: 'None' as ImpedanceCableModeName,
   fixedCableOhms: 0,
   fixedCableMillihenry: 0,
@@ -180,6 +183,9 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.smoothingDenominator === 'number') form.smoothingDenominator = stored.smoothingDenominator
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (typeof stored.chirpStartHz === 'number') form.chirpStartHz = stored.chirpStartHz
+  if (typeof stored.noiseCutoffHz === 'number' && stored.noiseCutoffHz > 0) {
+    form.noiseCutoffHz = stored.noiseCutoffHz
+  }
   const known = (value: unknown): value is ImpedanceStimulusName =>
     STIMULI.some((option) => option.value === value)
   if (known(stored.stimulus)) form.stimulus = stored.stimulus
@@ -336,6 +342,14 @@ const usesBroadband = computed(
 
 /** Whether the *measurement* (rather than its calibration) analyses a whole spectrum. */
 const measuresBroadband = computed(() => BROADBAND_STIMULI.includes(form.stimulus))
+
+/**
+ * Whether either selector plays noise — the same shape as `usesStepped`, and the same reason: the
+ * cut-off belongs to the pink stimulus, whichever of the two is playing it.
+ */
+const usesNoise = computed(
+  () => form.stimulus === 'PinkNoise' || form.calibrationStimulus === 'PinkNoise',
+)
 
 /** A stepped measurement is single-shot; App.vue reads this to hide the continuous-run button. */
 watch(
@@ -518,6 +532,7 @@ function buildParamsJson(): string {
     frequencySpanHz: form.frequencySpanHz,
     resolutionMultiplier: form.resolutionMultiplier,
     chirpStartHz: form.chirpStartHz,
+    noiseCutoffHz: form.noiseCutoffHz,
     levelValue: form.levelValue,
     levelUnit: form.levelUnit,
     smoothingDenominator: form.smoothingDenominator,
@@ -572,6 +587,7 @@ function buildRequest(continuous: boolean, calTarget: ImpedanceCalTargetName = '
     continuous: calibrating || form.stimulus === 'SteppedSine' ? false : continuous,
     calibrationLevelValue: form.calibrationLevelValue,
     chirpStartHz: form.chirpStartHz,
+    noiseCutoffHz: form.noiseCutoffHz,
     calTarget,
     cableMode: calibrating ? 'None' : form.cableMode,
     fixedCableOhms: form.fixedCableOhms,
@@ -728,6 +744,25 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       >
         <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span / 1000 }} kHz</option>
       </select>
+    </label>
+
+    <!-- Pink noise's counterpart to the chirp's start: where the 1/f slope begins. Shown whenever
+         either selector asks for noise, the same rule the chirp start follows. -->
+    <label
+      v-if="usesNoise"
+      class="tb-field"
+      title="Where the pink slope begins. Below it the stimulus is flat rather than still rising, which keeps the bottom of the band from eating the DAC's headroom. LIMP suggests setting it near the impedance maximum — 20 to 100 Hz for a loudspeaker."
+    >
+      <span>Pink noise cut-off (Hz)<span v-if="form.stimulus !== 'PinkNoise'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
+      <input
+        v-model.number="form.noiseCutoffHz"
+        type="number"
+        min="1"
+        max="1000"
+        step="1"
+        :disabled="running"
+        class="tb-input"
+      />
     </label>
 
     <label v-if="usesBroadband" class="tb-field">

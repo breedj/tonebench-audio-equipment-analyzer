@@ -73,19 +73,15 @@ const { showPage } = useManual()
       is not useful.
     </p>
     <p>
-      <strong>Pink noise</strong> plays continuously and builds the answer up out of independent
-      records. It costs the same as the chirp &mdash; the same span, the same record length, the same
-      handful of averages &mdash; and shares its settings, but the two differ in what an extra average
-      buys. A chirp's records are repeats of one deterministic sweep, so averaging confirms a reading
-      rather than improving it; every noise record is a fresh draw, so the estimate keeps getting
-      quieter for as long as you let it run, and the curve is redrawn after each one rather than only
-      at the end. Under <strong>Run</strong> that average is a sliding window: once the first
-      <em>Averages</em> records are in, each new record replaces the oldest, so the curve never drops
-      back to a single-record estimate and the status keeps reading the full count. It also carries
-      no harmonic packets, so the gate below is not offered for it: what
-      a distorting DUT does to noise lands in the coherence, where you can see it, instead of folding
-      into the answer as ripple.
-    </p>
+      <strong>Pink noise</strong> is a periodic multisine — ARTA's "PN Pink". One component sits on
+      every analysis bin, its magnitude flat below the <em>Pink noise cut-off</em> and falling at
+      &minus;3 dB per octave above it, and the whole sequence repeats exactly once per record. That
+      last part is the point: every bin is excited by the same deterministic amplitude every time,
+      where a continuous random noise's bins vary record to record and one in ten lands 9 dB down by
+      luck. Raise the cut-off to stop the bottom of the band eating the generator's headroom — LIMP
+      suggests putting it near the impedance maximum, 20 to 100 Hz for a loudspeaker. It is still
+      noise: the crest factor is about 12 dB and the distribution close to normal, so it buys
+      steadiness rather than level</p>
     <p>
       Pink rather than white because the divider this measurement inverts is noise-limited at the
       bottom of the band, which is exactly where a white stimulus puts the least energy per octave.

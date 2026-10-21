@@ -103,6 +103,27 @@ public sealed record WhiteNoiseSettings
     /// (<c>SimulatedSignalProfile.NoiseDensityDbvPerRootHz</c>) — the two are not interchangeable.
     /// </summary>
     public double LevelDbv { get; init; } = -20.0;
+
+    /// <summary>
+    /// Makes the pink stimulus <b>periodic</b> over this many frames instead of a continuous random
+    /// stream — see <see cref="PeriodicPinkNoise"/>. Zero, the default, keeps the filtered-white
+    /// noise the generator screen plays.
+    ///
+    /// <para>Set to the analysis record length by a measurement that wants one whole period per
+    /// record, which is what makes every bin's amplitude deterministic rather than Rayleigh and lets
+    /// the analysis use a rectangular window. Read only for <see cref="GeneratorKind.PinkNoise"/>;
+    /// white noise has no periodic form here, having no shape to hold.</para>
+    ///
+    /// <para>It is a frame <i>count</i> rather than a duration for the chirp's reason: a period off
+    /// by one frame puts a drifting ripple on every record.</para>
+    /// </summary>
+    public int PeriodFrames { get; init; }
+
+    /// <summary>
+    /// Where a periodic pink sequence stops being pink, in Hz: flat below, &#8722;3 dB per octave
+    /// above. Ignored unless <see cref="PeriodFrames"/> is set.
+    /// </summary>
+    public double CutoffHz { get; init; } = PeriodicPinkNoise.DefaultCutoffHz;
 }
 
 /// <summary>

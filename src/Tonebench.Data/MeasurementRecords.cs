@@ -1451,6 +1451,12 @@ public sealed record ImpedanceParameters(
     /// a run has one stimulus and the others are a property of the configuration.</para>
     /// </summary>
     public ImpedanceStimulusSettings? ByStimulus { get; init; }
+
+    /// <summary>
+    /// Where the periodic pink stimulus stopped being pink, in Hz. Null on anything saved before it
+    /// existed and on anything that did not play noise.
+    /// </summary>
+    public double? NoiseCutoffHz { get; init; }
     /// <summary>
     /// Present when this result was imported from a simulator's <c>.ac</c> run rather than
     /// measured, and null — the default — on every measured one. The same block

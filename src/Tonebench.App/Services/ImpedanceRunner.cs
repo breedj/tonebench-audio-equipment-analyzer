@@ -865,13 +865,16 @@ public sealed class ImpedanceRunner(
     }
 
     /// <summary>
-    /// The generator config this run's stimulus needs. <paramref name="repeatFrames"/> is the chirp's
-    /// period, which has to equal the size it will be analysed at -- so the input-range probe, which
-    /// analyses short, passes its own rather than the run's.
+    /// The generator config this run's stimulus needs. <paramref name="repeatFrames"/> is the
+    /// stimulus's period, which has to equal the size it will be analysed at -- so the input-range
+    /// probe, which analyses short, passes its own rather than the run's.
+    ///
+    /// <para>Both stimuli are periodic over it: the chirp has been since it existed, and the noise
+    /// since 2026-10-21. One record, one whole period, either way.</para>
     /// </summary>
     private static GeneratorConfig BuildStimulus(ImpedanceRequest request, double amplitudeDbv, int repeatFrames) =>
         request.IsNoise
-            ? ResponseCaptureSupport.BuildPinkNoiseGenerator(amplitudeDbv)
+            ? ResponseCaptureSupport.BuildPinkNoiseGenerator(amplitudeDbv, repeatFrames, request.NoiseCutoffHz)
             : ResponseCaptureSupport.BuildChirpGenerator(
                 amplitudeDbv, request.ChirpStartHz, request.ChirpEndHz, repeatFrames);
 
@@ -1289,19 +1292,23 @@ public sealed class ImpedanceRunner(
     /// response's and load-bearing for the same reasons, with one difference: the retained complex
     /// spectrum because this measurement is built on phase, and a window that follows the stimulus.
     ///
-    /// <para><b>Rectangular for the chirp, Hann for noise.</b> The chirp is periodic in the record by
-    /// construction, so a rectangular window transforms it exactly and a taper would destroy the
-    /// periodicity the whole measurement rests on. Noise is periodic in nothing: rectangular there
-    /// splices an arbitrary discontinuity into every record and smears its energy across the
-    /// spectrum. The window cancels in the ratio either way -- both channels get the same one -- but
-    /// it decides how much of the neighbouring floor lands in each bin, which is what the coherence
-    /// figure is measuring.</para>
+    /// <para><b>Rectangular for both.</b> The chirp is periodic in the record by construction, and
+    /// since 2026-10-21 so is the noise -- its period is the record length, so a whole period
+    /// transforms exactly and a taper would destroy the periodicity the measurement now rests on in
+    /// either case. It used to be Hann for noise, which was right while that noise was a continuous
+    /// random stream periodic in nothing: rectangular there splices an arbitrary discontinuity into
+    /// every record. The window cancels in the ratio either way -- both channels get the same one --
+    /// but it decides how much of the neighbouring floor lands in each bin, which is what the
+    /// coherence figure is measuring.</para>
     /// </summary>
     private static SpectrumPipelineOptions BuildOptions(SpectrumPipelineOptions current, ImpedanceRequest request) =>
         current with
         {
             FftSize = request.FftSize,
-            Window = request.IsNoise ? WindowType.Hann : WindowType.Rectangular,
+            // Rectangular for both now: the noise is periodic over the record too, so a whole
+            // period transforms exactly and a taper would only destroy that -- the chirp's rule,
+            // applied to the stimulus that used to be the exception.
+            Window = WindowType.Rectangular,
 
             // The runner averages in the complex domain itself. The pipeline's averager works on
             // magnitudes, which would throw away the phase this measurement is entirely about.

@@ -48,7 +48,8 @@ public class ImpedanceStartRequestTests
             StepsPerOctave: 9,
             AdaptiveResolution: false,
             SteppedFftSize: 32768,
-            SteppedSampleRateHz: 96_000.0);
+            SteppedSampleRateHz: 96_000.0,
+            NoiseCutoffHz: 37.0);
 
         var measurement = wire.ToMeasurement(
             ImpedanceMethod.ReferenceResistor,
@@ -78,6 +79,7 @@ public class ImpedanceStartRequestTests
         Assert.True(measurement.ApplySweepGate);
         Assert.Same(open, measurement.OpenCal);
         Assert.Same(shortCal, measurement.ShortCal);
+        Assert.Equal(37.0, measurement.NoiseCutoffHz);
         Assert.Equal(3.5, measurement.CalibrationLevelValue);
         Assert.Equal(ImpedanceStimulus.SteppedSine, measurement.CalibrationStimulus);
         Assert.Equal(31.5, measurement.StartFreqHz);
@@ -96,8 +98,8 @@ public class ImpedanceStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(28, ConstructorParameterCount(typeof(ImpedanceStartRequest)));
-        Assert.Equal(28, ConstructorParameterCount(typeof(ImpedanceRequest)));
+        Assert.Equal(29, ConstructorParameterCount(typeof(ImpedanceStartRequest)));
+        Assert.Equal(29, ConstructorParameterCount(typeof(ImpedanceRequest)));
     }
 
     /// <summary>

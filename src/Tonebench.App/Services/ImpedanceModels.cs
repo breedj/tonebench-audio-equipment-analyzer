@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using Tonebench.Device;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Services;
@@ -174,7 +175,12 @@ public sealed record ImpedanceRequest(
     double SteppedSampleRateHz = SteppedResponseRequest.DefaultSampleRateHz,
     // The literal, not the const: a primary constructor's default cannot reference a member of the
     // type it is declaring. Kept equal to DefaultCalibrationLevelDbv by a test.
-    double CalibrationLevelValue = 0.0)
+    double CalibrationLevelValue = 0.0,
+    /// <summary>
+    /// Where the periodic pink stimulus stops being pink: flat below, &#8722;3 dB per octave above.
+    /// Read only by a noise run — see <see cref="PeriodicPinkNoise"/>, whose default this is.
+    /// </summary>
+    double NoiseCutoffHz = 5.0)
 {
     /// <summary>
     /// The drive level a calibration run uses by default, in dBV.
@@ -469,6 +475,16 @@ public sealed record ImpedanceRequest(
         {
             throw new ArgumentOutOfRangeException(
                 nameof(CalibrationLevelValue), CalibrationLevelValue, "A calibration voltage must be positive.");
+        }
+
+        // Only where a run would read it, the same rule the two settings groups follow: an untouched
+        // default must not block a measurement that never looks at it.
+        if (IsNoise && !(NoiseCutoffHz >= PeriodicPinkNoise.MinCutoffHz && NoiseCutoffHz <= PeriodicPinkNoise.MaxCutoffHz))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(NoiseCutoffHz), NoiseCutoffHz,
+                $"The pink noise cut-off must be between {PeriodicPinkNoise.MinCutoffHz:0.#} and "
+                    + $"{PeriodicPinkNoise.MaxCutoffHz:0.#} Hz.");
         }
 
         if (AverageCount is < FrequencyResponseRequest.MinAverageCount or > MaxAverageCount)

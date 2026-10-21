@@ -119,6 +119,14 @@ internal sealed class Qa40xGeneratorWaveform(Random random, double sampleRateHz)
             return 0.0;
 
         double sigma = Math.Pow(10.0, settings.LevelDbv / 20.0);
+
+        // Periodic when a measurement asked for it: a pure function of the frame index, so both
+        // channels play the same sequence and a re-primed queue rebuilds it. The filtered-white form
+        // below is recursive and therefore cannot do either on its own -- it relies on being called
+        // once per frame in order.
+        if (settings.PeriodFrames > 1)
+            return sigma * PeriodicPinkNoise.For(settings.PeriodFrames, sampleRateHz, settings.CutoffHz).Sample(frameIndex);
+
         var shaper = _pink[Math.Clamp(channelIndex, 0, _pink.Length - 1)];
         return sigma * shaper.NextStimulus(PinkNoiseShaper.WhiteAt(frameIndex));
     }

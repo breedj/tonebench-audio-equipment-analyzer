@@ -434,6 +434,7 @@ public sealed class MeasurementSaveService(
             UseGlobalFixture: useGlobalFixture)
         {
             ByStimulus = ImpedanceStimulusDefaults.All,
+            NoiseCutoffHz = PeriodicPinkNoise.DefaultCutoffHz,
         }, SerializerOptions);
 
     /// <summary>

@@ -123,13 +123,18 @@ public sealed class PeriodicPinkNoise
 
         double corner = Math.Max(cutoffHz, binHz);
 
+        // Flat to the corner, then 1/sqrt(f) -- which is -3 dB per octave in power. Continuous at
+        // the corner, so there is no step in the spectrum to show up as a kink in the curve.
+        var magnitudes = new double[bins];
         for (int k = 1; k < bins; k++)
         {
             double freqHz = k * binHz;
+            magnitudes[k] = freqHz <= corner ? 1.0 : Math.Sqrt(corner / freqHz);
+        }
 
-            // Flat to the corner, then 1/sqrt(f) -- which is -3 dB per octave in power. Continuous
-            // at the corner, so there is no step in the spectrum to show up as a kink in the curve.
-            double magnitude = freqHz <= corner ? 1.0 : Math.Sqrt(corner / freqHz);
+        for (int k = 1; k < bins; k++)
+        {
+            double magnitude = magnitudes[k];
 
             // Nyquist has no conjugate partner to carry a phase, so it stays real -- and is simply
             // left out, since a component there is half a sample's worth of nothing useful.

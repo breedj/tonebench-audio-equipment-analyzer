@@ -115,24 +115,32 @@ internal static class ImpedanceTraceBuilder
         for (int k = 0; k < binCount; k++)
             magnitude[k] = values[k].Magnitude;
 
-        var smoothed = FractionalOctaveSmoother.Smooth(magnitude, binHz, request.SmoothingDenominator);
+        // Only where the sweep put energy. Outside it the ratio is noise over nothing and the peak
+        // search would lock onto whichever out-of-band bin happened to be loudest — and, which is why
+        // this is computed *before* the smoothing rather than after it, a smoothing band reaching
+        // past the top of it drags the last columns toward whatever an out-of-band ratio inverts to.
+        // This measurement has the worst arithmetic for that of any of them: Z = R·H/(1 − H) of a
+        // noise ratio wandering near 1 is clamped at ImpedanceMath.MaxOhms, and an RMS over a band
+        // holding one such bin *is* that bin. Measured 2026-10-21 on a 1 Ω fixture: the last columns
+        // read 4.37 Ω at 1/3 octave against a true 1.06, while 1/48 — whose band reaches 3 % past
+        // each bin rather than 12 % — read 1.07 and smoothing None read 1.14.
+        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
+        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
+        if (lastBin <= firstBin)
+            lastBin = Math.Min(binCount - 1, firstBin + 1);
+
+        var band = new FractionalOctaveSmoother.Band(firstBin, lastBin);
+        var smoothed = FractionalOctaveSmoother.Smooth(magnitude, binHz, request.SmoothingDenominator, band);
 
         // The angle over the same bands, as a vector mean — see FractionalOctaveSmoother.SmoothPhaseDeg.
         // Smoothed because the magnitude is: a column whose level is an RMS over ten bins and whose
         // angle is the raw centre bin of those ten draws a readable curve beside an unreadable one,
         // from one capture.
-        var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothPhaseDeg(values, binHz, request.SmoothingDenominator);
+        var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothPhaseDeg(values, binHz, request.SmoothingDenominator, band);
 
         var traceDb = new double[binCount];
         for (int k = 0; k < binCount; k++)
             traceDb[k] = ImpedanceMath.ToDbOhms(smoothed[k]);
-
-        // Only where the sweep put energy. Outside it the ratio is noise over nothing and the peak
-        // search would lock onto whichever out-of-band bin happened to be loudest.
-        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
-        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
-        if (lastBin <= firstBin)
-            lastBin = Math.Min(binCount - 1, firstBin + 1);
 
         // For an impedance curve this is the resonance: the frequency a driver's motional impedance
         // peaks at, which is the first number anyone reads off one of these.

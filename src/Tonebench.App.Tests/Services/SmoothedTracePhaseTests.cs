@@ -145,4 +145,41 @@ public class SmoothedTracePhaseTests
             Math.Abs(smoothed.PhaseDeg[smoothed.PhaseDeg.Length / 2] - raw.PhaseDeg[raw.PhaseDeg.Length / 2]) < 30.0,
             "smoothing moved the curve rather than quieting it");
     }
+
+    /// <summary>
+    /// That the builders <b>ask</b> for the analysed band when they smooth.
+    ///
+    /// <para>The smoother's own clamp has been tested since it was written; what was missing was a
+    /// test that the impedance builder passes it, and it did not. The spike it is there to stop came
+    /// straight back when the stimulus changed, because nothing here was watching: a 1/3-octave
+    /// window reaches 12 % past the top analysed bin, and an impedance inverts an out-of-band ratio
+    /// to the open-circuit ceiling, so one such bin in the band is the whole RMS.</para>
+    /// </summary>
+    [Fact]
+    public void AnImpedanceTrace_SmoothsOnlyWithinTheAnalysedBand()
+    {
+        var request = ImpedanceAt(3);
+        int binCount = request.BinCount;
+        double binHz = request.BinHz;
+        int lastBin = (int)Math.Floor(request.AnalysisHighHz / binHz);
+
+        // A flat 1.06 ohm fixture, and the open-circuit ceiling everywhere the stimulus does not go.
+        var values = new Complex[binCount];
+        for (int k = 0; k < binCount; k++)
+            values[k] = new Complex(k <= lastBin ? 1.06 : ImpedanceMath.MaxOhms, 0.0);
+
+        var coherence = new double[binCount];
+        Array.Fill(coherence, 0.99);
+
+        var trace = ImpedanceTraceBuilder.Build(
+            request, ImpedanceTraceKind.Impedance, values, coherence, displayColumns: 1600);
+
+        for (int c = trace.FreqHz.Length - 20; c < trace.FreqHz.Length; c++)
+        {
+            double ohms = ImpedanceMath.FromDbOhms(trace.MagnitudeMaxDbOhms[c]);
+            Assert.True(
+                Math.Abs(ohms - 1.06) < 0.01,
+                $"{trace.FreqHz[c]:0} Hz read {ohms:0.000} ohms: the smoothing band reached out of the analysed one");
+        }
+    }
 }

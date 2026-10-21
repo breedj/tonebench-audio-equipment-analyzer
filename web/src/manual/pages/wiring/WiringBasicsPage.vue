@@ -183,6 +183,9 @@ const { showPage } = useManual()
       <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
         a line-level DUT
       </button>,
+      <button type="button" class="manual-link" @click="showPage('wiring-reference')">
+        the reference channel
+      </button>,
       <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
         a power amplifier
       </button>,

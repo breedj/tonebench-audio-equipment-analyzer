@@ -281,6 +281,14 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/wiring/WiringLineLevelPage.vue')),
   },
   {
+    id: 'wiring-reference',
+    title: 'Wiring: the reference channel',
+    summary:
+      'Left output to right input: the second cable that makes gain a transfer function and gives the phase a meaning.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringReferencePage.vue')),
+  },
+  {
     id: 'wiring-power-amp',
     title: 'Wiring: a power amplifier',
     summary: 'The load, the quiet ground, and the divider for anything past 40 V.',

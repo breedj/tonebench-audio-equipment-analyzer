@@ -13,6 +13,9 @@ comes with four downloads:
 | `tonebench_<version>_amd64.deb` | Debian, Ubuntu, Linux Mint and other apt-based distributions |
 | `tonebench-<version>-linux-x64.tar.gz` | Any other 64-bit Linux |
 
+Beside them is `SHA256SUMS.txt`, a checksum for each of the four — see
+[Verifying your download](#verifying-your-download).
+
 Nothing else is needed to run it: the .NET runtime is built into the program, no USB driver is
 needed for the QA403, and no Visual C++ redistributable is needed either. The analyzer runs as a
 small local web server and opens its screen in your normal browser (Chrome, Edge or Firefox — any
@@ -33,10 +36,13 @@ Behringer…) ship one; a laptop's built-in audio generally does not, and the ge
 ### Install
 
 1. Download `tonebench-<version>-win-x64-setup.exe` and run it.
-2. Windows SmartScreen will say **"Windows protected your PC"**, because the program is not signed
-   with a paid certificate. Click **More info**, then **Run anyway**.
+2. Windows SmartScreen will say **"Windows protected your PC"** and name an unknown publisher.
+   Click **More info**, then **Run anyway**. See
+   [Why Windows warns about this download](#why-windows-warns-about-this-download) below if you
+   would rather check before you click — the SHA256 checksum on the release page is there for
+   exactly that.
 3. Click through the wizard. It installs for your user account only (into
-   `%LOCALAPPDATA%\Programs\Tonebench - Audio Equipment Analyzer`), so **no administrator password** is asked and
+   `%LOCALAPPDATA%\Programs\Tonebench`), so **no administrator password** is asked and
    nothing changes for other users of the PC. A desktop icon is optional.
 
 No USB driver needs to be installed. Plug the QA403 into a USB port and Windows binds it on its
@@ -76,6 +82,44 @@ Coming from *QA403 Audio Analyzer* (0.2.0 or earlier) is a rename rather than an
 *Settings › Apps › Installed apps › Tonebench - Audio Equipment Analyzer › Uninstall*, or the **Uninstall** entry
 in the Start Menu group. Your projects, settings and logs are deliberately left in place (see
 [Where your data is](#where-your-data-is)); delete those folders yourself if you want them gone.
+
+---
+
+## Why Windows warns about this download
+
+Tonebench is not code-signed, so Windows has no publisher name to show for it and SmartScreen says
+"Windows protected your PC" the first time you run a new version. The portable zip behaves the same
+way, and on a Windows 11 machine with Smart App Control switched on the file may be blocked outright
+rather than offered a **Run anyway** button.
+
+Signing is planned once the project's source is public. It is worth being straight about what that
+will and will not do, because it is widely misunderstood: Microsoft's own
+[guidance for developers](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
+says a signed application **still** shows the warning until it has built up a reputation over
+"several weeks and hundreds of clean installs", and that Extended Validation certificates no longer
+bypass SmartScreen at all. What a certificate changes is that the dialog names a publisher instead
+of saying "unknown", and that each release inherits the trust earlier ones earned rather than
+starting from zero. A small project will see this dialog either way for a while.
+
+### Verifying your download
+
+Every release carries a `SHA256SUMS.txt` with one checksum per file. Checking against it confirms
+the download is byte-for-byte the file that was built and published — which is the question a
+signature would otherwise answer for you.
+
+On Windows, in PowerShell:
+
+```powershell
+Get-FileHash tonebench-<version>-win-x64-setup.exe -Algorithm SHA256
+```
+
+Compare the hash it prints with the line for that filename in `SHA256SUMS.txt`.
+
+On Linux, with `SHA256SUMS.txt` saved next to the package:
+
+```bash
+sha256sum -c --ignore-missing SHA256SUMS.txt
+```
 
 ---
 

@@ -59,11 +59,17 @@ export interface DeviceStatus {
    */
   rangingMode: RangingModeName
   /**
-   * The generator is asking for more than the output range's full scale, so what reaches the DUT is
-   * clipped. Only reachable under manual ranging — under Auto the range is derived from the
-   * generator itself, so it is false by construction.
+   * The generator is asking for more than the output range's full scale *right now*, so what reaches
+   * the DUT is clipped. Reachable under either ranging mode: Auto derives the range from the
+   * generator, but when nothing fits it takes the largest range there is and that one still clips.
    */
   outputRangeClipping: boolean
+  /**
+   * The generator clipped at some point since the current acquisition started. The live flag above
+   * cannot say this: a sweep configures a stimulus per point, so the loudest ones can overrun the
+   * DAC and be gone again before the curve is on screen. Per acquisition, like the drop counters.
+   */
+  outputClippedDuringAcquisition: boolean
   /**
    * How long, in ms, a peak must stay under-range before autoranging steps to a more sensitive
    * range. Same null-means-no-autoranging convention as autoRangeEnabled.

@@ -80,61 +80,13 @@ const { showPage } = useManual()
       then the ratio of the two inputs rather than the left input against the sweep the app
       generated, and the generator, the cabling and the analyzer's own output stage divide out.
     </p>
-
-    <WiringDiagram
-      :terminate="['in-l-', 'in-r-']"
-      :height="380"
-      alt="As before, with a T-piece at the device's input feeding Input R plus as the reference channel."
-      caption="A T-piece at the DUT's input takes the reference. Tick Right channel is reference."
-    >
-      <template #default="{ cable }">
-        <rect x="200" y="275" width="290" height="60" rx="4" class="w-block-fill" />
-        <text x="345" y="303" text-anchor="middle" class="w-label">Device under test</text>
-        <text x="345" y="320" text-anchor="middle" class="w-note">preamp, filter, phono stage…</text>
-
-        <path class="w-cable w-drive" :d="cable('out-l+', 275, [242, 275])" />
-        <path class="w-cable w-measure" :d="cable('in-l+', 275, [445, 275])" />
-        <path class="w-cable w-reference" :d="cable('in-r+', 255, [242, 255])" />
-        <circle cx="242" cy="255" r="3.6" class="w-node" />
-        <circle cx="242" cy="275" r="3" class="w-node" />
-        <circle cx="445" cy="275" r="3" class="w-node" />
-
-        <text x="250" y="200" class="w-label w-drive">Drive</text>
-        <text x="453" y="200" class="w-label w-measure">Measure</text>
-        <text x="272" y="247" class="w-label w-reference">Reference — the T-piece</text>
-        <text x="345" y="366" text-anchor="middle" class="w-note">
-          The reference tees onto the drive cable at the DUT's input.
-        </text>
-      </template>
-    </WiringDiagram>
-
-    <ul>
-      <li>
-        Put a <strong>BNC T-piece</strong> at the DUT's input: one leg from OUT L+, one leg on to the
-        DUT, one leg to <strong>IN R+</strong>.
-      </li>
-      <li><strong>IN R−</strong> keeps its shorting plug; only IN R+ is now in use.</li>
-      <li>
-        Turn on <strong>Right channel is reference</strong> (chirp and stepped response) or set
-        <strong>Reference</strong> to <strong>Right input channel</strong> (impulse response).
-      </li>
-    </ul>
     <p>
-      Looping <strong>OUT R+</strong> straight to <strong>IN R+</strong> also works and needs no
-      T-piece, which is why the
-      <button type="button" class="manual-link" @click="showPage('wiring-output-impedance')">
-        output impedance
-      </button>
-      measurement uses it — both generator channels play the same stimulus. It cancels slightly
-      less, because the reference then travels through the right output stage and the right input
-      rather than through the cable that actually drives the DUT. Use the T-piece where you can.
-    </p>
-    <p>
-      Note what the reference does <em>not</em> cancel: the analyzer's two input channels are still
-      two different channels, and nothing on the input side divides out. For the band edges of an
-      impulse measurement, a stored
-      <button type="button" class="manual-link" @click="showPage('wiring-loopback')">loopback</button>
-      calibration is the tool for that.
+      That is one extra cable, from the left output across to the right input, plus
+      <strong>Right channel is reference</strong> on the chirp or stepped-sine screen. It has a page
+      of its own, with both ways of running it and what the shared input range then costs:
+      <button type="button" class="manual-link" @click="showPage('wiring-reference')">
+        Wiring: the reference channel
+      </button>.
     </p>
 
     <h2>A balanced DUT</h2>
@@ -158,11 +110,6 @@ const { showPage } = useManual()
       <li>
         <strong>A missing shorting plug.</strong> The floor rises about 33 dB, stays flat and white,
         and does not move when the generator is switched off.
-      </li>
-      <li>
-        <strong>Driving the DUT through the reference T-piece's stub.</strong> The T belongs at the
-        DUT's input, not at the analyzer's output; a long stub to the DUT with the T left at the
-        panel measures the cable, not the drive.
       </li>
       <li>
         <strong>An input range left over from the previous measurement.</strong> Every sweep probes

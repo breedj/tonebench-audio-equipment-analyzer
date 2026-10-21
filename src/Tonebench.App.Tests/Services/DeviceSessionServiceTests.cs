@@ -746,6 +746,18 @@ public class DeviceSessionServiceTests
     private static GeneratorConfig LoudTone() =>
         new(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, 8.6)]), ChannelGeneratorConfig.Off);
 
+    /// <summary>
+    /// Pink noise at 12 dBV: its crest factor puts the peak near 16 V, where the widest output range
+    /// delivers 11.2 — the level measured clipping on the bench, and the one Auto derives onto the
+    /// top range and still cannot carry.
+    /// </summary>
+    private static ChannelGeneratorConfig LoudNoiseChannel() =>
+        new(Enabled: true, Tones: [])
+        {
+            Kind = GeneratorKind.PinkNoise,
+            Noise = new WhiteNoiseSettings { LevelDbv = 12.0 },
+        };
+
     /// <summary>-40 dBV: quiet enough that the derivation picks the *smallest* output range, so a pinned wide one is visibly not it.</summary>
     private static GeneratorConfig QuietTone() =>
         new(new ChannelGeneratorConfig(true, [new GeneratorTone(1000.0, -40.0)]), ChannelGeneratorConfig.Off);
@@ -915,8 +927,9 @@ public class DeviceSessionServiceTests
     /// <summary>
     /// A pinned range the generator overruns clips the DAC, and nothing else on screen says so: the
     /// generator panel still reads the level that was asked for and the spectrum still shows a tone
-    /// at the right frequency. Only reachable under Manual — under Auto the range is derived from
-    /// this very config, which is what the second half asserts.
+    /// at the right frequency. The second half is Auto re-deriving a range that fits <i>this</i>
+    /// tone — not the general claim that Auto cannot clip, which is false and is what
+    /// <see cref="OutputRangeClipping_IsReportedInAutoWhenTheLevelOverrunsTheTopRange"/> pins.
     /// </summary>
     [Fact]
     public async Task OutputRangeClipping_IsReportedWhenAPinnedRangeCannotCarryTheGenerator()
@@ -932,6 +945,79 @@ public class DeviceSessionServiceTests
 
         await session.SetRangingModeAsync(RangingMode.Auto, CancellationToken.None);
         Assert.False(session.GetStatus().OutputRangeClipping);
+    }
+
+    /// <summary>
+    /// <b>Auto clips too, which this file and the status record both used to deny.</b>
+    /// <see cref="OutputRangeSelector.Select"/> ends with "or the largest supported range when
+    /// nothing fits (better a range that clips than one that clips harder)", so a level above the top
+    /// range's full scale is derived onto that range and clips against it. The old comment —
+    /// "under Auto the range is derived from this very config, so it is false by construction" —
+    /// held only for levels the ladder can actually carry.
+    ///
+    /// <para>Pink noise at 12 dBV is the case measured on the bench: its crest factor puts the peak
+    /// near 16 V where the 18 dBV range delivers 11.2, and the recorded stimulus came back with its
+    /// crest collapsed and 0.11 % of samples at the rail — with the coherence reading 0.996, which
+    /// is why a flag is the only thing that can report it.</para>
+    /// </summary>
+    [Fact]
+    public async Task OutputRangeClipping_IsReportedInAutoWhenTheLevelOverrunsTheTopRange()
+    {
+        var device = new StubDevice();
+        var session = CreateStubService(device);
+        await session.ConnectAsync(CancellationToken.None);
+
+        Assert.Equal("Auto", session.GetStatus().RangingMode);
+
+        await session.ConfigureGeneratorAsync(
+            new GeneratorConfig(
+                LoudNoiseChannel(),
+                ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+
+        // Derived onto the widest range there is, and still not enough.
+        Assert.Equal(device.Capabilities.OutputRangesDbv[^1], session.OutputRangeDbv);
+        Assert.True(session.GetStatus().OutputRangeClipping);
+    }
+
+    /// <summary>
+    /// The clipping a <b>sweep</b> does is gone by the time anyone looks, so it is remembered for the
+    /// length of the acquisition.
+    ///
+    /// <para>Every point of a sweep configures its own stimulus. A run whose loudest points overran
+    /// the DAC therefore leaves <see cref="DeviceSessionService.OutputRangeClipping"/> false the
+    /// moment it steps down again, and the curve on screen has nothing anywhere to say that part of
+    /// it was measured through a clipped stimulus — worst on the distortion sweeps, where clipping
+    /// adds exactly the harmonics being plotted. Zeroed by the next acquisition, like the two drop
+    /// counters and for the reason given there.</para>
+    /// </summary>
+    [Fact]
+    public async Task OutputClippedDuringAcquisition_SurvivesTheStimulusThatCausedIt_AndIsClearedByTheNextRun()
+    {
+        var session = CreateStubService(new StubDevice());
+        await session.ConnectAsync(CancellationToken.None);
+        await session.StartAcquisitionAsync(new AcquisitionConfig(48000.0, 2, 1024), CancellationToken.None);
+
+        Assert.False(session.GetStatus().OutputClippedDuringAcquisition);
+
+        // One loud point of a sweep...
+        await session.ConfigureGeneratorAsync(
+            new GeneratorConfig(
+                LoudNoiseChannel(),
+                ChannelGeneratorConfig.Off),
+            CancellationToken.None);
+        Assert.True(session.GetStatus().OutputRangeClipping);
+
+        // ...and the next one is quiet again. The live flag clears; the run's own does not.
+        await session.ConfigureGeneratorAsync(QuietTone(), CancellationToken.None);
+        Assert.False(session.GetStatus().OutputRangeClipping);
+        Assert.True(session.GetStatus().OutputClippedDuringAcquisition);
+
+        // A fresh acquisition is a fresh measurement: a stale "it clipped" reads exactly like one
+        // that just happened, which is the DroppedRxChunks lesson.
+        await session.StopAcquisitionAsync();
+        await session.StartAcquisitionAsync(new AcquisitionConfig(48000.0, 2, 1024), CancellationToken.None);
+        Assert.False(session.GetStatus().OutputClippedDuringAcquisition);
     }
 
     /// <summary>Stands in for real hardware: an <see cref="IAnalyzerDevice"/> that is not the simulator.</summary>

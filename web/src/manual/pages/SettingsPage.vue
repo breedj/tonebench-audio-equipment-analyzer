@@ -508,6 +508,19 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>generator clipped</td>
+          <td>
+            At some point during this run the generator asked for more than the output range could
+            deliver, so part of what reached the DUT was clipped — and a clipped stimulus carries
+            distortion of its own, which on the distortion screens is the very quantity being
+            plotted. It stays for the length of the run rather than only while it is happening,
+            because a sweep sets a level per point: the loud ones can overrun the DAC and be gone
+            again before the curve is finished. Lower the generator level, or widen the output
+            range if you have pinned it. The output range readout itself turns red while a clipping
+            stimulus is actually playing.
+          </td>
+        </tr>
+        <tr>
           <td>Load</td>
           <td>
             <p>

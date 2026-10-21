@@ -373,11 +373,20 @@ public sealed record DeviceStatusResponse(
     /// </summary>
     string RangingMode = "Auto",
     /// <summary>
-    /// The generator is asking for more than the output range's full scale, so what reaches the DUT
-    /// is clipped. Only reachable under manual ranging — see
-    /// <see cref="Services.DeviceSessionService.OutputRangeClipping"/>.
+    /// The generator is asking for more than the output range's full scale <i>right now</i>, so what
+    /// reaches the DUT is clipped. Reachable under either ranging mode — see
+    /// <see cref="Services.DeviceSessionService.OutputRangeClipping"/>, whose remarks correct the
+    /// "manual only" claim this used to repeat.
     /// </summary>
     bool OutputRangeClipping = false,
+    /// <summary>
+    /// The generator clipped at some point since the current acquisition started, which the live
+    /// flag above cannot say: a sweep configures a stimulus per point, so the loudest ones can
+    /// overrun the DAC and be gone again before anyone looks. Per acquisition, like the two drop
+    /// counters — see
+    /// <see cref="Services.DeviceSessionService.OutputClippedDuringAcquisition"/>.
+    /// </summary>
+    bool OutputClippedDuringAcquisition = false,
     /// <summary>
     /// The analyzer's housekeeping sensors, or null on a device that has none (the simulator) or
     /// before the first reading has landed — the UI hides the readout in that case rather than

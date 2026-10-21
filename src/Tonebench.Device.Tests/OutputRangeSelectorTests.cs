@@ -1,4 +1,4 @@
-using Tonebench.Device;
+﻿using Tonebench.Device;
 
 namespace Tonebench.Device.Tests;
 
@@ -93,10 +93,12 @@ public class OutputRangeSelectorTests
     }
 
     [Fact]
-    public void RequiredPeakVolts_PinkNoise_AllowsTheSameCrestFactorAsWhite()
+    public void RequiredPeakVolts_ContinuousPinkNoise_AllowsTheSameCrestFactorAsWhite()
     {
-        // Shaping filters a Gaussian stream and leaves it Gaussian, and PinkNoiseShaper renormalises
-        // it to the same RMS -- so the peak-to-RMS ratio is white's, and so is the range.
+        // A *continuous* pink stream, i.e. PeriodFrames unset: shaping filters a Gaussian stream and
+        // leaves it Gaussian, and PinkNoiseShaper renormalises it to the same RMS -- so the
+        // peak-to-RMS ratio is white's, and so is the range. The periodic sequence below is the one
+        // that is not covered by this.
         var channel = new ChannelGeneratorConfig(true, [])
         {
             Kind = GeneratorKind.PinkNoise,
@@ -105,6 +107,73 @@ public class OutputRangeSelectorTests
 
         double expected = Math.Pow(10.0, (-20.0 + OutputRangeSelector.NoiseCrestFactorDb) / 20.0);
         Assert.Equal(expected, OutputRangeSelector.RequiredPeakVolts(channel), precision: 10);
+        // And with a rate to build a table with it is still the allowance, because there is no table
+        // to build: a continuous stream has no period.
+        Assert.Equal(expected, OutputRangeSelector.RequiredPeakVolts(channel, 48000.0), precision: 10);
+    }
+
+    /// <summary>
+    /// A <b>periodic</b> pink sequence is asked what its own crest factor is, rather than allowed the
+    /// Gaussian 12 dB.
+    ///
+    /// <para>It is deterministic, so its peak is a measured property of the table and not a
+    /// probability — and it is not 12 dB. Measured across every period from 8192 to 524288, all three
+    /// sample rates and the whole cut-off range, it runs from <b>11.37 to 14.49 dB</b>, rising with
+    /// the period because more components make a longer tail; 13.05 dB at 65536 points and 48 kHz,
+    /// which is the impedance screen's own territory. The allowance therefore under-read the peak by
+    /// up to 2.5 dB — a quarter of a 10 dB range step and more, enough to park the DAC a rung too low
+    /// and clip a stimulus that nothing then reported.</para>
+    /// </summary>
+    [Fact]
+    public void RequiredPeakVolts_PeriodicPinkNoise_AsksTheSequenceForItsOwnCrestFactor()
+    {
+        var channel = new ChannelGeneratorConfig(true, [])
+        {
+            Kind = GeneratorKind.PinkNoise,
+            Noise = new WhiteNoiseSettings
+            {
+                LevelDbv = -20.0,
+                PeriodFrames = 65536,
+                CutoffHz = PeriodicPinkNoise.DefaultCutoffHz,
+            },
+        };
+
+        double crestDb = PeriodicPinkNoise.For(65536, 48000.0, PeriodicPinkNoise.DefaultCutoffHz).CrestFactorDb;
+        Assert.Equal(
+            Math.Pow(10.0, (-20.0 + crestDb) / 20.0),
+            OutputRangeSelector.RequiredPeakVolts(channel, 48000.0),
+            precision: 10);
+
+        // The figure this replaced, so the test fails if it goes back to the allowance: the sequence
+        // really does peak above 12 dB, by about a decibel at this length.
+        Assert.True(crestDb > OutputRangeSelector.NoiseCrestFactorDb + 0.5, $"crest was {crestDb}");
+
+        // No rate, no table: a caller that cannot know what it will be played at gets the allowance
+        // rather than a wrong answer.
+        Assert.Equal(
+            Math.Pow(10.0, (-20.0 + OutputRangeSelector.NoiseCrestFactorDb) / 20.0),
+            OutputRangeSelector.RequiredPeakVolts(channel),
+            precision: 10);
+    }
+
+    /// <summary>
+    /// And a table the sequence refuses to build never decides a range: a range chosen from the 12 dB
+    /// guess may clip, where an exception here is an acquisition that will not start at all.
+    /// </summary>
+    [Fact]
+    public void RequiredPeakVolts_PeriodicPinkNoise_WithSettingsNoSequenceCanBeBuiltFrom_FallsBackToTheAllowance()
+    {
+        var channel = new ChannelGeneratorConfig(true, [])
+        {
+            Kind = GeneratorKind.PinkNoise,
+            // Not a power of two, and a cut-off far outside the supported range.
+            Noise = new WhiteNoiseSettings { LevelDbv = -20.0, PeriodFrames = 1000, CutoffHz = 1e9 },
+        };
+
+        Assert.Equal(
+            Math.Pow(10.0, (-20.0 + OutputRangeSelector.NoiseCrestFactorDb) / 20.0),
+            OutputRangeSelector.RequiredPeakVolts(channel, 48000.0),
+            precision: 10);
     }
 
     [Fact]

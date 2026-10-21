@@ -389,10 +389,14 @@ const { showPage } = useManual()
       −30 dBV against a settled 1.02 from −20 dBV upward, because noise on the measured ratio
       inflates the impedance it is inverted into. And pink noise cannot be driven as hard as a
       chirp: its crest factor is 12.5 dB against the chirp's 3 dB, so it clips the generator about
-      9 dB lower — clean at 6 dBV, clipped at 12, where a chirp is clean all the way to the
-      18 dBV maximum. Clipping does not show up in the coherence, which is why the default sits
-      where it does. A loudspeaker is the case for turning all of this down: use the stepped sine,
-      and remember that Thiele-Small parameters are small-signal figures.
+      9 dB lower — above roughly <strong>8.5 dBV</strong> at the default span, where a chirp is
+      clean all the way to the 18 dBV maximum. At 12 dBV the recorded stimulus comes back with its
+      crest collapsed to 10.5 dB and a tenth of a percent of its samples pinned at the rail, while
+      the <em>coherence still reads 0.996</em> — so nothing about the measurement itself says the
+      stimulus was clipped, which is why 6 dBV is the default and why the status bar says
+      <strong>generator clipped</strong> when it happens. A loudspeaker is the case for turning all
+      of this down: use the stepped sine, and remember that Thiele-Small parameters are
+      small-signal figures.
     </p>
 
     <h2>Against the simulator</h2>

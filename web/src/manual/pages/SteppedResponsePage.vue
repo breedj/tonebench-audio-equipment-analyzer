@@ -23,6 +23,10 @@ const { showPage } = useManual()
       <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
         a power amplifier
       </button>
+      ·
+      <button type="button" class="manual-link" @click="showPage('wiring-reference')">
+        with a reference channel
+      </button>
     </p>
 
     <h2>When to prefer it over the chirp</h2>

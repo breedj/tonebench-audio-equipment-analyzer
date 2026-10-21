@@ -847,6 +847,21 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       {{ status.droppedBlocks }} blocks dropped
     </span>
     <!--
+      The generator's own fault rather than the pipeline's, and the only badge here that is about
+      what went *out*. Red, and worded as a run rather than a count: the live flag beside the output
+      range covers the stimulus in force, and this is the one that survives a sweep whose loudest
+      points clipped and whose last point did not. A clipped stimulus adds harmonics, so on the
+      distortion screens it is the quantity being plotted; nothing else on screen shows it, since the
+      generator panel still reads the level that was asked for.
+    -->
+    <span
+      v-if="status?.outputClippedDuringAcquisition"
+      class="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
+      title="The generator asked for more than the output range could deliver at some point during this run, so part of what reached the DUT was clipped — and a clipped stimulus has distortion of its own. Lower the generator level, or widen the output range if you pinned it. Cleared when the next run starts."
+    >
+      generator clipped
+    </span>
+    <!--
       The transport's own drops, and the one of the three that does NOT mean the measurement is
       wrong: the samples all arrived and anything saved from this run is sound. What is lost is a
       frame of one tick's *set*, which this client pairs by seq — so a torn tick reads as the

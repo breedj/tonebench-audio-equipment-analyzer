@@ -1,4 +1,4 @@
-namespace Tonebench.Device;
+﻿namespace Tonebench.Device;
 
 /// <summary>
 /// Picks the smallest DAC output range that still fits what the generator is about to play.
@@ -23,13 +23,24 @@ public static class OutputRangeSelector
     public const double HeadroomDb = 2.0;
 
     /// <summary>
-    /// Crest factor allowed for Gaussian noise, whose peak is unbounded. 12 dB ≈ 4 sigma: clipping
-    /// is then rare enough not to show up as distortion in a spectrum, without wasting a whole range
-    /// step. Not a protocol fact — a tuning constant.
+    /// Crest factor allowed for a <b>continuous, random</b> noise stream, whose peak is unbounded.
+    /// 12 dB ≈ 4 sigma: clipping is then rare enough not to show up as distortion in a spectrum,
+    /// without wasting a whole range step. Not a protocol fact — a tuning constant.
     ///
-    /// <para>Serves the pink kind too, and at the same figure: shaping filters a Gaussian stream and
-    /// leaves it Gaussian, and <see cref="PinkNoiseShaper"/> renormalises the result to the same RMS,
-    /// so the peak-to-RMS ratio is the one white has.</para>
+    /// <para>Serves the continuous pink kind too, and at the same figure: shaping filters a Gaussian
+    /// stream and leaves it Gaussian, and <see cref="PinkNoiseShaper"/> renormalises the result to
+    /// the same RMS, so the peak-to-RMS ratio is the one white has.</para>
+    ///
+    /// <para><b>A periodic pink sequence is not covered by this and must not be.</b> That sequence is
+    /// deterministic, so its crest is a measured property of the table rather than an allowance about
+    /// a distribution — and it is not 12 dB: measured across every period from 8192 to 524288, all
+    /// three sample rates and the whole cut-off range, <see cref="PeriodicPinkNoise.CrestFactorDb"/>
+    /// runs from <b>11.37 to 14.49 dB</b>, rising with the period because more components make a
+    /// longer tail. At the impedance screen's own record lengths it is 12.2–13.1 dB, so this constant
+    /// under-read the peak by up to a decibel there and by 2.5 dB at the extreme — a quarter of a
+    /// 10 dB range step and more, i.e. enough to park the DAC one rung too low and clip a stimulus
+    /// that nothing then reports. <see cref="RequiredPeakVolts"/> therefore asks the table, whenever
+    /// it is given a sample rate to build it with.</para>
     /// </summary>
     public const double NoiseCrestFactorDb = 12.0;
 
@@ -40,14 +51,19 @@ public static class OutputRangeSelector
     /// <paramref name="supportedRangesDbv"/> must be in ascending order, as
     /// <see cref="DeviceCapabilities.OutputRangesDbv"/> is.
     /// </summary>
-    public static double Select(GeneratorConfig config, IReadOnlyList<double> supportedRangesDbv)
+    public static double Select(
+        GeneratorConfig config,
+        IReadOnlyList<double> supportedRangesDbv,
+        double sampleRateHz = 0.0)
     {
         ArgumentNullException.ThrowIfNull(config);
         if (supportedRangesDbv is null || supportedRangesDbv.Count == 0)
             throw new ArgumentException("At least one output range is required.", nameof(supportedRangesDbv));
 
         // One register serves both channels, so the range has to satisfy the louder of the two.
-        double requiredPeakV = Math.Max(RequiredPeakVolts(config.Left), RequiredPeakVolts(config.Right));
+        double requiredPeakV = Math.Max(
+            RequiredPeakVolts(config.Left, sampleRateHz),
+            RequiredPeakVolts(config.Right, sampleRateHz));
 
         // The relative slack is float-rounding tolerance, nothing more. An amplitude exactly
         // HeadroomDb below a range's full scale is the common case, not a corner one — the ranges are
@@ -78,11 +94,13 @@ public static class OutputRangeSelector
     /// the common case (the ranges are 10 dB apart and users pick round numbers), and the
     /// calibration factor that can push it over is what <see cref="HeadroomDb"/> covers.</para>
     /// </summary>
-    public static bool Clips(GeneratorConfig config, double rangeDbv)
+    public static bool Clips(GeneratorConfig config, double rangeDbv, double sampleRateHz = 0.0)
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        double requiredPeakV = Math.Max(RequiredPeakVolts(config.Left), RequiredPeakVolts(config.Right));
+        double requiredPeakV = Math.Max(
+            RequiredPeakVolts(config.Left, sampleRateHz),
+            RequiredPeakVolts(config.Right, sampleRateHz));
         return requiredPeakV > PeakVolts(rangeDbv) * (1.0 + 1e-9);
     }
 
@@ -91,7 +109,14 @@ public static class OutputRangeSelector
     /// disabled or Off channel — which is why a silent generator selects the *smallest* range, the
     /// quietest state the DAC has.
     /// </summary>
-    public static double RequiredPeakVolts(ChannelGeneratorConfig channel)
+    /// <param name="sampleRateHz">
+    /// The rate the stimulus will be played at, where the caller knows it. Only a <b>periodic</b>
+    /// pink sequence reads it, and only to ask that sequence what its own crest factor is; 0 means
+    /// "not known", which falls back to <see cref="NoiseCrestFactorDb"/>. Optional so every caller
+    /// that cannot know the rate — a test, a panel's estimate — still gets the allowance rather than
+    /// a wrong answer.
+    /// </param>
+    public static double RequiredPeakVolts(ChannelGeneratorConfig channel, double sampleRateHz = 0.0)
     {
         ArgumentNullException.ThrowIfNull(channel);
 
@@ -108,7 +133,7 @@ public static class OutputRangeSelector
             GeneratorKind.Tones or GeneratorKind.Multitone => channel.Tones.Sum(t => PeakVolts(t.AmplitudeDbv)),
 
             GeneratorKind.WhiteNoise or GeneratorKind.PinkNoise => channel.Noise is { } noise
-                ? Math.Pow(10.0, (noise.LevelDbv + NoiseCrestFactorDb) / 20.0)
+                ? Math.Pow(10.0, (noise.LevelDbv + NoiseCrestDbFor(channel.Kind, noise, sampleRateHz)) / 20.0)
                 : 0.0,
 
             // A sweep is one sinusoid at a time, so its peak is just its amplitude.
@@ -125,6 +150,31 @@ public static class OutputRangeSelector
 
             _ => 0.0,
         };
+    }
+
+    /// <summary>
+    /// The crest factor to allow this noise stimulus: the periodic pink sequence's own measured one
+    /// where it can be built, and <see cref="NoiseCrestFactorDb"/>'s allowance otherwise.
+    ///
+    /// <para>Never throws and never lets the table's construction decide a range: a cut-off outside
+    /// <see cref="PeriodicPinkNoise.MinCutoffHz"/>..<see cref="PeriodicPinkNoise.MaxCutoffHz"/>, a
+    /// period that is not a power of two, or anything else the table refuses, falls back to the
+    /// allowance — a range chosen from a 12 dB guess is a measurement that may clip, while an
+    /// exception here is an acquisition that will not start at all.</para>
+    /// </summary>
+    private static double NoiseCrestDbFor(GeneratorKind kind, WhiteNoiseSettings noise, double sampleRateHz)
+    {
+        if (kind != GeneratorKind.PinkNoise || noise.PeriodFrames <= 0 || !(sampleRateHz > 0.0))
+            return NoiseCrestFactorDb;
+
+        try
+        {
+            return PeriodicPinkNoise.For(noise.PeriodFrames, sampleRateHz, noise.CutoffHz).CrestFactorDb;
+        }
+        catch (ArgumentException)
+        {
+            return NoiseCrestFactorDb;
+        }
     }
 
     /// <summary>dBV (rms-referenced) to peak volts — the same convention <c>Qa40xCalibration.VoltsToRaw</c> and the generator waveform use.</summary>

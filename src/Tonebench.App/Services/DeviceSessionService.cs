@@ -1,4 +1,4 @@
-using Tonebench.App.Endpoints;
+﻿using Tonebench.App.Endpoints;
 using Tonebench.App.Diagnostics;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
@@ -245,6 +245,9 @@ public sealed class DeviceSessionService(
     /// <summary>Last sample rate the client told us about, for snapping tones while no stream is running.</summary>
     private double _lastSampleRateHz = 48000.0;
 
+    /// <summary>Backs <see cref="OutputClippedDuringAcquisition"/>; zeroed by the acquisition start.</summary>
+    private bool _outputClippedDuringAcquisition;
+
     /// <summary>
     /// The device's <see cref="IAnalyzerDevice.StreamAsync"/> loop and the spectrum-facing "Acquiring" state
     /// are deliberately two different things. The QA403's DAC only clocks samples out while the same USB
@@ -333,9 +336,16 @@ public sealed class DeviceSessionService(
     public RangingMode RangingMode => _rangingMode;
 
     /// <summary>
-    /// True when the generator is asking for more than the output range's full scale, which only
-    /// <see cref="RangingMode.Manual"/> can produce — in <see cref="RangingMode.Auto"/> the range is
-    /// derived from this very config, so it is false by construction.
+    /// True when the generator is asking for more than the output range's full scale, so what
+    /// reaches the DUT is clipped.
+    ///
+    /// <para><b>Reachable under <see cref="RangingMode.Auto"/> as well, which this said it was not.</b>
+    /// The claim was that Auto derives the range from this very config so it is false by
+    /// construction — but <see cref="OutputRangeSelector.Select"/> ends with "or the largest
+    /// supported range when nothing fits (better a range that clips than one that clips harder)", and
+    /// a level above the top range's full scale is exactly that case. Measured: pink noise at 12 dBV
+    /// on a QA403 wants a 15.8 V peak against the 18 dBV range's 11.2 V, in Auto, and the flag is
+    /// true. Pinned by <c>OutputRangeClipping_IsReportedInAutoWhenTheLevelOverrunsTheTopRange</c>.</para>
     ///
     /// <para>On the status so the status bar can say it. A clipped DAC is not visible anywhere else:
     /// the generator panel still reads the level that was asked for, the spectrum shows a tone at
@@ -343,7 +353,22 @@ public sealed class DeviceSessionService(
     /// measurement the user is looking at.</para>
     /// </summary>
     public bool OutputRangeClipping =>
-        _info is not null && OutputRangeSelector.Clips(_generatorConfig, _outputRangeDbv);
+        _info is not null && OutputRangeSelector.Clips(_generatorConfig, _outputRangeDbv, _lastSampleRateHz);
+
+    /// <summary>
+    /// Whether the generator has clipped at any point since this acquisition started, as against
+    /// <see cref="OutputRangeClipping"/>, which is only ever about the stimulus in force right now.
+    ///
+    /// <para><b>A sweep is why this exists.</b> Every point configures its own stimulus, so a run
+    /// whose loudest points overran the DAC leaves the live flag false the moment it moves on — and
+    /// by the time the curve is on screen there is nothing anywhere to say part of it was measured
+    /// through a clipped stimulus. Worse on the distortion sweeps than anywhere, since clipping adds
+    /// harmonics and that is the quantity being plotted. Per acquisition and zeroed at the start of
+    /// one, exactly like <see cref="DroppedRxChunks"/> and for the reason stated there: the only
+    /// question it is ever asked is whether the measurement on screen can be trusted, and a running
+    /// total since connect cannot answer it.</para>
+    /// </summary>
+    public bool OutputClippedDuringAcquisition => _outputClippedDuringAcquisition;
 
     /// <summary>
     /// The device state to stamp on a diagnostic record, read at the instant the record is analyzed
@@ -905,6 +930,7 @@ public sealed class DeviceSessionService(
                 SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
                 ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb,
                 RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping,
+                OutputClippedDuringAcquisition: OutputClippedDuringAcquisition,
                 ExternalGainUnit: ExternalGainUnit);
 
         return new DeviceStatusResponse(
@@ -916,6 +942,7 @@ public sealed class DeviceSessionService(
             SimulatedOutputStage: SimulatedOutputStage?.ToString(), SimulatedLoad: SimulatedLoad?.ToString(),
             ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb,
             RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping,
+            OutputClippedDuringAcquisition: OutputClippedDuringAcquisition,
             Telemetry: ToResponse(_device.Telemetry),
             SoundCardInputDevice: SoundCardField(c => c.InputDeviceName),
             SoundCardOutputDevice: SoundCardField(c => c.OutputDeviceName),
@@ -1076,7 +1103,8 @@ public sealed class DeviceSessionService(
                 return;
             }
 
-            double derived = OutputRangeSelector.Select(_generatorConfig, Capabilities.OutputRangesDbv);
+            double derived = OutputRangeSelector.Select(
+                _generatorConfig, Capabilities.OutputRangesDbv, _lastSampleRateHz);
             if (derived != _outputRangeDbv)
                 await SetOutputRangeCoreAsync(derived, ct);
         }
@@ -1115,7 +1143,7 @@ public sealed class DeviceSessionService(
         if (_lastVoicedGeneratorConfig is not { } voiced)
             return;
 
-        double seeded = OutputRangeSelector.Select(voiced, Capabilities.OutputRangesDbv);
+        double seeded = OutputRangeSelector.Select(voiced, Capabilities.OutputRangesDbv, _lastSampleRateHz);
         if (seeded != _outputRangeDbv)
             await SetOutputRangeCoreAsync(seeded, ct);
     }
@@ -1388,6 +1416,37 @@ public sealed class DeviceSessionService(
 
         await _device.SetOutputRangeAsync(dbv, ct);
         _outputRangeDbv = dbv;
+        NoteOutputClipping();
+    }
+
+    /// <summary>
+    /// Folds the stimulus in force into <see cref="OutputClippedDuringAcquisition"/>, and says so in
+    /// the log the first time it happens in an acquisition.
+    ///
+    /// <para>Called from the two places that can create clipping — a stimulus change and a range
+    /// change — rather than computed from a history, so there is one definition of "clipped" and it
+    /// is <see cref="OutputRangeClipping"/>'s. The log line is the half that survives being sent in:
+    /// a flag on a status response is gone with the process, and this fault is one a user reports
+    /// after the fact as "the harmonics look wrong".</para>
+    /// </summary>
+    private void NoteOutputClipping()
+    {
+        if (_outputClippedDuringAcquisition || !OutputRangeClipping)
+            return;
+
+        _outputClippedDuringAcquisition = true;
+
+        double peakV = Math.Max(
+            OutputRangeSelector.RequiredPeakVolts(_generatorConfig.Left, _lastSampleRateHz),
+            OutputRangeSelector.RequiredPeakVolts(_generatorConfig.Right, _lastSampleRateHz));
+
+        logger.LogWarning(
+            "Generator clipped: the stimulus needs a {PeakV:0.000} V peak, which is more than the "
+            + "{RangeDbv:0.#} dBV output range can deliver ({Mode} ranging). What reaches the DUT is "
+            + "clipped, so its distortion is the analyzer's.",
+            peakV,
+            _outputRangeDbv,
+            _rangingMode);
     }
 
     /// <summary>
@@ -1460,7 +1519,7 @@ public sealed class DeviceSessionService(
         // rather than quietly corrected: correcting it would make "Manual" mean "manual until the
         // app disagrees".
         double nextOutputRangeDbv = _rangingMode == RangingMode.Auto
-            ? OutputRangeSelector.Select(config, Capabilities.OutputRangesDbv)
+            ? OutputRangeSelector.Select(config, Capabilities.OutputRangesDbv, _lastSampleRateHz)
             : _outputRangeDbv;
         bool widening = nextOutputRangeDbv > _outputRangeDbv;
 
@@ -1469,6 +1528,7 @@ public sealed class DeviceSessionService(
 
         await _device.ConfigureGeneratorAsync(config, ct);
         _generatorConfig = config;
+        NoteOutputClipping();
 
         if (!widening && nextOutputRangeDbv != _outputRangeDbv)
             await SetOutputRangeCoreAsync(nextOutputRangeDbv, ct);
@@ -1558,6 +1618,13 @@ public sealed class DeviceSessionService(
             : new SessionInputRanger(Capabilities.InputRangesDbv) { StepDownDelayMs = _stepDownDelay.Ms };
 
         _isAcquiring = true;
+
+        // Per acquisition, like the device's two drop counters: a stale "it clipped" from a run
+        // twenty minutes ago reads exactly like one that just happened. Re-evaluated rather than
+        // merely cleared, because the FFT screen's Run configures its generator *before* it
+        // acquires, so a clipping stimulus is already in force by the time we reach here.
+        _outputClippedDuringAcquisition = false;
+        NoteOutputClipping();
 
         // **The device's own stream-start settling is not booked here any more, and must not be.**
         // It was, as a Flush at the end of this method, "so nothing above can overwrite it" -- and

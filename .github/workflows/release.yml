@@ -270,6 +270,21 @@ jobs:
         with:
           path: artifacts
 
+      # The binaries are not code-signed, so this file is how a user confirms a download is the one
+      # that was built here — INSTALL.md's "Why Windows warns about this download" points at it.
+      # The sed strips the artifact subdirectory, so each line names the asset exactly as the
+      # release page lists it and `sha256sum -c` works with the file downloaded beside the package.
+      - name: Checksums
+        run: |
+          cd artifacts
+          sha256sum \
+            tonebench-win-x64/*-setup.exe \
+            tonebench-win-x64/*.zip \
+            tonebench-linux-x64/*.deb \
+            tonebench-linux-x64/*.tar.gz \
+            | sed 's#[^ ]*/##' > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       # --repo, because this job never checks the repository out and gh otherwise reads it from git.
       - name: Create release
         env:
@@ -280,5 +295,6 @@ jobs:
             artifacts/tonebench-win-x64/*.zip \
             artifacts/tonebench-linux-x64/*.deb \
             artifacts/tonebench-linux-x64/*.tar.gz \
+            artifacts/SHA256SUMS.txt \
             --title "${{ github.ref_name }}" \
             --generate-notes

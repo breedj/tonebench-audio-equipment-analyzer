@@ -22,7 +22,13 @@ import {
 } from '../sweep/points'
 import { useProjects } from '../composables/useProjects'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
-import { MAX_AVERAGES, STIMULUS_DEFAULTS, defaultsByStimulus, readSettings, toStored } from '../impedance/stimulusSettings'
+import {
+  MAX_AVERAGES,
+  STIMULUS_DEFAULTS,
+  defaultsByStimulus,
+  readSettings,
+  toStoredWithActive,
+} from '../impedance/stimulusSettings'
 import { useImpedance } from '../composables/useImpedance'
 import { useImpedanceFixture } from '../composables/useImpedanceFixture'
 import { isPowerUnit } from '../measurements/levelMode'
@@ -116,10 +122,12 @@ const form = reactive({
   rightChannelIsReference: false,
   frequencySpanHz: 24000 as number,
   resolutionMultiplier: 1,
-  levelValue: -20,
-  levelUnit: 'Dbv' as SweepLevelUnit,
   calibrationLevelValue: 0,
-  // The selected stimulus's pair, kept authoritative; `byStimulus` below is the memory behind it.
+  // The selected stimulus's own four, kept authoritative; `byStimulus` below is the memory behind
+  // them. All from one slot — the stimulus this form starts on — so the form and the map cannot
+  // start out disagreeing about the stimulus that is selected.
+  levelValue: STIMULUS_DEFAULTS.PinkNoise.levelValue,
+  levelUnit: STIMULUS_DEFAULTS.PinkNoise.levelUnit as SweepLevelUnit,
   smoothingDenominator: STIMULUS_DEFAULTS.PinkNoise.smoothingDenominator,
   averageCount: STIMULUS_DEFAULTS.PinkNoise.averageCount,
   byStimulus: defaultsByStimulus(),
@@ -197,9 +205,13 @@ function applyStoredParams(paramsJson: string) {
   form.byStimulus = readSettings(stored.byStimulus, form.stimulus, {
     averageCount: form.averageCount,
     smoothingDenominator: form.smoothingDenominator,
+    levelValue: form.levelValue,
+    levelUnit: form.levelUnit,
   })
   form.averageCount = form.byStimulus[form.stimulus].averageCount
   form.smoothingDenominator = form.byStimulus[form.stimulus].smoothingDenominator
+  form.levelValue = form.byStimulus[form.stimulus].levelValue
+  form.levelUnit = form.byStimulus[form.stimulus].levelUnit
   if (typeof stored.startFreqHz === 'number' && stored.startFreqHz > 0) form.startFreqHz = stored.startFreqHz
   if (typeof stored.endFreqHz === 'number' && stored.endFreqHz > 0) form.endFreqHz = stored.endFreqHz
   if (typeof stored.stepsPerOctave === 'number' && stored.stepsPerOctave > 0) {
@@ -226,12 +238,16 @@ function applyStoredParams(paramsJson: string) {
 }
 
 /**
- * Averaging and smoothing follow the stimulus: the pair on screen is parked under the stimulus being
- * left and the new one's is loaded. See impedance/stimulusSettings.ts for why they cannot be one
- * shared pair — a stepped sweep pays its averages at every point of its grid, a chirp pays them once.
+ * Averaging, smoothing and the drive level follow the stimulus: what is on screen is parked under
+ * the stimulus being left and the new one's is loaded. See impedance/stimulusSettings.ts for why
+ * they cannot be one shared set — a stepped sweep pays its averages at every point of its grid where
+ * a chirp pays them once, and it reads cleanly some 30 dB below the level a chirp needs.
+ *
+ * <p>The level's **unit** is parked with its value, or a bench that typed volts for the chirp would
+ * come back to a stepped sine asking for -20 V, which this panel refuses.</p>
  *
  * <p>Silent while `restoring`, which is what tells a stored measurement being loaded apart from the
- * user turning the dropdown: `applyStoredParams` sets the stimulus and the pair together, and this
+ * user turning the dropdown: `applyStoredParams` sets the stimulus and the values together, and this
  * would overwrite the second with the first's slot.</p>
  */
 watch(
@@ -242,9 +258,13 @@ watch(
     form.byStimulus[before] = {
       averageCount: form.averageCount,
       smoothingDenominator: form.smoothingDenominator,
+      levelValue: form.levelValue,
+      levelUnit: form.levelUnit,
     }
     form.averageCount = form.byStimulus[now].averageCount
     form.smoothingDenominator = form.byStimulus[now].smoothingDenominator
+    form.levelValue = form.byStimulus[now].levelValue
+    form.levelUnit = form.byStimulus[now].levelUnit
   },
 )
 
@@ -475,8 +495,8 @@ const hasShortCal = computed(() => (form.shortCal?.freqHz?.length ?? 0) > 1)
 const invalid = computed<string | null>(() => {
   if (!Number.isFinite(form.referenceOhms) || form.referenceOhms < 0.1 || form.referenceOhms > 1e7)
     return 'The reference resistor must be between 0.1 Ω and 10 MΩ.'
-  if (!Number.isFinite(form.levelValue)) return 'Amplitude must be a number.'
-  if (form.levelUnit !== 'Dbv' && form.levelValue <= 0) return 'A voltage amplitude must be positive.'
+  if (!Number.isFinite(form.levelValue)) return 'The drive level must be a number.'
+  if (form.levelUnit !== 'Dbv' && form.levelValue <= 0) return 'A drive level in volts must be positive.'
   if (!Number.isFinite(form.calibrationLevelValue)) return 'The calibration level must be a number.'
   if (form.levelUnit !== 'Dbv' && form.calibrationLevelValue <= 0)
     return 'A calibration voltage must be positive.'
@@ -537,7 +557,15 @@ function buildParamsJson(): string {
     levelUnit: form.levelUnit,
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
-    byStimulus: toStored(form.byStimulus),
+    // With the values on screen folded into the selected stimulus's slot: the form parks a slot
+    // only when the dropdown is turned, so a level typed and saved without touching it would be
+    // stored under the previous figure. See toStoredWithActive.
+    byStimulus: toStoredWithActive(form.byStimulus, form.stimulus, {
+      averageCount: form.averageCount,
+      smoothingDenominator: form.smoothingDenominator,
+      levelValue: form.levelValue,
+      levelUnit: form.levelUnit,
+    }),
     calibrationLevelValue: form.calibrationLevelValue,
     cableMode: form.cableMode,
     fixedCableOhms: form.fixedCableOhms,

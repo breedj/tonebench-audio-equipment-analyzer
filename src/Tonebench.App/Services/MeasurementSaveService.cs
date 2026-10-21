@@ -418,10 +418,14 @@ public sealed class MeasurementSaveService(
             FrequencySpanHz: 24000.0,
             ResolutionMultiplier: 1,
             ChirpStartHz: 10.0,
-            LevelValue: -20.0,
-            LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
-            SmoothingDenominator: ImpedanceStimulusDefaults.PinkNoise.SmoothingDenominator ?? 12,
-            AverageCount: ImpedanceStimulusDefaults.PinkNoise.AverageCount ?? 10,
+            // All four from the one slot, never typed here beside it: the authoritative fields and
+            // the map have to agree about the stimulus that is selected, and the way they come to
+            // disagree is a default written in two places. Pinned by
+            // ANewImpedanceType_SeedsItsLevelAndAveragingFromTheSelectedStimulusSlot.
+            LevelValue: ImpedanceStimulusDefaults.ForNewMeasurement.LevelValue ?? -20.0,
+            LevelUnit: ImpedanceStimulusDefaults.ForNewMeasurement.LevelUnit ?? nameof(ThdSweepLevelUnit.Dbv),
+            SmoothingDenominator: ImpedanceStimulusDefaults.ForNewMeasurement.SmoothingDenominator ?? 12,
+            AverageCount: ImpedanceStimulusDefaults.ForNewMeasurement.AverageCount ?? 10,
             CalibrationLevelValue: ImpedanceRequest.DefaultCalibrationLevelDbv,
             CableMode: nameof(ImpedanceCableMode.None),
             FixedCableOhms: 0.0,

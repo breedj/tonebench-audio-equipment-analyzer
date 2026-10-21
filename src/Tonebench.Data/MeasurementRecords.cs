@@ -1318,20 +1318,49 @@ public static class ImpedanceParametersDefaults
 /// What each impedance stimulus starts a new measurement at. The same table as
 /// <c>web/src/impedance/stimulusSettings.ts</c>, which is where its reasoning is written down —
 /// a chirp and pink noise fold their records into one estimate and can afford ten of them, while a
-/// stepped sweep pays that count at every point of its grid.
+/// stepped sweep pays that count at every point of its grid, and the broadband pair need some 30 dB
+/// more drive than a stepped sine for the same coherence.
 /// </summary>
 public static class ImpedanceStimulusDefaults
 {
-    public static readonly ImpedanceStimulusSlot Chirp = new(AverageCount: 10, SmoothingDenominator: 12);
-    public static readonly ImpedanceStimulusSlot PinkNoise = new(AverageCount: 10, SmoothingDenominator: 12);
-    public static readonly ImpedanceStimulusSlot SteppedSine = new(AverageCount: 2, SmoothingDenominator: 48);
+    /// <summary>
+    /// The unit all three slots' levels are in. A one-port has no output power to aim at, and dBV is
+    /// also the one unit a negative level is legal in — the stepped sine's -20 would be refused as
+    /// volts. Spelled out rather than taken from <c>ThdSweepLevelUnit</c>, which lives in
+    /// <c>Tonebench.App</c> and is not visible here, the same reason
+    /// <see cref="ImpedanceParametersDefaults"/> exists; pinned to that enum by
+    /// <c>SweepTypeParamsTests.ANewImpedanceType_SeedsItsLevelAndAveragingFromTheSelectedStimulusSlot</c>.
+    /// </summary>
+    public const string LevelUnit = "Dbv";
+
+    public static readonly ImpedanceStimulusSlot Chirp =
+        new(AverageCount: 10, SmoothingDenominator: 12, LevelValue: 6.0, LevelUnit: LevelUnit);
+    public static readonly ImpedanceStimulusSlot PinkNoise =
+        new(AverageCount: 10, SmoothingDenominator: 12, LevelValue: 6.0, LevelUnit: LevelUnit);
+    public static readonly ImpedanceStimulusSlot SteppedSine =
+        new(AverageCount: 2, SmoothingDenominator: 48, LevelValue: -20.0, LevelUnit: LevelUnit);
 
     /// <summary>All three, as a new type stores them.</summary>
     public static ImpedanceStimulusSettings All => new(Chirp, PinkNoise, SteppedSine);
+
+    /// <summary>
+    /// The slot a new measurement's authoritative fields are seeded from, i.e. the one for the
+    /// stimulus <c>DefaultImpedanceParametersJson</c> selects. Here rather than at that call site so
+    /// the pair and the map cannot be seeded from different rows of this table.
+    /// </summary>
+    public static ImpedanceStimulusSlot ForNewMeasurement => PinkNoise;
 }
 
-/// <summary>One stimulus's remembered averaging and smoothing.</summary>
-public sealed record ImpedanceStimulusSlot(int? AverageCount, int? SmoothingDenominator);
+/// <summary>
+/// One stimulus's remembered averaging, smoothing and drive level. Every field is nullable: a slot
+/// stored before one of them existed means "this build's default" for it, which is what lets a
+/// field be added here without a migration.
+/// </summary>
+public sealed record ImpedanceStimulusSlot(
+    int? AverageCount,
+    int? SmoothingDenominator,
+    double? LevelValue = null,
+    string? LevelUnit = null);
 
 /// <summary>The per-stimulus map; an absent slot means "this build's default".</summary>
 public sealed record ImpedanceStimulusSettings(

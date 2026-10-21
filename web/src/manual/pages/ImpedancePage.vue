@@ -371,6 +371,29 @@ const { showPage } = useManual()
       drive current, which is the number that says whether a driver was measured gently enough to
       trust — a voice coil heats up, and a hot one has a higher resistance.
     </p>
+    <p>
+      <strong>Each stimulus remembers its own level</strong>, alongside its own
+      <em>Averages</em> and <em>Smoothing</em>: turn the stimulus dropdown and the
+      <em>Drive level</em> box shows what that stimulus was last set to, not what the previous one
+      was. New measurements start at <strong>6 dBV</strong> for the chirp and for pink noise and
+      <strong>−20 dBV</strong> for the stepped sine, and that gap is measured rather than a
+      preference. A stepped sine puts all of its energy on one bin at a time, so it reads cleanly
+      about 30 dB quieter than a broadband stimulus: on a sub-ohm fixture over a 100 &Omega;
+      reference, the worst percent of in-band coherence read <strong>0.95 at −20 dBV</strong>
+      stepped, against 0.02 for a chirp at −30, 0.56 at −10, 0.94 at 0 and 0.98 at 6 dBV —
+      with pink noise within a few hundredths of the chirp at every level.
+    </p>
+    <p>
+      Two limits are worth knowing, in both directions. Too <em>little</em> drive does not merely
+      add scatter, it reads <strong>high</strong>: the same fixture measured 1.07 &Omega; at
+      −30 dBV against a settled 1.02 from −20 dBV upward, because noise on the measured ratio
+      inflates the impedance it is inverted into. And pink noise cannot be driven as hard as a
+      chirp: its crest factor is 12.5 dB against the chirp's 3 dB, so it clips the generator about
+      9 dB lower — clean at 6 dBV, clipped at 12, where a chirp is clean all the way to the
+      18 dBV maximum. Clipping does not show up in the coherence, which is why the default sits
+      where it does. A loudspeaker is the case for turning all of this down: use the stepped sine,
+      and remember that Thiele-Small parameters are small-signal figures.
+    </p>
 
     <h2>Against the simulator</h2>
     <p>

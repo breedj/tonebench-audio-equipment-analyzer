@@ -287,6 +287,62 @@ public class SweepTypeParamsTests
         });
 
     /// <summary>
+    /// A new impedance measurement's own level and averaging are the selected stimulus's slot, and
+    /// every stimulus starts at the figures <c>impedance/stimulusSettings.ts</c> holds.
+    ///
+    /// <para><b>The fault this pins is a default written twice.</b> The authoritative
+    /// <c>LevelValue</c>/<c>AverageCount</c> pair and the <c>ByStimulus</c> map both describe the
+    /// stimulus that is selected, so a figure typed into one and not the other makes a brand-new
+    /// measurement whose panel disagrees with its own memory the first time the stimulus dropdown is
+    /// turned and back. Both now come from <see cref="ImpedanceStimulusDefaults.ForNewMeasurement"/>,
+    /// and this is what says so.</para>
+    ///
+    /// <para>The figures themselves were measured on a QA403 against a sub-ohm fixture on 2026-10-21
+    /// and asked for that day: 6 dBV for the chirp and pink noise, -20 dBV for the stepped sine,
+    /// which reads the same coherence some 30 dB quieter because it puts all of its energy on one bin
+    /// at a time. They are duplicated in the TypeScript table, which is why they are asserted here as
+    /// values rather than against themselves.</para>
+    /// </summary>
+    [Fact]
+    public async Task ANewImpedanceType_SeedsItsLevelAndAveragingFromTheSelectedStimulusSlot() =>
+        await WithSaveServiceAsync(saveService =>
+        {
+            var parameters = JsonSerializer.Deserialize<ImpedanceParameters>(
+                saveService.DefaultImpedanceParametersJson(useGlobalFixture: false),
+                JsonSerializerOptions.Web);
+
+            Assert.NotNull(parameters);
+
+            // The slot the selected stimulus is stored under, whichever stimulus that is.
+            ImpedanceStimulusSlot? selected = parameters!.Stimulus switch
+            {
+                nameof(ImpedanceStimulus.Chirp) => parameters.ByStimulus?.Chirp,
+                nameof(ImpedanceStimulus.PinkNoise) => parameters.ByStimulus?.PinkNoise,
+                nameof(ImpedanceStimulus.SteppedSine) => parameters.ByStimulus?.SteppedSine,
+                _ => null,
+            };
+
+            Assert.NotNull(selected);
+            Assert.Equal(selected!.LevelValue, parameters.LevelValue);
+            Assert.Equal(selected.LevelUnit, parameters.LevelUnit);
+            Assert.Equal(selected.AverageCount, parameters.AverageCount);
+            Assert.Equal(selected.SmoothingDenominator, parameters.SmoothingDenominator);
+
+            // And the table itself, so a stimulus cannot quietly lose its own level.
+            Assert.Equal(6.0, parameters.ByStimulus!.Chirp!.LevelValue);
+            Assert.Equal(6.0, parameters.ByStimulus.PinkNoise!.LevelValue);
+            Assert.Equal(-20.0, parameters.ByStimulus.SteppedSine!.LevelValue);
+
+            // Every one of them in dBV: a negative level is only legal in that unit, and the
+            // request refuses a non-positive volt or millivolt amplitude outright.
+            foreach (ImpedanceStimulusSlot slot in
+                     new[] { parameters.ByStimulus.Chirp, parameters.ByStimulus.PinkNoise, parameters.ByStimulus.SteppedSine })
+            {
+                Assert.Equal(nameof(ThdSweepLevelUnit.Dbv), slot.LevelUnit);
+            }
+        });
+
+    /// <summary>
     /// And an existing type keeps whatever it was saved with — the default only ever applies to a
     /// type being created, or the user's own choice would be overwritten every time the settings
     /// were re-resolved.

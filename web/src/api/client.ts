@@ -746,10 +746,16 @@ export interface ImpedanceStartRequest {
  * An impedance measurement type's stored settings. The `chart*` fields are display state and all
  * optional, so a type saved before one of them existed still loads.
  */
-/** One stimulus's remembered averaging and smoothing. */
+/**
+ * One stimulus's remembered averaging, smoothing and drive level. Every field is optional: a slot
+ * written before one of them existed keeps this build's default for it.
+ */
 export interface ImpedanceStimulusSlot {
   averageCount?: number
   smoothingDenominator?: number
+  levelValue?: number | null
+  /** Always a voltage unit — a one-port has no output power to aim at. */
+  levelUnit?: SweepLevelUnit | null
 }
 
 /**

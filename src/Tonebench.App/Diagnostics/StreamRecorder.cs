@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -166,13 +166,24 @@ public sealed class StreamRecorder : IStimulusTap
     /// directories and deletes files in them, which is not something to point at a developer's own
     /// data folder from a test run.
     /// </param>
-    public StreamRecorder(ILogger<StreamRecorder> logger, string? directory = null)
+    /// <param name="maxQueuedBuffers">
+    /// The queue's depth, for a test that has to <b>force</b> an overflow. Defaults to
+    /// <see cref="QueueCapacity"/>, which is the only value the app ever uses.
+    ///
+    /// <para>A seam rather than a timing assumption, because the alternative was one: the test that
+    /// pins the per-recording drop count used to flood a full-size queue with 8000 buffers and hope
+    /// the producer outran the writer, which it does on a developer's machine and did not on CI —
+    /// where the writer's buffered file writes kept up, nothing was dropped, and the test failed on
+    /// its own "this is no longer forcing the case it exists for" guard. With a depth of a few
+    /// buffers the producer has to win by a handful out of thousands rather than by a coin toss.</para>
+    /// </param>
+    public StreamRecorder(ILogger<StreamRecorder> logger, string? directory = null, int? maxQueuedBuffers = null)
     {
         _logger = logger;
         Directory = directory ?? TonebenchAppData.RecordingsDirectory;
 
         _queue = Channel.CreateBounded<IRecorderCommand>(
-            new BoundedChannelOptions(QueueCapacity)
+            new BoundedChannelOptions(maxQueuedBuffers ?? QueueCapacity)
             {
                 // Wait, although nothing here ever waits for a sample buffer: the dropping is done
                 // by Enqueue instead, and that is the whole point. A DropWrite channel drops

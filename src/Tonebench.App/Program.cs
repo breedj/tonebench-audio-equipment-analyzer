@@ -141,8 +141,8 @@ try
 
     builder.Services.AddSingleton(new DiagnosticLoggingSetting(logLevelSwitch));
     builder.Services.AddSingleton<DiagnosticRecorder>();
-    // A factory rather than AddSingleton<StreamRecorder>(): its second constructor parameter is a
-    // directory with a default, which is a test seam rather than something to ask the container for.
+    // A factory rather than AddSingleton<StreamRecorder>(): its optional constructor parameters are
+    // a directory and a queue depth, both test seams rather than things to ask the container for.
     builder.Services.AddSingleton(sp => new StreamRecorder(sp.GetRequiredService<ILogger<StreamRecorder>>()));
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();

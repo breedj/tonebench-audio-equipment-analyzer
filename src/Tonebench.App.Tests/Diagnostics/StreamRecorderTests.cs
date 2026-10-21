@@ -1,6 +1,6 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Text.Json;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Tonebench.App.Diagnostics;
 using Tonebench.Device;
 
@@ -21,8 +21,40 @@ public sealed class StreamRecorderTests : IDisposable
             Directory.Delete(_dir, recursive: true);
     }
 
-    private StreamRecorder Create(bool enabled = true, int capMegabytes = 256) =>
-        new(NullLogger<StreamRecorder>.Instance, _dir) { Enabled = enabled, MaxFileMegabytes = capMegabytes };
+    /// <summary>
+    /// What the writer task said, so a failure here can name its own cause.
+    ///
+    /// <para>These used to run on a <c>NullLogger</c>, and the writer loop answers <i>any</i>
+    /// exception by abandoning the recording and logging it — so on the one machine where that
+    /// happened, CI, the only thing the test could report was a NullReferenceException on
+    /// <c>Last</c> one line later, naming nothing. The reason was written and thrown away. Every
+    /// assertion that an abandoned recording can reach now prints this.</para>
+    /// </summary>
+    private readonly List<string> _log = [];
+
+    private StreamRecorder Create(bool enabled = true, int capMegabytes = 256, int? maxQueuedBuffers = null) =>
+        new(new ListLogger(_log), _dir, maxQueuedBuffers) { Enabled = enabled, MaxFileMegabytes = capMegabytes };
+
+    /// <summary>Whatever the writer logged, for an assertion message.</summary>
+    private string LogText => _log.Count == 0 ? "(the recorder logged nothing)" : string.Join(" | ", _log);
+
+    private sealed class ListLogger(List<string> lines) : ILogger<StreamRecorder>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            lock (lines)
+                lines.Add($"{logLevel}: {formatter(state, exception)}{(exception is null ? "" : " -- " + exception)}");
+        }
+    }
 
     private static StreamRecordingContext Context(double sampleRateHz = 48000, int channels = 2) => new(
         SampleRateHz: sampleRateHz,
@@ -165,15 +197,21 @@ public sealed class StreamRecorderTests : IDisposable
 
         await recorder.EndAsync();
 
-        Assert.True(recorder.Last!.ReachedCap);
+        // Not `Last!`: the writer abandons a recording on any exception, and then Last is null and
+        // the bare dereference reports a NullReferenceException naming nothing — which is exactly
+        // how this failed on CI. This says which of the two happened.
+        var finishedAtCap = recorder.Last;
+        Assert.True(finishedAtCap is not null, $"the recording never finished. Recorder log: {LogText}");
+
+        Assert.True(finishedAtCap!.ReachedCap, $"the cap was not reached. Recorder log: {LogText}");
         Assert.False(recorder.Recording);
 
-        long bytes = new FileInfo(Path.Combine(_dir, recorder.Last.Name + "-in.wav")).Length;
+        long bytes = new FileInfo(Path.Combine(_dir, finishedAtCap.Name + "-in.wav")).Length;
         Assert.InRange(bytes, 16L * 1024 * 1024, 17L * 1024 * 1024);
 
         // And the sidecar says so, because the file's own end does not: a recording that stopped at
         // the cap looks exactly like one whose acquisition ended there.
-        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(_dir, recorder.Last.Name + "-info.json")));
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(_dir, finishedAtCap.Name + "-info.json")));
         Assert.True(document.RootElement.GetProperty("reachedCap").GetBoolean());
     }
 
@@ -220,8 +258,12 @@ public sealed class StreamRecorderTests : IDisposable
     /// reason, as the device's own per-acquisition drop counters.
     ///
     /// <para>Forcing a real drop is the only way to test it, so the first recording is handed far
-    /// more buffers than the queue can hold, far faster than a writer doing one file write each can
-    /// drain them. The assertion that matters is the second recording's.</para>
+    /// more buffers than the queue can hold. <b>The queue is deliberately tiny here</b>: with the
+    /// app's own depth this was a race between the producer and a writer doing one buffered file
+    /// write per buffer, which the producer wins on a developer's machine and lost on CI — where
+    /// nothing was dropped and this failed on its own guard below, twice. At a depth of 8 the
+    /// producer has to win by a handful of buffers out of 8000 rather than by a coin toss. The
+    /// assertion that matters is the second recording's.</para>
     ///
     /// <para>Filling the queue is also the only thing that reaches <see cref="StreamRecorder.EndAsync"/>'s
     /// own worst case — the End command being dropped like any other — so this doubles as the guard
@@ -230,11 +272,11 @@ public sealed class StreamRecorderTests : IDisposable
     [Fact]
     public async Task TheDropCount_BelongsToTheRecording_NotToTheProcess()
     {
-        var recorder = Create();
+        var recorder = Create(maxQueuedBuffers: 8);
         recorder.Begin(Context());
 
-        // Several times the queue's capacity, in buffers small enough that the cost is the writer's
-        // per-buffer file write rather than the bytes.
+        // Several hundred times the queue's capacity, in buffers small enough that the cost is the
+        // writer's per-buffer file write rather than the bytes.
         for (int i = 0; i < 8000; i++)
         {
             using var block = Block(64, 2, 48000, (_, _) => 0.1f);
@@ -244,9 +286,13 @@ public sealed class StreamRecorderTests : IDisposable
         // WaitAsync, not a bare await: a full queue used to swallow the End command outright, so the
         // failure this guards against is a test run that never finishes rather than one that fails.
         await recorder.EndAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        // Thousands, not one: with a depth of 8 against 8000 buffers the writer would have to keep
+        // up to within a percent while doing a file write per buffer. A handful of drops would mean
+        // this is back to racing a full-size queue, which is the regression that put it here.
         Assert.True(
-            recorder.DroppedBuffers > 0,
-            "The queue did not overflow, so this test is no longer forcing the case it exists for.");
+            recorder.DroppedBuffers > 100,
+            $"The queue dropped {recorder.DroppedBuffers} buffers, so this test is no longer forcing "
+                + $"the case it exists for. Recorder log: {LogText}");
 
         recorder.Begin(Context());
         Assert.Equal(0, recorder.DroppedBuffers);
@@ -258,7 +304,7 @@ public sealed class StreamRecorderTests : IDisposable
         Assert.Equal(0, recorder.DroppedBuffers);
 
         var finished = recorder.Last;
-        Assert.NotNull(finished);
+        Assert.True(finished is not null, $"the second recording never finished. Recorder log: {LogText}");
         using var sidecar = JsonDocument.Parse(
             await File.ReadAllTextAsync(Path.Combine(_dir, finished.Name + "-info.json")));
         Assert.Equal(0, sidecar.RootElement.GetProperty("droppedBuffers").GetInt64());

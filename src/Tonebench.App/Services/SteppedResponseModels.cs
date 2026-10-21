@@ -89,7 +89,14 @@ public sealed record SteppedResponseRequest(
 
     public const int MinAverageCount = 1;
 
-    public const int MaxAverageCount = 10;
+    /// <summary>
+    /// How many records one measurement may fold in. Raised from 10 to <b>20</b> on 2026-10-21,
+    /// after the impedance screen had it alone for a day — asked for across the board rather than
+    /// kept as a divider-only allowance, and the ceiling is not what decides whether the records
+    /// are worth taking: a stepped grid's per-point cost is the thing to look at, and the panel's
+    /// own time estimate says it before you press RUN.
+    /// </summary>
+    public const int MaxAverageCount = FrequencyResponseRequest.MaxAverageCount;
 
     /// <summary>The requested drive level in dBV, whatever unit it was entered in. Watts convert through the load: V = sqrt(P·R).</summary>
     public double LevelDbv => LevelUnit.ToDbv(LevelValue, LoadOhms);

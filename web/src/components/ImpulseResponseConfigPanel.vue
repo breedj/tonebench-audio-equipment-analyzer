@@ -29,6 +29,7 @@ import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
+import { MAX_AVERAGE_COUNT, averageCountError } from '../measurements/averaging'
 import EstimateBadge from './EstimateBadge.vue'
 
 defineProps<{ running: boolean }>()
@@ -229,7 +230,8 @@ const referenceRateMismatch = computed(
 const invalid = computed<string | null>(() => {
   const levelProblem = levelInvalid(form.level, loadOhms.value)
   if (levelProblem) return levelProblem
-  if (form.averageCount < 1 || form.averageCount > 10) return 'Averages must be between 1 and 10.'
+  const averages = averageCountError(form.averageCount)
+  if (averages) return averages
   if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
     return 'Chirp start must be between 0.5 and 1000 Hz.'
   if (form.chirpStartHz >= chirpEndHz.value / 10) return 'Chirp start must be at least a decade below the span.'
@@ -427,7 +429,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         v-model.number="form.averageCount"
         type="number"
         min="1"
-        max="10"
+        :max="MAX_AVERAGE_COUNT"
         :disabled="running"
         class="tb-input"
       />

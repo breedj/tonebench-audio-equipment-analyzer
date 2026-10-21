@@ -22,6 +22,7 @@ import { useLoadOhms } from '../composables/useLoadOhms'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
+import { MAX_AVERAGE_COUNT } from '../measurements/averaging'
 import EstimateBadge from './EstimateBadge.vue'
 import {
   adaptiveFftBounds,
@@ -380,7 +381,7 @@ function run() {
           v-model.number="form.averageCount"
           type="number"
           min="1"
-          max="10"
+          :max="MAX_AVERAGE_COUNT"
           :disabled="running"
           class="tb-input"
         />

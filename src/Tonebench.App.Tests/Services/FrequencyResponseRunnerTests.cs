@@ -896,7 +896,9 @@ public class FrequencyResponseRunnerTests
     [InlineData(24_000.0, 3, 24, 1)]      // unsupported resolution multiplier
     [InlineData(24_000.0, 1, 17, 1)]      // unsupported smoothing denominator
     [InlineData(24_000.0, 1, 24, 0)]      // too few averages
-    [InlineData(24_000.0, 1, 24, 11)]     // too many averages
+    // One past the ceiling. A literal rather than the constant because InlineData needs one, so it
+    // has to be kept in step by hand -- AverageCountCeilingTests is what pins the number itself.
+    [InlineData(24_000.0, 1, 24, 21)]     // too many averages
     public void Validate_RejectsAnUnmeasurableRequest(double spanHz, int multiplier, int smoothing, int averages)
     {
         var request = Request(spanHz: spanHz, resolutionMultiplier: multiplier, smoothing: smoothing, averages: averages);

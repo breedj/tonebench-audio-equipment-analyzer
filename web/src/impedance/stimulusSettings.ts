@@ -1,4 +1,5 @@
 import type { ImpedanceSettingsByStimulus, ImpedanceStimulusName } from '../api/client'
+import { MAX_AVERAGE_COUNT } from '../measurements/averaging'
 
 // Averaging and smoothing, kept per stimulus.
 //
@@ -15,12 +16,11 @@ import type { ImpedanceSettingsByStimulus, ImpedanceStimulusName } from '../api/
 // active pair staying authoritative so nothing downstream has to learn about the map.
 
 /**
- * How many records one impedance measurement may fold in. Mirrors
- * `ImpedanceRequest.MaxAverageCount`, which is 20 where every other kind stops at 10: a divider puts
- * the DUT channel tens of dB below the reference, and pink noise's records are independent draws
- * that keep improving the estimate.
+ * How many records one impedance measurement may fold in. The shared ceiling again since
+ * 2026-10-21 — it was this screen's own 20 against every other kind's 10 for a day — and re-exported
+ * under the name this panel already used rather than changed at its call sites.
  */
-export const MAX_AVERAGES = 20
+export const MAX_AVERAGES = MAX_AVERAGE_COUNT
 
 export interface StimulusSettings {
   averageCount: number

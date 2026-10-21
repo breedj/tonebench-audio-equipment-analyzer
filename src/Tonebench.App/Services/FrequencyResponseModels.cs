@@ -265,7 +265,15 @@ public sealed record FrequencyResponseRequest(
     public static readonly int[] SupportedResolutionMultipliers = [1, 2, 4];
 
     public const int MinAverageCount = 1;
-    public const int MaxAverageCount = 10;
+
+    /// <summary>
+    /// How many records one measurement may fold in. Raised from 10 to <b>20</b> on 2026-10-21,
+    /// after the impedance screen had it alone for a day — asked for across the board rather than
+    /// kept as a divider-only allowance, and the ceiling is not what decides whether the records
+    /// are worth taking: a stepped grid's per-point cost is the thing to look at, and the panel's
+    /// own time estimate says it before you press RUN.
+    /// </summary>
+    public const int MaxAverageCount = 20;
 
     /// <summary>
     /// Where the chirp starts by default. Deliberately below anything worth reporting: the sweep's

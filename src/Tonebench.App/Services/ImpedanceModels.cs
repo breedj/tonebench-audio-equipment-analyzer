@@ -201,20 +201,15 @@ public sealed record ImpedanceRequest(
     public const double DefaultCalibrationLevelDbv = 0.0;
 
     /// <summary>
-    /// How many records one impedance measurement may fold in — <b>20</b>, where every other kind
-    /// stops at 10 (Joost, 2026-10-20).
+    /// How many records one impedance measurement may fold in.
     ///
-    /// <para>This is the measurement that needs them. A divider puts the DUT channel at
-    /// <c>Z/(R + Z)</c> of the reference, which on a sub-ohm part against a 100 ohm resistor is
-    /// 40 dB down, and the chirp spreads what is left over thousands of bins. Pink noise earns the
-    /// count outright: its records are independent draws, so the noise in H keeps falling with the
-    /// count, where a chirp's are repeats of one deterministic sweep.</para>
-    ///
-    /// <para>The other kinds keep <see cref="FrequencyResponseRequest.MaxAverageCount"/>: they
-    /// measure a DUT's own output, which is not 40 dB down, and the stepped ones pay the count at
-    /// every point of a grid.</para>
+    /// <para>This had a ceiling of its own for a day — 20 against every other kind's 10 — because a
+    /// divider puts the DUT channel tens of dB below the reference and pink noise's records are
+    /// independent draws that keep improving the estimate. All the kinds were raised to 20 on
+    /// 2026-10-21, so it is the shared one again and the name is kept only so a reader looking here
+    /// finds an answer.</para>
     /// </summary>
-    public const int MaxAverageCount = 20;
+    public const int MaxAverageCount = FrequencyResponseRequest.MaxAverageCount;
 
     /// <summary>The smallest reference resistor that is a resistor rather than a wire.</summary>
     public const double MinReferenceOhms = 0.1;

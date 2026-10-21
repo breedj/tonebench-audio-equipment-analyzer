@@ -27,6 +27,7 @@ import { useProjects } from '../composables/useProjects'
 import { stimulusFloorNotice } from '../stimulusFloor'
 import { spanFallback, supportedSpans } from '../supportedSpans'
 import CollapsibleSection from './CollapsibleSection.vue'
+import { MAX_AVERAGE_COUNT, MIN_AVERAGE_COUNT, averageCountError } from '../measurements/averaging'
 import EstimateBadge from './EstimateBadge.vue'
 
 const props = defineProps<{
@@ -248,7 +249,8 @@ const targetDbv = computed(() => (targetVolt.value > 0 ? 20 * Math.log10(targetV
 const invalid = computed<string | null>(() => {
   const levelProblem = levelInvalid(form.level, loadOhms.value)
   if (levelProblem) return levelProblem
-  if (form.averageCount < 1 || form.averageCount > 10) return 'Averages must be between 1 and 10.'
+  const averages = averageCountError(form.averageCount)
+  if (averages) return averages
   if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
     return 'Chirp start must be between 0.5 and 1000 Hz.'
   if (form.chirpStartHz >= (form.frequencySpanHz * 0.98) / 10)
@@ -450,7 +452,14 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         title="How many sweeps to average. Coherence is only meaningful from two upward — a single record always reads 1."
       >
         Averages
-        <input v-model.number="form.averageCount" type="number" min="1" max="10" :disabled="running" class="tb-input" />
+        <input
+          v-model.number="form.averageCount"
+          type="number"
+          :min="MIN_AVERAGE_COUNT"
+          :max="MAX_AVERAGE_COUNT"
+          :disabled="running"
+          class="tb-input"
+        />
       </label>
     </div>
 

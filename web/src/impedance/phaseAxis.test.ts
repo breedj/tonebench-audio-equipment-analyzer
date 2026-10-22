@@ -3,6 +3,7 @@ import {
   MAX_PHASE_TICKS,
   MIN_PHASE_SPAN_DEG,
   phaseAxisSplits,
+  phaseInWindow,
   phaseScaleRange,
   phaseWindow,
 } from './phaseAxis'
@@ -98,6 +99,49 @@ describe('phaseAxisSplits', () => {
   it('labels something even for a window narrower than the finest step', () => {
     const splits = phaseAxisSplits(0.2, 0.4)
     expect(splits.length).toBeGreaterThan(0)
+  })
+})
+
+describe('phaseInWindow', () => {
+  it('blanks the samples that would be drawn in the empty lower half', () => {
+    // The report (Joost, 2026-10-22), from the output-impedance chart at 30/10: the phase swept up
+    // from near zero, and everything below 10 deg was drawn through the |Z| half of the plot at a
+    // height the degrees axis prints no label for.
+    expect(phaseInWindow([2, 8, 12, 25, 31], 10, 30)).toEqual([null, null, 12, 25, null])
+  })
+
+  it('keeps a sample sitting exactly on either boundary', () => {
+    // Autofit rounds the curve's extremes outward onto whole ticks, so this is the ordinary case
+    // rather than an edge one: blanked here, the fitted window would open with a gap at each end.
+    expect(phaseInWindow([10, 30], 10, 30)).toEqual([10, 30])
+  })
+
+  it('leaves a curve that fits inside the window untouched', () => {
+    const values = [-89.5, -45, 0, 12.25, 90]
+    expect(phaseInWindow(values, -90, 90)).toEqual(values)
+  })
+
+  it('carries a gap through as a gap, and never writes a zero', () => {
+    // A null is "not measured here" and must stay one: drawn as 0 it would be a phase the DUT never
+    // had, sitting in the middle of the window.
+    expect(phaseInWindow([null, undefined, Number.NaN, 5], -90, 90)).toEqual([null, null, null, 5])
+  })
+
+  it('reads the window through the same guard the scale and the ticks do', () => {
+    // A window with no height is widened to MIN_PHASE_SPAN_DEG for the scale, so it has to be
+    // widened here too -- otherwise the axis would show a band the curve is blanked out of.
+    const [bottom, top] = phaseWindow(90, 90)
+    expect(top - bottom).toBe(MIN_PHASE_SPAN_DEG)
+    expect(phaseInWindow([bottom, top, bottom - 1, top + 1], 90, 90)).toEqual([bottom, top, null, null])
+
+    // And a cleared box falls back to +/-90 here as well, rather than blanking the whole curve.
+    expect(phaseInWindow([-90, 0, 90], Number.NaN, Number.NaN)).toEqual([-90, 0, 90])
+  })
+
+  it('answers an array of the length it was given', () => {
+    // uPlot pairs series with x by position, so a filtered-down array would shift every sample onto
+    // a lower frequency than it was measured at.
+    expect(phaseInWindow(new Array(7).fill(180), -90, 90)).toHaveLength(7)
   })
 })
 

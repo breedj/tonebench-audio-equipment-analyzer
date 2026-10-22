@@ -56,6 +56,59 @@ export function phaseScaleRange(bottomDeg: number, topDeg: number): [number, num
 }
 
 /**
+ * How far outside the window a sample may sit and still be drawn. Rounding only: Autofit rounds the
+ * curve's extremes outward onto whole ticks, so a sample lands exactly on a boundary routinely, and
+ * blanking it there would put a gap at the one end of the curve the fit was sized to show.
+ */
+const PHASE_EDGE_TOLERANCE_DEG = 1e-9
+
+/**
+ * A phase series with every sample outside the window blanked to `null` — a gap, never a zero.
+ *
+ * <p>The scale spans twice the window so the curve occupies the top half of the plot, which leaves
+ * the lower half as empty space nothing is plotted in. A sample that fell there was still being
+ * drawn, against an axis that does not label it: reported from the output-impedance chart with a
+ * 30°/10° window (Joost, 2026-10-22), where most of the phase curve swept up through the |Z| half
+ * of the plot at heights the degrees axis cannot be read for. Widening the window — or Autofit — is
+ * what brings that part of the curve back.</p>
+ *
+ * <p>Blanked at <b>sample</b> granularity, so a curve that leaves the window stops at the last
+ * sample inside it rather than exactly at the crossing: uPlot's series share one x array, and there
+ * is no column to put the crossing on. On this chart's grid — the union of every drawn curve's own
+ * columns — that is a fraction of a pixel for a chirp or a noise run, and at most one point's
+ * spacing on a coarse stepped sweep.</p>
+ *
+ * <p>The cursor readout reads the plotted arrays, so a blanked sample reads as a dash. That is the
+ * same answer the chart gives: what is not drawn has no value to report at that frequency.</p>
+ *
+ * <p><b>The frequency-response chart needs no counterpart</b>, and that was checked rather than
+ * assumed: its phase is wrapped into (−180°, 180°] as the very last step before it is drawn, and
+ * that interval <i>is</i> the window its axis shows, so no sample can reach the empty half.
+ * `response/phaseCurve.test.ts` pins it.</p>
+ */
+export function phaseInWindow(
+  values: readonly (number | null | undefined)[],
+  bottomDeg: number,
+  topDeg: number,
+): (number | null)[] {
+  const [bottom, top] = phaseWindow(bottomDeg, topDeg)
+  const out = new Array<number | null>(values.length)
+
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i]
+    out[i] =
+      typeof value === 'number' &&
+      Number.isFinite(value) &&
+      value >= bottom - PHASE_EDGE_TOLERANCE_DEG &&
+      value <= top + PHASE_EDGE_TOLERANCE_DEG
+        ? value
+        : null
+  }
+
+  return out
+}
+
+/**
  * The ticks to label: inside the window and nowhere else, at a step off
  * {@link PHASE_AXIS_INCRS} that keeps them to {@link MAX_PHASE_TICKS}.
  *

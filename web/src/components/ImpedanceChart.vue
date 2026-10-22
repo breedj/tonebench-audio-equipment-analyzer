@@ -38,7 +38,7 @@ import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
 import { measuredColumns, mergeGrids } from '../charts/chartGrid'
-import { phaseAxisSplits, phaseScaleRange } from '../impedance/phaseAxis'
+import { phaseAxisSplits, phaseInWindow, phaseScaleRange } from '../impedance/phaseAxis'
 import { ohmAxis } from '../impedance/ohmAxis'
 import { dampingFactorTicks, formatDampingFactor } from '../impedance/dampingFactorAxis'
 import { dbOhmsToOhms, formatOhms } from '../impedance/equivalent'
@@ -320,6 +320,11 @@ function pointSeriesOnto(
   return interpolateOnto(freqHz, values, grid, (v) => v)
 }
 
+/** Every phase series goes through this, so one of them cannot be left drawing in the empty half. */
+function inPhaseWindow(values: readonly (number | null | undefined)[]): (number | null)[] {
+  return phaseInWindow(values, props.phaseBottomDeg, props.phaseTopDeg)
+}
+
 function buildData(): uPlot.AlignedData {
   const t = trace.value
   const x = gridHz.value
@@ -343,11 +348,14 @@ function buildData(): uPlot.AlignedData {
   // Resolved onto `x` for the same reason the magnitude is: these arrays are indexed by the measured
   // grid, and uPlot pairs series with x by position, so a short array would shift every phase and
   // coherence sample onto a lower frequency than it was measured at.
+  // Blanked outside the Top/Bottom window on the way in, by every path that reaches the degrees
+  // axis: the scale spans twice that window so the curve sits in the top half, and a sample in the
+  // lower half is drawn where the axis prints no label for it. See phaseInWindow.
   if (props.showPhase) {
-    series.push(pointSeriesOnto(t?.phaseDeg, t?.freqHz, x))
-    for (const overlay of overlayCurves.value) series.push(resamplePhaseOnto(overlay.trace, x))
+    series.push(inPhaseWindow(pointSeriesOnto(t?.phaseDeg, t?.freqHz, x)))
+    for (const overlay of overlayCurves.value) series.push(inPhaseWindow(resamplePhaseOnto(overlay.trace, x)))
   }
-  if (shortCalPhase.value) series.push(shortCalPhase.value)
+  if (shortCalPhase.value) series.push(inPhaseWindow(shortCalPhase.value))
   if (props.showCoherence) series.push(pointSeriesOnto(t?.coherence, t?.freqHz, x))
 
   return [x, ...series] as uPlot.AlignedData

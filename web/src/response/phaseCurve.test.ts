@@ -131,6 +131,34 @@ describe('the fixed axis', () => {
     for (const split of PHASE_AXIS_SPLITS) expect(split).toBeGreaterThanOrEqual(min)
     for (const split of PHASE_AXIS_SPLITS) expect(split).toBeLessThanOrEqual(180)
   })
+
+  it('cannot draw a sample in the empty half, which is why this chart blanks nothing', () => {
+    // The impedance chart had to blank the samples outside its phase window (phaseInWindow in
+    // impedance/phaseAxis.ts) -- there the window is the user's, so a curve routinely leaves it and
+    // was being drawn in the half the axis does not label. Asked the same day whether this chart has
+    // the same fault (Joost, 2026-10-22). It cannot: the window here is fixed, and the wrap is the
+    // last thing applied to every drawn sample, so each one lands in the half that carries the
+    // labels. This is that check, kept rather than reported -- clipping code here would be dead, and
+    // the invariant it would stand in for is this one.
+    const [min, max] = PHASE_SCALE_RANGE
+    const labelledTop = min + (max - min) / 2
+
+    for (const raw of [0, 1, 179.999, 180, 181, -180, -181, 540, -540, 1e4, -1e4, -311068]) {
+      const drawn = wrapPhaseDeg(raw)
+      expect(drawn).toBeGreaterThan(min)
+      expect(drawn).toBeLessThanOrEqual(labelledTop)
+    }
+
+    // And through the path the chart actually draws, with a delay restored on top -- which is what
+    // puts the turns there in the first place.
+    const restore = { restoreDelay: true, latencySamples: 4800, sampleRateHz: 48_000 }
+    const curve = phaseSeries(trace({ phaseDeg: [1e5, -1e5, 180, -180, 0] }), 'PerTrace', restore, 5)
+    for (const value of curve) {
+      if (value === null) continue
+      expect(value).toBeGreaterThan(min)
+      expect(value).toBeLessThanOrEqual(labelledTop)
+    }
+  })
 })
 
 describe('the restored delay', () => {

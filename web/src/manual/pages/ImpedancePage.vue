@@ -183,7 +183,9 @@ const { showPage } = useManual()
       <strong>+90° and −90°</strong>, which is the whole of what a passive one-port can produce:
       a curve that leaves it is a fixture or a calibration that is wrong, and the axis showing it is
       how you see that. Both ends are yours to change under <strong>Phase axis</strong>, and Autofit
-      narrows them to whatever was measured.
+      narrows them to whatever was measured. The only rule is that Bottom stays below Top, so a
+      window inside one quadrant is yours to set — which is where a capacitor (near −90°) or a
+      coil (near +90°) spends its whole curve.
     </p>
     <p>
       The ohms axis has a <strong>Scale</strong> selector under <strong>Impedance axis</strong>.

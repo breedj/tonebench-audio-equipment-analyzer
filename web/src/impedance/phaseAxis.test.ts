@@ -23,6 +23,22 @@ describe('phaseScaleRange', () => {
     expect(phaseScaleRange(-90, -30)).toEqual([-150, -30])
   })
 
+  it('keeps a window inside one quadrant in the top half, ticks and all', () => {
+    // Asked for 2026-10-22: the two boxes used to be held 90 deg apart, so the default +90/-90
+    // window was also the narrowest one reachable -- a capacitor near -90 or a coil near +90 could
+    // not be framed. The panels clamp to MIN_PHASE_SPAN_DEG now, so the geometry has to hold for a
+    // window far narrower than the default.
+    expect(phaseScaleRange(45, 90)).toEqual([0, 90])
+    expect(phaseScaleRange(-90, -45)).toEqual([-135, -45])
+
+    const splits = phaseAxisSplits(45, 90)
+    expect(splits.length).toBeGreaterThan(1)
+    for (const value of splits) {
+      expect(value).toBeGreaterThanOrEqual(45)
+      expect(value).toBeLessThanOrEqual(90)
+    }
+  })
+
   it('guards a window with no height rather than blanking the plot', () => {
     // Top at or below Bottom is reachable by typing, and a zero-height window doubled is still zero:
     // uPlot would have nothing to map onto and the whole chart would come back empty.

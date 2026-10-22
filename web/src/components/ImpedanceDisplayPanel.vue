@@ -6,6 +6,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { useImpedance, type ImpedanceTrace } from '../composables/useImpedance'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { dbOhmsToOhms } from '../impedance/equivalent'
+import { MIN_PHASE_SPAN_DEG } from '../impedance/phaseAxis'
 import { standardOnGrid } from '../impedance/standard'
 
 const props = defineProps<{
@@ -38,7 +39,15 @@ const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 const PHASE_MIN = -1440
 const PHASE_MAX = 1440
 const PHASE_TICK_DEG = 45
-const PHASE_MIN_SPAN = PHASE_TICK_DEG * 2
+/**
+ * What Autofit leaves when the curve has no spread of its own: a flat resistive fixture reads
+ * 0.00° at every frequency, and a window fitted to that exactly would have no height at all.
+ * Two ticks, so the fitted axis still carries labels.
+ *
+ * <p>Deliberately <b>not</b> what the Top and Bottom boxes are clamped to — see the handlers
+ * below.</p>
+ */
+const PHASE_AUTOFIT_MIN_SPAN = PHASE_TICK_DEG * 2
 
 /** A logarithmic axis cannot reach zero; a linear one may start there. */
 const Z_LOG_MIN = 0.001
@@ -119,12 +128,21 @@ watch(zScale, (scale) => {
   if (scale === 'Log' && zBottomOhms.value < Z_LOG_MIN) zBottomOhms.value = Z_LOG_MIN
 })
 
+/**
+ * Top and Bottom are held apart by {@link MIN_PHASE_SPAN_DEG} — the chart's own guard against a
+ * window with no height — and by nothing more (Joost, 2026-10-22). They used to be held two 45°
+ * ticks apart, i.e. a 90° window at the narrowest, and on this chart that is the whole of the
+ * default window: at +90°/−90° the Bottom box refused anything above 0°, and with the top at 90°
+ * after an Autofit the Top box refused anything below 90°. So a phase that lives inside one
+ * quadrant — which is most of them, a capacitor near −90° and a coil near +90° — could not be
+ * framed in the half of the plot the phase is drawn in.
+ */
 function onTopPhaseChange(event: Event) {
-  phaseTopDeg.value = commitBoundedNumber(event, phaseTopDeg.value, phaseBottomDeg.value + PHASE_MIN_SPAN, PHASE_MAX)
+  phaseTopDeg.value = commitBoundedNumber(event, phaseTopDeg.value, phaseBottomDeg.value + MIN_PHASE_SPAN_DEG, PHASE_MAX)
 }
 
 function onBottomPhaseChange(event: Event) {
-  phaseBottomDeg.value = commitBoundedNumber(event, phaseBottomDeg.value, PHASE_MIN, phaseTopDeg.value - PHASE_MIN_SPAN)
+  phaseBottomDeg.value = commitBoundedNumber(event, phaseBottomDeg.value, PHASE_MIN, phaseTopDeg.value - MIN_PHASE_SPAN_DEG)
 }
 
 /**
@@ -222,7 +240,7 @@ function autofitPhase() {
 
   let bottom = Math.floor(min / PHASE_TICK_DEG) * PHASE_TICK_DEG
   let top = Math.ceil(max / PHASE_TICK_DEG) * PHASE_TICK_DEG
-  if (top - bottom < PHASE_MIN_SPAN) top = bottom + PHASE_MIN_SPAN
+  if (top - bottom < PHASE_AUTOFIT_MIN_SPAN) top = bottom + PHASE_AUTOFIT_MIN_SPAN
 
   phaseBottomDeg.value = Math.max(PHASE_MIN, bottom)
   phaseTopDeg.value = Math.min(PHASE_MAX, top)

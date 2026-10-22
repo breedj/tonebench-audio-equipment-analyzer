@@ -178,7 +178,7 @@ public class ProgrammableLoadParamsTests
             _projectId ??= await projects.CreateProjectAsync("load", null, CancellationToken.None);
             long typeId = await projects.CreateTypeAsync(
                 _projectId.Value, $"FFT {Guid.NewGuid():N}", "fft", null,
-                saveService.BuildCurrentParametersJson(Staged()), CancellationToken.None);
+                SaveService.BuildCurrentParametersJson(Staged()), CancellationToken.None);
 
             pipeline.Options = pipeline.Options with { FftSize = 8192, Averaging = AveragingMode.Off, SingleShot = true };
             await session.StartAcquisitionAsync(
@@ -195,7 +195,7 @@ public class ProgrammableLoadParamsTests
                 await session.StopAcquisitionAsync();
             }
 
-            return await saveService.SaveAsync(typeId, $"capture {Guid.NewGuid():N}", null, null, CancellationToken.None);
+            return await SaveService.SaveAsync(typeId, $"capture {Guid.NewGuid():N}", null, null, CancellationToken.None);
         }
 
         public async Task<FftSpectrumParameters> ReadParamsAsync(long resultId)

@@ -520,10 +520,16 @@ const invalid = computed<string | null>(() => {
     if (steppedPointCount.value < 2)
       return `This grid produces ${steppedPointCount.value} point(s) below ${formatHz(steppedMaxFreqHz.value)}; a sweep needs two.`
   }
-  if (form.cableMode === 'Measured' && !effectiveShortCal.value)
-    return 'Subtracting a measured short needs one captured first.'
+  // The fixture is checked *before* the short, and the order is the whole of the message (Joost,
+  // 2026-10-22). A measurement that adopts the global calibration takes its short from it, so with
+  // the fixture empty both refusals are true at once — and the short's names the symptom while this
+  // one names the cause. It is the state a new measurement is born in whenever a bench has a
+  // fixture and then loses it (a config reset, another machine, an imported project): the leads
+  // default to Measured and the tick to on, both seeded from a fixture that is no longer there.
   if (form.useGlobalFixture && !fixtureHasCalibration.value)
     return 'There is no global fixture calibration stored yet.'
+  if (form.cableMode === 'Measured' && !effectiveShortCal.value)
+    return 'Subtracting a measured short needs one captured first.'
   if (form.cableMode === 'Fixed' && (!Number.isFinite(form.fixedCableOhms) || form.fixedCableOhms < 0))
     return 'A cable resistance cannot be negative.'
   if (form.cableMode === 'Fixed' && (!Number.isFinite(form.fixedCableMillihenry) || form.fixedCableMillihenry < 0))

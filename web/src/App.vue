@@ -96,7 +96,6 @@ import ImpedanceConfigPanel from './components/ImpedanceConfigPanel.vue'
 import ImpedanceDisplayPanel from './components/ImpedanceDisplayPanel.vue'
 import ImpedanceChart from './components/ImpedanceChart.vue'
 import ImpedancePlaneChart from './components/ImpedancePlaneChart.vue'
-import ImpedanceReadoutPanel from './components/ImpedanceReadoutPanel.vue'
 import ImpedanceComparisonPanel from './components/ImpedanceComparisonPanel.vue'
 import SteppedResponseConfigPanel from './components/SteppedResponseConfigPanel.vue'
 import CrosstalkConfigPanel from './components/CrosstalkConfigPanel.vue'
@@ -794,8 +793,6 @@ const {
   generatorAmpDbv: impedanceGeneratorAmpDbv,
   binHz: impedanceBinHz,
   referenceOhms: impedanceReferenceOhms,
-  medianOhms: impedanceMedianOhms,
-  driveCurrentAmps: impedanceDriveCurrentAmps,
   selectedStimulus: impedanceStimulus,
   start: startImpedance,
   cancel: cancelImpedanceRun,
@@ -5345,15 +5342,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :running="impedanceRunning"
                   @calibrate="calibrateImpedance"
                 />
-
-                <ImpedanceReadoutPanel
-                  v-model:dut-type="impedanceDutType"
-                  v-model:equivalent-hz="impedanceEquivalentHz"
-                  :traces="impedanceTraces"
-                  :median-ohms="impedanceMedianOhms"
-                  :drive-current-amps="impedanceDriveCurrentAmps"
-                  :reference-ohms="impedanceReferenceOhms"
-                />
               </template>
 
               <template #status>
@@ -5416,12 +5404,12 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 />
 
                 <ImpedanceComparisonPanel
+                  v-model:dut-type="impedanceDutType"
+                  v-model:equivalent-hz="impedanceEquivalentHz"
                   :traces="impedanceTraces"
                   :overlays="visibleImpedanceOverlays"
-                  :dut-type="impedanceDutType"
                   :reference-ohms="impedanceReferenceOhms"
                   :generator-amp-dbv="impedanceTraces.length > 0 && Number.isFinite(impedanceGeneratorAmpDbv) ? impedanceGeneratorAmpDbv : null"
-                  :equivalent-hz="impedanceEquivalentHz"
                 />
 
                 <MeasurementNotesPanel />

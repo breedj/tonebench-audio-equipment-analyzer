@@ -23,7 +23,9 @@ describe('measurementsComparison', () => {
     ])
 
     expect(table.title).toBe('Measurements')
-    expect(table.columns).toEqual(['Peak |Z|', 'at', 'Minimum |Z|', 'at', 'Median |Z|', 'Drive current', 'Reference R'])
+    expect(table.columns.map((c) => c.label)).toEqual(
+      ['Peak |Z|', 'at', 'Minimum |Z|', 'at', 'Median |Z|', 'Drive current', 'Reference R'],
+    )
     expect(table.rows.map((r) => r.id)).toEqual(['live', 'stored-7'])
     expect(table.rows[0].cells).toEqual(['30.000 Ω', '100.0 Hz', '6.000 Ω', '1.00 kHz', '8.000 Ω', '9.259 mA', '100.0 Ω'])
   })
@@ -64,7 +66,7 @@ describe('componentComparison', () => {
     )!
 
     expect(table.title).toBe('Loudspeaker')
-    expect(table.columns).toEqual(['fs', 'Zmax', 'Re', 'f1 / f2', 'Qms', 'Qes', 'Qts'])
+    expect(table.columns.map((c) => c.label)).toEqual(['fs', 'Zmax', 'Re', 'f1 / f2', 'Qms', 'Qes', 'Qts'])
     expect(table.rows.map((r) => r.name)).toEqual(['Driver A', 'Driver B'])
     // The same function the side panel and the report call, so the cells are that fit's own values.
     expect(table.rows[0].cells).toEqual(componentReading(driverTestTrace(), 'Loudspeaker')!.rows.map((r) => r.value))
@@ -94,7 +96,9 @@ describe('equivalentComparison', () => {
     const table = equivalentComparison([subject(), subject({ id: 'stored-1', name: 'Earlier' })], 900)
 
     expect(table.title).toBe('Equivalent circuit at 900.0 Hz')
-    expect(table.columns).toEqual(['Measured at', '|Z|', 'Phase', 'Series R', 'Series X', 'Series L / C', 'Coherence'])
+    expect(table.columns.map((c) => c.label)).toEqual(
+      ['Measured at', '|Z|', 'Phase', 'Series R', 'Series X', 'Series L / C', 'Coherence'],
+    )
     // 900 Hz lands on the 1 kHz column, and the block says which column it read.
     expect(table.rows[0].cells[0]).toBe('1.00 kHz')
     expect(table.rows[0].cells[1]).toBe('6.000 Ω')
@@ -110,8 +114,31 @@ describe('equivalentComparison', () => {
       1000,
     )
 
-    expect(table.columns[5]).toBe('Series L / C')
+    expect(table.columns[5].label).toBe('Series L / C')
     expect(table.rows[0].cells[5]).toContain('mH')
     expect(table.rows[1].cells[5]).toContain('µF')
+  })
+})
+
+describe('column tooltips', () => {
+  it('explains the headers the side panels used to explain', () => {
+    // These tables replaced three side panels whose every row carried its meaning on a title. A
+    // table of bare symbols -- Re, Qms, ESR -- is one only a reader who already knows them can use.
+    const component = componentComparison([subject({ trace: driverTestTrace() })], 'Loudspeaker')
+
+    expect(component).not.toBeNull()
+    expect(component!.columns.find((c) => c.label === 'Re')?.title).toContain('Voice-coil resistance')
+    expect(component!.columns.find((c) => c.label === 'f1 / f2')?.title).toContain('geometric mean')
+    // A label nobody had to explain carries no tooltip rather than an empty one.
+    expect(component!.columns.find((c) => c.label === 'Zmax')?.title).toBeUndefined()
+  })
+
+  it('tells the two "at" columns apart, which a label lookup could not', () => {
+    // The first is the peak's frequency -- a driver's resonance -- and the second the minimum's.
+    const ats = measurementsComparison([subject()]).columns.filter((c) => c.label === 'at')
+
+    expect(ats).toHaveLength(2)
+    expect(ats[0].title).toContain('resonance')
+    expect(ats[1].title).toBeUndefined()
   })
 })

@@ -37,6 +37,46 @@ export interface ComparisonSubject {
   generatorAmpDbv: number | null
 }
 
+/**
+ * What a column header explains, hovered.
+ *
+ * <p>Carried over from the three side panels these tables replaced (2026-10-22): each of their rows
+ * had its label's meaning on a `title`, and a table of bare symbols — ESR, ESL, DCR, Qms — is a
+ * table only someone who already knows them can read. Keyed by label, which is why **SRF is worded
+ * for both components**: the capacitor panel said "crosses from capacitive to inductive" and the
+ * inductor panel the reverse, and one header has to serve whichever fit is showing.</p>
+ */
+const COLUMN_TITLES: Readonly<Record<string, string>> = {
+  'Minimum |Z|': 'The worst-case load: where the DUT draws the most current from whatever is driving it.',
+  'Drive current': "Roughly what the DUT was driven with. Approximate: a sweep's current varies with Z across the band.",
+  C: 'Fitted across every sample that is clearly capacitive and below self-resonance.',
+  L: 'Fitted across every sample that is clearly inductive and below self-resonance.',
+  SRF: 'Self-resonant frequency: where the phase crosses between capacitive and inductive.',
+  ESR: '|Z| at self-resonance, where the reactances cancel and only the loss is left. The one place ESR is honestly measurable.',
+  ESL: 'Equivalent series inductance, fitted above self-resonance with the capacitive term removed.',
+  D: 'tan delta = R/|X| in the capacitive band.',
+  DCR: 'Winding resistance: the real part where |Z| is lowest.',
+  'Z at SRF': "|Z| at self-resonance. For an inductor this is a peak, where the winding's own capacitance parallels it.",
+  Q: "|X|/R over the inductance fit's band.",
+  fs: 'Resonance frequency.',
+  Re: "Voice-coil resistance, read as the minimum |Z| above resonance. Close to, but not the same as, a DC ohmmeter's answer.",
+  'f1 / f2':
+    'The frequencies either side of fs where |Z| falls to the geometric mean of Zmax and Re. The width between them is what sets Q.',
+}
+
+/** One column: what it is called, and what that name means. */
+export interface ComparisonColumn {
+  label: string
+  /** The hover text, where the label is a symbol rather than a word. */
+  title?: string
+}
+
+/** A column from its label alone, picking up whatever {@link COLUMN_TITLES} explains about it. */
+function column(label: string): ComparisonColumn {
+  const title = COLUMN_TITLES[label]
+  return title ? { label, title } : { label }
+}
+
 /** A row of one comparison table: the subject it describes, and one cell per column. */
 export interface ComparisonRow {
   id: string
@@ -48,7 +88,7 @@ export interface ComparisonRow {
 /** One transposed table: the column headers (the reading labels), a row per subject, and any per-subject notes. */
 export interface ComparisonTable {
   title: string
-  columns: string[]
+  columns: ComparisonColumn[]
   rows: ComparisonRow[]
   /** What `componentReading` said about a subject whose fit it withheld — a ported box, say. Empty for the other tables. */
   notes: { id: string; name: string; text: string }[]
@@ -58,7 +98,18 @@ const DASH = '—'
 
 /** The Measurements block, one row per subject. Every column is defined for every curve that measured at all. */
 export function measurementsComparison(subjects: readonly ComparisonSubject[]): ComparisonTable {
-  const columns = ['Peak |Z|', 'at', 'Minimum |Z|', 'at', 'Median |Z|', 'Drive current', 'Reference R']
+  // Written out rather than mapped through `column`, because the two "at" headers mean different
+  // things -- the first is the peak's frequency, which on a driver is its resonance, and the second
+  // is the minimum's -- and a label-keyed lookup would give them the same note.
+  const columns: ComparisonColumn[] = [
+    column('Peak |Z|'),
+    { label: 'at', title: 'For a driver this is its resonance.' },
+    column('Minimum |Z|'),
+    { label: 'at' },
+    column('Median |Z|'),
+    column('Drive current'),
+    column('Reference R'),
+  ]
 
   const rows = subjects.map((subject) => {
     const readings = impedanceReadings(subject.trace, subject.referenceOhms, subject.generatorAmpDbv)
@@ -95,10 +146,11 @@ export function componentComparison(subjects: readonly ComparisonSubject[], dutT
   const readings = subjects.map((subject) => ({ subject, reading: componentReading(subject.trace, dutType) }))
   if (readings.every((r) => r.reading === null)) return null
 
-  const columns: string[] = []
+  const labels: string[] = []
   for (const { reading } of readings) {
-    for (const row of reading?.rows ?? []) if (!columns.includes(row.label)) columns.push(row.label)
+    for (const row of reading?.rows ?? []) if (!labels.includes(row.label)) labels.push(row.label)
   }
+  const columns = labels.map(column)
 
   const label = readings.find((r) => r.reading !== null)?.reading?.label ?? 'Component'
   const notes: ComparisonTable['notes'] = []
@@ -109,7 +161,7 @@ export function componentComparison(subjects: readonly ComparisonSubject[], dutT
     return {
       id: subject.id,
       name: subject.name,
-      cells: columns.map((column) => byLabel.get(column)?.value ?? DASH),
+      cells: labels.map((label) => byLabel.get(label)?.value ?? DASH),
     }
   })
 
@@ -127,7 +179,7 @@ export function componentComparison(subjects: readonly ComparisonSubject[], dutT
 export function equivalentComparison(subjects: readonly ComparisonSubject[], cursorHz: number): ComparisonTable {
   // Taken from the row list rather than written out again, so a row added to the block appears here.
   const template = equivalentRows(null)
-  const columns = template.map((row, i) => (i === 5 ? 'Series L / C' : row.label))
+  const columns = template.map((row, i) => column(i === 5 ? 'Series L / C' : row.label))
 
   const rows = subjects.map((subject) => ({
     id: subject.id,

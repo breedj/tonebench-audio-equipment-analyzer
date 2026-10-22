@@ -15,7 +15,7 @@ import { findExtremes, findResonance, type RivalPeak } from './resonance'
 /**
  * The numbers an impedance curve is read for, as pure functions: the peak, the minimum and the
  * median |Z|, the drive current, and the component fit for whatever the user said is on the
- * fixture. ImpedanceReadoutPanel shows them and the report's impedance chapter prints them, and
+ * fixture. The Readings panel shows them and the report's impedance chapter prints them, and
  * both read this module so the two cannot disagree — nothing in a .vue file is testable, which is
  * why the arithmetic and the formatting live here and not there.
  */

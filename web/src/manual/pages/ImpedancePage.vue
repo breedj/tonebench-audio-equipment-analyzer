@@ -205,23 +205,29 @@ const { showPage } = useManual()
       in ohms, where −1 means nothing and the origin is a short circuit.
     </p>
     <p>
-      The <strong>Equivalent circuit</strong> panel turns one frequency into components: the series
-      resistance and reactance, and the inductance or capacitance that reactance corresponds to
-      there. "8.5 Ω at 45°" is a measurement; "6 Ω in series with 1 mH" is something you can reason
-      about.
+      <strong>Readings</strong>, under the chart, is where every number this screen produces is read.
+      It holds three tables &mdash; <strong>Measurements</strong> (peak, minimum, median, drive
+      current), the <strong>component fit</strong> for whatever the Device under test selector says
+      is on the fixture, and the <strong>equivalent circuit</strong> at one frequency &mdash; and
+      each covers <em>every</em> curve on screen at once, one row each: the current measurement
+      first when there is one, then each history item ticked in the checklist.
     </p>
     <p>
-      The <strong>Readings</strong> table under the chart is those same three blocks &mdash;
-      Measurements, the component fit and the equivalent circuit &mdash; for <em>every</em> curve on
-      screen at once, one row each: the current measurement first when there is one, then each
-      history item ticked in the checklist. Nothing extra is stored for it. The peak, the fit and the
-      equivalent circuit are all functions of a curve, and a saved result keeps its curve, so a
-      history item is read through exactly the same arithmetic the side panel uses &mdash; which is
-      why an older result can be compared against today's without having been measured any
-      differently. Each row uses its <em>own</em> reference resistor and generator level, off the
-      settings that run was saved with, so a drive current is never quoted against a fixture the run
-      did not use. The equivalent-circuit rows all follow the one <strong>At frequency</strong> box
-      in the side panel.
+      The equivalent circuit is the one worth explaining: it turns a frequency into components, the
+      series resistance and reactance and the inductance or capacitance that reactance corresponds
+      to there. "8.5 &Omega; at 45&deg;" is a measurement; "6 &Omega; in series with 1 mH" is
+      something you can reason about. Every row of that table is read at the one
+      <strong>At frequency</strong> box above it.
+    </p>
+    <p>
+      Nothing extra is stored for the history rows. The peak, the fit and the equivalent circuit are
+      all functions of a curve, and a saved result keeps its curve, so a history item is read through
+      exactly the arithmetic the live measurement is &mdash; which is why an older result can be
+      compared against today's without having been measured any differently. Each row uses its
+      <em>own</em> reference resistor and generator level, off the settings that run was saved with,
+      so a drive current is never quoted against a fixture the run did not use. Column headers that
+      are symbols rather than words &mdash; ESR, DCR, Q<sub>ms</sub> &mdash; say what they mean when
+      hovered.
     </p>
     <p>
       <strong>Short calibration</strong> in the Display panel draws the stored short standard as the
@@ -262,8 +268,8 @@ const { showPage } = useManual()
 
     <h2>Device under test</h2>
     <p>
-      The readout's <strong>Device under test</strong> selector decides which component metrics it
-      offers. It defaults to <strong>None</strong>, which shows only what is true of any impedance —
+      The <strong>Device under test</strong> selector, at the top of the Readings panel, decides
+      which component metrics it offers. It defaults to <strong>None</strong>, which shows only what is true of any impedance —
       peak, minimum, median. <strong>Minimum |Z|</strong> is worth a look on its own: it is the
       worst-case load, where the DUT asks the most current of whatever is driving it, and a nominal
       8 Ω driver routinely dips below 6.

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ImpedanceTrace } from '../composables/useImpedance'
-import type { DutType } from '../impedance/component'
+import { DUT_TYPES, type DutType } from '../impedance/component'
 import {
   componentComparison,
   equivalentComparison,
@@ -13,8 +13,16 @@ import CollapsibleSection from './CollapsibleSection.vue'
 import type { OverlayEntry } from '../composables/useMeasurements'
 
 /**
- * The readout panel's three blocks for every curve on the chart at once — the measurement on screen
+ * Every reading this screen has, for every curve on the chart at once — the measurement on screen
  * and each checked history item — one row per curve.
+ *
+ * <p><b>This is the only readout now.</b> Until 2026-10-22 the settings rail also carried
+ * Measurements, Component and Equivalent circuit panels describing the live curve alone, and these
+ * tables are those same three blocks built from the same `readings.ts` functions — so the three
+ * were the one-column case of what is here, and were removed on the ask (Joost). The two controls
+ * that lived on them came with them, since they are what the tables below are read against: the
+ * **Device under test** dropdown, which decides whether there is a component fit at all, and the
+ * **At frequency** box the equivalent-circuit table follows.</p>
  *
  * <p>The side panel can only ever describe the live measurement, and a checked history curve is
  * drawn beside it with no numbers of its own. Nothing had to be stored to fix that: the peak, the
@@ -32,14 +40,19 @@ const props = defineProps<{
   traces: ImpedanceTrace[]
   /** The checked history items, already filtered to those carrying impedance curves. */
   overlays: OverlayEntry[]
-  /** What the type's Component dropdown says is on the fixture; `None` hides the component table. */
-  dutType: DutType
   /** The live run's series resistor, and the level it drove with — for the live row only. */
   referenceOhms: number
   generatorAmpDbv: number | null
-  /** The frequency the Equivalent circuit block is reading, shared with the side panel. */
-  equivalentHz: number
 }>()
+
+/**
+ * What is on the fixture. `None` means no component table at all, which is why this control cannot
+ * live inside that table: there would be no way back from it.
+ */
+const dutType = defineModel<DutType>('dutType', { required: true })
+
+/** The one frequency every row of the equivalent-circuit table is read at. */
+const equivalentHz = defineModel<number>('equivalentHz', { required: true })
 
 /** A result's own reference resistor and generator level, off its stored `params_json`. */
 function runFacts(paramsJson: string): { referenceOhms: number; generatorAmpDbv: number | null } {
@@ -86,18 +99,39 @@ const subjects = computed<ComparisonSubject[]>(() => {
 
 const tables = computed<ComparisonTable[]>(() => {
   if (subjects.value.length === 0) return []
-  const component = componentComparison(subjects.value, props.dutType)
+  const component = componentComparison(subjects.value, dutType.value)
   return [
     measurementsComparison(subjects.value),
     ...(component ? [component] : []),
-    equivalentComparison(subjects.value, props.equivalentHz),
+    equivalentComparison(subjects.value, equivalentHz.value),
   ]
 })
 </script>
 
 <template>
-  <CollapsibleSection v-if="tables.length > 0" title="Readings" size="sm">
-    <div class="flex flex-col gap-4">
+  <!-- Rendered whatever is on the chart, unlike the tables inside it: these two controls are the
+       measurement's own settings, and a panel that appears only once something has been measured
+       would take them with it until the first run. -->
+  <CollapsibleSection title="Readings" size="sm">
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        <span
+          title="What is on the fixture. Nothing in an impedance curve can tell a choke's self-resonance from a driver's motional resonance -- they are the same shape -- so the readout asks rather than guesses."
+        >
+          Device under test
+        </span>
+        <select v-model="dutType" class="tb-input">
+          <option v-for="option in DUT_TYPES" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+
+      <label class="tb-field">
+        <span title="The one frequency the equivalent-circuit table below is read at.">At frequency (Hz)</span>
+        <input v-model.number="equivalentHz" type="number" min="1" step="any" class="tb-input" />
+      </label>
+    </div>
+
+    <div v-if="tables.length > 0" class="mt-4 flex flex-col gap-4">
       <div v-for="table in tables" :key="table.title" class="tb-field">
         <span class="text-xs text-neutral-500 dark:text-neutral-400">{{ table.title }}</span>
         <div class="overflow-x-auto">
@@ -105,8 +139,14 @@ const tables = computed<ComparisonTable[]>(() => {
             <thead>
               <tr class="border-b border-neutral-200 text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                 <th class="py-1 pr-3 text-left font-normal">Measurement</th>
-                <th v-for="column in table.columns" :key="column" class="py-1 pl-3 text-right font-normal">
-                  {{ column }}
+                <!-- `index` as the key, not the label: a Measurements table has two "at" columns. -->
+                <th
+                  v-for="(column, index) in table.columns"
+                  :key="index"
+                  class="py-1 pl-3 text-right font-normal"
+                  :title="column.title"
+                >
+                  {{ column.label }}
                 </th>
               </tr>
             </thead>

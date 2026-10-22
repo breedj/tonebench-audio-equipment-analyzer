@@ -287,6 +287,41 @@ public class SweepTypeParamsTests
         });
 
     /// <summary>
+    /// A new impedance measurement subtracts the leads when the stored calibration holds a
+    /// <b>short</b>, and never merely because it holds a calibration.
+    ///
+    /// <para>Asked for 2026-10-21: on a sub-ohm DUT the test leads are most of the reading, so a
+    /// bench that has captured a short wants it subtracted and the old <c>None</c> default is the
+    /// one that silently reads high.</para>
+    ///
+    /// <para><b>The gate is the trap.</b> <c>ImpedanceFixtureConfig.HasCalibration</c> is true for an
+    /// open on its own — its own remark says "an open alone is useful; a short alone is not" — while
+    /// <c>ImpedanceConfigPanel</c> refuses to run with Measured selected and no short to subtract.
+    /// Keyed on the calibration, a bench with an open and no short would get new measurements that
+    /// cannot be started until the dropdown is put back, i.e. a default that is an error. The
+    /// third case below is that bench.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(true, true, nameof(ImpedanceCableMode.Measured))]
+    [InlineData(true, false, nameof(ImpedanceCableMode.None))]
+    [InlineData(false, false, nameof(ImpedanceCableMode.None))]
+    public async Task ANewImpedanceType_SubtractsTheLeadsOnlyWhenAShortIsStored(
+        bool calibration, bool shortStandard, string expectedCableMode) =>
+        await WithSaveServiceAsync(saveService =>
+        {
+            var parameters = JsonSerializer.Deserialize<ImpedanceParameters>(
+                saveService.DefaultImpedanceParametersJson(
+                    useGlobalFixture: calibration, globalShortAvailable: shortStandard),
+                JsonSerializerOptions.Web);
+
+            Assert.NotNull(parameters);
+            Assert.Equal(expectedCableMode, parameters!.CableMode);
+
+            // And the checkbox beside it follows the calibration, which is what it has always done.
+            Assert.Equal(calibration, parameters.UseGlobalFixture);
+        });
+
+    /// <summary>
     /// A new impedance measurement's own level and averaging are the selected stimulus's slot, and
     /// every stimulus starts at the figures <c>impedance/stimulusSettings.ts</c> holds.
     ///

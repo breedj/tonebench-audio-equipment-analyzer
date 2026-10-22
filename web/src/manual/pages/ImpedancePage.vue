@@ -166,7 +166,8 @@ const { showPage } = useManual()
       of the leads and connectors, in series with everything you go on to measure. Capture it and set
       <strong>Subtract for the leads</strong> to <em>Measured short</em>, or type a known value in
       under <em>Fixed value</em> instead. On a 4 Ω driver a tenth of an ohm of lead is a 2.5% error,
-      so it is worth one more run.
+      so it is worth one more run — which is why a new measurement starts on <em>Measured short</em>
+      whenever the global calibration holds one, and on <em>Nothing</em> when it does not.
     </p>
 
     <h2>Reading the result</h2>
@@ -174,6 +175,15 @@ const { showPage } = useManual()
       <strong>|Z| and phase</strong> is the usual view: impedance in ohms against frequency, with
       phase in degrees on the right. A passive one-port stays between −90° and +90°; positive is
       inductive, negative capacitive.
+    </p>
+    <p>
+      The <strong>phase axis occupies the top half of the plot</strong>, starting at the top and
+      ending half way down, while |Z| keeps the full height underneath it — so the two curves sit in
+      their own halves rather than crossing and being read for one another. Its window starts at
+      <strong>+90° and −90°</strong>, which is the whole of what a passive one-port can produce:
+      a curve that leaves it is a fixture or a calibration that is wrong, and the axis showing it is
+      how you see that. Both ends are yours to change under <strong>Phase axis</strong>, and Autofit
+      narrows them to whatever was measured.
     </p>
     <p>
       The ohms axis has a <strong>Scale</strong> selector under <strong>Impedance axis</strong>.

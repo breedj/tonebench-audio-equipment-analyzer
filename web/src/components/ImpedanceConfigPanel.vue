@@ -779,7 +779,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
     <label
       v-if="usesNoise"
       class="tb-field"
-      title="Where the pink slope begins. Below it the stimulus is flat rather than still rising, which keeps the bottom of the band from eating the DAC's headroom. LIMP suggests setting it near the impedance maximum — 20 to 100 Hz for a loudspeaker."
+      title="Where the pink slope begins. Below it the stimulus is flat rather than still rising, which keeps the bottom of the band from eating the DAC's headroom."
     >
       <span>Pink noise cut-off (Hz)<span v-if="form.stimulus !== 'PinkNoise'" class="text-neutral-500 dark:text-neutral-400"> (calibration)</span></span>
       <input

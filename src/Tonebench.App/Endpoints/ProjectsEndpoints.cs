@@ -34,13 +34,18 @@ public static class ProjectsEndpoints
             try
             {
                 // A new impedance measurement starts on the global fixture calibration when there is
-                // one. Only read for that kind: it is a second database round trip, and every other
-                // kind ignores the answer.
-                bool globalCalibration = MeasurementSaveService.IsImpedanceKind(request.Kind)
-                    && await HasGlobalCalibrationAsync(config, ct);
+                // one, with the leads subtracted when that calibration holds a short. Only read for
+                // that kind: it is a second database round trip, and every other kind ignores the
+                // answer. Two flags off one read, because an open alone satisfies HasCalibration
+                // while only a short can be subtracted -- see DefaultImpedanceParametersJson.
+                ImpedanceFixtureConfig? fixture = MeasurementSaveService.IsImpedanceKind(request.Kind)
+                    ? await ReadGlobalFixtureAsync(config, ct)
+                    : null;
 
                 string paramsJson = saveService.ResolveTypeParamsJson(
-                    request.ParamsJson, request.Kind, existingParamsJson: null, request.Staged, globalCalibration);
+                    request.ParamsJson, request.Kind, existingParamsJson: null, request.Staged,
+                    globalCalibrationAvailable: fixture is { HasCalibration: true },
+                    globalShortAvailable: fixture is { HasCalibration: true, ShortCal.IsUsable: true });
                 long typeId = await repo.CreateTypeAsync(id, request.Kind, request.Name, request.Notes, paramsJson, ct);
                 return Results.Ok(new IdResponse(typeId));
             }
@@ -144,27 +149,30 @@ public static class ProjectsEndpoints
         new(row.Id, row.ProjectId, row.Kind, row.Name, row.Notes, row.ParamsJson, row.SortOrder, row.CreatedUtc);
 
     /// <summary>
-    /// Whether a usable global impedance fixture calibration is stored.
+    /// The stored global impedance fixture, or null where there is none to read.
+    ///
+    /// <para>The whole record rather than a bool, because a new measurement's defaults ask it two
+    /// questions — is there a calibration, and does it carry a short — and one database read should
+    /// answer both.</para>
     ///
     /// <para>Tolerant of a configuration database that cannot be read or holds something that is not
-    /// a fixture: the answer only decides a checkbox's starting position on a new measurement, so
-    /// failing closed (no calibration, panel starts on its own standards) is right and throwing a 500
-    /// out of "create a measurement" because of it would not be.</para>
+    /// a fixture: the answer only decides a checkbox's and a dropdown's starting position on a new
+    /// measurement, so failing closed (no calibration, panel starts on its own standards) is right
+    /// and throwing a 500 out of "create a measurement" because of it would not be.</para>
     /// </summary>
-    private static async Task<bool> HasGlobalCalibrationAsync(ConfigRepository config, CancellationToken ct)
+    private static async Task<ImpedanceFixtureConfig?> ReadGlobalFixtureAsync(ConfigRepository config, CancellationToken ct)
     {
         try
         {
             string? json = await config.GetAsync(ConfigRepository.ImpedanceFixtureKey, ct);
             if (string.IsNullOrWhiteSpace(json))
-                return false;
+                return null;
 
-            return JsonSerializer.Deserialize<ImpedanceFixtureConfig>(json, JsonSerializerOptions.Web)
-                is { HasCalibration: true };
+            return JsonSerializer.Deserialize<ImpedanceFixtureConfig>(json, JsonSerializerOptions.Web);
         }
         catch (Exception ex) when (ex is JsonException or SqliteException)
         {
-            return false;
+            return null;
         }
     }
 }

@@ -38,6 +38,7 @@ import { freqAxis } from '../freqAxis'
 import { formatHz } from '../response/format'
 import { useAppTheme } from '../composables/useAppTheme'
 import { measuredColumns, mergeGrids } from '../charts/chartGrid'
+import { phaseAxisSplits, phaseScaleRange } from '../impedance/phaseAxis'
 import { ohmAxis } from '../impedance/ohmAxis'
 import { dampingFactorTicks, formatDampingFactor } from '../impedance/dampingFactorAxis'
 import { dbOhmsToOhms, formatOhms } from '../impedance/equivalent'
@@ -555,7 +556,13 @@ function buildSeries(p: ChartPalette): uPlot.Series[] {
   ]
 }
 
-const phaseRange = computed<[number, number]>(() => [props.phaseBottomDeg, props.phaseTopDeg])
+/**
+ * The phase scale, which spans **twice** the window the axis shows so the curve occupies the top
+ * half of the plot and the |Z| curve keeps the full height underneath it. See
+ * `impedance/phaseAxis.ts`, where the geometry, the mirror-image of the response chart's
+ * arrangement and the tick generation all live.
+ */
+const phaseRange = computed<[number, number]>(() => phaseScaleRange(props.phaseBottomDeg, props.phaseTopDeg))
 
 const logZ = computed(() => props.zScale === 'Log')
 
@@ -768,7 +775,10 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
         show: props.showPhase,
         size: 52,
         ...exportAxisLabel(interactive, 'Phase (°)'),
-        incrs: [15, 30, 45, 90, 180, 360],
+        // Generated rather than left to uPlot: half of this scale is the empty space that puts
+        // the curve in the top half, and uPlot's own splits would label phases down there that
+        // nothing can ever be drawn at.
+        splits: () => phaseAxisSplits(props.phaseBottomDeg, props.phaseTopDeg),
         values: (_u, vals) => vals.map((v) => `${v}°`),
         stroke: p.color(PHASE_COLOR),
         grid: { show: false },

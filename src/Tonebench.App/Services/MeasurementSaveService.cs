@@ -409,7 +409,7 @@ public sealed class MeasurementSaveService(
     /// the two ADC channels' mismatch and by the test leads. A user who wants this measurement's own
     /// standards unticks it and captures them, and that choice is then stored on the type.
     /// </param>
-    public string DefaultImpedanceParametersJson(bool useGlobalFixture = false) =>
+    public string DefaultImpedanceParametersJson(bool useGlobalFixture = false, bool globalShortAvailable = false) =>
         JsonSerializer.Serialize(new ImpedanceParameters(
             Method: nameof(ImpedanceMethod.ReferenceResistor),
             Stimulus: nameof(ImpedanceStimulus.PinkNoise),
@@ -427,7 +427,20 @@ public sealed class MeasurementSaveService(
             SmoothingDenominator: ImpedanceStimulusDefaults.ForNewMeasurement.SmoothingDenominator ?? 12,
             AverageCount: ImpedanceStimulusDefaults.ForNewMeasurement.AverageCount ?? 10,
             CalibrationLevelValue: ImpedanceRequest.DefaultCalibrationLevelDbv,
-            CableMode: nameof(ImpedanceCableMode.None),
+            // **Measured short wherever one is stored** (asked 2026-10-21): the leads between the
+            // fixture and the DUT are in series with everything measured, and on a sub-ohm DUT they
+            // are most of the reading — so a bench that has captured a short wants it subtracted,
+            // and the default that leaves it out is the one that silently reads high.
+            //
+            // Gated on the **short** rather than on `useGlobalFixture`, which is the trap here:
+            // `ImpedanceFixtureConfig.HasCalibration` is true for an open alone ("an open alone is
+            // useful; a short alone is not"), and this panel refuses to run with Measured selected
+            // and no short to subtract. Keyed on the calibration instead, a bench with an open and
+            // no short would get new measurements that cannot be started until the dropdown is put
+            // back — a default that is an error.
+            CableMode: useGlobalFixture && globalShortAvailable
+                ? nameof(ImpedanceCableMode.Measured)
+                : nameof(ImpedanceCableMode.None),
             FixedCableOhms: 0.0,
             FixedCableMillihenry: 0.0,
             CalibrationStimulus: nameof(ImpedanceStimulus.Chirp),
@@ -439,6 +452,18 @@ public sealed class MeasurementSaveService(
         {
             ByStimulus = ImpedanceStimulusDefaults.All,
             NoiseCutoffHz = PeriodicPinkNoise.DefaultCutoffHz,
+
+            // **Stated rather than left null**, which is the only way a new measurement reliably
+            // opens on +/-90. An absent display field keeps whatever is on screen -- App.vue
+            // restores over `currentImpedanceDisplay()` on purpose -- so a type that said nothing
+            // inherited the *previous* measurement's phase window, and after an Autofit that is
+            // whatever the last DUT happened to need. Same reasoning as the sweep kinds writing
+            // `ChartAutofitOnDone` outright: a configured type should state what it does.
+            //
+            // +/-90 because a passive one-port cannot leave it: a reading outside that range is a
+            // fixture or a calibration that is wrong, and the axis showing it is how that is seen.
+            ChartPhaseTopDeg = 90.0,
+            ChartPhaseBottomDeg = -90.0,
         }, SerializerOptions);
 
     /// <summary>
@@ -459,12 +484,19 @@ public sealed class MeasurementSaveService(
     /// configuration database is not; both callers are already in async handlers. Defaults to false,
     /// so every other kind and every existing test call site is unaffected.
     /// </param>
+    /// <param name="globalShortAvailable">
+    /// Whether that calibration also holds a usable <b>short</b>, which is what decides whether a
+    /// new measurement starts with the leads subtracted. Separate from the flag above because
+    /// <c>HasCalibration</c> is satisfied by the open alone — see <c>CableMode</c> in
+    /// <see cref="DefaultImpedanceParametersJson"/>.
+    /// </param>
     public string ResolveTypeParamsJson(
         string? requestedJson,
         string kind,
         string? existingParamsJson,
         StagedMeasurementConfig? staged,
-        bool globalCalibrationAvailable = false)
+        bool globalCalibrationAvailable = false,
+        bool globalShortAvailable = false)
     {
         if (!string.IsNullOrWhiteSpace(requestedJson))
             return requestedJson;
@@ -482,7 +514,7 @@ public sealed class MeasurementSaveService(
             return existingParamsJson ?? DefaultOutputImpedanceParametersJson();
 
         if (IsImpedanceKind(kind))
-            return existingParamsJson ?? DefaultImpedanceParametersJson(globalCalibrationAvailable);
+            return existingParamsJson ?? DefaultImpedanceParametersJson(globalCalibrationAvailable, globalShortAvailable);
 
         if (IsImpulseResponseKind(kind))
             return existingParamsJson ?? DefaultImpulseResponseParametersJson();

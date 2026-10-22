@@ -1334,9 +1334,9 @@ public static class ImpedanceStimulusDefaults
     public const string LevelUnit = "Dbv";
 
     public static readonly ImpedanceStimulusSlot Chirp =
-        new(AverageCount: 10, SmoothingDenominator: 12, LevelValue: 6.0, LevelUnit: LevelUnit);
+        new(AverageCount: 10, SmoothingDenominator: 3, LevelValue: 6.0, LevelUnit: LevelUnit);
     public static readonly ImpedanceStimulusSlot PinkNoise =
-        new(AverageCount: 10, SmoothingDenominator: 12, LevelValue: 6.0, LevelUnit: LevelUnit);
+        new(AverageCount: 10, SmoothingDenominator: 3, LevelValue: 6.0, LevelUnit: LevelUnit);
     public static readonly ImpedanceStimulusSlot SteppedSine =
         new(AverageCount: 2, SmoothingDenominator: 48, LevelValue: -20.0, LevelUnit: LevelUnit);
 

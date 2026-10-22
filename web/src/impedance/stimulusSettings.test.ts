@@ -12,18 +12,32 @@ describe('STIMULUS_DEFAULTS', () => {
   it('gives the two broadband stimuli the records they need and the stepped one its own', () => {
     expect(STIMULUS_DEFAULTS.Chirp).toEqual({
       averageCount: 10,
-      smoothingDenominator: 12,
+      smoothingDenominator: 3,
       levelValue: 6,
       levelUnit: 'Dbv',
     })
     expect(STIMULUS_DEFAULTS.PinkNoise).toEqual({
       averageCount: 10,
-      smoothingDenominator: 12,
+      smoothingDenominator: 3,
       levelValue: 6,
       levelUnit: 'Dbv',
     })
     // A stepped sweep pays its averages at every point of its grid; ten of them is ten sweeps.
     expect(STIMULUS_DEFAULTS.SteppedSine.averageCount).toBeLessThan(STIMULUS_DEFAULTS.Chirp.averageCount)
+  })
+
+  it('smooths the broadband pair at the widest band on offer', () => {
+    // 1/3 octave, asked for 2026-10-22, and the one default here that depends on a *fix* rather than
+    // on a preference: that window reaches 12 % past the top analysed bin, which before
+    // FractionalOctaveSmoother.Band clamped it put the open-circuit ceiling into the last columns.
+    // The top-of-band spike reported on 2026-10-20 was at exactly this setting.
+    expect(STIMULUS_DEFAULTS.Chirp.smoothingDenominator).toBe(3)
+    expect(STIMULUS_DEFAULTS.PinkNoise.smoothingDenominator).toBe(STIMULUS_DEFAULTS.Chirp.smoothingDenominator)
+    // Nothing smooths a stepped sweep, so its own figure is inert -- but it must stay a *narrower*
+    // band than the broadband pair's, or the day it is read it would smooth a point grid flat.
+    expect(STIMULUS_DEFAULTS.SteppedSine.smoothingDenominator).toBeGreaterThan(
+      STIMULUS_DEFAULTS.Chirp.smoothingDenominator,
+    )
   })
 
   it('drives the stepped sine far gentler than the broadband pair, which is the measured difference', () => {

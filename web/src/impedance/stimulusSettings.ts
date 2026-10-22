@@ -48,17 +48,21 @@ export interface StimulusSettings {
 /**
  * What each stimulus starts at.
  *
- * <p>Chirp and pink noise at <b>10 averages, 1/12 octave and 6 dBV</b> (Joost, 2026-10-20 and
- * 2026-10-21): both were reported as too noisy to read on a sub-ohm fixture at the old 2 and 1/48,
+ * <p>Chirp and pink noise at <b>10 averages, 1/3 octave and 6 dBV</b> (Joost, 2026-10-20 to
+ * 2026-10-22): both were reported as too noisy to read on a sub-ohm fixture at the old 2 and 1/48,
  * both can afford the records, and both need the drive — see the measurements at the top of this
- * file. The stepped sine keeps 2 and 1/48 and sits at <b>-20 dBV</b>: it measures one tone at a
- * time, so its points are already clean at a level the broadband stimuli cannot read at, its
+ * file. The smoothing went 1/48 → 1/12 → <b>1/3</b> over those three days, i.e. the widest band on
+ * offer, which is affordable only because `FractionalOctaveSmoother.Band` now clamps a window to
+ * the analysed band: 1/3 octave reaches 12 % past the top analysed bin, and before the clamp that
+ * put the open-circuit ceiling into the last columns — the top-of-band spike reported at exactly
+ * this setting. The stepped sine keeps 2 and 1/48 and sits at <b>-20 dBV</b>: it measures one tone
+ * at a time, so its points are already clean at a level the broadband stimuli cannot read at, its
  * averages are the expensive ones, and nothing is smoothed on that path at all (the grid is coarser
- * than the narrowest band on offer).</p>
+ * than the narrowest band on offer), which is why its figure is inert rather than wrong.</p>
  */
 export const STIMULUS_DEFAULTS: Record<ImpedanceStimulusName, StimulusSettings> = {
-  Chirp: { averageCount: 10, smoothingDenominator: 12, levelValue: 6, levelUnit: 'Dbv' },
-  PinkNoise: { averageCount: 10, smoothingDenominator: 12, levelValue: 6, levelUnit: 'Dbv' },
+  Chirp: { averageCount: 10, smoothingDenominator: 3, levelValue: 6, levelUnit: 'Dbv' },
+  PinkNoise: { averageCount: 10, smoothingDenominator: 3, levelValue: 6, levelUnit: 'Dbv' },
   SteppedSine: { averageCount: 2, smoothingDenominator: 48, levelValue: -20, levelUnit: 'Dbv' },
 }
 

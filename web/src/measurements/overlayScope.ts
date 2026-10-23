@@ -7,6 +7,7 @@ import {
   isImpedanceKind,
   isImpulseResponseKind,
   isOutputImpedanceKind,
+  isSteppedResponseKind,
 } from './kinds'
 
 /**
@@ -47,6 +48,7 @@ export function foreignMeasurementName(origin: OverlayOrigin, currentTypeId: num
 /** A screen whose overlays are curves read back out of the shared `response_trace` rows. */
 export type CurveOverlayScreen =
   | 'Response'
+  | 'SteppedResponse'
   | 'ImpulseResponse'
   | 'Crosstalk'
   | 'Impedance'
@@ -68,11 +70,22 @@ export type CurveOverlayScreen =
  * only thing that can tell them apart, and answering it in one place is what lets a test assert the
  * screens partition rather than overlap.</p>
  *
- * <p>The chirp and the stepped sine share <b>one</b> screen on purpose: they are two ways of
- * measuring the same curve, stored identically, and drawing one under the other is a comparison
- * worth having.</p>
+ * <p><b>The chirp and the stepped sine are two screens, not one.</b> They shared `'Response'`
+ * until 2026-10-23 on the reasoning that they are two ways of measuring the same curve, stored
+ * identically, so drawing one under the other is a comparison worth having. The comparison is real
+ * and the sharing was still wrong, because nothing asks for it: an overlay checked on stays checked
+ * across a measurement switch, so running a chirp and then opening a stepped measurement put the
+ * chirp's history item on that chart uninvited — and <b>there is no way to take it off</b>. The
+ * History checklist is server-filtered to the open measurement, so a foreign result has no row
+ * there, and <code>OverlayList</code>, which names foreign overlays and is the only other place one
+ * can be unchecked, renders on the FFT screen alone. Reported by Joost, who read it as the
+ * 2026-09-25 impulse-on-chirp bug coming back; it was the one deliberate exception to that rule,
+ * and the exception is what made it unreachable. Note the cap had already split them:
+ * <code>useMeasurements.visibleOverlayCount</code> counts by exact kind, so three chirp results and
+ * three stepped ones were always two separate allowances.</p>
  */
 export function curveOverlayScreen(kind: string | null | undefined): CurveOverlayScreen | null {
+  if (isSteppedResponseKind(kind)) return 'SteppedResponse'
   if (isFrequencyResponseKind(kind)) return 'Response'
   if (isImpulseResponseKind(kind)) return 'ImpulseResponse'
   if (isCrosstalkKind(kind)) return 'Crosstalk'

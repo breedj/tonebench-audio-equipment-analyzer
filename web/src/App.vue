@@ -1115,10 +1115,14 @@ function curveOverlaysFor(screen: CurveOverlayScreen): OverlayEntry[] {
  * frequency-response chart, legend and all, with no row in that screen's History to uncheck it from.
  * Reported 2026-09-25.</p>
  *
- * <p>The chirp and the stepped sine share one list on purpose: they are two ways of measuring the
- * same curve, stored identically, and drawing one under the other is a comparison worth having.</p>
+ * <p>The chirp and the stepped sine have <b>a screen each</b>, so this one follows the open
+ * measurement's kind. They shared one list until 2026-10-23, on the reasoning that they measure
+ * the same curve — see `curveOverlayScreen` for why that comparison, real as it is, is not worth
+ * a chirp's history item appearing on a stepped chart with no row anywhere to uncheck it from.</p>
  */
-const visibleResponseOverlays = computed(() => curveOverlaysFor('Response'))
+const visibleResponseOverlays = computed(() =>
+  curveOverlaysFor(isSteppedResponse.value ? 'SteppedResponse' : 'Response'),
+)
 
 /** The same for the impulse screen's gated-response view: its own kind's runs, and never a chirp's. */
 const visibleImpulseResponseOverlays = computed(() => curveOverlaysFor('ImpulseResponse'))

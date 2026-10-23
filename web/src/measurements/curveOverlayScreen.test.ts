@@ -15,9 +15,16 @@ import {
 } from './kinds'
 
 describe('curveOverlayScreen', () => {
-  it('puts a chirp and a stepped sine on the same screen, since they measure the same curve', () => {
+  /**
+   * The report of 2026-10-23: run a chirp, check one of its results on, open a stepped measurement,
+   * and the chirp's curve was on that chart — with no row in its History and no overlay list on
+   * that screen, so nothing could take it off again. They measure the same curve and shared a
+   * screen for it; the comparison is not worth an overlay that cannot be dismissed.
+   */
+  it('keeps a chirp off the stepped sine’s screen, though they measure the same curve', () => {
     expect(curveOverlayScreen(FREQUENCY_RESPONSE_KIND)).toBe('Response')
-    expect(curveOverlayScreen(STEPPED_RESPONSE_KIND)).toBe('Response')
+    expect(curveOverlayScreen(STEPPED_RESPONSE_KIND)).toBe('SteppedResponse')
+    expect(curveOverlayScreen(STEPPED_RESPONSE_KIND)).not.toBe(curveOverlayScreen(FREQUENCY_RESPONSE_KIND))
   })
 
   /**
@@ -62,7 +69,8 @@ describe('curveOverlayScreen', () => {
     }
 
     expect(Object.fromEntries(byScreen)).toEqual({
-      Response: [FREQUENCY_RESPONSE_KIND, STEPPED_RESPONSE_KIND],
+      Response: [FREQUENCY_RESPONSE_KIND],
+      SteppedResponse: [STEPPED_RESPONSE_KIND],
       ImpulseResponse: [IMPULSE_RESPONSE_KIND],
       Impedance: [IMPEDANCE_KIND],
       Crosstalk: [CROSSTALK_KIND],

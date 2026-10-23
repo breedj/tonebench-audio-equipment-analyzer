@@ -188,7 +188,8 @@ const { showPage } = useManual()
     <ul>
       <li>
         <strong>Passband median</strong> (the default): the target is the median level over the
-        <strong>Reference from / to</strong> band, 200 Hz – 2 kHz unless you change it. This is how
+        <strong>From</strong> – <strong>To</strong> band beside it, 200 Hz – 2 kHz unless you change
+        it. This is how
         a datasheet quotes a level — "1 V out" means at 1 kHz, in the passband — and for a flat DUT
         it is simply the level everywhere.
       </li>
@@ -322,8 +323,8 @@ const { showPage } = useManual()
       here and draws no delay curve; measure it again to get them.
     </p>
     <p>
-      At the top of the panel is what those corners are measured down from, and it can be changed
-      after the measurement: the corners are re-found on the curves already on screen, without a new
+      At the top of the panel, under a line saying what it decides, is what those corners are
+      measured down from — and it can be changed after the measurement: the corners are re-found on the curves already on screen, without a new
       run, and the chart's markers follow. Nothing about the measurement itself moves — the
       reference is a reading <em>of</em> the response, not a parameter of the stimulus, which is why
       it lives here and the smoothing, which is baked into the curve, stays in the settings.
@@ -331,16 +332,17 @@ const { showPage } = useManual()
     <ul>
       <li>
         <strong>Bandwidth reference</strong> — <strong>Passband median</strong> (the default) takes
-        the median level over the reference band below. <strong>Peak</strong> uses the highest point
+        the median level over the reference band beside it. <strong>Peak</strong> uses the highest point
         of the curve — right only when the DUT's response <em>is</em> a peak, such as a bandpass
         filter or a tweeter. See <em>Choosing the reference</em> below. The same reference is where
         an output-referred generator level applies — see <em>Setting the level by output</em>.
       </li>
       <li>
-        <strong>Reference from / to (Hz)</strong> — the band the passband median is taken over,
-        200 Hz – 2 kHz by default. It must lie somewhere the DUT is flat: a band that straddles a
-        corner is already part-way down the roll-off, and every figure referenced to it shifts with
-        it. Shown only for the passband median.
+        <strong>From (Hz)</strong> and <strong>To (Hz)</strong> — the band the passband median is
+        taken over, 200 Hz – 2 kHz by default. It must lie somewhere the DUT is flat: a band that
+        straddles a corner is already part-way down the roll-off, and every figure referenced to it
+        shifts with it. The two boxes appear only under the passband median; under <strong>Peak</strong>
+        there is no band to take a median over, so they are hidden and the dropdown stands alone.
       </li>
     </ul>
     <p>

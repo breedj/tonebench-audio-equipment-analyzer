@@ -260,7 +260,12 @@ const { showPage } = useManual()
         the plot — STEPS' layout, so the magnitude keeps the full height and the two curves are
         read in their own halves. It is wrapped into ±180°: a phase passing −180° comes back at
         +180° rather than running off the axis, so a DUT with several turns of phase draws the
-        classic sawtooth. The axis is fixed — there is no window to set.
+        classic sawtooth. The axis is fixed — there is no window to set. The curve is always the
+        <strong>Gain (dB)</strong> trace's phase — the transfer function's — whichever view is on
+        screen and whichever channels are ticked, so one capture reads the same phase everywhere;
+        with <strong>Right channel is reference</strong> off there is no second measured channel to
+        compare against, and that curve is the left input against the generated sweep, which carries
+        the analyzer's own output path along with the DUT.
         <strong>Restore removed delay</strong>, under the checkbox, decides what is drawn: off, the
         bulk delay the estimator removed is left out, so the curve is excess phase only and a
         minimum-phase DUT reads a few degrees across its passband; on, the delay is put back and

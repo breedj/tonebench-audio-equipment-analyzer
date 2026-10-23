@@ -330,26 +330,32 @@ const outOfRange = computed(() => {
 })
 
 /**
- * The curve the phase series is drawn from — <b>not</b> `primaryTrace</b>, which is what the view is
- * about rather than what was measured.
+ * The curve the phase series is drawn from: <b>always the Gain trace</b>, on every phase kind and
+ * in either Bode view.
  *
- * Phase is a property of the measurement, not of whichever magnitude curve is on screen. Sourcing it
- * from `primaryTrace` meant FR (dBV) view plotted the Left trace's phase, and for a stepped sine that
- * is a genuine array of zeros (only the Gain trace is a relationship between the two inputs) — drawn
- * as a solid 0° line, indistinguishable from a DUT with no phase shift at all. `PerTrace` is the one
- * case where the trace on screen really does carry its own: the chirp estimates Left and Right
- * against the synthesised sweep.
+ * <p>Phase is a property of the measurement, not of whichever magnitude curve is on screen — which
+ * is what this used to be, and it cost two reports. It was `primaryTrace`, i.e. what the *view* is
+ * about, and for a stepped sine the Left trace's phase is a genuine array of zeros (only Gain is a
+ * relationship between the two inputs), drawn as a solid 0° line and indistinguishable from a DUT
+ * with no phase shift at all. Narrowing it to the first *visible* trace fixed that one and left the
+ * rest: with the right input as the reference, `Left = L/chirp` carries the analyzer's own output
+ * path (the DAC reconstruction filter) and its removed rotation is the record's arbitrary start
+ * point in the periodic sweep, where `Gain = L/R` is the DUT alone with its real delay taken off.
+ * So FR (dBV) and Gain (dB) drew two different phases of one capture and the curve changed as the
+ * view was switched — reported 2026-10-23, and Joost's call is that the measurement has one phase.</p>
+ *
+ * <p>It also settles <b>Restore removed delay</b>, which is handed `latencySamples` — the *gain*
+ * estimator's figure. Applied to a Left or Right curve it added back a delay that curve never had
+ * removed; now the delay and the phase always come from the same estimate, as they already did on
+ * the Nyquist/Nichols/s-plane views, which read `gainTrace` and could never hit it.</p>
+ *
+ * <p>Null where there is no Gain trace draws no phase at all, deliberately: every response result
+ * has one (`ResponseCaptureSupport.BuildTraces` adds it unconditionally, falling back to the left
+ * estimate when no reference was measured, and the `.ac` importer writes one too), so a missing one
+ * means a kind this axis has nothing to say about — and falling back to a magnitude curve is the
+ * very thing above.</p>
  */
-const phaseTrace = computed<ResponseTrace | null>(() => {
-  if (props.phaseKind !== 'PerTrace') return gainTrace.value
-  // The curve on screen, and never one that is not. `primaryTrace` stood here, and its fallback
-  // chain reaches the *right* trace the moment the Left checkbox is cleared -- which with the right
-  // input as the reference is a curve the chart refuses to draw at all, being the stimulus leg. Its
-  // phase is flat 0 by construction, so clearing Left silently replaced the DUT's phase with a
-  // straight line through the middle of the plot. Reported 2026-10-17 as the phase appearing only
-  // once Left was unticked; what appeared was the generator's own leg.
-  return visibleTraces.value[0] ?? leftTrace.value ?? rightTrace.value
-})
+const phaseTrace = computed<ResponseTrace | null>(() => gainTrace.value)
 
 /**
  * Every trace that contributes a column to the shared x grid: the curves on screen, the one the
@@ -488,14 +494,14 @@ function delayOnGrid(trace: ResponseTrace | null, grid: Float64Array): (number |
 }
 
 /**
- * Whichever of a stored result's traces carries a phase under this run's phase kind — the trace on
- * screen under PerTrace, the gain curve otherwise. Its magnitude, phase and delay all come from
- * this one choice, since a delay is that phase's own derivative.
+ * A stored result's own Gain trace — the overlay counterpart of `phaseTrace`, and it has to move
+ * with it. Its phase and its delay both come from this one choice, since a delay is that phase's
+ * own derivative, and a live phase read from one estimate drawn on the same axis as an overlay's
+ * read from another is worse than either on its own.
  */
-function overlayPhaseSource(overlayId: number, shownKind: ResponseTrace['kind']): ResponseTrace | null {
+function overlayPhaseSource(overlayId: number): ResponseTrace | null {
   const traces = props.overlays.find((o) => o.id === overlayId)?.responseTraces ?? []
-  const wanted: ResponseTrace['kind'] = props.phaseKind === 'PerTrace' ? shownKind : 'Gain'
-  return traces.find((t) => t.kind === wanted) ?? null
+  return traces.find((t) => t.kind === 'Gain') ?? null
 }
 
 /**
@@ -512,9 +518,9 @@ function overlayPhaseSource(overlayId: number, shownKind: ResponseTrace['kind'])
  * phase the DUT never had. The gaps travel too — a column whose neighbours are below the floor
  * interpolates to NaN, which is drawn as a gap rather than as a zero.</p>
  */
-function overlayPhaseSeries(overlayId: number, shownKind: ResponseTrace['kind'], grid: Float64Array): (number | null)[] {
+function overlayPhaseSeries(overlayId: number, grid: Float64Array): (number | null)[] {
   const overlay = props.overlays.find((o) => o.id === overlayId)
-  const source = overlayPhaseSource(overlayId, shownKind)
+  const source = overlayPhaseSource(overlayId)
   if (!overlay || !source) return new Array<number | null>(grid.length).fill(null)
 
   // Restored by the overlay's own removed delay, never by the live run's: the two measurements
@@ -711,10 +717,10 @@ function buildData(): uPlot.AlignedData {
   // so the two lists stay in the same order buildSeries and buildReadoutSeries walk them.
   for (const overlay of overlayCurves.value) series.push(resampleOnto(overlay.trace, x))
   if (props.showPhase) {
-    for (const overlay of overlayCurves.value) series.push(overlayPhaseSeries(overlay.id, overlay.trace.kind, x))
+    for (const overlay of overlayCurves.value) series.push(overlayPhaseSeries(overlay.id, x))
   }
   if (delayShown.value) {
-    for (const overlay of overlayCurves.value) series.push(delayOnGrid(overlayPhaseSource(overlay.id, overlay.trace.kind), x))
+    for (const overlay of overlayCurves.value) series.push(delayOnGrid(overlayPhaseSource(overlay.id), x))
   }
 
   return [x, ...series] as uPlot.AlignedData

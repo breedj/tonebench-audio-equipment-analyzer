@@ -310,7 +310,9 @@ const { showPage } = useManual()
       the frequency it occurs at, and the reference the corners were measured from. A corner shown
       with <strong>&lt;</strong> or <strong>&gt;</strong> was never reached inside the measured band —
       that is where the search stopped, not where the response rolls off. Widen the sweep before
-      quoting it.
+      quoting it. The <strong>Plot</strong> column at the right of each band's row is where its
+      markers are turned on and off, beside the figures they mark; the display rail carried a second
+      pair of those checkboxes until 2026-10-23 and no longer does.
     </p>
     <p>
       Below those, the delay readings: <strong>Group delay @ ref</strong> and <strong>Phase delay @

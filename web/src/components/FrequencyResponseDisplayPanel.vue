@@ -28,8 +28,6 @@ import { seedNicholsGain, seedPoleZeroWindow, type ResponseAutoWindow } from '..
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
-import { bandwidthColor, type BandwidthMarker } from '../charts/bandwidthColors'
-import { useAppTheme } from '../composables/useAppTheme'
 
 /**
  * Whether coherence is a meaningful thing to offer. A chirp measures it from the cross-spectra of
@@ -75,8 +73,10 @@ const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
 const showPhase = defineModel<boolean>('showPhase', { required: true })
 const showCoherence = defineModel<boolean>('showCoherence', { required: true })
-const showOneDb = defineModel<boolean>('showOneDb', { required: true })
-const showThreeDb = defineModel<boolean>('showThreeDb', { required: true })
+// No showOneDb / showThreeDb here: the two bandwidth checkboxes live in the Measurements panel's
+// own PLOT column, beside the corners they plot, and this rail carried a second copy of them until
+// 2026-10-23. Two controls for one setting is one too many — and the panel's copy is the one that
+// can be read against the figures it acts on.
 const thickLines = defineModel<boolean>('thickLines', { required: true })
 const showDataPoints = defineModel<boolean>('showDataPoints', { required: true })
 // Model names stay yTopDb/yBottomDb for backward compat (App.vue/params_json), but they now name
@@ -522,12 +522,6 @@ watch(running, (isRunning, wasRunning) => {
   // window the user cannot see.
   if (wasRunning && !isRunning && autofitOnDone.value) autofitAll()
 })
-
-// The colour each bandwidth row shows beside its checkbox — the chart's own markers.
-const { isDark } = useAppTheme()
-function bandwidthSwatch(marker: BandwidthMarker): string {
-  return bandwidthColor(marker, isDark.value)
-}
 </script>
 
 <template>
@@ -879,23 +873,6 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
            generator, not a measurement of anything. -->
       <label v-if="!rightChannelIsReference" class="tb-check-row">
         <input v-model="showRight" type="checkbox" class="tb-check" /> Right
-      </label>
-    </div>
-
-    <div v-if="bodeShowing" class="tb-field">
-      <span class="tb-group">Bandwidth</span>
-      <!-- Each row carries the colour its markers are drawn in, from charts/bandwidthColors.ts —
-           the mockup's own treatment, and the one thing two identically-shaped checkboxes could
-           not say before. -->
-      <label class="tb-check-row" title="Dashed markers and a labelled arrow at the -1 dB corners.">
-        <input v-model="showOneDb" type="checkbox" class="tb-check" />
-        <span class="flex-1">−1 dB</span>
-        <span class="w-4 shrink-0 border-t-2 border-dashed" :style="{ borderColor: bandwidthSwatch('oneDb') }"></span>
-      </label>
-      <label class="tb-check-row" title="Dashed markers and a labelled arrow at the -3 dB corners.">
-        <input v-model="showThreeDb" type="checkbox" class="tb-check" />
-        <span class="flex-1">−3 dB</span>
-        <span class="w-4 shrink-0 border-t-2 border-dashed" :style="{ borderColor: bandwidthSwatch('threeDb') }"></span>
       </label>
     </div>
 

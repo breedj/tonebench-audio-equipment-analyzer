@@ -920,8 +920,10 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
            the delay removed a minimum-phase DUT reads a few degrees across its whole passband (8-10°
            on the simulator's Butterworth), which is both uninformative and drawn on top of the level
            trace. Shown under the phase checkbox rather than at the top of the rail so the two read
-           as one control and its answer. -->
-      <label v-if="phaseAvailable && latencySamples !== null" class="tb-check-row pl-5">
+           as one control and its answer — but **flush with it**, not indented: the indent said
+           "sub-option of Phase", and it is not one, since the Delay curves below read it too and
+           are drawn whether or not Phase is ticked (Joost, 2026-10-23). -->
+      <label v-if="phaseAvailable && latencySamples !== null" class="tb-check-row">
         <input v-model="restoreDelay" type="checkbox" class="tb-check" />
         <span title="The chirp estimator removes a bulk propagation delay per record, and on a minimum-phase DUT that delay is most of its phase — which is why the passband reads a few degrees. This puts it back, so the phase is the physical one (0 → −450° through a 5th-order corner). Overlays are always drawn uncorrected.">
           Restore removed delay

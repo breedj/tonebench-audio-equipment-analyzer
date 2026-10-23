@@ -116,10 +116,21 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
 
     <!-- The readings. Three columns — what it is, what it reads, and the note that qualifies it (a
          linear ratio, the reference's own name, the frequency an extreme sits at) — each row on its
-         own hairline, so a long label and a long note cannot run into each other. -->
+         own hairline, so a long label and a long note cannot run into each other.
+
+         The first two columns are **capped** rather than fractional. As `1.2fr 1fr 1fr` the value
+         was right-aligned at the end of its own third, so on a wide panel "Max. amplitude" and
+         "8.99 dB" sat some 500 px apart and the eye had nothing to carry it across (reported
+         2026-10-23). 10rem clears the longest label there is — "Group delay diff. @ ref", measured at 125 px
+         against the column's 160 — and 6rem
+         any figure, so the pair reads as one line while the note stays out at the right margin.
+         A cap and not `max-content`: each row is its own grid, so a content-sized label column
+         would be a different width per row and the figures would no longer line up with each
+         other. `minmax(0,...)` is what still lets both shrink where this panel lands in the
+         two-wide flow under the chart. -->
     <dl v-if="trace" class="mt-1 text-[12.5px] tabular-nums">
       <div
-        class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+        class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
       >
         <dt class="text-neutral-500 dark:text-neutral-400">{{ peakLabel }}</dt>
         <dd class="m-0 text-right"><ReadingValue :text="formatDb(trace.peakDb)" /></dd>
@@ -129,7 +140,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
       </div>
 
       <div
-        class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+        class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
       >
         <dt class="text-neutral-500 dark:text-neutral-400">{{ peakFreqLabel }}</dt>
         <dd class="m-0 text-right"><ReadingValue :text="formatHz(trace.peakFreqHz)" /></dd>
@@ -138,7 +149,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
 
       <div
         v-if="referenceLabel"
-        class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+        class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
       >
         <dt class="text-neutral-500 dark:text-neutral-400">Reference</dt>
         <dd class="m-0 text-right">
@@ -152,7 +163,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
            the frequency each sits at. Dashes for a stored result from before the delays existed. -->
       <template v-if="delays">
         <div
-          class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+          class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
         >
           <dt
             class="text-neutral-500 dark:text-neutral-400"
@@ -165,7 +176,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
         </div>
 
         <div
-          class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+          class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
         >
           <dt
             class="text-neutral-500 dark:text-neutral-400"
@@ -178,7 +189,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
         </div>
 
         <div
-          class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
+          class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
         >
           <dt class="text-neutral-500 dark:text-neutral-400" title="The smallest group delay anywhere in the measured band, and where.">
             Group delay min
@@ -189,7 +200,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
           </dd>
         </div>
 
-        <div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 py-1.5">
+        <div class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 py-1.5">
           <dt
             class="text-neutral-500 dark:text-neutral-400"
             title="The largest group delay anywhere in the measured band, and where — on an amplifier, usually at the low-frequency corner."

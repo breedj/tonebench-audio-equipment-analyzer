@@ -941,7 +941,11 @@ function drawDirectionArrow(
 
   const px = t.toScreenX(toPlane(points[mid]).x)
   const py = t.toScreenY(toPlane(points[mid]).y)
-  const size = 7
+  // 11 px from apex to base rather than the 7 it was drawn at: on a Nichols contour, which is a
+  // long gentle sweep rather than a Nyquist loop, a 7 px dart on a 1.5 px line reads as a kink in
+  // the curve rather than as a direction. Reported 2026-10-23. The half-angle is unchanged, so it
+  // stays a dart (8.6 px across, 10.1 long) and not a blob sitting on the trace.
+  const size = 11
 
   ctx.save()
   ctx.fillStyle = stroke

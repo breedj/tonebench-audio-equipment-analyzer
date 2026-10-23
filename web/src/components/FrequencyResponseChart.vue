@@ -781,12 +781,20 @@ function resampleOnto(trace: ResponseTrace, grid: Float64Array): (number | null)
  * claim a measurement that was never taken, which is the whole thing this option is asked for. A
  * function rather than the array uPlot also accepts, because a stepped sweep's grid grows between
  * rebuilds and a baked array would go stale.</p>
+ *
+ * <p><b>The filter has to answer `show`, or `show: false` does nothing.</b> uPlot draws points
+ * when `show || idxs` (uPlot.esm.js, drawSeries), so a filter that returns its index list
+ * unconditionally forces the markers on — and the Data points checkbox on this chart had no
+ * effect at all, in either Bode view, on the live curve or an overlay. It only surfaced once the
+ * merged grid gave this chart a filter; before that `show` was the only thing deciding it. uPlot
+ * passes the resolved `show` as the third argument for exactly this, which is why it is read here
+ * rather than `props.showDataPoints` again.</p>
  */
 function markerPoints(trace: ResponseTrace): uPlot.Series.Points {
   return {
     show: props.showDataPoints,
     size: 3,
-    filter: () => markerColumns.value.get(trace) ?? null,
+    filter: (_u, _seriesIdx, show) => (show ? markerColumns.value.get(trace) ?? null : null),
   }
 }
 

@@ -195,12 +195,19 @@ const theme = computed(() => currentTheme())
     class="relative flex flex-col gap-1 panel-surface rounded-xl border border-neutral-200 p-2 dark:border-neutral-800"
   >
     <ExpandToggle class="absolute right-1 top-1" :target="rootRef" />
-    <!-- pr-9 for the button, which is positioned absolutely and so makes no room for itself. -->
-    <div class="flex items-center justify-between gap-2 pr-9 text-xs text-neutral-500 dark:text-neutral-400">
+    <!-- Two lines, not one. The label, the Fit all button and the per-channel readout shared a
+         `justify-between` row, and in the sweep rail — which is a narrow column — there was room
+         for none of them: the label truncated to "Sp…", the readout ran under the button and the
+         two were drawn on top of each other (reported 2026-10-23). The button stays beside the
+         label, since it is the label's own control; the values go below, where they have the
+         panel's full width and wrap when even that is not enough.
+         `pr-9` on the first line only, for the expand button, which is positioned absolutely and
+         so makes no room for itself. -->
+    <div class="flex flex-col gap-0.5 text-xs text-neutral-500 dark:text-neutral-400">
       <!-- min-w-0 so the label is what gives way when an overlay's name is long: a flex item will
            not shrink below its content without it, and the button and the per-channel readout were
            pushed off the panel's edge instead. -->
-      <span class="flex min-w-0 items-center gap-2">
+      <span class="flex min-w-0 items-center gap-2 pr-9">
         <span class="truncate">{{ label ? `${label} — Spectrum (dBV)` : 'Spectrum (dBV)' }}</span>
         <!-- Shared by every one of these charts on the screen, so the live pair and each overlay's
              preview are drawn against one window. -->
@@ -219,7 +226,7 @@ const theme = computed(() => currentTheme())
           Fit all
         </button>
       </span>
-      <span class="flex shrink-0 items-center gap-2">
+      <span class="flex flex-wrap items-center gap-x-2">
         <span v-if="pointLeft" class="flex items-center gap-1">
           <span class="h-1.5 w-1.5 rounded-full" :style="{ background: theme.left }"></span>
           {{ formatHz(pointLeft.freqHz) }}

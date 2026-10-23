@@ -188,17 +188,21 @@ const { showPage } = useManual()
     <p>
       Under the settings in the left rail, the <strong>spectrum</strong> and the
       <strong>waveform</strong> of one measured point, left blue and right red — the point being
-      measured while the sweep runs, and the pinned one once it has finished. They are the capture
+      measured while the sweep runs, and afterwards the nearest point to the pointer as it moves
+      over the chart, or the pinned one once a point is pinned. They are the capture
       behind a reading, which is what makes a surprising point answerable: a level that sits low is
       either the DUT, a clipped waveform, or hum that wandered into the tone's own bin, and the
       preview says which. Only the stepped sine has these; a chirp excites the whole band at once,
       so there is no "the capture at 1 kHz" to show.
     </p>
     <p>
-      <strong>Click the chart to pin a point.</strong> A dashed line marks it, a
-      <strong>Pinned</strong> badge appears beside the readings above the chart, and from then on
-      both previews and that readout stay on that point however the pointer moves — which is what
-      lets you take the pointer off the chart to expand a preview and study it. Click another point
+      <strong>Hovering the chart moves the previews</strong> to the point nearest the pointer, so
+      running along the curve runs through the captures behind it; take the pointer off the chart
+      and they fall back to the last point measured. <strong>Click the chart to pin a point.</strong>
+      A dashed line marks it, a <strong>Pinned</strong> badge appears beside the readings above the
+      chart, and from then on both previews and that readout stay on that point however the pointer
+      moves — which is what lets you take the pointer off the chart to expand a preview and study
+      it. Click another point
       to move the pin, and click the pinned line again, or the badge, to release it. The pin is
       dropped when the curves are cleared and when you leave the measurement; it is kept across a
       re-run, so one frequency can be watched before and after a change to the DUT.
@@ -207,8 +211,8 @@ const { showPage } = useManual()
       <strong>Fit all</strong>, in each preview's header, holds its axis still instead of scaling it
       to the point on screen: one window covering every point of this run and of every history run
       checked on, which is what makes two points comparable by eye. Each checked history run gets
-      its own preview pair underneath, fed its own capture at the same pinned frequency — the two
-      runs' spectra at one tone, side by side. A result saved before this existed has no captures
+      its own preview pair underneath, fed its own capture at the same frequency the live pair is
+      showing — the two runs' spectra at one tone, side by side. A result saved before this existed has no captures
       stored and draws no pair.
     </p>
 

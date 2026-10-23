@@ -158,7 +158,27 @@ const props = withDefaults(defineProps<{
  */
 const DRAG_RESTING: BoxDragResting = { y: true, uni: 12 }
 
-const emit = defineEmits<{ cursorPin: [freqHz: number | null]; axisWindow: [window: ZoomWindow] }>()
+/**
+ * `cursorX` is the hover; `cursorPin` is a click — the sweep chart's own pair, for its reasons.
+ *
+ * <p>A hover is transient and is dropped the moment the pointer leaves the plot (uPlot clears
+ * `cursor.idx` on mouseleave); a pin is a choice that has to outlive that, which is what reaching
+ * for a preview's expand button does. The stepped screen's rail follows the hover when nothing is
+ * pinned, exactly as the sweep screen's does (Joost, 2026-10-23): the chart used to keep its hover
+ * to itself, so the two small previews sat on the last point measured until something was pinned.
+ * Emitted on every screen this chart serves and read only by the stepped one, since it is the only
+ * one with a per-point rail — a chirp has no points.</p>
+ *
+ * <p>The value is a <b>grid frequency, not a pixel</b>: `cursor.idx` is already snapped to the
+ * nearest column in the data. With overlays on, that column may be one only an *overlay* was
+ * measured at, which is why the consumer resolves it through `nearestSweepPoint` rather than
+ * looking it up.</p>
+ */
+const emit = defineEmits<{
+  cursorX: [freqHz: number | null]
+  cursorPin: [freqHz: number | null]
+  axisWindow: [window: ZoomWindow]
+}>()
 
 function clearPin() {
   emit('cursorPin', null)
@@ -1338,11 +1358,16 @@ function buildOptions(width: number, height: number, p: Palette, interactive: bo
           // series at it. null once the pointer leaves the plot (uPlot clears idx on mouseleave).
           setCursor: [
             (u: uPlot) => {
+              const idx = u.cursor.idx
+              // Emitted whether or not something is pinned, and *before* the early return below:
+              // the consumer gives the pin precedence anyway, and a hover dropped here would leave
+              // the rail holding a stale frequency the moment a pin is released.
+              emit('cursorX', idx != null && idx >= 0 ? ((u.data[0]?.[idx] as number | undefined) ?? null) : null)
               // Pinned, the hover is ignored outright rather than restored afterwards: this fires
               // on every pointer move, and recomputing the same frozen row sixty times a second to
               // arrive back where it started is work for nothing.
               if (props.pinnedX != null) return
-              cursorReadout.value = readoutAt(u, u.cursor.idx ?? -1)
+              cursorReadout.value = readoutAt(u, idx ?? -1)
             },
           ],
         }

@@ -867,18 +867,30 @@ function onResponseCursorPin(freqHz: number | null) {
   pinnedResponseHz.value = freqHz
 }
 
+/**
+ * The hovered frequency, which the pin beats — the sweep screen's `hoveredSweepX`, one screen
+ * along. Transient by construction: the chart emits null the moment the pointer leaves the plot,
+ * which is what sends the rail back to the last point measured.
+ */
+const hoveredResponseHz = ref<number | null>(null)
+function onResponseCursorX(freqHz: number | null) {
+  hoveredResponseHz.value = freqHz
+}
+
 watch(currentTypeId, () => {
   pinnedResponseHz.value = null
+  hoveredResponseHz.value = null
 })
 
 /**
  * The point each input's preview charts draw: the one being measured while a stepped run is going,
- * the pinned one once it is pinned, and otherwise the last point measured.
+ * the pinned one once it is pinned, the hovered one while the pointer is on the chart, and
+ * otherwise the last point measured.
  *
- * <p>No hover case, unlike the sweep screen's: the response chart keeps its hover to itself (it
- * draws its own readout from it), and a rail that followed the pointer as well as the pin would
- * need that hover routed out through a second event for no gain — the pin is what this screen was
- * asked for.</p>
+ * <p>Exactly `selectedSweepPointFor`'s precedence, and for the same reason it has one. The hover
+ * case was deliberately left out on 2026-10-11 — "the pin is what this screen was asked for" —
+ * which made this rail the one per-point rail in the app that did not follow the pointer; asked
+ * for 2026-10-23, since the two screens are read the same way.</p>
  */
 function selectedResponsePreview(channel: number) {
   const onChannel = responsePreviews.value.filter((p) => p.channel === channel)
@@ -886,7 +898,7 @@ function selectedResponsePreview(channel: number) {
 
   if (responseRunning.value) return onChannel[onChannel.length - 1]
 
-  const target = pinnedResponseHz.value ?? onChannel[onChannel.length - 1].freqHz
+  const target = pinnedResponseHz.value ?? hoveredResponseHz.value ?? onChannel[onChannel.length - 1].freqHz
   return nearestSweepPoint(responsePreviews.value, channel, target, (p) => p.freqHz)
 }
 
@@ -902,13 +914,17 @@ const visibleResponsePreviewOverlays = computed(() =>
   overlays.value.filter((o) => o.visible && o.responsePreviews?.length && isSteppedResponseKind(o.detail.kind)),
 )
 
-/** selectedResponsePreview's counterpart for a stored run — never "running", so it always follows the pin. */
+/**
+ * selectedResponsePreview's counterpart for a stored run — never "running", so it follows the pin
+ * and then the hover. It has to move with the live one or a stacked pair would be read at two
+ * different frequencies, which is the comparison those previews exist for.
+ */
 function selectedResponsePreviewForOverlay(overlay: OverlayEntry, channel: number) {
   const points = overlay.responsePreviews ?? []
   const onChannel = points.filter((p) => p.channel === channel)
   if (onChannel.length === 0) return null
 
-  const target = pinnedResponseHz.value ?? onChannel[onChannel.length - 1].freqHz
+  const target = pinnedResponseHz.value ?? hoveredResponseHz.value ?? onChannel[onChannel.length - 1].freqHz
   return nearestSweepPoint(points, channel, target, (p) => p.freqHz)
 }
 
@@ -2132,8 +2148,10 @@ function clearFrequencyResponse() {
   return withErrorReporting(async () => {
     await clearResponseRun()
     // With the curves: the pin names a frequency on a grid that no longer exists, and the rail it
-    // was holding has just gone with it.
+    // was holding has just gone with it. The hover goes too, since the pointer may be sitting on
+    // the plot at the moment Clear is pressed and nothing would fire to drop it.
     pinnedResponseHz.value = null
+    hoveredResponseHz.value = null
   })
 }
 
@@ -4874,6 +4892,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :sample-rate-hz="responseSampleRateHz"
                   :axis-titles="true"
                   :pinned-x="pinnedResponseHz"
+                  @cursor-x="onResponseCursorX"
                   @cursor-pin="onResponseCursorPin"
                 />
                 <ResponseSPlaneChart
@@ -5113,6 +5132,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :x-to-hz="crosstalkXToHz"
                   :axis-titles="true"
                   :pinned-x="pinnedResponseHz"
+                  @cursor-x="onResponseCursorX"
                   @cursor-pin="onResponseCursorPin"
                 />
 

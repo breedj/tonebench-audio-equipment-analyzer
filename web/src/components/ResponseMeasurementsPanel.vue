@@ -127,14 +127,19 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
          A cap and not `max-content`: each row is its own grid, so a content-sized label column
          would be a different width per row and the figures would no longer line up with each
          other. `minmax(0,...)` is what still lets both shrink where this panel lands in the
-         two-wide flow under the chart. -->
+         two-wide flow under the chart.
+
+         The note is **left-aligned beside the value**, not pinned to the right margin, which is the
+         same reading as the pair above it: right-aligned in a `1fr` column it sat alone at the far
+         end of a wide panel, so "8.97 dB" and the "Peak" that qualifies it were a panel's width
+         apart (Joost, 2026-10-23, the second half of the same report). -->
     <dl v-if="trace" class="mt-1 text-[12.5px] tabular-nums">
       <div
         class="grid grid-cols-[minmax(0,10rem)_minmax(0,6rem)_minmax(0,1fr)] gap-3 border-b border-neutral-100 py-1.5 dark:border-neutral-800"
       >
         <dt class="text-neutral-500 dark:text-neutral-400">{{ peakLabel }}</dt>
         <dd class="m-0 text-right"><ReadingValue :text="formatDb(trace.peakDb)" /></dd>
-        <dd class="m-0 text-right whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+        <dd class="m-0 whitespace-nowrap text-neutral-500 dark:text-neutral-400">
           {{ formatRatio(trace.peakDb) }}
         </dd>
       </div>
@@ -155,7 +160,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
         <dd class="m-0 text-right">
           <ReadingValue :text="trace.referenceDb === null ? '—' : formatDb(trace.referenceDb)" />
         </dd>
-        <dd class="m-0 text-right text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</dd>
+        <dd class="m-0 text-neutral-500 dark:text-neutral-400">{{ referenceLabel }}</dd>
       </div>
 
       <!-- Delay, from the curve the chart's delay series is drawn from: at the reference band (or
@@ -195,7 +200,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
             Group delay min
           </dt>
           <dd class="m-0 text-right"><ReadingValue :text="formatDelay(delays.groupDelayMin?.s)" /></dd>
-          <dd class="m-0 text-right whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+          <dd class="m-0 whitespace-nowrap text-neutral-500 dark:text-neutral-400">
             {{ delays.groupDelayMin ? `@ ${formatHz(delays.groupDelayMin.freqHz)}` : '' }}
           </dd>
         </div>
@@ -208,7 +213,7 @@ function bandwidthSwatch(marker: BandwidthMarker): string {
             Group delay max
           </dt>
           <dd class="m-0 text-right"><ReadingValue :text="formatDelay(delays.groupDelayMax?.s)" /></dd>
-          <dd class="m-0 text-right whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+          <dd class="m-0 whitespace-nowrap text-neutral-500 dark:text-neutral-400">
             {{ delays.groupDelayMax ? `@ ${formatHz(delays.groupDelayMax.freqHz)}` : '' }}
           </dd>
         </div>
